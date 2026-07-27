@@ -54,7 +54,10 @@ from abicheck.mcp_server import (  # noqa: E402
     abi_project_plan,
     abi_project_validate,
 )
-from abicheck.mcp_server_project import _resolve_sysroot_path  # noqa: E402
+from abicheck.mcp_server_project import (  # noqa: E402
+    _redact_paths,
+    _resolve_sysroot_path,
+)
 
 # ---------------------------------------------------------------------------
 # abi_deps
@@ -265,19 +268,24 @@ class TestAbiDeps:
         self, tmp_path: Path, monkeypatch
     ):
         # Same class of bug as the relative binary_path case above, but for
-        # search_paths entries: resolver._build_search_order joins a relative
-        # entry directly onto sysroot ("<sysroot>/lib"), matching the CLI's
-        # Click-based (non-resolving) handling -- _safe_read_path
-        # absolutizing a relative entry first would make that join produce
-        # "<sysroot>/<cwd>/lib" instead (Codex review).
+        # search_paths entries: resolver._build_search_order joins *every*
+        # entry -- relative or absolute -- directly onto sysroot (unlike the
+        # root binary's rebase, unconditionally, with no already-under-
+        # sysroot guard), matching the CLI's Click-based (non-resolving)
+        # handling -- _safe_read_path absolutizing a relative entry first
+        # would make that join produce "<sysroot>/<cwd>/lib" instead (Codex
+        # review). The existence pre-check must therefore validate each
+        # entry at its *effective*, sysroot-rebased location, not its raw
+        # host path (a second Codex review round on the same fix).
         monkeypatch.chdir(tmp_path)
         binary = tmp_path / "app"
         binary.write_bytes(b"\x7fELF")
         sysroot_dir = tmp_path / "sysroot"
         sysroot_dir.mkdir()
-        (tmp_path / "lib").mkdir()
+        (sysroot_dir / "lib").mkdir(parents=True)
         absolute_search_path = tmp_path / "abs-lib"
-        absolute_search_path.mkdir()
+        effective_abs_search_path = sysroot_dir / str(absolute_search_path).lstrip("/")
+        effective_abs_search_path.mkdir(parents=True)
 
         received: dict[str, object] = {}
 
@@ -342,6 +350,31 @@ class TestResolveSysrootPath:
             _resolve_sysroot_path(binary, sysroot)
             == (sysroot / str(binary).lstrip("/")).resolve()
         )
+
+
+class TestRedactPaths:
+    def test_nested_path_is_fully_redacted_regardless_of_argument_order(
+        self, tmp_path: Path
+    ):
+        # A shorter path that is a literal prefix of a longer one (e.g. a
+        # bindings dir nested under a config dir) must be substituted
+        # *after* the longer one. Substituting the shorter one first
+        # (e.g. because the caller happened to pass it first) rewrites it
+        # inside the longer path's own text too, leaving the longer
+        # occurrence only partially redacted -- e.g. "myproject/secretname"
+        # instead of the fully-redacted "secretname" (CodeRabbit).
+        outer = tmp_path / "myproject"
+        inner = outer / "secretname"
+        message = f"path: {inner}/file.yml and {outer}/other.yml"
+        # Deliberately pass the shorter (outer) path first -- the fix must
+        # not depend on caller-supplied ordering.
+        redacted = _redact_paths(message, str(outer), str(inner))
+        assert redacted == "path: secretname/file.yml and myproject/other.yml"
+        assert str(outer) not in redacted
+        assert str(inner) not in redacted
+
+    def test_empty_path_is_ignored(self):
+        assert _redact_paths("no paths here", "") == "no paths here"
 
 
 # ---------------------------------------------------------------------------
@@ -787,6 +820,23 @@ class TestAbiProjectValidate:
         assert payload["status"] == "error"
         assert "timed out" in payload["error"]
 
+    def test_timeout_includes_config_path_resolution(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D2: _safe_read_path's symlink-following .resolve() call
+        # must count against --timeout too, not just parsing/validation
+        # (Codex review).
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.mcp_server_project._safe_read_path", _slow)
+        raw = abi_project_validate(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
+
     def test_malformed_yaml_error_does_not_leak_config_path(self, tmp_path: Path):
         config = tmp_path / ".abicheck.yml"
         config.write_text("- just\n- a\n- list\n", encoding="utf-8")
@@ -885,6 +935,23 @@ class TestAbiProjectPlan:
             raise AssertionError("should have timed out first")
 
         monkeypatch.setattr("abicheck.cli_project._load_project_targets_config", _slow)
+        raw = abi_project_plan(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
+
+    def test_timeout_includes_config_path_resolution(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D2: _safe_read_path's symlink-following .resolve() call
+        # must count against --timeout too, not just parsing/generation
+        # (Codex review).
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        monkeypatch.setattr(mcp_shared, "MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.mcp_server_project._safe_read_path", _slow)
         raw = abi_project_plan(str(config))
         payload = json.loads(raw)
         assert payload["status"] == "error"

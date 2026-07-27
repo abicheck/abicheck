@@ -319,11 +319,12 @@ def load_aggregate_report_schema() -> dict[str, Any]:
 #: Artifact names :func:`current` accepts, each mapped to the module-level
 #: constant that already owns its version (ADR-055 D3). Read-only lookup
 #: facade -- adding an entry here never changes that constant's own value or
-#: bump policy, and this dict is rebuilt fresh per :func:`current` call (via
-#: function-local imports) rather than imported at module scope, since some
-#: of these modules transitively import this package themselves (e.g.
-#: ``buildsource.run_plan`` -> ``buildsource.check_report`` -> ``schemas``)
-#: and a module-level import here would turn that into a real import cycle.
+#: bump policy. This frozenset itself is built once at import time; it is
+#: :func:`current`'s per-artifact lookups that use function-local imports
+#: (not this set), since some of those modules transitively import this
+#: package themselves (e.g. ``buildsource.run_plan`` -> ``buildsource.
+#: check_report`` -> ``schemas``) and a module-level import here would turn
+#: that into a real import cycle.
 _ARTIFACT_NAMES = frozenset(
     {"snapshot", "compare", "scan", "aggregate", "build-output", "run-plan"}
 )

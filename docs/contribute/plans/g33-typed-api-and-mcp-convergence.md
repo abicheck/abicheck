@@ -83,11 +83,20 @@ CLI / Python / MCP / Action
 ```
 
 Invariant this plan exists to restore: **no front end (CLI, MCP, or an
-Action) recomputes scope, policy, severity, comparability, or consumer
-relevance on its own** — every front end builds the same typed request and
-reads the same typed result. Today `abi_compare` is the one confirmed
-violation of that invariant (Phase 4/D4 below); the other phases close gaps
-that make the invariant harder to reach even where it isn't yet violated.
+Action) resolves inputs, loads policy/suppression, or classifies a
+comparison on its own** — every front end builds the same typed request and
+reads the same typed result for that classification step. Today
+`abi_compare` is the one confirmed violation of that invariant (Phase 4/D4
+below); the other phases close gaps that make the invariant harder to reach
+even where it isn't yet violated. This deliberately does **not** cover every
+downstream presentation concern: `used_by`/`required_symbols` app-scoping
+and severity/exit-code computation are explicitly kept as thin,
+front-end-specific glue applied *after* a typed result exists (Phase 4
+below) — they are not part of "recomputes scope/severity" in the sense this
+invariant restricts, since there is no shared typed field for them to
+recompute *from* a single source in the first place; folding them into the
+request/result types would recreate the "one growing struct" problem this
+plan's earlier phases exist to avoid.
 
 ## 3. Acceptance outcomes
 

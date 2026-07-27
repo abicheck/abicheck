@@ -3,21 +3,24 @@
 **Date:** 2026-07-27 (D1–D3); Gap 3/D4 added 2026-07-27 after a second,
 more detailed external review of the same subject was checked line-by-line
 against `mcp_server.py` (see "Amendment" note below Gap 2)
-**Status:** Proposed — not implemented. Written up after an external
-API-layer review of `abicheck` (CLI/Python/MCP/Actions/schemas) turned out to
-be largely stale against current `main` — G22/ADR-037 already landed the CLI
-consolidation and the `checker.compare`-vs-Tier-2 chokepoint the review
-flagged as missing — but verifying that review's claims against the actual
-code (`service.py`, `api_types.py`) surfaced two real, narrower,
-already-self-documented gaps. **Correction:** this ADR's first version also
-asserted, as a Non-goal, that `abi_compare` "already routes through
-`compare_snapshots`/the same Tier-2 layer as the CLI" and therefore needed no
-further MCP-surface work. Re-checking that specific claim against
-`mcp_server.py` line-by-line (prompted by a second, independent review
-raising the same point with more detail) found it true only for the final
-snapshot-diffing step, not for the tool as a whole — see Gap 3 below, now
-folded in as D4 rather than left a Non-goal. This ADR proposes closing all
-four; it does not implement anything itself.
+**Status:** Proposed — D3 (schema-version registry) implemented
+(`abicheck/schemas/__init__.py`'s `current()`, see
+[G33](../plans/g33-typed-api-and-mcp-convergence.md) Phase 1); D1/D2/D4 not
+started. Written up after an external API-layer review of `abicheck`
+(CLI/Python/MCP/Actions/schemas) turned out to be largely stale against
+current `main` — G22/ADR-037 already landed the CLI consolidation and the
+`checker.compare`-vs-Tier-2 chokepoint the review flagged as missing — but
+verifying that review's claims against the actual code (`service.py`,
+`api_types.py`) surfaced two real, narrower, already-self-documented gaps.
+**Correction:** this ADR's first version also asserted, as a Non-goal, that
+`abi_compare` "already routes through `compare_snapshots`/the same Tier-2
+layer as the CLI" and therefore needed no further MCP-surface work.
+Re-checking that specific claim against `mcp_server.py` line-by-line
+(prompted by a second, independent review raising the same point with more
+detail) found it true only for the final snapshot-diffing step, not for the
+tool as a whole — see Gap 3 below, now folded in as D4 rather than left a
+Non-goal. This ADR proposes closing all four; it does not implement anything
+itself beyond D3.
 **Decision maker:** (pending)
 
 ---
@@ -169,6 +172,20 @@ ADR-050 (G32) machinery, still being built out at the time of writing — D1
 should track that ADR's `DumpManifest` type rather than inventing a second
 shape.
 
+**Two-resolution-path finding (see G33's Phase 2 status note).** The actual
+CLI `compare` command does not resolve its inputs through
+`service.run_compare_request` at all — it calls a separate, richer function,
+`cli_resolve._resolve_compare_snapshots`, which layers per-side
+`CompileContext`/`dump_manifest`/debug-root overrides and dependency-graph
+following on top of what `run_compare_request` does today. So "extend
+`CompareRequest` to cover everything CLI `compare` supports" is not simply a
+matter of adding fields to an already-shared resolution path — D1's
+implementer must first decide whether to migrate the CLI onto
+`run_compare_request` (making it the genuine single resolution path) or to
+extend `run_compare_request` to match `_resolve_compare_snapshots`'s
+capabilities in parallel, keeping two implementations in sync by hand. This
+ADR does not resolve that choice; it is scoped work for whoever picks up D1.
+
 ### D2. Typed `Result` wrappers for the existing typed-request verbs
 
 `run_compare`/`run_compare_request` return a bare
@@ -203,10 +220,15 @@ Add a small `abicheck.schemas` (or extend the existing one, if `compare`/
 
 ```python
 from abicheck import schemas
-schemas.current("snapshot")   # -> 17
-schemas.current("compare")    # -> "2.22"
-schemas.current("scan")       # -> "1.3"
+schemas.current("snapshot")   # -> current SCHEMA_VERSION (int)
+schemas.current("compare")    # -> current REPORT_SCHEMA_VERSION (str)
+schemas.current("scan")       # -> current SCAN_SCHEMA_VERSION (str)
 ```
+
+(the exact values drift as each artifact's own constant bumps — deliberately
+not hand-copied here, since a literal number in this ADR would go stale the
+same way `docs/use/python-api.md`'s did; see each module's own docstring for
+the current value and its bump history)
 
 backed by the *existing* constants (`serialization.SCHEMA_VERSION`,
 `checker_types`/wherever `compare`'s `report_schema_version` lives,
@@ -215,10 +237,13 @@ backed by the *existing* constants (`serialization.SCHEMA_VERSION`,
 `RUN_PLAN_SCHEMA`) — this is a **read-only lookup facade**, not a new
 versioning scheme, and does not change any of those constants' current
 values or bump policy. `docs/use/python-api.md`'s dead `schema_version 8`
-claim is exactly the failure mode this closes: a docs generator (or a new
-`gen_python_api_reference.py`-style script) can pull every current version
-number from one place instead of a human hand-copying one, which is how it
-went stale in the first place.
+claim is exactly the failure mode this makes preventable: a docs generator
+(or a new `gen_python_api_reference.py`-style script) can pull every current
+version number from one place instead of a human hand-copying one, which is
+how it went stale in the first place — closing the *doc-generator* half of
+that gap (wiring an actual generator to call `schemas.current()` instead of
+hand-copying) is separate follow-up work, not implied by the registry
+existing.
 
 ### D4. Route `abi_compare` through `run_compare_request`
 
@@ -272,7 +297,7 @@ regression guard against silent behavior drift during the rewrite.
 |---|---|
 | `abicheck/api_types.py` | New `InputSpec`/`CompareRequest` fields (D1); policy/suppression fields for D4 |
 | `abicheck/service.py` | `run_compare_request` reads the new fields instead of falling back to `resolve_input` kwargs; new `CompareResult` (D2) |
-| `abicheck/schemas.py` *(new or extended)* | `current(name)` registry (D3) |
+| `abicheck/schemas/__init__.py` | `current(name)` registry (D3) — **implemented** |
 | `abicheck/mcp_server.py` | `abi_compare` rewritten to build a `CompareRequest` and call `run_compare_request` (D4) |
 | `docs/reference/python-api-reference.md` | Regenerate after D1/D2 (generated file) |
 | `docs/reference/mcp-tools-reference.md` | Regenerate after D4 (generated file) |
@@ -303,8 +328,9 @@ regression guard against silent behavior drift during the rewrite.
 
 ## Rollout
 
-Same phased-PR discipline ADR-037/G22 used: D3 (schema registry) is
-independently shippable and lowest-risk — land it first. D1 is the larger
+Same phased-PR discipline ADR-037/G22 used: D3 (schema registry) was
+independently shippable and lowest-risk — it has landed
+(`abicheck/schemas/__init__.py`'s `current()`). D1 is the larger
 slice (needs `DumpManifest`/`CompileContext` per-side wiring in
 `run_compare_request`, plus the policy/suppression fields D4 needs) and
 should land behind its own parity test (`test_service_unit.py`, above)

@@ -191,3 +191,54 @@
   `abi_dump`/`abi_compare` and `mcp_server.py` as the owning module; now
   they link to the authoritative "Runtime configuration" table instead of
   restating a stale subset, and correctly point at `mcp_shared.py`.
+- **`abi_deps`'s `search_paths` existence check now validates the
+  *effective*, sysroot-rebased location, not the raw host path** —
+  `resolver._build_search_order` unconditionally joins *every* search-path
+  entry (relative or absolute) onto an active `sysroot` (no
+  already-under-sysroot guard, unlike the root binary's own rebase), so a
+  directory that exists only inside the sysroot (e.g. `search_paths=
+  ["lib"]` with `<sysroot>/lib` present but no host `./lib`) was wrongly
+  rejected by the existence check added earlier in this PR. A new
+  `_effective_search_path` helper mirrors that join exactly for the
+  pre-check, while `resolve_dependencies` still receives each entry in its
+  original relative/absolute form.
+- **`abi_project_validate`/`abi_project_plan` now count `config`'s and
+  `toolchain_bindings`' own path resolution against `--timeout` too** —
+  `_safe_read_path`'s symlink-following `.resolve()` call for both paths
+  ran before `_call_with_timeout` started; a stalled NFS/FUSE mount or a
+  blocking symlink lookup could block on either with no chance of the
+  advertised structured timeout, even though parsing/validation right
+  after them were already bounded. Both moved inside their tool's bounded
+  worker.
+- **`abi_deps` now rejects a missing `sysroot` instead of silently ignoring
+  it** — the CLI's `deps tree --sysroot` is declared `click.Path(exists=
+  True)`, but the MCP tool accepted any string, so a typo'd or nonexistent
+  sysroot could make a static binary appear to have resolvable dependencies
+  under a directory that was never actually checked. The existence check
+  runs inside the same timed worker as the rest of `abi_deps`'s preflight.
+- **`abi_deps` now rejects an empty `search_paths` entry instead of silently
+  resolving it to the current working directory** — an empty string turned
+  into `Path("")`, which resolves to `.`, and was passed straight to the
+  dependency resolver as a real search directory. Now raises a clear
+  "Empty search_path is not allowed" error before it reaches the resolver.
+- **`abi_aggregate` now accepts a `report_prefix` parameter** — the CLI's
+  `aggregate --report-prefix` (default `abi-report-`) was never exposed on
+  the MCP tool, so a caller using a custom report-file prefix had every
+  report misclassified as an unexpected target and every required target
+  reported missing. `abi_aggregate` now forwards `report_prefix` (default
+  `aggregate.DEFAULT_REPORT_PREFIX`, matching the CLI) to
+  `aggregate_reports_dir`.
+- **`abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan`'s
+  preflight-error responses are now audit-logged** — every other exit path
+  (success, timeout, unexpected error) already called `_audit_log`; the
+  `_ToolPreflightError` handler in all four tools returned its structured
+  error without logging the attempt, leaving preflight rejections (missing
+  file, bad format, oversized input) invisible to the audit trail.
+- **`_redact_paths` no longer leaves a nested path partially redacted** —
+  it substituted paths in caller-supplied order; when one resolved path was
+  a literal prefix of another (e.g. a bindings file nested under a config
+  directory), substituting the shorter one first rewrote it *inside* the
+  longer path's own text too, leaving the longer occurrence only
+  partially redacted (e.g. `"myproject/secretname"` instead of the fully
+  redacted `"secretname"`). Now substitutes longest-first, independent of
+  the order arguments are passed in.

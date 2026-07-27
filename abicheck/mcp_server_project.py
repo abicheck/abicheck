@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import ParamSpec, TypeVar
 
 from . import mcp_shared
+from .aggregate import DEFAULT_REPORT_PREFIX
 from .binary_utils import detect_binary_format as _detect_binary_format
 from .mcp_shared import (
     _audit_log,
@@ -93,6 +94,21 @@ def _check_dir_json_file_sizes(directory: Path, *, label: str = "input") -> None
         _check_file_size(entry, label=f"{label} ({entry.name})")
 
 
+def _effective_search_path(entry: Path, sysroot: Path | None) -> Path:
+    """Mirror ``resolver._build_search_order``'s ``extra_dirs`` join exactly,
+    so an existence pre-check validates the same location
+    ``resolve_dependencies`` will actually search there. Unlike the root
+    binary's sysroot rebase (``_resolve_sysroot_path``, only rebased when not
+    already under sysroot), every search-path entry -- relative or absolute
+    -- is unconditionally joined onto an active sysroot (``os.path.join(prefix,
+    d.lstrip("/"))`` whenever ``prefix`` is truthy); there is no
+    already-under-sysroot guard for this one, so this helper must not reuse
+    ``_resolve_sysroot_path`` (Codex review)."""
+    if sysroot is not None:
+        return sysroot / str(entry).lstrip("/")
+    return entry
+
+
 def _redact_paths(message: str, *paths: str | Path) -> str:
     """Replace any occurrence of a known local path with its basename.
 
@@ -103,9 +119,15 @@ def _redact_paths(message: str, *paths: str | Path) -> str:
     same way ``_check_file_size``'s own errors already avoid it (ADR-021b,
     Codex review) -- every path this tool itself resolved is substituted
     with just its final component before the message reaches the caller.
+
+    Substitutes longest paths first: if one path is a prefix of another
+    (e.g. a bindings dir nested under the config dir), replacing the shorter
+    one first would rewrite it *inside* the longer path's own text too,
+    corrupting the longer substitution that runs after it (CodeRabbit
+    review).
     """
-    for p in paths:
-        p_str = str(p)
+    sorted_paths = sorted((str(p) for p in paths), key=len, reverse=True)
+    for p_str in sorted_paths:
         if p_str:
             message = message.replace(p_str, Path(p_str).name)
     return message
@@ -176,41 +198,57 @@ def abi_deps(
         from .stack_checker import StackCheckResult, check_single_env
         from .stack_report import stack_to_json
 
-        # _safe_read_path always resolves to an absolute path (path-safety), so
-        # its output can't tell us whether the caller's own input was relative
-        # or absolute -- capture that from the raw string first. resolver.
-        # _seed_root only rebases an *absolute* binary under sysroot; a
-        # relative one is always resolved against cwd regardless of sysroot,
-        # matching the `deps tree` CLI's Click-based (non-resolving) Path
-        # handling. Without this, a relative binary_path + sysroot combination
-        # (the CLI's own documented `deps tree ./app --sysroot ...` example)
-        # would get wrongly rebased under sysroot at the absolutized cwd,
-        # rather than left alone (Codex review).
-        binary_was_absolute = Path(binary_path).is_absolute() if binary_path else False
-        # Validate (empty-string/type errors) via _safe_read_path, but do NOT
-        # use its resolved return value for an absolute path: .resolve()
-        # follows host symlinks (e.g. a merged-/usr host's "/lib" -> "/usr/
-        # lib"), so a sysroot-rebase computed from that resolved value lands
-        # at "<sysroot>/usr/lib/app" instead of the resolver/loader-semantic
-        # "<sysroot>/lib/app" -- the sysroot rebase must apply to the raw,
-        # symbolic path the caller asked for, the same way resolver._seed_root
-        # rebases the CLI's own un-resolved Click Path (Codex review).
-        _safe_read_path(binary_path, label="binary_path")
-        raw_bin_path = Path(binary_path)
-        sysroot_path = _safe_read_path(sysroot, label="sysroot") if sysroot else None
-        resolve_target = raw_bin_path
-        effective_path = (
-            _resolve_sysroot_path(raw_bin_path, sysroot_path)
-            if binary_was_absolute
-            else raw_bin_path
-        )
-        bin_path = raw_bin_path
+        bin_path = Path(binary_path) if binary_path else Path()
 
         def _do_deps() -> StackCheckResult:
-            # The existence/format/size preflight reads effective_path (a
-            # FIFO or a stalled filesystem could block on any of these) --
-            # run it inside the same bounded worker as check_single_env
-            # itself, not before _call_with_timeout starts (Codex review).
+            # Path resolution (_safe_read_path's symlink-following .resolve()
+            # call for sysroot), existence/format/size preflight, and
+            # search_path validation all run inside the same bounded worker
+            # as check_single_env: a stalled filesystem or a blocking
+            # symlink lookup could block on any one of these, not just
+            # check_single_env itself (Codex/CodeRabbit review).
+            #
+            # _safe_read_path always resolves to an absolute path
+            # (path-safety), so its output can't tell us whether the
+            # caller's own input was relative or absolute -- capture that
+            # from the raw string first. resolver._seed_root only rebases
+            # an *absolute* binary under sysroot; a relative one is always
+            # resolved against cwd regardless of sysroot, matching the
+            # `deps tree` CLI's Click-based (non-resolving) Path handling.
+            # Without this, a relative binary_path + sysroot combination
+            # (the CLI's own documented `deps tree ./app --sysroot ...`
+            # example) would get wrongly rebased under sysroot at the
+            # absolutized cwd, rather than left alone (Codex review).
+            binary_was_absolute = (
+                Path(binary_path).is_absolute() if binary_path else False
+            )
+            # Validate (empty-string/type errors) via _safe_read_path, but do
+            # NOT use its resolved return value for an absolute path:
+            # .resolve() follows host symlinks (e.g. a merged-/usr host's
+            # "/lib" -> "/usr/lib"), so a sysroot-rebase computed from that
+            # resolved value lands at "<sysroot>/usr/lib/app" instead of the
+            # resolver/loader-semantic "<sysroot>/lib/app" -- the sysroot
+            # rebase must apply to the raw, symbolic path the caller asked
+            # for, the same way resolver._seed_root rebases the CLI's own
+            # un-resolved Click Path (Codex review).
+            _safe_read_path(binary_path, label="binary_path")
+            raw_bin_path = Path(binary_path)
+            sysroot_path = (
+                _safe_read_path(sysroot, label="sysroot") if sysroot else None
+            )
+            # `deps tree --sysroot` is declared click.Path(exists=True); a
+            # nonexistent sysroot must be rejected the same way, not silently
+            # accepted and searched under (which could make a binary appear
+            # loadable when its dependencies were never actually resolved
+            # anywhere real) (Codex review).
+            if sysroot_path is not None and not sysroot_path.exists():
+                raise _ToolPreflightError("sysroot does not exist")
+            resolve_target = raw_bin_path
+            effective_path = (
+                _resolve_sysroot_path(raw_bin_path, sysroot_path)
+                if binary_was_absolute
+                else raw_bin_path
+            )
             if not effective_path.exists():
                 raise _ToolPreflightError("Binary file not found")
             fmt = _detect_binary_format(effective_path)
@@ -232,10 +270,12 @@ def abi_deps(
             # instead of a falsely-unresolved dependency (Codex review).
             sp_paths = []
             for p in search_paths or []:
+                if not p or not p.strip():
+                    raise _ToolPreflightError("Empty search_path is not allowed")
                 p_path = Path(p)
                 if p_path.is_absolute():
                     _safe_read_path(p, label="search_path")
-                if not p_path.exists():
+                if not _effective_search_path(p_path, sysroot_path).exists():
                     raise _ToolPreflightError(
                         f"search_path does not exist: {p_path.name}"
                     )
@@ -260,6 +300,8 @@ def abi_deps(
                 }
             )
         except _ToolPreflightError as exc:
+            elapsed = _time.monotonic() - t0
+            _audit_log("abi_deps", {"binary": bin_path.name}, elapsed, "error")
             return json.dumps({"status": "error", "error": str(exc)})
 
         elapsed = _time.monotonic() - t0
@@ -282,6 +324,7 @@ def abi_aggregate(
     expect: list[str] | None = None,
     optional: list[str] | None = None,
     discovered_only: bool = False,
+    report_prefix: str = DEFAULT_REPORT_PREFIX,
     on_missing_required: str = "fail",
     on_unexpected_target: str = "include",
 ) -> str:
@@ -304,6 +347,9 @@ def abi_aggregate(
         optional: Optional target id(s) — only meaningful together with expect.
         discovered_only: Aggregate whatever reports are present with no
             coverage gate (mutually exclusive with the other four).
+        report_prefix: Filename prefix stripped when deriving a target id
+            from a report file that does not self-identify a ``target_id``
+            (e.g. ``"abi-report-linux.json"`` -> ``"linux"``).
         on_missing_required: ``"fail"`` (default) or ``"warn"`` — how an
             unavailable required target affects the exit code.
         on_unexpected_target: ``"include"`` (default), ``"warn"``, ``"fail"``,
@@ -366,6 +412,7 @@ def abi_aggregate(
                 discovered_only=discovered_only,
                 on_missing_required=OnMissingRequired(on_missing_required),
                 on_unexpected_target=OnUnexpectedTarget(on_unexpected_target),
+                prefix=report_prefix,
             )
 
         try:
@@ -385,6 +432,13 @@ def abi_aggregate(
                 }
             )
         except _ToolPreflightError as exc:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_aggregate",
+                {"reports_dir": Path(reports_dir).name},
+                elapsed,
+                "error",
+            )
             return json.dumps({"status": "error", "error": str(exc)})
         except (click.UsageError, AggregateError, ValueError) as exc:
             redact_args: list[str | Path] = [Path(reports_dir)]
@@ -462,20 +516,20 @@ def abi_project_validate(
         )
         from .cli_project import _load_project_targets_config
 
-        config_path = _safe_read_path(config, label="config")
-        bindings_path = (
-            _safe_read_path(toolchain_bindings, label="toolchain_bindings")
-            if toolchain_bindings is not None
-            else None
-        )
-
         def _do_validate() -> ProjectTargetsValidationReport:
-            # Existence/size preflight and config/bindings parsing all run
-            # inside the same bounded worker as validate_project_targets
-            # (ADR-021b D2): a stalled filesystem's stat() call or a
-            # slow-to-read/parse config/bindings file must count against
-            # --timeout too, not just the validation call that follows them
-            # (Codex review).
+            # Path resolution (_safe_read_path's symlink-following .resolve()
+            # call), existence/size preflight, and config/bindings parsing
+            # all run inside the same bounded worker as
+            # validate_project_targets (ADR-021b D2): a stalled NFS/FUSE
+            # mount or a blocking symlink lookup could block on any one of
+            # these filesystem calls, not just the validation call that
+            # follows them (Codex review).
+            config_path = _safe_read_path(config, label="config")
+            bindings_path = (
+                _safe_read_path(toolchain_bindings, label="toolchain_bindings")
+                if toolchain_bindings is not None
+                else None
+            )
             if not config_path.exists():
                 raise _ToolPreflightError("config file not found")
             _check_file_size(config_path, label="config")
@@ -498,7 +552,7 @@ def abi_project_validate(
             elapsed = _time.monotonic() - t0
             _audit_log(
                 "abi_project_validate",
-                {"config": config_path.name},
+                {"config": Path(config).name},
                 elapsed,
                 "timeout",
             )
@@ -509,17 +563,35 @@ def abi_project_validate(
                 }
             )
         except _ToolPreflightError as exc:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_project_validate", {"config": Path(config).name}, elapsed, "error"
+            )
             return json.dumps({"status": "error", "error": str(exc)})
         except (click.UsageError, BindingsFileError) as exc:
-            redact_args = [config_path]
-            if bindings_path is not None:
-                redact_args.append(bindings_path)
+            redact_args: list[str | Path] = [Path(config)]
+            if toolchain_bindings is not None:
+                redact_args.append(Path(toolchain_bindings))
+            # Best-effort: also redact the resolved forms, since some errors
+            # embed the resolved path rather than the raw caller-supplied
+            # string. One fewer path substituted is not a failure to respond.
+            try:
+                redact_args.append(_safe_read_path(config, label="config"))
+            except ValueError:
+                pass
+            if toolchain_bindings is not None:
+                try:
+                    redact_args.append(
+                        _safe_read_path(toolchain_bindings, label="toolchain_bindings")
+                    )
+                except ValueError:
+                    pass
             return json.dumps(
                 {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
             )
 
         elapsed = _time.monotonic() - t0
-        _audit_log("abi_project_validate", {"config": config_path.name}, elapsed, "ok")
+        _audit_log("abi_project_validate", {"config": Path(config).name}, elapsed, "ok")
         return json.dumps({"status": "ok", "result": report.to_dict()})
     except Exception as exc:
         elapsed = _time.monotonic() - t0
@@ -592,7 +664,6 @@ def abi_project_plan(
         )
         from .cli_project import _load_project_targets_config, _parse_build_output_specs
 
-        config_path = _safe_read_path(config, label="config")
         # _parse_build_output_specs reads each PROFILE=DIR's build-output.json
         # itself; the "=" split here is a best-effort pre-parse (ADR-021b D3)
         # just to collect each dir for the size probe below and for error
@@ -604,20 +675,20 @@ def abi_project_plan(
             if sep:
                 build_output_dirs.append(dir_str)
 
-        bindings_path = (
-            _safe_read_path(toolchain_bindings, label="toolchain_bindings")
-            if toolchain_bindings is not None
-            else None
-        )
-
         def _do_plan() -> tuple[RunPlan, RunPlanGenerationReport]:
-            # Existence/size preflight, config/build-output/bindings parsing,
-            # validation, and binding resolution all run inside the same
-            # bounded worker as run-plan generation (ADR-021b D2): a stalled
-            # filesystem's stat() call or a large/slow-to-read config,
-            # build-output, or bindings file must count against --timeout
-            # too, not just the generate_run_plan call that follows them
-            # (Codex review).
+            # Path resolution (_safe_read_path's symlink-following .resolve()
+            # call), existence/size preflight, config/build-output/bindings
+            # parsing, validation, and binding resolution all run inside the
+            # same bounded worker as run-plan generation (ADR-021b D2): a
+            # stalled NFS/FUSE mount or a blocking symlink lookup could block
+            # on any one of these filesystem calls, not just the
+            # generate_run_plan call that follows them (Codex review).
+            config_path = _safe_read_path(config, label="config")
+            bindings_path = (
+                _safe_read_path(toolchain_bindings, label="toolchain_bindings")
+                if toolchain_bindings is not None
+                else None
+            )
             if not config_path.exists():
                 raise _ToolPreflightError("config file not found")
             _check_file_size(config_path, label="config")
@@ -666,7 +737,7 @@ def abi_project_plan(
         except _futures.TimeoutError:
             elapsed = _time.monotonic() - t0
             _audit_log(
-                "abi_project_plan", {"config": config_path.name}, elapsed, "timeout"
+                "abi_project_plan", {"config": Path(config).name}, elapsed, "timeout"
             )
             return json.dumps(
                 {
@@ -685,17 +756,35 @@ def abi_project_plan(
                 }
             )
         except _ToolPreflightError as exc:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_project_plan", {"config": Path(config).name}, elapsed, "error"
+            )
             return json.dumps({"status": "error", "error": str(exc)})
         except (click.UsageError, BindingsFileError) as exc:
-            redact_args: list[str | Path] = [config_path, *build_output_dirs]
-            if bindings_path is not None:
-                redact_args.append(bindings_path)
+            redact_args: list[str | Path] = [Path(config), *build_output_dirs]
+            if toolchain_bindings is not None:
+                redact_args.append(Path(toolchain_bindings))
+            # Best-effort: also redact the resolved forms, since some errors
+            # embed the resolved path rather than the raw caller-supplied
+            # string. One fewer path substituted is not a failure to respond.
+            try:
+                redact_args.append(_safe_read_path(config, label="config"))
+            except ValueError:
+                pass
+            if toolchain_bindings is not None:
+                try:
+                    redact_args.append(
+                        _safe_read_path(toolchain_bindings, label="toolchain_bindings")
+                    )
+                except ValueError:
+                    pass
             return json.dumps(
                 {"status": "error", "error": _redact_paths(str(exc), *redact_args)}
             )
 
         elapsed = _time.monotonic() - t0
-        _audit_log("abi_project_plan", {"config": config_path.name}, elapsed, "ok")
+        _audit_log("abi_project_plan", {"config": Path(config).name}, elapsed, "ok")
         return json.dumps(
             {
                 "status": "ok",
