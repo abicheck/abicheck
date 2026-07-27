@@ -465,3 +465,60 @@ class TestResolveDependencies:
 
         assert result.node_count == 4
         assert result.unresolved == []
+
+
+# ---------------------------------------------------------------------------
+# resolve_dependencies — max_file_size (ADR-021b D3)
+# ---------------------------------------------------------------------------
+
+class TestResolveDependenciesMaxFileSize:
+    def test_no_limit_by_default(self, tmp_path):
+        """max_file_size=None (the default) applies no size guard."""
+        binary = tmp_path / "app"
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 4096)
+        root_meta = ElfMetadata(soname="app", needed=[], rpath="", runpath="")
+
+        with patch("abicheck.resolver.parse_elf_metadata", return_value=root_meta):
+            result = resolve_dependencies(binary)
+
+        assert result.node_count == 1
+
+    def test_oversized_root_raises(self, tmp_path):
+        binary = tmp_path / "app"
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 4096)
+
+        with pytest.raises(ValueError, match="exceeds limit"):
+            resolve_dependencies(binary, max_file_size=1)
+
+    def test_oversized_transitive_dependency_raises(self, tmp_path):
+        """A small root with a huge resolved dependency is still rejected --
+        the size guard must apply to every DSO parsed, not just the root
+        (ADR-021b D3: caller-controlled search_paths can otherwise steer
+        resolution to an arbitrarily large file with no guard at all)."""
+        binary = tmp_path / "app"
+        binary.write_bytes(b"\x7fELF")  # tiny root
+
+        lib_dir = tmp_path / "lib"
+        lib_dir.mkdir()
+        libfoo = lib_dir / "libfoo.so.1"
+        libfoo.write_bytes(b"\x7fELF" + b"\x00" * 4096)  # oversized dependency
+
+        root_meta = ElfMetadata(
+            soname="app", needed=["libfoo.so.1"], rpath="", runpath="",
+        )
+        foo_meta = ElfMetadata(soname="libfoo.so.1", needed=[], rpath="", runpath="")
+
+        call_count = 0
+
+        def fake_parse(path):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return root_meta
+            return foo_meta
+
+        with patch("abicheck.resolver.parse_elf_metadata", side_effect=fake_parse):
+            with pytest.raises(ValueError, match="exceeds limit"):
+                resolve_dependencies(
+                    binary, search_paths=[lib_dir], max_file_size=1024,
+                )

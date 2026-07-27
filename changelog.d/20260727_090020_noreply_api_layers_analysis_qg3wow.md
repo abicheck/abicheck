@@ -37,3 +37,23 @@
   ran unbounded before the timeout-wrapped `generate_run_plan` call, so a
   large but size-compliant config could stall past the advertised
   per-invocation deadline. Both now run inside the same bounded worker.
+- **`abi_deps` now validates the file a sysroot actually resolves to** —
+  when `sysroot` is supplied, `resolver._seed_root` parses the sysroot-
+  rebased path, not the host-absolute `binary_path` passed in; the
+  existence/format/size pre-checks previously validated the wrong file, so
+  a valid host ELF could authorize an oversized or non-ELF file under the
+  sysroot. `abi_deps` now mirrors `_seed_root`'s own rebasing logic before
+  checking.
+- **`abi_deps` now bounds every dependency it resolves, not just the root
+  binary** — `resolver.resolve_dependencies` parsed each transitively
+  resolved DSO (via `search_paths`/`ld_library_path`/`sysroot`/default
+  search order) with no size guard, so a small root binary could still
+  make `abi_deps` parse an arbitrarily large dependency file. Added an
+  optional `max_file_size` parameter (default `None`, preserving prior
+  behavior for the CLI `deps tree` command and all other callers) threaded
+  through `resolve_dependencies`/`stack_checker.check_single_env`; `abi_deps`
+  now passes `ABICHECK_MCP_MAX_FILE_SIZE`.
+- **The MCP server's `instructions` string now lists all eleven registered
+  tools** — an MCP client reads this text to pick a tool; it previously
+  named only four of the original seven, omitting `abi_audit`/`abi_scan`
+  entirely and all four tools this PR added.

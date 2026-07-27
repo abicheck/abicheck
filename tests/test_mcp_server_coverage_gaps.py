@@ -421,6 +421,7 @@ class TestMainArgValidation:
         # main() mutates mcp_shared's module globals (not monkeypatch), so
         # capture and restore them ourselves to keep later tests isolated.
         saved_timeout = mcp_shared.MCP_TIMEOUT
+        saved_structured_logging = mcp_shared._structured_logging
         try:
             main()
             assert calls == ["stdio"]
@@ -428,5 +429,5 @@ class TestMainArgValidation:
             assert mcp_shared.MCP_TIMEOUT == 5
         finally:
             # Restore module-level globals mutated by main().
-            mcp_shared._structured_logging = False
+            mcp_shared._structured_logging = saved_structured_logging
             mcp_shared.MCP_TIMEOUT = saved_timeout

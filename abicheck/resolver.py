@@ -39,6 +39,28 @@ from .elf_metadata import ElfMetadata, parse_elf_metadata
 log = logging.getLogger(__name__)
 
 
+def _check_dso_size(path: Path, max_file_size: int | None) -> None:
+    """Raise ValueError if *path* exceeds *max_file_size* bytes.
+
+    Applied to every DSO this module parses (root and each transitively
+    resolved dependency) when a caller supplies a limit -- a caller-controlled
+    search_paths/ld_library_path/sysroot can otherwise steer resolution to an
+    arbitrarily large file with no size guard of its own (ADR-021b D3, for
+    callers like the MCP ``abi_deps`` tool that need one).
+    """
+    if max_file_size is None:
+        return
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return  # let the caller's own existence/format checks report this
+    if size > max_file_size:
+        raise ValueError(
+            f"{path} is {size / (1024 * 1024):.1f} MB, "
+            f"exceeds limit of {max_file_size / (1024 * 1024):.0f} MB"
+        )
+
+
 @dataclass
 class ResolvedDSO:
     """A single resolved shared object in the dependency graph."""
@@ -130,6 +152,7 @@ def resolve_dependencies(
     search_paths: list[Path] | None = None,
     sysroot: Path | None = None,
     ld_library_path: str = "",
+    max_file_size: int | None = None,
 ) -> DependencyGraph:
     """Resolve the transitive closure of DT_NEEDED dependencies.
 
@@ -138,6 +161,12 @@ def resolve_dependencies(
         search_paths: Additional directories to search (appended after defaults).
         sysroot: Prefix prepended to all search paths (for cross/container analysis).
         ld_library_path: Colon-separated list of directories (simulates $LD_LIBRARY_PATH).
+        max_file_size: When given, every DSO resolved (root and each
+            transitive dependency) is checked against this byte limit before
+            being parsed, raising ``ValueError`` if exceeded -- for callers
+            (e.g. the MCP ``abi_deps`` tool) that must bound how large a file
+            caller-controlled search paths can steer resolution to. ``None``
+            (the default) applies no limit, preserving prior behavior.
 
     Returns:
         A DependencyGraph with all resolved and unresolved dependencies.
@@ -147,7 +176,7 @@ def resolve_dependencies(
     ld_dirs = [d for d in ld_library_path.split(":") if d]
     prefix = str(sysroot) if sysroot else ""
 
-    seed = _seed_root(binary, graph, prefix)
+    seed = _seed_root(binary, graph, prefix, max_file_size)
     if seed is None:
         return graph
     root_path, root_key, root_soname, default_dirs, platform_token, lib_token = seed
@@ -205,6 +234,7 @@ def resolve_dependencies(
             resolved_path, resolved_key, soname, reason, depth,
             requester_path, graph, queue, visited_sonames,
             propagated_rpaths, prefix, platform_token, lib_token,
+            max_file_size,
         )
 
     return graph
@@ -224,8 +254,10 @@ def _register_resolved_dso(
     prefix: str,
     platform_token: str,
     lib_token: str,
+    max_file_size: int | None = None,
 ) -> None:
     """Parse a newly resolved DSO, add it to the graph, and enqueue its children."""
+    _check_dso_size(resolved_path, max_file_size)
     meta = parse_elf_metadata(resolved_path)
     node = ResolvedDSO(
         path=resolved_path, soname=meta.soname or soname,
@@ -266,6 +298,7 @@ def _merge_rpaths(own: list[str], ancestor: list[str]) -> list[str]:
 
 def _seed_root(
     binary: Path, graph: DependencyGraph, prefix: str,
+    max_file_size: int | None = None,
 ) -> tuple[Path, str, str, list[str], str, str] | None:
     """Parse the root binary, add it to the graph, and return target config.
 
@@ -286,6 +319,7 @@ def _seed_root(
         log.warning("resolve_dependencies: root binary not found: %s", root_path)
         return None
 
+    _check_dso_size(root_path, max_file_size)
     root_meta = parse_elf_metadata(root_path)
     root_key = str(root_path)
     root_soname = root_meta.soname or root_path.name

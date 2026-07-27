@@ -536,11 +536,16 @@ variables override defaults.
 | `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input` (`abi_compare`), `binary_path`/`compile_db`/`against` (`abi_scan`), and the binary/report/config/bindings paths `abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read |
 | `--log-format text\|json` | — | `text` | Audit log format on stderr |
 
-All eleven tools share one configuration source: `--timeout`/`--max-file-size`
-passed as CLI flags to a running server, or the `ABICHECK_MCP_TIMEOUT`/
-`ABICHECK_MCP_MAX_FILE_SIZE` environment variables, apply uniformly across
-`abi_dump`/`abi_compare`/`abi_audit`/`abi_scan`/`abi_deps`/`abi_aggregate`/
-`abi_project_validate`/`abi_project_plan`.
+The eight tools above share one configuration source: `--timeout`/
+`--max-file-size` passed as CLI flags to a running server, or the
+`ABICHECK_MCP_TIMEOUT`/`ABICHECK_MCP_MAX_FILE_SIZE` environment variables,
+apply uniformly across all of them (including every input path each one
+reads — `manifest`/`run_plan` for `abi_aggregate`, `build-output.json` per
+profile for `abi_project_plan`). The remaining three tools —
+`abi_estimate` (a fast, compiler-free cost probe; "Scans nothing" per its
+own description), `abi_list_changes`, and `abi_explain_change` (both pure
+in-memory lookups) — don't run bounded work and aren't governed by these
+settings.
 
 Example invocation tuned for large libraries:
 

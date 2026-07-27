@@ -65,8 +65,9 @@ symptom, not the disease: `abicheck.schemas` already has *some* structure for
 `gen_python_api_reference.py`-style generation elsewhere), but snapshot/scan/
 build-output/run-plan version numbers each live in their own module-level
 constant with no shared lookup surface a docs generator (or an external
-integrator) can query once for "what versions does this abicheck build
-support, and are they compatible."
+integrator) can query once for "what version does this abicheck build
+currently emit for artifact X" — current-version discovery only; this
+proposes no compatibility metadata or cross-version lookup (see D3 below).
 
 ## Non-goals
 

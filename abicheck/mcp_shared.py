@@ -97,7 +97,11 @@ try:
             "ABI compatibility checker for C/C++ shared libraries. "
             "Detects breaking changes in .so/.dll/.dylib files before they reach production. "
             "Use abi_compare to diff two library versions, abi_dump to extract ABI snapshots, "
-            "abi_list_changes to browse change kinds, and abi_explain_change for detailed explanations."
+            "abi_audit/abi_scan for single-build hygiene and source-intelligence scans, "
+            "abi_deps to resolve a binary's dependency stack, abi_aggregate to fold per-target "
+            "reports into one gate decision, abi_project_validate/abi_project_plan for project "
+            "config validation and run-plan generation, abi_list_changes to browse change kinds, "
+            "and abi_explain_change for detailed explanations."
         ),
     )
 except Exception as _exc:  # noqa: BLE001

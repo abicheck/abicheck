@@ -54,6 +54,7 @@ from abicheck.mcp_server import (  # noqa: E402
     abi_project_plan,
     abi_project_validate,
 )
+from abicheck.mcp_server_project import _resolve_sysroot_path  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # abi_deps
@@ -136,6 +137,49 @@ class TestAbiDeps:
         payload = json.loads(raw)
         assert payload["status"] == "error"
         assert "timed out" in payload["error"]
+
+    def test_oversized_sysroot_resolved_binary_is_rejected(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # ADR-021b D3: when a sysroot is active, resolver._seed_root parses
+        # the sysroot-rebased path, not the host-absolute one passed in --
+        # the pre-flight size/format checks must validate that same file.
+        sysroot_dir = tmp_path / "sysroot"
+        rebased = sysroot_dir / "usr" / "lib" / "libfoo.so"
+        rebased.parent.mkdir(parents=True)
+        rebased.write_bytes(b"\x7fELF" + b"\x00" * 4096)
+        monkeypatch.setattr(mcp_shared, "MCP_MAX_FILE_SIZE", 1)
+        raw = abi_deps("/usr/lib/libfoo.so", sysroot=str(sysroot_dir))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "exceeds limit" in payload["error"]
+
+    def test_non_elf_sysroot_resolved_binary_is_rejected(self, tmp_path: Path):
+        sysroot_dir = tmp_path / "sysroot"
+        rebased = sysroot_dir / "usr" / "lib" / "libfoo.so"
+        rebased.parent.mkdir(parents=True)
+        rebased.write_text("not an elf file")
+        raw = abi_deps("/usr/lib/libfoo.so", sysroot=str(sysroot_dir))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "elf" in payload["error"].lower()
+
+
+class TestResolveSysrootPath:
+    def test_no_sysroot_returns_binary_unchanged(self):
+        binary = Path("/usr/bin/foo")
+        assert _resolve_sysroot_path(binary, None) == binary
+
+    def test_absolute_binary_rebased_under_sysroot(self, tmp_path: Path):
+        binary = Path("/usr/lib/libfoo.so")
+        assert (
+            _resolve_sysroot_path(binary, tmp_path)
+            == (tmp_path / "usr" / "lib" / "libfoo.so").resolve()
+        )
+
+    def test_binary_already_under_sysroot_is_unchanged(self, tmp_path: Path):
+        binary = tmp_path / "usr" / "lib" / "libfoo.so"
+        assert _resolve_sysroot_path(binary, tmp_path) == binary
 
 
 # ---------------------------------------------------------------------------
@@ -342,8 +386,7 @@ class TestAbiProjectValidate:
         assert payload["status"] == "error"
 
     def test_dangling_reference_is_a_validation_error(self, tmp_path: Path):
-        raw_cfg = dict(_SINGLE_PROFILE_LIBRARY_RAW)
-        raw_cfg = json.loads(json.dumps(raw_cfg))  # deep copy
+        raw_cfg = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))  # deep copy
         raw_cfg["targets"]["libfoo"]["checks"][0]["channel"] = "does-not-exist"
         config = _write_config(tmp_path, raw_cfg)
         raw = abi_project_validate(str(config))

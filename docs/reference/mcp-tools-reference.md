@@ -2,7 +2,7 @@
 
 # MCP Tools Reference
 
-Every parameter of every `abicheck-mcp` tool, generated directly from `abicheck/mcp_server.py`'s function signatures and docstrings. See [MCP Server (Agent Integration)](../use/mcp-integration.md) for install/configure steps, response envelope shapes, agent workflow examples, and the security model — this page is the exhaustive parameter list only.
+Every parameter of every `abicheck-mcp` tool, generated directly from `abicheck/mcp_server.py`'s and `abicheck/mcp_server_project.py`'s function signatures and docstrings. See [MCP Server (Agent Integration)](../use/mcp-integration.md) for install/configure steps, response envelope shapes, agent workflow examples, and the security model — this page is the exhaustive parameter list only.
 
 ## `abi_aggregate`
 

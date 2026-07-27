@@ -290,16 +290,21 @@ def check_single_env(
     search_paths: list[Path] | None = None,
     sysroot: Path | None = None,
     ld_library_path: str = "",
+    max_file_size: int | None = None,
 ) -> StackCheckResult:
     """Check a binary's dependency stack in a single environment.
 
     Useful for "will this binary load?" analysis without a baseline comparison.
+
+    ``max_file_size``, when given, bounds every DSO ``resolve_dependencies``
+    parses (root and each transitive dependency) -- see its own docstring.
     """
     graph = resolve_dependencies(
         binary,
         search_paths=search_paths,
         sysroot=sysroot,
         ld_library_path=ld_library_path,
+        max_file_size=max_file_size,
     )
     bindings = compute_bindings(graph)
 

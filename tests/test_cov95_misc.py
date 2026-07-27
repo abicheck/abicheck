@@ -41,10 +41,20 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 
 def _import_mcp_server_symbols():  # noqa: ANN202
     """Import the mcp_server symbols we test, leaving sys.modules unperturbed."""
+    # abicheck.mcp_server's own import graph pulls in both sibling modules
+    # (mcp_shared for shared state/helpers, mcp_server_project for its own
+    # @mcp.tool() registrations) -- restore all three afterward, not just
+    # mcp_server itself, or a module imported here under the temporary mock
+    # stays cached in sys.modules for every later-collected test file.
+    _abicheck_mcp_modules = (
+        "abicheck.mcp_server",
+        "abicheck.mcp_shared",
+        "abicheck.mcp_server_project",
+    )
     injected = [
         k for k in ("mcp", "mcp.server", "mcp.server.fastmcp") if k not in sys.modules
     ]
-    mcp_server_was_present = "abicheck.mcp_server" in sys.modules
+    was_present = {name: name in sys.modules for name in _abicheck_mcp_modules}
 
     _mock_fastmcp = MagicMock()
     _mock_mcp_module = MagicMock()
@@ -66,8 +76,9 @@ def _import_mcp_server_symbols():  # noqa: ANN202
     # don't enable mcp for files collected after us.
     for key in injected:
         sys.modules.pop(key, None)
-    if not mcp_server_was_present:
-        sys.modules.pop("abicheck.mcp_server", None)
+    for name in _abicheck_mcp_modules:
+        if not was_present[name]:
+            sys.modules.pop(name, None)
     return _ms, _mcp_shared
 
 

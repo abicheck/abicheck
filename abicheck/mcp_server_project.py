@@ -70,6 +70,21 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
+def _resolve_sysroot_path(binary: Path, sysroot: Path | None) -> Path:
+    """Mirror ``resolver._seed_root``'s sysroot rebasing so the existence/
+    format/size pre-checks below validate the file that will actually be
+    parsed, not the (possibly unrelated) host-absolute path — an absolute
+    ``binary`` under an active ``sysroot`` is looked up beneath the sysroot,
+    exactly as ``_seed_root`` does before calling ``parse_elf_metadata``."""
+    if (
+        sysroot is not None
+        and binary.is_absolute()
+        and not str(binary).startswith(str(sysroot))
+    ):
+        return (sysroot / str(binary).lstrip("/")).resolve()
+    return binary
+
+
 def _check_dir_json_file_sizes(directory: Path, *, label: str = "input") -> None:
     """Apply ``_check_file_size`` to every ``*.json`` file directly under
     *directory* (ADR-021b D3) -- for tools that read a whole directory of
@@ -132,9 +147,11 @@ def abi_deps(
         from .stack_report import stack_to_json
 
         bin_path = _safe_read_path(binary_path, label="binary_path")
-        if not bin_path.exists():
+        sysroot_path = _safe_read_path(sysroot, label="sysroot") if sysroot else None
+        effective_path = _resolve_sysroot_path(bin_path, sysroot_path)
+        if not effective_path.exists():
             return json.dumps({"status": "error", "error": "Binary file not found"})
-        fmt = _detect_binary_format(bin_path)
+        fmt = _detect_binary_format(effective_path)
         if fmt != "elf":
             return json.dumps(
                 {
@@ -142,11 +159,10 @@ def abi_deps(
                     "error": f"abi_deps requires an ELF binary; got {fmt or 'unknown format'}",
                 }
             )
-        _check_file_size(bin_path, label="binary_path")
+        _check_file_size(effective_path, label="binary_path")
         sp_paths = [
             _safe_read_path(p, label="search_path") for p in (search_paths or [])
         ]
-        sysroot_path = _safe_read_path(sysroot, label="sysroot") if sysroot else None
 
         try:
             result = _call_with_timeout(
@@ -155,6 +171,7 @@ def abi_deps(
                 search_paths=sp_paths or None,
                 sysroot=sysroot_path,
                 ld_library_path=ld_library_path,
+                max_file_size=mcp_shared.MCP_MAX_FILE_SIZE,
             )
         except _futures.TimeoutError:
             elapsed = _time.monotonic() - t0
