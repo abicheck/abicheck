@@ -301,6 +301,23 @@ class TestLoadPackManifestValidation:
         with pytest.raises(PackManifestError, match="not valid UTF-8"):
             load_pack_manifest(path)
 
+    def test_invalid_timestamp_scalar_raises_pack_manifest_error(
+        self, tmp_path: Path
+    ) -> None:
+        # PyYAML's implicit timestamp resolver constructs a real
+        # datetime.date for a timestamp-shaped scalar -- an out-of-range
+        # value raises a raw ValueError from that stdlib constructor, not
+        # yaml.YAMLError, and must not escape this loader's documented
+        # PackManifestError contract (Codex review, fresh evidence).
+        path = _write(
+            tmp_path,
+            "badtime.yaml",
+            "id: p\nversion: 1\nkind: contract\n"
+            "assignments: {contract.mode: 2020-99-99}\n",
+        )
+        with pytest.raises(PackManifestError, match="invalid YAML scalar"):
+            load_pack_manifest(path)
+
     def test_duplicate_top_level_key_raises(self, tmp_path: Path) -> None:
         # yaml.safe_load alone silently keeps last-value-wins for a repeated
         # mapping key -- a hard-load-error manifest format must not let a

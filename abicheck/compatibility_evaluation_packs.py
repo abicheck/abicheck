@@ -301,6 +301,16 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
         raise PackManifestError(f"{manifest_path}: {exc}") from exc
     except yaml.YAMLError as exc:
         raise PackManifestError(f"{manifest_path}: invalid YAML ({exc})") from exc
+    except ValueError as exc:
+        # PyYAML's implicit timestamp resolver constructs a real
+        # datetime.date/datetime for a timestamp-shaped scalar -- an
+        # out-of-range value (e.g. "2020-99-99") raises a raw ValueError
+        # from that stdlib constructor, not yaml.YAMLError, and would
+        # otherwise escape this loader's documented PackManifestError
+        # contract (Codex review, fresh evidence).
+        raise PackManifestError(
+            f"{manifest_path}: invalid YAML scalar ({exc})"
+        ) from exc
 
     if not isinstance(document, dict):
         raise PackManifestError(
