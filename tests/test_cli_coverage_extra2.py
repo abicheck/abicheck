@@ -322,6 +322,46 @@ class TestWriteSnapshotOutput:
         assert "requested evidence layer(s) not collected" in err
         assert "L4" in err and "L5" in err
 
+    def test_public_surface_only_scopes_before_writing(self, tmp_path: Path) -> None:
+        """dump --public-surface-only drops unreferenced dependency types from
+        the written JSON, reusing dumper_scoping.scope_snapshot_to_public_surface."""
+        from abicheck.model import Function, Param, RecordType, TypeField, Visibility
+
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="run",
+                    mangled="_Z3runP4Used",
+                    return_type="void",
+                    params=[Param(name="a", type="Used *")],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Used",
+                    kind="struct",
+                    size_bits=32,
+                    fields=[TypeField(name="x", type="int")],
+                ),
+                RecordType(name="unreferenced_internal", kind="struct", size_bits=32),
+            ],
+        )
+        out = tmp_path / "snap.json"
+        _write_snapshot_output(snap, out, public_surface_only=True)
+        text = out.read_text(encoding="utf-8")
+        assert '"Used"' in text
+        assert "unreferenced_internal" not in text
+
+    def test_public_surface_only_unresolvable_is_usage_error(self) -> None:
+        """No headers parsed -> no resolvable public surface -> a loud usage
+        error, not a silently-empty snapshot."""
+        snap = AbiSnapshot(library="lib.so", version="1.0")
+        with pytest.raises(click.UsageError):
+            _write_snapshot_output(snap, None, public_surface_only=True)
+
 
 class TestClassifyMissingLayers:
     """The absent-vs-ran-but-empty split behind the accurate coverage warning."""

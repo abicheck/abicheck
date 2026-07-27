@@ -303,6 +303,7 @@ def _write_snapshot_output(
     extractor: str = "auto",
     inputs_pack: Path | None = None,
     depth: str | None = None,
+    public_surface_only: bool = False,
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -318,7 +319,10 @@ def _write_snapshot_output(
     L2 header AST (ADR-037 D8): one frontend choice across both pipeline stages.
     *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when
     given, ``check_requested_depth_satisfied`` raises if the snapshot did not
-    actually reach it.
+    actually reach it. *public_surface_only* (``dump --public-surface-only``)
+    scopes the snapshot to its public ABI surface right before serialization,
+    once every embed step above has had its chance to fill in the snapshot —
+    see ``dumper_scoping.py`` for what this trades away.
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -373,6 +377,15 @@ def _write_snapshot_output(
     # check_requested_depth_satisfied's docstring. Checked last, after every
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
+    if public_surface_only:
+        from .dumper_scoping import (
+            PublicSurfaceScopingError,
+            scope_snapshot_to_public_surface,
+        )
+        try:
+            snap = scope_snapshot_to_public_surface(snap)
+        except PublicSurfaceScopingError as exc:
+            raise click.UsageError(str(exc)) from exc
     result = snapshot_to_json(snap)
     # Audit finding: dump/baseline provenance didn't record requested vs.
     # effective depth anywhere a later reader could inspect -- fold it into
@@ -506,6 +519,18 @@ def main() -> None:
               type=click.Path(exists=True, file_okay=False, path_type=Path),
               help="Directory whose headers are treated as public for provenance "
                    "classification (repeat for multiple).")
+@click.option("--public-surface-only", "public_surface_only", is_flag=True, default=False,
+              help="Scope the written snapshot to its public ABI surface: public "
+                   "functions/variables plus the types transitively reachable from "
+                   "their signatures/fields/bases. Drops unreferenced dependency "
+                   "internals (e.g. unused stdlib/SYCL declarations pulled in by "
+                   "#include) that a full header-AST dump otherwise serializes "
+                   "wholesale, which can dominate the file size for a library with a "
+                   "large dependency stack. Requires -H/--header (a snapshot with no "
+                   "resolvable public surface, e.g. an export-table-only ELF dump, "
+                   "is a usage error). A scoped snapshot is a lossy artifact: compare "
+                   "both sides of a `compare` the same way, don't mix scoped and "
+                   "unscoped snapshots.")
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
 @lang_option
@@ -587,6 +612,7 @@ def main() -> None:
 @compile_context_options  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
+             public_surface_only: bool,
              version: str, lang: str, header_backend: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
              gcc_option_tokens: tuple[str, ...],
@@ -886,6 +912,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=native_cc,
             depth=depth, compile_db_context_matched=compile_db_matched,
+            public_surface_only=public_surface_only,
         )
         return
 
@@ -947,6 +974,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         compile_db_context_matched=compile_db_matched,
         dump_manifest=parsed_dump_manifest,
         include_labels=_resolved_include_labels,
+        public_surface_only=public_surface_only,
     )
 
 

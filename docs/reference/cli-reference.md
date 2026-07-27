@@ -284,6 +284,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--include`, `-I` | no | — | Extra include directory for castxml. |
 | `--public-header` | no | — | Header treated as public for provenance classification (repeat for multiple). Declarations are tagged public/private/system in the snapshot. Opt-in: omitting this leaves every origin UNKNOWN. |
 | `--public-header-dir` | no | — | Directory whose headers are treated as public for provenance classification (repeat for multiple). |
+| `--public-surface-only` | no | `False` | Scope the written snapshot to its public ABI surface: public functions/variables plus the types transitively reachable from their signatures/fields/bases. Drops unreferenced dependency internals (e.g. unused stdlib/SYCL declarations pulled in by #include) that a full header-AST dump otherwise serializes wholesale, which can dominate the file size for a library with a large dependency stack. Requires -H/--header (a snapshot with no resolvable public surface, e.g. an export-table-only ELF dump, is a usage error). A scoped snapshot is a lossy artifact: compare both sides of a `compare` the same way, don't mix scoped and unscoped snapshots. |
 | `--version` | no | `unknown` | Library version string to embed in snapshot. |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--output`, `-o` | no | — | Output JSON file. Defaults to stdout. |

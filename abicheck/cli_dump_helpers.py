@@ -75,6 +75,7 @@ class _WriteSnapshotOutput(Protocol):
         extractor: str = ...,
         inputs_pack: Path | None = ...,
         depth: str | None = ...,
+        public_surface_only: bool = ...,
     ) -> None: ...
 
 
@@ -1096,6 +1097,7 @@ def handle_non_elf_dump(
     inputs_pack: Path | None = None,
     depth: str | None = None,
     compile_db_context_matched: bool = False,
+    public_surface_only: bool = False,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -1187,6 +1189,7 @@ def handle_non_elf_dump(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
         extractor=header_backend, inputs_pack=inputs_pack, depth=depth,
+        public_surface_only=public_surface_only,
     )
 
 
@@ -1344,6 +1347,7 @@ def perform_elf_dump(
     compile_db_context_matched: bool = False,
     dump_manifest: Any = None,
     include_labels: dict[Path, str] | None = None,
+    public_surface_only: bool = False,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -1390,6 +1394,13 @@ def perform_elf_dump(
     from whether any castxml flags were derived (a genuinely matched TU with
     no ABI-relevant flags to forward is still real build-context evidence,
     not an absent one — Codex review, second finding on this signal).
+
+    ``public_surface_only`` (``dump --public-surface-only``): scope the
+    written snapshot to its public ABI surface (public functions/variables
+    plus the types transitively reachable from them) via
+    :func:`abicheck.dumper_scoping.scope_snapshot_to_public_surface`,
+    applied in ``write_snapshot_output`` right before serialization — see
+    that module's docstring for what this trades away.
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
@@ -1702,4 +1713,5 @@ def perform_elf_dump(
         extractor=header_backend,
         inputs_pack=inputs_pack,
         depth=depth,
+        public_surface_only=public_surface_only,
     )

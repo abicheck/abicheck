@@ -336,6 +336,12 @@ class PublicSurface:
     all_symbols: set[str] = field(default_factory=set)
     public_types: set[str] = field(default_factory=set)
     all_types: set[str] = field(default_factory=set)
+    # Typedef keys (``snapshot.typedefs``) actually resolved while walking the
+    # type closure from a public root — a strict subset of ``snapshot.typedefs``.
+    # Used by dump-time public-surface scoping (``dumper_scoping.py``) to decide
+    # which typedef entries to keep; unrelated to classification/demotion, so it
+    # has no analogue in the per-finding scoping this dataclass otherwise serves.
+    public_typedefs: set[str] = field(default_factory=set)
     resolvable: bool = False
     # Origin (ADR-024 D1 / ADR-015 v6) keyed by every symbol key and type
     # name. Only populated when the snapshot was dumped with a public-header
@@ -542,6 +548,7 @@ def _walk_type_closure(
         # Follow typedef targets.
         target = snap.typedefs.get(name)
         if target:
+            surface.public_typedefs.add(name)
             for ident in _type_identifiers(target):
                 if ident not in seen:
                     queue.append(ident)
