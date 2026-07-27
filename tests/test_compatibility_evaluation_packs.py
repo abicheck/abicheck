@@ -357,6 +357,21 @@ class TestLoadPackManifestValidation:
         with pytest.raises(PackManifestError, match="unknown top-level field"):
             load_pack_manifest(path)
 
+    def test_heterogeneous_unknown_top_level_fields_raise_cleanly(
+        self, tmp_path: Path
+    ) -> None:
+        # Two unknown keys of different types (int `1:` and str `extra:`)
+        # must not crash sorting the unknown-key list with a raw TypeError
+        # ("'<' not supported between instances of 'int' and 'str'") instead
+        # of the documented PackManifestError (Codex review, fresh evidence).
+        path = _write(
+            tmp_path,
+            "mixed_unknown.yaml",
+            "id: p\nversion: 1\nkind: gate\nassignments: {}\n1: x\nextra: y\n",
+        )
+        with pytest.raises(PackManifestError, match="unknown top-level field"):
+            load_pack_manifest(path)
+
 
 class TestAssignmentsForConflictCheck:
     def test_feeds_detect_pack_conflicts_directly(self, tmp_path: Path) -> None:

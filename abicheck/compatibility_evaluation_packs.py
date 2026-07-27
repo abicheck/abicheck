@@ -312,7 +312,15 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
     # `assignments:`) would otherwise be silently ignored -- every field
     # below is read with `.get()`, which has no way to notice an unread key
     # sitting right next to the one it was meant to replace (Codex review).
-    unknown_top_level = sorted(set(document) - _TOP_LEVEL_MANIFEST_FIELDS)
+    # Sorted by `repr`, not the bare keys themselves: a plain `sorted(...)`
+    # raises TypeError if the unknown keys are heterogeneously typed (e.g.
+    # both `1:` and `extra:` -- Python cannot order int against str), which
+    # would surface as an uncontextualized crash instead of the documented
+    # PackManifestError this validation exists to produce (Codex review,
+    # fresh evidence).
+    unknown_top_level = sorted(
+        (set(document) - _TOP_LEVEL_MANIFEST_FIELDS), key=repr
+    )
     if unknown_top_level:
         raise PackManifestError(
             f"{manifest_path}: unknown top-level field(s) {unknown_top_level} "
