@@ -94,6 +94,16 @@ def test_header_graph_attach_reuse_faster_than_disk_reparse(
     header.write_text(_gen_large_header(1500), encoding="utf-8")
     cache_path = tmp_path / "ast_cache.json"
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache_path)
+    # Every _clang_header_dump call -- memo hit or not -- first resolves the
+    # host system-include dirs via a real, uncached ``cc -E -v``-style probe
+    # (dumper_sysinc._resolve_clang_system_includes, called twice for C mode)
+    # *before* it even checks the memo. That probe's cost is identical on
+    # both sides of this A/B and was observed to fully swamp the actual
+    # memo-vs-disk-reparse signal on a loaded macOS CI runner (both timed
+    # calls landing within noise of each other) -- disabled here to isolate
+    # the mechanism this test actually exists to guard, matching the same
+    # opt-out ``test_dumper_clang.py``'s real-fixture tests already use.
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
     # Prime the disk cache with one real clang parse -- not timed (mirrors
     # the main snapshot pass that already ran before _attach_header_graph
