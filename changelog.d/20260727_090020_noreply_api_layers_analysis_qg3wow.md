@@ -234,6 +234,15 @@
   `_ToolPreflightError` handler in all four tools returned its structured
   error without logging the attempt, leaving preflight rejections (missing
   file, bad format, oversized input) invisible to the audit trail.
+- **`docs/integration/index.md` no longer misstates the Actions composition
+  direction** — it claimed both the "Single-Action step" and "Reusable
+  workflow" layers are "built out of" the "Primitive Actions" layer below.
+  Verified against `actions/check-target/action.yml`'s "Run analysis" step:
+  `check-target` (a primitive) itself checks out and invokes the root
+  `abicheck/abicheck` composite Action directly, so the root Action actually
+  sits underneath `check-target` in the real call graph — the reverse of a
+  simple bottom-to-top ladder. Reworded to describe the actual graph
+  (Codex review).
 - **`abi_aggregate` now counts `manifest`'s and `run_plan`'s own path
   resolution against `--timeout` too** — `_safe_read_path`'s
   symlink-following `.resolve()` call for both paths ran before
