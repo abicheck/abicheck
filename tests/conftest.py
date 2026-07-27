@@ -45,7 +45,7 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
 
 @pytest.fixture(autouse=True)
 def _isolate_ast_memo() -> Iterator[None]:
-    """Clear the in-process clang-AST memo (``dumper_cache._AST_MEMO``,
+    """Clear the in-process clang-AST memo slot (``dumper_cache._ast_memo_slot``,
     G31 Phase C AST reuse) before and after every test.
 
     Several fixture headers across ``test_dumper_clang.py`` share identical
@@ -54,13 +54,15 @@ def _isolate_ast_memo() -> Iterator[None]:
     entry left behind by one test could serve a stale/wrong result to a
     later test expecting a genuine cache miss (the same hazard
     ``_isolate_snapshot_cache`` above already guards against for the
-    whole-snapshot disk cache).
+    whole-snapshot disk cache). The pytest main thread is reused across
+    tests, so a ContextVar set by one test is otherwise still visible to
+    the next.
     """
     from abicheck import dumper_cache
 
-    dumper_cache._AST_MEMO.clear()
+    dumper_cache._ast_memo_slot.set(None)
     yield
-    dumper_cache._AST_MEMO.clear()
+    dumper_cache._ast_memo_slot.set(None)
 
 
 @pytest.fixture

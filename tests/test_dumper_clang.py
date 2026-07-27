@@ -1909,33 +1909,26 @@ def test_clang_header_dump_memoize_false_never_writes_the_memo(
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
 
-    # Fresh-parse path: memoize=False must leave the memo empty afterward.
+    # Fresh-parse path: memoize=False must leave this thread's slot unset.
     _clang_header_dump([header], [], memoize=False)
     assert cache.exists()  # the disk cache is still populated, as always
-    assert not dumper_cache._AST_MEMO
+    assert dumper_cache._ast_memo_slot.get() is None
 
     # Disk-cache-hit path: a second memoize=False call reads the file this
-    # test just warmed on disk, and must still leave the memo empty.
+    # test just warmed on disk, and must still leave the slot unset.
     _clang_header_dump([header], [], memoize=False)
-    assert not dumper_cache._AST_MEMO
+    assert dumper_cache._ast_memo_slot.get() is None
 
 
-def test_ast_memo_evicts_oldest_entry_past_maxsize(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """CodeRabbit/Codex review: the memo is a single-consumption handoff, not
-    a general cache -- ``_AST_MEMO_MAXSIZE`` is only the last-resort bound for
-    entries that get written but never read (e.g. the header graph disabled
-    after the main pass ran). Storing past that bound must evict the oldest
-    entry rather than grow unbounded."""
-    monkeypatch.setattr(dumper_cache, "_AST_MEMO_MAXSIZE", 2)
+def test_ast_memo_slot_overwrites_previous_pending_value() -> None:
+    """CodeRabbit/Codex review: the memo is a single-consumption, per-thread
+    handoff, not a general keyed cache -- there is at most one legitimate
+    pending AST at a time, so a second write before the first is consumed
+    simply replaces it (nothing to "evict" across distinct keys, unlike the
+    old shared-dict design this superseded)."""
     dumper_cache.store_cached_ast("k1", "clang", {"n": 1})
     dumper_cache.store_cached_ast("k2", "clang", {"n": 2})
-    dumper_cache.store_cached_ast("k3", "clang", {"n": 3})
-    assert len(dumper_cache._AST_MEMO) == 2
-    assert ("clang", "k1") not in dumper_cache._AST_MEMO
-    assert ("clang", "k2") in dumper_cache._AST_MEMO
-    assert ("clang", "k3") in dumper_cache._AST_MEMO
+    assert dumper_cache._ast_memo_slot.get() == ("clang", "k2", {"n": 2})
 
 
 def test_clang_header_dump_direct_caller_never_memoizes(
@@ -1964,7 +1957,7 @@ def test_clang_header_dump_direct_caller_never_memoizes(
     assert not dumper_cache.ast_memoize_active()
     _clang_header_dump([header], [])  # no ast_memoize_scope() active
     assert cache.exists()  # the disk cache is still populated, as always
-    assert not dumper_cache._AST_MEMO
+    assert dumper_cache._ast_memo_slot.get() is None
 
 
 def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
@@ -1988,10 +1981,10 @@ def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
 
     with dumper_cache.ast_memoize_scope():
         _clang_header_dump([header], [])
-        assert dumper_cache._AST_MEMO  # written while the scope is active
-    # The scope exiting doesn't itself clear the memo -- only a subsequent
+        assert dumper_cache._ast_memo_slot.get() is not None  # written
+    # The scope exiting doesn't itself clear the slot -- only a subsequent
     # pop (the header-graph attach step) does; still present right after.
-    assert dumper_cache._AST_MEMO
+    assert dumper_cache._ast_memo_slot.get() is not None
 
 
 def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
@@ -2000,9 +1993,9 @@ def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
     """Codex review: a primary dump that successfully parses/memoizes an AST
     but then fails *later* in the same scoped call (e.g. snapshot
     construction raises after the AST parse succeeded) never reaches
-    _attach_header_graph to pop that entry -- ast_memoize_scope must clean
-    up whatever it wrote itself when the scoped operation raises, or the
-    entry sits until evicted by the count bound in a long-lived process."""
+    _attach_header_graph to pop that entry -- ast_memoize_scope must clear
+    this thread's slot when the scoped operation raises, or it sits set
+    for however long this thread lives afterward in a long-lived process."""
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
@@ -2019,23 +2012,49 @@ def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
     with pytest.raises(RuntimeError, match="snapshot construction failed"):
         with dumper_cache.ast_memoize_scope():
             _clang_header_dump([header], [])
-            assert dumper_cache._AST_MEMO  # written while the scope is active
+            assert dumper_cache._ast_memo_slot.get() is not None  # written
             raise RuntimeError("snapshot construction failed")
-    assert not dumper_cache._AST_MEMO  # cleaned up on the way out
+    assert dumper_cache._ast_memo_slot.get() is None  # cleaned up on the way out
 
 
-def test_ast_memoize_scope_leaves_other_threads_writes_alone(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_ast_memo_slot_is_per_thread_not_shared(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failing scope must only clean up the keys *it* wrote -- not an
-    unrelated entry already sitting in the memo from something else (e.g. a
-    concurrent scope on another thread; ContextVars are per-thread, so this
-    also verifies the tracking list itself doesn't leak across scopes)."""
-    dumper_cache.store_cached_ast("unrelated-key", "clang", {"kind": "Other"})
-    with pytest.raises(RuntimeError):
-        with dumper_cache.ast_memoize_scope():
-            raise RuntimeError("boom")
-    assert ("clang", "unrelated-key") in dumper_cache._AST_MEMO
+    """Codex review, fresh evidence: ``service.compare``'s default worker
+    pool dumps the old/new sides *concurrently* in separate threads, and
+    the AST cache key has no side/binary component -- comparing against
+    the same ``-H`` header set (the common case) makes both sides compute
+    the identical key. A shared dict would let one side's single-
+    consumption pop steal (or clobber) the other side's pending AST. Prove
+    the per-thread slot design structurally can't: a background thread's
+    own write must be invisible to (and unaffected by) the main thread's
+    slot, even when both use the exact same (backend, key)."""
+    import threading
+
+    dumper_cache.store_cached_ast("shared-key", "clang", {"side": "main"})
+
+    other_saw: dict[str, object] = {}
+
+    def _other_thread() -> None:
+        # A fresh thread starts with an empty slot regardless of what the
+        # main thread just stored under the identical key.
+        other_saw["before"] = dumper_cache._ast_memo_slot.get()
+        dumper_cache.store_cached_ast("shared-key", "clang", {"side": "other"})
+        other_saw["after"] = dumper_cache._ast_memo_slot.get()
+
+    t = threading.Thread(target=_other_thread)
+    t.start()
+    t.join()
+
+    assert other_saw["before"] is None
+    assert other_saw["after"] == ("clang", "shared-key", {"side": "other"})
+    # The main thread's own slot is untouched by the other thread's write
+    # under the identical key.
+    assert dumper_cache._ast_memo_slot.get() == (
+        "clang",
+        "shared-key",
+        {"side": "main"},
+    )
 
 
 def test_clang_only_dump_does_not_require_gxx_identity(
@@ -2117,7 +2136,7 @@ def test_clang_header_dump_rechecks_deadline_after_cache_load(
     # onto the on-disk read this test is actually about -- a memo hit would
     # skip json.loads (and the slow-patched cost below) entirely, which is
     # exactly the intended optimization but not what this test exercises.
-    dumper_cache._AST_MEMO.clear()
+    dumper_cache._ast_memo_slot.set(None)
 
     # The disk-cache read (json.loads) now lives in dumper_cache.py, not
     # dumper.py itself (G31 Phase C AST reuse split the read into

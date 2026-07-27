@@ -10,7 +10,6 @@ import os
 import shutil
 import sys
 import tempfile
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,30 +26,36 @@ log = logging.getLogger(__name__)
 #: ``service._attach_header_graph`` consumer (``appcompat.
 #: check_app_compatibility``, a direct Python-API/MCP caller selecting the
 #: clang backend) would otherwise memoize an AST nothing will ever pop,
-#: holding a potentially multi-GB tree until evicted by the entry-count
-#: bound for no benefit (Codex review). ``service.run_dump`` activates this
-#: around its own primary ELF/PE/Mach-O dump call, since that is the one
-#: shape where ``_attach_header_graph`` really does follow and consume the
-#: memo. Does not cross a ``ThreadPoolExecutor`` boundary (same caveat as
-#: ``deadline``'s own ContextVar) -- not a concern today since header-graph
-#: attach isn't wired for the pooled manifest-dump path.
+#: holding a potentially multi-GB tree indefinitely for no benefit (Codex
+#: review). ``service.run_dump`` activates this around its own primary
+#: ELF/PE/Mach-O dump call, since that is the one shape where
+#: ``_attach_header_graph`` really does follow and consume the memo.
 _ast_memoize_scope: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "_ast_memoize_scope", default=False
 )
 
-#: Keys :func:`store_cached_ast` has written *during the current scope*
-#: (``None`` outside any scope) -- lets :func:`ast_memoize_scope` clean up
-#: after itself on an exceptional exit (Codex review): a primary dump that
-#: successfully parses and memoizes an AST but then fails *later* in the
-#: same call (e.g. snapshot construction raises after the AST parse
-#: succeeded) never reaches ``_attach_header_graph`` to pop that entry, so
-#: without this it would sit until evicted by the count bound -- up to
-#: :data:`_AST_MEMO_MAXSIZE` orphaned, potentially multi-GB trees in a
-#: long-lived process. A ``ContextVar`` (not a plain module list) so two
-#: concurrent scopes on different threads each only ever see and clean up
-#: their own writes, never each other's.
-_ast_memoize_scope_keys: contextvars.ContextVar[list[tuple[str, str]] | None] = (
-    contextvars.ContextVar("_ast_memoize_scope_keys", default=None)
+#: The single pending AST handoff for the *current thread*, or ``None``.
+#: ``(backend, key, root)`` -- a plain per-thread slot (``contextvars``),
+#: never a shared dict keyed only by content hash (Codex review, fresh
+#: evidence): ``service.compare``'s default worker pool
+#: (``ABICHECK_PARALLEL_EXTRACTION``) dumps the old and new sides
+#: *concurrently* in separate threads, and the AST cache key has no
+#: binary/side component -- comparing two versions against the *same*
+#: ``-H`` header set (the common case) makes both sides' primary passes
+#: compute the identical key. A shared dict would let one side's
+#: single-consumption pop steal the other side's entry (or one side's
+#: fresh write silently clobber the other's, mid-flight), so one graph
+#: pass falls back to a full disk re-read/re-parse regardless -- the exact
+#: regression this reuse exists to remove, on top of a plausible
+#: wrong-AST hazard if the two sides' headers ever do differ. A per-thread
+#: slot sidesteps the whole class of bug structurally: each worker thread
+#: only ever sees its own write, never another thread's, no matter what
+#: the two computed keys happen to be. Does not cross a
+#: ``ThreadPoolExecutor`` boundary on its own (same caveat as
+#: ``deadline``'s own ContextVar) -- that's exactly the point here, not a
+#: gap: each pooled worker thread gets its own independent slot.
+_ast_memo_slot: contextvars.ContextVar[tuple[str, str, Any] | None] = (
+    contextvars.ContextVar("_ast_memo_slot", default=None)
 )
 
 
@@ -58,24 +63,21 @@ _ast_memoize_scope_keys: contextvars.ContextVar[list[tuple[str, str]] | None] = 
 def ast_memoize_scope() -> Iterator[None]:
     """Mark the current thread's AST parses as worth memoizing in-process.
 
-    Cleans up any entry written during this scope if the scoped operation
-    raises, since a failure partway through means no downstream
-    ``_attach_header_graph`` will ever run to pop it (see
-    :data:`_ast_memoize_scope_keys`'s own docstring).
+    Clears this thread's pending slot if the scoped operation raises, since
+    a failure partway through (e.g. snapshot construction fails after the
+    header AST parse itself succeeded) means no downstream
+    ``_attach_header_graph`` will ever run to consume it -- leaving it set
+    would hold a potentially multi-GB tree in this thread for however long
+    the thread itself lives afterward (Codex review).
     """
     active_token = _ast_memoize_scope.set(True)
-    keys_token = _ast_memoize_scope_keys.set([])
     try:
         yield
     except BaseException:
-        written = _ast_memoize_scope_keys.get() or []
-        with _AST_MEMO_LOCK:
-            for k in written:
-                _AST_MEMO.pop(k, None)
+        _ast_memo_slot.set(None)
         raise
     finally:
         _ast_memoize_scope.reset(active_token)
-        _ast_memoize_scope_keys.reset(keys_token)
 
 
 def ast_memoize_active() -> bool:
@@ -83,45 +85,12 @@ def ast_memoize_active() -> bool:
     return _ast_memoize_scope.get()
 
 
-#: In-process, single-consumption handoff for an already-parsed AST, keyed by
-#: (backend, cache key) -- e.g. the header-only semantic graph's own AST pass
-#: (ADR-041/G31, always on) over the identical header aggregate the main L2
-#: clang dump already parsed for the same snapshot. A memo hit skips both the
-#: disk read and the JSON re-parse of what can be a multi-GB tree (see
-#: ``_atomic_copy``'s own docstring).
-#:
-#: Deliberately evicted on first read (:func:`load_cached_ast` pops, not
-#: gets), not kept around as a general cache: the only intended reader is the
-#: header-graph attach step immediately following the main snapshot pass that
-#: wrote it, so once consumed there is no legitimate reason to keep a
-#: potentially multi-GB tree strongly referenced (Codex/CodeRabbit review --
-#: bounding by entry count alone still let a long-lived process, e.g. the MCP
-#: server or ``scan`` over many libraries, accumulate several such trees at
-#: once). ``ast_memoize_scope`` cleans up its own writes on an exceptional
-#: exit (a later failure in the same scoped call, before
-#: ``_attach_header_graph`` would have popped it); ``_AST_MEMO_MAXSIZE`` is
-#: only the last-resort bound for whatever that can't cover -- a write with
-#: no active scope at all (header graph disabled) -- kept small since
-#: pop-on-read already handles the common single-handoff case.
-_AST_MEMO_LOCK = threading.Lock()
-_AST_MEMO: dict[tuple[str, str], Any] = {}
-_AST_MEMO_MAXSIZE = 2
-
-
 def store_cached_ast(key: str, backend: str, root: Any) -> None:
-    """Memoize an already-parsed AST *root* for (*backend*, *key*) in-process.
-
-    Registers the key with the calling thread's active
-    :func:`ast_memoize_scope`, if any, so it can be cleaned up on an
-    exceptional exit (see :data:`_ast_memoize_scope_keys`'s own docstring).
-    """
-    with _AST_MEMO_LOCK:
-        _AST_MEMO[(backend, key)] = root
-        while len(_AST_MEMO) > _AST_MEMO_MAXSIZE:
-            _AST_MEMO.pop(next(iter(_AST_MEMO)))
-    scope_keys = _ast_memoize_scope_keys.get()
-    if scope_keys is not None:
-        scope_keys.append((backend, key))
+    """Memoize an already-parsed AST *root* for (*backend*, *key*) in the
+    calling thread's own pending slot (see :data:`_ast_memo_slot`'s own
+    docstring) -- overwrites whatever this thread's slot already held, if
+    anything (there is at most one legitimate pending handoff at a time)."""
+    _ast_memo_slot.set((backend, key, root))
 
 
 def load_cached_ast(
@@ -138,35 +107,37 @@ def load_cached_ast(
     *memoize* -- ``False`` for a caller that is itself the *final* consumer
     of this AST (the header-graph attach step, when the primary snapshot
     pass used ``castxml`` and never wrote a memo entry of its own): a disk
-    hit there has no further same-process reader to hand off to, so
-    re-inserting it into :data:`_AST_MEMO` would just hold a potentially
-    multi-GB tree until evicted by the entry-count bound, dead weight in a
-    long-lived process (Codex review). The primary snapshot pass's own call
-    keeps the default ``True`` -- that write *is* the intended handoff
+    hit there has no further same-thread reader to hand off to, so setting
+    this thread's slot would just hold a potentially multi-GB tree for no
+    benefit (Codex review). The primary snapshot pass's own call keeps the
+    default ``True`` -- that write *is* the intended handoff
     :func:`store_cached_ast`'s docstring describes.
 
-    Checks the in-process memo first (see :data:`_AST_MEMO`'s own docstring)
-    -- popping it on a hit, since the memo is a single-consumption handoff,
-    not a general cache -- falling back to the on-disk cache -- deadline-
-    checked the same way the original inline disk-cache read was (once
-    before the parse, so an already-exceeded deadline skips it, and once
-    after, since parsing a huge cached AST can itself eat the rest of the
-    budget). A corrupt/unreadable cache file is evicted, same as before.
-    Never a staleness risk: this only ever returns a value this same process
-    already validated (from disk or a fresh parse) under this identical
+    Checks this thread's own pending slot first (see :data:`_ast_memo_slot`'s
+    own docstring) -- consuming it only when its ``(backend, key)`` matches
+    the request (a mismatch means this thread's slot holds something
+    unrelated, e.g. a stale leftover from an earlier, differently-shaped
+    call in a reused worker thread; left alone rather than guessed at) --
+    falling back to the on-disk cache, deadline-checked the same way the
+    original inline disk-cache read was (once before the parse, so an
+    already-exceeded deadline skips it, and once after, since parsing a
+    huge cached AST can itself eat the rest of the budget). A
+    corrupt/unreadable cache file is evicted, same as before. Never a
+    staleness risk: this only ever returns a value this same thread already
+    validated (from disk or a fresh parse) under this identical
     content-addressed key.
 
-    A memo hit is itself deadline-checked too, even though it does no real
+    A slot hit is itself deadline-checked too, even though it does no real
     work -- a caller relying on ``--budget``/``deadline.deadline_scope`` to
     bound the whole scan must see a consistently-enforced deadline on every
     path back out of this function, not just the ones that happen to be
     expensive (mirrors the disk-cache-hit contract PR #591 established).
     """
-    with _AST_MEMO_LOCK:
-        memoized = _AST_MEMO.pop((backend, key), None)
-    if memoized is not None:
+    slot = _ast_memo_slot.get()
+    if slot is not None and slot[0] == backend and slot[1] == key:
+        _ast_memo_slot.set(None)
         deadline.check()
-        return memoized
+        return slot[2]
     if not cache_path.exists():
         return None
     deadline.check()

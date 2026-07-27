@@ -3021,7 +3021,7 @@ class TestAttachHeaderGraphCompilerSelection:
     "c". The compiler string is part of the AST cache key, so a mismatch
     here silently misses the memo on top of picking the wrong driver."""
 
-    def test_uppercase_c_selects_cc_compiler(self, tmp_path):
+    def test_uppercase_c_selects_cc_compiler(self, tmp_path: Path):
         from abicheck.service import _attach_header_graph
 
         header = tmp_path / "pub.h"
@@ -3044,7 +3044,7 @@ class TestAttachHeaderGraphCompilerSelection:
             )
         assert mock_ast.call_args.kwargs["compiler"] == "cc"
 
-    def test_lang_none_selects_cpp_compiler(self, tmp_path):
+    def test_lang_none_selects_cpp_compiler(self, tmp_path: Path):
         from abicheck.service import _attach_header_graph
 
         header = tmp_path / "pub.h"
@@ -3068,7 +3068,7 @@ class TestAttachHeaderGraphCompilerSelection:
         assert mock_ast.call_args.kwargs["compiler"] == "c++"
 
     def test_uppercase_c_selects_c_include_extractor_driver_and_language(
-        self, tmp_path
+        self, tmp_path: Path
     ):
         """CodeRabbit review: the same case-insensitive normalization must
         also apply to the include-graph pass's own driver resolution
