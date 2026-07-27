@@ -185,6 +185,34 @@ class TestNotApplicableKinds:
             assurance=ContractAssurance.COMPLETE,
         )
 
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            ChangeKind.INTERPRETER_CHANGED,
+            ChangeKind.BIND_NOW_DISABLED,
+            ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED,
+            ChangeKind.ELF_INIT_FINI_CHANGED,
+        ],
+    )
+    def test_elf_loader_control_changes_are_not_applicable(
+        self, kind: ChangeKind
+    ) -> None:
+        # Regression (Codex review, fresh evidence): _diff_dynamic_contract's
+        # own PT_INTERP/DT_* loader-control state (program interpreter path,
+        # eager/lazy symbol binding, dlopen/dlclose flags, init/fini array
+        # presence) is binary-wide loader-contract identity, the same
+        # synthetic-subject shape as the DT_NEEDED findings above -- but was
+        # missing from this set.
+        c = Change(kind=kind, symbol="", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
 
 class TestUnsupportedMode:
     @pytest.mark.parametrize("mode", [ContractMode.EXPORTS, "exports"])

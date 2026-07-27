@@ -264,6 +264,85 @@ class TestReportValidatesAgainstSchema:
             assert c["contract_reason_code"] == "all_mode_normalized_entity"
             assert c["contract_assurance"] == "complete"
 
+    def test_contract_evaluation_stamps_demoted_out_of_surface_findings(self):
+        # Regression (Codex review, fresh evidence): _apply_contract_evaluation_shadow
+        # previously evaluated only `kept`, so a finding public-surface
+        # scoping already demoted to out_of_surface never got a shadow
+        # decision at all -- exactly the false-positive-reduction case
+        # Phase 3 exists to measure. An internal (unreferenced) type's
+        # layout change is demoted to out_of_surface by scope_to_public_surface,
+        # and must now resolve to PROVEN_OUT_OF_CONTRACT via its own
+        # surface_exclusion_reason ("non-public-type").
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=64),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=128),
+            ],
+        )
+        result = compare(
+            old, new, scope_to_public_surface=True, contract_evaluation=True
+        )
+        assert result.out_of_surface_count >= 1
+        demoted = [
+            c for c in result.out_of_surface_changes if c.symbol == "InternalCache"
+        ]
+        assert demoted, "fixture must produce a demoted InternalCache finding"
+        for c in demoted:
+            assert c.contract_relevance is not None
+            assert c.contract_relevance.value == "PROVEN_OUT_OF_CONTRACT"
+            assert c.contract_reason_code == "terminal_authoritative_exclusion"
+
+        payload = json.loads(reporter.to_json(result))
+        entries = payload["surface_scope"]["out_of_surface_changes"]
+        stamped_entries = [e for e in entries if e["symbol"] == "InternalCache"]
+        assert stamped_entries
+        for e in stamped_entries:
+            assert e["contract_relevance"] == "PROVEN_OUT_OF_CONTRACT"
+            assert e["contract_reason_code"] == "terminal_authoritative_exclusion"
+            assert e["contract_assurance"] == "complete"
+
+    def test_out_of_surface_findings_omit_contract_fields_by_default(self):
+        # Without contract_evaluation=True, out_of_surface_changes entries
+        # must stay exactly as before -- no new keys at all.
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=64),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=128),
+            ],
+        )
+        result = compare(old, new, scope_to_public_surface=True)
+        payload = json.loads(reporter.to_json(result))
+        entries = payload["surface_scope"]["out_of_surface_changes"]
+        assert entries
+        for e in entries:
+            assert "contract_relevance" not in e
+            assert "contract_reason_code" not in e
+            assert "contract_assurance" not in e
+
 
 @_requires_jsonschema
 class TestNotComparableReportSchema:

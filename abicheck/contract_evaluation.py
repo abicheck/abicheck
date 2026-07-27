@@ -130,6 +130,16 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
         # "DT_NEEDED" subject, same loader-level state, not a different kind
         # of entity (Codex review, fresh evidence).
         "needed_order_changed",
+        # _diff_dynamic_contract's own PT_INTERP/DT_* loader-control state --
+        # program interpreter path, eager/lazy symbol binding, dlopen/dlclose
+        # flags, and init/fini array presence are all binary-wide
+        # loader-contract properties, the same synthetic-subject shape as
+        # the DT_NEEDED findings immediately above, never a specific
+        # function/variable/type (Codex review, fresh evidence).
+        "interpreter_changed",
+        "bind_now_disabled",
+        "dynamic_loading_flags_changed",
+        "elf_init_fini_changed",
         # Architecture / file-format identity.
         "pe_machine_changed",
         "wheel_tag_architecture_mismatch",

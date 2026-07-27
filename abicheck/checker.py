@@ -542,7 +542,9 @@ def _apply_contract_evaluation_shadow(
     pp_ctx: PipelineContext,
 ) -> None:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
-    *kept* finding, in place. Called only when ``contract_evaluation=True``.
+    *kept* finding **and** every finding public-surface scoping already
+    demoted to ``pp_ctx.out_of_surface``, in place. Called only when
+    ``contract_evaluation=True``.
 
     Purely additive -- never consulted by verdict computation, policy, or
     exit-code logic (see ``Change.contract_relevance``'s own docstring).
@@ -550,6 +552,16 @@ def _apply_contract_evaluation_shadow(
     the old gate authoritative" half of Phase 3's own gate (ADR-049 plan
     Section 9); the shadow evaluator itself already existed
     (``contract_evaluation.py``) but was never called from ``compare()``.
+
+    Demoted (``out_of_surface``) findings are included, not just ``kept``:
+    a private/system-header finding ``FilterNonPublicSurface`` already moved
+    out of ``kept`` is exactly the false-positive-reduction case Phase 3
+    exists to measure (Codex review, fresh evidence) -- each already carries
+    that step's own ``Change.surface_exclusion_reason``, which
+    ``evaluate_change_contract_relevance`` consults directly via its
+    already-excluded-by-pipeline fast path (``contract_evaluation.py``'s own
+    module docstring), resolving it to ``PROVEN_OUT_OF_CONTRACT`` without
+    needing fresh surface evidence for that finding specifically.
     """
     from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
     from .contract_relevance_types import ContractMode
@@ -572,8 +584,9 @@ def _apply_contract_evaluation_shadow(
     # a header-scoping run corresponds to contract=public.
     mode = ContractMode.PUBLIC if scope_to_public_surface else ContractMode.ALL
 
+    all_changes = kept + pp_ctx.out_of_surface
     decisions = evaluate_snapshot_pair_contract_relevance(
-        kept,
+        all_changes,
         surf_old,
         surf_new,
         mode=mode,
@@ -581,7 +594,7 @@ def _apply_contract_evaluation_shadow(
             frozenset(force_public_symbols) if force_public_symbols else None
         ),
     )
-    for change, decision in zip(kept, decisions):
+    for change, decision in zip(all_changes, decisions):
         change.contract_relevance = decision.relevance
         change.contract_reason_code = decision.reason_code
         change.contract_assurance = decision.assurance
