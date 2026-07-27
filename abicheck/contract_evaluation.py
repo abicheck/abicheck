@@ -68,7 +68,10 @@ from .contract_relevance_types import (
     ContractRelevance,
 )
 from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
+from .model import ScopeOrigin
 from .surface import (
+    _HIDDEN_FRIEND_KIND_NAMES,
+    _MEMBER_LEVEL_TYPE_KIND_NAMES,
     _NEVER_FILTER_KIND_NAMES,
     REASON_NO_PROVENANCE,
     REASON_NON_PUBLIC_TYPE,
@@ -79,6 +82,8 @@ from .surface import (
     REASON_SYSTEM_HEADER,
     PublicSurface,
     SurfaceUnions,
+    _hidden_friend_owner_effective_origin,
+    _one_sided_key_origin,
     _type_identifiers,
     classify_change_surface,
     surface_unions,
@@ -237,7 +242,46 @@ def _decision_for_surface_reason(reason: str) -> ContractEvaluationDecision:
     )
 
 
-def _in_surface_result_is_confirmed(change: Change, unions: SurfaceUnions) -> bool:
+def _hidden_friend_confirmed_public(
+    change: Change, surf_old: PublicSurface, surf_new: PublicSurface
+) -> bool:
+    """Whether a ``hidden_friend_removed``/``hidden_friend_added`` finding's
+    ``True`` verdict from ``surface._classify_hidden_friend_surface`` is
+    backed by genuine origin provenance, not its own step-3 conservative
+    fallback ("origin is unknown/unconfirmed: keep the finding").
+
+    Mirrors that function's own two confirming checks -- the befriending
+    owner's effective origin (``change.caused_by_type``, preferred) and,
+    independently, the friend function's own recorded origin (``change.symbol``)
+    -- without reimplementing the demotion side, since a ``False`` verdict
+    from the classifier never reaches this helper at all (only its ``True``
+    outcomes are ambiguous between "confirmed" and "kept anyway"). A hidden
+    friend can never produce a real export (compiled inline into every
+    caller via ADL), so it need not, and typically will not, appear in
+    ``public_symbols``/``public_types`` at all -- checking those universes
+    the way the generic path below does would systematically underconfirm
+    this kind, which is exactly what a prior version of this function did
+    (Codex review, ninth round).
+    """
+    owner = change.caused_by_type
+    if owner:
+        bare = owner.rsplit("::", 1)[-1] if "::" in owner else owner
+        eff_old = _hidden_friend_owner_effective_origin(surf_old, owner, bare)
+        eff_new = _hidden_friend_owner_effective_origin(surf_new, owner, bare)
+        if ScopeOrigin.PUBLIC_HEADER in (eff_old, eff_new):
+            return True
+    sym = change.symbol or ""
+    eff_sym_old = _one_sided_key_origin(surf_old, sym, surf_old.all_symbols)
+    eff_sym_new = _one_sided_key_origin(surf_new, sym, surf_new.all_symbols)
+    return ScopeOrigin.PUBLIC_HEADER in (eff_sym_old, eff_sym_new)
+
+
+def _in_surface_result_is_confirmed(
+    change: Change,
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+    unions: SurfaceUnions,
+) -> bool:
     """Whether ``classify_change_surface``'s ``True`` verdict for *change*
     reflects genuine public-root/closure membership, not its anti-hiding
     "cannot place it, so keep it" fallback.
@@ -252,6 +296,22 @@ def _in_surface_result_is_confirmed(change: Change, unions: SurfaceUnions) -> bo
       findings (a distinct evidence axis the header-surface universes
       don't cover at all) are unconditionally trustworthy by construction,
       independent of any universe-membership check.
+    - ``_HIDDEN_FRIEND_KIND_NAMES`` findings go through
+      ``surface._classify_hidden_friend_surface`` instead of the ordinary
+      symbol/type path -- delegated to :func:`_hidden_friend_confirmed_public`
+      (Codex review, tenth round), since neither the ordinary symbol
+      universe (a hidden friend never becomes a real export) nor the
+      ordinary type-candidate derivation (``change.symbol`` names a
+      function, not a type) applies to this kind at all.
+    - A member-level finding (``_MEMBER_LEVEL_TYPE_KIND_NAMES``, e.g.
+      ``TYPE_FIELD_OFFSET_CHANGED`` with ``symbol="Point::x"``) must be
+      confirmed against its *owner* type, exactly like
+      ``classify_change_surface`` reclassifies it: passing the full
+      ``"Point::x"`` to ``_type_identifiers`` yields ``{"Point::x", "x"}``,
+      never the owner ``"Point"`` that is actually the ``public_types``
+      entry, so this case previously always failed confirmation and was
+      downgraded to ``UNKNOWN_UNRESOLVED`` even for a genuinely public
+      field/enum-member change (Codex review, ninth round).
     - Every other ``True`` comes from ``_classify_symbol_level``/
       ``_classify_type_level``, where ``sym in public_symbols``/``known &
       public_types`` is genuine confirmation -- but ``_classify_type_level``
@@ -273,12 +333,17 @@ def _in_surface_result_is_confirmed(change: Change, unions: SurfaceUnions) -> bo
         "python_"
     ):
         return True
+    if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
+        return _hidden_friend_confirmed_public(change, surf_old, surf_new)
     sym = change.symbol or ""
     if sym in unions.public_symbols:
         return True
     if sym and "::" in sym and sym.rsplit("::", 1)[1] in unions.public_symbols:
         return True
-    candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
+    if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and sym and "::" in sym:
+        candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
+    else:
+        candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
     return bool(candidates & unions.public_types)
 
 
@@ -372,7 +437,7 @@ def evaluate_change_contract_relevance(
         change, surf_old, surf_new, unions=unions
     )
     if in_surface:
-        if _in_surface_result_is_confirmed(change, unions):
+        if _in_surface_result_is_confirmed(change, surf_old, surf_new, unions):
             return ContractEvaluationDecision(
                 relevance=ContractRelevance.IN_CONTRACT,
                 reason_code="public_root_membership",

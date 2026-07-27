@@ -48,6 +48,7 @@ from abicheck.model import (
     Param,
     RecordType,
     ScopeOrigin,
+    TypeField,
     Visibility,
 )
 from abicheck.surface import (
@@ -59,10 +60,17 @@ from abicheck.surface import (
 )
 
 
-def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, origin=ScopeOrigin.UNKNOWN):
+def _fn(
+    name,
+    ret="void",
+    params=(),
+    vis=Visibility.PUBLIC,
+    origin=ScopeOrigin.UNKNOWN,
+    mangled=None,
+):
     return Function(
         name=name,
-        mangled=f"_Z{len(name)}{name}",
+        mangled=mangled if mangled is not None else f"_Z{len(name)}{name}",
         return_type=ret,
         params=[Param(name=f"a{i}", type=t) for i, t in enumerate(params)],
         visibility=vis,
@@ -404,6 +412,189 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "public_root_membership"
+
+
+class TestPublicModeMemberLevelConfirmation:
+    """A member-level finding (``TYPE_FIELD_OFFSET_CHANGED`` etc.) is
+    owner-qualified: ``symbol="Point::x"``. Confirmation must check the
+    *owner* (``Point``) against ``public_types``, mirroring
+    ``classify_change_surface``'s own owner-stripping -- passing the full
+    ``"Point::x"`` to ``_type_identifiers`` yields ``{"Point::x", "x"}``,
+    never ``"Point"``, so this previously always failed confirmation
+    (Codex review, ninth round)."""
+
+    def test_public_struct_field_offset_change_confirms_via_owner_type(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Point", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[TypeField(name="x", type="int")],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+            symbol="Point::x",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_enum_member_change_confirms_via_owner_enum(self) -> None:
+        from abicheck.model import EnumMember, EnumType
+
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Mode", origin=ScopeOrigin.PUBLIC_HEADER)],
+            enums=[
+                EnumType(
+                    name="Mode",
+                    members=[EnumMember(name="A", value=0)],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+            symbol="Mode::A",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+
+class TestPublicModeHiddenFriendConfirmation:
+    """``hidden_friend_removed``/``hidden_friend_added`` findings go through
+    ``surface._classify_hidden_friend_surface`` instead of the ordinary
+    symbol/type path -- a hidden friend can never produce a real export, so
+    it will typically not appear in ``public_symbols``/``public_types`` at
+    all. Confirmation must be based on the classifier's own origin-based
+    checks (owner or friend-symbol confidently ``PUBLIC_HEADER``), not
+    universe membership (Codex review, tenth round)."""
+
+    def test_owner_confirmed_public_by_origin_is_in_contract(self) -> None:
+        # Mirrors test_surface.py's TestHiddenFriendSurface.
+        # test_public_project_hidden_friend_retained: the owner is
+        # confidently PUBLIC_HEADER by *origin*, but is never referenced by
+        # any public function signature, so it never enters public_types.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                RecordType(
+                    name="point",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_friend_symbol_confirmed_public_by_origin_is_in_contract(self) -> None:
+        # No caused_by_type at all -- confirmation must fall back to the
+        # friend function's own recorded origin.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn(
+                    "mylib::operator==",
+                    mangled="_ZN5mylibeqERKNS_5pointES2_",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_unresolved_hidden_friend_owner_is_unresolved_not_confirmed(self) -> None:
+        # No caused_by_type and no matching friend-symbol origin either --
+        # classify_change_surface's own conservative "keep it" fallback,
+        # not genuine provenance confirmation.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type=None,
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_owner_present_but_inconclusive_falls_through_to_unresolved(self) -> None:
+        # caused_by_type resolves to a real, present type, but its origin is
+        # UNKNOWN (neither confidently public nor confidently private) --
+        # must fall through to the friend-symbol check, and since that is
+        # also inconclusive here, the overall result is the classifier's
+        # conservative "keep it" fallback, not confirmed provenance.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[
+                RecordType(
+                    name="point",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.UNKNOWN,
+                )
+            ],
+        )
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol="_ZN5mylibeqERKNS_5pointES2_",
+            caused_by_type="mylib::point",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
 
 
 class TestPublicModeTerminalExclusion:
