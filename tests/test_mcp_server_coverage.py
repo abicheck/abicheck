@@ -736,9 +736,14 @@ class TestAbiCompareTool:
 
 class TestSafeReadPathResolveError:
     def test_invalid_path_raises(self):
-        """Lines 94-95: resolve raises TypeError/ValueError."""
+        """Lines 94-95: resolve raises TypeError/ValueError.
+
+        ``_safe_read_path`` lives in ``mcp_shared`` (a leaf module shared with
+        ``mcp_server_project`` — see that module's docstring), so ``Path`` is
+        patched there, not on ``abicheck.mcp_server``.
+        """
         from abicheck.mcp_server import _safe_read_path
-        with patch("abicheck.mcp_server.Path") as MockPath:
+        with patch("abicheck.mcp_shared.Path") as MockPath:
             MockPath.return_value.resolve.side_effect = TypeError("bad type")
             with pytest.raises(ValueError, match="Invalid path"):
                 _safe_read_path("some\x00path")

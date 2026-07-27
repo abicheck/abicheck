@@ -42,7 +42,14 @@ def _mcp_extra_installed() -> bool:
 if not _mcp_extra_installed():
     pytest.skip("mcp extra not installed", allow_module_level=True)
 
-_TAINTED_MODULE_NAMES = ("mcp", "mcp.server", "mcp.server.fastmcp", "abicheck.mcp_server")
+_TAINTED_MODULE_NAMES = (
+    "mcp",
+    "mcp.server",
+    "mcp.server.fastmcp",
+    "abicheck.mcp_shared",
+    "abicheck.mcp_server",
+    "abicheck.mcp_server_project",
+)
 
 
 def _mcp_server_is_tainted() -> bool:

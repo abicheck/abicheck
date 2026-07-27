@@ -4,6 +4,21 @@
 
 Every parameter of every `abicheck-mcp` tool, generated directly from `abicheck/mcp_server.py`'s function signatures and docstrings. See [MCP Server (Agent Integration)](../use/mcp-integration.md) for install/configure steps, response envelope shapes, agent workflow examples, and the security model — this page is the exhaustive parameter list only.
 
+## `abi_aggregate`
+
+Fold per-target ``compare``/``scan`` reports into one CI gate decision.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `reports_dir` | `str` | yes | — | Directory holding the per-target report JSON files. |
+| `manifest` | `str \| None` | no | `None` | Expected-target manifest path (mutually exclusive with run_plan/expect/discovered_only). |
+| `run_plan` | `str \| None` | no | `None` | A ``project plan``-generated ``run-plan.json`` path, used as the expected-target set (mutually exclusive with the others). |
+| `expect` | `list[str] \| None` | no | `None` | Required target id(s) (mutually exclusive with manifest/run_plan). |
+| `optional` | `list[str] \| None` | no | `None` | Optional target id(s) — only meaningful together with expect. |
+| `discovered_only` | `bool` | no | `False` | Aggregate whatever reports are present with no coverage gate (mutually exclusive with the other four). |
+| `on_missing_required` | `str` | no | `fail` | ``"fail"`` (default) or ``"warn"`` — how an unavailable required target affects the exit code. |
+| `on_unexpected_target` | `str` | no | `include` | ``"include"`` (default), ``"warn"``, ``"fail"``, or ``"ignore"`` — how a report for an unexpected target is handled. |
+
 ## `abi_audit`
 
 Single-release ABI-hygiene audit — no baseline (ADR-035 D8).
@@ -44,6 +59,17 @@ Compare two ABI surfaces and report breaking changes.
 | `used_by` | `list[str] \| None` | no | `None` | Application binary paths (ADR-043) — scope the comparison to what each app actually imports/requires, instead of the full library surface. old_input/new_input may be real library binaries or JSON snapshots carrying binary evidence (a dump of a real library, not headers-only). Mutually exclusive with required_symbols. Adds a ``used_by`` list to the response and computes ``exit_code`` from the worst-scoped app: the legacy BREAKING → 4 / API_BREAK → 2 floor, or — when any ``severity_*`` argument is given — the severity-aware scheme (which can return ``0`` for a scoped BREAKING verdict under ``severity_preset= "info-only"``). |
 | `required_symbols` | `list[str] \| None` | no | `None` | An explicit plugin/host required-entrypoint contract (ADR-043) — scope the comparison to only these exported symbols. Mutually exclusive with used_by. Adds a ``required_symbol_contract`` object to the response and computes ``exit_code`` from its verdict under the same legacy/severity-aware scheme as ``used_by`` above. |
 | `diagnostic_comparison` | `bool` | no | `False` | ADR-050 D2's sanctioned escape hatch. By default, a genuine ``ExtractionContract`` mismatch between old_input and new_input (old/new were not extracted under a comparable profile/scope) makes this tool return ``{"status": "not_comparable", "reason": ...}`` instead of a verdict. Setting this True downgrades that into a tentative diff whose report is stamped ``assurance: "none"``, so the caller can still see *a* result but knows not to trust it fully. Not needed, and does nothing, on a comparable pair. |
+
+## `abi_deps`
+
+Resolve a binary's shared-library dependency stack and symbol bindings.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `binary_path` | `str` | yes | — | Root ELF binary to resolve dependencies for. |
+| `search_paths` | `list[str] \| None` | no | `None` | Additional directories to search for shared libraries. |
+| `sysroot` | `str \| None` | no | `None` | Sysroot prefix for cross/container analysis. |
+| `ld_library_path` | `str` | no | `` | Simulated ``LD_LIBRARY_PATH`` (colon-separated). |
 
 ## `abi_dump`
 
@@ -87,6 +113,28 @@ List all ABI change kinds that abicheck can detect.
 | Parameter | Type | Required | Default | Description |
 |---|---|:--:|---|---|
 | `impact` | `str \| None` | no | `None` | Filter by impact level. One of: "breaking", "api_break", "risk", "compatible". If omitted, returns all change kinds. |
+
+## `abi_project_plan`
+
+Generate a run-plan from a project config's contract profiles.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `config` | `str` | no | `.abicheck.yml` | Path to the project config (default ``.abicheck.yml``). |
+| `build_outputs` | `list[str] \| None` | no | `None` | One entry per contract profile referenced by config's checks, each formatted ``PROFILE=DIR`` (a directory containing ``build-output.json``). |
+| `project` | `str` | no | `` | Project identifier recorded in the run-plan, e.g. ``owner/repo``. |
+| `head_sha` | `str` | no | `` | Candidate commit SHA recorded in the run-plan. |
+| `toolchain_bindings` | `str \| None` | no | `None` | Optional trusted toolchain-bindings file path; each resolved cell's profile ``compile.binding`` (if declared) is checked against it and resolved into that cell's ``compile_gcc_path``. |
+| `allow_empty` | `bool` | no | `False` | Accept a run-plan that resolves to zero checks (else that is reported as a generation error). |
+
+## `abi_project_validate`
+
+Validate a project config's ``targets:``/``bundles:``/``profiles:`` block.
+
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `config` | `str` | no | `.abicheck.yml` | Path to the project config (default ``.abicheck.yml``). |
+| `toolchain_bindings` | `str \| None` | no | `None` | Optional trusted toolchain-bindings file path (schema ``abicheck.toolchain-bindings/v1``) to additionally check every declared ``profiles.<id>.compile.binding`` against. |
 
 ## `abi_scan`
 

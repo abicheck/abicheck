@@ -41,21 +41,6 @@ if TYPE_CHECKING:
     from .severity import SeverityConfig
     from .suppression import SuppressionList
 
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError as _exc:
-    _msg = (
-        "MCP support requires the 'mcp' package. "
-        "Install it with: pip install abicheck[mcp]"
-    )
-    raise ImportError(_msg) from _exc
-except Exception as _exc:  # noqa: BLE001
-    # Guard against partial installs or other init-time failures from mcp internals
-    raise ImportError(
-        f"Failed to initialise MCP support: {_exc}. "
-        "Try: pip install --upgrade 'abicheck[mcp]'"
-    ) from _exc
-
 from .checker import DiffResult
 from .checker_policy import (
     API_BREAK_KINDS,
@@ -69,13 +54,17 @@ from .checker_policy import (
     policy_for,
     policy_kind_sets,
 )
-from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
+from .errors import ProfileMismatchError, ScopeMismatchError
+from .mcp_shared import (
+    _logger,
+    _safe_read_path,
+    _sanitize_error,
+    mcp,
+)
 from .model import AbiSnapshot
 from .reporter import _finding_id, to_json, to_markdown
 from .serialization import snapshot_to_json
 from .service import compare_snapshots
-
-_logger = logging.getLogger("abicheck.mcp")
 
 # ---------------------------------------------------------------------------
 # Configuration (environment variables or CLI flags)
@@ -185,29 +174,19 @@ def _audit_log(
 # ---------------------------------------------------------------------------
 # Path safety helpers
 # ---------------------------------------------------------------------------
+#
+# ``_safe_read_path``/``_sanitize_error``/``mcp`` itself now live in the leaf
+# module ``mcp_shared`` (imported above) so a sibling tool module
+# (``mcp_server_project``) can depend on them without this module depending
+# back on that sibling for shared state — see ``mcp_shared``'s own docstring.
+# ``_safe_write_path`` stays here: no tool outside this module writes an
+# output file.
 
 # Allowed extensions for output files written by abi_dump
 _ALLOWED_OUTPUT_SUFFIXES = frozenset({".json"})
 
 # Allowed extensions for input binary files
 _ALLOWED_BINARY_SUFFIXES = frozenset({".so", ".dll", ".dylib", ".json", ".dump", ""})
-
-
-def _safe_read_path(raw: str, *, label: str = "path") -> Path:
-    """Resolve and validate a path for reading.
-
-    - Resolves symlinks and `..` components.
-    - Does NOT restrict to a specific directory (read paths are user-specified).
-    - Returns the resolved Path.
-
-    Raises ValueError with a generic message on obviously bad input.
-    """
-    if not raw or raw.strip() == "":
-        raise ValueError(f"Empty {label} is not allowed")
-    try:
-        return Path(raw).resolve()
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"Invalid {label}: {exc!s}") from exc
 
 
 def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
@@ -294,39 +273,6 @@ def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
                 raise
 
     return p
-
-
-def _sanitize_error(exc: Exception, *, context: str = "operation") -> str:
-    """Return a safe error message that does not leak filesystem paths or internals."""
-    # Known domain errors: safe to surface as-is
-    if isinstance(exc, AbicheckError):
-        return str(exc)
-    if isinstance(exc, (ValueError, KeyError)):
-        return str(exc)
-    # OS/IO errors: return generic message, log details internally
-    if isinstance(exc, (OSError, FileNotFoundError, PermissionError)):
-        _logger.debug("OS error in %s: %s", context, exc, exc_info=True)
-        return f"{context} failed: file system error (check logs for details)"
-    # All others: generic
-    _logger.debug("Unexpected error in %s: %s", context, exc, exc_info=True)
-    return f"{context} failed: unexpected error"
-
-
-try:
-    mcp = FastMCP(
-        "abicheck",
-        instructions=(
-            "ABI compatibility checker for C/C++ shared libraries. "
-            "Detects breaking changes in .so/.dll/.dylib files before they reach production. "
-            "Use abi_compare to diff two library versions, abi_dump to extract ABI snapshots, "
-            "abi_list_changes to browse change kinds, and abi_explain_change for detailed explanations."
-        ),
-    )
-except Exception as _exc:  # noqa: BLE001
-    raise ImportError(
-        f"Failed to initialise MCP support: {_exc}. "
-        "Try: pip install --upgrade 'abicheck[mcp]'"
-    ) from _exc
 
 
 # ---------------------------------------------------------------------------
@@ -1778,6 +1724,17 @@ def abi_scan(
             {"status": "error", "error": _sanitize_error(exc, context="abi_scan")}
         )
 
+
+# abi_deps / abi_aggregate / abi_project_validate / abi_project_plan live in
+# the sibling module below (file-size split); imported here for side-effect
+# (registers them via @mcp.tool()) and so they still resolve as
+# ``abicheck.mcp_server.abi_deps`` etc. for existing callers/tests.
+from .mcp_server_project import (  # noqa: E402,F401
+    abi_aggregate,
+    abi_deps,
+    abi_project_plan,
+    abi_project_validate,
+)
 
 # ---------------------------------------------------------------------------
 # Entry point

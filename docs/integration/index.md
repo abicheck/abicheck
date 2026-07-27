@@ -35,6 +35,24 @@ channel, check, run plan, ...).
 > [ADR-047 §8](../contribute/adr/047-github-actions-integration-model.md#8-condensed-scenario-catalog-s1s28)'s
 > full catalog, independent of which page currently hosts the answer.
 
+## Which Actions building block do I use?
+
+Every scenario below eventually points at one of three composition layers.
+They are not a "recommended vs. legacy" ladder — each is the right choice
+for a different composition shape, and the two upper layers are literally
+built out of the one below:
+
+| Layer | What it is | Reach for it when | Reference |
+|---|---|---|---|
+| **Single-Action step** | The root `abicheck/abicheck` composite Action — one step you nest inside a job you already have (your own build job, your own checkout). | You have one target to check and want to add it to an existing job with minimal new CI structure — this is the [Quick start](../use/github-action.md#quick-start) path. | [GitHub Action](../use/github-action.md) |
+| **Reusable workflow** | `check-single.yml` / `check-project.yml` — a `workflow_call` job that always runs on its own fresh runner, with its own artifact-staging contract. | You have several targets/profiles/baseline channels to fan out over (`check-project.yml`), or you want one isolated check job without hand-composing the primitives yourself (`check-single.yml`). | [Reusable Workflows](../reference/reusable-workflows.md) |
+| **Primitive Actions** | `actions/check-target`, `actions/resolve-baseline`, `actions/baseline`, `actions/collect-facts` — the composable building blocks the two layers above are assembled from. | Neither layer above fits your orchestration as-is — e.g. you need `resolve-baseline`'s typed outcome without `check-target`'s report envelope, or a custom job topology around one primitive. | [`check-target`](../reference/check-target.md), [`resolve-baseline`](../reference/resolve-baseline.md), [`publish-baseline`/`update-main-baseline`](../reference/publish-baseline.md) |
+
+`check-project.yml`'s cross-repository artifact-staging convention is newer
+and less battle-tested than the single-Action step — see the status note on
+[Reusable Workflows](../reference/reusable-workflows.md) before committing a
+large migration to it.
+
 ## Getting started
 
 | Scenario | Question | Where to look |
