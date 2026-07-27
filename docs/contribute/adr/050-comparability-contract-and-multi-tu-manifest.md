@@ -1,9 +1,20 @@
 # ADR-050: Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest
 
 **Date:** 2026-07-22
-**Status:** Proposed — not implemented. This ADR records the target model and
-component surface; [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md)
-carries the phased implementation backlog.
+**Status:** Accepted — implemented (Phase 0 and Phases A–E; D1–D6). See
+[G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) for the
+per-phase implementation record, including the post-merge D5/D6 review
+follow-up. One thing remains intentionally unbuilt, not a gap in this ADR's
+model: `service.run_dump` itself accepts `dump_manifest` (public API,
+documented), so a direct caller can already dump both sides manifest-driven
+and hand the snapshots to `compare_snapshots` — but the one-call
+`CompareRequest`/`run_compare_request` path and the MCP tools have no
+`dump_manifest` field at all, so *those specific* entry points can't reach
+a manifest-driven comparison in a single call. This is deliberate (no code
+for a hypothetical caller — none needs the one-call path yet), not an
+oversight; should `CompareRequest` gain manifest support later,
+`run_compare_request`'s existing `ABICHECK_PARALLEL_EXTRACTION` sequential
+fallback is already the right lever to route it through.
 **Decision maker:** (pending — recorded per repository convention.)
 
 **Amendments:**
