@@ -394,6 +394,48 @@ def _in_surface_result_is_confirmed(
     its ambiguous sibling, is what the public signature actually reaches
     (Codex review, twelfth round). Neither case establishes which record --
     or whether either -- this finding's root actually resolves to.
+
+    **Known over-rejection, investigated and deliberately not fixed this
+    pass (Codex review, fifteenth round):** the qualified-tail rejection
+    above is intentionally blunt and can reject a genuinely exact match.
+    When a public signature names ``ns1::Point`` *explicitly* (fully
+    qualified) and the snapshot separately contains an unrelated
+    ``ns2::Point``, ``_type_identifiers`` still derives the bare tail
+    ``"Point"`` from that qualified reference (by design, so a short alias
+    referenced from inside its own namespace still resolves) -- which is
+    *also* how the ambiguous-bare-tail path itself reaches both siblings --
+    so ``ns1::Point``'s membership in ``public_types`` and ``ns2::Point``'s
+    membership are structurally indistinguishable from this function's
+    inputs alone: both a genuinely exact qualified reference and a purely
+    conservative ambiguous-tail guess leave the *identical* final
+    ``public_types``/``ambiguous_type_names`` state, since
+    ``_walk_type_closure`` queues the bare tail unconditionally alongside
+    the qualified form for every ``"::"``-bearing token, not only when the
+    original reference truly was bare. Confirmed empirically: constructing
+    a public function taking ``ns1::Point`` by exact qualified name plus an
+    unrelated ``ns2::Point`` record reproduces the wrong
+    ``UNKNOWN_UNRESOLVED`` this docstring's own twelfth-round fix was
+    designed to produce only for a *bare* ``"Mode"``-style reference (see
+    the twelfth-round test using ``params=["Mode"]``, never
+    ``params=["ns1::Mode"]``). Distinguishing the two needs new provenance
+    data this function doesn't have access to: whether a *specific* route
+    into ``public_types`` for a given qualified name came from
+    ``_walk_type_closure`` matching a token's own full-name key directly
+    (exact) or only from matching a *different*, bare token against
+    ``record_by_name``/``enum_by_name``'s ambiguous tail-keyed entry
+    (conservative guess) -- ``PublicSurface`` records neither route
+    separately today, only the merged final sets. A real fix means adding
+    that per-type provenance to ``surface.py``'s own closure walk -- the
+    public-surface-scoping gate every other detector in the codebase
+    depends on, not a boundary specific to this still-unwired shadow
+    module -- which needs its own careful, independently-verified design
+    (mirroring this file's already-documented deferral of the analogous
+    ``surface.py``-vs-``type_reachability.py`` owner-seeding gap), not a
+    same-PR drive-by extension of this narrower confirmation check. Left as
+    a known false-negative-producing conservatism (never a false
+    ``IN_CONTRACT``, only an occasional wrongly-``UNKNOWN_UNRESOLVED``) --
+    the same direction every other unresolvable case in this function
+    already defaults to.
     """
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _hidden_friend_confirmed_public(change, surf_old, surf_new)

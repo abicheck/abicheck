@@ -326,6 +326,7 @@ def _canonicalize_scalar(value: Any, *, where: str) -> Hashable:
             value.second,
             value.microsecond,
             value.tzinfo,
+            fold=value.fold,
         )
     if isinstance(value, datetime.date):
         return datetime.date(value.year, value.month, value.day)

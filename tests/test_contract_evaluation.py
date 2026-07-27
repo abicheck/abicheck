@@ -768,6 +768,60 @@ class TestPublicModeAmbiguousTypeRoot:
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "public_root_membership"
 
+    def test_exact_qualified_reference_still_over_rejected_known_gap(self) -> None:
+        # Known, deliberately-deferred limitation (Codex review, fifteenth
+        # round): a public signature naming ``ns1::Point`` *explicitly*
+        # (fully qualified) is a genuinely exact, unambiguous reference --
+        # but `_type_identifiers` derives the bare tail "Point" from that
+        # same qualified string (by design, to also match a short in-
+        # namespace alias), and that bare tail also drives the *ambiguous*
+        # widening path that adds the unrelated `ns2::Point` to
+        # `public_types` too. The two routes are indistinguishable from
+        # `public_types`/`ambiguous_type_names` alone, so this exact match
+        # is currently (over-)rejected the same as a genuinely ambiguous
+        # bare reference would be. This test locks in today's conservative
+        # (never wrongly IN_CONTRACT) behavior -- see
+        # `_in_surface_result_is_confirmed`'s docstring for why a precise
+        # fix needs new provenance data in `surface.py` itself, out of
+        # scope for a drive-by fix here. If `surface.py` ever gains that
+        # provenance and this starts resolving to IN_CONTRACT instead, that
+        # is progress, not a regression -- update this test then.
+        # Mirrors the twelfth-round test's DWARF-style convention (the
+        # namespace is baked directly into `.name`, not a separate
+        # `qualified_name`) -- with the bare-name + `qualified_name`
+        # convention (castxml/clang), `record_by_name` never even keys the
+        # qualified spelling at all (only the bare tail), so the qualified
+        # candidate wouldn't reach `public_types` either way and this
+        # scenario couldn't be reproduced through that convention.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="void", params=["ns1::Point *"])],
+            types=[
+                RecordType(
+                    name="ns1::Point",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                RecordType(
+                    name="ns2::Point",
+                    kind="struct",
+                    size_bits=32,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+        )
+        s = compute_public_surface(snap)
+        assert "Point" in s.ambiguous_type_names
+        assert {"ns1::Point", "ns2::Point"} <= s.public_types
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="ns1::Point", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+
 
 class TestPublicModeHiddenFriendConfirmation:
     """``hidden_friend_removed``/``hidden_friend_added`` findings go through

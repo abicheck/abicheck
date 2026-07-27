@@ -343,6 +343,27 @@ class TestLoadPackManifestHappyPath:
         assert value == dt
         assert value.tzinfo == datetime.timezone.utc
 
+    def test_directly_constructed_pack_preserves_datetime_fold(self) -> None:
+        # `fold` disambiguates a wall-clock time that occurs twice (e.g. a
+        # DST fall-back transition) -- it's deliberately ignored by
+        # datetime's own __eq__/__hash__ (per the stdlib docs), so a naive
+        # `value == dt` assertion can't catch a canonicalization that drops
+        # it. Reconstructing via the positional-args constructor without
+        # `fold=value.fold` silently resets it to 0 (Codex/CodeRabbit
+        # review).
+        import datetime
+
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        ambiguous = datetime.datetime(2026, 11, 1, 1, 30, fold=1)
+        assert ambiguous.fold == 1
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={"field": ambiguous},
+        )
+        assert pack.assignments["field"].fold == 1
+
     def test_directly_constructed_policy_pack_coerces_raw_severity_string(
         self,
     ) -> None:
