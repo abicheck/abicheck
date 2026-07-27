@@ -486,6 +486,55 @@ class TestLoadPackManifestHappyPath:
                 assignments={1: "value"},
             )
 
+    def test_directly_constructed_pack_canonicalizes_a_mutable_str_subclass_key(
+        self,
+    ) -> None:
+        # Regression (Codex review, fourteenth round): a mutable str
+        # subclass accepted as an assignment *key* previously stayed the
+        # same aliased object -- mutating it after construction (if its
+        # __eq__/__hash__ read mutable state) could change the field
+        # identity detect_pack_conflicts() consumes without changing
+        # identity.sha256. Mirrors the identical, already-fixed concern for
+        # assignment *values*.
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        class TrackedKey(str):
+            def __new__(cls, s: str) -> TrackedKey:
+                obj = super().__new__(cls, s)
+                obj.tag = "mine"  # type: ignore[attr-defined]
+                return obj
+
+        key = TrackedKey("contract.mode")
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.CONTRACT,
+            assignments={key: "public"},
+        )
+        stored_key = next(iter(pack.assignments))
+        assert type(stored_key) is str
+        assert stored_key is not key
+
+    def test_directly_constructed_policy_pack_canonicalizes_a_mutable_str_subclass_key(
+        self,
+    ) -> None:
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+
+        class TrackedKey(str):
+            def __new__(cls, s: str) -> TrackedKey:
+                obj = super().__new__(cls, s)
+                obj.tag = "mine"  # type: ignore[attr-defined]
+                return obj
+
+        key = TrackedKey("func_removed")
+        pack = LoadedPack(
+            identity=ImmutableIdentity(id="x", version=1, sha256="deadbeef"),
+            kind=PackKind.POLICY,
+            assignments={key: "break"},
+        )
+        stored_key = next(iter(pack.assignments))
+        assert type(stored_key) is str
+        assert stored_key is not key
+
 
 @pytest.mark.parametrize("field", ["contract.overlays", "surface.internal_namespaces"])
 class TestOrderInsensitiveFieldCanonicalization:

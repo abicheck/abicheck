@@ -390,6 +390,11 @@ def _parse_policy_assignments(
         if slug not in _VALID_CHANGE_KIND_SLUGS:
             unknown_kinds.append(slug)
             continue
+        # Reconstruct as a plain str (see _parse_field_assignments' identical
+        # fix): a directly constructed LoadedPack could otherwise carry a
+        # mutable str subclass as the dict key, aliasing the caller's object
+        # (Codex review).
+        slug_key = str(slug)
         # A directly constructed `LoadedPack` (this class's own docstring)
         # may already carry a real `Verdict` member rather than a raw
         # severity spelling -- `parse_severity_value` only recognizes the
@@ -397,13 +402,13 @@ def _parse_policy_assignments(
         # member's own str value, so it would otherwise reject exactly the
         # documented-correct direct-construction input (Codex review).
         if isinstance(severity, Verdict):
-            result[slug] = severity
+            result[slug_key] = severity
             continue
         verdict = parse_severity_value(severity)
         if verdict is None:
             unknown_severities.append(f"{slug}: {severity!r}")
             continue
-        result[slug] = verdict
+        result[slug_key] = verdict
     if unknown_kinds:
         # ADR-049 D8: "An unknown ChangeKind in a custom policy is a hard
         # load error" -- a pack manifest is exactly as capable of silently
@@ -480,7 +485,13 @@ def _parse_field_assignments(
             )
         field_source = f"{source}:{field_name}"
         hashable_value = _to_hashable(value, where=field_source)
-        result[field_name] = _canonicalize_order_insensitive_field(
+        # Reconstruct as a plain str (mirroring _canonicalize_scalar's own
+        # str branch): a directly constructed LoadedPack could otherwise
+        # carry a mutable str subclass as the dict key itself, aliasing the
+        # caller's object -- mutating it later (if its __eq__/__hash__ read
+        # mutable state) would change the field identity detect_pack_conflicts
+        # consumes without changing identity.sha256 (Codex review).
+        result[str(field_name)] = _canonicalize_order_insensitive_field(
             field_name, hashable_value, source=field_source
         )
     return result

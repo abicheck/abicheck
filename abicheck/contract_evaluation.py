@@ -73,6 +73,7 @@ from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,
     _MEMBER_LEVEL_TYPE_KIND_NAMES,
     _NEVER_FILTER_KIND_NAMES,
+    _TYPE_LEVEL_KIND_NAMES,
     REASON_NO_PROVENANCE,
     REASON_NON_PUBLIC_TYPE,
     REASON_NOT_EXPORTED,
@@ -357,12 +358,17 @@ def _in_surface_result_is_confirmed(
       field/enum-member change (Codex review, ninth round).
     - Every other ``True`` comes from ``_classify_symbol_level``/
       ``_classify_type_level``, where ``sym in public_symbols``/``known &
-      public_types`` is genuine confirmation -- but ``_classify_type_level``
-      also returns ``(True, None)`` when the implicated type is entirely
-      absent from the snapshot's own type universe (`known` empty, "we
-      cannot place this finding -- keep it") or is deferred to the
-      separate, more precise internal-leak detector (an internal-namespace
-      type). Neither of those two is evidence of public membership; both
+      public_types`` is genuine confirmation. The ``public_symbols`` check
+      here is gated to non-``_TYPE_LEVEL_KIND_NAMES`` findings, mirroring
+      ``classify_change_surface``'s own gating -- a type-level finding's
+      ``symbol`` can coincidentally collide with an unrelated real
+      function/variable of the same spelling (Codex review, fourteenth
+      round). ``_classify_type_level`` also returns ``(True, None)`` when
+      the implicated type is entirely absent from the snapshot's own type
+      universe (`known` empty, "we cannot place this finding -- keep it")
+      or is deferred to the separate, more precise internal-leak detector
+      (an internal-namespace type). Neither of those two is evidence of
+      public membership; both
       are silently upgraded to ``IN_CONTRACT`` without this check
       (Codex review, eighth round).
 
@@ -392,10 +398,24 @@ def _in_surface_result_is_confirmed(
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _hidden_friend_confirmed_public(change, surf_old, surf_new)
     sym = change.symbol or ""
-    if sym in unions.public_symbols:
-        return True
-    if sym and "::" in sym and sym.rsplit("::", 1)[1] in unions.public_symbols:
-        return True
+    # `classify_change_surface` never consults `public_symbols` for a
+    # type-level kind at all (`_classify_symbol_level` is only called when
+    # `not type_level_finding`) -- exactly to prevent a type name colliding
+    # with an unrelated exported function/variable of the same spelling
+    # (surface.py's own `_TYPE_LEVEL_KIND_NAMES` docstring: castxml
+    # represents an implicit same-named constructor unmangled, so a type
+    # "Foo" can share a bare name with a real symbol "Foo" that has nothing
+    # to do with it). Confirmed empirically: a type completely unknown to
+    # either snapshot (classify_change_surface's own "cannot place it, keep
+    # it" fallback -- not genuine confirmation) whose symbol happened to
+    # match an unrelated public function of the same name was wrongly
+    # confirmed via this check before gating it the same way (Codex
+    # review).
+    if change.kind.value not in _TYPE_LEVEL_KIND_NAMES:
+        if sym in unions.public_symbols:
+            return True
+        if sym and "::" in sym and sym.rsplit("::", 1)[1] in unions.public_symbols:
+            return True
     if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and sym and "::" in sym:
         candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
     else:

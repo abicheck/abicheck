@@ -447,6 +447,29 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
             assurance=ContractAssurance.PARTIAL,
         )
 
+    def test_type_level_finding_is_not_confirmed_by_a_colliding_symbol_name(
+        self,
+    ) -> None:
+        # Regression (Codex review, fourteenth round): classify_change_surface
+        # never consults public_symbols for a type-level kind at all (its own
+        # _classify_symbol_level call is gated on `not type_level_finding`) --
+        # exactly to prevent a type name colliding with an unrelated exported
+        # function/variable of the same spelling. A type totally unknown to
+        # either snapshot (the "cannot place it, keep it" fallback -- not
+        # genuine confirmation) whose symbol happens to match an unrelated
+        # public function of the same name must not be confirmed via that
+        # coincidental symbol-universe match.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("Foo", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s = compute_public_surface(snap)
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Foo", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+
     def test_internal_namespace_type_with_no_leak_finding_is_unresolved(
         self,
     ) -> None:
@@ -506,6 +529,24 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "public_root_membership"
+
+    def test_qualified_symbol_tail_not_in_public_symbols_falls_through_to_type_check(
+        self,
+    ) -> None:
+        # The qualified-tail symbol check's non-matching branch: a
+        # non-type-level finding whose symbol's trailing ::-segment isn't a
+        # public symbol either, falling through to the type-candidate check
+        # (which also fails to confirm, since the symbol isn't a type name).
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = compute_public_surface(snap)
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED,
+            symbol="ns::totally_unrelated",
+            description="",
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
 
 
 class TestPublicModeMemberLevelConfirmation:
