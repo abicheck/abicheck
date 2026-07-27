@@ -74,7 +74,7 @@ Add to `.cursor/mcp.json` or VS Code MCP settings:
 
 ## Tools
 
-The MCP server exposes seven tools. All return JSON-encoded strings.
+The MCP server exposes eleven tools. All return JSON-encoded strings.
 
 **Response envelopes.** On failure, every tool returns the same error
 envelope: `{"status": "error", "error": "<message>"}`. `abi_compare` has one
@@ -94,6 +94,10 @@ shape differs by tool:
 | `abi_audit` | `{"status": "ok", "verdict": ..., "catalog": ..., "pattern_scan": ...}` |
 | `abi_estimate` | `{"status": "ok", "estimate": [...], "total_est_seconds": ...}` |
 | `abi_scan` | `{"status": "ok", "verdict": ..., "layers": [...], ...}` |
+| `abi_deps` | `{"status": "ok", "result": {...}}` |
+| `abi_aggregate` | `{"status": "ok", "exit_code": ..., "result": {...}}` |
+| `abi_project_validate` | `{"status": "ok", "result": {"ok": ..., "errors": [...], ...}}` |
+| `abi_project_plan` | `{"status": "ok", "plan": {...}, "report": {...}}` |
 
 The simplest client check has three outcomes, not two:
 
@@ -343,6 +347,80 @@ verdict), `confidence` (the provider-agreement matrix), `estimate` (projected
 per-layer cost for comparison against the actual run), and `report` (the full
 report payload).
 
+---
+
+### `abi_deps` — Dependency stack and symbol bindings
+
+The MCP counterpart of [`abicheck deps tree`](../reference/cli-reference.md):
+resolves an ELF binary's loader-accurate transitive closure of `DT_NEEDED`
+dependencies (RPATH/RUNPATH/`LD_LIBRARY_PATH`/default search order) and
+reports per-symbol binding status — "will this binary load, and are all its
+required symbols bound?" without a shell. ELF-only; a PE/Mach-O input returns
+an error.
+
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_deps)
+for the exhaustive, generated parameter list.
+
+**Response fields:** `result` — the same JSON shape `deps tree --format json`
+renders (`root_binary`, `verdict.loadability`/`abi_risk`/`risk_score`,
+`baseline_graph`, `bindings_baseline`, `missing_symbols`, ...).
+
+---
+
+### `abi_aggregate` — Fold per-target reports into one gate decision
+
+The MCP counterpart of [`abicheck aggregate`](../reference/reusable-workflows.md):
+folds a directory of per-target `compare`/`scan` report JSON files into one
+CI gate decision (ADR-042). Three axes stay separate — compatibility (worst
+verdict), gate (each report's own recorded severity decision, combined —
+never recomputed from the verdict), and coverage (did every required target
+report?) — a required target with no report is unavailable, never treated as
+compatible.
+
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_aggregate)
+for the exhaustive, generated parameter list, including the mutually
+exclusive `manifest`/`run_plan`/`expect`+`optional`/`discovered_only`
+expected-target sources.
+
+**Response fields:** `exit_code` (`0` pass / `1` coverage-or-policy gap /
+`2` API break / `4` ABI break) and `result` (the full aggregate report:
+`status`, `compatibility`, `coverage`, `gate`, `targets`).
+
+---
+
+### `abi_project_validate` — Validate a project config
+
+The MCP counterpart of [`abicheck project validate`](../reference/project-targets-schema.md)
+(ADR-047 §3): checks a `.abicheck.yml`'s `targets:`/`bundles:`/`profiles:`
+block for cross-reference and semantic errors — kind-specific required
+fields, bundle membership agreement, `checks[].channel`/`depth`/`gate_mode`/
+`profiles` resolution, id validity — and, with `toolchain_bindings`, that
+every declared `profiles.<id>.compile.binding` resolves against a trusted
+bindings file. Structural/type errors in the YAML itself (unknown key, wrong
+type) surface as a plain `"error"` result, not a validation finding.
+
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_project_validate)
+for the exhaustive, generated parameter list.
+
+**Response fields:** `result` (`ok`, `errors`, `warnings`).
+
+---
+
+### `abi_project_plan` — Generate a run-plan
+
+The MCP counterpart of [`abicheck project plan`](../reference/run-plan-schema.md)
+(ADR-047 §5/§7): resolves a `.abicheck.yml`'s `checks[]` entries against the
+supplied `build_outputs` (one `PROFILE=DIR` per contract profile referenced)
+into the ordered list of `(target, profile)` cells to run, each identified by
+`check_id` (`target@profile#baseline_channel@requested_depth`). Fails closed
+on a run-plan that resolves to zero checks unless `allow_empty` is set.
+
+See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_project_plan)
+for the exhaustive, generated parameter list.
+
+**Response fields:** `plan` (`schema`, `project`, `head_sha`, `checks[]`) and
+`report` (`ok`, `errors`, `warnings`).
+
 ## Agent workflow examples
 
 ### Check a PR for ABI compatibility
@@ -454,9 +532,15 @@ variables override defaults.
 
 | CLI flag | Environment variable | Default | Purpose |
 |---|---|---|---|
-| `--timeout <s>` | `ABICHECK_MCP_TIMEOUT` | `120` | Per-call timeout (seconds) for `abi_dump`, `abi_compare`, `abi_audit`, and `abi_scan`. On timeout the tool returns a structured error; the server stays up |
-| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input` (`abi_compare`), and `binary_path`/`compile_db`/`against` (`abi_scan`) |
+| `--timeout <s>` | `ABICHECK_MCP_TIMEOUT` | `120` | Per-call timeout (seconds) for `abi_dump`, `abi_compare`, `abi_audit`, `abi_scan`, `abi_deps`, `abi_aggregate`, `abi_project_validate`, and `abi_project_plan`. On timeout the tool returns a structured error; the server stays up |
+| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path` (`abi_dump`/`abi_audit`), `old_input`/`new_input` (`abi_compare`), `binary_path`/`compile_db`/`against` (`abi_scan`), and the binary/report/config/bindings paths `abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read |
 | `--log-format text\|json` | — | `text` | Audit log format on stderr |
+
+`abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read
+`ABICHECK_MCP_TIMEOUT`/`ABICHECK_MCP_MAX_FILE_SIZE` independently of the four
+original tools — the env vars apply to both, but `--timeout`/`--max-file-size`
+passed as CLI flags to a running server only reconfigure the original four;
+set the env vars instead if you need one value that covers all eleven tools.
 
 Example invocation tuned for large libraries:
 

@@ -34,33 +34,42 @@ Deliberately imports its stable helpers (``mcp``/``_safe_read_path``/
 ``mcp_server`` (for tool registration), so importing back from it here would
 recreate an import cycle the split was meant to avoid (AGENTS.md "What NOT to
 do" — a new cycle needs a leaf module, not an allowlist entry). The
-``_check_file_size``/``_audit_log`` guards below are therefore small local
-copies with their own module-level config, not shared with
-``mcp_server.py``'s mutable ``MCP_MAX_FILE_SIZE``/``--log-format`` state — the
-``ABICHECK_MCP_MAX_FILE_SIZE`` env var still applies to both, only the
-`--max-file-size`/``--log-format`` CLI-flag overrides on a running server
-don't retroactively reach these four tools.
+``_check_file_size``/``_audit_log``/``_MCP_TIMEOUT`` guards below are
+therefore small local copies with their own module-level config (ADR-021b
+D2/D3 apply here the same as every other tool), not shared with
+``mcp_server.py``'s mutable ``MCP_TIMEOUT``/``MCP_MAX_FILE_SIZE``/
+``--log-format`` state — the ``ABICHECK_MCP_TIMEOUT``/
+``ABICHECK_MCP_MAX_FILE_SIZE`` env vars still apply to both, only the
+``--timeout``/``--max-file-size``/``--log-format`` CLI-flag overrides on a
+running server don't retroactively reach these four tools.
 """
 
 from __future__ import annotations
 
+import concurrent.futures as _futures
 import json
 import os as _os
 import time as _time
+from collections.abc import Callable
 from pathlib import Path
+from typing import ParamSpec, TypeVar
 
 from .binary_utils import detect_binary_format as _detect_binary_format
 from .mcp_shared import _logger, _safe_read_path, _sanitize_error, mcp
 
-#: Local copy of mcp_server.py's file-size guard default (see module
-#: docstring for why this isn't shared mutable state with that module).
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+#: Local copies of mcp_server.py's guard defaults (see module docstring for
+#: why these aren't shared mutable state with that module).
 _MAX_FILE_SIZE = int(
     _os.environ.get("ABICHECK_MCP_MAX_FILE_SIZE", str(500 * 1024 * 1024))
 )
+_MCP_TIMEOUT = int(_os.environ.get("ABICHECK_MCP_TIMEOUT", "120"))
 
 
 def _check_file_size(path: Path, *, label: str = "input") -> None:
-    """Raise ValueError if *path* exceeds ``_MAX_FILE_SIZE``."""
+    """Raise ValueError if *path* exceeds ``_MAX_FILE_SIZE`` (ADR-021b D3)."""
     try:
         size = path.stat().st_size
     except FileNotFoundError:
@@ -72,6 +81,14 @@ def _check_file_size(path: Path, *, label: str = "input") -> None:
             f"{label} is {size / (1024 * 1024):.1f} MB, "
             f"exceeds limit of {_MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
         )
+
+
+def _check_dir_json_file_sizes(directory: Path, *, label: str = "input") -> None:
+    """Apply ``_check_file_size`` to every ``*.json`` file directly under
+    *directory* (ADR-021b D3) -- for tools that read a whole directory of
+    per-target reports rather than one path a caller named explicitly."""
+    for entry in directory.glob("*.json"):
+        _check_file_size(entry, label=f"{label} ({entry.name})")
 
 
 def _audit_log(
@@ -87,6 +104,21 @@ def _audit_log(
     parts.append(f"duration={duration_s:.3f}s")
     parts.append(f"status={status}")
     _logger.info(" ".join(parts))
+
+
+def _call_with_timeout(fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    """Run ``fn(*args, **kwargs)`` in a thread bounded by ``_MCP_TIMEOUT``.
+
+    ADR-021b D2: every tool invocation must have a configurable timeout
+    rather than blocking the MCP stdio server indefinitely. Raises
+    ``concurrent.futures.TimeoutError`` on expiry; any exception *fn* itself
+    raises propagates unchanged (re-raised by ``future.result()``) so callers
+    can catch their own domain exceptions the same way they would a direct
+    call.
+    """
+    with _futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(fn, *args, **kwargs)
+        return future.result(timeout=_MCP_TIMEOUT)
 
 
 @mcp.tool()
@@ -132,12 +164,24 @@ def abi_deps(
         ]
         sysroot_path = _safe_read_path(sysroot, label="sysroot") if sysroot else None
 
-        result = check_single_env(
-            bin_path,
-            search_paths=sp_paths or None,
-            sysroot=sysroot_path,
-            ld_library_path=ld_library_path,
-        )
+        try:
+            result = _call_with_timeout(
+                check_single_env,
+                bin_path,
+                search_paths=sp_paths or None,
+                sysroot=sysroot_path,
+                ld_library_path=ld_library_path,
+            )
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log("abi_deps", {"binary": bin_path.name}, elapsed, "timeout")
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_deps timed out after {_MCP_TIMEOUT}s",
+                }
+            )
+
         elapsed = _time.monotonic() - t0
         _audit_log("abi_deps", {"binary": bin_path.name}, elapsed, "ok")
         return json.dumps({"status": "ok", "result": json.loads(stack_to_json(result))})
@@ -205,12 +249,17 @@ def abi_aggregate(
                     "error": f"reports_dir is not a directory: {reports_dir}",
                 }
             )
+        _check_dir_json_file_sizes(reports_path, label="report")
         manifest_path = (
             _safe_read_path(manifest, label="manifest") if manifest else None
         )
+        if manifest_path is not None:
+            _check_file_size(manifest_path, label="manifest")
         run_plan_path = (
             _safe_read_path(run_plan, label="run_plan") if run_plan else None
         )
+        if run_plan_path is not None:
+            _check_file_size(run_plan_path, label="run_plan")
 
         try:
             expected = _resolve_expected(
@@ -220,14 +269,30 @@ def abi_aggregate(
                 tuple(optional or ()),
                 discovered_only,
             )
-            result = aggregate_reports_dir(
+        except (click.UsageError, AggregateError) as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
+
+        try:
+            result = _call_with_timeout(
+                aggregate_reports_dir,
                 reports_path,
                 expected=expected,
                 discovered_only=discovered_only,
                 on_missing_required=OnMissingRequired(on_missing_required),
                 on_unexpected_target=OnUnexpectedTarget(on_unexpected_target),
             )
-        except (click.UsageError, AggregateError, ValueError) as exc:
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_aggregate", {"reports_dir": reports_path.name}, elapsed, "timeout"
+            )
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_aggregate timed out after {_MCP_TIMEOUT}s",
+                }
+            )
+        except (AggregateError, ValueError) as exc:
             return json.dumps({"status": "error", "error": str(exc)})
 
         elapsed = _time.monotonic() - t0
@@ -275,7 +340,10 @@ def abi_project_validate(
     try:
         import click
 
-        from .buildsource.project_targets import validate_project_targets
+        from .buildsource.project_targets import (
+            ProjectTargetsValidationReport,
+            validate_project_targets,
+        )
         from .buildsource.toolchain_bindings import (
             BindingsFileError,
             check_profile_bindings_resolve,
@@ -286,24 +354,46 @@ def abi_project_validate(
         config_path = _safe_read_path(config, label="config")
         if not config_path.exists():
             return json.dumps({"status": "error", "error": "config file not found"})
+        _check_file_size(config_path, label="config")
 
         try:
             parsed = _load_project_targets_config(config_path)
         except click.UsageError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
 
-        report = validate_project_targets(parsed)
-
         if toolchain_bindings is not None:
             bindings_path = _safe_read_path(
                 toolchain_bindings, label="toolchain_bindings"
             )
+            _check_file_size(bindings_path, label="toolchain_bindings")
             try:
                 bindings_file = load_bindings_file(bindings_path)
             except BindingsFileError as exc:
                 return json.dumps({"status": "error", "error": str(exc)})
-            report.errors.extend(
-                check_profile_bindings_resolve(parsed.profiles, bindings_file)
+        else:
+            bindings_file = None
+
+        def _do_validate() -> ProjectTargetsValidationReport:
+            report = validate_project_targets(parsed)
+            if bindings_file is not None:
+                report.errors.extend(
+                    check_profile_bindings_resolve(parsed.profiles, bindings_file)
+                )
+            return report
+
+        try:
+            report = _call_with_timeout(_do_validate)
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_project_validate", {"config": config_path.name}, elapsed,
+                "timeout",
+            )
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_project_validate timed out after {_MCP_TIMEOUT}s",
+                }
             )
 
         elapsed = _time.monotonic() - t0
@@ -358,7 +448,11 @@ def abi_project_plan(
         import click
 
         from .buildsource.project_targets import validate_project_targets
-        from .buildsource.run_plan import generate_run_plan
+        from .buildsource.run_plan import (
+            RunPlan,
+            RunPlanGenerationReport,
+            generate_run_plan,
+        )
         from .buildsource.toolchain_bindings import (
             BindingsFileError,
             check_profile_bindings_resolve,
@@ -369,6 +463,7 @@ def abi_project_plan(
         config_path = _safe_read_path(config, label="config")
         if not config_path.exists():
             return json.dumps({"status": "error", "error": "config file not found"})
+        _check_file_size(config_path, label="config")
 
         try:
             parsed = _load_project_targets_config(config_path)
@@ -388,6 +483,16 @@ def abi_project_plan(
                 }
             )
 
+        # _parse_build_output_specs reads each PROFILE=DIR's build-output.json
+        # itself; check every one's size *before* that parse (ADR-021b D3) --
+        # a best-effort pre-check keyed on the same "=" split it uses, so a
+        # malformed spec here just falls through to that function's own error.
+        for spec in build_outputs or ():
+            _, sep, dir_str = spec.partition("=")
+            if sep:
+                _check_file_size(
+                    Path(dir_str) / "build-output.json", label="build_output"
+                )
         try:
             resolved_build_outputs = _parse_build_output_specs(
                 tuple(build_outputs or ())
@@ -401,6 +506,7 @@ def abi_project_plan(
             bindings_path = _safe_read_path(
                 toolchain_bindings, label="toolchain_bindings"
             )
+            _check_file_size(bindings_path, label="toolchain_bindings")
             try:
                 bindings_file = load_bindings_file(bindings_path)
             except BindingsFileError as exc:
@@ -410,20 +516,35 @@ def abi_project_plan(
                 parsed.profiles, bindings_file
             )
 
-        plan, report = generate_run_plan(
-            parsed,
-            resolved_build_outputs,
-            project=project,
-            head_sha=head_sha,
-            resolved_bindings=resolved_bindings,
-        )
-        report.errors.extend(binding_errors)
+        def _do_plan() -> tuple[RunPlan, RunPlanGenerationReport]:
+            plan, report = generate_run_plan(
+                parsed,
+                resolved_build_outputs,
+                project=project,
+                head_sha=head_sha,
+                resolved_bindings=resolved_bindings,
+            )
+            report.errors.extend(binding_errors)
+            if not plan.checks and not allow_empty:
+                report.errors.append(
+                    "run-plan resolved to zero checks -- pass allow_empty=true to "
+                    "accept this (e.g. bootstrapping .abicheck.yml before any "
+                    "targets:/bundles: checks[] are declared yet)."
+                )
+            return plan, report
 
-        if not plan.checks and not allow_empty:
-            report.errors.append(
-                "run-plan resolved to zero checks -- pass allow_empty=true to "
-                "accept this (e.g. bootstrapping .abicheck.yml before any "
-                "targets:/bundles: checks[] are declared yet)."
+        try:
+            plan, report = _call_with_timeout(_do_plan)
+        except _futures.TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_project_plan", {"config": config_path.name}, elapsed, "timeout"
+            )
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_project_plan timed out after {_MCP_TIMEOUT}s",
+                }
             )
 
         elapsed = _time.monotonic() - t0

@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -44,6 +45,7 @@ if "mcp" not in sys.modules or not isinstance(sys.modules["mcp"], MagicMock):
     _mock_mcp_instance.tool.return_value = lambda fn: fn
     _mock_fastmcp.return_value = _mock_mcp_instance
 
+from abicheck import mcp_server_project as msp  # noqa: E402
 from abicheck.mcp_server import (  # noqa: E402
     abi_aggregate,
     abi_deps,
@@ -68,6 +70,13 @@ def _first_existing(*candidates: str) -> str | None:
 
 class TestAbiDeps:
     def test_resolves_a_real_elf_binary(self):
+        # abi_deps wraps stack_checker.check_single_env, which only resolves
+        # DT_NEEDED/ELF dependency graphs -- mirrors the ELF-only guard the
+        # `deps tree` CLI command itself has. macOS/Windows runners have no
+        # ELF binary at a well-known path (macOS system binaries are Mach-O),
+        # same reasoning as tests/test_stack_checker.py's _require_linux_elf.
+        if sys.platform != "linux":
+            pytest.skip("abi_deps/stack_checker only resolves ELF binaries")
         binary = _first_existing("/bin/ls", "/usr/bin/ls", "ls")
         if binary is None:
             pytest.skip("no ELF binary available to resolve")
@@ -92,6 +101,39 @@ class TestAbiDeps:
         payload = json.loads(raw)
         assert payload["status"] == "error"
         assert "elf" in payload["error"].lower()
+
+    def test_oversized_binary_is_rejected(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D3: input size must be bounded before processing.
+        if sys.platform != "linux":
+            pytest.skip("abi_deps/stack_checker only resolves ELF binaries")
+        binary = _first_existing("/bin/ls", "/usr/bin/ls", "ls")
+        if binary is None:
+            pytest.skip("no ELF binary available to resolve")
+        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        raw = abi_deps(binary)
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "exceeds limit" in payload["error"]
+
+    def test_timeout(self, monkeypatch, tmp_path: Path):
+        # ADR-021b D2: a stalled resolve must return a structured timeout,
+        # not block the server indefinitely.
+        if sys.platform != "linux":
+            pytest.skip("abi_deps/stack_checker only resolves ELF binaries")
+        binary = _first_existing("/bin/ls", "/usr/bin/ls", "ls")
+        if binary is None:
+            pytest.skip("no ELF binary available to resolve")
+        monkeypatch.setattr(msp, "_MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.stack_checker.check_single_env", _slow)
+        raw = abi_deps(binary)
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +194,90 @@ class TestAbiAggregate:
         )
         payload = json.loads(raw)
         assert payload["status"] == "error"
+
+    def test_with_manifest_file(self, tmp_path: Path):
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "aggregate_manifest_version": "1.0",
+                    "targets": [{"id": "linux-x86_64", "required": True}],
+                }
+            )
+        )
+        raw = abi_aggregate(str(tmp_path), manifest=str(manifest))
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["exit_code"] == 0
+
+    def test_with_run_plan_file(self, tmp_path: Path):
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        run_plan = tmp_path / "run-plan.json"
+        run_plan.write_text(
+            json.dumps(
+                {
+                    "schema": "abicheck.run-plan/v1",
+                    "checks": [
+                        {
+                            "check_id": "linux-x86_64",
+                            "kind": "target",
+                            "target_kind": "library",
+                            "name": "libfoo",
+                            "profile_id": "linux",
+                            "baseline_channel": "release",
+                            "requested_depth": "headers",
+                            "required": True,
+                            "gate_mode": "local",
+                        }
+                    ],
+                }
+            )
+        )
+        raw = abi_aggregate(str(tmp_path), run_plan=str(run_plan))
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["exit_code"] == 0
+
+    def test_oversized_report_is_rejected(self, tmp_path: Path, monkeypatch):
+        # ADR-021b D3: every report file under reports_dir must be bounded.
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        raw = abi_aggregate(str(tmp_path), discovered_only=True)
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "exceeds limit" in payload["error"]
+
+    def test_oversized_manifest_is_rejected(self, tmp_path: Path, monkeypatch):
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "aggregate_manifest_version": "1.0",
+                    "targets": [{"id": "linux-x86_64", "required": True}],
+                }
+            )
+        )
+        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        raw = abi_aggregate(str(tmp_path), manifest=str(manifest))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "exceeds limit" in payload["error"]
+
+    def test_timeout(self, tmp_path: Path, monkeypatch):
+        _write_report(tmp_path, "linux-x86_64", "COMPATIBLE")
+        monkeypatch.setattr(msp, "_MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr("abicheck.aggregate.aggregate_reports_dir", _slow)
+        raw = abi_aggregate(str(tmp_path), discovered_only=True)
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +358,93 @@ class TestAbiProjectValidate:
         raw = abi_project_validate(str(config))
         payload = json.loads(raw)
         assert payload["status"] == "error"
+
+    def test_toolchain_bindings_with_nothing_declared_is_a_noop(
+        self, tmp_path: Path
+    ):
+        # _SINGLE_PROFILE_LIBRARY_RAW's "linux" profile declares no
+        # compile.binding, so check_profile_bindings_resolve has nothing to
+        # check -- this only exercises that the bindings file still loads.
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text(
+            yaml.safe_dump(
+                {"schema": "abicheck.toolchain-bindings/v1", "bindings": {}}
+            ),
+            encoding="utf-8",
+        )
+        raw = abi_project_validate(str(config), toolchain_bindings=str(bindings))
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["result"]["ok"] is True
+
+    def test_toolchain_bindings_unresolved_binding_is_a_validation_error(
+        self, tmp_path: Path
+    ):
+        raw_cfg = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))
+        raw_cfg["profiles"]["linux"]["compile"] = {"binding": "gcc99"}
+        config = _write_config(tmp_path, raw_cfg)
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text(
+            yaml.safe_dump(
+                {"schema": "abicheck.toolchain-bindings/v1", "bindings": {}}
+            ),
+            encoding="utf-8",
+        )
+        raw = abi_project_validate(str(config), toolchain_bindings=str(bindings))
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["result"]["ok"] is False
+        assert any("gcc99" in e for e in payload["result"]["errors"])
+
+    def test_malformed_toolchain_bindings_is_an_error(self, tmp_path: Path):
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text("schema: wrong-schema\n", encoding="utf-8")
+        raw = abi_project_validate(str(config), toolchain_bindings=str(bindings))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+
+    def test_oversized_config_is_rejected(self, tmp_path: Path, monkeypatch):
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        raw = abi_project_validate(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "exceeds limit" in payload["error"]
+
+    def test_oversized_toolchain_bindings_is_rejected(
+        self, tmp_path: Path, monkeypatch
+    ):
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text(
+            yaml.safe_dump(
+                {"schema": "abicheck.toolchain-bindings/v1", "bindings": {}}
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(msp, "_MAX_FILE_SIZE", 1)
+        raw = abi_project_validate(str(config), toolchain_bindings=str(bindings))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "exceeds limit" in payload["error"]
+
+    def test_timeout(self, tmp_path: Path, monkeypatch):
+        config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
+        monkeypatch.setattr(msp, "_MCP_TIMEOUT", 0.1)
+
+        def _slow(*a, **k):
+            time.sleep(1.0)
+            raise AssertionError("should have timed out first")
+
+        monkeypatch.setattr(
+            "abicheck.buildsource.project_targets.validate_project_targets", _slow
+        )
+        raw = abi_project_validate(str(config))
+        payload = json.loads(raw)
+        assert payload["status"] == "error"
+        assert "timed out" in payload["error"]
 
 
 class TestAbiProjectPlan:
