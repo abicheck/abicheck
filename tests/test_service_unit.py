@@ -216,6 +216,69 @@ class TestResolveInput:
         assert "header_graph" not in kwargs
         assert "header_graph_includes" not in kwargs
 
+    def test_header_graph_lang_matches_elf_main_pass_normalization(self, tmp_path):
+        """Codex review: ``_dump_elf`` normalizes ``lang`` to only ever force
+        "c" explicitly (letting auto-detection run for the default "c++"),
+        before calling ``dumper.dump()`` -- ``_attach_header_graph``'s own
+        ``_clang_header_dump`` call must be given that identical normalized
+        value, or it hashes a different cache key than the main pass just
+        used and permanently misses the new AST reuse memo for the default,
+        by far the most common, ELF dump shape."""
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(p, "elf", headers=[header], includes=[], lang="c++")
+        args, _ = mock_attach.call_args
+        assert args[5] is None  # not the raw "c++" default
+
+    def test_header_graph_lang_forces_c_like_elf_main_pass(self, tmp_path):
+        """The other half of the normalization: an explicit ``lang="c"``
+        request must still reach ``_attach_header_graph`` as "c", matching
+        what ``_dump_elf`` itself forwards to ``dumper.dump()`` for that
+        explicit case."""
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f(void);\n")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_elf", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(p, "elf", headers=[header], includes=[], lang="c")
+        args, _ = mock_attach.call_args
+        assert args[5] == "c"
+
+    def test_header_graph_lang_unchanged_for_pe(self, tmp_path):
+        """PE/Mach-O's own main pass never normalizes ``lang`` (passes it
+        through as-is to ``dumper._header_ast_parser``) -- ``_attach_header_graph``
+        must keep matching that raw value for those formats, not the
+        ELF-specific normalization."""
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with (
+            patch("abicheck.service._dump_pe", return_value=snap),
+            patch(
+                "abicheck.service._attach_header_graph", return_value=snap
+            ) as mock_attach,
+        ):
+            run_dump(p, "pe", headers=[header], includes=[], lang="c++")
+        args, _ = mock_attach.call_args
+        assert args[5] == "c++"
+
     def test_binary_detection_elf(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)

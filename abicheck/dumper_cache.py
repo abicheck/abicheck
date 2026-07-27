@@ -48,7 +48,9 @@ def store_cached_ast(key: str, backend: str, root: Any) -> None:
             _AST_MEMO.pop(next(iter(_AST_MEMO)))
 
 
-def load_cached_ast(key: str, backend: str, cache_path: Path) -> Any | None:
+def load_cached_ast(
+    key: str, backend: str, cache_path: Path, *, memoize: bool = True
+) -> Any | None:
     """Return a previously-parsed AST for (*backend*, *key*), or ``None``.
 
     *cache_path* is the caller's own already-resolved :func:`_cache_path`
@@ -56,6 +58,16 @@ def load_cached_ast(key: str, backend: str, cache_path: Path) -> Any | None:
     their own module namespace (as several tests do) must have that
     override actually govern the disk path this function reads, which a
     second, independent ``_cache_path`` call from this module could not see.
+
+    *memoize* -- ``False`` for a caller that is itself the *final* consumer
+    of this AST (the header-graph attach step, when the primary snapshot
+    pass used ``castxml`` and never wrote a memo entry of its own): a disk
+    hit there has no further same-process reader to hand off to, so
+    re-inserting it into :data:`_AST_MEMO` would just hold a potentially
+    multi-GB tree until evicted by the entry-count bound, dead weight in a
+    long-lived process (Codex review). The primary snapshot pass's own call
+    keeps the default ``True`` -- that write *is* the intended handoff
+    :func:`store_cached_ast`'s docstring describes.
 
     Checks the in-process memo first (see :data:`_AST_MEMO`'s own docstring)
     -- popping it on a hit, since the memo is a single-consumption handoff,
@@ -88,7 +100,8 @@ def load_cached_ast(key: str, backend: str, cache_path: Path) -> Any | None:
         cache_path.unlink(missing_ok=True)
         return None
     deadline.check()  # loading a huge cached AST can eat the rest of the budget
-    store_cached_ast(key, backend, root)
+    if memoize:
+        store_cached_ast(key, backend, root)
     return root
 
 

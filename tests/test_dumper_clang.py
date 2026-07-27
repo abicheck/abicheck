@@ -1885,6 +1885,41 @@ def test_clang_header_dump_skips_memo_write_on_toolchain_change(
     assert calls["n"] == 2
 
 
+def test_clang_header_dump_memoize_false_never_writes_the_memo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review: ``_attach_header_graph`` is the *final* consumer of its
+    own ``_clang_header_dump`` call when the primary snapshot pass used
+    castxml (never wrote a memo entry of its own) -- passing
+    ``memoize=False`` there must mean neither a disk-cache hit nor a fresh
+    parse populates the in-process memo, since no further same-process
+    reader will ever pop it. Otherwise a long-lived process (the MCP
+    server, ``scan`` over many libraries) accumulates dead, potentially
+    multi-GB entries with no consumer."""
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "cache.json"
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+
+    def _run(cmd: list[str], **kwargs: Any) -> Any:
+        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
+        return _fake_proc()
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+
+    # Fresh-parse path: memoize=False must leave the memo empty afterward.
+    _clang_header_dump([header], [], memoize=False)
+    assert cache.exists()  # the disk cache is still populated, as always
+    assert not dumper_cache._AST_MEMO
+
+    # Disk-cache-hit path: a second memoize=False call reads the file this
+    # test just warmed on disk, and must still leave the memo empty.
+    _clang_header_dump([header], [], memoize=False)
+    assert not dumper_cache._AST_MEMO
+
+
 def test_ast_memo_evicts_oldest_entry_past_maxsize(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

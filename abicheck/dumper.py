@@ -360,6 +360,7 @@ def _clang_header_dump(
     lang: str | None = None,
     extra_hash_dirs: tuple[Path, ...] = (),
     frontend_context: str = "host",
+    memoize: bool = True,
 ) -> tuple[dict[str, Any], str | None]:
     """Run clang over *headers* and return ``(root, resolved_kind)``.
 
@@ -369,9 +370,10 @@ def _clang_header_dump(
     Disk-cached like the castxml path, and also memoized in-process
     (``dumper_cache.load_cached_ast``/``store_cached_ast``) so the always-on
     header-only graph's own AST pass (``service._attach_header_graph``)
-    reuses the parsed dict instead of a second disk read/re-parse (G31
-    Phase C AST reuse). Raises :class:`SnapshotError` when clang is missing,
-    times out, or emits no usable AST.
+    reuses the parsed dict instead of a second disk read/re-parse (G31 Phase
+    C AST reuse; *memoize=False* there -- it's the final AST consumer).
+    Raises :class:`SnapshotError` when clang is missing, times out, or emits
+    no usable AST.
 
     ``frontend_context`` (ADR-050 D5, G32 Phase D) is ``"host"``/``"device"``.
     ``resolved_kind`` is *frontend_context* when the multi-pass SYCL decode
@@ -449,11 +451,9 @@ def _clang_header_dump(
     )
     resolved_kind = frontend_context if dpcpp_multi_context else None
     cached = _cache_path(key, backend="clang")
-    # An in-process memo hit (e.g. the header-only graph's own second AST
-    # pass over the identical header aggregate, ADR-041/G31 always-on) skips
-    # the disk read/JSON re-parse entirely (G31 Phase C AST reuse); a
-    # disk-cache hit still costs that, same as before (Codex review).
-    _cached_result = load_cached_ast(key, "clang", cached)
+    # An in-process memo hit skips the disk read/JSON re-parse entirely
+    # (G31 Phase C AST reuse); a disk-cache hit still costs that.
+    _cached_result = load_cached_ast(key, "clang", cached, memoize=memoize)
     if _cached_result is not None:
         return cast("dict[str, Any]", _cached_result), resolved_kind
 
@@ -545,7 +545,7 @@ def _clang_header_dump(
             dpcpp_capable=dpcpp_multi_context,
             frontend_context=frontend_context,
         )
-        if identities_stable:
+        if identities_stable and memoize:
             store_cached_ast(key, "clang", root)
         return root, resolved_kind
     finally:

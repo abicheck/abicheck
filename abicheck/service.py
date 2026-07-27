@@ -562,6 +562,18 @@ def run_dump(
         )
     _headers = headers or []
     _includes = includes or []
+    # _dump_elf's own dumper.dump() call normalizes `lang` to only ever force
+    # "c" explicitly, letting auto-detection run for anything else
+    # (including the default "c++") -- `_cache_key` hashes the raw `lang`
+    # value, so `_attach_header_graph`'s own _clang_header_dump call must
+    # pass this identical normalized value for ELF, or it hashes a different
+    # key than the main pass just used, permanently missing the AST memo for
+    # the default (non-explicit-"c") ELF workload (Codex review). PE/Mach-O's
+    # own main pass never normalizes `lang` this way (passes it through
+    # as-is), so no adjustment is made there.
+    _header_graph_lang = (
+        lang if binary_fmt != "elf" else (lang if lang == "c" else None)
+    )
     # An explicit --ast-frontend on the compile context wins over the bare
     # header_backend arg (the latter is the compare-path default carrier).
     eff_backend = (
@@ -651,7 +663,7 @@ def run_dump(
             _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only and not symbols_only,
             _headers,
             _includes,
-            lang,
+            _header_graph_lang,
             compile,
             public_headers,
             public_header_dirs,
@@ -704,7 +716,7 @@ def run_dump(
             and not symbols_only,
             _headers,
             _includes,
-            lang,
+            _header_graph_lang,
             compile,
             public_headers,
             public_header_dirs,
@@ -808,7 +820,7 @@ def _attach_header_graph(
     header_graph_includes: bool,
     headers: list[Path],
     includes: list[Path],
-    lang: str,
+    lang: str | None,
     compile: CompileContext | None,
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
@@ -921,6 +933,12 @@ def _attach_header_graph(
             lang=lang,
             extra_hash_dirs=deferred_dirs,
             frontend_context=cc.frontend_context,
+            # This is the *final* consumer of this AST -- writing it into
+            # the in-process memo here would have no further same-process
+            # reader to hand off to (Codex review). A memo entry the
+            # primary snapshot pass already wrote is still read (and
+            # popped) above; only the write-back on a miss is suppressed.
+            memoize=False,
         )
     except (SnapshotError, ValidationError):
         ast_root = None
