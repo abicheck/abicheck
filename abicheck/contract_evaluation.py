@@ -131,6 +131,14 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
         "elf_class_changed",
         "elf_osabi_changed",
         "elf_endianness_changed",
+        # The Mach-O analogue of pe_machine_changed/elf_class_changed --
+        # binary-wide CPU architecture identity, not a function/variable/type
+        # (Codex review, fresh evidence). Previously fell through to
+        # UNKNOWN_UNRESOLVED (PUBLIC mode, no headers) or IN_CONTRACT (ALL
+        # mode), skewing shadow relevance metrics for ordinary Mach-O
+        # architecture changes the same way the sibling PE/ELF kinds already
+        # correctly short-circuit.
+        "macho_cpu_type_changed",
         "macho_filetype_changed",
         "macho_linkage_flags_changed",
         "macho_reexport_changed",
@@ -383,7 +391,7 @@ def _decision_for_surface_reason(
 # Genuine "a wholly new entity/commitment appears" kinds that `ADDITION_KINDS`
 # misses purely because that set is scoped to *compatible* additions
 # (`change_registry.py`'s `default_verdict`, a verdict-category concern) --
-# not because these two are shaped any differently. Each is the direct
+# not because these kinds are shaped any differently. Each is the direct
 # breaking/risky sibling of an addition shape already recognized:
 # `type_field_added` is `type_field_added_compatible`'s same "a new field
 # appears" shape, just breaking when the class isn't guaranteed final
@@ -393,17 +401,20 @@ def _decision_for_surface_reason(
 # member appearing, not an existing member gaining a property, the same
 # distinction the `ADDITION_KINDS`-only check already draws correctly for
 # every *_deprecated_added/*_noexcept_added/*_virtual_added-style kind
-# below. Confirmed empirically that `_authoritative_surface` returned the
-# old side for both before this fix, so a new-side-confirmed addition with
-# no old-side header evidence fell to `UNKNOWN_UNRESOLVED` instead of
-# `IN_CONTRACT`, contrary to ADR-049 D4 (Codex review, fresh evidence).
+# below. `overload_added` ("a new overload was added under a public name
+# that previously had exactly one declaration", per its own registry impact
+# text) is the same shape again -- a new declaration appearing, not an
+# existing one gaining a property -- so an added overload confirmed public
+# only on the new side (no old-side header evidence at all, since the
+# overload itself didn't exist yet) must use new-side authority too (Codex
+# review, fresh evidence). Confirmed empirically that `_authoritative_surface`
+# returned the old side for all three before their respective fixes, so a
+# new-side-confirmed addition with no old-side header evidence fell to
+# `UNKNOWN_UNRESOLVED` instead of `IN_CONTRACT`, contrary to ADR-049 D4.
 #
 # Deliberately NOT included, considered and left as a documented gap since
-# Codex's finding named only the two kinds above and this module's own
-# discipline is to fix the verified case rather than speculatively expand
-# it: `overload_added` (a new overload under an existing public name --
-# arguably the same new-entity shape as `func_added`, but its own
-# temporal-direction correctness hasn't been independently verified here),
+# no Codex finding has named these and this module's own discipline is to
+# fix the verified case rather than speculatively expand it:
 # `imported_symbol_added`/`target_dependency_added`/
 # `public_api_internal_dependency_added`/`numpy_capi_consumption_added`/
 # `symbol_version_defined_added`/`symbol_version_required_added` (each
@@ -411,10 +422,11 @@ def _decision_for_surface_reason(
 # rather than a new function/variable/type member, so whether "new-side
 # authoritative" is even the right frame for them needs its own scoped
 # look, not a drive-by inclusion here).
-_BREAKING_ADDITION_SHAPE_KINDS: frozenset[ChangeKind] = frozenset(
+_NON_COMPATIBLE_ADDITION_SHAPE_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.TYPE_FIELD_ADDED,
         ChangeKind.VIRTUAL_METHOD_ADDED,
+        ChangeKind.OVERLOAD_ADDED,
     }
 )
 
@@ -427,7 +439,7 @@ def _authoritative_surface(
     "Removal and modification of an existing obligation use old-side
     evidence. Addition and a new commitment use new-side evidence." --
     checked via ``checker_policy.ADDITION_KINDS`` unioned with
-    :data:`_BREAKING_ADDITION_SHAPE_KINDS`, rather than a naive
+    :data:`_NON_COMPATIBLE_ADDITION_SHAPE_KINDS`, rather than a naive
     ``kind.value.endswith("_added")`` string heuristic: confirmed
     empirically that many kinds *ending* in ``"_added"`` are themselves
     modifications of an already-existing obligation gaining a new
@@ -442,9 +454,9 @@ def _authoritative_surface(
     additions only, a verdict-category concern orthogonal to temporal
     direction (ADR-049 D4 says nothing about severity), so a genuinely
     new-entity-shaped kind that happens to default to a breaking/risky
-    verdict (``type_field_added``, ``virtual_method_added``) was wrongly
-    excluded too until :data:`_BREAKING_ADDITION_SHAPE_KINDS` was added
-    (Codex review, fresh evidence).
+    verdict (``type_field_added``, ``virtual_method_added``, ``overload_added``)
+    was wrongly excluded too until :data:`_NON_COMPATIBLE_ADDITION_SHAPE_KINDS`
+    was added (Codex review, fresh evidence).
 
     Without this, a symbol/type's public-root confirmation was checked
     against the *union* of both sides regardless of the change's direction
@@ -456,7 +468,10 @@ def _authoritative_surface(
     evidence cannot retroactively manufacture confidence about an old,
     unresolved/private commitment (Codex review, fresh evidence).
     """
-    if change.kind in ADDITION_KINDS or change.kind in _BREAKING_ADDITION_SHAPE_KINDS:
+    if (
+        change.kind in ADDITION_KINDS
+        or change.kind in _NON_COMPATIBLE_ADDITION_SHAPE_KINDS
+    ):
         return surf_new
     return surf_old
 

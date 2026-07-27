@@ -139,6 +139,23 @@ class TestNotApplicableKinds:
             assurance=ContractAssurance.COMPLETE,
         )
 
+    def test_macho_cpu_type_change_is_not_applicable(self) -> None:
+        # Regression (Codex review, fresh evidence): macho_cpu_type_changed
+        # is the Mach-O analogue of pe_machine_changed/elf_class_changed --
+        # binary-wide CPU architecture identity, not a function/variable/
+        # type -- but was missing from this set, so it fell through to
+        # UNKNOWN_UNRESOLVED (PUBLIC mode) / IN_CONTRACT (ALL mode) while
+        # its PE/ELF siblings already correctly short-circuited here.
+        c = Change(kind=ChangeKind.MACHO_CPU_TYPE_CHANGED, symbol="", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
 
 class TestUnsupportedMode:
     @pytest.mark.parametrize("mode", [ContractMode.EXPORTS, "exports"])
@@ -841,6 +858,29 @@ class TestPublicModeSideAuthority:
         c = Change(
             kind=ChangeKind.VIRTUAL_METHOD_ADDED, symbol="_Z3barv", description=""
         )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    def test_overload_addition_is_confirmed_by_new_side_alone(self) -> None:
+        # Regression (Codex review, fresh evidence): overload_added is the
+        # same "a new declaration appears" shape as type_field_added/
+        # virtual_method_added above -- an added overload's old-side header
+        # evidence is unresolvable by construction (the overload itself
+        # didn't exist yet), so it must be confirmed by the new side alone,
+        # not left UNKNOWN_UNRESOLVED.
+        snap_new = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("bar", mangled="_Z3barv", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        surf_new = compute_public_surface(snap_new)
+        c = Change(kind=ChangeKind.OVERLOAD_ADDED, symbol="_Z3barv", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
         )
