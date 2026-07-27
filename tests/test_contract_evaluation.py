@@ -117,7 +117,12 @@ class TestNotApplicableKinds:
         assert decision.relevance is not ContractRelevance.NOT_APPLICABLE
 
     @pytest.mark.parametrize(
-        "kind", [ChangeKind.NEEDED_ADDED, ChangeKind.NEEDED_REMOVED]
+        "kind",
+        [
+            ChangeKind.NEEDED_ADDED,
+            ChangeKind.NEEDED_REMOVED,
+            ChangeKind.NEEDED_ORDER_CHANGED,
+        ],
     )
     def test_needed_dependency_changes_are_not_applicable(
         self, kind: ChangeKind
@@ -129,6 +134,9 @@ class TestNotApplicableKinds:
         # ordinary header-surface classification and came back
         # UNKNOWN_UNRESOLVED (PUBLIC mode, no headers) or IN_CONTRACT (ALL
         # mode), neither of which is the right ADR-049 "non-entity" verdict.
+        # needed_order_changed (a pure DT_NEEDED reorder, dependency set
+        # unchanged) is the same loader-level state as needed_added/removed,
+        # not a different kind of entity.
         c = Change(kind=kind, symbol="", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
@@ -147,6 +155,27 @@ class TestNotApplicableKinds:
         # UNKNOWN_UNRESOLVED (PUBLIC mode) / IN_CONTRACT (ALL mode) while
         # its PE/ELF siblings already correctly short-circuited here.
         c = Change(kind=ChangeKind.MACHO_CPU_TYPE_CHANGED, symbol="", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    @pytest.mark.parametrize(
+        "kind", [ChangeKind.ELF_MACHINE_CHANGED, ChangeKind.ELF_ABI_FLAGS_CHANGED]
+    )
+    def test_elf_machine_and_abi_flags_changes_are_not_applicable(
+        self, kind: ChangeKind
+    ) -> None:
+        # Regression (Codex review, fresh evidence): elf_machine_changed
+        # (e_machine drift) and elf_abi_flags_changed (decoded float-ABI/EABI
+        # drift) are binary-wide architecture/calling-convention identity --
+        # the ELF analogue of pe_machine_changed/macho_cpu_type_changed
+        # already covered above -- but were missing from this set.
+        c = Change(kind=kind, symbol="", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
         )

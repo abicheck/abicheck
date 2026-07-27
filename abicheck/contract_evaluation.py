@@ -125,12 +125,23 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
         # fresh evidence).
         "needed_added",
         "needed_removed",
+        # _diff_needed_order's own reorder-only finding (the dependency SET
+        # is unchanged, only DT_NEEDED entry order) -- same synthetic
+        # "DT_NEEDED" subject, same loader-level state, not a different kind
+        # of entity (Codex review, fresh evidence).
+        "needed_order_changed",
         # Architecture / file-format identity.
         "pe_machine_changed",
         "wheel_tag_architecture_mismatch",
         "elf_class_changed",
         "elf_osabi_changed",
         "elf_endianness_changed",
+        # e_machine / decoded float-ABI-EABI drift -- binary-wide
+        # architecture/calling-convention identity, the ELF analogue of
+        # pe_machine_changed/macho_cpu_type_changed already covered above
+        # (Codex review, fresh evidence).
+        "elf_machine_changed",
+        "elf_abi_flags_changed",
         # The Mach-O analogue of pe_machine_changed/elf_class_changed --
         # binary-wide CPU architecture identity, not a function/variable/type
         # (Codex review, fresh evidence). Previously fell through to
