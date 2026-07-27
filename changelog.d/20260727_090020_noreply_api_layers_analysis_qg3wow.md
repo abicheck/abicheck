@@ -100,7 +100,14 @@
   `aggregate_reports_dir` can still return a structured
   required-coverage failure (exit code 1) instead of a hard error. The
   MCP wrapper's own directory check now only rejects a path that
-  *exists* but isn't a directory, matching that contract.
+  *exists* but isn't a directory — this is an intentional MCP-specific
+  improvement over `collect_reports`'s own behavior (which treats
+  "missing" and "exists but is a file" identically as zero reports) and
+  over the CLI's `aggregate --reports-dir`, which has no Click-level
+  type check at all; a prior version of this entry described the added
+  check as "matching" the core `collect_reports` contract, which
+  overstated it — there is no existing contract distinguishing those two
+  cases for this check to match (self-review finding).
 - **`abi_deps`'s sysroot rebasing no longer treats a sibling directory as
   already-under-sysroot** — both `_resolve_sysroot_path` (the MCP
   pre-check mirror) and `resolver._seed_root` itself used a raw string

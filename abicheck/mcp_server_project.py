@@ -390,8 +390,20 @@ def abi_aggregate(
             # A *missing* reports_dir is deliberately not an error here --
             # aggregate.collect_reports treats it as zero reports so a full
             # build-matrix outage still produces a structured required-coverage
-            # failure (exit code 1) instead of a generic tool error; only reject
-            # a path that exists but isn't a directory (Codex review).
+            # failure (exit code 1) instead of a generic tool error. An
+            # *existing-but-not-a-directory* reports_dir is different:
+            # collect_reports treats that identically to "missing" too (its
+            # own `if not reports_dir.is_dir(): return found` doesn't
+            # distinguish the two), but the CLI's `aggregate --reports-dir`
+            # has no Click-level type check either (`click.Path(path_type=
+            # Path)`, no `exists=True`/`file_okay=False`) -- so silently
+            # reporting "zero reports found" for a typo'd file path would be
+            # confusing for an MCP caller with no terminal to notice the
+            # coverage-gate wording. This check is therefore an intentional
+            # MCP-specific improvement over the CLI's behavior for this one
+            # input shape, not a divergence "matching" some existing
+            # contract -- there is no existing contract to match here
+            # (code-review finding on an earlier version of this comment).
             if reports_path.exists() and not reports_path.is_dir():
                 raise _ToolPreflightError(
                     f"reports_dir is not a directory: {reports_path.name}"
