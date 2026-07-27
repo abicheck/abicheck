@@ -123,6 +123,16 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.RPATH_TYPE_CHANGED,
         ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
         ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
+        # A binary-wide file/product version regression -- PE's
+        # `VS_FIXEDFILEINFO` resource or Mach-O's `LC_ID_DYLIB`
+        # current_version (`diff_platform._diff_pe_versions`/
+        # `_diff_macho_versions`'s own `symbol="VS_FIXEDFILEINFO"`/
+        # `symbol="LC_ID_DYLIB"` construction) -- and a missing ELF version
+        # script (`diff_versioning.py`'s own `symbol="<version-script>"`
+        # sentinel) are both linker/version metadata, never a function/
+        # variable/type (Codex review, fresh evidence).
+        ChangeKind.LIBRARY_VERSION_DOWNGRADED,
+        ChangeKind.VERSION_SCRIPT_MISSING,
         # DT_NEEDED loader dependency list -- which *other* shared libraries
         # this one requires, not a function/variable/type consumer code
         # references. Falling through the ordinary path made these
@@ -152,6 +162,13 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
         # construction), never a specific function/variable/type (Codex
         # review, fresh evidence).
         ChangeKind.SYMBOLIC_BINDING_MODE_CHANGED,
+        # DF_STATIC_TLS toggle (ELF) -- `_diff_static_tls`'s own
+        # `symbol="DF_STATIC_TLS"` construction, the same synthetic-subject
+        # binary-wide loader/TLS-model shape as the PT_INTERP/DT_* findings
+        # above, never a consumer-referenced entity (Codex review, fresh
+        # evidence).
+        ChangeKind.STATIC_TLS_INTRODUCED,
+        ChangeKind.STATIC_TLS_REMOVED,
         # LC_ID_DYLIB compat_version (Mach-O) -- a binary-wide loader
         # contract property with its own synthetic `symbol="compat_version"`
         # subject (`diff_platform._diff_macho_compat_version`), the Mach-O
@@ -233,6 +250,25 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
         # review, fresh evidence).
         ChangeKind.RUNTIME_FLOOR_RAISED,
         ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        # The C++ standard floor (`diff_build_config.detect_cxx_standard_floor_raised`'s
+        # own `symbol="__cplusplus"` construction) and the NumPy C-API target
+        # floor (`diff_numpy_capi.py`'s own `symbol="<numpy-capi>"`
+        # construction) are the identical synthesized, package-wide
+        # minimum-toolchain-floor shape as the runtime/OS/CPU-ISA kinds
+        # immediately above, just for a different axis, never a specific
+        # function/variable/type (Codex review, fresh evidence).
+        ChangeKind.CXX_STANDARD_FLOOR_RAISED,
+        ChangeKind.NUMPY_TARGET_FLOOR_RAISED,
+        # The Python stable-ABI (abi3) floor (`diff_python.py`'s own
+        # `symbol=<module>` construction) is the same package-wide
+        # minimum-toolchain-floor shape, just spelled with a real module
+        # symbol instead of a synthetic sentinel -- without this entry it
+        # fell through to the `python_*`-prefix "trusted by construction"
+        # shortcut further down and was wrongly reported `IN_CONTRACT`
+        # rather than the mode-independent `NOT_APPLICABLE` every other
+        # deployment-floor kind above already gets (Codex review, fresh
+        # evidence).
+        ChangeKind.PYTHON_ABI3_FLOOR_RAISED,
         ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
         ChangeKind.X86_ISA_BASELINE_RAISED,
         ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,

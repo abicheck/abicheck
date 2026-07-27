@@ -233,6 +233,78 @@ class TestNotApplicableKinds:
             assurance=ContractAssurance.COMPLETE,
         )
 
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            ChangeKind.CXX_STANDARD_FLOOR_RAISED,
+            ChangeKind.NUMPY_TARGET_FLOOR_RAISED,
+            ChangeKind.PYTHON_ABI3_FLOOR_RAISED,
+        ],
+    )
+    def test_remaining_deployment_floor_changes_are_not_applicable(
+        self, kind: ChangeKind
+    ) -> None:
+        # Regression (Codex review, fresh evidence): the C++ standard floor
+        # (diff_build_config.py's own symbol="__cplusplus" construction) and
+        # the NumPy C-API target floor (diff_numpy_capi.py's own
+        # symbol="<numpy-capi>" construction) are the same synthesized,
+        # package-wide minimum-toolchain-floor shape as
+        # RUNTIME_FLOOR_RAISED/etc. above, just for a different axis.
+        # python_abi3_floor_raised (diff_python.py's own symbol=<module>
+        # construction) is the same shape spelled with a real module symbol
+        # -- without this entry it fell through to the `python_*`-prefix
+        # "trusted by construction" shortcut and was wrongly IN_CONTRACT
+        # instead of NOT_APPLICABLE.
+        c = Change(kind=kind, symbol="anything", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    @pytest.mark.parametrize(
+        "kind",
+        [ChangeKind.LIBRARY_VERSION_DOWNGRADED, ChangeKind.VERSION_SCRIPT_MISSING],
+    )
+    def test_version_metadata_changes_are_not_applicable(
+        self, kind: ChangeKind
+    ) -> None:
+        # Regression (Codex review, fresh evidence): library_version_downgraded
+        # (PE's symbol="VS_FIXEDFILEINFO" / Mach-O's symbol="LC_ID_DYLIB") and
+        # version_script_missing (symbol="<version-script>") are both
+        # linker/version metadata, never a function/variable/type.
+        c = Change(kind=kind, symbol="", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    @pytest.mark.parametrize(
+        "kind", [ChangeKind.STATIC_TLS_INTRODUCED, ChangeKind.STATIC_TLS_REMOVED]
+    )
+    def test_static_tls_changes_are_not_applicable(self, kind: ChangeKind) -> None:
+        # Regression (Codex review, fresh evidence): DF_STATIC_TLS
+        # (diff_platform_elf_dynamic.py's own symbol="DF_STATIC_TLS"
+        # construction) is a binary-wide loader/TLS-model property, the same
+        # synthetic-subject shape as the PT_INTERP/DT_* loader-control
+        # findings, never a consumer-referenced entity.
+        c = Change(kind=kind, symbol="DF_STATIC_TLS", description="")
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.PUBLIC
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.NOT_APPLICABLE,
+            reason_code="non_entity_finding",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
     def test_pe_import_load_mode_change_is_not_applicable(self) -> None:
         # Regression (Codex review, fresh evidence): pe_import_load_mode_changed
         # is a link-time property of a PE import table entry (eager IAT vs.
