@@ -609,7 +609,7 @@ def _apply_contract_evaluation_shadow(
             else None
         ),
     )
-    for change, decision in zip(all_changes, decisions):
+    for change, decision in zip(all_changes, decisions, strict=True):
         change.contract_relevance = decision.relevance
         change.contract_reason_code = decision.reason_code
         change.contract_assurance = decision.assurance

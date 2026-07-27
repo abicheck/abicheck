@@ -1561,6 +1561,7 @@ def compare_snapshots(
     reconcile_build_context: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
     diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -1602,6 +1603,7 @@ def compare_snapshots(
         reconcile_build_context=reconcile_build_context,
         env_matrix=env_matrix,
         diagnostic_comparison=diagnostic_comparison,
+        contract_evaluation=contract_evaluation,
     )
 
 
@@ -1751,6 +1753,7 @@ def run_compare_request(
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,
+        contract_evaluation=request.contract_evaluation,
     )
     result.old_metadata = collect_metadata(request.old.path)
     result.new_metadata = collect_metadata(request.new.path)
@@ -1782,6 +1785,7 @@ def run_compare(
     public_surface_allowlist: set[str] | None = None,
     debuginfod_url: str | None = None,
     diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1790,11 +1794,13 @@ def run_compare(
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
 
-    ``debuginfod_url`` and ``diagnostic_comparison`` are appended after every
-    pre-existing parameter (not inserted alongside their thematically-closer
-    neighbors) so a caller invoking this positionally keeps binding every
-    argument after them to the same parameter it always did (Codex review,
-    PR #551; same rule applied again for ADR-050 D2's escape hatch).
+    ``debuginfod_url``, ``diagnostic_comparison``, and ``contract_evaluation``
+    are appended after every pre-existing parameter (not inserted alongside
+    their thematically-closer neighbors) so a caller invoking this
+    positionally keeps binding every argument after them to the same
+    parameter it always did (Codex review, PR #551; same rule applied again
+    for ADR-050 D2's escape hatch, and once more for ADR-049 Phase 3's shadow
+    evaluator).
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
@@ -1838,6 +1844,7 @@ def run_compare(
         enable_debuginfod=enable_debuginfod,
         debuginfod_url=debuginfod_url,
         diagnostic_comparison=diagnostic_comparison,
+        contract_evaluation=contract_evaluation,
     )
     return run_compare_request(request)
 

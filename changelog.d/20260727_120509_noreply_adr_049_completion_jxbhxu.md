@@ -21,8 +21,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 - **ADR-049 Phase 3 shadow evaluator: a confidently public-header
   declaration is now recognized as `IN_CONTRACT`, not left `UNKNOWN_UNRESOLVED`**
-  (no behavior change outside this still-unwired shadow module):
-  `REASON_NOT_EXPORTED` (a symbol declared but not ELF-exported, e.g. an
+  (opt-in via `compare(..., contract_evaluation=True)`; no default-path
+  behavior change): `REASON_NOT_EXPORTED` (a symbol declared but not
+  ELF-exported, e.g. an
   inline or explicitly hidden-visibility function) is correctly *weak*, not
   terminal, per ADR-049 D2's `public` domain including "declared-public
   providers" independent of export status -- but a bare "weak, so stay
@@ -36,8 +37,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 - **ADR-049 Phase 3 shadow evaluator: breaking-addition kinds now use
   new-side authority, and DT_NEEDED loader dependency changes are now
-  `NOT_APPLICABLE`** (`contract_evaluation.py`; no behavior change outside
-  this still-unwired shadow module): `_authoritative_surface`'s ADR-049 D4
+  `NOT_APPLICABLE`** (`contract_evaluation.py`; opt-in via
+  `compare(..., contract_evaluation=True)`; no default-path behavior
+  change): `_authoritative_surface`'s ADR-049 D4
   temporal-direction check used `checker_policy.ADDITION_KINDS`, which is
   scoped to *compatible* additions only (17 members) -- so a genuinely
   new-entity-shaped addition that defaults to a breaking/risky verdict

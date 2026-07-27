@@ -31,8 +31,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 - **ADR-049 Phase 3 shadow evaluator: L4/L5 source-derived public-by-
   construction findings are no longer downgraded to `UNKNOWN_UNRESOLVED`**
-  (no behavior change outside this still-unwired shadow module):
-  `post_processing.MarkReachability`'s own `_PUBLIC_SOURCE_ABI_KINDS` (e.g.
+  (opt-in via `compare(..., contract_evaluation=True)`; no default-path
+  behavior change): `post_processing.MarkReachability`'s own
+  `_PUBLIC_SOURCE_ABI_KINDS` (e.g.
   `PUBLIC_MACRO_REMOVED`, `INLINE_FUNCTION_REMOVED`, `PUBLIC_TYPEDEF_REMOVED`)
   are proven public by construction, but their `symbol` (a macro/inline-
   function/typedef name) is never a real C/C++ header-surface function/

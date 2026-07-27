@@ -104,66 +104,85 @@ from .surface import (
 # gets a relevance decision" (harmless for a shadow evaluator), not a crash,
 # so this set can grow incrementally as new non-entity kinds are noticed
 # without needing to be complete from day one.
-_NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
+# Built from real `ChangeKind` members (not raw string literals): a
+# misspelled/stale entry now fails loudly at import time (an `AttributeError`
+# on `ChangeKind`) instead of silently degrading to "not in the set" and
+# falling through to ordinary classification with no signal at all -- the
+# same reasoning already applied to `_PUBLIC_SOURCE_ABI_KIND_SLUGS` below
+# (CodeRabbit review).
+_NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
     {
         # Linker identity (SONAME/RPATH/RUNPATH/DT_NEEDED).
-        "soname_changed",
-        "soname_missing",
-        "soname_bump_recommended",
-        "soname_bump_unnecessary",
-        "bundle_soname_skew",
-        "rpath_changed",
-        "runpath_changed",
-        "rpath_type_changed",
-        "wheel_rpath_not_portable",
-        "wheel_closure_dependency_violation",
+        ChangeKind.SONAME_CHANGED,
+        ChangeKind.SONAME_MISSING,
+        ChangeKind.SONAME_BUMP_RECOMMENDED,
+        ChangeKind.SONAME_BUMP_UNNECESSARY,
+        ChangeKind.BUNDLE_SONAME_SKEW,
+        ChangeKind.RPATH_CHANGED,
+        ChangeKind.RUNPATH_CHANGED,
+        ChangeKind.RPATH_TYPE_CHANGED,
+        ChangeKind.WHEEL_RPATH_NOT_PORTABLE,
+        ChangeKind.WHEEL_CLOSURE_DEPENDENCY_VIOLATION,
         # DT_NEEDED loader dependency list -- which *other* shared libraries
         # this one requires, not a function/variable/type consumer code
         # references. Falling through the ordinary path made these
         # `UNKNOWN_UNRESOLVED` without headers, or `IN_CONTRACT` in `ALL`
         # mode -- both wrong for a loader-deployment fact (Codex review,
         # fresh evidence).
-        "needed_added",
-        "needed_removed",
+        ChangeKind.NEEDED_ADDED,
+        ChangeKind.NEEDED_REMOVED,
         # _diff_needed_order's own reorder-only finding (the dependency SET
         # is unchanged, only DT_NEEDED entry order) -- same synthetic
         # "DT_NEEDED" subject, same loader-level state, not a different kind
         # of entity (Codex review, fresh evidence).
-        "needed_order_changed",
+        ChangeKind.NEEDED_ORDER_CHANGED,
         # _diff_dynamic_contract's own PT_INTERP/DT_* loader-control state --
         # program interpreter path, eager/lazy symbol binding, dlopen/dlclose
         # flags, and init/fini array presence are all binary-wide
         # loader-contract properties, the same synthetic-subject shape as
         # the DT_NEEDED findings immediately above, never a specific
         # function/variable/type (Codex review, fresh evidence).
-        "interpreter_changed",
-        "bind_now_disabled",
-        "dynamic_loading_flags_changed",
-        "elf_init_fini_changed",
+        ChangeKind.INTERPRETER_CHANGED,
+        ChangeKind.BIND_NOW_DISABLED,
+        ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED,
+        ChangeKind.ELF_INIT_FINI_CHANGED,
         # DT_SYMBOLIC/DF_SYMBOLIC toggle (ELF) -- the same synthetic-subject
         # loader-control shape as the PT_INTERP/DT_* findings immediately
         # above (`diff_platform_elf_dynamic.py`'s own `symbol="DT_SYMBOLIC"`
         # construction), never a specific function/variable/type (Codex
         # review, fresh evidence).
-        "symbolic_binding_mode_changed",
+        ChangeKind.SYMBOLIC_BINDING_MODE_CHANGED,
         # LC_ID_DYLIB compat_version (Mach-O) -- a binary-wide loader
         # contract property with its own synthetic `symbol="compat_version"`
         # subject (`diff_platform._diff_macho_compat_version`), the Mach-O
         # counterpart of the ELF loader-state findings above (Codex review,
         # fresh evidence).
-        "compat_version_changed",
+        ChangeKind.COMPAT_VERSION_CHANGED,
+        # A PE import's eager/delay-load mode (a link-time property of the
+        # import table entry, not a change to the imported function itself),
+        # ELF's SysV/GNU symbol-hash style (a synthetic `.hash`/`.gnu.hash`
+        # subject, `diff_platform_elf_dynamic.py`'s own
+        # `symbol=".hash" if ... else ".gnu.hash"` construction), and a
+        # musllinux-tagged wheel actually depending on a glibc-versioned
+        # symbol (a synthetic `symbol="<platform-baseline>"` sentinel,
+        # `diff_versioning.py`) are all loader/deployment-packaging state,
+        # never a specific function/variable/type (Codex review, fresh
+        # evidence).
+        ChangeKind.PE_IMPORT_LOAD_MODE_CHANGED,
+        ChangeKind.HASH_STYLE_REMOVED,
+        ChangeKind.MUSLLINUX_GLIBC_DEPENDENCY_DETECTED,
         # Architecture / file-format identity.
-        "pe_machine_changed",
-        "wheel_tag_architecture_mismatch",
-        "elf_class_changed",
-        "elf_osabi_changed",
-        "elf_endianness_changed",
+        ChangeKind.PE_MACHINE_CHANGED,
+        ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH,
+        ChangeKind.ELF_CLASS_CHANGED,
+        ChangeKind.ELF_OSABI_CHANGED,
+        ChangeKind.ELF_ENDIANNESS_CHANGED,
         # e_machine / decoded float-ABI-EABI drift -- binary-wide
         # architecture/calling-convention identity, the ELF analogue of
         # pe_machine_changed/macho_cpu_type_changed already covered above
         # (Codex review, fresh evidence).
-        "elf_machine_changed",
-        "elf_abi_flags_changed",
+        ChangeKind.ELF_MACHINE_CHANGED,
+        ChangeKind.ELF_ABI_FLAGS_CHANGED,
         # The Mach-O analogue of pe_machine_changed/elf_class_changed --
         # binary-wide CPU architecture identity, not a function/variable/type
         # (Codex review, fresh evidence). Previously fell through to
@@ -171,39 +190,39 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
         # mode), skewing shadow relevance metrics for ordinary Mach-O
         # architecture changes the same way the sibling PE/ELF kinds already
         # correctly short-circuit.
-        "macho_cpu_type_changed",
-        "macho_filetype_changed",
-        "macho_linkage_flags_changed",
-        "macho_reexport_changed",
+        ChangeKind.MACHO_CPU_TYPE_CHANGED,
+        ChangeKind.MACHO_FILETYPE_CHANGED,
+        ChangeKind.MACHO_LINKAGE_FLAGS_CHANGED,
+        ChangeKind.MACHO_REEXPORT_CHANGED,
         # Security-hardening posture (PT_GNU_STACK/RELRO/PIE/canary/FORTIFY/
         # PE DllCharacteristics/text relocations/DT_RELR) -- a property of
         # the binary's build flags, not of any one exported entity.
-        "executable_stack",
-        "executable_stack_removed",
-        "relro_weakened",
-        "pie_disabled",
-        "stack_canary_removed",
-        "fortify_source_weakened",
-        "pe_hardening_weakened",
-        "pe_hardening_improved",
-        "text_relocation_introduced",
-        "dt_relr_introduced",
-        "dt_relr_removed",
+        ChangeKind.EXECUTABLE_STACK,
+        ChangeKind.EXECUTABLE_STACK_REMOVED,
+        ChangeKind.RELRO_WEAKENED,
+        ChangeKind.PIE_DISABLED,
+        ChangeKind.STACK_CANARY_REMOVED,
+        ChangeKind.FORTIFY_SOURCE_WEAKENED,
+        ChangeKind.PE_HARDENING_WEAKENED,
+        ChangeKind.PE_HARDENING_IMPROVED,
+        ChangeKind.TEXT_RELOCATION_INTRODUCED,
+        ChangeKind.DT_RELR_INTRODUCED,
+        ChangeKind.DT_RELR_REMOVED,
         # W^X/CET/BTI-PAC hardening posture -- the same binary-wide
         # build-flag property as the security-hardening kinds immediately
         # above, just omitted from the original curation (Codex review,
         # fresh evidence): a writable+executable segment, and IBT/SHSTK
         # (x86 CET) / BTI/PAC (AArch64 branch protection) gained or
         # dropped, are never about one exported entity.
-        "writable_executable_segment",
-        "text_relocation_removed",
-        "cet_protection_weakened",
-        "branch_protection_weakened",
-        "cet_protection_improved",
-        "branch_protection_improved",
+        ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
+        ChangeKind.TEXT_RELOCATION_REMOVED,
+        ChangeKind.CET_PROTECTION_WEAKENED,
+        ChangeKind.BRANCH_PROTECTION_WEAKENED,
+        ChangeKind.CET_PROTECTION_IMPROVED,
+        ChangeKind.BRANCH_PROTECTION_IMPROVED,
         # Toolchain/runtime identity, not a consumer-visible entity.
-        "libcpp_abi_version_changed",
-        "sycl_plugin_search_path_changed",
+        ChangeKind.LIBCPP_ABI_VERSION_CHANGED,
+        ChangeKind.SYCL_PLUGIN_SEARCH_PATH_CHANGED,
         # Deployment/runtime-floor state (ADR-049 D2's "deployment" column):
         # each is a synthesized headline finding over a synthetic subject
         # (e.g. "libc.so.6:GLIBC_2" for RUNTIME_FLOOR_RAISED, per
@@ -212,12 +231,16 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
         # runtime/OS/CPU-ISA a binary now requires, never a specific
         # function/variable/type a consumer's code references (Codex
         # review, fresh evidence).
-        "runtime_floor_raised",
-        "platform_baseline_floor_raised",
-        "macos_deployment_target_raised",
-        "x86_isa_baseline_raised",
-        "os_deployment_floor_raised",
+        ChangeKind.RUNTIME_FLOOR_RAISED,
+        ChangeKind.PLATFORM_BASELINE_FLOOR_RAISED,
+        ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
+        ChangeKind.X86_ISA_BASELINE_RAISED,
+        ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
     }
+)
+
+_NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
+    k.value for k in _NOT_APPLICABLE_KINDS
 )
 
 _SUPPORTED_MODES: frozenset[ContractMode] = frozenset(
@@ -703,8 +726,8 @@ def _in_surface_result_is_confirmed(
     the same direction every other unresolvable case in this function
     already defaults to.
 
-    **Checks only the authoritative side (ADR-049 D4), not the old∪new
-    union:** "Removal and modification of an existing obligation use
+    **Checks only the authoritative side (ADR-049 D4), not the old-union-new
+    universe:** "Removal and modification of an existing obligation use
     old-side evidence. Addition and a new commitment use new-side
     evidence... If the authoritative side is unresolved, evidence from the
     other side cannot manufacture confidence." Confirmed empirically that
@@ -968,8 +991,7 @@ def evaluate_change_contract_relevance(
     # *authoritative* side to be resolvable (the non-authoritative side can
     # still be unresolvable and fall through to here, in which case
     # `classify_change_surface`'s own gate keeps it at `in_surface=True`).
-    assert reason in _ALL_SURFACE_REASONS, f"unrecognized surface reason: {reason!r}"
-    return _decision_for_surface_reason(reason, change, surf_old, surf_new)
+    return _decision_for_surface_reason(reason or "", change, surf_old, surf_new)
 
 
 def evaluate_snapshot_pair_contract_relevance(

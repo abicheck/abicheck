@@ -13,15 +13,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   equality assertion. Fixed by passing `fold=value.fold` through the
   reconstruction.
 
-- **ADR-049 Phase 3 shadow evaluator: documented, not fixed, a known
-  over-rejection of exact qualified type references** (no behavior change
-  outside this still-unwired shadow module): when a public signature names
-  a type fully qualified (e.g. `ns1::Point`) and the snapshot separately
-  contains an unrelated same-tail type (`ns2::Point`), the finding's exact,
-  unambiguous match is currently rejected the same as a genuinely ambiguous
-  bare reference would be — `_type_identifiers` derives the same bare tail
-  from both an exact qualified reference and a truly ambiguous bare one, so
-  the two routes are indistinguishable from `PublicSurface`'s current
+### Documentation
+
+- **ADR-049 Phase 3 shadow evaluator (`compare(..., contract_evaluation=True)`,
+  opt-in): documented, not fixed, a known over-rejection of exact qualified
+  type references**: when a public signature names a type fully qualified
+  (e.g. `ns1::Point`) and the snapshot separately contains an unrelated
+  same-tail type (`ns2::Point`), the finding's exact, unambiguous match is
+  currently rejected the same as a genuinely ambiguous bare reference would
+  be — `_type_identifiers` derives the same bare tail from both an exact
+  qualified reference and a truly ambiguous bare one, so the two routes are
+  indistinguishable from `PublicSurface`'s current
   `public_types`/`ambiguous_type_names` alone. A precise fix needs new
   per-type provenance tracking in `surface.py`'s closure walk itself — the
   public-surface-scoping gate every other detector depends on, not a

@@ -5,8 +5,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 ### Fixed
 
 - **ADR-049 Phase 3 shadow evaluator: a one-sided public-root proof is now
-  sufficient, not both sides** (no behavior change outside this still-unwired
-  shadow module): `evaluate_change_contract_relevance` required *both*
+  sufficient, not both sides** (opt-in via
+  `compare(..., contract_evaluation=True)`; no default-path behavior
+  change): `evaluate_change_contract_relevance` required *both*
   `surf_old`/`surf_new` to be header-resolvable before attempting any
   classification, downgrading to `UNKNOWN_UNRESOLVED` even when, e.g., a
   `FUNC_REMOVED` finding's old side definitively proved the function was

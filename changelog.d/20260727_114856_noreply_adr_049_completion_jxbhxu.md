@@ -5,8 +5,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 ### Fixed
 
 - **ADR-049 Phase 3 shadow evaluator: public-root confirmation now respects
-  D4's temporal side authority** (no behavior change outside this
-  still-unwired shadow module): `_in_surface_result_is_confirmed` (and the
+  D4's temporal side authority** (opt-in via
+  `compare(..., contract_evaluation=True)`; no default-path behavior
+  change): `_in_surface_result_is_confirmed` (and the
   hidden-friend confirmation path) previously checked the *union* of
   `surf_old`/`surf_new` regardless of the finding's direction, so new-side
   public evidence could retroactively confirm `IN_CONTRACT` for a
