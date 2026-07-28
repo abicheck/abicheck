@@ -81,6 +81,35 @@ if TYPE_CHECKING:
     from .service_scan import CompileContext
 
 
+def _preprocessor_scan_clang_bin(compile_context: CompileContext | None) -> str:
+    """Resolve the ``clang -E`` binary for the S2 pre-scan from the scan's own
+    compile context (D2), instead of a hardcoded ``clang++``.
+
+    Mirrors :func:`abicheck.dumper_clang._resolve_clang_bin`'s two override
+    cases (``--gcc-path`` only when it is actually a clang-family binary --
+    castxml/GCC binaries can't take clang-only flags; ``--gcc-prefix`` maps to
+    the prefixed clang driver), without that function's raise-on-missing: the
+    S2 pre-scan already degrades to a ``skipped_reason`` coverage row via
+    ``ClangPreprocessorExtractor.available()`` when the resolved binary isn't
+    on PATH (ADR-035 D2 coverage honesty), so this stays a pure resolver.
+
+    Without this, a scan compiled with an Intel oneAPI/DPC++ toolchain
+    (``--gcc-path icpx``, which accepts icx/icpx-only flags like
+    ``-no-intel-lib``) always shelled out to a plain ``clang++`` instead,
+    failing every ``clang -E`` invocation and silently degrading L3
+    preprocessor coverage (and, transitively, L4 source-ABI).
+    """
+    from .dumper_clang import _is_clang_family_binary
+
+    if compile_context is None:
+        return "clang++"
+    if compile_context.gcc_path and _is_clang_family_binary(compile_context.gcc_path):
+        return compile_context.gcc_path
+    if compile_context.gcc_prefix:
+        return f"{compile_context.gcc_prefix}clang++"
+    return "clang++"
+
+
 @dataclass
 class ScanOutcome:
     """The composed result of a ``scan`` run, rendered to text or JSON.
@@ -814,7 +843,11 @@ def run_scan_core(
     # the same shrinking, process-group-safe deadline the other stages get,
     # so it can't run its own remaining compile units past the budget.
     with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
-        preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
+        preproc = run_preprocessor_scan(
+            pp_build,
+            _expand_public_headers(list(headers)),
+            clang_bin=_preprocessor_scan_clang_bin(compile_context),
+        )
     _record_stage("preprocessor_scan", _stage)
 
     # --- always-on tier: intra-version cross-source checks (D4) ---------------
