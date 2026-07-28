@@ -1594,6 +1594,17 @@ def _embed_inline_source_side(
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
         _resolved_include_labels=include_labels,
+        # dump_cmd's own default now excludes toolchain/system-header
+        # declarations (dump --include-dependencies opts out). The sibling
+        # path that reaches this same binary without a raw --old/new-sources
+        # tree goes through service.run_dump directly and never applies that
+        # filter -- so without forcing it off here too, merely adding deeper
+        # L3-L5 evidence to an otherwise-identical compare would silently
+        # scope this side's snapshot and could drop real findings depending
+        # only on which evidence flags happened to be passed (Codex review).
+        # Force it off so this inline dump preserves compare's existing
+        # (unscoped) behavior, consistent with the non-inline path.
+        include_dependencies=True,
     )
     # The raw sources/build-info are now embedded in the snapshot; pack-shaped
     # inputs (kept_*) ride through to the later prepare_embedded_build_source so

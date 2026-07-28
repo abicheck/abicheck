@@ -24,6 +24,7 @@ import click
 import pytest
 
 from abicheck.cli_dump_helpers import (
+    _dump_manifest_header_roots,
     check_dump_compile_db_error,
     check_dump_debug_format_error,
     handle_non_elf_dump,
@@ -1741,3 +1742,50 @@ def test_perform_elf_dump_header_roots_is_headers_only_without_manifest(
     )
 
     assert captured["header_roots"] == (hdr,)
+
+
+def test_dump_manifest_header_roots_includes_public_headers_and_project_owned_includes(
+    tmp_path: Path,
+) -> None:
+    """Regression coverage for a Codex-review P1 finding: ``roots`` alone
+    is not the manifest's full ownership set -- ``public_header_paths``/
+    ``public_header_dirs`` (the manifest's own ADR-015 provenance-input
+    equivalent of ``--public-header``/``--public-header-dir``) and any
+    per-translation-unit include directory explicitly marked
+    ``project_owned: true`` are just as much "the dump's actual root set"
+    and must reach dependency scoping too, or their declarations can be
+    misclassified as dependencies and silently dropped."""
+    from abicheck.dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
+
+    root = Path("/usr/include/mylib/api.h")
+    pub_path = Path("/usr/include/mylib/extra_public.h")
+    pub_dir = Path("/usr/include/mylib/public_dir")
+    owned_include = Path("/usr/include/mylib/owned_include")
+    unowned_include = Path("/usr/include/other/not_owned")
+    manifest = DumpManifest(
+        base_dir=tmp_path,
+        roots=(root,),
+        public_header_paths=(pub_path,),
+        public_header_dirs=(pub_dir,),
+        translation_units=(
+            TranslationUnit(
+                name="tu1",
+                includes=(
+                    IncludeEntry(path=owned_include, project_owned=True),
+                    IncludeEntry(path=unowned_include, project_owned=False),
+                ),
+            ),
+        ),
+    )
+
+    roots = _dump_manifest_header_roots(manifest)
+
+    assert root in roots
+    assert pub_path in roots
+    assert pub_dir in roots
+    assert owned_include in roots
+    assert unowned_include not in roots
+
+
+def test_dump_manifest_header_roots_empty_without_manifest() -> None:
+    assert _dump_manifest_header_roots(None) == ()

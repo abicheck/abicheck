@@ -1303,6 +1303,31 @@ def resolve_dump_compile_context(
     )
 
 
+def _dump_manifest_header_roots(dump_manifest: Any) -> tuple[Path, ...]:
+    """Every path a ``--dump-manifest`` document declares as project-owned,
+    for forwarding into :func:`abicheck.dumper_scoping.scope_snapshot_excluding_
+    dependencies`'s ``header_roots`` -- not just ``roots`` (Codex review).
+    ``public_header_paths``/``public_header_dirs`` (the manifest's own
+    ADR-015 provenance-input equivalent of ``--public-header``/
+    ``--public-header-dir``) and any per-translation-unit include directory
+    explicitly marked ``project_owned: true`` are just as much "the dump's
+    actual root set" as ``roots`` -- a declaration under one of them must
+    not be misclassified as a dependency just because those paths happen to
+    sit under a system prefix, the same reasoning ``roots`` itself already
+    gets.
+    """
+    if dump_manifest is None:
+        return ()
+    roots = [
+        *dump_manifest.roots,
+        *dump_manifest.public_header_paths,
+        *dump_manifest.public_header_dirs,
+    ]
+    for tu in dump_manifest.translation_units:
+        roots.extend(inc.path for inc in tu.includes if inc.project_owned)
+    return tuple(roots)
+
+
 def perform_elf_dump(
     so_path: Path,
     headers: tuple[Path, ...],
@@ -1715,6 +1740,5 @@ def perform_elf_dump(
         inputs_pack=inputs_pack,
         depth=depth,
         include_dependencies=include_dependencies,
-        header_roots=tuple(headers)
-        + tuple(dump_manifest.roots if dump_manifest is not None else ()),
+        header_roots=tuple(headers) + _dump_manifest_header_roots(dump_manifest),
     )

@@ -195,6 +195,34 @@ def is_system_header(source_header: str | None) -> bool:
     return _is_system_header(_segments(source_header))
 
 
+_DRIVE_ROOT_RE = re.compile(r"^[A-Za-z]:[/\\]")
+
+
+def _absolutize_header_root(h: Path | str) -> Path:
+    """Absolutize a ``-H``/``--header`` root, but only when it is genuinely
+    *relative* (e.g. ``-H include/api.h``).
+
+    An already-rooted path -- POSIX-style (a leading ``/``), a Windows
+    drive root (``C:\\...``), or a UNC path (``\\\\server\\share\\...``) --
+    is returned unchanged. Unconditionally calling :meth:`Path.resolve` here
+    (an earlier version of this fix did) is wrong on Windows: resolving a
+    POSIX-style already-rooted string like ``/usr/include/mylib/api.h``
+    drive-anchors it to the current working directory's drive (e.g.
+    ``D:\\usr\\include\\mylib\\api.h``), producing a segment sequence that no
+    longer matches the very same string's own -- never resolved -- form
+    when it later appears as a declaration's ``source_header`` (confirmed by
+    a real Windows CI failure). This module's own docstring already commits
+    to matching by path *segments* rather than resolving real paths for
+    exactly this cross-machine-safety reason; resolving an already-rooted
+    root broke that contract for itself.
+    """
+    s = str(h)
+    normalized = s.replace("\\", "/")
+    if normalized.startswith("/") or _DRIVE_ROOT_RE.match(s):
+        return Path(s)
+    return Path(h).resolve()
+
+
 def is_dependency_header(
     source_header: str | None,
     header_roots: Sequence[Path | str] | None,
@@ -255,7 +283,7 @@ def is_dependency_header(
     # system prefix (`-H /usr/include/mylib/api.h`, parent
     # `/usr/include/mylib`) is unaffected: that parent is not itself one of
     # the bare system-dir suffixes, only *within* one.
-    resolved = [Path(h).resolve() for h in header_roots]
+    resolved = [_absolutize_header_root(h) for h in header_roots]
     roots = [str(r) for r in resolved if not r.is_dir()]
     root_dirs = [
         str(r if r.is_dir() else r.parent)

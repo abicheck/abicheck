@@ -31,6 +31,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.provenance import (
+    _absolutize_header_root,
     apply_provenance,
     build_public_set,
     classify_origin,
@@ -586,6 +587,41 @@ class TestIsDependencyHeaderFlatInstalledFileRoot:
         # The already-fixed case (TestInstalledLibraryUnderSystemPrefix):
         # a root under its own project subdirectory of a system prefix
         # must still widen to that subdirectory, unaffected by this fix.
+        root = "/usr/include/mylib/api.h"
+        sibling = "/usr/include/mylib/detail/internal.h"
+        assert is_dependency_header(sibling, [root]) is False
+
+
+class TestAbsolutizeHeaderRoot:
+    """Regression coverage for a real Windows CI failure: an earlier version
+    of this fix called ``Path(h).resolve()`` unconditionally on every root,
+    including already-rooted ones. On Windows, resolving a POSIX-style
+    already-rooted string (``/usr/include/mylib/api.h``, the convention this
+    test suite -- and any snapshot produced on Linux/macOS -- uses)
+    drive-anchors it to the current working directory's drive, producing a
+    segment sequence that no longer matches that same string's own
+    (never-resolved) form as a declaration's ``source_header``. Only a
+    genuinely relative root should be absolutized."""
+
+    def test_posix_rooted_path_returned_unchanged(self):
+        assert _absolutize_header_root("/usr/include/mylib/api.h") == Path(
+            "/usr/include/mylib/api.h"
+        )
+
+    def test_windows_drive_rooted_path_returned_unchanged(self):
+        assert _absolutize_header_root("C:\\project\\include\\api.h") == Path(
+            "C:\\project\\include\\api.h"
+        )
+
+    def test_relative_path_is_resolved_against_cwd(self):
+        result = _absolutize_header_root("include/api.h")
+        assert result.is_absolute()
+        assert result == Path("include/api.h").resolve()
+
+    def test_dependency_check_stable_for_posix_rooted_root_and_sibling(self):
+        # The end-to-end regression this unit covers: a POSIX-rooted root and
+        # an unresolved sibling source_header must still match consistently,
+        # regardless of platform.
         root = "/usr/include/mylib/api.h"
         sibling = "/usr/include/mylib/detail/internal.h"
         assert is_dependency_header(sibling, [root]) is False
