@@ -2220,6 +2220,28 @@ def test_dump_source_only_no_binary(tmp_path):
     assert len(snap.build_source.build_evidence.compile_units) == 1
 
 
+def test_dump_source_only_include_dependencies_is_noop(tmp_path):
+    """`dump --sources <tree> --include-dependencies` (no SO_PATH) must not
+    error: dependency-exclusion runs by default now, and a source-only
+    snapshot has no header-derived declarations at all, so both the default
+    (excluding) and --include-dependencies (opting out) paths are a no-op
+    for it -- succeed normally either way.
+    """
+    tree = tmp_path / "src"
+    tree.mkdir()
+    cdb = [{"directory": str(tree), "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
+    (tree / "compile_commands.json").write_text(json.dumps(cdb))
+
+    out = tmp_path / "libfoo.src.json"
+    result = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(tree), "--include-dependencies", "-o", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+
 def test_dump_with_no_binary_and_no_inputs_errors():
     """A bare `dump` (no SO_PATH, no --sources/--build-info) errors clearly."""
     result = CliRunner().invoke(main, ["dump"])

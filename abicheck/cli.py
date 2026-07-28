@@ -303,6 +303,8 @@ def _write_snapshot_output(
     extractor: str = "auto",
     inputs_pack: Path | None = None,
     depth: str | None = None,
+    include_dependencies: bool = False,
+    header_roots: tuple[Path, ...] = (),
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -318,7 +320,17 @@ def _write_snapshot_output(
     L2 header AST (ADR-037 D8): one frontend choice across both pipeline stages.
     *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when
     given, ``check_requested_depth_satisfied`` raises if the snapshot did not
-    actually reach it.
+    actually reach it. Unless *include_dependencies* is set (``dump
+    --include-dependencies``), toolchain/system-header declarations are
+    excluded from the snapshot right before serialization by default, once
+    every embed step above has had its chance to fill in the snapshot — see
+    ``dumper_scoping.py`` for exactly what "dependency" means here (header
+    origin, not ABI visibility) and what this still doesn't filter.
+    *header_roots* is the actual ``-H``/``--header`` input the dump was
+    invoked with, forwarded to ``scope_snapshot_excluding_dependencies`` so a
+    header that IS one of those roots (or lives under one) is never treated
+    as a dependency just because it happens to sit under a system prefix
+    (e.g. an installed library dumped via its real ``/usr/include`` path).
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -373,6 +385,9 @@ def _write_snapshot_output(
     # check_requested_depth_satisfied's docstring. Checked last, after every
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
+    if not include_dependencies:
+        from .dumper_scoping import scope_snapshot_excluding_dependencies
+        snap = scope_snapshot_excluding_dependencies(snap, header_roots)
     result = snapshot_to_json(snap)
     # Audit finding: dump/baseline provenance didn't record requested vs.
     # effective depth anywhere a later reader could inspect -- fold it into
@@ -506,6 +521,24 @@ def main() -> None:
               type=click.Path(exists=True, file_okay=False, path_type=Path),
               help="Directory whose headers are treated as public for provenance "
                    "classification (repeat for multiple).")
+@click.option("--include-dependencies", "include_dependencies", is_flag=True, default=False,
+              help="Include toolchain/system-header declarations (std::/SYCL/etc. pulled "
+                   "in transitively by #include) in the written snapshot. By default "
+                   "these are excluded -- every declaration whose own defining header is "
+                   "a toolchain/system header (/usr/include, MSVC VC/Tools, the Xcode/"
+                   "macOS SDK, ...) is dropped, which can dominate the file size for a "
+                   "library with a large dependency stack. This is a header-origin "
+                   "filter, not a public-API-surface one: the library's own private/"
+                   "internal declarations are always kept, exactly like its public ones "
+                   "-- pass this flag to get the old, unfiltered full dump instead. A "
+                   "no-op when the snapshot has no header-derived declarations at all "
+                   "(a binary-only/DWARF-only dump). A scoped snapshot is a lossy "
+                   "artifact: compare both sides of a `compare` the same way, don't mix "
+                   "a scoped and an --include-dependencies snapshot. Filters the flat "
+                   "function/variable/type/enum lists (typedefs are always kept) and the "
+                   "DWARF/DWARF-advanced collections keyed off them; an embedded "
+                   "header-only semantic graph (always attached by default) is not "
+                   "filtered and may still carry excluded-dependency nodes/edges.")
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
 @lang_option
@@ -587,6 +620,7 @@ def main() -> None:
 @compile_context_options  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
+             include_dependencies: bool,
              version: str, lang: str, header_backend: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
              gcc_option_tokens: tuple[str, ...],
@@ -821,7 +855,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, include_dependencies=include_dependencies)
         return
 
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
@@ -886,6 +920,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             allow_build_query, collect_mode, build_query, build_compile_db,
             header_backend=header_backend, compile_context=native_cc,
             depth=depth, compile_db_context_matched=compile_db_matched,
+            include_dependencies=include_dependencies,
         )
         return
 
@@ -947,6 +982,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         compile_db_context_matched=compile_db_matched,
         dump_manifest=parsed_dump_manifest,
         include_labels=_resolved_include_labels,
+        include_dependencies=include_dependencies,
     )
 
 
@@ -1558,6 +1594,17 @@ def _embed_inline_source_side(
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
         _resolved_include_labels=include_labels,
+        # dump_cmd's own default now excludes toolchain/system-header
+        # declarations (dump --include-dependencies opts out). The sibling
+        # path that reaches this same binary without a raw --old/new-sources
+        # tree goes through service.run_dump directly and never applies that
+        # filter -- so without forcing it off here too, merely adding deeper
+        # L3-L5 evidence to an otherwise-identical compare would silently
+        # scope this side's snapshot and could drop real findings depending
+        # only on which evidence flags happened to be passed (Codex review).
+        # Force it off so this inline dump preserves compare's existing
+        # (unscoped) behavior, consistent with the non-inline path.
+        include_dependencies=True,
     )
     # The raw sources/build-info are now embedded in the snapshot; pack-shaped
     # inputs (kept_*) ride through to the later prepare_embedded_build_source so

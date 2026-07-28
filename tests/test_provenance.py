@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from abicheck.model import (
@@ -29,10 +31,12 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.provenance import (
+    _absolutize_header_root,
     apply_provenance,
     build_public_set,
     classify_origin,
     header_from_location,
+    is_dependency_header,
     tag_provenance,
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
@@ -481,3 +485,143 @@ def test_castxml_populates_source_location_on_types_vars_enums():
     assert var.source_location == "/build/inc/api.h:20"
     enum = next(e for e in parser.parse_enums() if e.name == "Color")
     assert enum.source_location == "/build/inc/api.h:30"
+
+
+# ── is_dependency_header ────────────────────────────────────────────────────
+
+
+class TestIsDependencyHeaderRootResolution:
+    """Regression coverage for a Codex-review P2 finding: a relative
+    ``-H`` root (e.g. ``dump ... -H include/api.h``, the common invocation
+    from a project's own root directory) must not turn its short relative
+    parent directory (``include``) into a public-dir segment that then
+    matches *any* unrelated path containing the same generic component --
+    including real system headers like ``/usr/include/...`` -- which would
+    defeat dependency exclusion entirely."""
+
+    def test_relative_root_directory_does_not_leak_into_system_paths(self):
+        root = "include/api.h"
+        assert is_dependency_header("/usr/include/c++/11/string", [root]) is True
+
+    def test_relative_root_still_recognizes_its_own_header(self):
+        root = "include/api.h"
+        resolved = str(Path(root).resolve())
+        assert is_dependency_header(resolved, [root]) is False
+
+    def test_relative_root_recognizes_sibling_private_header(self):
+        root = "include/api.h"
+        sibling = str(Path("include/detail/internal.h").resolve())
+        assert is_dependency_header(sibling, [root]) is False
+
+    def test_no_header_roots_falls_back_to_bare_heuristic(self):
+        assert is_dependency_header("/usr/include/c++/11/string", None) is True
+        assert is_dependency_header("/usr/include/c++/11/string", []) is True
+
+    def test_absolute_root_under_system_prefix_still_kept(self):
+        root = "/usr/include/mylib/api.h"
+        assert is_dependency_header(root, [root]) is False
+
+    def test_no_source_header_is_never_a_dependency(self):
+        assert is_dependency_header(None, ["include/api.h"]) is False
+
+
+class TestIsDependencyHeaderDirectoryRoot:
+    """Regression coverage for a Codex-review P1 finding: ``-H`` accepts a
+    directory as well as a file (``dump --header`` help text: "Public
+    header file or directory"). Unconditionally widening every root to its
+    *parent* over-widens a directory root -- ``-H /usr/include/mylib``
+    must not turn into the public dir ``/usr/include``, which would make
+    every unrelated header under that prefix (including real dependency
+    headers) match as project-owned."""
+
+    def test_directory_root_does_not_widen_to_parent(self, tmp_path):
+        # "usr"/"include" as separate path segments (not one joined
+        # component) so the real system-header heuristic recognizes the
+        # sibling as a genuine dependency path, the same way it would
+        # recognize a real /usr/include/otherlib on disk.
+        root_dir = tmp_path / "usr" / "include" / "mylib"
+        root_dir.mkdir(parents=True)
+        sibling_dep = tmp_path / "usr" / "include" / "otherlib" / "dep.h"
+        sibling_dep.parent.mkdir(parents=True)
+        sibling_dep.write_text("", encoding="utf-8")
+
+        assert is_dependency_header(str(sibling_dep), [str(root_dir)]) is True
+
+    def test_directory_root_still_keeps_its_own_contents(self, tmp_path):
+        root_dir = tmp_path / "usr" / "include" / "mylib"
+        own_header = root_dir / "detail" / "api.h"
+        own_header.parent.mkdir(parents=True)
+        own_header.write_text("", encoding="utf-8")
+
+        assert is_dependency_header(str(own_header), [str(root_dir)]) is False
+
+    def test_file_root_still_widens_to_its_parent_directory(self, tmp_path):
+        root_file = tmp_path / "mylib" / "api.h"
+        root_file.parent.mkdir(parents=True)
+        root_file.write_text("", encoding="utf-8")
+        sibling = tmp_path / "mylib" / "detail" / "internal.h"
+        sibling.parent.mkdir(parents=True)
+        sibling.write_text("", encoding="utf-8")
+
+        assert is_dependency_header(str(sibling), [str(root_file)]) is False
+
+
+class TestIsDependencyHeaderFlatInstalledFileRoot:
+    """Regression coverage for a Codex-review P1 finding: a file root
+    installed flat in a system prefix (e.g. ``-H /usr/include/zlib.h``)
+    must not widen its parent (the bare, unqualified ``/usr/include``) into
+    a project directory -- unlike a root under its own subdirectory there
+    (``-H /usr/include/mylib/api.h``), the bare system prefix has nothing
+    project-specific about it, and treating it as project-owned would let
+    every unrelated system header underneath match too."""
+
+    def test_flat_installed_root_does_not_widen_bare_system_prefix(self):
+        root = "/usr/include/zlib.h"
+        assert is_dependency_header("/usr/include/c++/11/string", [root]) is True
+
+    def test_flat_installed_root_itself_still_kept(self):
+        root = "/usr/include/zlib.h"
+        assert is_dependency_header(root, [root]) is False
+
+    def test_subdirectory_installed_root_still_widens_its_own_parent(self):
+        # The already-fixed case (TestInstalledLibraryUnderSystemPrefix):
+        # a root under its own project subdirectory of a system prefix
+        # must still widen to that subdirectory, unaffected by this fix.
+        root = "/usr/include/mylib/api.h"
+        sibling = "/usr/include/mylib/detail/internal.h"
+        assert is_dependency_header(sibling, [root]) is False
+
+
+class TestAbsolutizeHeaderRoot:
+    """Regression coverage for a real Windows CI failure: an earlier version
+    of this fix called ``Path(h).resolve()`` unconditionally on every root,
+    including already-rooted ones. On Windows, resolving a POSIX-style
+    already-rooted string (``/usr/include/mylib/api.h``, the convention this
+    test suite -- and any snapshot produced on Linux/macOS -- uses)
+    drive-anchors it to the current working directory's drive, producing a
+    segment sequence that no longer matches that same string's own
+    (never-resolved) form as a declaration's ``source_header``. Only a
+    genuinely relative root should be absolutized."""
+
+    def test_posix_rooted_path_returned_unchanged(self):
+        assert _absolutize_header_root("/usr/include/mylib/api.h") == Path(
+            "/usr/include/mylib/api.h"
+        )
+
+    def test_windows_drive_rooted_path_returned_unchanged(self):
+        assert _absolutize_header_root("C:\\project\\include\\api.h") == Path(
+            "C:\\project\\include\\api.h"
+        )
+
+    def test_relative_path_is_resolved_against_cwd(self):
+        result = _absolutize_header_root("include/api.h")
+        assert result.is_absolute()
+        assert result == Path("include/api.h").resolve()
+
+    def test_dependency_check_stable_for_posix_rooted_root_and_sibling(self):
+        # The end-to-end regression this unit covers: a POSIX-rooted root and
+        # an unresolved sibling source_header must still match consistently,
+        # regardless of platform.
+        root = "/usr/include/mylib/api.h"
+        sibling = "/usr/include/mylib/detail/internal.h"
+        assert is_dependency_header(sibling, [root]) is False
