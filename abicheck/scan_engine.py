@@ -42,6 +42,7 @@ note through the advisories list like every other cross-cutting message.
 
 from __future__ import annotations
 
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -79,6 +80,71 @@ from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
+
+
+def _is_cl_style_driver_name(path: str) -> bool:
+    """Whether *path* is a CL-compatible-mode driver (``clang-cl``,
+    ``dpcpp-cl``, …), as opposed to a GNU-mode one.
+
+    :func:`abicheck.dumper_clang._is_clang_family_binary` deliberately does
+    not distinguish the two -- both are "clang-family" for its callers, which
+    invoke the frontend with driver-appropriate flags either way. This
+    module's :class:`~abicheck.buildsource.preprocessor_scan.
+    ClangPreprocessorExtractor` is different: it always shells out with
+    fixed GNU-mode flags (``-E -dM``, ``-M``), never CL-mode ones
+    (``/E``, ``/d1PP``) -- so a CL-style driver must never be selected here,
+    or the macro/include capture silently misbehaves (a CL driver can accept
+    ``-dM``/``-M`` as ordinary compile input and "succeed" without producing
+    the expected output; Codex review). Narrow, name-only heuristic: any
+    stem ending in ``-cl`` (covers ``clang-cl``/``clang-cl.exe`` and Intel's
+    ``dpcpp-cl``), consistent with the equally name-only
+    :func:`~abicheck.dumper_clang._is_clang_family_binary` this complements.
+    """
+    return Path(path).stem.lower().endswith("-cl")
+
+
+def _preprocessor_scan_clang_bin(compile_context: CompileContext | None) -> str:
+    """Resolve the ``clang -E``/``clang -M`` binary for the S2 pre-scan from
+    the scan's own compile context (D2), instead of a hardcoded ``clang++``.
+
+    Mirrors :func:`abicheck.dumper_clang._resolve_clang_bin`'s two override
+    cases (``--gcc-path`` only when it is actually a GNU-mode clang-family
+    binary -- castxml/GCC binaries can't take clang-only flags, and a
+    CL-mode driver can't take the GNU-mode flags this pre-scan always uses
+    (:func:`_is_cl_style_driver_name`); ``--gcc-prefix`` maps to the prefixed
+    clang driver, but only when that specific prefixed binary is actually on
+    PATH -- a documented GCC cross-toolchain prefix (e.g.
+    ``aarch64-linux-gnu-``) is not evidence a same-prefixed Clang exists, and
+    guessing wrong would silently downgrade an already-working plain
+    ``clang++`` fallback to a "not_collected" skip (Codex review)), without
+    that function's raise-on-missing for the explicit-binary case: the S2
+    pre-scan already degrades to a ``skipped_reason`` coverage row via
+    ``ClangPreprocessorExtractor.available()`` when an explicitly-requested
+    binary isn't on PATH (ADR-035 D2 coverage honesty), so this stays a pure
+    resolver.
+
+    Without this, a scan compiled with an Intel oneAPI/DPC++ toolchain
+    (``--gcc-path icpx``, which accepts icx/icpx-only flags like
+    ``-no-intel-lib``) always shelled out to a plain ``clang++`` instead,
+    failing every ``clang -E`` invocation and silently degrading L3
+    preprocessor coverage (and, transitively, L4 source-ABI).
+    """
+    from .dumper_clang import _is_clang_family_binary
+
+    if compile_context is None:
+        return "clang++"
+    gcc_path = compile_context.gcc_path
+    if (
+        gcc_path
+        and _is_clang_family_binary(gcc_path)
+        and not _is_cl_style_driver_name(gcc_path)
+    ):
+        return gcc_path
+    if compile_context.gcc_prefix:
+        prefixed = f"{compile_context.gcc_prefix}clang++"
+        if shutil.which(prefixed):
+            return prefixed
+    return "clang++"
 
 
 @dataclass
@@ -814,7 +880,11 @@ def run_scan_core(
     # the same shrinking, process-group-safe deadline the other stages get,
     # so it can't run its own remaining compile units past the budget.
     with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
-        preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
+        preproc = run_preprocessor_scan(
+            pp_build,
+            _expand_public_headers(list(headers)),
+            clang_bin=_preprocessor_scan_clang_bin(compile_context),
+        )
     _record_stage("preprocessor_scan", _stage)
 
     # --- always-on tier: intra-version cross-source checks (D4) ---------------

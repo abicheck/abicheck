@@ -525,3 +525,87 @@ def test_capture_macros_argv_is_output_flag_sanitized(monkeypatch) -> None:
     assert "-save-temps" not in cmd
     assert not any(a.startswith("-ftime-trace") for a in cmd)
     assert out["cu://a"] == {"NDEBUG": "1"}
+
+
+# ── scan_engine's clang-binary resolution for run_preprocessor_scan ────────────
+
+
+def test_scan_engine_clang_bin_defaults_to_clang_plusplus() -> None:
+    from abicheck.scan_engine import _preprocessor_scan_clang_bin
+
+    assert _preprocessor_scan_clang_bin(None) == "clang++"
+
+
+def test_scan_engine_clang_bin_honors_clang_family_gcc_path() -> None:
+    """A ``--gcc-path`` pointing at a clang-family binary (icx/icpx/dpcpp/…)
+    must be threaded through to the S2 pre-scan's own ``clang -E`` invocation
+    instead of a hardcoded ``clang++`` — otherwise every preprocessor pass
+    fails on an Intel-only flag like ``-no-intel-lib`` that a real ``clang++``
+    on PATH rejects (the bug this test guards against)."""
+    from abicheck.scan_engine import _preprocessor_scan_clang_bin
+    from abicheck.service_scan import CompileContext
+
+    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="icpx")) == "icpx"
+    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="/opt/bin/icx")) == (
+        "/opt/bin/icx"
+    )
+
+
+def test_scan_engine_clang_bin_ignores_non_clang_gcc_path() -> None:
+    """A ``--gcc-path`` pointing at a real GCC binary (castxml's compiler
+    emulation target) is never dereferenced for the clang-only ``-E -dM``/``-M``
+    pre-scan — same "clang-family only" rule as
+    :func:`abicheck.dumper_clang._resolve_clang_bin`."""
+    from abicheck.scan_engine import _preprocessor_scan_clang_bin
+    from abicheck.service_scan import CompileContext
+
+    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="g++")) == "clang++"
+
+
+def test_scan_engine_clang_bin_honors_gcc_prefix_when_available(monkeypatch) -> None:
+    """A ``--gcc-prefix`` composes a prefixed clang driver name, but only wins
+    when that specific binary is actually resolvable on PATH."""
+    import abicheck.scan_engine as se
+    from abicheck.service_scan import CompileContext
+
+    monkeypatch.setattr(
+        se.shutil, "which", lambda name: name if name.endswith("clang++") else None
+    )
+    ctx = CompileContext(gcc_prefix="/opt/x86_64-linux-gnu-")
+    assert se._preprocessor_scan_clang_bin(ctx) == "/opt/x86_64-linux-gnu-clang++"
+
+
+def test_scan_engine_clang_bin_falls_back_when_prefixed_clang_missing(
+    monkeypatch,
+) -> None:
+    """A documented GCC cross-toolchain prefix (e.g. ``aarch64-linux-gnu-``)
+    is not evidence a same-prefixed Clang driver exists — a system providing
+    only ``aarch64-linux-gnu-g++`` must fall back to the plain ``clang++``
+    that worked before this resolver existed, not silently downgrade S2 to
+    ``not_collected`` by guessing a nonexistent binary name (Codex review)."""
+    import abicheck.scan_engine as se
+    from abicheck.service_scan import CompileContext
+
+    monkeypatch.setattr(se.shutil, "which", lambda name: None)
+    ctx = CompileContext(gcc_prefix="aarch64-linux-gnu-")
+    assert se._preprocessor_scan_clang_bin(ctx) == "clang++"
+
+
+def test_scan_engine_clang_bin_excludes_cl_style_drivers() -> None:
+    """A CL-compatible-mode driver (``clang-cl``, Intel's ``dpcpp-cl``) must
+    never be selected here: :class:`ClangPreprocessorExtractor` always shells
+    out with fixed GNU-mode flags (``-E -dM``, ``-M``), which a CL-mode
+    driver either rejects or silently misinterprets as ordinary compile
+    input (``/E``/``/d1PP`` are the CL-mode spellings) — Codex review."""
+    from abicheck.scan_engine import _preprocessor_scan_clang_bin
+    from abicheck.service_scan import CompileContext
+
+    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="dpcpp-cl")) == (
+        "clang++"
+    )
+    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="clang-cl")) == (
+        "clang++"
+    )
+    assert _preprocessor_scan_clang_bin(
+        CompileContext(gcc_path=r"C:\llvm\bin\clang-cl.exe")
+    ) == "clang++"
