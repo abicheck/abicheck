@@ -20,20 +20,33 @@ This is deliberately **not** a public-API-surface filter: the library's own
 private/internal declarations are kept, same as its public ones — only
 declarations whose own defining header is a toolchain/system header
 (``/usr/include``, the MSVC ``VC/Tools`` tree, the Xcode/macOS SDK, ...) are
-excluded. This applies **by default**, without requiring a
-``--public-header``/``--public-header-dir`` set: ``AbiSnapshot.source_header``
-is populated unconditionally by ``provenance.apply_provenance`` (only the
-PUBLIC_HEADER/PRIVATE_HEADER *classification* is opt-in — see
-``provenance.is_system_header``'s docstring), so "is this declaration's own
-header a system header" needs no public-header input at all. ``dump
---include-dependencies`` opts out and writes the full, unscoped snapshot
-(the old default).
+excluded, and even that is overridden whenever the header is one of the
+dump's own ``-H``/``--header`` roots (or lives under one) — see
+:func:`provenance.is_dependency_header`'s docstring for why an installed
+library analyzed via its real system-prefixed install path
+(``-H /usr/include/mylib/api.h``) must not have its own headers misread as
+toolchain headers (Codex review). This applies **by default**, without
+requiring a ``--public-header``/``--public-header-dir`` set:
+``AbiSnapshot.source_header`` is populated unconditionally by
+``provenance.apply_provenance``. ``dump --include-dependencies`` opts out
+and writes the full, unscoped snapshot (the old default).
 
 Because this scopes by header origin rather than ABI visibility, it is a
 silent no-op (not an error) on a snapshot with no header-derived
 declarations at all (a binary-only/DWARF-only dump) -- unlike an opt-in
 flag, default-on behavior must never fail a plain ``dump`` invocation that
 has nothing for it to act on.
+
+**Trade-off, by design (CodeRabbit review):** a genuine ABI-relevant layout
+change confined entirely to an excluded dependency type (e.g. a toolchain
+libstdc++ upgrade changing ``std::string``'s layout) becomes invisible to a
+later ``compare`` once *both* snapshots are scoped -- the type is absent
+from both sides symmetrically, not merely demoted. That is the intended
+effect of "we don't want a dump of the standard dependency", not a bug, but
+it does mean `dump`'s default output alone is no longer a toolchain/stdlib
+ABI-drift detector across compiler or C++ standard library upgrades; pass
+``--include-dependencies`` on both sides of a comparison if that detection
+is needed.
 
 **Known limitation (investigated, deliberately not fixed here):** this
 filters the flat snapshot lists (``functions``/``variables``/``types``/
@@ -59,22 +72,43 @@ project.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
+from pathlib import Path
 
 from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
 from .model import AbiSnapshot
-from .provenance import is_system_header
+from .provenance import is_dependency_header
 
 
-def _name_matches(name: str, kept_type_names: set[str]) -> bool:
-    # A DWARF struct/enum key (or a record's own identity) may be
-    # namespace-qualified while the header-derived kept-type-name set may
-    # only carry the bare tail, or vice versa -- match either form.
-    return name in kept_type_names or name.split("::")[-1] in kept_type_names
+def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
+    return names | qualified_names
+
+
+def _name_matches(name: str, kept_identifiers: set[str]) -> bool:
+    """Exact-only match against the kept types'/enums' own spellings.
+
+    Deliberately does **not** fall back to bare-tail matching (a DWARF key
+    ``ns::Foo`` reducing to a bare ``Foo`` and comparing against a kept
+    type's bare name): two distinct types sharing a leaf name -- a kept
+    ``mine::Thing`` and an excluded ``std::Thing`` -- would otherwise both
+    satisfy a tail match against the single bare name ``"Thing"``, letting
+    the excluded dependency type's DWARF/DWARF-advanced entry survive the
+    filter under its own qualified spelling even though the flat type list
+    correctly dropped it (Codex review). ``kept_identifiers`` already
+    carries both the bare ``name`` and (when present) the fully-qualified
+    ``qualified_name`` of every *kept* type/enum, so an exact match still
+    succeeds whichever form a real DWARF/castxml backend spells the same
+    kept entity with -- only an actually-ambiguous bare-vs-qualified
+    mismatch with no qualified_name recorded at all is missed, the same
+    conservative "only drop what's confidently identified" bias the rest
+    of this module already uses.
+    """
+    return name in kept_identifiers
 
 
 def _scoped_dwarf(
-    dwarf: DwarfMetadata | None, kept_type_names: set[str]
+    dwarf: DwarfMetadata | None, kept_identifiers: set[str]
 ) -> DwarfMetadata | None:
     """Filter a DWARF layout map to the declarations kept from the flat
     ``types``/``enums`` lists (same dependency-exclusion decision, applied
@@ -85,17 +119,17 @@ def _scoped_dwarf(
     return dataclasses.replace(
         dwarf,
         structs={
-            k: v for k, v in dwarf.structs.items() if _name_matches(k, kept_type_names)
+            k: v for k, v in dwarf.structs.items() if _name_matches(k, kept_identifiers)
         },
         enums={
-            k: v for k, v in dwarf.enums.items() if _name_matches(k, kept_type_names)
+            k: v for k, v in dwarf.enums.items() if _name_matches(k, kept_identifiers)
         },
     )
 
 
 def _scoped_dwarf_advanced(
     adv: AdvancedDwarfMetadata | None,
-    kept_type_names: set[str],
+    kept_identifiers: set[str],
     kept_symbols: set[str],
 ) -> AdvancedDwarfMetadata | None:
     """Filter Sprint-4 advanced DWARF metadata the same way: type-keyed
@@ -119,10 +153,10 @@ def _scoped_dwarf_advanced(
             k for k in adv.return_memory_classified if k in kept_symbols
         },
         packed_structs={
-            k for k in adv.packed_structs if _name_matches(k, kept_type_names)
+            k for k in adv.packed_structs if _name_matches(k, kept_identifiers)
         },
         all_struct_names={
-            k for k in adv.all_struct_names if _name_matches(k, kept_type_names)
+            k for k in adv.all_struct_names if _name_matches(k, kept_identifiers)
         },
         frame_registers={
             k: v for k, v in adv.frame_registers.items() if k in kept_symbols
@@ -133,18 +167,27 @@ def _scoped_dwarf_advanced(
     )
 
 
-def scope_snapshot_excluding_dependencies(snap: AbiSnapshot) -> AbiSnapshot:
+def scope_snapshot_excluding_dependencies(
+    snap: AbiSnapshot,
+    header_roots: Sequence[Path | str] | None = None,
+) -> AbiSnapshot:
     """Return a copy of *snap* with toolchain/system-header declarations
     dropped, keeping everything that belongs to the library itself.
 
     Keeps a function/variable/type/enum unless its own ``source_header`` is
-    a toolchain/system header (see :func:`provenance.is_system_header`) --
-    this is a header-*origin* filter, not an ABI-visibility one: a private,
-    non-exported declaration from the library's own headers is kept exactly
-    like a public one, only dependency-header declarations are dropped.
-    ``dwarf``/``dwarf_advanced`` are filtered by the same decision (see
-    :func:`_scoped_dwarf`/:func:`_scoped_dwarf_advanced`) so a later DWARF
-    diff can't silently re-observe an excluded type's layout.
+    a toolchain/system header (see :func:`provenance.is_dependency_header`)
+    -- this is a header-*origin* filter, not an ABI-visibility one: a
+    private, non-exported declaration from the library's own headers is
+    kept exactly like a public one, only dependency-header declarations are
+    dropped. ``header_roots`` should be the actual ``-H``/``--header``
+    paths the dump was invoked with, so a header that *is* one of them (or
+    lives under one, e.g. an installed library's own private headers under
+    ``/usr/include/mylib/``) is never misclassified as a dependency just
+    because it happens to sit under a system prefix -- pass ``None`` only
+    when no such root set is available (falls back to a bare path-heuristic
+    check). ``dwarf``/``dwarf_advanced`` are filtered by the same decision
+    (see :func:`_scoped_dwarf`/:func:`_scoped_dwarf_advanced`) so a later
+    DWARF diff can't silently re-observe an excluded type's layout.
 
     A no-op (returns *snap* unchanged) when the snapshot has no
     header-derived declarations at all (:attr:`AbiSnapshot.from_headers`
@@ -159,11 +202,19 @@ def scope_snapshot_excluding_dependencies(snap: AbiSnapshot) -> AbiSnapshot:
     """
     if not snap.from_headers:
         return snap
-    kept_functions = [f for f in snap.functions if not is_system_header(f.source_header)]
-    kept_variables = [v for v in snap.variables if not is_system_header(v.source_header)]
-    kept_types = [t for t in snap.types if not is_system_header(t.source_header)]
-    kept_enums = [e for e in snap.enums if not is_system_header(e.source_header)]
-    kept_type_names = {t.name for t in kept_types} | {e.name for e in kept_enums}
+
+    def _is_dep(source_header: str | None) -> bool:
+        return is_dependency_header(source_header, header_roots)
+
+    kept_functions = [f for f in snap.functions if not _is_dep(f.source_header)]
+    kept_variables = [v for v in snap.variables if not _is_dep(v.source_header)]
+    kept_types = [t for t in snap.types if not _is_dep(t.source_header)]
+    kept_enums = [e for e in snap.enums if not _is_dep(e.source_header)]
+    kept_identifiers = _kept_identifiers(
+        {t.name for t in kept_types} | {e.name for e in kept_enums},
+        {t.qualified_name for t in kept_types if t.qualified_name}
+        | {e.qualified_name for e in kept_enums if e.qualified_name},
+    )
     kept_symbols = {f.mangled for f in kept_functions if f.mangled}
     return dataclasses.replace(
         snap,
@@ -171,8 +222,10 @@ def scope_snapshot_excluding_dependencies(snap: AbiSnapshot) -> AbiSnapshot:
         variables=kept_variables,
         types=kept_types,
         enums=kept_enums,
-        dwarf=_scoped_dwarf(snap.dwarf, kept_type_names),
-        dwarf_advanced=_scoped_dwarf_advanced(snap.dwarf_advanced, kept_type_names, kept_symbols),
+        dwarf=_scoped_dwarf(snap.dwarf, kept_identifiers),
+        dwarf_advanced=_scoped_dwarf_advanced(
+            snap.dwarf_advanced, kept_identifiers, kept_symbols
+        ),
         # dataclasses.replace() otherwise carries these lazy lookup-index
         # caches over from *snap* verbatim: if the input snapshot's index()
         # was already called (e.g. by an earlier pipeline step), the copy

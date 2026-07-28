@@ -21,6 +21,33 @@ abicheck dump libfoo.so -H foo.h --lang c -o snap.json
 abicheck compare libv1.so libv2.so -H foo.h --lang c
 ```
 
+## Dependency exclusion in `dump`
+
+By default, `dump` drops any declaration whose own defining header is a
+toolchain/system header (`/usr/include`, MSVC `VC/Tools`, the Xcode/macOS
+SDK, ...) from the written snapshot. This is a header-*origin* filter, not a
+public-API-visibility one: your library's own private/internal declarations
+are always kept, exactly like its public ones — only declarations belonging
+to a dependency (the C++ standard library, SYCL runtime headers, etc.) are
+excluded. For a library with a large or heavily-templated dependency stack,
+a full header-AST dump can otherwise put the transitive dependency surface
+in the hundreds-of-MB range, most of which the library itself never declares.
+
+```bash
+# api.h declares your own public API and pulls in <string>/<vector> etc.
+# transitively; the written snapshot keeps every declaration from api.h and
+# any of your own project headers it includes, and drops the std:: ones.
+abicheck dump libfoo.so -H api.h -o snap.json
+
+# Opt out to get the old, unfiltered full dump (every declaration the
+# header AST parser saw, including the full dependency surface):
+abicheck dump libfoo.so -H api.h --include-dependencies -o snap.json
+```
+
+Since this changes what a scoped snapshot can see, compare two snapshots
+dumped the same way — don't mix a default-scoped snapshot with one dumped
+via `--include-dependencies`.
+
 ## Cross-compilation
 
 When analysing libraries built for a different architecture, pass cross-compilation

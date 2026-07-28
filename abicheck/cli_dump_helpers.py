@@ -76,6 +76,7 @@ class _WriteSnapshotOutput(Protocol):
         inputs_pack: Path | None = ...,
         depth: str | None = ...,
         include_dependencies: bool = ...,
+        header_roots: tuple[Path, ...] = ...,
     ) -> None: ...
 
 
@@ -1189,7 +1190,7 @@ def handle_non_elf_dump(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
         extractor=header_backend, inputs_pack=inputs_pack, depth=depth,
-        include_dependencies=include_dependencies,
+        include_dependencies=include_dependencies, header_roots=headers,
     )
 
 
@@ -1714,4 +1715,5 @@ def perform_elf_dump(
         inputs_pack=inputs_pack,
         depth=depth,
         include_dependencies=include_dependencies,
+        header_roots=headers,
     )

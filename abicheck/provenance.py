@@ -32,6 +32,7 @@ no existing behaviour changes (decision D4 of the provenance design).
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
 from .model import AbiSnapshot, ScopeOrigin, Visibility
@@ -172,6 +173,46 @@ def is_system_header(source_header: str | None) -> bool:
     if not source_header:
         return False
     return _is_system_header(_segments(source_header))
+
+
+def is_dependency_header(
+    source_header: str | None,
+    header_roots: Sequence[Path | str] | None,
+) -> bool:
+    """Whether *source_header* is confidently a toolchain/dependency header,
+    given the actual ``-H``/``--header`` root set a dump was invoked with.
+
+    Unlike a bare :func:`is_system_header` path check, this treats any header
+    that *is* one of the given roots, or lives under a root's own directory
+    (even recursively, e.g. a private header the root ``#include``s), as
+    never a dependency -- regardless of whether that directory happens to
+    sit under a system prefix. This matters for an installed library
+    analyzed via its real install path (``-H /usr/include/mylib/api.h`` or
+    ``/usr/local/include/mylib/api.h``): without this check,
+    ``is_system_header`` alone would misclassify the library's *own* headers
+    as toolchain headers and silently drop the whole snapshot (Codex
+    review). Reuses :func:`classify_origin`'s existing public-header-set
+    precedence (an explicit match is checked before the system-header
+    heuristic ever runs) by treating *header_roots* as that set -- the roots
+    themselves as the "public headers" and their parent directories as the
+    "public dirs", so both an exact-root match and anything living in the
+    same directory tree win over the system-header classification.
+
+    Falls back to a bare :func:`is_system_header` check when no
+    *header_roots* were given at all (e.g. a dump built from an already
+    in-memory snapshot with no recorded root set).
+    """
+    if not source_header:
+        return False
+    if not header_roots:
+        return is_system_header(source_header)
+    roots = [str(h) for h in header_roots]
+    root_dirs = [str(Path(h).parent) for h in roots]
+    header_segs, dir_segs, have_set = build_public_set(roots, root_dirs)
+    origin = classify_origin(
+        source_header, header_segs, dir_segs, have_public_set=have_set
+    )
+    return origin is ScopeOrigin.SYSTEM_HEADER
 
 
 def classify_origin(

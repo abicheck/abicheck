@@ -304,6 +304,7 @@ def _write_snapshot_output(
     inputs_pack: Path | None = None,
     depth: str | None = None,
     include_dependencies: bool = False,
+    header_roots: tuple[Path, ...] = (),
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -325,6 +326,11 @@ def _write_snapshot_output(
     every embed step above has had its chance to fill in the snapshot — see
     ``dumper_scoping.py`` for exactly what "dependency" means here (header
     origin, not ABI visibility) and what this still doesn't filter.
+    *header_roots* is the actual ``-H``/``--header`` input the dump was
+    invoked with, forwarded to ``scope_snapshot_excluding_dependencies`` so a
+    header that IS one of those roots (or lives under one) is never treated
+    as a dependency just because it happens to sit under a system prefix
+    (e.g. an installed library dumped via its real ``/usr/include`` path).
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -381,7 +387,7 @@ def _write_snapshot_output(
     check_requested_depth_satisfied(depth, snap)
     if not include_dependencies:
         from .dumper_scoping import scope_snapshot_excluding_dependencies
-        snap = scope_snapshot_excluding_dependencies(snap)
+        snap = scope_snapshot_excluding_dependencies(snap, header_roots)
     result = snapshot_to_json(snap)
     # Audit finding: dump/baseline provenance didn't record requested vs.
     # effective depth anywhere a later reader could inspect -- fold it into
