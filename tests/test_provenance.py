@@ -522,3 +522,44 @@ class TestIsDependencyHeaderRootResolution:
 
     def test_no_source_header_is_never_a_dependency(self):
         assert is_dependency_header(None, ["include/api.h"]) is False
+
+
+class TestIsDependencyHeaderDirectoryRoot:
+    """Regression coverage for a Codex-review P1 finding: ``-H`` accepts a
+    directory as well as a file (``dump --header`` help text: "Public
+    header file or directory"). Unconditionally widening every root to its
+    *parent* over-widens a directory root -- ``-H /usr/include/mylib``
+    must not turn into the public dir ``/usr/include``, which would make
+    every unrelated header under that prefix (including real dependency
+    headers) match as project-owned."""
+
+    def test_directory_root_does_not_widen_to_parent(self, tmp_path):
+        # "usr"/"include" as separate path segments (not one joined
+        # component) so the real system-header heuristic recognizes the
+        # sibling as a genuine dependency path, the same way it would
+        # recognize a real /usr/include/otherlib on disk.
+        root_dir = tmp_path / "usr" / "include" / "mylib"
+        root_dir.mkdir(parents=True)
+        sibling_dep = tmp_path / "usr" / "include" / "otherlib" / "dep.h"
+        sibling_dep.parent.mkdir(parents=True)
+        sibling_dep.write_text("", encoding="utf-8")
+
+        assert is_dependency_header(str(sibling_dep), [str(root_dir)]) is True
+
+    def test_directory_root_still_keeps_its_own_contents(self, tmp_path):
+        root_dir = tmp_path / "usr" / "include" / "mylib"
+        own_header = root_dir / "detail" / "api.h"
+        own_header.parent.mkdir(parents=True)
+        own_header.write_text("", encoding="utf-8")
+
+        assert is_dependency_header(str(own_header), [str(root_dir)]) is False
+
+    def test_file_root_still_widens_to_its_parent_directory(self, tmp_path):
+        root_file = tmp_path / "mylib" / "api.h"
+        root_file.parent.mkdir(parents=True)
+        root_file.write_text("", encoding="utf-8")
+        sibling = tmp_path / "mylib" / "detail" / "internal.h"
+        sibling.parent.mkdir(parents=True)
+        sibling.write_text("", encoding="utf-8")
+
+        assert is_dependency_header(str(sibling), [str(root_file)]) is False

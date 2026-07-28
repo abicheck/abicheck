@@ -216,8 +216,17 @@ def is_dependency_header(
     # review). Resolving first makes the root's own segments as specific
     # as the real filesystem location, so only paths actually under it
     # can match.
-    roots = [str(Path(h).resolve()) for h in header_roots]
-    root_dirs = [str(Path(h).parent) for h in roots]
+    #
+    # `-H`/`--header` accepts a directory as well as a file (Click help:
+    # "Public header file or directory"). Widening *every* root to its
+    # parent unconditionally over-widens a directory root -- `-H
+    # /usr/include/mylib` would turn into the public dir `/usr/include`,
+    # making every unrelated header under that prefix (including real
+    # dependency headers) match as project-owned (Codex review). Only a
+    # *file* root widens to its parent; a directory root is used as-is.
+    resolved = [Path(h).resolve() for h in header_roots]
+    roots = [str(r) for r in resolved if not r.is_dir()]
+    root_dirs = [str(r if r.is_dir() else r.parent) for r in resolved]
     header_segs, dir_segs, have_set = build_public_set(roots, root_dirs)
     origin = classify_origin(
         source_header, header_segs, dir_segs, have_public_set=have_set
