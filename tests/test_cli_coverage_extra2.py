@@ -322,9 +322,10 @@ class TestWriteSnapshotOutput:
         assert "requested evidence layer(s) not collected" in err
         assert "L4" in err and "L5" in err
 
-    def test_public_surface_only_scopes_before_writing(self, tmp_path: Path) -> None:
-        """dump --public-surface-only drops unreferenced dependency types from
-        the written JSON, reusing dumper_scoping.scope_snapshot_to_public_surface."""
+    def test_dependencies_excluded_by_default_before_writing(self, tmp_path: Path) -> None:
+        """dump (no flag) drops system-header declarations from the written
+        JSON by default, reusing
+        dumper_scoping.scope_snapshot_excluding_dependencies."""
         from abicheck.model import Function, Param, RecordType, TypeField, Visibility
 
         snap = AbiSnapshot(
@@ -338,6 +339,7 @@ class TestWriteSnapshotOutput:
                     return_type="void",
                     params=[Param(name="a", type="Used *")],
                     visibility=Visibility.PUBLIC,
+                    source_header="/src/lib/api.h",
                 )
             ],
             types=[
@@ -346,22 +348,52 @@ class TestWriteSnapshotOutput:
                     kind="struct",
                     size_bits=32,
                     fields=[TypeField(name="x", type="int")],
+                    source_header="/src/lib/api.h",
                 ),
-                RecordType(name="unreferenced_internal", kind="struct", size_bits=32),
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    size_bits=32,
+                    source_header="/usr/include/c++/11/string",
+                ),
             ],
         )
         out = tmp_path / "snap.json"
-        _write_snapshot_output(snap, out, public_surface_only=True)
+        _write_snapshot_output(snap, out)
         text = out.read_text(encoding="utf-8")
         assert '"Used"' in text
-        assert "unreferenced_internal" not in text
+        assert "basic_string" not in text
 
-    def test_public_surface_only_unresolvable_is_usage_error(self) -> None:
-        """No headers parsed -> no resolvable public surface -> a loud usage
-        error, not a silently-empty snapshot."""
+    def test_include_dependencies_keeps_full_dump(self, tmp_path: Path) -> None:
+        """dump --include-dependencies opts out of the default exclusion."""
+        from abicheck.model import RecordType
+
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            from_headers=True,
+            types=[
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    size_bits=32,
+                    source_header="/usr/include/c++/11/string",
+                ),
+            ],
+        )
+        out = tmp_path / "snap.json"
+        _write_snapshot_output(snap, out, include_dependencies=True)
+        text = out.read_text(encoding="utf-8")
+        assert "basic_string" in text
+
+    def test_default_exclusion_is_noop_without_headers(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No header-derived declarations -> nothing to classify -> a silent
+        no-op, not an error, since this now runs by default."""
         snap = AbiSnapshot(library="lib.so", version="1.0")
-        with pytest.raises(click.UsageError):
-            _write_snapshot_output(snap, None, public_surface_only=True)
+        _write_snapshot_output(snap, None)  # must not raise
+        assert '"lib.so"' in capsys.readouterr().out
 
 
 class TestClassifyMissingLayers:

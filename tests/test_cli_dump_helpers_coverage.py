@@ -28,7 +28,6 @@ from abicheck.cli_dump_helpers import (
     check_dump_debug_format_error,
     handle_non_elf_dump,
     perform_elf_dump,
-    reject_statically_headerless_public_surface_only,
     resolve_compile_db_l3_reuse,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
@@ -59,61 +58,6 @@ def test_debug_format_absent_selector_falls_back_to_legacy() -> None:
     """When the selector is absent the legacy flag value is used (else branch)."""
     assert resolve_dump_debug_format(None, "btf") == "btf"
     assert resolve_dump_debug_format(None, None) is None
-
-
-# ── reject_statically_headerless_public_surface_only ────────────────────────
-
-
-def test_reject_public_surface_only_source_only_dump() -> None:
-    """No SO_PATH -> always rejected regardless of headers (Codex review)."""
-    with pytest.raises(click.UsageError, match="has nothing to scope from"):
-        reject_statically_headerless_public_surface_only(
-            None, (), None, public_surface_only=True
-        )
-
-
-def test_reject_public_surface_only_no_headers_no_manifest(tmp_path: Path) -> None:
-    """A real SO_PATH but no -H/--header and no --dump-manifest -> rejected: no
-    header source exists for from_headers to ever become True (Codex review)."""
-    so = tmp_path / "lib.so"
-    so.write_bytes(b"")
-    with pytest.raises(click.UsageError, match="has nothing to scope from"):
-        reject_statically_headerless_public_surface_only(
-            so, (), None, public_surface_only=True
-        )
-
-
-def test_reject_public_surface_only_noop_when_flag_unset() -> None:
-    """The flag itself gates everything -- no rejection when it's off."""
-    result = reject_statically_headerless_public_surface_only(
-        None, (), None, public_surface_only=False
-    )
-    assert result is None  # returns normally: no UsageError raised
-
-
-def test_reject_public_surface_only_allows_headers_present(tmp_path: Path) -> None:
-    """A real SO_PATH with -H given passes this static preflight check (whether
-    from_headers actually ends up True is resolved later, at real dump time)."""
-    so = tmp_path / "lib.so"
-    hdr = tmp_path / "api.h"
-    so.write_bytes(b"")
-    hdr.write_text("", encoding="utf-8")
-    result = reject_statically_headerless_public_surface_only(
-        so, (hdr,), None, public_surface_only=True
-    )
-    assert result is None  # returns normally: no UsageError raised
-
-
-def test_reject_public_surface_only_allows_dump_manifest(tmp_path: Path) -> None:
-    """--dump-manifest alone (no -H) also passes this static preflight check."""
-    so = tmp_path / "lib.so"
-    manifest = tmp_path / "manifest.yml"
-    so.write_bytes(b"")
-    manifest.write_text("", encoding="utf-8")
-    result = reject_statically_headerless_public_surface_only(
-        so, (), manifest, public_surface_only=True
-    )
-    assert result is None  # returns normally: no UsageError raised
 
 
 # ── resolve_dump_compile_db ─────────────────────────────────────────────────

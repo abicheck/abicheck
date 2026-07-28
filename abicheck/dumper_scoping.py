@@ -6,43 +6,54 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-"""Dump-time public-surface scoping (``dump --public-surface-only``).
+"""Dump-time dependency scoping (``dump --include-dependencies`` opt-out).
 
-``surface.compute_public_surface()`` already computes the transitive-closure
-public ABI surface of a snapshot (public functions/variables plus every type
-reachable from their signatures/fields/bases) — but until now that closure was
-only ever applied at *compare* time, to demote findings. A full ``dump``
-serializes every declaration the header AST parser saw, including the entire
-transitive dependency surface pulled in by ``#include`` (every libstdc++/SYCL
-internal, whether or not the library's own public API ever references it) —
-for a library with a large or heavily-templated dependency stack this can put
-the snapshot JSON in the hundreds-of-MB range, most of which is dependency
-surface no consumer's public API reaches.
+A header-AST dump serializes every declaration the parser saw, including the
+entire transitive dependency surface pulled in by ``#include`` (every
+libstdc++/SYCL internal a public *or* private header happens to reach) —
+for a library with a large or heavily-templated dependency stack this can
+put the snapshot JSON in the hundreds-of-MB range, most of which is
+dependency surface that belongs to the toolchain/standard library, not to
+the library under test.
 
-This module reuses the same closure to filter what a dump *writes*, instead of
-computing a second, parallel notion of "public". A type reachable from the
-public API (including a `std::`/SYCL type actually named in a public
-signature or field — dropping those would blind layout-based detectors to a
-real ABI break in a used dependency type) is kept; anything the public API
-never reaches is not.
+This is deliberately **not** a public-API-surface filter: the library's own
+private/internal declarations are kept, same as its public ones — only
+declarations whose own defining header is a toolchain/system header
+(``/usr/include``, the MSVC ``VC/Tools`` tree, the Xcode/macOS SDK, ...) are
+excluded. This applies **by default**, without requiring a
+``--public-header``/``--public-header-dir`` set: ``AbiSnapshot.source_header``
+is populated unconditionally by ``provenance.apply_provenance`` (only the
+PUBLIC_HEADER/PRIVATE_HEADER *classification* is opt-in — see
+``provenance.is_system_header``'s docstring), so "is this declaration's own
+header a system header" needs no public-header input at all. ``dump
+--include-dependencies`` opts out and writes the full, unscoped snapshot
+(the old default).
 
-**Known limitation (Codex review, investigated, deliberately not fixed
-here):** this filters the flat snapshot lists (`functions`/`variables`/
-`types`/`enums`/`typedefs`) only. `service._attach_header_graph` (G29 Phase A,
-always-on by default -- `_HEADER_GRAPH_ENABLED`) separately embeds a semantic
-header-only graph (`snap.build_source.source_graph`, a
+Because this scopes by header origin rather than ABI visibility, it is a
+silent no-op (not an error) on a snapshot with no header-derived
+declarations at all (a binary-only/DWARF-only dump) -- unlike an opt-in
+flag, default-on behavior must never fail a plain ``dump`` invocation that
+has nothing for it to act on.
+
+**Known limitation (investigated, deliberately not fixed here):** this
+filters the flat snapshot lists (``functions``/``variables``/``types``/
+``enums``) and the DWARF/DWARF-advanced collections keyed off them.
+``typedefs`` (``dict[str, str]``, name -> target spelling) carry no
+per-entry header provenance at all, so they are kept unconditionally --
+typically a small fraction of a dump's size next to full record layouts,
+so this is a low-cost simplification, not a hidden accuracy gap the way
+skipping type layouts would be. `service._attach_header_graph` (G29 Phase
+A, always-on by default -- `_HEADER_GRAPH_ENABLED`) separately embeds a
+semantic header-only graph (`snap.build_source.source_graph`, a
 `buildsource.source_graph.SourceGraphSummary`) built from the *same*
-unscoped header AST, and `scope_snapshot_to_public_surface` leaves it
-untouched -- a `--public-surface-only` dump can therefore still carry graph
-nodes/edges for dependency declarations the flat-list scoping just dropped.
-Correctly scoping the graph too needs its own closure walk over
-`GraphNode`/`GraphEdge` (each carrying its own `facts`/`resolved`/
-`conflicts`/`provenance`/`confidence` evidence-merge state -- ADR-046 D2),
-handling dangling edges when a node is removed, without corrupting a
-legitimate real L3/L4/L5 collection merged into the same pack from an
-explicit `--sources`/`--build-info` alongside this flag. That's a separate,
-independently-scoped project, not a drive-by extension of this flag's flat
-public-surface closure.
+unscoped header AST; this module leaves it untouched for the same reasons
+the previous (now-superseded) public-surface design documented: a correct
+filter needs its own closure walk over `GraphNode`/`GraphEdge` (each
+carrying its own `facts`/`resolved`/`conflicts`/`provenance`/`confidence`
+evidence-merge state -- ADR-046 D2) without corrupting a legitimate real
+L3/L4/L5 collection merged into the same pack from an explicit
+`--sources`/`--build-info`. That's a separate, independently-scoped
+project.
 """
 
 from __future__ import annotations
@@ -51,209 +62,124 @@ import dataclasses
 
 from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
-from .errors import ValidationError
-from .model import AbiSnapshot, Function, Visibility
-from .surface import PublicSurface, compute_public_surface
+from .model import AbiSnapshot
+from .provenance import is_system_header
 
 
-def _name_in_public_types(name: str, public_types: set[str]) -> bool:
-    # Mirrors diff_platform._diff_dwarf's own _allow_name: a type-keyed name
-    # (a DWARF struct/enum key, or a hidden friend's owning class) may be
-    # namespace-qualified while surface.public_types also carries the bare
-    # tail (surface._index_surface_types indexes both).
-    return name in public_types or name.split("::")[-1] in public_types
+def _name_matches(name: str, kept_type_names: set[str]) -> bool:
+    # A DWARF struct/enum key (or a record's own identity) may be
+    # namespace-qualified while the header-derived kept-type-name set may
+    # only carry the bare tail, or vice versa -- match either form.
+    return name in kept_type_names or name.split("::")[-1] in kept_type_names
 
 
 def _scoped_dwarf(
-    dwarf: DwarfMetadata | None, surface: PublicSurface
+    dwarf: DwarfMetadata | None, kept_type_names: set[str]
 ) -> DwarfMetadata | None:
-    """Filter a DWARF layout map to the same public-surface closure.
-
-    Without this, an ELF snapshot with both a header model and DWARF debug
-    info can scope its flat ``types``/``enums`` lists down to nothing (e.g. a
-    public API that only uses primitive types) while leaving ``snap.dwarf``
-    untouched -- ``diff_platform._diff_dwarf`` treats an empty
-    header-model-derived allow-set as "no header model at all" and falls back
-    to comparing *every* DWARF struct/enum, including private ones the
-    scoping was supposed to exclude. That falls straight back into a false
-    ``struct_size_changed``/etc. finding on an unreachable private type, even
-    between two ``--public-surface-only`` snapshots (Codex review). Filtering
-    ``dwarf.structs``/``dwarf.enums`` here the same way keeps that allow-set
-    genuinely empty end to end, instead of behaving like DWARF-only mode.
-    """
+    """Filter a DWARF layout map to the declarations kept from the flat
+    ``types``/``enums`` lists (same dependency-exclusion decision, applied
+    to the DWARF side so a later ``diff_platform._diff_dwarf`` can't
+    silently re-expand to comparing an excluded dependency type's layout)."""
     if dwarf is None or not dwarf.has_dwarf:
         return dwarf
     return dataclasses.replace(
         dwarf,
         structs={
-            k: v
-            for k, v in dwarf.structs.items()
-            if _name_in_public_types(k, surface.public_types)
+            k: v for k, v in dwarf.structs.items() if _name_matches(k, kept_type_names)
         },
         enums={
-            k: v
-            for k, v in dwarf.enums.items()
-            if _name_in_public_types(k, surface.public_types)
+            k: v for k, v in dwarf.enums.items() if _name_matches(k, kept_type_names)
         },
     )
 
 
 def _scoped_dwarf_advanced(
-    adv: AdvancedDwarfMetadata | None, surface: PublicSurface
+    adv: AdvancedDwarfMetadata | None,
+    kept_type_names: set[str],
+    kept_symbols: set[str],
 ) -> AdvancedDwarfMetadata | None:
-    """Filter Sprint-4 advanced DWARF metadata to the same public-surface
-    closure (Codex review, second finding on this signal).
-
-    ``checker._diff_advanced_dwarf`` -> ``dwarf_advanced.diff_advanced_dwarf``
-    compares ``packed_structs``/``all_struct_names`` and the per-function
-    ``calling_conventions``/``value_abi_traits``/``return_value_sizes``/
-    ``return_memory_classified``/``frame_registers``/``callee_saved_regs``
-    dicts directly, with no allow-set/fallback mechanism of its own (unlike
-    ``diff_platform._diff_dwarf``'s ``allowed_structs``) -- so leaving this
-    metadata unfiltered means a private, unreachable type's packing change
-    (or a private function's calling-convention drift) still produces a
-    breaking finding between two ``--public-surface-only`` snapshots,
-    regardless of what the flat lists were scoped to. Type-keyed collections
-    filter via :func:`_name_in_public_types` (``surface.public_types``);
-    function-keyed collections (keyed by mangled ``linkage_name``) filter via
-    ``surface.public_symbols``, which already carries every public function's
-    mangled name (``surface._symbol_keys``).
-    """
+    """Filter Sprint-4 advanced DWARF metadata the same way: type-keyed
+    collections (``packed_structs``/``all_struct_names``) via
+    :func:`_name_matches`, function-keyed collections (keyed by mangled
+    ``linkage_name``) via *kept_symbols*."""
     if adv is None or not adv.has_dwarf:
         return adv
-    public_types = surface.public_types
-    public_symbols = surface.public_symbols
     return dataclasses.replace(
         adv,
         calling_conventions={
-            k: v for k, v in adv.calling_conventions.items() if k in public_symbols
+            k: v for k, v in adv.calling_conventions.items() if k in kept_symbols
         },
         value_abi_traits={
-            k: v for k, v in adv.value_abi_traits.items() if k in public_symbols
+            k: v for k, v in adv.value_abi_traits.items() if k in kept_symbols
         },
         return_value_sizes={
-            k: v for k, v in adv.return_value_sizes.items() if k in public_symbols
+            k: v for k, v in adv.return_value_sizes.items() if k in kept_symbols
         },
         return_memory_classified={
-            k for k in adv.return_memory_classified if k in public_symbols
+            k for k in adv.return_memory_classified if k in kept_symbols
         },
         packed_structs={
-            k for k in adv.packed_structs if _name_in_public_types(k, public_types)
+            k for k in adv.packed_structs if _name_matches(k, kept_type_names)
         },
         all_struct_names={
-            k for k in adv.all_struct_names if _name_in_public_types(k, public_types)
+            k for k in adv.all_struct_names if _name_matches(k, kept_type_names)
         },
         frame_registers={
-            k: v for k, v in adv.frame_registers.items() if k in public_symbols
+            k: v for k, v in adv.frame_registers.items() if k in kept_symbols
         },
         callee_saved_regs={
-            k: v for k, v in adv.callee_saved_regs.items() if k in public_symbols
+            k: v for k, v in adv.callee_saved_regs.items() if k in kept_symbols
         },
     )
 
 
-def _is_reachable_hidden_friend(fn: Function, surface: PublicSurface) -> bool:
-    """True when *fn* is an in-class ``friend`` declaration whose owning class
-    is part of the public surface (Codex review, third finding on this
-    module).
+def scope_snapshot_excluding_dependencies(snap: AbiSnapshot) -> AbiSnapshot:
+    """Return a copy of *snap* with toolchain/system-header declarations
+    dropped, keeping everything that belongs to the library itself.
 
-    An inline-defined hidden friend never gets an exported symbol (the
-    compiler emits it ``linkonce_odr``, usually inlined at every call site),
-    so the header parser records it with ``Visibility.HIDDEN`` even though it
-    genuinely belongs to a public class's ABI/API surface -- the flat
-    ``Visibility.PUBLIC`` filter above would otherwise drop it unconditionally.
-    ``diff_hidden_friends.diff_inline_hidden_friends`` deliberately scans the
-    *full* function map specifically to catch this shape (the public-symbol
-    diff never sees it at all), so dropping it here would silently make
-    ``HIDDEN_FRIEND_ADDED``/``HIDDEN_FRIEND_REMOVED`` unobservable between two
-    ``--public-surface-only`` snapshots for a class that IS in scope. A hidden
-    friend of a private/unreachable class is still dropped, same as any other
-    private declaration.
-    """
-    return bool(
-        fn.is_hidden_friend
-        and fn.hidden_friend_owner
-        and _name_in_public_types(fn.hidden_friend_owner, surface.public_types)
-    )
+    Keeps a function/variable/type/enum unless its own ``source_header`` is
+    a toolchain/system header (see :func:`provenance.is_system_header`) --
+    this is a header-*origin* filter, not an ABI-visibility one: a private,
+    non-exported declaration from the library's own headers is kept exactly
+    like a public one, only dependency-header declarations are dropped.
+    ``dwarf``/``dwarf_advanced`` are filtered by the same decision (see
+    :func:`_scoped_dwarf`/:func:`_scoped_dwarf_advanced`) so a later DWARF
+    diff can't silently re-observe an excluded type's layout.
 
-
-class PublicSurfaceScopingError(ValidationError):
-    """Raised when ``--public-surface-only`` is requested but the snapshot has
-    no header-AST-derived declarations to scope (no ``-H``/``--header`` at
-    all, or a DWARF-only/export-table-only dump)."""
-
-
-def scope_snapshot_to_public_surface(snap: AbiSnapshot) -> AbiSnapshot:
-    """Return a copy of *snap* containing only its public ABI surface.
-
-    Keeps: functions/variables with :data:`Visibility.PUBLIC`, plus any
-    ``Visibility.HIDDEN`` function that is an in-class ``friend`` declaration
-    whose owning class is itself in the public closure (see
-    :func:`_is_reachable_hidden_friend` — otherwise
-    ``HIDDEN_FRIEND_ADDED``/``HIDDEN_FRIEND_REMOVED`` detection would
-    silently break for two scoped snapshots, Codex review), and every
-    record/enum/typedef in the transitive closure reachable from their
-    signatures (per :func:`surface.compute_public_surface`). Drops
-    unreferenced dependency internals (unused stdlib/SYCL/etc. declarations)
-    that a full header-AST dump otherwise serializes wholesale. When the
-    snapshot also carries DWARF (an ELF dump with both a header model and
-    debug info), ``dwarf.structs``/``dwarf.enums`` (see :func:`_scoped_dwarf`)
-    and every type-/function-keyed collection in ``dwarf_advanced`` (see
-    :func:`_scoped_dwarf_advanced`) are filtered by the same closure —
-    leaving either unfiltered lets a private, unreachable type's or
-    function's layout/ABI-trait change still produce a breaking finding
-    between two ``--public-surface-only`` snapshots, defeating the scoping
-    (Codex review, twice).
-
-    Raises :class:`PublicSurfaceScopingError` if the snapshot has no
-    resolvable public surface at all (see
-    :attr:`surface.PublicSurface.resolvable`), **or** if it was not parsed
-    from headers at all (:attr:`AbiSnapshot.from_headers` False) — scoping an
-    export-table-only dump would silently drop everything, which is never the
-    caller's intent, and gating on ``resolvable`` alone is not enough: a
-    DWARF-derived dump (no ``-H`` at all, e.g. the auto-DWARF-fallback path or
-    ``--dwarf-only``) can carry ``Visibility.PUBLIC`` declarations with full
-    type layout from debug info, making ``resolvable`` True even though this
-    flag's whole premise — a full header-AST dump pulling in unreferenced
-    transitive ``#include`` dependency declarations — does not apply to it at
-    all (Codex review).
+    A no-op (returns *snap* unchanged) when the snapshot has no
+    header-derived declarations at all (:attr:`AbiSnapshot.from_headers`
+    False -- a binary-only or DWARF-only dump) -- this runs by default, so
+    unlike an opt-in flag it must never fail a plain invocation that has
+    nothing for it to act on.
 
     The result is a lossy artifact: a later ``compare`` against it can only
-    see what this closure kept, so comparing a scoped snapshot against an
-    unscoped one (or against a snapshot scoped from a differently-shaped
-    public surface) is not meaningful — scope both sides of a comparison the
-    same way.
+    see what this filter kept, so comparing a scoped snapshot against one
+    dumped with ``--include-dependencies`` is not meaningful — scope both
+    sides of a comparison the same way.
     """
-    surface = compute_public_surface(snap)
-    if not surface.resolvable or not snap.from_headers:
-        raise PublicSurfaceScopingError(
-            "--public-surface-only requires a header-AST-derived snapshot "
-            "(-H/--header, or --dump-manifest); a DWARF-only, "
-            "export-table-only, or source-only dump has no header-parsed "
-            "declarations to scope."
-        )
+    if not snap.from_headers:
+        return snap
+    kept_functions = [f for f in snap.functions if not is_system_header(f.source_header)]
+    kept_variables = [v for v in snap.variables if not is_system_header(v.source_header)]
+    kept_types = [t for t in snap.types if not is_system_header(t.source_header)]
+    kept_enums = [e for e in snap.enums if not is_system_header(e.source_header)]
+    kept_type_names = {t.name for t in kept_types} | {e.name for e in kept_enums}
+    kept_symbols = {f.mangled for f in kept_functions if f.mangled}
     return dataclasses.replace(
         snap,
-        functions=[
-            f
-            for f in snap.functions
-            if f.visibility == Visibility.PUBLIC or _is_reachable_hidden_friend(f, surface)
-        ],
-        variables=[v for v in snap.variables if v.visibility == Visibility.PUBLIC],
-        types=[t for t in snap.types if t.name in surface.public_types],
-        enums=[e for e in snap.enums if e.name in surface.public_types],
-        typedefs={
-            k: v for k, v in snap.typedefs.items() if k in surface.public_typedefs
-        },
-        dwarf=_scoped_dwarf(snap.dwarf, surface),
-        dwarf_advanced=_scoped_dwarf_advanced(snap.dwarf_advanced, surface),
+        functions=kept_functions,
+        variables=kept_variables,
+        types=kept_types,
+        enums=kept_enums,
+        dwarf=_scoped_dwarf(snap.dwarf, kept_type_names),
+        dwarf_advanced=_scoped_dwarf_advanced(snap.dwarf_advanced, kept_type_names, kept_symbols),
         # dataclasses.replace() otherwise carries these lazy lookup-index
         # caches over from *snap* verbatim: if the input snapshot's index()
         # was already called (e.g. by an earlier pipeline step), the copy
         # would keep pointing at the unscoped functions/types lists even
         # though its own .functions/.types are now filtered, so
         # func_by_mangled()/type_by_name() on the *returned* snapshot could
-        # resolve a declaration this scoping just dropped (Codex review).
+        # resolve a declaration this scoping just dropped.
         # None forces a lazy rebuild from the scoped lists on next access.
         _func_by_mangled=None,
         _var_by_mangled=None,

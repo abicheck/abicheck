@@ -339,7 +339,7 @@ def dump_source_only(
     build_compile_db: str | None = None,
     extractor: str = "auto",
     depth: str | None = None,
-    public_surface_only: bool = False,
+    include_dependencies: bool = False,
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -348,12 +348,12 @@ def dump_source_only(
     empty snapshot, to be combined with an artifact-side dump via ``merge``. A
     bare ``dump`` (no binary and no source/build inputs) errors clearly here.
 
-    ``public_surface_only`` is forwarded to ``_write_snapshot_output`` rather
-    than silently dropped (Codex review): this path's snapshot starts with no
-    functions/variables at all (only L3/L4/L5 facts get embedded), so
-    ``--public-surface-only`` here always hits the same
-    ``PublicSurfaceScopingError`` a header-less dump would -- a loud usage
-    error instead of the flag having no effect.
+    ``include_dependencies`` is forwarded to ``_write_snapshot_output`` for
+    consistency, though it never has any effect here in practice: this
+    path's snapshot starts with no functions/variables at all (only L3/L4/L5
+    facts get embedded), and ``scope_snapshot_excluding_dependencies`` is a
+    no-op on a snapshot with no header-derived declarations
+    (``from_headers`` stays ``False``) either way.
     """
     from .cli import _stamp_provenance, _write_snapshot_output
     from .model import AbiSnapshot
@@ -381,7 +381,7 @@ def dump_source_only(
         build_compile_db=build_compile_db,
         extractor=extractor,
         depth=depth,
-        public_surface_only=public_surface_only,
+        include_dependencies=include_dependencies,
     )
 
 

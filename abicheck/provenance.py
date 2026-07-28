@@ -156,6 +156,24 @@ def is_generated_header(source_header: str | None) -> bool:
     return _is_generated_header(_segments(source_header))
 
 
+def is_system_header(source_header: str | None) -> bool:
+    """Whether a header path looks like a toolchain/system header
+    (``/usr/include``, MSVC ``VC/Tools``, the Xcode/macOS SDK, ...).
+
+    Public wrapper around the segment-based heuristic, usable independent of
+    a ``--public-header`` set (unlike :func:`classify_origin`, which gates
+    *all* classification, including this check, behind ``have_public_set`` —
+    D4's "opt-in" only applies to the PUBLIC_HEADER/PRIVATE_HEADER split;
+    "is this a system header at all" is a pure function of the path and
+    needs no public-header input). Used by ``dumper_scoping.py`` to exclude
+    dependency-header declarations from a dump by default, without
+    requiring the caller to declare a public-header set at all.
+    """
+    if not source_header:
+        return False
+    return _is_system_header(_segments(source_header))
+
+
 def classify_origin(
     source_header: str | None,
     public_header_segs: list[tuple[str, ...]],

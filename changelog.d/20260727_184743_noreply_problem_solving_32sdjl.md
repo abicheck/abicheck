@@ -6,23 +6,21 @@ wrapper) and replace the example bullet with your entry, written the way
 it should read in CHANGELOG.md. Delete the other sections.
 -->
 
-### Added
+### Changed
 
-- **`dump --public-surface-only`** — scope a written snapshot to its public
-  ABI surface (public functions/variables plus the types transitively
-  reachable from their signatures, fields, and bases) instead of serializing
-  every declaration the header AST parser saw. A full header-AST dump
-  includes the entire transitive `#include` dependency surface regardless of
-  whether the library's own public API reaches it, which can dominate the
-  snapshot size for a library with a large or heavily-templated dependency
-  stack (e.g. SYCL/libstdc++). The new flag reuses the same public-surface
-  reachability closure `compare` already uses to demote out-of-scope
-  findings (`surface.compute_public_surface`), so a type actually named in a
-  public signature (including a used `std::`/SYCL type) is still kept — only
-  unreferenced dependency internals are dropped. Requires a header-AST-derived
-  snapshot (`-H`/`--header`, or `--dump-manifest`); a DWARF-only,
-  export-table-only, or source-only dump has nothing to scope from and is a
-  usage error rather than a silently unscoped or empty artifact. Filters the
-  flat function/variable/type/enum/typedef lists only — an embedded
-  header-only semantic graph (attached by default) is not yet filtered by
-  this flag.
+- **`dump` now excludes toolchain/system-header declarations by default.**
+  A full header-AST dump previously serialized every declaration the parser
+  saw, including the entire transitive `#include` dependency surface
+  (SYCL/libstdc++ internals, etc.) regardless of whether the library under
+  test even declares them itself — for a library with a large or
+  heavily-templated dependency stack this could put the snapshot JSON in
+  the hundreds-of-MB range. `dump` now drops a declaration whenever its own
+  defining header is a toolchain/system header (`/usr/include`, MSVC
+  `VC/Tools`, the Xcode/macOS SDK, ...) — a header-*origin* filter, not an
+  ABI-visibility one: the library's own private/internal declarations are
+  always kept, exactly like its public ones. Pass the new
+  **`dump --include-dependencies`** to opt out and get the old, unfiltered
+  full dump. This is a behavior change to `dump`'s default output — a
+  baseline dumped before this change and one dumped after it may no longer
+  compare identically if either side's public API touches a dependency
+  type; re-dump baselines that need `--include-dependencies` parity.

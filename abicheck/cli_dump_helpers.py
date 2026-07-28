@@ -75,7 +75,7 @@ class _WriteSnapshotOutput(Protocol):
         extractor: str = ...,
         inputs_pack: Path | None = ...,
         depth: str | None = ...,
-        public_surface_only: bool = ...,
+        include_dependencies: bool = ...,
     ) -> None: ...
 
 
@@ -133,40 +133,6 @@ def _attach_build_context(
         snap.build_context_defines = bc_defines
     if bc_conditional:
         snap.conditional_fields = bc_conditional
-
-
-def reject_statically_headerless_public_surface_only(
-    so_path: Path | None,
-    headers: tuple[Path, ...],
-    dump_manifest_path: Path | None,
-    public_surface_only: bool,
-) -> None:
-    """Reject ``dump --public-surface-only`` invocations known to fail before
-    any real parse attempt, so ``--dry-run`` preflight can't approve a
-    command the real run always rejects (Codex review, twice).
-
-    Two shapes are *statically* certain to leave nothing to scope from:
-    a source-only dump (no ``SO_PATH``) -- ``dump_source_only()``'s snapshot
-    never parses ``-H``/``--header`` at all, it doesn't even accept a headers
-    param -- and no header source given at all (``-H``/``--header`` empty and
-    no ``--dump-manifest``), since with nothing to parse
-    ``AbiSnapshot.from_headers`` cannot become ``True`` on any dispatch path
-    (ELF/PE/Mach-O). ``--dwarf-only`` alone (with ``-H`` given) is
-    deliberately NOT rejected here: whether it actually skips the header
-    parse depends on whether DWARF resolves at dump time, not known this
-    early -- rejecting it unconditionally would falsely reject a combination
-    that can still succeed (DWARF absent -> falls through to the header
-    parse).
-    """
-    if public_surface_only and (
-        so_path is None or (not headers and dump_manifest_path is None)
-    ):
-        raise click.UsageError(
-            "--public-surface-only has nothing to scope from: a source-only "
-            "dump (--sources/--build-info with no SO_PATH) never parses "
-            "headers, and no -H/--header or --dump-manifest was given to "
-            "produce a header-AST-derived snapshot."
-        )
 
 
 def resolve_dump_debug_format(
@@ -1131,7 +1097,7 @@ def handle_non_elf_dump(
     inputs_pack: Path | None = None,
     depth: str | None = None,
     compile_db_context_matched: bool = False,
-    public_surface_only: bool = False,
+    include_dependencies: bool = False,
 ) -> None:
     """Handle the PE/Mach-O native dump path and output writing (split from cli.py).
 
@@ -1223,7 +1189,7 @@ def handle_non_elf_dump(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
         extractor=header_backend, inputs_pack=inputs_pack, depth=depth,
-        public_surface_only=public_surface_only,
+        include_dependencies=include_dependencies,
     )
 
 
@@ -1381,7 +1347,7 @@ def perform_elf_dump(
     compile_db_context_matched: bool = False,
     dump_manifest: Any = None,
     include_labels: dict[Path, str] | None = None,
-    public_surface_only: bool = False,
+    include_dependencies: bool = False,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -1429,12 +1395,12 @@ def perform_elf_dump(
     no ABI-relevant flags to forward is still real build-context evidence,
     not an absent one — Codex review, second finding on this signal).
 
-    ``public_surface_only`` (``dump --public-surface-only``): scope the
-    written snapshot to its public ABI surface (public functions/variables
-    plus the types transitively reachable from them) via
-    :func:`abicheck.dumper_scoping.scope_snapshot_to_public_surface`,
-    applied in ``write_snapshot_output`` right before serialization — see
-    that module's docstring for what this trades away.
+    ``include_dependencies`` (``dump --include-dependencies``): by default,
+    ``write_snapshot_output`` excludes toolchain/system-header declarations
+    from the written snapshot right before serialization via
+    :func:`abicheck.dumper_scoping.scope_snapshot_excluding_dependencies`;
+    this flag opts out and keeps the old, unfiltered full dump — see that
+    module's docstring for exactly what "dependency" means here.
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
@@ -1747,5 +1713,5 @@ def perform_elf_dump(
         extractor=header_backend,
         inputs_pack=inputs_pack,
         depth=depth,
-        public_surface_only=public_surface_only,
+        include_dependencies=include_dependencies,
     )

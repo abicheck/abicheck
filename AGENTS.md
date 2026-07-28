@@ -148,12 +148,15 @@ Core pipeline (in order of data flow):
      surface behind `dumper._header_ast_parser`.
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
    - `snapshot_cache.py` — caching layer
-   - `dumper_scoping.py` — `dump --public-surface-only`: filters a written
-     snapshot to its public ABI surface (reused from `surface.py`'s
-     `compute_public_surface` reachability closure) so a full header-AST
-     dump's unreferenced transitive dependency surface (e.g. an unused
-     SYCL/libstdc++ declaration pulled in by `#include`) doesn't dominate
-     snapshot size for a library with a large dependency stack
+   - `dumper_scoping.py` — dependency exclusion, on by default (`dump
+     --include-dependencies` opts out): drops declarations whose own
+     defining header is a toolchain/system header (`/usr/include`, MSVC
+     `VC/Tools`, the Xcode/macOS SDK, ...) so a full header-AST dump's
+     transitive dependency surface (e.g. SYCL/libstdc++ declarations pulled
+     in by `#include`) doesn't dominate snapshot size for a library with a
+     large dependency stack. A header-*origin* filter, not an ABI-visibility
+     one — the library's own private/internal declarations are always kept,
+     same as its public ones
 3. **Diffing** — compare two snapshots
    - `diff_symbols.py` — function/variable/parameter changes
    - `diff_types.py` — struct/enum/union/typedef changes

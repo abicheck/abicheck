@@ -2220,12 +2220,12 @@ def test_dump_source_only_no_binary(tmp_path):
     assert len(snap.build_source.build_evidence.compile_units) == 1
 
 
-def test_dump_source_only_public_surface_only_is_usage_error(tmp_path):
-    """`dump --sources <tree> --public-surface-only` (no SO_PATH) must not
-    silently ignore the flag (Codex review): a source-only snapshot carries no
-    functions/variables at all, so it has no resolvable public surface to
-    scope from -- the CLI must surface that as a usage error, not succeed
-    with an unscoped artifact as if the flag had no effect.
+def test_dump_source_only_include_dependencies_is_noop(tmp_path):
+    """`dump --sources <tree> --include-dependencies` (no SO_PATH) must not
+    error: dependency-exclusion runs by default now, and a source-only
+    snapshot has no header-derived declarations at all, so both the default
+    (excluding) and --include-dependencies (opting out) paths are a no-op
+    for it -- succeed normally either way.
     """
     tree = tmp_path / "src"
     tree.mkdir()
@@ -2236,51 +2236,10 @@ def test_dump_source_only_public_surface_only_is_usage_error(tmp_path):
     out = tmp_path / "libfoo.src.json"
     result = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(tree), "--public-surface-only", "-o", str(out)],
+        ["dump", "--sources", str(tree), "--include-dependencies", "-o", str(out)],
     )
-    assert result.exit_code != 0
-    assert not out.exists()
-
-
-def test_dump_source_only_public_surface_only_rejected_in_dry_run_too(tmp_path):
-    """The same source-only + --public-surface-only combination must be
-    rejected during --dry-run preflight too (Codex review): it's statically
-    known to fail on a real run, so dry-run must not approve it.
-    """
-    tree = tmp_path / "src"
-    tree.mkdir()
-    cdb = [{"directory": str(tree), "file": "foo.cpp",
-            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
-    (tree / "compile_commands.json").write_text(json.dumps(cdb))
-
-    result = CliRunner().invoke(
-        main,
-        ["dump", "--sources", str(tree), "--public-surface-only", "--dry-run"],
-    )
-    assert result.exit_code != 0
-
-
-def test_dump_public_surface_only_depth_binary_rejected_in_dry_run_too(tmp_path):
-    """`dump LIB -H api.h --public-surface-only --depth binary --dry-run` must
-    be rejected too (Codex review, third finding on this signal): --depth
-    binary clears the supplied -H list before the real header parse runs, so
-    the real command always hits scope_snapshot_to_public_surface's "nothing
-    to scope from" error -- the static preflight must see the *resolved*
-    (post-clearing) headers, not the raw -H input, or a --depth binary
-    invocation with -H on the command line would slip through dry-run.
-    """
-    so = tmp_path / "lib.so"
-    hdr = tmp_path / "api.h"
-    so.write_bytes(b"")
-    hdr.write_text("", encoding="utf-8")
-    result = CliRunner().invoke(
-        main,
-        [
-            "dump", str(so), "-H", str(hdr),
-            "--public-surface-only", "--depth", "binary", "--dry-run",
-        ],
-    )
-    assert result.exit_code != 0
+    assert result.exit_code == 0, result.output
+    assert out.exists()
 
 
 def test_dump_with_no_binary_and_no_inputs_errors():
