@@ -563,3 +563,29 @@ class TestIsDependencyHeaderDirectoryRoot:
         sibling.write_text("", encoding="utf-8")
 
         assert is_dependency_header(str(sibling), [str(root_file)]) is False
+
+
+class TestIsDependencyHeaderFlatInstalledFileRoot:
+    """Regression coverage for a Codex-review P1 finding: a file root
+    installed flat in a system prefix (e.g. ``-H /usr/include/zlib.h``)
+    must not widen its parent (the bare, unqualified ``/usr/include``) into
+    a project directory -- unlike a root under its own subdirectory there
+    (``-H /usr/include/mylib/api.h``), the bare system prefix has nothing
+    project-specific about it, and treating it as project-owned would let
+    every unrelated system header underneath match too."""
+
+    def test_flat_installed_root_does_not_widen_bare_system_prefix(self):
+        root = "/usr/include/zlib.h"
+        assert is_dependency_header("/usr/include/c++/11/string", [root]) is True
+
+    def test_flat_installed_root_itself_still_kept(self):
+        root = "/usr/include/zlib.h"
+        assert is_dependency_header(root, [root]) is False
+
+    def test_subdirectory_installed_root_still_widens_its_own_parent(self):
+        # The already-fixed case (TestInstalledLibraryUnderSystemPrefix):
+        # a root under its own project subdirectory of a system prefix
+        # must still widen to that subdirectory, unaffected by this fix.
+        root = "/usr/include/mylib/api.h"
+        sibling = "/usr/include/mylib/detail/internal.h"
+        assert is_dependency_header(sibling, [root]) is False
