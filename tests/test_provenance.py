@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from abicheck.model import (
@@ -33,6 +35,7 @@ from abicheck.provenance import (
     build_public_set,
     classify_origin,
     header_from_location,
+    is_dependency_header,
     tag_provenance,
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
@@ -481,3 +484,41 @@ def test_castxml_populates_source_location_on_types_vars_enums():
     assert var.source_location == "/build/inc/api.h:20"
     enum = next(e for e in parser.parse_enums() if e.name == "Color")
     assert enum.source_location == "/build/inc/api.h:30"
+
+
+# ── is_dependency_header ────────────────────────────────────────────────────
+
+
+class TestIsDependencyHeaderRootResolution:
+    """Regression coverage for a Codex-review P2 finding: a relative
+    ``-H`` root (e.g. ``dump ... -H include/api.h``, the common invocation
+    from a project's own root directory) must not turn its short relative
+    parent directory (``include``) into a public-dir segment that then
+    matches *any* unrelated path containing the same generic component --
+    including real system headers like ``/usr/include/...`` -- which would
+    defeat dependency exclusion entirely."""
+
+    def test_relative_root_directory_does_not_leak_into_system_paths(self):
+        root = "include/api.h"
+        assert is_dependency_header("/usr/include/c++/11/string", [root]) is True
+
+    def test_relative_root_still_recognizes_its_own_header(self):
+        root = "include/api.h"
+        resolved = str(Path(root).resolve())
+        assert is_dependency_header(resolved, [root]) is False
+
+    def test_relative_root_recognizes_sibling_private_header(self):
+        root = "include/api.h"
+        sibling = str(Path("include/detail/internal.h").resolve())
+        assert is_dependency_header(sibling, [root]) is False
+
+    def test_no_header_roots_falls_back_to_bare_heuristic(self):
+        assert is_dependency_header("/usr/include/c++/11/string", None) is True
+        assert is_dependency_header("/usr/include/c++/11/string", []) is True
+
+    def test_absolute_root_under_system_prefix_still_kept(self):
+        root = "/usr/include/mylib/api.h"
+        assert is_dependency_header(root, [root]) is False
+
+    def test_no_source_header_is_never_a_dependency(self):
+        assert is_dependency_header(None, ["include/api.h"]) is False

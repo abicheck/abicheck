@@ -206,7 +206,17 @@ def is_dependency_header(
         return False
     if not header_roots:
         return is_system_header(source_header)
-    roots = [str(h) for h in header_roots]
+    # Resolve relative roots (e.g. `-H include/api.h`) to absolute paths
+    # before segmenting. Without this, a short relative parent directory
+    # like `include` becomes a single-segment public dir, and
+    # `_matches_public`'s contiguous-subsequence containment check then
+    # matches that same generic segment inside *any* path containing an
+    # "include" component -- including real system paths like
+    # `/usr/include/...` -- defeating the exclusion entirely (Codex
+    # review). Resolving first makes the root's own segments as specific
+    # as the real filesystem location, so only paths actually under it
+    # can match.
+    roots = [str(Path(h).resolve()) for h in header_roots]
     root_dirs = [str(Path(h).parent) for h in roots]
     header_segs, dir_segs, have_set = build_public_set(roots, root_dirs)
     origin = classify_origin(

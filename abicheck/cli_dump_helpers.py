@@ -1715,5 +1715,6 @@ def perform_elf_dump(
         inputs_pack=inputs_pack,
         depth=depth,
         include_dependencies=include_dependencies,
-        header_roots=headers,
+        header_roots=tuple(headers)
+        + tuple(dump_manifest.roots if dump_manifest is not None else ()),
     )

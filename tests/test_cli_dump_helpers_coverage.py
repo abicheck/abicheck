@@ -1675,3 +1675,69 @@ def test_perform_elf_dump_wraps_dump_errors_still_cleans_up_seeded_dirs(
 # ── evidence_depth_label (CLI-audit P2 self-describing output) ──────────────
 
 
+
+
+# ── perform_elf_dump / --dump-manifest header_roots (Codex review P1) ───────
+
+
+def test_perform_elf_dump_forwards_dump_manifest_roots_as_header_roots(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``--dump-manifest`` is mutually exclusive with ``-H``, so ``headers``
+    is empty on a manifest-driven dump even though the manifest's own
+    ``roots`` are the library's real header roots. Without forwarding those
+    roots into ``write_snapshot_output``'s ``header_roots``, the default
+    dependency-exclusion pass (``dumper_scoping.scope_snapshot_excluding_
+    dependencies``) falls back to the bare system-header path heuristic and
+    can misclassify an installed library's own headers under a system
+    prefix as a dependency, silently emptying the snapshot (Codex review)."""
+    from abicheck.dump_manifest import DumpManifest
+
+    so = tmp_path / "lib.so"
+    snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
+
+    captured: dict[str, object] = {}
+
+    def _write(*_a, header_roots=(), **_k):  # noqa: ANN002, ANN003
+        captured["header_roots"] = header_roots
+
+    _events, _stamp, _write_unused, _expand, _populate = _elf_dump_callables()
+    manifest_root = Path("/usr/include/mylib/api.h")
+    manifest = DumpManifest(base_dir=tmp_path, roots=(manifest_root,))
+
+    perform_elf_dump(
+        so, (), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, None, None,
+        False, "off", _expand, _populate, _stamp, _write,
+        dump_manifest=manifest,
+    )
+
+    assert manifest_root in captured["header_roots"]
+
+
+def test_perform_elf_dump_header_roots_is_headers_only_without_manifest(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """No ``--dump-manifest``: ``header_roots`` is exactly the ``-H`` tuple,
+    unchanged from before (no manifest roots to fold in)."""
+    so = tmp_path / "lib.so"
+    hdr = tmp_path / "h.h"
+    hdr.write_text("struct S { int x; };\n", encoding="utf-8")
+    snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
+
+    captured: dict[str, object] = {}
+
+    def _write(*_a, header_roots=(), **_k):  # noqa: ANN002, ANN003
+        captured["header_roots"] = header_roots
+
+    _events, _stamp, _write_unused, _expand, _populate = _elf_dump_callables()
+
+    perform_elf_dump(
+        so, (hdr,), (), "1.0", "c", None, None, None, (), None, True, False, None,
+        (), (), None, False, (), "", None, None, False, None, None, None, None,
+        False, "off", _expand, _populate, _stamp, _write,
+    )
+
+    assert captured["header_roots"] == (hdr,)
