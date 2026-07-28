@@ -562,9 +562,50 @@ def test_scan_engine_clang_bin_ignores_non_clang_gcc_path() -> None:
     assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="g++")) == "clang++"
 
 
-def test_scan_engine_clang_bin_honors_gcc_prefix() -> None:
+def test_scan_engine_clang_bin_honors_gcc_prefix_when_available(monkeypatch) -> None:
+    """A ``--gcc-prefix`` composes a prefixed clang driver name, but only wins
+    when that specific binary is actually resolvable on PATH."""
+    import abicheck.scan_engine as se
+    from abicheck.service_scan import CompileContext
+
+    monkeypatch.setattr(
+        se.shutil, "which", lambda name: name if name.endswith("clang++") else None
+    )
+    ctx = CompileContext(gcc_prefix="/opt/x86_64-linux-gnu-")
+    assert se._preprocessor_scan_clang_bin(ctx) == "/opt/x86_64-linux-gnu-clang++"
+
+
+def test_scan_engine_clang_bin_falls_back_when_prefixed_clang_missing(
+    monkeypatch,
+) -> None:
+    """A documented GCC cross-toolchain prefix (e.g. ``aarch64-linux-gnu-``)
+    is not evidence a same-prefixed Clang driver exists — a system providing
+    only ``aarch64-linux-gnu-g++`` must fall back to the plain ``clang++``
+    that worked before this resolver existed, not silently downgrade S2 to
+    ``not_collected`` by guessing a nonexistent binary name (Codex review)."""
+    import abicheck.scan_engine as se
+    from abicheck.service_scan import CompileContext
+
+    monkeypatch.setattr(se.shutil, "which", lambda name: None)
+    ctx = CompileContext(gcc_prefix="aarch64-linux-gnu-")
+    assert se._preprocessor_scan_clang_bin(ctx) == "clang++"
+
+
+def test_scan_engine_clang_bin_excludes_cl_style_drivers() -> None:
+    """A CL-compatible-mode driver (``clang-cl``, Intel's ``dpcpp-cl``) must
+    never be selected here: :class:`ClangPreprocessorExtractor` always shells
+    out with fixed GNU-mode flags (``-E -dM``, ``-M``), which a CL-mode
+    driver either rejects or silently misinterprets as ordinary compile
+    input (``/E``/``/d1PP`` are the CL-mode spellings) — Codex review."""
     from abicheck.scan_engine import _preprocessor_scan_clang_bin
     from abicheck.service_scan import CompileContext
 
-    ctx = CompileContext(gcc_prefix="/opt/x86_64-linux-gnu-")
-    assert _preprocessor_scan_clang_bin(ctx) == "/opt/x86_64-linux-gnu-clang++"
+    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="dpcpp-cl")) == (
+        "clang++"
+    )
+    assert _preprocessor_scan_clang_bin(CompileContext(gcc_path="clang-cl")) == (
+        "clang++"
+    )
+    assert _preprocessor_scan_clang_bin(
+        CompileContext(gcc_path=r"C:\llvm\bin\clang-cl.exe")
+    ) == "clang++"
