@@ -167,9 +167,15 @@ def depfile_args_from_argv(argv: list[str], directory: str | None = None) -> lis
     if directory is not None and any(a.startswith("@") and len(a) > 1 for a in args):
         from pathlib import Path
 
-        from ..build_context import _expand_response_files
+        from ..build_context import _expand_response_files, _safe_resolve
 
-        args = _expand_response_files(args, Path(directory))
+        # The compile unit's own working directory is both the base a relative
+        # @file resolves against AND the trusted root it must stay under (no
+        # separate "compile database location" is available at this call
+        # site) -- an untrusted CompileUnit must not be able to smuggle an
+        # absolute/traversal path to read arbitrary filesystem content.
+        cu_dir = Path(directory)
+        args = _expand_response_files(args, cu_dir, _safe_resolve(cu_dir) or cu_dir)
     out: list[str] = []
     skip_next = False
     for tok in args:

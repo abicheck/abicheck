@@ -88,22 +88,47 @@ _MAX_RESPONSE_FILE_DEPTH = 4
 _MAX_RESPONSE_FILE_BYTES = 1024 * 1024
 
 
-def _read_response_file(path: Path) -> str | None:
-    """Best-effort, bounded read of a GNU ``@response-file``.
-
-    Returns ``None`` (never raises) for anything that isn't a plausible
-    response file — missing, not a regular file, or oversized — so the
-    caller can fall back to keeping the original ``@file`` token untouched
-    instead of losing the rest of the argument list.
-    """
+def _safe_resolve(path: Path) -> Path | None:
     try:
-        st = path.stat()
+        return path.resolve()
     except OSError:
         return None
-    if not path.is_file() or st.st_size > _MAX_RESPONSE_FILE_BYTES:
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _read_response_file(path: Path, root: Path) -> str | None:
+    """Best-effort, bounded read of a GNU ``@response-file``.
+
+    Returns ``None`` (never raises) for anything that isn't a plausible,
+    in-tree response file: missing, not a regular file, oversized, or
+    outside *root* (the trusted compile-database directory) — an
+    ``@/etc/passwd`` or ``@../../secret`` token in an untrusted
+    ``compile_commands.json`` (e.g. a PR checkout scanned in CI) must not
+    read arbitrary filesystem content into the parsed argv, which
+    ``adapters/compile_db.py`` persists into ``CompileUnit.argv`` and
+    ultimately the ``.abi.json`` artifact — mirrors
+    ``adapters.make._read_response_file``'s identical build-tree jail. The
+    caller falls back to keeping the original ``@file`` token untouched
+    instead of losing the rest of the argument list.
+    """
+    resolved = _safe_resolve(path)
+    if resolved is None or not _is_relative_to(resolved, root):
         return None
     try:
-        data = path.read_bytes()
+        st = resolved.stat()
+    except OSError:
+        return None
+    if not resolved.is_file() or st.st_size > _MAX_RESPONSE_FILE_BYTES:
+        return None
+    try:
+        data = resolved.read_bytes()
     except OSError:
         return None
     if len(data) > _MAX_RESPONSE_FILE_BYTES:
@@ -112,7 +137,7 @@ def _read_response_file(path: Path) -> str | None:
 
 
 def _expand_response_files(
-    arguments: list[str], directory: Path, _depth: int = 0
+    arguments: list[str], directory: Path, root: Path, _depth: int = 0
 ) -> list[str]:
     """Inline GNU-style ``@response-file`` arguments in a compiler argv.
 
@@ -128,12 +153,13 @@ def _expand_response_files(
     ``file not found`` on every translation unit regardless of which
     compiler ends up invoked. A response file's own contents may themselves
     ``@include`` another one, so expansion recurses, bounded by
-    *_MAX_RESPONSE_FILE_DEPTH*.
+    *_MAX_RESPONSE_FILE_DEPTH*. *root* is the trusted directory a resolved
+    ``@file`` must stay under (see :func:`_read_response_file`).
 
-    Unreadable/oversized files, and unparsable file contents, degrade to
-    keeping the original ``@file`` token rather than raising — matching
-    ``_extract_flags``'s existing "skip what we don't understand" contract
-    for any other flag it doesn't recognize.
+    Unreadable/oversized/out-of-tree files, and unparsable file contents,
+    degrade to keeping the original ``@file`` token rather than raising —
+    matching ``_extract_flags``'s existing "skip what we don't understand"
+    contract for any other flag it doesn't recognize.
     """
     if _depth > _MAX_RESPONSE_FILE_DEPTH:
         return arguments
@@ -144,7 +170,7 @@ def _expand_response_files(
             continue
         raw_path = Path(arg[1:])
         path = raw_path if raw_path.is_absolute() else directory / raw_path
-        text = _read_response_file(path)
+        text = _read_response_file(path, root)
         if text is None:
             expanded.append(arg)
             continue
@@ -153,7 +179,7 @@ def _expand_response_files(
         except ValueError:
             expanded.append(arg)
             continue
-        expanded.extend(_expand_response_files(tokens, directory, _depth + 1))
+        expanded.extend(_expand_response_files(tokens, directory, root, _depth + 1))
     return expanded
 
 
@@ -171,9 +197,11 @@ class CompileEntry:
 
         Handles both ``arguments`` (JSON array) and ``command`` (shell string)
         forms as specified by the Clang compilation database standard.
-        ``@response-file`` arguments are expanded inline (see
-        :func:`_expand_response_files`) so every downstream consumer of
-        ``arguments`` sees the real flags, not an opaque ``@file`` token.
+        ``@response-file`` arguments are expanded inline, constrained to
+        *db_dir* (see :func:`_expand_response_files`) so every downstream
+        consumer of ``arguments`` sees the real flags, not an opaque
+        ``@file`` token — without reading outside the compilation
+        database's own trusted directory.
         """
         directory = Path(str(raw.get("directory", db_dir)))
         file_str = str(raw.get("file", ""))
@@ -192,7 +220,9 @@ class CompileEntry:
         else:
             arguments = []
 
-        arguments = _expand_response_files(arguments, directory)
+        arguments = _expand_response_files(
+            arguments, directory, _safe_resolve(db_dir) or db_dir
+        )
 
         return cls(file=file_path.resolve(), directory=directory, arguments=arguments)
 

@@ -214,6 +214,73 @@ class TestCompileEntry:
         assert "@does-not-exist.txt" in entry.arguments
         assert "-c" in entry.arguments
 
+    def test_response_file_absolute_path_outside_db_dir_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """A response-file token pointing at an absolute path outside the
+        compile database's own directory must not be read -- an untrusted
+        ``compile_commands.json`` (e.g. scanned from a PR checkout in CI)
+        could otherwise leak arbitrary filesystem content (like
+        ``@/etc/passwd``) into the parsed argv, which ends up persisted in
+        ``CompileUnit.argv`` / the ``.abi.json`` artifact."""
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        secret_dir = tmp_path / "outside"
+        secret_dir.mkdir()
+        secret = secret_dir / "secret.txt"
+        secret.write_text("-Dleaked=1\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", f"@{secret}", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert f"@{secret}" in entry.arguments
+        assert "-Dleaked=1" not in entry.arguments
+
+    def test_response_file_path_traversal_outside_db_dir_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """A relative ``@../../secret``-style traversal is rejected the same
+        way an absolute out-of-tree path is."""
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        secret = tmp_path / "secret.txt"
+        secret.write_text("-Dleaked=1\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@../secret.txt", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "@../secret.txt" in entry.arguments
+        assert "-Dleaked=1" not in entry.arguments
+
+    def test_response_file_within_db_dir_subdirectory_still_expands(
+        self, tmp_path: Path
+    ) -> None:
+        """The trusted-root check is not overly strict: a response file that
+        lives *inside* the compile database's own directory tree (just in a
+        different subdirectory than the entry's ``directory``) still
+        expands normally."""
+        db_dir = tmp_path / "db"
+        (db_dir / "sub").mkdir(parents=True)
+        rsp = db_dir / "inc_folders.txt"
+        rsp.write_text("-Iinclude/foo\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir / "sub"),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@../inc_folders.txt", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "-Iinclude/foo" in entry.arguments
+
 
 # ---------------------------------------------------------------------------
 # Tests: _extract_flags

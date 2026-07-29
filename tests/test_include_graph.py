@@ -248,6 +248,23 @@ def test_depfile_args_response_file_without_directory_drops_token() -> None:
     ) == ["foo.cpp", "-Iinc"]
 
 
+def test_depfile_args_response_file_outside_directory_rejected(tmp_path) -> None:
+    """A response file outside the compile unit's own working directory must
+    not be read -- an untrusted CompileUnit (e.g. from a third-party
+    ``abicheck_inputs/`` pack) could otherwise smuggle an absolute/traversal
+    ``@file`` token to leak arbitrary filesystem content into the argv fed
+    to ``clang -MM``."""
+    cu_dir = tmp_path / "cu"
+    cu_dir.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("-Dleaked=1\n")
+    result = depfile_args_from_argv(
+        ["clang++", "-c", "foo.cpp", f"@{secret}"],
+        directory=str(cu_dir),
+    )
+    assert "-Dleaked=1" not in result
+
+
 def test_parse_depfile_line_continuations() -> None:
     text = "foo.o: foo.cpp \\\n  inc/a.h \\\n  inc/b.h\n"
     assert parse_depfile(text) == ["foo.cpp", "inc/a.h", "inc/b.h"]
