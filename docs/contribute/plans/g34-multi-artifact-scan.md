@@ -211,13 +211,34 @@ started.**
   `run_scan`/`run_scan_core` for N artifacts would therefore let each
   member consume up to the *full* configured budget independently — a
   `--budget 15m` on a 5-artifact set could run ~75 minutes instead of the
-  documented whole-command guard. `run_scan_set` must compute one
-  set-level deadline up front (`start = _time.monotonic()` once, before the
-  loop) and pass each artifact's *remaining* budget
-  (`req.budget.total_timeout - elapsed`) into that artifact's
-  `run_scan_core` call, failing the set with the existing budget-overflow
-  contract (exit code 5) the moment the remaining budget is exhausted
-  rather than starting a member that can't finish in time.
+  documented whole-command guard.
+  **Fix — do not recompute remaining budget externally; `run_scan_core`
+  already does.** `run_scan_core` derives its own remaining budget from
+  `budget_s - (time.monotonic() - start)` (`_remaining_budget_s`,
+  `abicheck/scan_engine.py`) — it already subtracts elapsed-since-`start`
+  internally. Combining a *shared, set-level* `start` (computed once,
+  before the loop) with an already-*reduced* `budget_s` per member (as an
+  earlier round of this plan specified: "pass each artifact's remaining
+  budget") double-subtracts: after member 1 finishes at the 7-minute mark
+  of a 15-minute budget, member 2 would receive `budget_s = 8min`
+  (correctly reduced) but the *original* `start` from 7 minutes ago, so
+  `run_scan_core` computes its own remaining as `8min - 7min_elapsed =
+  1min` — overflowing the whole set around the 8-minute mark instead of
+  the intended 15. The correct combination is one of:
+  1. pass the **same, shared `start`** *and* the **original, unreduced,
+     total `budget_s`** to every member's `run_scan_core` call — since
+     `run_scan_core` already computes `budget_s - (now - shared_start)`
+     internally, this alone produces the correct shrinking remaining
+     budget across members with no external recomputation needed; or
+  2. give each member its own fresh `start = _time.monotonic()` at the
+     moment it begins, paired with that member's actual remaining budget
+     computed externally (`total_timeout - elapsed_so_far`) — an
+     equivalent absolute-deadline formulation, but only if the shared
+     `start` from option 1 is *not* also passed alongside it.
+  Option 1 is simpler and requires no new per-member arithmetic —
+  prefer it. Cover with a test asserting a 2-member set where member 1
+  consumes most of the budget correctly overflows on member 2 at the
+  *original* total deadline, not early.
 - **`run_scan_set` cannot simply call `run_scan` in a loop.** `ScanResult`
   (`abicheck/service_scan.py`) has no snapshot field
   (`verdict`/`exit_code`/`findings`/`layers`/`confidence`/`estimate`/
@@ -369,28 +390,46 @@ started.**
   binaries this ADR never asked the caller to provide paths for — out of
   scope here). The implementable check is therefore coarser, at DSO-set
   granularity: suppress an unversioned, unresolved-in-set import for a
-  consumer **iff that consumer has at least one non-intra `DT_NEEDED`
-  edge, and every one of them is either a well-known system soname or on
-  the caller-supplied `bundle_system_providers` allow-list** — mirroring
-  `_detect_intra_dep_removed`'s existing check **exactly**, not a narrower
-  version of it: that check's `e in system_providers or _looks_system(e)`
-  test already unions the built-in `DEFAULT_SYSTEM_PROVIDERS`/
-  `_looks_system` heuristic with the caller-supplied set
-  (`abicheck/bundle.py:220`, `sys_libs = set(DEFAULT_SYSTEM_PROVIDERS) |
-  set(system_providers or ())`), and the audit detector must reuse that
-  same union — checking only the caller-supplied list, as an earlier round
-  of this plan specified, would regress ordinary built-in-system consumers
-  (e.g. a consumer needing both a declared `libvendor.so` and plain
-  `libc.so.6`): requiring the user to redundantly name every built-in
-  system library in `--bundle-system-providers` just to keep today's
-  already-working system-library suppression is not backward compatible
-  with `compare`'s existing behavior on the same graph shape. Also carries
-  over the non-empty guard (`if extra_needed and all(...)`, not just
-  `all(...)`): `all()` over an empty list is vacuously `True` in Python, so
-  a consumer with *zero* non-intra `DT_NEEDED` edges (e.g. the sibling that
-  used to provide the symbol was itself dropped from the set, taking its
-  DT_NEEDED edge with it) would otherwise suppress unconditionally —
-  exactly the genuinely-broken intra-set reference this detector exists to
+  consumer **iff all four hold**:
+  1. the consumer has **zero intra-set `DT_NEEDED` edges**
+     (`ResolutionGraph.intra_needed.get(consumer.library)` is empty) —
+     **this is the load-bearing condition a prior round of this plan
+     omitted, and omitting it is unsound, not just imprecise.** If the
+     consumer still depends on an intra-set library (e.g. `libcore`) that
+     simply stopped exporting the symbol, that intra-set library — not
+     anything external — is the true, broken provider; the live
+     `_detect_intra_dep_removed` never suppresses purely on "the
+     consumer's *external* deps happen to look fine" for exactly this
+     reason, since a consumer needing both `libcore` (intra) and
+     `libc.so.6` (extra, system) would otherwise suppress a genuinely
+     broken `libcore` reference with zero symbol-level evidence that
+     `libcore` was ever ruled out. Restricting to "no intra-set deps at
+     all" means this coarse path only ever fires for a consumer whose
+     *entire* dependency set is external — the one case where there is no
+     intra-set candidate to have silently broken;
+  2. the consumer has at least one non-intra `DT_NEEDED` edge (paired with
+     condition 1: a consumer with literally zero `DT_NEEDED` edges at all
+     is a degenerate case, not "purely external" — treat as unresolved);
+  3. every one of those non-intra edges is either a well-known system
+     soname or on the caller-supplied `bundle_system_providers` allow-list
+     — mirroring `_detect_intra_dep_removed`'s existing
+     `e in system_providers or _looks_system(e)` union of the built-in
+     `DEFAULT_SYSTEM_PROVIDERS`/`_looks_system` heuristic with the
+     caller-supplied set (`abicheck/bundle.py:220`), not a narrower,
+     caller-list-only version of it (checking only the caller-supplied
+     list, as an earlier round of this plan specified, would regress an
+     ordinary consumer needing both a declared `libvendor.so` and plain
+     `libc.so.6` — requiring the user to redundantly name every built-in
+     system library just to keep today's already-working suppression);
+  4. the non-intra-edge list from condition 2/3 is non-empty before the
+     `all(...)` check runs — mirroring the live code's `if extra_needed
+     and all(...)` guard exactly, not just `all(...)` alone: `all()` over
+     an empty list is vacuously `True` in Python, so without this guard a
+     consumer with *zero* non-intra edges (already excluded by condition
+     1's "purely external" framing, but worth stating as its own explicit
+     guard rather than relying on condition 1 alone to prevent it) would
+     otherwise suppress unconditionally — exactly the genuinely-broken
+     intra-set reference this detector exists to
   catch. Requiring at least one external edge before the all-covered check
   applies closes that vacuous-truth gap; a unit test for the empty-edge
   case (no non-intra DT_NEEDED at all, symbol genuinely unresolved) must
@@ -403,8 +442,10 @@ started.**
   "provided by the undeclared one" at this granularity), not a silent gap.
   Document this limitation directly in the detector's docstring and in
   ADR-056/user-facing `--bundle-system-providers` help text: the allow-list
-  is a per-consumer, all-non-intra-deps-covered escape hatch, not a
-  per-symbol attribution mechanism.
+  is a per-consumer, all-non-intra-deps-covered escape hatch that only
+  applies to a consumer with **no remaining intra-set dependencies at
+  all** — not a per-symbol attribution mechanism, and not something that
+  rescues a mixed intra+external consumer.
   Emit `BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` with `COMPATIBLE_WITH_RISK`
   severity and a description that says "no provider found in this
   artifact set" (not "removed") only when neither suppression path
@@ -428,20 +469,27 @@ started.**
   name the built-in one — the `DEFAULT_SYSTEM_PROVIDERS`-union regression
   test; (f) an unresolved *weak* import with a non-system-shaped name
   produces no finding regardless of allow-list state — the weak-import
-  exclusion regression test.
+  exclusion regression test; (g) a consumer with **one intra-set edge**
+  (e.g. `libcore`, which stopped exporting the symbol) **and** an
+  otherwise-fully-allow-listed external edge (`libc.so.6`) still produces
+  the finding — the mixed-intra-plus-external regression test for the P1
+  soundness fix above; the case this whole coarse suppression path exists
+  to avoid ever silently swallowing.
 - **The set-level deadline (Phase 1) must reach this phase too, not stop
-  after the last member scan.** Phase 1's remaining-budget threading only
-  covers each artifact's `run_scan_core` call; building the resolution
-  graph and running the new audit detector over a large-symbol bundle
-  happens *after* the last member finishes, with no deadline check of its
-  own — a set could exhaust its whole advertised `--budget` on N member
-  scans and then keep running an unbounded amount of extra time in bundle
-  construction/detection before `run_scan_set` returns. `build_bundle_snapshot`/
-  the new audit detector must accept the same set-level deadline
-  (remaining budget after the last member scan) and raise the existing
-  budget-overflow condition if exceeded, so `ScanSetResult` can end up
-  `BUDGET_OVERFLOW` from bundle-phase work too, not only from a member
-  scan.
+  after the last member scan.** Phase 1's shared-`start`/total-`budget_s`
+  threading (corrected above) only covers each artifact's `run_scan_core`
+  call; building the resolution graph and running the new audit detector
+  over a large-symbol bundle happens *after* the last member finishes,
+  with no deadline check of its own — a set could exhaust its whole
+  advertised `--budget` on N member scans and then keep running an
+  unbounded amount of extra time in bundle construction/detection before
+  `run_scan_set` returns. `build_bundle_snapshot`/the new audit detector
+  must accept the same shared `start` + total `budget_s` (computing its
+  own remaining time from them the same way `run_scan_core` does, not a
+  pre-computed "remaining after member N" value passed in) and raise the
+  existing budget-overflow condition if exceeded, so `ScanSetResult` can
+  end up `BUDGET_OVERFLOW` from bundle-phase work too, not only from a
+  member scan.
 - **Not started.**
 
 ### Phase 3 — CLI + MCP surface
