@@ -920,6 +920,44 @@ def test_run_scan_auto_default_without_evidence_is_best_effort(snap_path: Path) 
     assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
 
 
+def test_run_scan_forwards_new_scan_request_controls(
+    monkeypatch, snap_path: Path
+) -> None:
+    # P2 regression (Codex review): run_scan() used to silently ignore
+    # abi3_floor/enabled_checks/severities/build_config/allow_build_query
+    # even when a direct Python API caller set them on ScanRequest --
+    # run_scan_set (--artifact-set) already forwarded them, but run_scan
+    # hard-coded build_config=None/allow_build_query=False/all
+    # checks/no severities/no abi3_floor regardless of the request.
+    import abicheck.scan_engine as scan_engine_mod
+    from abicheck.service import ScanRequest, run_scan
+
+    captured: dict[str, object] = {}
+    real_run_scan_core = scan_engine_mod.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured.update(kwargs)
+        return real_run_scan_core(*args, **kwargs)
+
+    monkeypatch.setattr(scan_engine_mod, "run_scan_core", _spy)
+
+    custom_checks = frozenset({"exported_not_public"})
+    run_scan(
+        ScanRequest(
+            binaries=[snap_path],
+            mode="audit",
+            abi3_floor=(3, 9),
+            enabled_checks=custom_checks,
+            severities={"exported_not_public": "error"},
+            allow_build_query=True,
+        )
+    )
+    assert captured["abi3_floor"] == (3, 9)
+    assert captured["enabled_checks"] == custom_checks
+    assert captured["severities"] == {"exported_not_public": "error"}
+    assert captured["allow_build_query"] is True
+
+
 def test_run_scan_binary_depth_suppresses_headers(
     monkeypatch, snap_path: Path, header: Path
 ) -> None:

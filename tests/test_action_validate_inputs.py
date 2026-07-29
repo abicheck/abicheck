@@ -293,6 +293,23 @@ class TestScanNewLibrarySet:
         assert result.returncode == 1
         assert "dry-run" in result.stdout
 
+    def test_rejects_estimate_alias_with_new_library_set(self) -> None:
+        # P2 regression (Codex review): run.sh converts the deprecated
+        # estimate: true alias into INPUT_DRY_RUN=true downstream, but this
+        # preflight check only looked at INPUT_DRY_RUN directly -- a set +
+        # estimate combination passed preflight and only failed after the
+        # full Python/toolchain install, same as the direct dry-run case
+        # above.
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_ESTIMATE": "true",
+            }
+        )
+        assert result.returncode == 1
+        assert "estimate" in result.stdout
+
     def test_warns_new_library_set_outside_scan(self) -> None:
         result = _run_validate(
             {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"}

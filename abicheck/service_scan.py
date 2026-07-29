@@ -231,10 +231,11 @@ class ScanRequest:
     collapse_versioned_symbols: bool = False
     # ADR-056: options the single-binary CLI path (cli_scan.py) already
     # forwards straight to run_scan_core, bypassing ScanRequest entirely.
-    # run_scan itself still ignores these (unchanged behavior); run_scan_set
-    # (--artifact-set) is the first caller that actually honors them, so a
-    # multi-artifact scan doesn't silently drop --abi3/--crosscheck/
-    # --build-config/--risk-rules relative to an equivalent single-binary run.
+    # Both run_scan and run_scan_set (--artifact-set) honor these when set
+    # directly on a ScanRequest (P2 regression, Codex review: run_scan used
+    # to silently ignore them, so a direct Python API caller passing
+    # abi3_floor/enabled_checks/severities/build_config/allow_build_query/
+    # risk_rules_path got a differently-gated result than requested).
     abi3_floor: tuple[int, int] | None = None
     enabled_checks: frozenset[str] | None = None  # None = ALL_CHECKS default
     severities: dict[str, str] = field(default_factory=dict)
@@ -1007,7 +1008,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         SourceScope,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan_baseline import _public_provenance_set
+    from .cli_scan_baseline import _load_risk_rules, _public_provenance_set
     from .scan_engine import (
         _BudgetOverflow,
         _EvidenceContractError,
@@ -1051,7 +1052,11 @@ def run_scan(req: ScanRequest) -> ScanResult:
 
     changed = [p for p in req.changed_paths if p]
     seeded = req.seeded or bool(changed)
-    risk_rules = RiskRules.default()
+    risk_rules = (
+        _load_risk_rules(req.risk_rules_path)
+        if req.risk_rules_path is not None
+        else RiskRules.default()
+    )
     risk = score_changed_paths(changed, risk_rules)
 
     scan_mode = ScanMode(req.mode)
@@ -1107,10 +1112,10 @@ def run_scan(req: ScanRequest) -> ScanResult:
             public_header_dirs=prov_dirs,
             sources=req.sources,
             effective_build_info=effective_build_info,
-            build_config=None,
+            build_config=req.build_config,
             baseline=Path(req.baseline) if req.baseline is not None else None,
             lang=req.lang,
-            allow_build_query=False,
+            allow_build_query=req.allow_build_query,
             scan_mode=scan_mode,
             resolved=resolved,
             eff_depth_enum=eff_depth,
@@ -1120,8 +1125,12 @@ def run_scan(req: ScanRequest) -> ScanResult:
             seeded=seeded,
             risk=risk,
             is_auto=is_auto,
-            enabled_checks=frozenset(ALL_CHECKS),
-            severities={},
+            enabled_checks=(
+                req.enabled_checks
+                if req.enabled_checks is not None
+                else frozenset(ALL_CHECKS)
+            ),
+            severities=dict(req.severities),
             budget=budget_str,
             budget_s=budget_s,
             pinned_explicit=pinned_explicit,
@@ -1135,6 +1144,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             pattern_verdicts=req.pattern_verdicts,
             env_matrix=req.env_matrix,
             collapse_versioned_symbols=req.collapse_versioned_symbols,
+            abi3_floor=req.abi3_floor,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

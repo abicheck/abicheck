@@ -14,9 +14,13 @@ solves this (ADR-023's bundle layer) but `scan`/`dump` have no equivalent —
 a user auditing a freshly-vendored multi-.so dependency with no "old"
 snapshot to compare against cannot express "these N files are one artifact"
 at all.
-**ADR:** [ADR-056](../adr/056-multi-artifact-library-set-scan.md) — Proposed,
-not yet accepted for implementation. This plan is the phased breakdown *if*
-ADR-056 is accepted; no phase here should be started before that.
+**ADR:** [ADR-056](../adr/056-multi-artifact-library-set-scan.md) — Proposed;
+formal decision-maker sign-off is still pending, but Phases 1-4's core
+scope (engine/detector/CLI slice, plus the GitHub Action wiring) has
+already shipped ahead of that sign-off, in the same PR that proposed the
+ADR — see the "Implementation status" note below for exactly what shipped
+vs. what remains deferred (MCP wiring, the full example-catalog
+obligation, and the dry-run/estimator's per-member scaling).
 **Type:** Initiative plan (cross-cutting; not tied to a single
 `usecase-registry.yaml` gap — spans `abicheck/service_scan.py`,
 `abicheck/bundle.py`, `abicheck/cli_scan.py`, `abicheck/mcp_server.py`,
