@@ -97,6 +97,7 @@ import inspect
 from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
@@ -225,6 +226,35 @@ def _typedef_alias_reachability(
 #: ``_directly_referenced_dependency_names`` and its nested-match
 #: suppression at the end of that function.
 _TAG_KEYWORDS = frozenset({"struct", "class", "union", "enum"})
+
+
+def dump_manifest_header_roots(dump_manifest: Any) -> tuple[Path, ...]:
+    """Every path a ``--dump-manifest`` document declares as project-owned,
+    for forwarding into :func:`scope_snapshot_excluding_dependencies`'s
+    ``header_roots`` -- not just ``roots`` (Codex review).
+    ``public_header_paths``/``public_header_dirs`` (the manifest's own
+    ADR-015 provenance-input equivalent of ``--public-header``/
+    ``--public-header-dir``) and any per-translation-unit include directory
+    explicitly marked ``project_owned: true`` are just as much "the dump's
+    actual root set" as ``roots`` -- a declaration under one of them must
+    not be misclassified as a dependency just because those paths happen to
+    sit under a system prefix, the same reasoning ``roots`` itself already
+    gets. Shared by both ``dump`` (``cli_dump_helpers.py``) and
+    ``compare``'s implicit live-binary dumping (this module's own
+    ``apply_dependency_scope_to_run_dump_result``) so a manifest's roots are
+    never dropped just because the dumping path used ``--dump-manifest``
+    instead of ``-H`` (Codex review).
+    """
+    if dump_manifest is None:
+        return ()
+    roots = [
+        *dump_manifest.roots,
+        *dump_manifest.public_header_paths,
+        *dump_manifest.public_header_dirs,
+    ]
+    for tu in dump_manifest.translation_units:
+        roots.extend(inc.path for inc in tu.includes if inc.project_owned)
+    return tuple(roots)
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
@@ -887,9 +917,16 @@ def apply_dependency_scope_to_run_dump_result(
     regardless of whether it was passed positionally or by keyword, the
     same ``-H``/``--header`` root set :func:`resolve_dependency_scope` needs
     to avoid misclassifying an installed library's own system-prefixed path
-    as a dependency."""
+    as a dependency. ``--dump-manifest`` is mutually exclusive with ``-H``,
+    so ``headers`` alone is empty for a manifest-driven dump — its own
+    project-owned roots (:func:`dump_manifest_header_roots`) are folded in
+    too, the same way ``cli_dump_helpers.py``'s ``dump`` path already does,
+    else a manifest project header installed under a system-like prefix
+    would be misclassified as a dependency (Codex review)."""
+    headers = tuple(bound_args.arguments.get("headers") or ())
+    manifest_roots = dump_manifest_header_roots(bound_args.arguments.get("dump_manifest"))
     return resolve_dependency_scope(
-        snap, include_dependencies, bound_args.arguments.get("headers")
+        snap, include_dependencies, headers + manifest_roots
     )
 
 

@@ -71,3 +71,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   reading as fully verified even though this axis was never actually
   checked. `contract_coverage` now reports `"partial"` for a mixed
   `dependency_scope` pair too.
+- **`compare --dump-manifest`'s own project-owned roots weren't reaching the
+  default dependency filter** (Codex review): `--dump-manifest` is mutually
+  exclusive with `-H`, so `service.run_dump`'s wrapper only recovering
+  `headers` from the bound call left it with no root set at all for a
+  manifest-driven dump, falling back to a bare system-path heuristic that
+  could misclassify the manifest's own `roots`/public-header
+  paths/dirs/project-owned TU includes as dependencies (potentially hiding
+  ABI breaks or emptying the declared surface) whenever they happened to
+  sit under a system-like prefix. `dump`'s own path
+  (`cli_dump_helpers.py`) already derived these via a
+  `_dump_manifest_header_roots` helper; moved it to `dumper_scoping.py` as
+  the shared `dump_manifest_header_roots` and wired it into the wrapper too.

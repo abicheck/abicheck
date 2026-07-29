@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from abicheck.dumper_scoping import (
     resolve_dependency_scope,
@@ -2173,7 +2174,10 @@ class TestWrapRunDumpWithDependencyScope:
     baseline instead of always producing the unfiltered surface."""
 
     def _uncached(self, tagged_snap):
-        def _fn(path, binary_fmt, headers=None, includes=None, version="", lang="c++", **_kw):
+        def _fn(
+            path, binary_fmt, headers=None, includes=None, version="", lang="c++",
+            *, dump_manifest=None, **_kw,
+        ):
             return tagged_snap
 
         return _fn
@@ -2226,3 +2230,31 @@ class TestWrapRunDumpWithDependencyScope:
         )
         assert [f.name for f in by_positional.functions] == ["mylib_run"]
         assert [f.name for f in by_keyword.functions] == ["mylib_run"]
+
+    def test_dump_manifest_roots_recovered_when_no_headers_given(self):
+        """Codex review: ``--dump-manifest`` is mutually exclusive with
+        ``-H``, so ``headers`` alone is empty for a manifest-driven dump.
+        Without also recovering the manifest's own project-owned roots
+        (``roots``/``public_header_paths``/``public_header_dirs``/
+        project-owned TU includes), a project header installed under a
+        system-like prefix (e.g. ``/usr/include/mylib/``) would be
+        misclassified as a dependency and filtered out."""
+        root = "/usr/include/mylib/api.h"
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("mylib_run", source_header=root)],
+        )
+        run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
+        manifest = SimpleNamespace(
+            roots=[root],
+            public_header_paths=[],
+            public_header_dirs=[],
+            translation_units=[],
+        )
+
+        result = run_dump(
+            Path("/lib.so"), "elf", include_dependencies=False, dump_manifest=manifest
+        )
+        assert [f.name for f in result.functions] == ["mylib_run"]
