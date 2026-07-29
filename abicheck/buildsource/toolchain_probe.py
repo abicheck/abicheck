@@ -26,12 +26,22 @@ path the bindings file (an explicit ``--config``/CI-managed source)
 actually names. A resolved binding whose probe fails outright (wrong
 format, not executable, times out) is reported as a probe error rather than
 silently falling through to a basename-only family guess — an unusable
-tool is not the same as a tool with a matching identity. ``target`` is
-checked coarsely (leading architecture component only, with a small
-alias table for ``amd64``/``arm64``-style spellings) rather than a full
-triple string match, since vendor/OS component spelling legitimately
-differs between a `--target=` value and a `-dumpmachine` probe for the
-same real toolchain.
+tool is not the same as a tool with a matching identity. Likewise, an
+executable whose actual family can't be determined at all is a failure
+whenever ``compiler_family``/``target`` is declared, not a silent pass —
+otherwise the check becomes a no-op for any unrecognized binary.
+
+``target`` is checked via a coarse architecture/OS-family/environment
+comparison (not a full triple string match, since vendor spelling
+legitimately differs between a ``--target=`` value and a ``-dumpmachine``
+probe for the same real toolchain) — and only for a **GCC-family**
+resolved binding. A GCC binary is single-target per install, so its
+``-dumpmachine`` output genuinely constrains what it can compile for.
+Clang is exempt: a single Clang binary is inherently multi-target via its
+own ``--target=`` flag (which the profile's compose logic already passes
+explicitly), so its bare ``-dumpmachine`` probe reports only its *host
+default* — comparing that against a declared cross-compilation target
+would reject a perfectly valid profile.
 
 Reuses :mod:`abicheck.dumper_toolchain`'s existing, cached, bounded
 ``--version``-capture plumbing (:func:`~abicheck.dumper_toolchain._tool_identity_metadata`)
@@ -125,6 +135,27 @@ _OS_FAMILY_MARKERS: tuple[tuple[str, str], ...] = (
 def _os_family(triple: str) -> str | None:
     lowered = triple.lower()
     for marker, family in _OS_FAMILY_MARKERS:
+        if marker in lowered:
+            return family
+    return None
+
+
+#: Coarse libc/environment markers, since two triples can share the same
+#: architecture and OS while targeting an incompatible ABI environment
+#: (``x86_64-linux-musl`` vs. ``x86_64-linux-gnu`` both reduce to OS family
+#: ``"linux"`` — Codex review, fresh evidence). Order doesn't matter here:
+#: every "gnueabi"/"gnueabihf" variant already contains "gnu" as a
+#: substring and maps to the same family value either way.
+_ENV_FAMILY_MARKERS: tuple[tuple[str, str], ...] = (
+    ("musl", "musl"),
+    ("gnu", "gnu"),
+    ("msvc", "msvc"),
+)
+
+
+def _env_family(triple: str) -> str | None:
+    lowered = triple.lower()
+    for marker, family in _ENV_FAMILY_MARKERS:
         if marker in lowered:
             return family
     return None
@@ -305,17 +336,36 @@ def _check_one_overlay(
         ]
 
     errors: list[str] = []
+    # Resolved once, needed by both the family check and the target check
+    # (target's own semantics depend on whether the actual compiler is
+    # Clang -- see below). An indeterminate family is itself a failure
+    # whenever family or target is declared: silently passing an
+    # unidentifiable executable defeats the point of a hard validation
+    # gate (Codex review, fresh evidence -- a family-only profile
+    # previously accepted literally any unrecognized binary).
+    actual_family = (
+        _probe_compiler_family(metadata)
+        if (declared_family or declared_target)
+        else None
+    )
     if declared_family:
-        actual_family = _probe_compiler_family(metadata)
-        wanted_family = _FAMILY_ALIASES.get(
-            declared_family.strip().lower(), declared_family.strip().lower()
-        )
-        if actual_family is not None and actual_family != wanted_family:
+        if actual_family is None:
             errors.append(
-                f"{where}.compiler_family declares {declared_family!r} but "
-                f"toolchain binding {binding_id!r} ({path!r}) resolved to "
-                f"family {actual_family!r}"
+                f"{where}.compiler_family declares {declared_family!r} but the "
+                f"actual family of toolchain binding {binding_id!r} ({path!r}) "
+                f"could not be determined from its resolved path or --version "
+                f"output"
             )
+        else:
+            wanted_family = _FAMILY_ALIASES.get(
+                declared_family.strip().lower(), declared_family.strip().lower()
+            )
+            if actual_family != wanted_family:
+                errors.append(
+                    f"{where}.compiler_family declares {declared_family!r} but "
+                    f"toolchain binding {binding_id!r} ({path!r}) resolved to "
+                    f"family {actual_family!r}"
+                )
     if declared_version:
         try:
             satisfied = version_satisfies(metadata.get("version", ""), declared_version)
@@ -329,33 +379,68 @@ def _check_one_overlay(
                     f"output {metadata.get('version', '')!r}, which does not satisfy it"
                 )
     if declared_target:
-        probed_triple = metadata.get("target_triple")
-        if probed_triple:
-            declared_arch = _normalize_arch(declared_target.split("-", 1)[0])
-            probed_arch = _normalize_arch(probed_triple.split("-", 1)[0])
-            arch_mismatch = bool(
-                declared_arch and probed_arch and declared_arch != probed_arch
+        if actual_family is None:
+            errors.append(
+                f"{where}.target declares {declared_target!r} but the actual "
+                f"family of toolchain binding {binding_id!r} ({path!r}) could "
+                f"not be determined, so its target cannot be verified"
             )
-            declared_os = _os_family(declared_target)
-            probed_os = _os_family(probed_triple)
-            os_mismatch = bool(
-                declared_os is not None
-                and probed_os is not None
-                and declared_os != probed_os
-            )
-            if arch_mismatch or os_mismatch:
-                mismatches = []
-                if arch_mismatch:
-                    mismatches.append(
-                        f"architecture {declared_arch!r} vs {probed_arch!r}"
-                    )
-                if os_mismatch:
-                    mismatches.append(f"OS {declared_os!r} vs {probed_os!r}")
+        elif actual_family == "clang":
+            # Clang is inherently multi-target: -dumpmachine (what
+            # target_triple comes from) reports only its host default, not
+            # a constraint -- the profile's own compose logic passes the
+            # declared target explicitly via --target=, which a single
+            # Clang binary genuinely honors for cross-compilation. Unlike
+            # GCC (a fixed single-target binary per install), there is
+            # nothing to compare here (Codex review, fresh evidence: a
+            # real x86_64 Clang with target: aarch64-linux-gnu was falsely
+            # rejected).
+            pass
+        else:
+            probed_triple = metadata.get("target_triple")
+            if not probed_triple:
                 errors.append(
                     f"{where}.target declares {declared_target!r} but toolchain "
-                    f"binding {binding_id!r} ({path!r}) resolved to target "
-                    f"triple {probed_triple!r} ({'; '.join(mismatches)})"
+                    f"binding {binding_id!r} ({path!r}) has no probed target "
+                    f"triple, so the declared target cannot be verified"
                 )
+            else:
+                declared_arch = _normalize_arch(declared_target.split("-", 1)[0])
+                probed_arch = _normalize_arch(probed_triple.split("-", 1)[0])
+                arch_mismatch = bool(
+                    declared_arch and probed_arch and declared_arch != probed_arch
+                )
+                declared_os = _os_family(declared_target)
+                probed_os = _os_family(probed_triple)
+                os_mismatch = bool(
+                    declared_os is not None
+                    and probed_os is not None
+                    and declared_os != probed_os
+                )
+                declared_env = _env_family(declared_target)
+                probed_env = _env_family(probed_triple)
+                env_mismatch = bool(
+                    declared_env is not None
+                    and probed_env is not None
+                    and declared_env != probed_env
+                )
+                if arch_mismatch or os_mismatch or env_mismatch:
+                    mismatches = []
+                    if arch_mismatch:
+                        mismatches.append(
+                            f"architecture {declared_arch!r} vs {probed_arch!r}"
+                        )
+                    if os_mismatch:
+                        mismatches.append(f"OS {declared_os!r} vs {probed_os!r}")
+                    if env_mismatch:
+                        mismatches.append(
+                            f"environment {declared_env!r} vs {probed_env!r}"
+                        )
+                    errors.append(
+                        f"{where}.target declares {declared_target!r} but "
+                        f"toolchain binding {binding_id!r} ({path!r}) resolved to "
+                        f"target triple {probed_triple!r} ({'; '.join(mismatches)})"
+                    )
     return errors
 
 

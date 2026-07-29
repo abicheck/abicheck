@@ -475,12 +475,12 @@ class TestCheckProfileToolchainIdentity:
         assert "windows" in errors[0]
         assert "linux" in errors[0]
 
-    def test_target_only_declared_with_no_probed_triple_is_skipped(
+    def test_target_declared_with_no_probed_triple_on_gnu_is_an_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A tool that doesn't support -dumpmachine has no target_triple key
-        # at all (dumper_toolchain._tool_target_triple returns None); no
-        # basis to compare against, so this must not error.
+        # Regression: a GCC-family tool that doesn't support -dumpmachine
+        # (no target_triple key) previously skipped the target check
+        # entirely, silently accepting an unverifiable claim.
         _stub_metadata(
             monkeypatch,
             {"/opt/gcc": {"selected": "/opt/gcc", "version": "gcc 13.2.0"}},
@@ -492,7 +492,108 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="gcc14"),
             )
         }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "cannot be verified" in errors[0]
+
+    def test_target_declared_with_unidentifiable_family_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: an unidentifiable executable (no recognized name or
+        # version signature) previously passed any declared compiler_family
+        # AND any declared target, since both checks silently no-op'd.
+        _stub_metadata(
+            monkeypatch,
+            {"/opt/weird": {"selected": "/opt/weird", "version": "weird-tool 1.0"}},
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"weird14": "/opt/weird"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc", target="x86_64-linux-gnu", binding="weird14"
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 2
+        assert any(
+            "compiler_family" in e and "could not be determined" in e for e in errors
+        )
+        assert any("target" in e and "could not be determined" in e for e in errors)
+
+    def test_target_only_declared_with_unidentifiable_family_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_metadata(
+            monkeypatch,
+            {"/opt/weird": {"selected": "/opt/weird", "version": "weird-tool 1.0"}},
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"weird14": "/opt/weird"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="weird14"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "could not be determined" in errors[0]
+
+    def test_clang_cross_compile_target_is_exempt_from_triple_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a single Clang binary is inherently multi-target via
+        # --target= (the profile's own compose logic passes it explicitly);
+        # its bare -dumpmachine probe only reports its host default, so
+        # comparing it against a declared cross-compilation target
+        # previously rejected an entirely valid profile.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/clang": {
+                    "selected": "/opt/clang",
+                    "version": "clang version 18.1.3",
+                    "target_triple": "x86_64-pc-linux-gnu",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"clang18": "/opt/clang"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="aarch64-linux-gnu", binding="clang18"),
+            )
+        }
         assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_musl_vs_gnu_environment_mismatch_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: x86_64-linux-musl vs x86_64-linux-gnu share
+        # architecture and OS family (both "linux"), so the earlier
+        # architecture+OS-only check passed a genuinely incompatible libc.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/musl-gcc": {
+                    "selected": "/opt/musl-gcc",
+                    "version": "gcc (Alpine 13.2.0) 13.2.0",
+                    "target_triple": "x86_64-linux-musl",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"musl14": "/opt/musl-gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="musl14"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "environment" in errors[0]
+        assert "musl" in errors[0]
 
     def test_version_only_declared_checks_without_a_family(
         self, monkeypatch: pytest.MonkeyPatch
