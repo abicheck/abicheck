@@ -281,6 +281,30 @@ class TestCompileEntry:
         )
         assert "-Iinclude/foo" in entry.arguments
 
+    def test_nested_response_file_resolves_relative_to_including_file(
+        self, tmp_path: Path
+    ) -> None:
+        """A response file referenced from *inside* another response file
+        resolves relative to the including file's own directory (matching
+        Clang/GNU response-file nesting semantics), not the original entry
+        directory -- so ``sub/a.rsp`` can reference a sibling ``@b.rsp``
+        living in ``sub/``, not in the top-level entry directory."""
+        db_dir = tmp_path
+        sub = db_dir / "sub"
+        sub.mkdir()
+        (sub / "b.rsp").write_text("-Dnested=1\n")
+        (sub / "a.rsp").write_text("-Itop @b.rsp\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@sub/a.rsp", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "-Itop" in entry.arguments
+        assert "-Dnested=1" in entry.arguments
+
 
 # ---------------------------------------------------------------------------
 # Tests: _extract_flags

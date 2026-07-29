@@ -95,14 +95,6 @@ def _safe_resolve(path: Path) -> Path | None:
         return None
 
 
-def _is_relative_to(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
-
-
 def _read_response_file(path: Path, root: Path) -> str | None:
     """Best-effort, bounded read of a GNU ``@response-file``.
 
@@ -119,7 +111,7 @@ def _read_response_file(path: Path, root: Path) -> str | None:
     instead of losing the rest of the argument list.
     """
     resolved = _safe_resolve(path)
-    if resolved is None or not _is_relative_to(resolved, root):
+    if resolved is None or not resolved.is_relative_to(root):
         return None
     try:
         st = resolved.stat()
@@ -153,8 +145,12 @@ def _expand_response_files(
     ``file not found`` on every translation unit regardless of which
     compiler ends up invoked. A response file's own contents may themselves
     ``@include`` another one, so expansion recurses, bounded by
-    *_MAX_RESPONSE_FILE_DEPTH*. *root* is the trusted directory a resolved
-    ``@file`` must stay under (see :func:`_read_response_file`).
+    *_MAX_RESPONSE_FILE_DEPTH*, resolving a nested ``@file`` relative to the
+    *including* response file's own directory (matching Clang/GNU response-
+    file nesting semantics) rather than the original *directory* -- so
+    ``build/subdir/a.rsp`` can reference a sibling ``@b.rsp``. *root* is the
+    trusted directory a resolved ``@file`` must stay under (see
+    :func:`_read_response_file`).
 
     Unreadable/oversized/out-of-tree files, and unparsable file contents,
     degrade to keeping the original ``@file`` token rather than raising —
@@ -179,7 +175,9 @@ def _expand_response_files(
         except ValueError:
             expanded.append(arg)
             continue
-        expanded.extend(_expand_response_files(tokens, directory, root, _depth + 1))
+        expanded.extend(
+            _expand_response_files(tokens, path.parent, root, _depth + 1)
+        )
     return expanded
 
 
