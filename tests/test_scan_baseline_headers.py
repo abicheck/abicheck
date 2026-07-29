@@ -344,6 +344,9 @@ def test_scan_against_bad_env_matrix_is_usage_error(tmp_path: Path) -> None:
     # Codex P2 review on PR #657: a malformed --env-matrix file must surface
     # as a repository-wide usage error (exit 64), matching `compare`'s own
     # AbicheckError -> click.UsageError handling -- not an uncaught traceback.
+    # --against is required here so this actually reaches load_env_matrix's
+    # own try/except, rather than the (separately tested) "comparison-only
+    # flags need --against" guard short-circuiting first.
     from click.testing import CliRunner
 
     from abicheck.cli import main
@@ -352,9 +355,19 @@ def test_scan_against_bad_env_matrix_is_usage_error(tmp_path: Path) -> None:
     bad_matrix.write_text("runtime_floors: [unclosed\n  GLIBC: {")
     snap = tmp_path / "artifact.so"
     snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+    baseline = tmp_path / "baseline.abi.json"
+    baseline.write_text('{"format": "abicheck-snapshot"}', encoding="utf-8")
 
     result = CliRunner().invoke(
-        main, ["scan", str(snap), "--env-matrix", str(bad_matrix)]
+        main,
+        [
+            "scan",
+            str(snap),
+            "--against",
+            str(baseline),
+            "--env-matrix",
+            str(bad_matrix),
+        ],
     )
 
     assert result.exit_code == 64, result.output
