@@ -139,7 +139,7 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setattr(
         cbs,
         "prepare_embedded_build_source",
-        lambda old, new, cm, extra, *rest: (list(extra), [], {}, None),
+        lambda old, new, cm, extra, *rest, **kw: (list(extra), [], {}, None),
     )
     return captured
 
@@ -282,7 +282,7 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
     monkeypatch.setattr(
         cbs,
         "prepare_embedded_build_source",
-        lambda old, new, cm, extra, *rest: (list(extra), [], {}, None),
+        lambda old, new, cm, extra, *rest, **kw: (list(extra), [], {}, None),
     )
 
     sentinel_suppression = object()
@@ -305,3 +305,57 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
     assert captured["force_public_symbols"] == {"foo"}
     assert captured["pattern_verdicts"] is True
     assert captured["env_matrix"] is sentinel_env_matrix
+
+
+def test_run_baseline_compare_forwards_policy_file_to_embedded_build_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Codex P1 review on PR #657: `--policy-file`'s evidence_policy knobs
+    # (require_evidence / evidence-verdict overrides, ADR-033 D7) are applied
+    # by `prepare_embedded_build_source`, not `compare_snapshots` -- passing
+    # `policy_file` only to the latter silently drops mandatory-evidence
+    # enforcement for `scan --against`. Assert `_run_baseline_compare` forwards
+    # its own `policy_file` into the `prepare_embedded_build_source` call too.
+    import abicheck.cli_buildsource as cbs
+    import abicheck.service as service
+
+    captured: dict[str, object] = {}
+
+    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+        return _FakeSnap()
+
+    def fake_prepare_embedded_build_source(old, new, cm, extra, *rest, **kw):  # type: ignore[no-untyped-def]
+        captured["policy_file"] = kw.get("policy_file")
+        return list(extra), [], {}, None
+
+    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    monkeypatch.setattr(service, "compare_snapshots", lambda *a, **k: _FakeDiff())
+    monkeypatch.setattr(
+        cbs, "prepare_embedded_build_source", fake_prepare_embedded_build_source
+    )
+
+    sentinel_policy_file = object()
+    _run(policy_file=sentinel_policy_file)
+
+    assert captured["policy_file"] is sentinel_policy_file
+
+
+def test_scan_against_bad_env_matrix_is_usage_error(tmp_path: Path) -> None:
+    # Codex P2 review on PR #657: a malformed --env-matrix file must surface
+    # as a repository-wide usage error (exit 64), matching `compare`'s own
+    # AbicheckError -> click.UsageError handling -- not an uncaught traceback.
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    bad_matrix = tmp_path / "env.yaml"
+    bad_matrix.write_text("runtime_floors: [unclosed\n  GLIBC: {")
+    snap = tmp_path / "artifact.so"
+    snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+
+    result = CliRunner().invoke(
+        main, ["scan", str(snap), "--env-matrix", str(bad_matrix)]
+    )
+
+    assert result.exit_code == 64, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)

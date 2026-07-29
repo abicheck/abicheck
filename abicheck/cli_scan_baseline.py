@@ -391,6 +391,7 @@ def _run_baseline_compare(
         None,
         None,
         None,
+        policy_file=policy_file,
     )
     diff = compare_snapshots(
         old_snap,

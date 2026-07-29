@@ -28,7 +28,7 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
         return old_snap
 
     def fake_prepare_embedded_build_source(
-        old, new, collect_mode, extra_changes, *args  # noqa: ANN001, ANN002
+        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
     ):
         return list(extra_changes), [], {}, None
 
@@ -109,7 +109,7 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch
         return old_snap
 
     def fake_prepare_embedded_build_source(
-        old, new, collect_mode, extra_changes, *args  # noqa: ANN001, ANN002
+        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
     ):
         return list(extra_changes), [], {}, None
 
@@ -174,7 +174,7 @@ def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> Non
         return old_snap
 
     def fake_prepare_embedded_build_source(
-        old, new, collect_mode, extra_changes, *args  # noqa: ANN001, ANN002
+        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
     ):
         return list(extra_changes), [], {}, None
 

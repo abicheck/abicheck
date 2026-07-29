@@ -813,9 +813,13 @@ def scan_cmd(
         public_symbols, public_symbols_list
     )
     _warn_force_public_ignored(force_public_symbols, scope_public_headers)
+    from .errors import AbicheckError
     from .service import load_env_matrix
 
-    env_matrix = load_env_matrix(env_matrix_path)
+    try:
+        env_matrix = load_env_matrix(env_matrix_path)
+    except AbicheckError as exc:
+        raise click.UsageError(str(exc)) from exc
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
