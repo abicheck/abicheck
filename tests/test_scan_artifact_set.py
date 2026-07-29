@@ -340,6 +340,41 @@ class TestRunScanSetBundleAuditDeadline:
         assert result.verdict == "BUDGET_OVERFLOW"
         assert result.exit_code == 5
 
+    def test_deadline_exceeded_inside_audit_bundle_reports_budget_overflow(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # P2 regression (Codex review): the elapsed-time re-check above only
+        # catches an overflow *after* audit_bundle() returns -- it doesn't
+        # bound the call itself. run_scan_set now runs audit_bundle() under
+        # deadline.deadline_scope(), so build_bundle_snapshot()'s per-
+        # library deadline.check() (a real deadline-scope trip, tested at
+        # the unit level in test_bundle.py) can raise DeadlineExceeded
+        # *during* the call; this isolates run_scan_set's own handling of
+        # that exception without depending on deadline internals.
+        import abicheck.bundle as bundle_mod
+        from abicheck import deadline
+        from abicheck.service import Budget, ScanRequest, ScanSetResult, run_scan_set
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+            raise deadline.DeadlineExceeded(-1.0)
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(bundle_mod, "audit_bundle", _fake_audit_bundle)
+
+        result = run_scan_set(
+            ScanRequest(
+                binaries=[snap_a, snap_b],
+                mode="audit",
+                budget=Budget(total_timeout=5.0),
+            )
+        )
+        assert isinstance(result, ScanSetResult)
+        assert result.verdict == "BUDGET_OVERFLOW"
+        assert result.exit_code == 5
+
 
 class TestRunScanSetAmbiguousSoname:
     """P2 regression (Codex review): audit_bundle() rejects an ambiguous

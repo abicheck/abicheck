@@ -93,9 +93,17 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
     Linux/ELF-only by design (see ADR-018 — PE/Mach-O bundle analysis is
     out of scope for this iteration).
     """
+    from . import deadline
+
     metadata: dict[str, ElfMetadata] = {}
     surviving: dict[str, Path] = {}
     for name, path in libraries.items():
+        # Cooperative checkpoint (no-op unless a deadline.deadline_scope()
+        # is active, e.g. service_scan.run_scan_set's audit-mode call) --
+        # lets a large/pathological set's parsing loop abort between
+        # members instead of only being caught by an elapsed-time check
+        # after the whole snapshot finishes building (Codex review).
+        deadline.check()
         # Bundle analysis is Linux/ELF-only by design (see ADR-018,
         # ADR-023). Skip JSON snapshots, PE/Mach-O, or other formats up
         # front so parse_elf_metadata never emits its "Magic number does
@@ -361,7 +369,22 @@ def _compute_resolution_graph(
         # canonical key left that edge unresolved, misclassifying a real
         # intra-bundle DT_NEEDED as "extra" (external) and breaking
         # reachability for consumers of that provider (Codex review).
+        #
+        # ``libraries[name]`` is the discovered path, which for the common
+        # ``libfoo.so -> libfoo.so.1`` symlink pair is the *symlink itself*
+        # (discover_artifact_set/directory discovery sort alphabetically and
+        # keep the first-seen alias, i.e. the unversioned symlink, as the
+        # representative path) -- so ``.name`` on it is just "libfoo.so"
+        # again, not the real target's filename. Resolve through the
+        # symlink to index the actual on-disk basename a sibling's
+        # DT_NEEDED would name (Codex review: the original fix only worked
+        # when the discovered path already *was* the real file).
         if name in libraries:
+            try:
+                resolved_name = libraries[name].resolve().name
+            except OSError:
+                resolved_name = libraries[name].name
+            soname_to_name.setdefault(resolved_name, name)
             soname_to_name.setdefault(libraries[name].name, name)
 
     # Index exports.

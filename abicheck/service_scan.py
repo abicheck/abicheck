@@ -1583,10 +1583,24 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
         )
 
+    from . import deadline as _deadline
+
     try:
-        audit = audit_bundle(
-            libraries, bundle_system_providers=req.bundle_system_providers
-        )
+        # P2 regression (Codex review): the post-audit elapsed-time check
+        # below only detects an overflow *after* audit_bundle() already ran
+        # to completion -- it doesn't bound the call itself, so a
+        # pathologically large or malformed ELF set could still burn far
+        # more wall-clock than --budget allows before that check is ever
+        # reached. build_bundle_snapshot()'s per-library parsing loop now
+        # calls deadline.check() between members (the same cooperative,
+        # per-unit-of-work checkpoint pattern scan_engine already uses for
+        # per-header/per-TU work), so running audit_bundle() under this
+        # scope lets a real overflow raise mid-parse instead of only being
+        # caught afterward.
+        with _deadline.deadline_scope(remaining):
+            audit = audit_bundle(
+                libraries, bundle_system_providers=req.bundle_system_providers
+            )
     except ArtifactSetError:
         # Ambiguous duplicate-SONAME rejection (Codex review) surfaces here
         # the same way a discovery failure does above -- degrade to an
@@ -1599,12 +1613,18 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
             per_artifact=per_artifact,
             bundle_incomplete=True,
         )
-    # The pre-audit check above only guards against starting the audit with
-    # no budget left; audit_bundle() itself has no internal deadline, so a
-    # pathological ELF set's resolution-graph construction can still run
-    # past --budget while it's in progress. Re-check afterward so a real
-    # overflow is reported as BUDGET_OVERFLOW (the failure-guard contract)
-    # rather than a normal verdict that quietly ran over time (Codex review).
+    except _deadline.DeadlineExceeded:
+        return ScanSetResult(
+            verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
+        )
+    # The deadline_scope above only bounds the checkpoints
+    # build_bundle_snapshot() itself calls deadline.check() between (i.e.
+    # per library, not mid-parse of one) -- re-check elapsed time after the
+    # whole call so a real overflow within a single library's parse (or in
+    # _compute_resolution_graph/_detect_unresolved_intra_dependency, which
+    # have no checkpoints of their own) is still reported as
+    # BUDGET_OVERFLOW (the failure-guard contract) rather than a normal
+    # verdict that quietly ran over time (Codex review).
     if budget_s is not None and (_time.monotonic() - start) > budget_s:
         return ScanSetResult(
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact

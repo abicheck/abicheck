@@ -184,6 +184,37 @@ class TestResolutionGraph:
         assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
         assert graph.extra_needed["libconsumer.so"] == []
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin on Windows")
+    def test_dt_needed_resolves_via_real_filename_of_symlinked_member(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): the earlier fix above indexed
+        # ``libraries[name].name`` -- fine when the discovered path already
+        # *is* the real file, but directory discovery's usual
+        # "libfoo.so -> libfoo.so.1" pair sorts the symlink first and keeps
+        # it as the representative discovered path, so ``.name`` on it was
+        # still just "libfoo.so", never the real target's on-disk filename
+        # a sibling's DT_NEEDED actually names. Must resolve through the
+        # symlink to index the real basename.
+        real = tmp_path / "libfoo.so.1"
+        real.write_bytes(b"")
+        link = tmp_path / "libfoo.so"
+        link.symlink_to(real)
+
+        libraries = {
+            "libfoo.so": link,
+            "libconsumer.so": tmp_path / "libconsumer.so",
+        }
+        metadata = {
+            "libfoo.so": _meta(soname=""),  # no DT_SONAME
+            "libconsumer.so": _meta(
+                soname="libconsumer.so", needed=["libfoo.so.1"]
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
+        assert graph.extra_needed["libconsumer.so"] == []
+
 
 # ---------------------------------------------------------------------------
 # bundle_intra_dep_removed
@@ -1784,6 +1815,34 @@ class TestAuditBundleDuplicateSoname:
         monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", _fake_snapshot)
         result = audit_bundle(libraries)
         assert result.findings == []
+
+
+class TestBuildBundleSnapshotDeadlineCheckpoint:
+    """P2 regression (Codex review): build_bundle_snapshot()'s per-library
+    parsing loop must call deadline.check() between members so a slow or
+    pathological ELF set aborts as soon as an active deadline.deadline_scope
+    expires, rather than only being detectable by an elapsed-time check
+    after the whole snapshot finishes building.
+    """
+
+    def test_raises_when_deadline_already_expired(self) -> None:
+        from abicheck import deadline
+        from abicheck.bundle import build_bundle_snapshot
+
+        with deadline.deadline_scope(-1):
+            with pytest.raises(deadline.DeadlineExceeded):
+                build_bundle_snapshot(
+                    {"a.so": Path("/fake/a.so"), "b.so": Path("/fake/b.so")}
+                )
+
+    def test_no_deadline_is_a_no_op(self, tmp_path: Path) -> None:
+        from abicheck.bundle import build_bundle_snapshot
+
+        json_file = tmp_path / "libnotelf.so"
+        json_file.write_text('{"library": "fake", "version": "1"}')
+        # No deadline_scope active -- must behave exactly as before.
+        snap = build_bundle_snapshot({"libnotelf.so": json_file})
+        assert snap.libraries == {}
 
 
 class TestArtifactSetDiscovery:
