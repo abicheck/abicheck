@@ -191,6 +191,16 @@ class TestCompareRequestValidate:
         )
         assert req.validation_errors() == []
 
+    def test_android_frontend_with_inputspec_sources_accepted(self, tmp_path):
+        # ADR-055 D1 (Codex review): either side's own InputSpec.sources also
+        # satisfies this -- not just the legacy has_sources flag.
+        req = CompareRequest(
+            old=InputSpec.of("a", sources=tmp_path),
+            new=InputSpec.of("b"),
+            frontend="android",
+        )
+        assert req.validation_errors() == []
+
     def test_missing_policy_file_rejected(self, tmp_path):
         # D9 pre-flight: a --policy-file path that doesn't exist errors identically
         # from CLI and MCP (one Tier-2 rule).

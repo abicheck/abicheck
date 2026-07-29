@@ -48,8 +48,17 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SideEvidence",
+    "effective_frontend",
     "resolve_compare_request_evidence",
 ]
+
+
+def effective_frontend(compile: CompileContext | None, header_backend: str) -> str:
+    """The L2 frontend `resolve_input`/`run_dump` actually use for *compile*
+    (an explicit `compile.frontend` wins over the bare `header_backend`
+    default) -- reused so `embed_build_source`'s `extractor` matches instead
+    of silently diverging (Codex review, P2)."""
+    return compile.frontend if (compile is not None and compile.frontend != "auto") else header_backend
 
 
 @dataclasses.dataclass(frozen=True)
@@ -68,7 +77,7 @@ def _resolve_depth_collect_mode(depth: str | None, default_mode: str) -> str:
     # this module's own docstring).
     if depth is None:
         return default_mode
-    evidence_depth = EvidenceDepth(depth)
+    evidence_depth = EvidenceDepth(depth.lower())
     method = depth_to_method(evidence_depth)
     if method is None:
         return "off"
@@ -109,7 +118,21 @@ def _compile_context(
     # Merge a side's explicit compile override, the pair-wide C++20 dialect
     # override, and the request-level frontend_context default -- a per-side
     # compile.frontend_context always wins over the request-level default.
-    base = side_compile or pair_compile
+    base = side_compile
+    if pair_compile is not None and pair_compile.gcc_option_tokens:
+        # Codex review (P2): an unrelated side_compile override (e.g. only a
+        # sysroot) must not silently discard the pair-wide C++20 dialect
+        # decision -- merge its tokens in unless this side already pins its
+        # own explicit standard.
+        from ._compiler_options import has_explicit_std
+
+        if base is None:
+            base = pair_compile
+        elif not has_explicit_std(base.gcc_options, base.gcc_option_tokens):
+            base = dataclasses.replace(
+                base,
+                gcc_option_tokens=base.gcc_option_tokens + pair_compile.gcc_option_tokens,
+            )
     if base is None:
         return (
             CompileContext(frontend_context=frontend_context)

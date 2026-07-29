@@ -1695,18 +1695,14 @@ def run_compare_request(
         SnapshotError: If either input cannot be loaded.
     """
     request.validate()
-    # ``validate()`` accepts the language case-insensitively, but the ELF dump
-    # path does case-sensitive ``lang == "c"`` checks — normalise so an accepted
-    # ``"C"`` is not silently treated as C++.
+    # validate() accepts lang case-insensitively; the ELF dump path does
+    # case-sensitive lang == "c" checks, so normalise here.
     lang = request.lang.lower()
-    # The artifact resolve path uses the header-AST frontend; an ``android``
-    # selection (source-ABI only, gated to has_sources by validate) has no
-    # header-AST path, so fall back to ``auto`` for the binary dump.
+    # android (source-ABI only, gated to has_sources by validate) has no
+    # header-AST path, so it falls back to "auto" for the binary dump.
     from .api_types import HEADER_AST_FRONTENDS
 
-    header_backend = (
-        request.frontend if request.frontend.lower() in HEADER_AST_FRONTENDS else "auto"
-    )
+    header_backend = request.frontend if request.frontend.lower() in HEADER_AST_FRONTENDS else "auto"
 
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
@@ -1715,9 +1711,7 @@ def run_compare_request(
     # effective CompileContext below alongside ADR-055 D1's per-side
     # `InputSpec.compile` override (service_compare_evidence.py).
     pair_compile: CompileContext | None = None
-    override = pair_wide_cxx20_std_override(
-        lang, request.old.headers, request.new.headers, None, ()
-    )
+    override = pair_wide_cxx20_std_override(lang, request.old.headers, request.new.headers, None, ())
     if override is not None:
         pair_compile = CompileContext(gcc_option_tokens=override)
 
@@ -1736,10 +1730,10 @@ def run_compare_request(
     old_public_header_dirs += list(request.old.public_header_dirs)
     new_public_header_dirs += list(request.new.public_header_dirs)
 
-    from .cli_buildsource import embed_build_source  # ADR-055 D1
-    from .service_compare_evidence import resolve_compare_request_evidence
+    from . import service_compare_evidence as _sce  # ADR-055 D1
+    from .cli_buildsource import embed_build_source
 
-    old_evidence, new_evidence = resolve_compare_request_evidence(request, pair_compile)
+    old_evidence, new_evidence = _sce.resolve_compare_request_evidence(request, pair_compile)
 
     def _resolve_side(
         side: InputSpec,
@@ -1767,7 +1761,8 @@ def run_compare_request(
             dump_manifest=side.dump_manifest,
         )
         if side.sources or side.build_info:
-            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode)
+            extractor = _sce.effective_frontend(evidence.compile, header_backend)
+            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=extractor)
         return snap
 
     def _resolve_old_side() -> AbiSnapshot:
@@ -1803,6 +1798,15 @@ def run_compare_request(
     suppression, pf = load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
+    # ADR-055 D1 (Codex review, P1): embed_build_source only writes
+    # snap.build_source -- it must still be *diffed* and folded into
+    # extra_changes (as the CLI compare path does) or source-only changes
+    # silently produce an ordinary artifact-only compatible verdict.
+    from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
+
+    extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = prepare_embedded_build_source(
+        old, new, old_evidence.collect_mode, None, request.old.build_info, request.new.build_info, request.old.sources, request.new.sources, policy_file=pf,
+    )
     result = compare_snapshots(
         old,
         new,
@@ -1810,20 +1814,18 @@ def run_compare_request(
         policy=request.policy,
         policy_file=pf,
         scope_to_public_surface=request.scope_public,
-        force_public_symbols=(
-            set(request.force_public_symbols) if request.force_public_symbols else None
-        ),
-        public_surface_allowlist=(
-            set(request.public_surface_allowlist)
-            if request.public_surface_allowlist is not None
-            else None
-        ),
+        force_public_symbols=(set(request.force_public_symbols) if request.force_public_symbols else None),
+        extra_changes=extra_changes,
+        public_surface_allowlist=(set(request.public_surface_allowlist) if request.public_surface_allowlist is not None else None),
         pattern_verdicts=request.pattern_verdicts,
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,
         contract_evaluation=request.contract_evaluation,
     )
+    if layer_coverage_rows:
+        result.layer_coverage = layer_coverage_rows
+    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     result.old_metadata = collect_metadata(request.old.path)
     result.new_metadata = collect_metadata(request.new.path)
     return result, old, new

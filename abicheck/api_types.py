@@ -272,9 +272,15 @@ class CompareRequest:
             errors.append(
                 f"unsupported AST frontend {self.frontend!r}: choose from {allowed}"
             )
-        elif frontend == "android" and not self.has_sources:
+        elif frontend == "android" and not (
+            self.has_sources or self.old.sources or self.new.sources
+        ):
             # D8/D9: 'android' reuses a pre-captured header-abi dump; it has no
-            # header-AST path, so a header-only run can't use it.
+            # header-AST path, so a header-only run can't use it. ADR-055 D1
+            # (Codex review): either side's own `InputSpec.sources` also
+            # satisfies this -- not just the legacy `has_sources` flag, which
+            # a typed caller using the new field alone would otherwise have to
+            # redundantly set too.
             errors.append(
                 "the 'android' AST frontend is source-ABI only (it has no "
                 "header-AST path); supply source inputs (--sources) to use it"

@@ -2287,3 +2287,30 @@ class TestWrapRunDumpWithDependencyScope:
             Path("/lib.so"), "elf", include_dependencies=False, dump_manifest=manifest
         )
         assert [f.name for f in result.functions] == ["mylib_run"]
+
+    def test_public_header_dirs_recovered_as_roots(self, tmp_path):
+        """Codex review (ADR-055 D1): a declared-public directory
+        (InputSpec.public_header_dirs / --public-header-dir) must be treated
+        as a project root the same way `-H`/`--header` roots are, even
+        though it wasn't also passed via `headers` -- previously it never
+        reached resolve_dependency_scope's header_roots at all, so a header
+        under it (e.g. an installed library's own system-prefixed path) could
+        be misclassified as a dependency and dropped."""
+        root = tmp_path / "mylib"
+        root.mkdir()
+        header = str(root / "api.h")
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("mylib_run", source_header=header)],
+        )
+        run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
+
+        result = run_dump(
+            Path("/lib.so"),
+            "elf",
+            include_dependencies=False,
+            public_header_dirs=[root],
+        )
+        assert [f.name for f in result.functions] == ["mylib_run"]

@@ -1879,8 +1879,6 @@ class TestCompareRequestAdr055Evidence:
         assert calls_by_path[new_p]["compile"].frontend_context == "device"
 
     def test_sources_triggers_embed_build_source(self, tmp_path, monkeypatch):
-        from abicheck import service as service_mod
-
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -1891,8 +1889,14 @@ class TestCompareRequestAdr055Evidence:
         def _fake_embed(snap, **kwargs):
             embed_calls.append(kwargs)
 
+        monkeypatch.setattr("abicheck.cli_buildsource.embed_build_source", _fake_embed)
+        # The real diffing/pack-loading (prepare_embedded_build_source) is
+        # exercised by the CLI-path tests already; here we're only asserting
+        # that run_compare_request wires sources/collect_mode into
+        # embed_build_source, so stub the diff step to a no-op.
         monkeypatch.setattr(
-            "abicheck.cli_buildsource.embed_build_source", _fake_embed
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
         )
 
         request = CompareRequest(
@@ -1917,6 +1921,124 @@ class TestCompareRequestAdr055Evidence:
         request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
         run_compare_request(request)
         assert embed_calls == []
+
+    def test_embedded_evidence_is_diffed_into_extra_changes(self, tmp_path, monkeypatch):
+        """Codex review (P1): embed_build_source alone only writes
+        snap.build_source -- the checker never reads it directly, so it must
+        also be diffed (prepare_embedded_build_source) and forwarded to
+        compare_snapshots as extra_changes, or a source-only ABI change would
+        silently produce an ordinary artifact-only compatible verdict."""
+        from abicheck import service as service_mod
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+        )
+        sentinel_change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="source_only_fn",
+            description="source-only ABI break injected by test",
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: ([sentinel_change], [], {}, [sentinel_change]),
+        )
+
+        captured = {}
+        original_compare_snapshots = service_mod.compare_snapshots
+
+        def _spy_compare_snapshots(old, new, *a, **kw):
+            captured["extra_changes"] = kw.get("extra_changes")
+            return original_compare_snapshots(old, new, *a, **kw)
+
+        monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=src_dir), new=InputSpec.of(new_p)
+        )
+        result, _, _ = run_compare_request(request)
+        assert captured["extra_changes"] == [sentinel_change]
+        assert sentinel_change in result.changes
+
+    def test_extractor_matches_effective_frontend(self, tmp_path, monkeypatch):
+        """Codex review (P2): embed_build_source's extractor must match the
+        same eff_backend resolve_input/run_dump use internally (an explicit
+        compile.frontend wins over the bare header_backend), not silently
+        default to "auto" while L2 used a different frontend."""
+        from abicheck.compile_context import CompileContext
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        embed_calls: list[dict] = []
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source",
+            lambda snap, **kwargs: embed_calls.append(kwargs),
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(
+                old_p, sources=src_dir, compile=CompileContext(frontend="castxml")
+            ),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        assert embed_calls[0]["extractor"] == "castxml"
+
+    def test_depth_is_case_insensitive_end_to_end(self, tmp_path):
+        """Codex review (P2): CompareRequest.validate() accepts a case-
+        insensitive depth (e.g. "BUILD"), so the internal EvidenceDepth
+        construction must not raise ValueError for it."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="BUILD"
+        )
+        result, _, _ = run_compare_request(request)
+        assert isinstance(result, DiffResult)
+
+    def test_pair_wide_dialect_merges_into_unrelated_side_compile(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P2): a side_compile override unrelated to the C++
+        dialect (e.g. only a sysroot) must not silently discard the pair-wide
+        C++20 heuristic's override for that side -- it should be merged in
+        unless the side already pins its own explicit standard."""
+        from abicheck import service as service_mod
+        from abicheck.compile_context import CompileContext
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+
+        monkeypatch.setattr(
+            service_mod,
+            "pair_wide_cxx20_std_override",
+            lambda *a, **k: ("-std=gnu++20",),
+        )
+        calls = self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, compile=CompileContext(sysroot=Path("/sysroot"))),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        old_compile = calls_by_path[old_p]["compile"]
+        assert old_compile.sysroot == Path("/sysroot")
+        assert "-std=gnu++20" in old_compile.gcc_option_tokens
 
 
 class TestDiagnosticComparisonThreading:

@@ -922,11 +922,16 @@ def apply_dependency_scope_to_run_dump_result(
     project-owned roots (:func:`dump_manifest_header_roots`) are folded in
     too, the same way ``cli_dump_helpers.py``'s ``dump`` path already does,
     else a manifest project header installed under a system-like prefix
-    would be misclassified as a dependency (Codex review)."""
+    would be misclassified as a dependency (Codex review). ``public_header_dirs``
+    (ADR-024 Phase 1 / ADR-055 D1's ``InputSpec.public_header_dirs``) is folded
+    in too -- an explicitly-declared public directory rooted under a
+    system-like prefix (e.g. an installed library's own ``/usr/include/mylib``)
+    must not be misclassified as a dependency either (Codex review)."""
     headers = tuple(bound_args.arguments.get("headers") or ())
     manifest_roots = dump_manifest_header_roots(bound_args.arguments.get("dump_manifest"))
+    public_header_dirs = tuple(bound_args.arguments.get("public_header_dirs") or ())
     return resolve_dependency_scope(
-        snap, include_dependencies, headers + manifest_roots
+        snap, include_dependencies, headers + manifest_roots + public_header_dirs
     )
 
 
