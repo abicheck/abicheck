@@ -98,9 +98,10 @@ from pathlib import Path
 
 from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
-from .model import AbiSnapshot, EnumType, Function, RecordType, Variable
+from .model import AbiSnapshot, EnumType, Function, RecordType, Variable, Visibility
 from .provenance import is_dependency_header
 from .type_reachability import (
+    _NON_PUBLIC_ORIGINS,
     _compile_spelling_pattern,
     _finditer_allow_nested,
     _namespace_suffix_spellings,
@@ -873,9 +874,40 @@ def scope_snapshot_excluding_dependencies(
     dep_types = [t for t in snap.types if _is_dep(t.source_header)]
     dep_enums = [e for e in snap.enums if _is_dep(e.source_header)]
     if dep_types or dep_enums:
+        # Direct-reference retention roots are restricted to the *public*
+        # subset of kept_functions/kept_variables (kept_functions/
+        # kept_variables themselves are NOT narrowed -- every non-dependency
+        # declaration still stays in the final snapshot, matching this
+        # function's own header-origin-only contract). A hidden/private
+        # function or variable naming a dependency type in its own
+        # signature must not itself cause that dependency type to be
+        # retained: if that private declaration is later removed, the
+        # dependency type silently drops out of the *next* scoped
+        # snapshot's retention set too, and `compare` then reports a
+        # spurious TYPE_REMOVED for a type whose real public-surface
+        # relevance never changed (Codex review, fresh evidence). A public
+        # declaration's own removal causing the same drop is not a false
+        # positive by the same reasoning -- the public surface's real
+        # dependency on that type has genuinely ended. Reuses
+        # type_reachability._NON_PUBLIC_ORIGINS, the same public-surface
+        # predicate its own directly_referenced_stdlib_types() already
+        # applies for the identical reason. RecordType has no
+        # visibility/origin field at all (unlike Function/Variable), so
+        # kept_types/kept_enums can't be narrowed the same way and are
+        # passed through unfiltered, same as before.
+        public_root_functions = [
+            f
+            for f in kept_functions
+            if f.visibility == Visibility.PUBLIC and f.origin not in _NON_PUBLIC_ORIGINS
+        ]
+        public_root_variables = [
+            v
+            for v in kept_variables
+            if v.visibility == Visibility.PUBLIC and v.origin not in _NON_PUBLIC_ORIGINS
+        ]
         directly_referenced = _directly_referenced_dependency_names(
-            kept_functions,
-            kept_variables,
+            public_root_functions,
+            public_root_variables,
             kept_types,
             kept_enums,
             [*dep_types, *dep_enums],

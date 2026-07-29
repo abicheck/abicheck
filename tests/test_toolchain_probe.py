@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from dataclasses import dataclass
 
 import pytest
@@ -167,6 +168,107 @@ class TestOsFamily:
 
     def test_unrecognized_triple_returns_none(self) -> None:
         assert tp._os_family("some-made-up-triple") is None
+
+
+class TestEnvFamily:
+    @pytest.mark.parametrize(
+        ("triple", "expected"),
+        [
+            ("x86_64-linux-gnu", "gnu"),
+            ("x86_64-linux-musl", "musl"),
+            ("arm-linux-gnueabihf", "gnueabihf"),
+            ("arm-linux-gnueabi", "gnueabi"),
+            ("x86_64-linux-gnux32", "gnux32"),
+            ("x86_64-pc-windows-msvc", "msvc"),
+        ],
+    )
+    def test_recognized_markers(self, triple: str, expected: str) -> None:
+        assert tp._env_family(triple) == expected
+
+    def test_gnueabihf_and_gnueabi_are_distinct(self) -> None:
+        # Regression: both contain "gnu" as a substring and previously
+        # collapsed to the same family, hiding an incompatible calling
+        # convention (soft-float vs. hard-float EABI).
+        assert tp._env_family("arm-linux-gnueabi") != tp._env_family(
+            "arm-linux-gnueabihf"
+        )
+
+    def test_gnu_and_gnux32_are_distinct(self) -> None:
+        # Regression: x86_64-linux-gnu vs x86_64-linux-gnux32 (the x32
+        # ILP32-on-x86_64 ABI) previously both reduced to "gnu".
+        assert tp._env_family("x86_64-linux-gnu") != tp._env_family(
+            "x86_64-linux-gnux32"
+        )
+
+    def test_unrecognized_triple_returns_none(self) -> None:
+        assert tp._env_family("arm-none-eabi") is None
+
+
+class TestClangAcceptsTarget:
+    def _run(self, monkeypatch: pytest.MonkeyPatch, returncode: int, stderr: str):
+        tp._clang_accepts_target.cache_clear()
+
+        def _fake_run(argv, **kwargs):
+            return subprocess.CompletedProcess(
+                argv, returncode, stdout="", stderr=stderr
+            )
+
+        monkeypatch.setattr(tp.subprocess, "run", _fake_run)
+
+    def test_accepted_target_returns_true(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._run(monkeypatch, 0, "")
+        assert (
+            tp._clang_accepts_target("/opt/clang", "digest1", "aarch64-linux-gnu")
+            is True
+        )
+
+    def test_unknown_target_triple_returns_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._run(monkeypatch, 1, "error: unknown target triple 'bogus'")
+        assert tp._clang_accepts_target("/opt/clang", "digest2", "bogus") is False
+
+    def test_unrelated_failure_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._run(monkeypatch, 1, "error: unsupported option '-fsyntax-only'")
+        assert (
+            tp._clang_accepts_target("/opt/clang", "digest3", "aarch64-linux-gnu")
+            is None
+        )
+
+    def test_probe_failure_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        tp._clang_accepts_target.cache_clear()
+
+        def _boom(argv, **kwargs):
+            raise OSError("exec failed")
+
+        monkeypatch.setattr(tp.subprocess, "run", _boom)
+        assert (
+            tp._clang_accepts_target("/opt/clang", "digest4", "aarch64-linux-gnu")
+            is None
+        )
+
+
+@pytest.mark.integration
+class TestClangAcceptsTargetRealCompiler:
+    def test_real_clang_accepts_a_real_cross_target(self) -> None:
+        clang_path = shutil.which("clang")
+        if clang_path is None:
+            pytest.skip("clang not available")
+        tp._clang_accepts_target.cache_clear()
+        assert tp._clang_accepts_target(clang_path, "real", "aarch64-linux-gnu") is True
+
+    def test_real_clang_rejects_a_bogus_target(self) -> None:
+        clang_path = shutil.which("clang")
+        if clang_path is None:
+            pytest.skip("clang not available")
+        tp._clang_accepts_target.cache_clear()
+        assert (
+            tp._clang_accepts_target(clang_path, "real", "not-a-real-target") is False
+        )
 
 
 @dataclass
@@ -594,6 +696,84 @@ class TestCheckProfileToolchainIdentity:
         assert len(errors) == 1
         assert "environment" in errors[0]
         assert "musl" in errors[0]
+
+    def test_clang_bogus_target_is_rejected_via_real_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a Clang binding's target was exempt from ALL
+        # verification, so a misspelled target: not-a-real-target passed
+        # unconditionally.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/clang": {
+                    "selected": "/opt/clang",
+                    "version": "clang version 18.1.3",
+                    "sha256": "deadbeef",
+                }
+            },
+        )
+        monkeypatch.setattr(tp, "_clang_accepts_target", lambda path, digest, t: False)
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"clang18": "/opt/clang"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="not-a-real-target", binding="clang18"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "p1.compile.target" in errors[0]
+
+    def test_clang_valid_target_via_real_probe_yields_no_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/clang": {
+                    "selected": "/opt/clang",
+                    "version": "clang version 18.1.3",
+                    "sha256": "deadbeef",
+                }
+            },
+        )
+        monkeypatch.setattr(tp, "_clang_accepts_target", lambda path, digest, t: True)
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"clang18": "/opt/clang"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="aarch64-linux-gnu", binding="clang18"),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_clang_target_without_sha256_skips_the_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # No sha256 in metadata (e.g. an unusual probe result) -- can't key
+        # the probe cache, so skip rather than probe unconditionally.
+        def _boom(*a, **k):
+            raise AssertionError("must not probe without a digest")
+
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/clang": {
+                    "selected": "/opt/clang",
+                    "version": "clang version 18.1.3",
+                }
+            },
+        )
+        monkeypatch.setattr(tp, "_clang_accepts_target", _boom)
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"clang18": "/opt/clang"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="aarch64-linux-gnu", binding="clang18"),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
 
     def test_version_only_declared_checks_without_a_family(
         self, monkeypatch: pytest.MonkeyPatch

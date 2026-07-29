@@ -31,17 +31,21 @@ executable whose actual family can't be determined at all is a failure
 whenever ``compiler_family``/``target`` is declared, not a silent pass —
 otherwise the check becomes a no-op for any unrecognized binary.
 
-``target`` is checked via a coarse architecture/OS-family/environment
-comparison (not a full triple string match, since vendor spelling
-legitimately differs between a ``--target=`` value and a ``-dumpmachine``
-probe for the same real toolchain) — and only for a **GCC-family**
-resolved binding. A GCC binary is single-target per install, so its
-``-dumpmachine`` output genuinely constrains what it can compile for.
-Clang is exempt: a single Clang binary is inherently multi-target via its
-own ``--target=`` flag (which the profile's compose logic already passes
-explicitly), so its bare ``-dumpmachine`` probe reports only its *host
-default* — comparing that against a declared cross-compilation target
-would reject a perfectly valid profile.
+``target`` is checked differently per family, since ``-dumpmachine``
+means something different for each. For a **GCC-family** binding (fixed
+single-target per install), it's compared via a coarse architecture/
+OS-family/environment comparison (not a full triple string match, since
+vendor spelling legitimately differs between a ``--target=`` value and a
+``-dumpmachine`` probe for the same real toolchain) against the probed
+``-dumpmachine`` output, which genuinely constrains what that binary can
+compile for. For a **Clang-family** binding (inherently multi-target via
+its own ``--target=`` flag, which the profile's compose logic already
+passes explicitly), ``-dumpmachine`` only reports its *host default* — not
+a constraint — so instead this actually invokes Clang with the declared
+``--target=`` on a trivial empty translation unit
+(:func:`_clang_accepts_target`) and checks whether it's accepted, catching
+a genuinely bogus/misspelled target without rejecting a valid
+cross-compilation profile.
 
 Reuses :mod:`abicheck.dumper_toolchain`'s existing, cached, bounded
 ``--version``-capture plumbing (:func:`~abicheck.dumper_toolchain._tool_identity_metadata`)
@@ -66,8 +70,11 @@ declared MSVC family/binding is silently skipped rather than guessed at.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from collections.abc import Mapping
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -143,11 +150,19 @@ def _os_family(triple: str) -> str | None:
 #: Coarse libc/environment markers, since two triples can share the same
 #: architecture and OS while targeting an incompatible ABI environment
 #: (``x86_64-linux-musl`` vs. ``x86_64-linux-gnu`` both reduce to OS family
-#: ``"linux"`` — Codex review, fresh evidence). Order doesn't matter here:
-#: every "gnueabi"/"gnueabihf" variant already contains "gnu" as a
-#: substring and maps to the same family value either way.
+#: ``"linux"`` — Codex review, fresh evidence). Checked most-specific-first:
+#: ``gnueabihf``/``gnueabi``/``gnux32`` are each incompatible ABI *variants*
+#: of glibc (hard-float EABI, soft-float EABI, x32 ILP32-on-x86_64) that
+#: would otherwise all collapse into the same generic ``"gnu"`` bucket,
+#: since each is a superstring containing "gnu" (a second review round,
+#: fresh evidence: ``arm-linux-gnueabi`` vs. ``arm-linux-gnueabihf`` and
+#: ``x86_64-linux-gnu`` vs. ``x86_64-linux-gnux32`` both compared as one
+#: family before this).
 _ENV_FAMILY_MARKERS: tuple[tuple[str, str], ...] = (
     ("musl", "musl"),
+    ("gnueabihf", "gnueabihf"),
+    ("gnueabi", "gnueabi"),
+    ("gnux32", "gnux32"),
     ("gnu", "gnu"),
     ("msvc", "msvc"),
 )
@@ -158,6 +173,50 @@ def _env_family(triple: str) -> str | None:
     for marker, family in _ENV_FAMILY_MARKERS:
         if marker in lowered:
             return family
+    return None
+
+
+@lru_cache(maxsize=64)
+def _clang_accepts_target(selected_path: str, digest: str, target: str) -> bool | None:
+    """Whether a Clang-family *selected_path* actually accepts ``--target=``
+    *target* for real compilation — not just echoes it back verbatim.
+
+    Unlike ``-dumpmachine`` (which a Clang binary accepts for any
+    ``--target=`` value, valid or not, and simply prints back), an actual
+    empty-translation-unit compile with ``--target=`` fails outright for an
+    unknown/misspelled triple (confirmed empirically: ``clang
+    --target=not-a-real-target -x c -fsyntax-only -`` exits nonzero with
+    "unknown target triple", while a real cross-compilation target exits 0)
+    — the check this module needs to actually validate a declared Clang
+    cross-compilation target rather than exempting it outright (Codex
+    review, fresh evidence: a misspelled ``target: not-a-real-target``
+    previously passed unconditionally). *digest* (the resolved
+    executable's content hash, from :func:`~abicheck.dumper_toolchain._tool_identity_metadata`)
+    keys the cache per exact binary revision, mirroring that module's own
+    caching convention. Returns ``None`` — skip the comparison, never
+    guess a mismatch — if the probe itself can't run (missing ``-x c``
+    support, timeout, permission error): an inconclusive probe is not the
+    same as a proven mismatch.
+    """
+    try:
+        process = subprocess.run(
+            [selected_path, f"--target={target}", "-x", "c", "-fsyntax-only", "-"],
+            input="",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            text=True,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if process.returncode == 0:
+        return True
+    if "unknown target triple" in (process.stderr or "").lower():
+        return False
+    # Some other failure (unrelated flag support, environment issue) --
+    # inconclusive, not a proven target mismatch. Never guess a mismatch
+    # from an error this probe wasn't designed to interpret.
     return None
 
 
@@ -391,11 +450,23 @@ def _check_one_overlay(
             # a constraint -- the profile's own compose logic passes the
             # declared target explicitly via --target=, which a single
             # Clang binary genuinely honors for cross-compilation. Unlike
-            # GCC (a fixed single-target binary per install), there is
-            # nothing to compare here (Codex review, fresh evidence: a
-            # real x86_64 Clang with target: aarch64-linux-gnu was falsely
-            # rejected).
-            pass
+            # GCC (a fixed single-target binary per install), the bare
+            # dumpmachine probe has nothing to compare here (Codex review,
+            # fresh evidence: a real x86_64 Clang with target:
+            # aarch64-linux-gnu was falsely rejected). But an entirely
+            # bogus/misspelled target must still be rejected, so probe
+            # Clang directly with the declared --target= instead (a
+            # second review round, fresh evidence: target:
+            # not-a-real-target previously passed unconditionally).
+            digest = metadata.get("sha256")
+            if digest:
+                accepted = _clang_accepts_target(path, digest, declared_target)
+                if accepted is False:
+                    errors.append(
+                        f"{where}.target declares {declared_target!r} but "
+                        f"toolchain binding {binding_id!r} ({path!r}) does not "
+                        f"recognize it as a valid --target= triple"
+                    )
         else:
             probed_triple = metadata.get("target_triple")
             if not probed_triple:

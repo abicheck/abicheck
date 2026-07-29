@@ -494,6 +494,44 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert {t.name for t in scoped.types} == {"Internal", "tm"}
 
+    def test_hidden_function_does_not_retain_a_dependency_type_it_names(self):
+        # Regression: a hidden/private function naming a dependency type in
+        # its own signature must not itself make that type a retention
+        # root -- otherwise removing that private function later silently
+        # drops the type from the NEXT scoped snapshot, and `compare`
+        # reports a spurious TYPE_REMOVED even though nothing on the
+        # public surface changed (Codex review, fresh evidence).
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[
+                _fn(
+                    "internal_helper",
+                    params=("struct tm *",),
+                    vis=Visibility.HIDDEN,
+                )
+            ],
+            types=[_rec("tm", source_header="/usr/include/time.h")],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == set(), (
+            "a hidden function is never a direct-reference retention root"
+        )
+
+    def test_public_function_still_retains_a_dependency_type_it_names(self):
+        # Same scenario, but the referencing function is public -- the
+        # existing retention behaviour must be unaffected.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("public_helper", params=("struct tm *",))],
+            types=[_rec("tm", source_header="/usr/include/time.h")],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"tm"}
+
     def test_dependency_type_referenced_only_via_field_of_kept_type_is_kept(self):
         snap = AbiSnapshot(
             library="libfoo.so",
