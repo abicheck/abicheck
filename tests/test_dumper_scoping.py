@@ -867,6 +867,46 @@ class TestDirectlyReferencedDependencyRetention:
             "dep::Thing",
         ]
 
+    def test_compound_typedef_alias_retains_both_dependency_components(self):
+        """Codex review (seventeenth round): `using Alias = Pair<dep::A,
+        dep::B>;` reaches *two distinct dependency candidates* (not one
+        kept + one dependency, as in the eleventh-round test above) in the
+        same compound target. The single-owner ambiguity check previously
+        applied uniformly to every spelling, including a purely
+        alias-derived one -- so both identities becoming "owners" of the
+        `Alias` spelling made it look like a coincidental collision between
+        unrelated candidates and dropped it entirely, even though the
+        alias unambiguously, structurally names both at once. Neither
+        `dep::A` nor `dep::B` has its own bare name collide with anything
+        else here -- the only reason both appear as owners is the shared
+        alias -- so both must be retained."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="B",
+                    kind="struct",
+                    qualified_name="dep::B",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Pair<dep::A, dep::B>"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert sorted(t.qualified_name for t in scoped.types) == [
+            "dep::A",
+            "dep::B",
+        ]
+
     def test_typedef_matching_stays_fast_with_many_candidates_and_typedefs(self):
         """Codex review (sixth round): matching resolved typedef targets
         against dependency candidates one-by-one was

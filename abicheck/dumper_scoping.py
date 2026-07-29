@@ -456,24 +456,48 @@ def _directly_referenced_dependency_names(
             spellings.update(_namespace_suffix_spellings(alias)[1:])
         candidate_spellings[id(candidate)] = spellings
 
-    spelling_owners: dict[str, set[str]] = {}
+    # Two separate ownership tallies, kept apart deliberately (Codex review,
+    # fresh evidence): a spelling that is some candidate's own identity/
+    # namespace-suffix/stdlib-stripped spelling (*own_spelling_owners*) is
+    # genuinely ambiguous the moment more than one distinct dependency
+    # touches it -- that's the "two unrelated candidates coincidentally
+    # share a bare suffix" case the single-owner guard exists for. A
+    # spelling that is only ever reached via a typedef alias's own
+    # reachability (*alias_spelling_owners*, never any candidate's own
+    # spelling) is different: a single compound alias like ``using Alias =
+    # Pair<dep::A, dep::B>;`` legitimately, unambiguously names *both*
+    # dep::A and dep::B in the same target -- multiple owners there isn't
+    # ambiguity, it's the alias structurally referencing more than one
+    # type at once, and dropping it entirely (the old ``len(...) == 1``
+    # check, applied uniformly to both categories) silently hid a real
+    # layout change to either type.
+    own_spelling_owners: dict[str, set[str]] = {}
+    alias_spelling_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = identity_of[id(candidate)]
-        for spelling in candidate_spellings[id(candidate)]:
-            spelling_owners.setdefault(spelling, set()).add(identity)
+        own = own_spellings_of[id(candidate)]
+        for spelling in own:
+            own_spelling_owners.setdefault(spelling, set()).add(identity)
+        for spelling in candidate_spellings[id(candidate)] - own:
+            alias_spelling_owners.setdefault(spelling, set()).add(identity)
 
-    # spelling -> {identity, ...}: every spelling -- including a candidate's
-    # own full identity -- is trusted only when unambiguous among
-    # dep_candidates and not colliding with a kept type's/enum's own
-    # spelling (Codex review: no spelling is exempt from either guard).
+    # spelling -> {identity, ...}: a spelling that is some candidate's own
+    # identity/suffix is trusted only when unambiguous among ALL owners
+    # (own- or alias-derived) and not colliding with a kept type's/enum's
+    # own spelling; a spelling reached *only* via alias reachability keeps
+    # every distinct owner the alias legitimately reaches.
     spelling_index: dict[str, set[str]] = {}
-    for candidate in dep_candidates:
-        identity = identity_of[id(candidate)]
-        for spelling in candidate_spellings[id(candidate)]:
-            if spelling in kept_spellings:
-                continue
-            if len(spelling_owners.get(spelling, ())) == 1:
-                spelling_index.setdefault(spelling, set()).add(identity)
+    for spelling in own_spelling_owners.keys() | alias_spelling_owners.keys():
+        if spelling in kept_spellings:
+            continue
+        own_owners = own_spelling_owners.get(spelling, set())
+        alias_owners = alias_spelling_owners.get(spelling, set())
+        if own_owners:
+            all_owners = own_owners | alias_owners
+            if len(all_owners) == 1:
+                spelling_index[spelling] = set(all_owners)
+        elif alias_owners:
+            spelling_index[spelling] = set(alias_owners)
 
     pattern = _compile_spelling_pattern(spelling_index)
     if pattern is None:
