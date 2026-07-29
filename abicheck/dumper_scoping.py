@@ -232,6 +232,28 @@ def _directly_referenced_dependency_names(
     surfaces -- SYCL/heavily-templated C++ headers -- this filter exists to
     make manageable in the first place), turning the scan into one
     O(signature size) pass regardless of candidate count.
+
+    **Known, inherited limitation (Codex review, not fixed here):** the
+    direct-clang backend's ``parse_typedefs()`` (``dumper_clang.py``)
+    stores a namespaced typedef under its *bare* key (e.g. ``Handle`` for
+    ``namespace api { using Handle = dep::Thing; }``), never the qualified
+    ``api::Handle`` form -- this is the exact same producer-side gap
+    already documented at length in ``AGENTS.md``'s "A separate, deeper
+    finding on typedef keys" entry for :mod:`abicheck.type_reachability`.
+    When a kept signature spells the alias qualified (``api::Handle``,
+    because Clang prints it qualified from outside its own namespace) the
+    boundary-aware match correctly refuses to let the bare key ``Handle``
+    match *inside* that qualified spelling (the same guard that prevents
+    an unrelated bare ``Thing`` from matching inside ``vendor::Thing``),
+    so the dependency candidate stays excluded -- a silent false negative,
+    not a false positive. Fixing the root cause means changing
+    ``dumper_clang.py`` to store the qualified key, whose blast radius
+    reaches every other consumer of ``snapshot.typedefs``
+    (``AGENTS.md`` already declines this for the identical reason); a
+    local reverse-namespace guesser here would risk fabricating new false
+    positives instead. Deliberately left as the same
+    false-negative-over-false-positive degradation this whole module
+    already uses throughout, consistent with the existing precedent.
     """
     signature_texts: list[str] = []
     for fn in kept_functions:
