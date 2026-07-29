@@ -792,6 +792,40 @@ def scan_cmd(
     binary = artifact
     baseline = against
 
+    # ADR-049 Phase 5 review (Codex, PR #657): every flag below only means
+    # anything for a --against comparison -- `run_scan_core` calls
+    # `_run_baseline_compare` only when a baseline is given, so without
+    # --against these would otherwise be silently parsed, validated (a
+    # malformed --env-matrix would still fail an unrelated one-build audit),
+    # and then discarded -- hiding e.g. a --policy-file require_evidence
+    # setting the user actually needed. Reject them explicitly rather than
+    # accepting no-op configuration.
+    if against is None:
+        ctx = click.get_current_context()
+        _comparison_only_flags = {
+            "suppress": "--suppress",
+            "policy_file_path": "--policy-file",
+            "policy": "--policy",
+            "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
+            "strict_suppressions": "--strict-suppressions",
+            "public_symbols": "--public-symbol",
+            "public_symbols_list": "--public-symbols-list",
+            "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
+            "env_matrix_path": "--env-matrix",
+        }
+        explicit = [
+            flag
+            for dest, flag in _comparison_only_flags.items()
+            if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+        ]
+        if explicit:
+            noun = "flag" if len(explicit) == 1 else "flags"
+            raise click.UsageError(
+                f"{', '.join(explicit)} only take effect with --against (they "
+                f"configure the baseline comparison); drop {'this' if len(explicit) == 1 else 'these'} "
+                f"{noun} or pass --against."
+            )
+
     # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
     # loader (`_load_suppression_and_policy`) so a scan baseline comparison
     # can be scoped/suppressed/policy-classified the same way a direct

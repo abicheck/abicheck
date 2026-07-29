@@ -1249,6 +1249,28 @@ not every flag/input combination §6.4's Gate lists), but it is a real,
 executable field-for-field parity assertion between the two commands where
 none existed before.
 
+**Two Codex review rounds on this same slice found real, fixed gaps.**
+First: `_run_baseline_compare` forwarded `policy_file` to `compare_snapshots`
+but not to `prepare_embedded_build_source` (`cli_buildsource_helpers.py`),
+which is what actually applies `require_evidence`/evidence-verdict
+overrides (ADR-033 D7) -- a `--policy-file` requiring evidence had no
+effect on `scan --against`, fixed by threading `policy_file` into that call
+too. `--env-matrix` with malformed YAML also raised an uncaught
+`ValidationError` instead of `compare`'s existing `AbicheckError` ->
+`click.UsageError` handling; fixed the same way. Second: every one of these
+config-surface flags only means anything for a `--against` comparison
+(`run_scan_core` calls `_run_baseline_compare` only when a baseline is
+given) -- without `--against` they were silently parsed (and, for
+`--env-matrix`, even validated against a file that could never matter) and
+then discarded, which could hide a `--policy-file` requiring evidence the
+user actually needed. `scan_cmd` now rejects any of them (via
+`ctx.get_parameter_source(...) == COMMANDLINE`) with a `click.UsageError`
+(exit 64) when passed without `--against`, rather than accepting silent
+no-op configuration. New tests: `test_scan_rejects_comparison_only_flags_without_against`
+(parametrized over four of the flags) and
+`test_scan_without_against_and_without_comparison_flags_is_unaffected`
+(the guard must not fire for a plain audit that touches none of them).
+
 Still not yet done, deliberately out of scope for these three slices (each
 is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is

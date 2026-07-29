@@ -359,3 +359,50 @@ def test_scan_against_bad_env_matrix_is_usage_error(tmp_path: Path) -> None:
 
     assert result.exit_code == 64, result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        ["--strict-suppressions"],
+        ["--policy", "sdk_vendor"],
+        ["--pattern-verdicts"],
+        ["--public-symbol", "foo"],
+    ],
+)
+def test_scan_rejects_comparison_only_flags_without_against(
+    tmp_path: Path, extra_args: list[str]
+) -> None:
+    # Codex P2 review on PR #657: without --against, run_scan_core never
+    # calls _run_baseline_compare, so these flags would otherwise be
+    # silently parsed and discarded -- including a --policy-file
+    # require_evidence setting the user actually needed. Must be a loud
+    # usage error (exit 64), not a silent no-op.
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    snap = tmp_path / "artifact.so"
+    snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+
+    result = CliRunner().invoke(main, ["scan", str(snap), *extra_args])
+
+    assert result.exit_code == 64, result.output
+    assert "only take effect with --against" in result.output
+
+
+def test_scan_without_against_and_without_comparison_flags_is_unaffected(
+    tmp_path: Path,
+) -> None:
+    # The new usage-error guard must not fire for a plain one-build audit
+    # that never touches any of the comparison-only flags.
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    snap = tmp_path / "artifact.so"
+    snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+
+    result = CliRunner().invoke(main, ["scan", str(snap)])
+
+    assert "only take effect with --against" not in result.output
