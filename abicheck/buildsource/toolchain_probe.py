@@ -145,7 +145,11 @@ def parse_version_constraints(spec: str) -> list[tuple[str, tuple[int, ...]]]:
     Each clause is an optional comparison operator (``==``/``!=``/``>=``/
     ``<=``/``>``/``<``, default ``==`` when omitted) followed by a dotted
     version number (1-4 components). Raises :class:`ToolchainProbeError` for
-    an unparseable clause.
+    an unparseable clause, or if *spec* contains no clause at all (e.g.
+    ``","`` or blank/whitespace) — a comma-only or empty spec would
+    otherwise parse to zero constraints, and :func:`version_satisfies`'s
+    all-clauses-must-hold loop would then vacuously report every probed
+    compiler as satisfying it (Codex review, fresh evidence).
     """
     constraints: list[tuple[str, tuple[int, ...]]] = []
     for clause in spec.split(","):
@@ -159,6 +163,8 @@ def parse_version_constraints(spec: str) -> list[tuple[str, tuple[int, ...]]]:
             )
         op = match.group(1) or "=="
         constraints.append((op, _parse_version(match.group(2))))
+    if not constraints:
+        raise ToolchainProbeError(f"no version constraint clauses found in {spec!r}")
     return constraints
 
 

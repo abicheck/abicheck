@@ -47,6 +47,20 @@ class TestParseVersionConstraints:
         with pytest.raises(tp.ToolchainProbeError, match="invalid version constraint"):
             tp.parse_version_constraints("~>1.0")
 
+    def test_comma_only_spec_raises_instead_of_matching_vacuously(self) -> None:
+        # Regression: "," parsed to zero clauses, and version_satisfies's
+        # all-clauses-must-hold loop then vacuously accepted any compiler.
+        with pytest.raises(
+            tp.ToolchainProbeError, match="no version constraint clauses"
+        ):
+            tp.parse_version_constraints(",")
+
+    def test_blank_spec_raises_instead_of_matching_vacuously(self) -> None:
+        with pytest.raises(
+            tp.ToolchainProbeError, match="no version constraint clauses"
+        ):
+            tp.parse_version_constraints("   ")
+
 
 class TestVersionSatisfies:
     @pytest.mark.parametrize(
@@ -85,6 +99,12 @@ class TestVersionSatisfies:
     def test_no_version_number_raises(self) -> None:
         with pytest.raises(tp.ToolchainProbeError, match="no version number"):
             tp.version_satisfies("unavailable: no such tool", ">=1")
+
+    def test_comma_only_constraint_does_not_vacuously_match(self) -> None:
+        with pytest.raises(
+            tp.ToolchainProbeError, match="no version constraint clauses"
+        ):
+            tp.version_satisfies("gcc 13.2.0", ",")
 
     def test_invalid_constraint_raises(self) -> None:
         with pytest.raises(tp.ToolchainProbeError, match="invalid version constraint"):
