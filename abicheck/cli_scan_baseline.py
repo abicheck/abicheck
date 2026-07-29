@@ -434,6 +434,24 @@ def _run_baseline_compare(
         summary["findings"] = findings
         if total_gating > _MAX_BASELINE_FINDINGS:
             summary["findings_truncated"] = True
+
+    # ADR-049 Phase 5: surface the same suppression audit trail `compare`'s
+    # own JSON report already exposes (`DiffResult.suppressed_changes`,
+    # reporter.py's `_add_suppression`) -- without this, `scan --against`'s
+    # summary silently hid which findings a `--suppress` rule removed, even
+    # though the rule itself is honored (threaded into `compare_snapshots`
+    # earlier in this same Phase 5 slice). Capped independently of the
+    # gating-findings truncation above -- a large suppression file
+    # shouldn't crowd out real gating findings from the always-on summary.
+    suppressed_changes = getattr(diff, "suppressed_changes", None) or []
+    if suppressed_changes:
+        summary["suppressed_count"] = len(suppressed_changes)
+        summary["suppressed"] = _baseline_finding_dicts(
+            suppressed_changes[:_MAX_BASELINE_FINDINGS], "suppressed"
+        )
+        if len(suppressed_changes) > _MAX_BASELINE_FINDINGS:
+            summary["suppressed_truncated"] = True
+
     from .cli_compare_helpers import _verdict_exit_code
 
     verdict = diff.verdict.value

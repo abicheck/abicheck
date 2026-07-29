@@ -1271,18 +1271,41 @@ no-op configuration. New tests: `test_scan_rejects_comparison_only_flags_without
 `test_scan_without_against_and_without_comparison_flags_is_unaffected`
 (the guard must not fire for a plain audit that touches none of them).
 
-Still not yet done, deliberately out of scope for these three slices (each
+**Updated (2026-07-29, same PR): a fourth slice closed a real, related gap
+-- `scan --against`'s own suppression audit trail.** Investigating "no
+suppression ledger exists" (below) turned up prior art that was closer than
+first thought: `DiffResult.suppressed_changes` ("full audit trail" per its
+own field comment, `checker_types.py`) and `reporter.py`'s `_add_suppression`
+already give `compare`'s JSON report a per-run list of every finding a
+`--suppress` rule silenced, including which rule (`Change.suppression_rule`).
+`scan --against` newly honors suppression (this Phase 5's earlier slices)
+but its own summary never surfaced *which* finding got silenced -- an
+asymmetry between the two commands' audit trails, not a missing concept.
+Fixed by adding the equivalent (`suppressed_count`/`suppressed`, capped
+independently of the existing gating-findings truncation) to
+`_run_baseline_compare`'s summary dict, reusing the existing
+`_baseline_finding_dicts` projector. New test
+`test_scan_against_exposes_suppression_ledger_like_compare` asserts `scan
+--against --suppress --format json` surfaces the same audit trail
+end-to-end (not just that the flag threads through in isolation).
+
+Still not yet done, deliberately out of scope for these four slices (each
 is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is
-still just the plan's own vocabulary, not live. Neither a "suppression
-ledger" nor an "unsuppressible coverage ledger" exists yet as a named
-concept anywhere in the codebase (the closest prior art is the
-differently-named, differently-shaped ADR-024 audit ledger in
-`post_processing.py`/`cli_audit.py`) -- designing what either of those
-means (what gets recorded, when a suppression counts as "covering" a
-finding, what "unsuppressible" gates on) is a genuinely new piece of design
-work, not a mechanical port of an existing `compare` flag, and hasn't been
-attempted. The parity test suite above covers one concrete scenario, not
+still just the plan's own vocabulary, not live. The "unsuppressible
+coverage ledger" specifically (as opposed to the ordinary suppression audit
+trail just closed above) remains undesigned -- there is still no concept in
+the codebase for *which* `ChangeKind`s categorically cannot be suppressed
+regardless of policy, nor a ledger proving a given run's suppressions never
+touched one. `SuppressionList.audit()`/`SuppressionAudit`
+(`suppression.py`) is a second, still-orphaned piece of related prior art
+found during this investigation -- stale-rule/high-risk-match/expiry
+analysis over a whole suppression file, exposed by neither `compare` nor
+`scan` today; wiring it in (e.g. a `--audit-suppressions` flag) is a
+separate, real follow-up, not attempted here since it is additive UI on top
+of the file, not part of per-run comparison output the way
+`suppressed_changes` is. The parity test suite above covers one concrete
+scenario (plus, now, the suppression-ledger scenario), not
 the exhaustive binaries/snapshots/mixed-inputs/policies/packs/suppressions/
 explicit-scope matrix §6.4 names in full. `compare`'s remaining
 config-surface options that are genuinely out of scope for "shared

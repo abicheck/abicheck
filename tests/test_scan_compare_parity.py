@@ -182,3 +182,39 @@ def test_no_scope_public_headers_agrees_across_both_commands(
     )
     assert compare_res.exit_code == 4, compare_res.output
     assert scan_res.exit_code == 4, scan_res.output
+
+
+def test_scan_against_exposes_suppression_ledger_like_compare(
+    runner: CliRunner,
+    old_snap: Path,
+    new_snap_breaking: Path,
+    suppress_bar: Path,
+) -> None:
+    # `compare`'s JSON report already surfaces which findings a --suppress
+    # rule silenced (DiffResult.suppressed_changes, reporter.py's
+    # _add_suppression) -- a per-run suppression audit trail. `scan
+    # --against`'s own summary previously had no equivalent: the suppression
+    # rule was honored (this Phase 5 slice's earlier work) but *which*
+    # finding it silenced was invisible. Assert scan's JSON `diff` block now
+    # carries the same audit trail.
+    import json
+
+    scan_res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(old_snap),
+            "--suppress",
+            str(suppress_bar),
+            "--format",
+            "json",
+        ],
+    )
+    assert scan_res.exit_code == 0, scan_res.output
+    payload = json.loads(scan_res.output)
+    diff = payload["diff"]
+    assert diff["suppressed_count"] == 1
+    assert diff["suppressed"][0]["symbol"] == "_Z3barv"
+    assert diff["suppressed"][0]["kind"] == "func_removed"
