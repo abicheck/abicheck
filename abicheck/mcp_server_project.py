@@ -506,8 +506,13 @@ def abi_project_validate(
     Args:
         config: Path to the project config (default ``.abicheck.yml``).
         toolchain_bindings: Optional trusted toolchain-bindings file path
-            (schema ``abicheck.toolchain-bindings/v1``) to additionally check
-            every declared ``profiles.<id>.compile.binding`` against.
+            (schema ``abicheck.toolchain-bindings/v1``) to additionally
+            check every declared ``profiles.<id>.compile``/``consumer_compile``
+            ``binding`` resolves, and — when ``compiler_family`` or
+            ``compiler_version`` is also declared — that the resolved
+            executable's probed identity actually matches (G34 Phase A;
+            MSVC bindings are skipped, see
+            ``abicheck.buildsource.toolchain_probe``).
     """
     t0 = _time.monotonic()
     try:
@@ -522,6 +527,7 @@ def abi_project_validate(
             check_profile_bindings_resolve,
             load_bindings_file,
         )
+        from .buildsource.toolchain_probe import check_profile_toolchain_identity
         from .cli_project import _load_project_targets_config
 
         def _do_validate() -> ProjectTargetsValidationReport:
@@ -554,6 +560,9 @@ def abi_project_validate(
                 if bindings_file is not None:
                     report.errors.extend(
                         check_profile_bindings_resolve(parsed.profiles, bindings_file)
+                    )
+                    report.errors.extend(
+                        check_profile_toolchain_identity(parsed.profiles, bindings_file)
                     )
                 return report
             except (click.UsageError, BindingsFileError) as exc:

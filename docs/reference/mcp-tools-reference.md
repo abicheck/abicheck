@@ -135,7 +135,7 @@ Validate a project config's ``targets:``/``bundles:``/``profiles:`` block.
 | Parameter | Type | Required | Default | Description |
 |---|---|:--:|---|---|
 | `config` | `str` | no | `.abicheck.yml` | Path to the project config (default ``.abicheck.yml``). |
-| `toolchain_bindings` | `str \| None` | no | `None` | Optional trusted toolchain-bindings file path (schema ``abicheck.toolchain-bindings/v1``) to additionally check every declared ``profiles.<id>.compile.binding`` against. |
+| `toolchain_bindings` | `str \| None` | no | `None` | Optional trusted toolchain-bindings file path (schema ``abicheck.toolchain-bindings/v1``) to additionally check every declared ``profiles.<id>.compile``/``consumer_compile`` ``binding`` resolves, and — when ``compiler_family`` or ``compiler_version`` is also declared — that the resolved executable's probed identity actually matches (G34 Phase A; MSVC bindings are skipped, see ``abicheck.buildsource.toolchain_probe``). |
 
 ## `abi_scan`
 

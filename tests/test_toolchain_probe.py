@@ -57,13 +57,30 @@ class TestVersionSatisfies:
             ("gcc 13.2.0", ">=13,<14", True),
             ("gcc 13.2.0", ">=14", False),
             ("gcc 13.2.0", "!=13.2.0", False),
+            ("gcc 13.2.0", ">13.1.0", True),
+            ("gcc 13.2.0", ">13.2.0", False),
+            ("gcc 13.2.0", "<13.3.0", True),
+            ("gcc 13.2.0", "<13.2.0", False),
             ("clang version 18", ">=17", True),
             ("clang version 18", "<=17", False),
             ("gcc 13", ">=13.0.0", True),
+            # Cross-compiler binding name (Debian/Ubuntu convention) embeds bare
+            # target-triple digits ("86", "64") before the real, dotted version.
+            (
+                "x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+                ">=13,<14",
+                True,
+            ),
         ],
     )
     def test_cases(self, actual: str, constraint: str, expected: bool) -> None:
         assert tp.version_satisfies(actual, constraint) is expected
+
+    def test_cross_compiler_prefix_does_not_shadow_real_version(self) -> None:
+        # Regression: a bare first-digit-substring search picked "86" out of
+        # the invoked name "x86_64-linux-gnu-gcc-13", rejecting a valid profile.
+        banner = "x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+        assert tp.version_satisfies(banner, ">=13,<14") is True
 
     def test_no_version_number_raises(self) -> None:
         with pytest.raises(tp.ToolchainProbeError, match="no version number"):
@@ -72,6 +89,43 @@ class TestVersionSatisfies:
     def test_invalid_constraint_raises(self) -> None:
         with pytest.raises(tp.ToolchainProbeError, match="invalid version constraint"):
             tp.version_satisfies("gcc 13.0.0", "bogus")
+
+
+class TestProbeCompilerFamily:
+    def test_generic_alias_resolves_via_realpath(self) -> None:
+        # Regression: a "cc"/"c++" driver alias (or symlink) that resolves to
+        # a real gcc binary was classified by its own generic basename.
+        metadata = {
+            "selected": "/usr/bin/cc",
+            "realpath": "/usr/bin/x86_64-linux-gnu-gcc-13",
+            "version": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+        }
+        assert tp._probe_compiler_family(metadata) == "gnu"
+
+    def test_clang_backed_alias_is_not_misread_as_gnu(self) -> None:
+        # Regression: an alias whose OWN name contains "gcc" but whose
+        # realpath/version banner is actually Clang must not be accepted as GNU.
+        metadata = {
+            "selected": "/usr/bin/gcc",
+            "realpath": "/usr/bin/clang",
+            "version": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+        }
+        assert tp._probe_compiler_family(metadata) == "clang"
+
+    def test_gnu_signature_phrase_fallback(self) -> None:
+        metadata = {
+            "selected": "/opt/cc1",
+            "version": "cc1 (Free Software Foundation, Inc.) 12.0",
+        }
+        assert tp._probe_compiler_family(metadata) == "gnu"
+
+    def test_inconclusive_metadata_returns_none(self) -> None:
+        metadata = {"selected": "/opt/weird-tool", "version": "weird-tool 1.0"}
+        assert tp._probe_compiler_family(metadata) is None
+
+    def test_cl_exe_name_resolves_to_msvc(self) -> None:
+        metadata = {"selected": "C:/VC/bin/cl.exe", "version": ""}
+        assert tp._probe_compiler_family(metadata) == "msvc"
 
 
 @dataclass
@@ -166,6 +220,29 @@ class TestCheckProfileToolchainIdentity:
         }
         assert tp.check_profile_toolchain_identity(profiles, bf) == []
 
+    def test_generic_alias_binding_matching_gcc_yields_no_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: profiles.<id>.compile.binding pointing at a "cc" driver
+        # alias that resolves to real gcc used to be falsely rejected.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/usr/bin/cc": {
+                    "selected": "/usr/bin/cc",
+                    "realpath": "/usr/bin/x86_64-linux-gnu-gcc-13",
+                    "version": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"cc1": "/usr/bin/cc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1", compile=_FakeCompileSpec(compiler_family="gcc", binding="cc1")
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
     def test_mismatched_family_yields_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -221,6 +298,43 @@ class TestCheckProfileToolchainIdentity:
         errors = tp.check_profile_toolchain_identity(profiles, bf)
         assert len(errors) == 1
         assert "could not be probed" in errors[0]
+
+    def test_version_only_declared_checks_without_a_family(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_metadata(
+            monkeypatch,
+            {"/opt/gcc": {"selected": "/opt/gcc", "version": "gcc 13.2.0"}},
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(compiler_version=">=13,<14", binding="gcc14"),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_unparseable_version_constraint_is_reported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_metadata(
+            monkeypatch,
+            {"/opt/gcc": {"selected": "/opt/gcc", "version": "gcc 13.2.0"}},
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_version="not-a-constraint", binding="gcc14"
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "compiler_version" in errors[0]
+        assert "invalid version constraint" in errors[0]
 
     def test_consumer_compile_overlay_checked_independently(
         self, monkeypatch: pytest.MonkeyPatch

@@ -25,12 +25,16 @@ real probe only ever runs against a path the bindings file (an explicit
 ``--config``/CI-managed source) actually names.
 
 Reuses :mod:`abicheck.dumper_toolchain`'s existing, cached, bounded
-``--version``-capture plumbing (:func:`~abicheck.dumper_toolchain._tool_identity_metadata`,
-:func:`~abicheck.dumper_toolchain._compiler_family_from_toolchain`) rather
-than re-implementing subprocess handling here — this module only adds the
-version-constraint grammar and the family-name reconciliation between the
-schema's spelling (``"gcc"``) and the internal label those helpers return
-(``"gnu"``).
+``--version``-capture plumbing (:func:`~abicheck.dumper_toolchain._tool_identity_metadata`)
+rather than re-implementing subprocess handling here — this module only adds
+the version-constraint grammar and its own family-detection
+(:func:`_probe_compiler_family`), deliberately **not**
+:func:`~abicheck.dumper_toolchain._compiler_family_from_toolchain`: that
+helper's own docstring says it is a best-effort guess for
+``profile_fingerprint`` stability, low-stakes because a wrong guess there
+only affects cache-key text — not appropriate for what is now a hard
+validation gate a wrong guess can make reject (or wrongly accept) a real
+profile.
 
 **Deliberately out of scope (documented limitation, not a bug):** MSVC
 (``compiler_family: msvc``/a ``cl``/``cl.exe`` binding). ``cl.exe`` has no
@@ -45,15 +49,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Protocol
 
-from ..dumper_toolchain import _compiler_family_from_toolchain, _tool_identity_metadata
+from ..dumper_toolchain import _tool_identity_metadata
 from .toolchain_bindings import BindingsFile
 
-#: Schema spelling -> internal label ``_compiler_family_from_toolchain`` returns.
+#: Schema spelling -> internal label :func:`_probe_compiler_family` returns.
 #: A profile may spell the GNU family ``"gcc"``/``"g++"`` (the schema's own
 #: vocabulary, matching ``compile.binding`` ids like ``"gcc14"``); the probe
-#: helper returns the internal ADR-050 label ``"gnu"`` for that same family.
+#: returns the internal ADR-050 label ``"gnu"`` for that same family.
 _FAMILY_ALIASES: dict[str, str] = {
     "gcc": "gnu",
     "g++": "gnu",
@@ -66,8 +71,57 @@ _FAMILY_ALIASES: dict[str, str] = {
 #: docstring. Checked against the *declared* ``compiler_family`` value.
 _UNPROBED_FAMILIES: frozenset[str] = frozenset({"msvc", "cl", "cl.exe"})
 
-_VERSION_TOKEN_RE = re.compile(r"\d+(?:\.\d+){0,3}")
+#: A dotted version number (2-4 components) is preferred over a bare one:
+#: a cross-compiler binding's own name (e.g. ``x86_64-linux-gnu-gcc-13``,
+#: a real, common Debian/Ubuntu naming convention) embeds bare digit groups
+#: from its target triple (``86``, ``64``) that a real compiler's
+#: ``--version`` banner echoes back verbatim as its first token — a bare
+#: search would find one of *those* before the actual, always-dotted
+#: version number that follows later in the same banner.
+_DOTTED_VERSION_RE = re.compile(r"\d+\.\d+(?:\.\d+){0,2}")
+_BARE_VERSION_RE = re.compile(r"\d+")
 _CONSTRAINT_CLAUSE_RE = re.compile(r"^(==|!=|>=|<=|>|<)?\s*(\d+(?:\.\d+){0,3})$")
+
+
+def _extract_version_token(text: str) -> str | None:
+    match = _DOTTED_VERSION_RE.search(text)
+    if match is not None:
+        return match.group()
+    match = _BARE_VERSION_RE.search(text)
+    return match.group() if match is not None else None
+
+
+def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
+    """Best-effort compiler family for *this* validation gate.
+
+    Deliberately more conservative than
+    :func:`~abicheck.dumper_toolchain._compiler_family_from_toolchain`
+    (see module docstring for why that helper isn't reused here): checks
+    both the *selected* path's basename and the resolved *realpath*'s
+    basename, since a generic driver alias/symlink (``cc``, ``c++``, or a
+    Windows-style ``gcc`` that is actually Clang under the hood) can name
+    something generic while resolving to the real compiler binary. Falls
+    back to a signature phrase in the probed ``--version`` banner text
+    (GCC always prints "Free Software Foundation, Inc."; Clang always
+    prints "clang version"). Returns ``None`` — skip the comparison,
+    never guess — when nothing here is conclusive.
+    """
+    names = [
+        Path(candidate).name.lower()
+        for candidate in (metadata.get("selected", ""), metadata.get("realpath", ""))
+        if candidate
+    ]
+    version_text = metadata.get("version", "").lower()
+
+    if any("clang" in name for name in names) or "clang version" in version_text:
+        return "clang"
+    if any(name in ("cl", "cl.exe") for name in names):
+        return "msvc"
+    if any("gcc" in name or "g++" in name for name in names):
+        return "gnu"
+    if "free software foundation" in version_text:
+        return "gnu"
+    return None
 
 
 class ToolchainProbeError(ValueError):
@@ -117,10 +171,10 @@ def version_satisfies(actual: str, constraint_spec: str) -> bool:
     *constraint_spec* doesn't parse, or if *actual* has no extractable
     version number.
     """
-    token = _VERSION_TOKEN_RE.search(actual)
+    token = _extract_version_token(actual)
     if token is None:
         raise ToolchainProbeError(f"no version number found in {actual!r}")
-    actual_version = _parse_version(token.group())
+    actual_version = _parse_version(token)
     for op, wanted in parse_version_constraints(constraint_spec):
         a, w = _pad(actual_version, wanted)
         if op == "==" and a != w:
@@ -175,7 +229,7 @@ def _check_one_overlay(
 
     errors: list[str] = []
     if declared_family:
-        actual_family = _compiler_family_from_toolchain(metadata)
+        actual_family = _probe_compiler_family(metadata)
         wanted_family = _FAMILY_ALIASES.get(
             declared_family.strip().lower(), declared_family.strip().lower()
         )

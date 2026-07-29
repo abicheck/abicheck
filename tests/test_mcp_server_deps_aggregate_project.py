@@ -697,9 +697,7 @@ class TestAbiAggregate:
             return real_safe_read_path(path, label=label)
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "abicheck.mcp_server_project._safe_read_path", _counting
-            )
+            mp.setattr("abicheck.mcp_server_project._safe_read_path", _counting)
             raw = abi_aggregate(str(tmp_path), run_plan=str(run_plan))
         payload = json.loads(raw)
         assert payload["status"] == "error"
@@ -834,6 +832,41 @@ class TestAbiProjectValidate:
         assert payload["status"] == "ok"
         assert payload["result"]["ok"] is False
         assert any("gcc99" in e for e in payload["result"]["errors"])
+
+    def test_toolchain_bindings_family_mismatch_is_a_validation_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # G34 Phase A parity: abi_project_validate must run the same
+        # toolchain-identity check the CLI's project validate command runs,
+        # not just binding resolution.
+        from abicheck.buildsource import toolchain_probe as tp
+
+        monkeypatch.setattr(
+            tp,
+            "_tool_identity_metadata",
+            lambda path: {"selected": path, "version": "clang version 18.0.0"},
+        )
+        raw_cfg = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))
+        raw_cfg["profiles"]["linux"]["compile"] = {
+            "binding": "gcc14",
+            "compiler_family": "gcc",
+        }
+        config = _write_config(tmp_path, raw_cfg)
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text(
+            yaml.safe_dump(
+                {
+                    "schema": "abicheck.toolchain-bindings/v1",
+                    "bindings": {"gcc14": "/opt/clang"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        raw = abi_project_validate(str(config), toolchain_bindings=str(bindings))
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["result"]["ok"] is False
+        assert any("compiler_family" in e for e in payload["result"]["errors"])
 
     def test_malformed_toolchain_bindings_is_an_error(self, tmp_path: Path):
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
