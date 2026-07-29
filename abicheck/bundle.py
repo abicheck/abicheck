@@ -204,16 +204,33 @@ def discover_artifact_set(
     """
     from .binary_utils import _canonical_library_key
 
-    resolved_by_real: dict[Path, Path] = {}
+    resolved_by_real: dict[Path | tuple[int, int], Path] = {}
     for path in paths:
         try:
             real = path.resolve()
         except OSError:
             real = path
+        # Path.resolve() only follows symlinks -- it does not coalesce two
+        # hard links to the same inode (a real, if unusual, way a library
+        # directory can carry both a versioned name and an unversioned
+        # alias). When available, key on filesystem identity
+        # (st_dev, st_ino) instead of the resolved path, so both survive-
+        # as-distinct-members outcomes Codex flagged are avoided: two
+        # hard-linked aliases with the *same* canonical name no longer
+        # spuriously collide below, and two differently-named hard-linked
+        # aliases no longer pass the cardinality check as if they were
+        # genuinely distinct libraries (bundle analysis is Linux/ELF-only
+        # by design, ADR-018/023, so POSIX inode semantics always apply
+        # here).
+        try:
+            st = real.stat()
+            identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
+        except OSError:
+            identity = real
         # Keep the first-seen original (unresolved) path for user-facing
         # messages/reporting identity; only the resolution key is the
-        # canonicalized real path.
-        resolved_by_real.setdefault(real, path)
+        # canonicalized real path / filesystem identity.
+        resolved_by_real.setdefault(identity, path)
 
     if explicit:
         # A full ET_DYN-vs-PIE shared-object check (package.py's

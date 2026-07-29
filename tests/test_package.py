@@ -5,6 +5,7 @@ import io
 import struct
 import sys
 import tarfile
+import time
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -171,6 +172,48 @@ def _make_minimal_elf_so_with_dynamic_no_pie_flag(path: Path) -> None:
     struct.pack_into("<Q", dyn, 16, 0)  # DT_NULL tag
     struct.pack_into("<Q", dyn, 24, 0)  # DT_NULL val
     path.write_bytes(bytes(elf) + bytes(phdr) + bytes(dyn))
+
+
+def _make_minimal_elf_dynamic_pie_exec_with_interp(path: Path) -> None:
+    """Write a minimal ET_DYN ELF with *both* PT_INTERP and a PT_DYNAMIC
+    segment whose DT_FLAGS_1 carries DF_1_PIE -- models a real
+    ``gcc -pie -o fake.so`` executable: has PT_INTERP (like a real,
+    directly-invocable runtime DSO), but is genuinely an executable, not a
+    shared object, confirmed by DF_1_PIE."""
+    _DT_FLAGS_1 = 0x6FFFFFFB
+    _DF_1_PIE = 0x08000000
+
+    elf = bytearray(64)
+    elf[0:4] = b"\x7fELF"
+    elf[4] = 2  # EI_CLASS = ELFCLASS64
+    elf[5] = 1  # EI_DATA = ELFDATA2LSB
+    elf[6] = 1  # EI_VERSION = EV_CURRENT
+    struct.pack_into("<H", elf, 16, 3)  # e_type = ET_DYN
+    struct.pack_into("<H", elf, 18, 0x3E)  # e_machine = EM_X86_64
+    struct.pack_into("<I", elf, 20, 1)  # e_version
+    struct.pack_into("<Q", elf, 32, 64)  # e_phoff
+    struct.pack_into("<H", elf, 54, 56)  # e_phentsize
+    struct.pack_into("<H", elf, 56, 2)  # e_phnum = 2 (PT_INTERP + PT_DYNAMIC)
+
+    interp_phdr = bytearray(56)
+    struct.pack_into("<I", interp_phdr, 0, 3)  # p_type = PT_INTERP
+    struct.pack_into("<I", interp_phdr, 4, 4)  # p_flags = PF_R
+    struct.pack_into("<Q", interp_phdr, 48, 1)  # p_align
+
+    dyn_offset = 64 + 56 * 2
+    dyn_phdr = bytearray(56)
+    struct.pack_into("<I", dyn_phdr, 0, 2)  # p_type = PT_DYNAMIC
+    struct.pack_into("<I", dyn_phdr, 4, 6)  # p_flags = PF_R | PF_W
+    struct.pack_into("<Q", dyn_phdr, 8, dyn_offset)  # p_offset
+    struct.pack_into("<Q", dyn_phdr, 32, 32)  # p_filesz
+    struct.pack_into("<Q", dyn_phdr, 48, 8)  # p_align
+
+    dyn = bytearray(32)
+    struct.pack_into("<Q", dyn, 0, _DT_FLAGS_1)
+    struct.pack_into("<Q", dyn, 8, _DF_1_PIE)
+    struct.pack_into("<Q", dyn, 16, 0)  # DT_NULL tag
+    struct.pack_into("<Q", dyn, 24, 0)  # DT_NULL val
+    path.write_bytes(bytes(elf) + bytes(interp_phdr) + bytes(dyn_phdr) + bytes(dyn))
 
 
 def _make_malformed_elf_dso_with_missing_phdr(path: Path) -> None:
@@ -587,6 +630,70 @@ class TestIsElfSharedObject:
         f = tmp_path / "libfoo.so"
         _make_minimal_elf_so_with_dynamic_no_pie_flag(f)
         assert _is_elf_shared_object(f) is True
+
+    def test_dynamic_pie_executable_with_library_name_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): a real `gcc -pie -o fake.so`
+        # executable has *both* PT_INTERP and DF_1_PIE set -- the
+        # PT_INTERP branch's filename fallback (added for genuinely
+        # directly-invocable runtime DSOs like libcap.so.2.66) previously
+        # ran before the DF_1_PIE check and accepted anything shaped like
+        # a library name, silently admitting a real PIE executable that
+        # merely happens to be named *.so. DF_1_PIE must be checked first,
+        # unconditionally decisive when set. Verified against a real
+        # `gcc -pie` binary.
+        f = tmp_path / "fake.so"
+        _make_minimal_elf_dynamic_pie_exec_with_interp(f)
+        assert _is_elf_shared_object(f) is False
+
+    def test_pie_flag_scan_is_bounded_against_oversized_p_filesz(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (CodeRabbit review): PT_DYNAMIC's p_filesz is an
+        # 8-byte, file-controlled field with no natural bound (unlike
+        # e_phnum, a uint16 capped at 65535). A crafted or sparse-file-
+        # backed ELF advertising a huge p_filesz must not drive an
+        # effectively unbounded seek+read loop.
+        f = tmp_path / "libfoo.so"
+        elf = bytearray(64)
+        elf[0:4] = b"\x7fELF"
+        elf[4] = 2  # EI_CLASS = ELFCLASS64
+        elf[5] = 1  # EI_DATA = ELFDATA2LSB
+        elf[6] = 1  # EI_VERSION = EV_CURRENT
+        struct.pack_into("<H", elf, 16, 3)  # e_type = ET_DYN
+        struct.pack_into("<H", elf, 18, 0x3E)  # e_machine = EM_X86_64
+        struct.pack_into("<I", elf, 20, 1)  # e_version
+        struct.pack_into("<Q", elf, 32, 64)  # e_phoff
+        struct.pack_into("<H", elf, 54, 56)  # e_phentsize
+        struct.pack_into("<H", elf, 56, 1)  # e_phnum
+
+        dyn_offset = 64 + 56
+        huge_filesz = 10**9  # would be ~62M iterations if unbounded
+        phdr = bytearray(56)
+        struct.pack_into("<I", phdr, 0, 2)  # p_type = PT_DYNAMIC
+        struct.pack_into("<I", phdr, 4, 6)  # p_flags = PF_R | PF_W
+        struct.pack_into("<Q", phdr, 8, dyn_offset)  # p_offset
+        struct.pack_into("<Q", phdr, 32, huge_filesz)  # p_filesz
+        struct.pack_into("<Q", phdr, 48, 8)  # p_align
+        f.write_bytes(bytes(elf) + bytes(phdr))
+        # Sparse-extend the file's *logical* size to cover the huge
+        # p_filesz without allocating real disk space -- models the exact
+        # attack shape the finding describes (a sparse file reads as real
+        # zero bytes within its logical bounds without ever hitting a
+        # short read, which would otherwise terminate even the old,
+        # unbounded loop early and mask a missing cap).
+        with open(f, "r+b") as fh:
+            fh.truncate(dyn_offset + huge_filesz)
+
+        start = time.monotonic()
+        result = _is_elf_shared_object(f)
+        elapsed = time.monotonic() - start
+        # No DT_FLAGS_1 within the capped scan window (all zero bytes) ->
+        # not rejected as PIE, but the point is boundedness, not this
+        # particular outcome.
+        assert result is True
+        assert elapsed < 5.0, f"scan took {elapsed:.1f}s -- not bounded"
 
     def test_malformed_program_header_table_is_rejected(self, tmp_path: Path) -> None:
         f = tmp_path / "libbad.so"

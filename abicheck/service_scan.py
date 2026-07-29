@@ -1578,17 +1578,26 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # duplicates or symlink aliases of one DSO must not silently pass as a
     # valid 2-member set (discover_artifact_set below dedupes via
     # Path.resolve() too, which would otherwise report a "complete" audit
-    # of what's really a single library) (Codex review).
-    seen_resolved: set[Path] = set()
+    # of what's really a single library) (Codex review). Path.resolve()
+    # only follows symlinks, not hard links -- key on filesystem identity
+    # (st_dev, st_ino) when available so two hard-linked aliases of one
+    # DSO are also caught, not just symlink aliases (Codex review, same
+    # gap fixed in bundle.discover_artifact_set's own dedup).
+    seen_resolved: set[Path | tuple[int, int]] = set()
     binaries: list[Path] = []
     for binary in req.binaries:
         try:
             resolved = binary.resolve()
         except OSError:
             resolved = binary
-        if resolved in seen_resolved:
+        try:
+            st = resolved.stat()
+            identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
+        except OSError:
+            identity = resolved
+        if identity in seen_resolved:
             continue
-        seen_resolved.add(resolved)
+        seen_resolved.add(identity)
         binaries.append(binary)
 
     if len(binaries) < 2:

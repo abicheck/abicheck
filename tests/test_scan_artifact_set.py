@@ -701,6 +701,26 @@ class TestRunScanSet:
         with pytest.raises(ValueError, match="distinct"):
             run_scan_set(ScanRequest(binaries=[snap_a, alias]))
 
+    def test_rejects_hard_link_alias_of_same_binary(
+        self, snap_a: Path, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): Path.resolve() only follows
+        # symlinks, not hard links -- two hard-linked aliases of the same
+        # binary previously passed the cardinality check as if they were
+        # distinct members.
+        import os
+
+        from abicheck.service import ScanRequest, run_scan_set
+
+        alias = tmp_path / "alias.abi.json"
+        try:
+            os.link(snap_a, alias)
+        except OSError:
+            pytest.skip("hard links unsupported in this environment")
+
+        with pytest.raises(ValueError, match="distinct"):
+            run_scan_set(ScanRequest(binaries=[snap_a, alias]))
+
     def test_forwards_changed_src_to_every_member(
         self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

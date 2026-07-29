@@ -1443,9 +1443,17 @@ def _has_pie_executable_flag(f: IO[bytes], ei_class: int, byte_order: str) -> bo
     entry_size = 8 if ei_class == 1 else 16  # d_tag + d_val/d_ptr, word-sized
     if p_filesz <= 0 or p_filesz % entry_size != 0:
         return False
+    # p_filesz is an 8-byte ELF64 field with no natural bound (unlike
+    # e_phnum, a uint16 already capped at 65535) -- a crafted or sparse-
+    # file-backed ELF advertising a huge PT_DYNAMIC p_filesz could
+    # otherwise drive an effectively unbounded seek+read loop over
+    # externally-supplied binaries (CodeRabbit review). Real .dynamic
+    # sections have at most a few hundred entries; cap well above that.
+    _MAX_DYNAMIC_ENTRIES = 8192
+    entry_count = min(p_filesz // entry_size, _MAX_DYNAMIC_ENTRIES)
     word_fmt = "I" if ei_class == 1 else "Q"
     try:
-        for i in range(p_filesz // entry_size):
+        for i in range(entry_count):
             f.seek(p_offset + i * entry_size)
             entry = f.read(entry_size)
             if len(entry) != entry_size:
@@ -1481,6 +1489,19 @@ def _is_elf_shared_object(path: Path) -> bool:
             if e_type != _ET_DYN:
                 return False
 
+            # Check the DF_1_PIE flag *before* the PT_INTERP/filename
+            # fallback below, not only in the no-PT_INTERP branch: a normal
+            # `gcc -pie -o fake.so` executable has *both* PT_INTERP and
+            # DF_1_PIE set, and previously reached the has_interp branch's
+            # filename check first, which accepts anything shaped like a
+            # library name -- silently admitting a real, directly-invocable
+            # PIE executable that only happens to be named ``*.so`` (Codex
+            # review; verified against a real `gcc -pie` binary). DF_1_PIE
+            # is unconditionally decisive when set: a real shared object
+            # never carries it, PT_INTERP or not.
+            if _has_pie_executable_flag(f, ei_class, byte_order):
+                return False
+
             # Distinguish PIE executables from true shared objects:
             # executables have a PT_INTERP segment, shared objects don't.
             has_interp = _has_interp_segment(f, ei_class, byte_order)
@@ -1491,22 +1512,18 @@ def _is_elf_shared_object(path: Path) -> bool:
                 # and intentionally carry PT_INTERP (and a nonzero entry
                 # point, since they're meant to be directly invocable) so
                 # they can be run directly (for example Ubuntu's
-                # libcap.so.2.66). Keep the PIE-executable guard for
-                # app-like filenames, but do not drop real versioned .so
-                # files from package discovery.
+                # libcap.so.2.66) -- these don't carry DF_1_PIE (already
+                # ruled out above), so this filename fallback is now only
+                # reached for a real, non-PIE-executable ET_DYN. Keep the
+                # PIE-executable guard for app-like filenames, but do not
+                # drop real versioned .so files from package discovery.
                 return _has_shared_object_name(path)
 
-            # No PT_INTERP alone isn't sufficient: a `gcc -static-pie`
-            # executable is also ET_DYN with no PT_INTERP (a statically
-            # linked binary needs no dynamic linker), so it would otherwise
-            # be misclassified as a shared object here. Reject only when
-            # the .dynamic section's DT_FLAGS_1 DF_1_PIE bit is definitely
-            # set -- the standard linker signal for a genuine PIE
-            # executable (static or dynamic) that a real shared object
-            # never carries, even one built with a custom entry point
-            # (Codex review: an earlier e_entry-based check false-rejected
-            # that case; verified against real compiled binaries).
-            return not _has_pie_executable_flag(f, ei_class, byte_order)
+            # No PT_INTERP and no DF_1_PIE: a real shared object (the
+            # common case -- most .so files carry neither). A
+            # `gcc -static-pie` executable is also ET_DYN with no
+            # PT_INTERP, but it's already been rejected above via DF_1_PIE.
+            return True
     except (OSError, struct.error):
         return False
 

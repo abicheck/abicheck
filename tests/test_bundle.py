@@ -7,6 +7,7 @@ examples/case90-93 fixtures live in tests/test_bundle_examples.py.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -1968,6 +1969,27 @@ class TestArtifactSetDiscovery:
         link = tmp_path / "libfoo.so"
         link.symlink_to(real)
         result = discover_artifact_set([real, link], explicit=False)
+        assert len(result) == 1
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="hard links behave differently on Windows"
+    )
+    def test_dedupes_hard_link_alias(self, tmp_path: Path) -> None:
+        # P2 regression (Codex review): Path.resolve() only follows
+        # symlinks, not hard links -- two hard-linked aliases of the same
+        # DSO (a real, if unusual, library-directory layout) previously
+        # survived discovery as distinct members instead of being
+        # deduplicated the same way a symlink alias already is.
+        from abicheck.bundle import discover_artifact_set
+
+        real = tmp_path / "libfoo.so.1"
+        _write_elf_shared_object_stub(real)
+        alias = tmp_path / "libfoo.so"
+        try:
+            os.link(real, alias)
+        except OSError:
+            pytest.skip("hard links unsupported in this environment")
+        result = discover_artifact_set([real, alias], explicit=False)
         assert len(result) == 1
 
     def test_rejects_unsupported_explicit_member(self, tmp_path: Path) -> None:
