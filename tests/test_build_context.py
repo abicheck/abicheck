@@ -334,6 +334,36 @@ class TestCompileEntry:
         assert "-Dwrong=1" not in entry.arguments
         assert "@b.rsp" in entry.arguments
 
+    def test_self_referential_response_file_does_not_blow_up(
+        self, tmp_path: Path
+    ) -> None:
+        """A response file containing many references to *itself* must not
+        cause combinatorial expansion: the depth cap alone allows roughly
+        ``fan_out ** _MAX_RESPONSE_FILE_DEPTH`` token reads (a 100-token
+        self-reference could reach ~10 billion), so an untrusted compile
+        database (e.g. a PR checkout scanned in CI) could hang or OOM the
+        scan despite the per-file byte cap (Codex review). An aggregate
+        expansion budget must cap total response-file reads regardless of
+        depth or branching factor -- this runs in well under a second."""
+        db_dir = tmp_path
+        loop = db_dir / "loop.rsp"
+        loop.write_text(" ".join(["@loop.rsp"] * 100))
+        import time
+
+        start = time.monotonic()
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@loop.rsp", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0
+        # Some @loop.rsp tokens survive un-expanded once the budget runs out.
+        assert any(a == "@loop.rsp" for a in entry.arguments)
+
 
 # ---------------------------------------------------------------------------
 # Tests: _extract_flags

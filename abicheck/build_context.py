@@ -81,6 +81,18 @@ _VISIBILITY_RE = re.compile(r"^-fvisibility=(.+)$")
 #: real build systems never nest them.
 _MAX_RESPONSE_FILE_DEPTH = 4
 
+#: Aggregate cap on the number of response files actually *read* across one
+#: top-level expansion call, independent of *_MAX_RESPONSE_FILE_DEPTH*. The
+#: depth cap alone does not bound total work: a response file containing many
+#: ``@self-reference`` tokens re-expands on every occurrence, so a shallow
+#: depth cap still permits combinatorial blowup (a 100-token self-referential
+#: file can produce roughly 100**_MAX_RESPONSE_FILE_DEPTH token reads before
+#: depth stops it) -- exploitable against an untrusted compile database (e.g.
+#: a PR checkout scanned in CI) as a hang/OOM (Codex review). Generous for any
+#: real nested-response-file build (a handful of files, rarely more than one
+#: level deep) while several orders of magnitude below a blowup.
+_MAX_RESPONSE_FILE_EXPANSIONS = 64
+
 #: Response files feeding a single compile action are typically a handful of
 #: KB even for a very long include-dir list (oneDAL's own longest is well
 #: under this); a much larger file is either not a real response file or not
@@ -203,7 +215,11 @@ def _read_response_file(path: Path, root: Path) -> str | None:
 
 
 def _expand_response_files(
-    arguments: list[str], directory: Path, root: Path, _depth: int = 0
+    arguments: list[str],
+    directory: Path,
+    root: Path,
+    _depth: int = 0,
+    _budget: list[int] | None = None,
 ) -> list[str]:
     """Inline GNU-style ``@response-file`` arguments in a compiler argv.
 
@@ -235,13 +251,23 @@ def _expand_response_files(
     Unreadable/oversized/out-of-tree files, and unparsable file contents,
     degrade to keeping the original ``@file`` token rather than raising —
     matching ``_extract_flags``'s existing "skip what we don't understand"
-    contract for any other flag it doesn't recognize.
+    contract for any other flag it doesn't recognize. *_budget* (internal,
+    shared across the whole recursive call tree via a single-element list)
+    is the remaining count of response files this call may still read —
+    see *_MAX_RESPONSE_FILE_EXPANSIONS* — bounding aggregate work
+    independently of *_depth*, since depth alone does not bound the total
+    number of reads a self-referential response file can trigger.
     """
     if _depth > _MAX_RESPONSE_FILE_DEPTH:
         return arguments
+    if _budget is None:
+        _budget = [_MAX_RESPONSE_FILE_EXPANSIONS]
     expanded: list[str] = []
     for arg in arguments:
         if not arg.startswith("@") or len(arg) == 1:
+            expanded.append(arg)
+            continue
+        if _budget[0] <= 0:
             expanded.append(arg)
             continue
         raw_path = Path(arg[1:])
@@ -250,12 +276,15 @@ def _expand_response_files(
         if text is None:
             expanded.append(arg)
             continue
+        _budget[0] -= 1
         try:
             tokens = _split_command_line(text)
         except ValueError:
             expanded.append(arg)
             continue
-        expanded.extend(_expand_response_files(tokens, directory, root, _depth + 1))
+        expanded.extend(
+            _expand_response_files(tokens, directory, root, _depth + 1, _budget)
+        )
     return expanded
 
 
