@@ -1569,10 +1569,29 @@ def _import_is_external(
     version = consumer.version
     if not version:
         return False
+
+    def _resolves_intra(soname: str) -> bool:
+        # Two independent, complementary signals, either sufficient:
+        # resolution.soname_to_name is the exact map
+        # _reachable_intra_libraries()/the version_soname pinning above use
+        # (knows a member's real on-disk filename when retained through a
+        # differently named symlink alias with no DT_SONAME -- Codex
+        # review); is_intra_bundle_provider() additionally does filename-
+        # stem matching (a SONAME-major bump, e.g. libcore.so.1 ->
+        # libcore.so.2, where a sibling's DT_NEEDED still cites the old
+        # soname -- test_versioned_import_after_soname_bump_still_fires),
+        # which the exact map alone does not cover since it only indexes a
+        # library's *current* soname/canonical key/real filename, never a
+        # soname it used to advertise.
+        return (
+            soname in snapshot.resolution.soname_to_name
+            or snapshot.is_intra_bundle_provider(soname)
+        )
+
     # Preferred path: the exact verneed provider for *this* symbol is known.
     # No label-collision ambiguity — resolve this import directly.
     if consumer.version_soname:
-        return not snapshot.is_intra_bundle_provider(consumer.version_soname)
+        return not _resolves_intra(consumer.version_soname)
     # Fallback: per-symbol verneed soname not captured. Scan the label across
     # all verneed providers. If any soname carrying this label resolves inside
     # the bundle, treat the import as intra (keep the finding); only when every
@@ -1582,7 +1601,7 @@ def _import_is_external(
     for soname, versions in consumer_meta.versions_required.items():
         if version not in versions:
             continue
-        if snapshot.is_intra_bundle_provider(soname):
+        if _resolves_intra(soname):
             return False  # required from a bundle sibling — keep the finding
         external_match = True
     if external_match:

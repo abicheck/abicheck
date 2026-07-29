@@ -1894,6 +1894,53 @@ class TestReachableIntraLibrariesSymlinkAlias:
         findings = _detect_unresolved_intra_dependency(snapshot, set())
         assert findings == []
 
+    def test_version_mismatch_not_misclassified_as_external_via_symlink_alias(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): _import_is_external()'s
+        # version_soname path called BundleSnapshot.is_intra_bundle_provider()
+        # (the same independent heuristic just fixed above), which doesn't
+        # resolve a provider retained through a differently-named symlink
+        # alias with no DT_SONAME -- misclassifying it as "external" and
+        # suppressing a genuine, real version-mismatch finding (consumer
+        # needs foo@V2, the reachable provider only exports foo@V1).
+        from abicheck.bundle import (
+            _compute_resolution_graph,
+            _detect_unresolved_intra_dependency,
+        )
+
+        real = tmp_path / "libreal.so.1"
+        real.write_bytes(b"")
+        link = tmp_path / "aaa.so"
+        link.symlink_to(real)
+
+        libraries = {
+            "aaa.so": link,
+            "libconsumer.so": tmp_path / "libconsumer.so",
+        }
+        metadata = {
+            "aaa.so": _meta(
+                soname="", exports=["foo"], export_versions={"foo": "V1"}
+            ),
+            "libconsumer.so": _meta(
+                soname="libconsumer.so",
+                needed=["libreal.so.1"],
+                imports=["foo"],
+                import_versions={"foo": "V2"},
+                import_version_sonames={"foo": "libreal.so.1"},
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        snapshot = BundleSnapshot(
+            root=tmp_path, libraries=libraries, metadata=metadata, resolution=graph
+        )
+        findings = _detect_unresolved_intra_dependency(snapshot, set())
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
 
 class TestArtifactSetDiscovery:
     def test_rejects_colliding_explicit_paths(self, tmp_path: Path) -> None:
