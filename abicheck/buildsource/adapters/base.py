@@ -76,7 +76,16 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     # review). Only the flag's *presence*, carried via replay_extra_flags(),
     # not a from-scratch reconstruction of the real build's host/device
     # multi-pass invocation -- see the "Known gaps" entry in AGENTS.md.
+    # "-fno-sycl" is a separate, non-prefix-matching spelling (it does not
+    # start with "-fsycl") that explicitly disables SYCL mode again -- an
+    # "icpx -fsycl -fno-sycl" (last-flag-wins) command recorded only
+    # "-fsycl" without it, so replay reconstructed the wrong (SYCL-enabled)
+    # AST for what the real build actually compiled as plain C++ (Codex
+    # review, second round). Extraction is argv-order-preserving, so
+    # capturing both spellings lets the same last-flag-wins semantics reach
+    # replay unchanged.
     "-fsycl",
+    "-fno-sycl",
 )
 
 #: Runtime-model flags normalized to a canonical (key, value) so a mode flip is
