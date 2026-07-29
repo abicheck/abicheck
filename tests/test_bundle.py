@@ -1910,16 +1910,18 @@ class TestArtifactSetDiscovery:
         with pytest.raises(ArtifactSetError, match="colliding library identities"):
             discover_artifact_set([p1, p2], explicit=True)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="symlinks need admin on Windows"
+    )
     def test_dedupes_symlink_alias(self, tmp_path: Path) -> None:
         from abicheck.bundle import discover_artifact_set
 
         real = tmp_path / "libfoo.so.1"
         _write_elf_shared_object_stub(real)
-        if sys.platform != "win32":
-            link = tmp_path / "libfoo.so"
-            link.symlink_to(real)
-            result = discover_artifact_set([real, link], explicit=False)
-            assert len(result) == 1
+        link = tmp_path / "libfoo.so"
+        link.symlink_to(real)
+        result = discover_artifact_set([real, link], explicit=False)
+        assert len(result) == 1
 
     def test_rejects_unsupported_explicit_member(self, tmp_path: Path) -> None:
         from abicheck.bundle import ArtifactSetError, discover_artifact_set

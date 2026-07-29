@@ -177,8 +177,9 @@ def discover_artifact_set(
       wins" tiebreak that would be sound here.
 
     For the explicit-list form, every named path must look like a real ELF
-    input (:func:`_path_looks_like_elf`) — every entry was deliberately
-    named by the caller, so silently dropping an unsupported one (the way
+    shared object (``package._is_elf_shared_object``) — every entry was
+    deliberately named by the caller, so silently dropping an unsupported
+    one (the way
     :func:`build_bundle_snapshot` does for a directory scan, where "some
     files aren't libraries" is expected) would misrepresent the audit as
     covering the full declared set. Raises :class:`ArtifactSetError` for any

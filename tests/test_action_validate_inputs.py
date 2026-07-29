@@ -361,6 +361,49 @@ class TestScanNewLibrarySet:
         assert "::warning::" in result.stdout
         assert "bundle-system-providers" in result.stdout
 
+    def test_bundle_system_providers_warns_on_scalar_compare(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): cli_compare_helpers.py only reaches
+        # bundle analysis on the directory/package dispatch --
+        # bundle-system-providers with single-file old-library/new-library
+        # operands is silently discarded the same way a scalar scan is,
+        # but this check previously treated any mode: compare as
+        # meaningful regardless of operand style.
+        old = tmp_path / "old.so"
+        new = tmp_path / "new.so"
+        old.write_bytes(b"")
+        new.write_bytes(b"")
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(old),
+                "INPUT_NEW_LIBRARY": str(new),
+                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "bundle-system-providers" in result.stdout
+
+    def test_bundle_system_providers_silent_on_directory_compare(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(old_dir),
+                "INPUT_NEW_LIBRARY": str(new_dir),
+                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
 
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"

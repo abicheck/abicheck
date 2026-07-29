@@ -985,6 +985,29 @@ def _layers_from_coverage(coverage: list[dict[str, Any]]) -> list[LayerResult]:
     return out
 
 
+def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
+    """Load `--risk-rules` YAML for a service-layer caller (`run_scan`/
+    `_run_scan_one_member`), never a `click` exception.
+
+    `cli_scan_baseline._load_risk_rules` raises `click.ClickException` on
+    unreadable/malformed YAML -- fine for the CLI, which is already inside
+    a click command, but `risk_rules_path` is a plain `ScanRequest` field a
+    direct Python API or MCP caller can set too. Re-raising as `ValueError`
+    keeps the service/API boundary click-free (CodeRabbit review) --
+    `run_scan_set_subprocess`'s generic exception-to-string handling would
+    otherwise surface a `click`-flavored message to a caller that never
+    imported click.
+    """
+    import click
+
+    from .cli_scan_baseline import _load_risk_rules
+
+    try:
+        return _load_risk_rules(risk_rules_path)
+    except click.ClickException as exc:
+        raise ValueError(str(exc.format_message())) from exc
+
+
 def run_scan(req: ScanRequest) -> ScanResult:
     """Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
 
@@ -1008,7 +1031,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         SourceScope,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan_baseline import _load_risk_rules, _public_provenance_set
+    from .cli_scan_baseline import _public_provenance_set
     from .scan_engine import (
         _BudgetOverflow,
         _EvidenceContractError,
@@ -1053,7 +1076,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
     changed = [p for p in req.changed_paths if p]
     seeded = req.seeded or bool(changed)
     risk_rules = (
-        _load_risk_rules(req.risk_rules_path)
+        _load_risk_rules_for_service(req.risk_rules_path)
         if req.risk_rules_path is not None
         else RiskRules.default()
     )
@@ -1421,7 +1444,7 @@ def _run_scan_one_member(
         SourceScope,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan_baseline import _load_risk_rules, _public_provenance_set
+    from .cli_scan_baseline import _public_provenance_set
     from .scan_engine import (
         _BudgetOverflow,
         _EvidenceContractError,
@@ -1434,7 +1457,7 @@ def _run_scan_one_member(
     changed = [p for p in req.changed_paths if p]
     seeded = req.seeded or bool(changed)
     risk_rules = (
-        _load_risk_rules(req.risk_rules_path)
+        _load_risk_rules_for_service(req.risk_rules_path)
         if req.risk_rules_path is not None
         else RiskRules.default()
     )

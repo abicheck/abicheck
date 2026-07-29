@@ -958,6 +958,31 @@ def test_run_scan_forwards_new_scan_request_controls(
     assert captured["allow_build_query"] is True
 
 
+def test_run_scan_risk_rules_error_is_service_level(
+    tmp_path: Path, snap_path: Path
+) -> None:
+    # P2 regression (CodeRabbit review): cli_scan_baseline._load_risk_rules
+    # raises click.ClickException for unreadable/malformed --risk-rules
+    # YAML -- fine inside a click command, but risk_rules_path is a plain
+    # ScanRequest field a direct Python API caller can set without ever
+    # importing click. run_scan() must not let a click exception escape
+    # its own service/API boundary.
+    from abicheck.service import ScanRequest, run_scan
+
+    bad_yaml = tmp_path / "risk_rules.yml"
+    bad_yaml.write_text("not: [valid, yaml: :", encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        run_scan(
+            ScanRequest(
+                binaries=[snap_path], mode="audit", risk_rules_path=bad_yaml
+            )
+        )
+    import click
+
+    assert not isinstance(excinfo.value, click.ClickException)
+
+
 def test_run_scan_forwards_level_explicit(monkeypatch, snap_path: Path) -> None:
     # P2 regression (Codex review): run_scan() never computed/forwarded
     # level_explicit at all, so run_scan_core defaulted it to False and

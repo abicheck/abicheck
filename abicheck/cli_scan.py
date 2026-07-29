@@ -955,7 +955,18 @@ def scan_cmd(
     # ADR-056: --artifact-set is mutually exclusive with the positional
     # ARTIFACT, with --against (audit-only -- no old side for a set), and
     # --bundle-system-providers is meaningless without --artifact-set.
-    if bool(artifact) == bool(artifact_set):
+    #
+    # An empty ``--artifact-set ""`` must count as *supplied* (and be
+    # rejected outright), not as "not set": the exclusivity check below
+    # used to test truthiness (`bool(artifact_set)`, False for "") while
+    # the branch just after it tested `is not None` (True for "") -- with
+    # ARTIFACT also given, that mismatch let both pass the exclusivity
+    # check and then silently ignored ARTIFACT, resolving the empty string
+    # to Path("") == Path(".") and auditing the whole CWD instead of
+    # erroring (CodeRabbit review).
+    if artifact_set is not None and not artifact_set.strip():
+        raise click.UsageError("--artifact-set must not be empty.")
+    if (artifact is not None) == (artifact_set is not None):
         raise click.UsageError(
             "scan requires exactly one of ARTIFACT or --artifact-set."
         )

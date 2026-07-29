@@ -146,6 +146,21 @@ class TestArtifactSetCliValidation:
         assert result.exit_code != 0
         assert "exactly one of ARTIFACT or --artifact-set" in result.output
 
+    def test_rejects_empty_artifact_set_even_with_artifact(
+        self, runner: CliRunner, snap_a: Path
+    ) -> None:
+        # P2 regression (CodeRabbit review): the exclusivity check used to
+        # test bool(artifact_set) (False for "") while the branch after it
+        # tested `is not None` (True for "") -- with ARTIFACT also given,
+        # both passed the exclusivity check and ARTIFACT was silently
+        # ignored, resolving the empty string to Path("") == Path(".") and
+        # auditing the whole CWD instead of erroring.
+        result = runner.invoke(
+            main, ["scan", str(snap_a), "--artifact-set", ""]
+        )
+        assert result.exit_code != 0
+        assert "--artifact-set must not be empty" in result.output
+
     def test_rejects_against_with_artifact_set(
         self, runner: CliRunner, snap_a: Path
     ) -> None:
@@ -663,7 +678,22 @@ class TestArtifactSetCliEndToEnd:
             ],
         )
         out = result.output
+        # Per ScanSetResult's own aggregation (_SCAN_SET_COMPAT_EXIT), the
+        # only possible non-zero exit codes here are 2 (API_BREAK) and 4
+        # (BREAKING) -- COMPATIBLE_WITH_RISK (what the unresolved-intra-
+        # dependency finding itself maps to) is exit 0.
+        assert result.exit_code in (0, 2, 4), out
         i = out.find("{")
         payload = json.loads(out[i:] if i >= 0 else out)
         assert payload["bundle_incomplete"] is False
         assert len(payload["per_artifact"]) == 2
+        # The actual point of this fixture: core_missing is deliberately
+        # never provided, so the audit must report it as an unresolved
+        # intra-bundle dependency (CodeRabbit review -- this was previously
+        # unverified, the only assertions were on bundle_incomplete/member
+        # count, not the detector's actual output).
+        assert any(
+            f["kind"] == "bundle_unresolved_intra_dependency"
+            and f["symbol"] == "core_missing"
+            for f in payload["bundle_findings"]
+        ), payload
