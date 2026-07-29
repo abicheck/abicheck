@@ -165,29 +165,41 @@ class _HasCompileBinding(Protocol):
 
     id: str
     compile: Any
+    consumer_compile: Any
 
 
 def check_profile_bindings_resolve(
     profiles: Mapping[str, _HasCompileBinding], bindings_file: BindingsFile
 ) -> list[str]:
     """Return one human-readable error string per declared
-    ``profiles.<id>.compile.binding`` that doesn't resolve against
-    *bindings_file* — empty when every declared binding resolves (including
-    when no profile declares one at all).
+    ``profiles.<id>.compile.binding``/``profiles.<id>.consumer_compile.binding``
+    (G34 Phase 0) that doesn't resolve against *bindings_file* — empty when
+    every declared binding resolves (including when no profile declares one
+    at all).
 
-    Never raises; a profile with no ``compile:`` overlay or no ``binding``
-    field is silently skipped (nothing declared to resolve).
+    Never raises; a profile with no ``compile:``/``consumer_compile:``
+    overlay or no ``binding`` field on either is silently skipped (nothing
+    declared to resolve). Checked identically and independently for both
+    overlays — an unresolved ``consumer_compile.binding`` is exactly as much
+    a caller error as an unresolved ``compile.binding``: silently converting
+    it into an empty path would let ``project plan`` succeed and emit
+    consumer options without the explicitly requested compiler executable,
+    indistinguishable from an intentionally unspecified consumer compiler
+    (Codex review, fresh evidence).
     """
     errors: list[str] = []
     for profile in profiles.values():
-        compile_spec = getattr(profile, "compile", None)
-        binding_id = getattr(compile_spec, "binding", "") if compile_spec else ""
-        if not binding_id:
-            continue
-        if binding_id not in bindings_file.bindings:
-            available = ", ".join(sorted(bindings_file.bindings)) or "(none declared)"
-            errors.append(
-                f"profiles.{profile.id}.compile.binding {binding_id!r} is not "
-                f"declared in the bindings file (available: {available})"
-            )
+        for key in ("compile", "consumer_compile"):
+            compile_spec = getattr(profile, key, None)
+            binding_id = getattr(compile_spec, "binding", "") if compile_spec else ""
+            if not binding_id:
+                continue
+            if binding_id not in bindings_file.bindings:
+                available = (
+                    ", ".join(sorted(bindings_file.bindings)) or "(none declared)"
+                )
+                errors.append(
+                    f"profiles.{profile.id}.{key}.binding {binding_id!r} is not "
+                    f"declared in the bindings file (available: {available})"
+                )
     return errors

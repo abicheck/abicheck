@@ -1108,6 +1108,39 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert scoped.types == []
 
+    def test_resolved_alias_takes_precedence_over_colliding_exact_tag(self):
+        """Codex review (twenty-eighth round): `typedef struct Actual
+        Handle;` alongside an unrelated `struct Handle` (a plain C-style
+        tag, its own identity exactly `Handle`, not merely a derived
+        suffix). The round-eighteen precedence fix only ever deferred a
+        candidate's *derived* own-spelling claim to a resolved alias; an
+        *exact*-identity claim still merged with the alias owner and
+        required a single combined owner, so this collision dropped both
+        `Actual` and `Handle` instead of retaining `Actual` -- the same
+        separate-namespaces reasoning as the primitive-alias tests above,
+        but now for an exact tag collision instead of a derived one."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Actual",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "struct Actual"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Actual"]
+
     def test_elaborated_tag_reference_survives_colliding_primitive_typedef(
         self,
     ):

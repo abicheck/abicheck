@@ -628,69 +628,58 @@ def _directly_referenced_dependency_names(
         # genuinely ambiguous, contributes no owner at all.
 
     own_spelling_owners: dict[str, set[str]] = {}
-    own_exact_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = identity_of[id(candidate)]
         own = own_spellings_of[id(candidate)]
         for spelling in own:
             own_spelling_owners.setdefault(spelling, set()).add(identity)
-            if spelling == identity:
-                own_exact_owners.setdefault(spelling, set()).add(identity)
 
     # spelling -> {identity, ...}: a spelling that is some candidate's own
-    # identity/suffix is trusted only when unambiguous among ALL owners
-    # (own- or alias-derived) and not colliding with a kept type's/enum's
-    # own spelling; a spelling reached *only* via alias reachability keeps
-    # every distinct owner the alias legitimately reaches.
+    # identity/suffix is trusted only when unambiguous among all owners of
+    # that same category, and not colliding with a kept type's/enum's own
+    # spelling; a spelling reached via alias reachability keeps every
+    # distinct owner the alias legitimately reaches.
     #
-    # A resolved typedef alias's own name is as direct a signal as a
-    # candidate's own *exact* identity -- both are literal, exact-name
-    # matches, not a guess -- but a candidate's merely *derived* spelling
-    # (a namespace-suffix or stdlib-stripped variant, never the literal
-    # identity itself) is weaker: it exists only because a real backend's
-    # namespace-dropping convention makes that guess necessary at all
-    # (Codex review, fresh evidence). Without this distinction, a public
-    # signature spelling ``Handle`` where ``typedefs["Handle"]`` resolves
-    # to ``dep::Actual`` was treated as equally ambiguous against an
-    # unrelated ``dep::Handle`` merely because its own bare-suffix
-    # spelling *also* happens to be ``Handle`` -- dropping both and hiding
-    # a real layout change to the directly-referenced ``dep::Actual``.
-    # Only a spelling with no exact-identity owner at all defers to this
-    # precedence; two exact identities (or an exact identity colliding
-    # with an alias) colliding on the same spelling is still genuine,
-    # unresolvable ambiguity, unchanged from before.
+    # A typedef alias existing under a given spelling **always** takes
+    # precedence over any of a candidate's own claims on that spelling --
+    # exact identity match or merely derived (namespace-suffix/stdlib-
+    # stripped) -- never merged or compared against them (Codex review,
+    # fresh evidence, generalizing an earlier, narrower version of this
+    # rule that only deferred a *derived* own-claim, not an *exact* one):
+    # in C, tag names (``struct Handle``) and typedef names occupy
+    # separate namespaces, so a signature spelling the bare, unqualified
+    # ``Handle`` can only mean an existing typedef of that name -- a
+    # same-named tag is never reachable that way at all, regardless of
+    # whether its own identity happens to be an exact or merely-derived
+    # match for the same string. Concretely: ``typedef struct Actual
+    # Handle;`` alongside an unrelated ``struct Handle`` must retain
+    # ``Actual`` through the alias, and never conflate that with the
+    # unrelated tag's own exact-identity claim on the same spelling.
+    # When the existing typedef doesn't itself resolve to anything
+    # retainable (an alias to a primitive, or one dropped as genuinely
+    # ambiguous among colliding aliases), the spelling contributes
+    # nothing at all -- not even the runner-up own-identity claim,
+    # unconditionally.
+    #
+    # Only when *no* typedef exists under a spelling at all does this
+    # fall back to plain own-identity resolution: an exact-identity claim
+    # is trusted only when it is the spelling's sole owner (two exact
+    # identities colliding is still genuine, unresolvable ambiguity), and
+    # a purely-derived claim is trusted only when it, too, is the sole
+    # owner among dep_candidates.
     spelling_index: dict[str, set[str]] = {}
     for spelling in own_spelling_owners.keys() | alias_spelling_owners.keys():
         if spelling in kept_spellings:
             continue
-        own_owners = own_spelling_owners.get(spelling, set())
-        exact_owners = own_exact_owners.get(spelling, set())
-        alias_owners = alias_spelling_owners.get(spelling, set())
-        if not own_owners:
+        if spelling in all_typedef_alias_names:
+            alias_owners = alias_spelling_owners.get(spelling, set())
             if alias_owners:
                 spelling_index[spelling] = set(alias_owners)
-        elif not alias_owners and spelling in all_typedef_alias_names:
-            # A typedef alias exists under this exact name/suffix, but
-            # didn't resolve to anything via *alias_spelling_owners*
-            # above (an alias to a primitive, or one dropped as
-            # genuinely ambiguous). This defers *unconditionally* --
-            # even a candidate's own *exact* identity match, not just a
-            # derived one (Codex review, fresh evidence: in C, tag names
-            # -- ``struct Handle`` -- and typedef names occupy separate
-            # namespaces, so a signature spelling the bare, unqualified
-            # ``Handle`` can only mean the typedef; a same-named tag is
-            # not reachable that way at all, exact-identity match or
-            # not). own_owners contributes nothing for this spelling.
-            pass
-        elif exact_owners:
-            all_owners = own_owners | alias_owners
-            if len(all_owners) == 1:
-                spelling_index[spelling] = set(all_owners)
-        elif alias_owners:
-            # own_owners are derived-only (no exact-identity claim) --
-            # defer to the resolved alias's stronger, literal-name match.
-            spelling_index[spelling] = set(alias_owners)
-        elif len(own_owners) == 1:
+            # else: the typedef exists but resolves to nothing retainable
+            # -- drop, no credit to any own-identity claim either.
+            continue
+        own_owners = own_spelling_owners.get(spelling, set())
+        if len(own_owners) == 1:
             spelling_index[spelling] = set(own_owners)
 
     pattern = _compile_spelling_pattern(spelling_index)
