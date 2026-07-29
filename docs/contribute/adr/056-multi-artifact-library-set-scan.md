@@ -1,3 +1,9 @@
+---
+doc_type: contributor
+level: advanced
+lifecycle: active
+---
+
 # ADR-056: Multi-Artifact / Library-Set `scan`
 
 **Date:** 2026-07-29
@@ -87,6 +93,20 @@ abicheck scan ARTIFACT               # unchanged: exactly one artifact
 abicheck scan --artifact-set DIR     # new: every discoverable shared library in DIR
 abicheck scan --artifact-set a.so,b.so,c.so   # new: explicit repeated-path form
 ```
+
+`scan`'s positional `ARTIFACT` is a required `@click.argument` in
+`abicheck/cli_scan.py` (the actual module the `scan` command is registered
+from — not `cli.py`, which was misidentified in earlier drafts of this ADR
+after Context's own citations). Adding `--artifact-set` cannot simply sit
+alongside that required positional: `cli_scan.py` must make `ARTIFACT`
+optional and enforce, as a `click.UsageError` (exit 64, matching the
+existing usage-error convention for mutually-exclusive `compare` scoping
+flags per ADR-043 D2), that a `scan` invocation supplies **exactly one** of
+`ARTIFACT` or `--artifact-set` — never both, never neither. This is a
+required part of D1's implementation, called out explicitly here since it's
+easy for an implementer to add the flag without touching the positional's
+`required=` behavior and ship a command that can never actually reach the
+new code path.
 
 Rationale against silently overloading the positional `ARTIFACT` the way
 `compare` overloads its positional operands (auto-detecting file vs.
@@ -230,18 +250,29 @@ Explicitly **not** in this ADR's scope:
 ## Implementation plan (not started — see G34 for the tracked, phased version)
 
 1. `abicheck/service_scan.py` — replace `run_scan`'s `len() != 1` guard with
-   real multi-binary handling: loop over `req.binaries`, produce
-   `list[AbiSnapshot]`; single-binary callers get a length-1 list (no
-   behavior change for existing callers of the singular path).
+   real multi-binary handling, **without changing `run_scan`'s existing
+   return type for the single-binary path**. `run_scan` returns
+   `ScanResult` today (`verdict`/`exit_code`/`findings`/`layers`/
+   `confidence`/`estimate`/`report`), and existing service callers,
+   `run_scan_subprocess`, and the MCP tool all consume it directly —
+   `.verdict`/`.exit_code` and `.to_dict()` are load-bearing. A single-item
+   `req.binaries` must still return exactly one `ScanResult`, unchanged. A
+   new multi-binary entry point (e.g. `run_scan_set(req) ->
+   ScanSetResult`, a new aggregate dataclass wrapping `per_artifact:
+   list[ScanResult]` + the bundle layer's findings/verdict) is added
+   alongside `run_scan`, not as a change to what `run_scan` itself returns.
 2. `abicheck/bundle.py` — generalize the entry point that currently only
    `compare-release`'s directory matching calls (`build_bundle_snapshot`/
    `compare_bundle`) to accept a `list[AbiSnapshot]` + path list directly,
    so a library-set `scan` can call it without going through
    `compare-release`'s file-matching layer at all (there is no "old vs new"
    matching to do for a single-side audit).
-3. `abicheck/cli.py` — add `--artifact-set` to the `scan` command
-   (directory or comma-separated explicit list), wire to
-   `ScanRequest.binaries`.
+3. `abicheck/cli_scan.py` (the module the `scan` command is actually
+   registered from — see D1 above) — make the existing `ARTIFACT`
+   `@click.argument` optional, add `--artifact-set` (directory or
+   comma-separated explicit list), and enforce exactly one of the two is
+   given (`click.UsageError`, exit 64) before wiring to
+   `ScanRequest.binaries` / the new `run_scan_set` entry point.
 4. `abicheck/mcp_server.py` — add the equivalent `artifact_set` parameter to
    `abi_scan`, same validation shape as the CLI flag.
 5. Reporter — `scan`'s report gains a `bundle_findings`/`bundle_verdict`

@@ -1,3 +1,9 @@
+---
+doc_type: contributor
+level: advanced
+lifecycle: active
+---
+
 # G34 — Multi-Artifact / Library-Set `scan`
 
 **Origin:** User request to properly scan cases where one logical
@@ -48,9 +54,12 @@ See ADR-056's Context section for the full investigation. Summary:
   artifact plus a `bundle_findings`/`bundle_verdict` section from the same
   `ResolutionGraph`/`BundleFinding` machinery `compare`'s directory path
   already uses (ADR-023), generalized to run without an old-side diff.
-- **G34.2** — `ScanRequest.binaries` accepts more than one path end to end
-  (`run_scan` no longer hard-rejects it); existing single-binary callers see
-  no behavior change.
+- **G34.2** — `ScanRequest.binaries` accepts more than one path end to end via
+  a new `run_scan_set`/`ScanSetResult` entry point; `run_scan`'s existing
+  single-binary `ScanResult` return type is untouched, so existing service,
+  `run_scan_subprocess`, and MCP callers that consume `.verdict`/
+  `.exit_code`/`.to_dict()` see no behavior change (see ADR-056's
+  implementation-plan step 1).
 - **G34.3** — `abi_scan` MCP tool gains the equivalent `artifact_set`
   parameter in the same change (ADR-043 D10 parity rule), not a follow-up.
 - **G34.4** — `tests/test_cli_root_surface.py`, `README.md`,
@@ -78,10 +87,13 @@ started.**
 
 ### Phase 1 — `service_scan.py`: finish the plural `binaries` path
 
-- Remove `run_scan`'s `if len(req.binaries) != 1` guard; loop over
-  `req.binaries`, dump each via the existing single-binary dump/scan
-  pipeline, produce `list[AbiSnapshot]` (or the per-binary result shape
-  `run_scan` already returns, extended to a list).
+- Add `run_scan_set(req) -> ScanSetResult` (new aggregate dataclass:
+  `per_artifact: list[ScanResult]` + bundle findings/verdict), looping over
+  `req.binaries` and reusing the existing single-binary dump/scan pipeline
+  per artifact. **`run_scan`'s own signature and `ScanResult` return type
+  stay exactly as they are today** — existing single-binary callers
+  (service, `run_scan_subprocess`, MCP `abi_scan`) are unaffected; only
+  `--artifact-set`/`artifact_set` callers route through `run_scan_set`.
 - `tests/test_scan_estimate.py::test_run_scan_rejects_multiple_binaries` —
   update to reflect the new accepting behavior; add a companion test
   confirming a single-item `binaries` list still behaves identically to
@@ -104,8 +116,12 @@ started.**
 
 ### Phase 3 — CLI + MCP surface
 
-- `abicheck/cli.py`: add `--artifact-set` to `scan` (directory or
-  comma-separated explicit paths), wired to `ScanRequest.binaries`.
+- `abicheck/cli_scan.py` (the module `scan` is actually registered from —
+  not `cli.py`): make the existing required `ARTIFACT` `@click.argument`
+  optional, add `--artifact-set` (directory or comma-separated explicit
+  paths), and enforce exactly one of `ARTIFACT`/`--artifact-set` via
+  `click.UsageError` (exit 64) before wiring to `ScanRequest.binaries`/
+  `run_scan_set`.
 - `abicheck/mcp_server.py`: add `artifact_set` param to `abi_scan`, same
   validation shape as CLI (ADR-043 D10 parity — land together, not as a
   follow-up PR).
@@ -139,7 +155,7 @@ Modified:
 ```text
 abicheck/service_scan.py     # Phase 1 — ScanRequest.binaries plural path
 abicheck/bundle.py           # Phase 0 (drift fix) + Phase 2 (audit-mode entry point)
-abicheck/cli.py              # Phase 3 — scan --artifact-set
+abicheck/cli_scan.py         # Phase 3 — scan --artifact-set, ARTIFACT made optional
 abicheck/mcp_server.py       # Phase 3 — abi_scan artifact_set param
 action/validate-inputs.sh    # Phase 3 — carve-out for the new supported form
 reporter.py / report_summary.py  # Phase 4 — bundle section on scan reports
