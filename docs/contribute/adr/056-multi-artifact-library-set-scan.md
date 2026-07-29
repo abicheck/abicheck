@@ -199,10 +199,19 @@ conservative than a direct reuse of `_detect_intra_dep_removed`:
 
 - `--artifact-set` audits under a **declared closed-world assumption**: the
   user is asserting the given set is the complete intra-set surface they
-  care about, with any known external dependency named via
-  `--bundle-system-providers` (same escape hatch ADR-023 already defines).
-  This must be stated plainly in the command's `--help` text and docs, not
-  left implicit.
+  care about, with any known external dependency named via a
+  `--bundle-system-providers` equivalent. `--bundle-system-providers` today
+  is declared only on `compare`'s `release_options` (`abicheck/cli_options.py`,
+  consumed by `cli_compare_release.py`) — this ADR requires the **same
+  flag** be added to `scan`'s `--artifact-set` path too (`cli_scan.py`),
+  plus the matching `abi_scan` MCP parameter and Action input, and threaded
+  through to `run_scan_set`'s audit-mode detector (D2's new check). Without
+  it, a `scan --artifact-set` user has no way to make the closed-world
+  declaration this design assumes, and every legitimate external dependency
+  produces an avoidable risk finding — that gap would defeat the point of
+  downgrading the kind to `COMPATIBLE_WITH_RISK` in the first place. This
+  must be stated plainly in the command's `--help` text and docs, not left
+  implicit.
 - Even under that assumption, an unversioned import with no intra-set
   provider is **evidence of an unresolved reference, not proof of one** —
   the audit has no diff to confirm it ever worked. The new kind's

@@ -99,6 +99,12 @@ started.**
   stay exactly as they are today** — existing single-binary callers
   (service, `run_scan_subprocess`, MCP `abi_scan`) are unaffected; only
   `--artifact-set`/`artifact_set` callers route through `run_scan_set`.
+- `run_scan_set` takes a `bundle_system_providers: list[str]` parameter
+  (same shape as `compare-release`'s `--bundle-system-providers`,
+  `abicheck/cli_options.py`/`cli_compare_release.py`) and threads it into
+  Phase 2's audit-mode detector — this is the closed-world escape hatch
+  ADR-056 D2 requires; without it there is no way for a `scan
+  --artifact-set` caller to declare a legitimate external dependency.
 - `tests/test_scan_estimate.py::test_run_scan_rejects_multiple_binaries` —
   **keep unchanged, unmodified.** `run_scan` itself still rejects a
   multi-item `binaries` list (Phase 1's bullet above); this test is the
@@ -120,10 +126,13 @@ started.**
   ADR-056 D2's correction for why reuse is unsafe.
 - New audit-mode detector — **do not call `_detect_intra_dep_removed`
   directly.** Write a separate, more conservative function: given only a
-  "new" side's `list[AbiSnapshot]` + `ResolutionGraph`, find symbols with
+  "new" side's `list[AbiSnapshot]` + `ResolutionGraph` + the caller-supplied
+  `bundle_system_providers` allow-list (Phase 1), find symbols with
   consumers but no intra-set provider, apply the same
   `_import_is_external`/system-symbol-allow-list filtering
-  `_detect_intra_dep_removed` already does, but additionally treat any
+  `_detect_intra_dep_removed` already does (extended with the caller's
+  allow-list, not just the built-in `DEFAULT_SYSTEM_PROVIDERS`), but
+  additionally treat any
   *unversioned* import with no intra-set provider as **not automatically
   intra-set** — `_import_is_external`'s existing unversioned-import
   behavior (`return False`) is correct for the diff-driven case (ADR-023)
@@ -143,26 +152,37 @@ started.**
 - `abicheck/cli_scan.py` (the module `scan` is actually registered from —
   not `cli.py`): make the existing required `ARTIFACT` `@click.argument`
   optional, add `--artifact-set` (directory or comma-separated explicit
-  paths), and enforce, as `click.UsageError` (exit 64):
+  paths) **and** `--bundle-system-providers` (same option shape as
+  `compare`'s existing flag in `abicheck/cli_options.py` — reuse that
+  decorator/option definition rather than redeclaring it), and enforce, as
+  `click.UsageError` (exit 64):
   - exactly one of `ARTIFACT`/`--artifact-set` is given;
   - `--against` is rejected together with `--artifact-set` (ADR-056 D2
     scopes `--artifact-set` to audit-only — no old side; `--against`
     stores one baseline path in `ScanRequest.baseline`, which does not
-    extend to a set of artifacts each needing its own baseline).
-  Wire the accepted form to `ScanRequest.binaries`/`run_scan_set`.
-- `abicheck/mcp_server.py`: add `artifact_set` param to `abi_scan`, same
-  validation shape as CLI (ADR-043 D10 parity — land together, not as a
-  follow-up PR).
-- `action/action.yml` + `action/run.sh` + `action/validate-inputs.sh`: the
+    extend to a set of artifacts each needing its own baseline);
+  - `--bundle-system-providers` without `--artifact-set` is rejected too
+    (the flag is meaningless outside audit-mode, same "don't accept a flag
+    with no effect" discipline `compare`'s own scoping flags follow).
+  Wire the accepted form to `ScanRequest.binaries`/`run_scan_set`
+  (`bundle_system_providers` param, Phase 1).
+- `abicheck/mcp_server.py`: add `artifact_set` **and**
+  `bundle_system_providers` params to `abi_scan`, same validation shape as
+  CLI (ADR-043 D10 parity — land together, not as a follow-up PR).
+- `action.yml` (repo-root composite Action manifest — not under `action/`;
+  `action/` holds the shell implementation only) + `action/run.sh` +
+  `action/validate-inputs.sh`: the
   Action has no path to this feature at all today, not just a rejection to
   carve out. `run.sh`'s `scan` branch hard-requires a single
   `INPUT_NEW_LIBRARY` (`SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?...}"`) and
   explicitly errors on a directory/package value
   (`"scan does not accept a directory or package... scan analyses exactly
   one artifact"`, `run.sh` around the `scan` mode branch). Landing
-  `--artifact-set` end-to-end for Action users needs: a new Action input
-  (e.g. `new-library-set`), `run.sh` forwarding it to `--artifact-set`
-  instead of the positional artifact when set, and *then* narrowing
+  `--artifact-set` end-to-end for Action users needs: two new Action inputs
+  (`new-library-set` and `bundle-system-providers`, the latter mirroring
+  `compare`'s existing Action input of the same name), `run.sh` forwarding
+  them to `--artifact-set`/`--bundle-system-providers` instead of the
+  positional artifact when `new-library-set` is set, and *then* narrowing
   `validate-inputs.sh`'s rejection to still block a bare directory/package
   passed as `new-library` while allowing the new dedicated input. Carving
   the rejection out of `validate-inputs.sh` alone, without the input +
@@ -184,9 +204,34 @@ started.**
 
 ### Phase 4 — Reporting
 
-- `scan`'s report gains a `bundle_findings`/`bundle_verdict` section when
-  `--artifact-set` was used — reuse ADR-023's existing `bundle.json`/
-  `bundle.md` output shape, don't invent a parallel one.
+**Correction (checked against the live code, not assumed):** `scan` does
+not render through `reporter.py`/`report_summary.py` at all —
+`abicheck/cli_scan.py::_emit_scan_report` serializes a `ScanOutcome`
+directly (text/JSON via its own rendering functions, e.g. `_render_text`).
+The `bundle_findings`/`bundle_verdict` JSON/Markdown assembly ADR-023
+shipped lives in `abicheck/cli_compare_release_helpers.py`
+(`_release_md_bundle_findings` and the `summary["bundle_findings"]`
+JSON-assembly block), reachable only from `compare-release`'s own
+result-rendering path — not from anything `scan` calls.
+
+- Extract the bundle-findings JSON/Markdown assembly out of
+  `cli_compare_release_helpers.py` into a shared, `BundleDiffResult`-only
+  helper (no dependency on `compare-release`'s own result types) that both
+  `cli_compare_release_helpers.py` and `cli_scan.py` can call — do not
+  duplicate the rendering logic.
+- `ScanSetResult` (Phase 1) carries `bundle_findings`/`bundle_verdict`;
+  `cli_scan.py` needs a new `--artifact-set`-aware branch (`_emit_scan_report`
+  doesn't take a `ScanSetResult` today — either overload it or add a
+  sibling `_emit_scan_set_report`) that calls the shared helper above for
+  the bundle section and reuses `_render_text`/JSON assembly for each
+  `per_artifact` entry.
+- `bundle.json`/`bundle.md` file outputs (ADR-023's `--output-dir`
+  contract) — decide whether `--artifact-set` follows the same
+  `--output-dir` convention `compare-release` uses or folds the bundle
+  section into `scan`'s existing single-file output; `scan` has no
+  `--output-dir` concept today, only `-o/--output` for one file, so this
+  needs an explicit choice, not an assumption that `compare-release`'s
+  shape transfers unchanged.
 - **Not started.**
 
 ### Phase 5 — Deferred (explicitly out of scope, see ADR-056 D2)
@@ -206,12 +251,13 @@ Modified:
 ```text
 abicheck/service_scan.py     # Phase 1 — ScanRequest.binaries plural path
 abicheck/bundle.py           # Phase 0 (drift fix) + Phase 2 (audit-mode entry point)
-abicheck/cli_scan.py         # Phase 3 — scan --artifact-set, ARTIFACT made optional
-abicheck/mcp_server.py       # Phase 3 — abi_scan artifact_set param
-action/action.yml            # Phase 3 — new new-library-set input
-action/run.sh                # Phase 3 — forward new-library-set to --artifact-set
-action/validate-inputs.sh    # Phase 3 — narrow rejection once run.sh/action.yml support the new input
-reporter.py / report_summary.py  # Phase 4 — bundle section on scan reports
+abicheck/cli_scan.py         # Phase 3 — scan --artifact-set/--bundle-system-providers, ARTIFACT made optional; Phase 4 — bundle section rendering
+abicheck/cli_options.py      # Phase 3 — reuse --bundle-system-providers option definition for scan
+abicheck/mcp_server.py       # Phase 3 — abi_scan artifact_set/bundle_system_providers params
+abicheck/cli_compare_release_helpers.py  # Phase 4 — extract shared bundle-findings render helper
+action.yml                   # Phase 3 — new new-library-set/bundle-system-providers inputs (repo-root manifest, not under action/)
+action/run.sh                # Phase 3 — forward new-library-set/bundle-system-providers to the CLI flags
+action/validate-inputs.sh    # Phase 3 — narrow rejection once run.sh/action.yml support the new inputs
 docs/reference/mcp-tools-reference.md      # Phase 3 — generated, gen_mcp_reference.py
 docs/reference/github-action-inputs.md     # Phase 3 — generated, gen_action_reference.py
 docs/reference/cli-reference.md            # Phase 3 — generated, gen_cli_reference.py
