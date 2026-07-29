@@ -52,7 +52,10 @@ Changelog = "https://github.com/abicheck/abicheck/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 mcp = [
-    "mcp[cli]>=1.2.0",
+    # mcp 2.0.0 removed mcp.server.fastmcp entirely, which abicheck.mcp_shared
+    # imports directly -- pin below the breaking major to keep abi_compare
+    # importable (see the same fix on PR #652).
+    "mcp[cli]>=1.2.0,<2.0.0",
 ]
 dev = [
     "pytest>=7.0",

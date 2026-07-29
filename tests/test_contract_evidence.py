@@ -131,6 +131,21 @@ class TestTypeGraphSnapshot:
         with pytest.raises(TypeError):
             TypeGraphSnapshot(edges="ab")  # type: ignore[arg-type]
 
+    def test_decoded_list_edges_accepted_and_frozen_to_tuples(self):
+        # Regression (Codex review, fresh evidence): a real JSON/YAML
+        # decoder has no tuple type, so a persisted-then-decoded edge is
+        # always a list (e.g. ["a", "b"]), not a tuple. The exact-tuple
+        # check previously rejected this normal decode-to-dataclass round
+        # trip; any non-string two-element sequence must be accepted and
+        # normalized to a tuple.
+        g = TypeGraphSnapshot(nodes=["a", "b"], edges=[["a", "b"]])
+        assert g.edges == (("a", "b"),)
+        assert isinstance(g.edges[0], tuple)
+
+    def test_edge_list_with_wrong_length_rejected(self):
+        with pytest.raises(TypeError):
+            TypeGraphSnapshot(edges=[["a"]])
+
 
 class TestEvidenceSearchRecord:
     def test_minimal_construction(self):
@@ -232,6 +247,21 @@ class TestContractEvidenceBlock:
     def test_providers_rejects_wrong_element_type(self):
         with pytest.raises(TypeError):
             ContractEvidenceBlock(providers=["not-an-entry"])  # type: ignore[list-item]
+
+    def test_providers_canonicalized_by_stable_identity_not_visit_order(self):
+        # Regression (Codex review, fresh evidence): two collectors visiting
+        # the same providers in a different order previously produced
+        # unequal ContractEvidenceBlock instances, contradicting this
+        # phase's own byte/order-independent round-trip gate. Providers
+        # must be canonicalized by their own stable (side, id) identity,
+        # not left in visit order.
+        entry_a = ProviderEvidenceEntry(record=_record(id="rec-a", side="old"))
+        entry_b = ProviderEvidenceEntry(record=_record(id="rec-b", side="old"))
+        block1 = ContractEvidenceBlock(providers=[entry_a, entry_b])
+        block2 = ContractEvidenceBlock(providers=[entry_b, entry_a])
+        assert block1 == block2
+        assert block1.providers == (entry_a, entry_b)
+        assert block2.providers == (entry_a, entry_b)
 
     def test_schema_version_must_be_positive_int(self):
         with pytest.raises(ValueError):

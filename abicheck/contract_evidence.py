@@ -61,10 +61,12 @@ fail-closed rule: a version *older than or equal to* what this build
 understands is accepted (a legacy snapshot stays readable, possibly
 degraded); a version *newer* than what this build understands raises
 :class:`UnsupportedSchemaVersionError` rather than silently reinterpreting
-data it cannot correctly parse. The four counters are checked independently
--- a mixed-version ``PersistedContractContext`` (older evidence paired with a
-newer evaluation context, the documented re-evaluation case) is not itself
-an error; only each individual counter exceeding its current ceiling is.
+data it cannot correctly parse. All five version fields (backed by the four
+reserved constants above -- ``IDENTITY_ALGORITHM_VERSION`` supplies two of
+the five) are checked independently -- a mixed-version
+``PersistedContractContext`` (older evidence paired with a newer evaluation
+context, the documented re-evaluation case) is not itself an error; only
+each individual field exceeding its current ceiling is.
 
 Every dataclass here is frozen, following the same normalize-in-``__post_init__``
 convention as ``compatibility_evaluation_config.py``: a mapping/sequence field
@@ -201,16 +203,24 @@ class TypeGraphSnapshot:
         edges: list[tuple[str, str]] = []
         for edge in self.edges:
             if (
-                not isinstance(edge, tuple)
+                isinstance(edge, (str, bytes))
+                or not isinstance(edge, Sequence)
                 or len(edge) != 2
                 or not isinstance(edge[0], str)
                 or not isinstance(edge[1], str)
             ):
                 raise TypeError(
                     "TypeGraphSnapshot.edges elements must each be a "
-                    f"(str, str) tuple, not {edge!r}."
+                    f"(str, str) pair, not {edge!r}."
                 )
-            edges.append(edge)
+            # Accept any non-string two-element sequence (a plain ``tuple``
+            # from in-process construction, or a ``list`` from a JSON/YAML
+            # decoder -- ``json.loads`` has no tuple type, so a real
+            # persisted-then-decoded edge is always a list) and normalize to
+            # a tuple here, rather than rejecting the decoder's native shape
+            # and pushing a bespoke inner-list conversion onto every future
+            # reader (Codex review, fresh evidence).
+            edges.append((edge[0], edge[1]))
         object.__setattr__(self, "edges", tuple(edges))
 
 
@@ -353,11 +363,18 @@ class ContractEvidenceBlock:
     identity_algorithm_version: int = IDENTITY_ALGORITHM_VERSION
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "providers",
-            _frozen_tuple(self.providers, element_type=ProviderEvidenceEntry),
+        providers = _frozen_tuple(self.providers, element_type=ProviderEvidenceEntry)
+        # Canonicalize by each provider's own stable identity (side, id) --
+        # not the order two independent collectors happened to visit
+        # providers in. Provider traversal order has no defined semantics,
+        # so leaving it order-preserving made two otherwise-identical
+        # blocks compare unequal and serialize differently, contradicting
+        # this phase's own byte/order-independent round-trip gate (Codex
+        # review, fresh evidence).
+        providers = tuple(
+            sorted(providers, key=lambda entry: (entry.record.side, entry.record.id))
         )
+        object.__setattr__(self, "providers", providers)
         _require_version_int(
             self.schema_version,
             owner="ContractEvidenceBlock",
@@ -555,8 +572,15 @@ def check_persisted_context_versions_supported(ctx: PersistedContractContext) ->
     """Check every version counter in *ctx* against this build's currently
     supported ceiling, independently (ADR-049 D6).
 
-    The four counters are checked one at a time, not required to agree with
-    each other: a ``PersistedContractContext`` combining older
+    Five fields are checked (``contract_evidence.schema_version``,
+    ``contract_evidence.identity_algorithm_version``,
+    ``evaluation_context.schema_version``,
+    ``evaluation_context.evaluator_version``,
+    ``evaluation_context.identity_algorithm_version``) -- backed by four
+    reserved constants, since ``IDENTITY_ALGORITHM_VERSION`` supplies both
+    of the ``identity_algorithm_version`` fields. Each is checked one at a
+    time, not required to agree with each other: a ``PersistedContractContext``
+    combining older
     ``contract_evidence`` with a newer ``evaluation_context`` is the
     documented re-evaluation case (plan Section 5.1: "re-evaluation uses old
     observations with a newly resolved context"), not itself an error --

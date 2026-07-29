@@ -1055,10 +1055,11 @@ on it yet:
 - `PersistedContractContext`, bundling all three;
 - `check_persisted_context_versions_supported()` / `UnsupportedSchemaVersionError`,
   implementing D6 ("unknown future versions fail closed") for each of the
-  four independent version counters this phase's gate requires
+  five independent version fields this phase's gate requires
   (`contract_evidence.schema_version`,
   `contract_evidence.identity_algorithm_version`,
-  `evaluation_context.schema_version`, `evaluation_context.evaluator_version`)
+  `evaluation_context.schema_version`, `evaluation_context.evaluator_version`,
+  `evaluation_context.identity_algorithm_version`)
   — checked independently, so a mixed-version context (older
   `contract_evidence` replayed against a current `evaluation_context`, the
   ordinary re-evaluation-against-newer-policy case this phase's gate names)
