@@ -190,6 +190,14 @@ def _safe_resolve(path: Path) -> Path | None:
         return path.resolve()
     except OSError:
         return None
+    except RuntimeError:
+        # Path.resolve() raises RuntimeError (not OSError) for a symlink
+        # loop on Python < 3.13 -- OSError only became the documented
+        # behavior in 3.13, and this project supports 3.10+ (Codex review).
+        # An uncaught RuntimeError here would abort the whole compile
+        # database load instead of degrading this one @file to its literal
+        # token, same as any other unreadable response file.
+        return None
 
 
 def _read_response_file(path: Path, root: Path) -> str | None:
@@ -297,6 +305,18 @@ def _expand_response_files(
         try:
             tokens = _split_command_line(text)
         except ValueError:
+            expanded.append(arg)
+            continue
+        if len(tokens) > _output_budget[0]:
+            # This single file's own token count already exceeds the
+            # remaining output budget -- the pre-loop budget check above
+            # only rejects a *subsequent* @file once the budget has already
+            # gone negative, so a single response file at or near the byte
+            # cap (tokenizable into hundreds of thousands of short tokens)
+            # could otherwise still be expanded whole in one shot before
+            # that check ever fires (Codex review, third round). Reject the
+            # whole file rather than partially truncating it -- a partial
+            # flag list is worse than none.
             expanded.append(arg)
             continue
         _output_budget[0] -= len(tokens)

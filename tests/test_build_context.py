@@ -394,9 +394,32 @@ class TestCompileEntry:
         )
         elapsed = time.monotonic() - start
         assert elapsed < 5.0
-        # Bounded well below the 25,000 tokens a single unbounded read would
-        # produce, let alone what further recursive expansion could reach.
-        assert len(entry.arguments) < 30_000
+        # A single file whose own token count exceeds the remaining output
+        # budget is rejected outright (kept as the literal @file token)
+        # rather than expanded once and only capped on the *next* @file
+        # (Codex review, third round) -- so this file contributes nothing.
+        assert entry.arguments == ["c++", "@loop.rsp", "-c", "src/foo.cpp"]
+
+    def test_symlink_loop_response_file_degrades_gracefully(
+        self, tmp_path: Path
+    ) -> None:
+        """``Path.resolve()`` raises ``RuntimeError`` (not ``OSError``) for a
+        symlink loop on Python < 3.13 -- an uncaught RuntimeError here would
+        abort loading the *entire* compile database instead of degrading
+        just this one unreadable ``@file`` to its literal token (Codex
+        review)."""
+        db_dir = tmp_path
+        loop_link = db_dir / "loop.link"
+        loop_link.symlink_to(loop_link)
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@loop.link", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "@loop.link" in entry.arguments
 
 
 # ---------------------------------------------------------------------------
