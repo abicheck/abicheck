@@ -384,6 +384,16 @@ def _to_json_leaf(
         entry["reachability_state"] = assessment.reachability_state.value
         if assessment.has_signal():
             entry["impact_assessment"] = assessment.to_dict()
+        # ADR-049 Phase 3: _leaf_entry builds its own dict rather than
+        # routing through _change_to_dict (see the schema 2.3/2.4 comment
+        # above -- this is the same, long-standing "leaf mode duplicates
+        # the full-mode entry builder" gap, now including the shadow
+        # contract-evaluation fields _change_to_dict already carries. A
+        # root TYPE_* change under --report-mode leaf previously lost
+        # contract_relevance/contract_reason_code/contract_assurance even
+        # though the identical finding kept them under --report-mode full
+        # (Codex review, fresh evidence).
+        _add_contract_evaluation_fields(entry, c)
         return entry
 
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]

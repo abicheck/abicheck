@@ -1041,6 +1041,84 @@ class TestAbiCompare:
         assert data["status"] == "ok"
         assert data["report"]["assurance"] == "none"
 
+    def test_contract_evaluation_off_by_default_omits_field(self, tmp_path: Path):
+        # ADR-049 Phase 3: without contract_evaluation=True, the response is
+        # unchanged from today's shape -- no contract_relevance anywhere.
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        raw = abi_compare(str(old_p), str(new_p))
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        changes = data["report"]["changes"]
+        assert changes
+        assert all("contract_relevance" not in c for c in changes)
+
+    def test_contract_evaluation_stamps_relevance_on_findings(self, tmp_path: Path):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        raw = abi_compare(str(old_p), str(new_p), contract_evaluation=True)
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        changes = data["report"]["changes"]
+        assert changes
+        assert all("contract_relevance" in c for c in changes)
+
+    def test_contract_evaluation_stamps_the_top_level_changes_array_too(
+        self, tmp_path: Path
+    ):
+        # Regression (Codex review, fresh evidence): the top-level, compact
+        # response["changes"] array is built independently of
+        # response["report"]["changes"] -- both must carry the shadow
+        # decision when contract_evaluation=True, not just the nested one.
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        raw = abi_compare(str(old_p), str(new_p), contract_evaluation=True)
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        changes = data["changes"]
+        assert changes
+        assert all("contract_relevance" in c for c in changes)
+
+    def test_contract_evaluation_off_omits_top_level_relevance_too(
+        self, tmp_path: Path
+    ):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        raw = abi_compare(str(old_p), str(new_p))
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        changes = data["changes"]
+        assert changes
+        assert all("contract_relevance" not in c for c in changes)
+
+    def test_contract_evaluation_never_changes_verdict_or_exit_code(
+        self, tmp_path: Path
+    ):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        without = json.loads(abi_compare(str(old_p), str(new_p)))
+        with_shadow = json.loads(
+            abi_compare(str(old_p), str(new_p), contract_evaluation=True)
+        )
+        assert without["report"]["verdict"] == with_shadow["report"]["verdict"]
+        assert without["exit_code"] == with_shadow["exit_code"]
+        assert len(without["report"]["changes"]) == len(with_shadow["report"]["changes"])
+
     def test_used_by_and_required_symbols_are_mutually_exclusive(
         self, tmp_path: Path
     ):
@@ -1301,6 +1379,174 @@ class TestAbiCompare:
         assert data["exit_code"] == 0
         assert data["exit_code_scheme"] == "scoped"
 
+    def test_used_by_missing_symbol_gets_contract_evaluation(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): a missing-symbol/
+        # missing-entrypoint label is a plain dict, not a Change, and is
+        # itself ADR-049 section 4.3 item 1's strongest evidence tier (an
+        # explicit required symbol) -- it must be stamped IN_CONTRACT
+        # directly, not left unstamped or run through the header-surface
+        # evaluator (which would misclassify a binary-only snapshot's
+        # unresolved header surface as unknown_unresolved).
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("entry", "_Z5entryv", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        missing_entries = [
+            c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
+        ]
+        assert missing_entries
+        assert all(c["contract_relevance"] == "IN_CONTRACT" for c in missing_entries)
+        # Regression (Codex review, fresh evidence): _fold_scoped_compat_into_text
+        # builds its own, separate missing-label dicts for response["report"]
+        # -- independent of the top-level array's already-stamped copy above
+        # -- so without a dedicated fix the embedded report's copy of this
+        # same finding disagreed with the top-level one.
+        report_missing_entries = [
+            c for c in data["report"]["changes"] if c["kind"] == "used_by_missing_symbol"
+        ]
+        assert report_missing_entries
+        assert all(
+            c["contract_relevance"] == "IN_CONTRACT" for c in report_missing_entries
+        )
+
+    def test_used_by_missing_symbol_gets_contract_evaluation_in_root_cause_mode(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): --report-mode root-cause
+        # serializes the exact same missing-label finding a *second* time,
+        # into root_causes[].findings (_add_entries_to_root_causes) -- the
+        # same dict object as the "changes" copy before serialization, but
+        # a JSON round trip (json.dumps then json.loads) always produces
+        # independent dict copies, so stamping only "changes" left this
+        # finding's root-cause copy unstamped.
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("entry", "_Z5entryv", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)],
+            contract_evaluation=True, report_mode="root-cause",
+        )
+        data = json.loads(raw)
+        root_cause_findings = [
+            finding
+            for group in data["report"]["root_causes"]
+            for finding in group["findings"]
+            if finding["kind"] == "used_by_missing_symbol"
+        ]
+        assert root_cause_findings
+        assert all(
+            f["contract_relevance"] == "IN_CONTRACT" for f in root_cause_findings
+        )
+
+    def test_used_by_missing_symbol_omits_contract_fields_by_default(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("entry", "_Z5entryv", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(str(old_p), str(new_p), used_by=[str(app)])
+        data = json.loads(raw)
+        missing_entries = [
+            c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
+        ]
+        assert missing_entries
+        assert all("contract_relevance" not in c for c in missing_entries)
+
+    def test_used_by_scoped_only_change_stamped_in_contract_not_header_evaluated(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): a scoped-only Change is
+        # itself explicit consumer-import evidence -- the strongest ADR-049
+        # public-evidence tier -- so it must be stamped IN_CONTRACT directly
+        # rather than run through the header-surface evaluator (which would
+        # misclassify a binary-only snapshot's unresolved header surface as
+        # unknown_unresolved rather than the authoritative in-contract
+        # evidence this finding actually represents).
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0")
+        new = _make_snapshot("2.0")
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5", description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+
+        def _scoped_for(*_args, **_kwargs):
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old_p), new_lib_path=str(new_p),
+                required_symbols={"foo"}, required_symbol_count=1,
+                breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
+            )
+
+        from abicheck import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input",
+            MagicMock(side_effect=[old, new]),
+        )
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        scoped_entries = [
+            c for c in data["changes"] if c["kind"] == "pe_ordinal_retargeted"
+        ]
+        assert scoped_entries
+        assert all(c["contract_relevance"] == "IN_CONTRACT" for c in scoped_entries)
+        assert all(
+            c["contract_reason_code"] == "explicit_consumer_or_required_symbol_evidence"
+            for c in scoped_entries
+        )
+
     def test_used_by_missing_symbol_is_breaking(self, tmp_path: Path, monkeypatch):
         from abicheck.appcompat import AppCompatResult
 
@@ -1394,6 +1640,110 @@ class TestAbiCompare:
         assert len(data["changes"]) == 1
         assert data["summary"]["total_changes"] == len(data["changes"])
         assert data["summary"]["breaking"] == 1
+
+    def test_used_by_finding_already_in_result_changes_gets_explicit_evidence_too(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): a finding relevant to
+        # used_by scoping that is ALSO already in result.changes (the
+        # ordinary case -- a plain FUNC_REMOVED) never appears in
+        # scoped_only_changes, since that collection is deliberately built
+        # excluding anything already in result.changes. Without stamping
+        # result.changes entries too (via scoped_relevant_finding_ids), this
+        # finding stayed under whatever the header-surface shadow evaluator
+        # computed for it (unknown_unresolved on these header-less JSON
+        # snapshots), even though its presence in breaking_for_app proves it
+        # is authoritative in-contract evidence.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[
+                # A fresh object, not the real result.changes one -- but with
+                # identical identity fields (kind/symbol/old_value/new_value/
+                # description), so _finding_id matches the real FUNC_REMOVED
+                # Change compare() itself produces for this snapshot pair,
+                # exercising the "already present in result.changes" path
+                # rather than the scoped-only-fresh-object path.
+                Change(
+                    ChangeKind.FUNC_REMOVED, "foo", "Public function removed: foo",
+                    old_value="foo", new_value=None,
+                )
+            ],
+            verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        func_removed_entries = [c for c in data["changes"] if c["kind"] == "func_removed"]
+        assert len(func_removed_entries) == 1
+        assert func_removed_entries
+        assert all(c["contract_relevance"] == "IN_CONTRACT" for c in func_removed_entries)
+        assert all(
+            c["contract_reason_code"] == "explicit_consumer_or_required_symbol_evidence"
+            for c in func_removed_entries
+        )
+        # And the embedded report (same mutated Change objects) agrees too.
+        report_entries = [
+            c for c in data["report"]["changes"] if c["kind"] == "func_removed"
+        ]
+        assert report_entries
+        assert all(c["contract_relevance"] == "IN_CONTRACT" for c in report_entries)
+
+    def test_used_by_soname_changed_stays_not_applicable(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, P2, fresh evidence): SONAME_CHANGED is
+        # included in breaking_for_app (_is_relevant_to_app) whenever the
+        # consumer records the old SONAME in DT_NEEDED -- a loader-level
+        # fact, not a match against a specific symbol/entrypoint the
+        # consumer's code references. It must NOT be overridden to
+        # IN_CONTRACT by the explicit consumer/required-symbol evidence
+        # tier; contract_evaluation.py's own NOT_APPLICABLE classification
+        # for this non-entity kind must be preserved.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[_pub_func("foo", "foo", "int")])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        soname_change = Change(
+            ChangeKind.SONAME_CHANGED, "libfoo.so.1", "SONAME changed",
+            old_value="libfoo.so.1", new_value="libfoo.so.2",
+        )
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols=set(), required_symbol_count=0,
+            breaking_for_app=[soname_change],
+            verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        soname_entries = [c for c in data["changes"] if c["kind"] == "soname_changed"]
+        assert soname_entries
+        assert all(c.get("contract_relevance") != "IN_CONTRACT" for c in soname_entries)
+        assert all(
+            c.get("contract_reason_code") != "explicit_consumer_or_required_symbol_evidence"
+            for c in soname_entries
+        )
 
     def test_used_by_missing_symbol_covered_by_change_not_double_counted(
         self, tmp_path: Path, monkeypatch
@@ -1568,6 +1918,56 @@ class TestAbiCompare:
         assert "pe_ordinal_retargeted" in top_kinds
         report_kinds = [c["kind"] for c in data["report"]["changes"]]
         assert "pe_ordinal_retargeted" in report_kinds
+
+    def test_used_by_scoped_only_change_gets_contract_evaluation_too(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): a scoped-only Change
+        # synthesized by scope_diff_to_app *after* compare_snapshots already
+        # ran was never part of the collections compare()'s own shadow
+        # evaluator stamps -- so it stayed permanently unstamped even with
+        # contract_evaluation=True, unlike an ordinary result.changes entry.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0")
+        new = _make_snapshot("2.0")
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5", description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        assert scoped_only.contract_relevance is None
+
+        def _scoped_for(*_args, **_kwargs):
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old_p), new_lib_path=str(new_p),
+                required_symbols={"foo"}, required_symbol_count=1,
+                breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
+            )
+
+        from abicheck import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input",
+            MagicMock(side_effect=[old, new]),
+        )
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        scoped_entries = [c for c in data["changes"] if c["kind"] == "pe_ordinal_retargeted"]
+        assert scoped_entries
+        assert all("contract_relevance" in c for c in scoped_entries)
 
     def test_used_by_root_cause_markdown_report_does_not_duplicate_scoped_finding(
         self, tmp_path: Path, monkeypatch
@@ -1877,6 +2277,39 @@ class TestAbiCompare:
         raw = abi_compare(str(old_p), str(new_p), report_mode="leaf")
         data = json.loads(raw)
         assert data["status"] == "ok"
+
+    def test_report_mode_leaf_type_entries_get_contract_evaluation(
+        self, tmp_path: Path
+    ):
+        # Regression (Codex review, fresh evidence): reporter._to_json_leaf's
+        # _leaf_entry builds its own dict for root TYPE_* changes instead of
+        # routing through _change_to_dict, so it never called
+        # _add_contract_evaluation_fields -- a root type change under
+        # --report-mode leaf lost contract_relevance/contract_reason_code/
+        # contract_assurance even though the identical finding kept them
+        # under the default full report mode.
+        old = _make_snapshot(
+            "1.0",
+            types=[
+                RecordType(name="S", kind="struct", size_bits=32, alignment_bits=32)
+            ],
+        )
+        new = _make_snapshot(
+            "2.0",
+            types=[
+                RecordType(name="S", kind="struct", size_bits=64, alignment_bits=32)
+            ],
+        )
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+        raw = abi_compare(
+            str(old_p), str(new_p), report_mode="leaf", contract_evaluation=True
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        leaf_changes = data["report"]["leaf_changes"]
+        type_entries = [c for c in leaf_changes if c["kind"] == "type_size_changed"]
+        assert type_entries
+        assert all("contract_relevance" in c for c in type_entries)
 
     def test_policy_file_skips_base_policy_validation(self, tmp_path: Path):
         """When policy_file is provided, base policy name is not validated."""

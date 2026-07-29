@@ -52,9 +52,14 @@ Changelog = "https://github.com/abicheck/abicheck/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 mcp = [
-    # mcp 2.0.0 removed mcp.server.fastmcp entirely, which abicheck.mcp_shared
-    # imports directly -- pin below the breaking major to keep abi_compare
-    # importable (see the same fix on PR #652).
+    # <2.0.0: mcp 2.0.0 (released 2026-07-29) restructured the package and no
+    # longer ships mcp.server.fastmcp at all (confirmed: `from mcp.server.fastmcp
+    # import FastMCP` raises ModuleNotFoundError in a clean venv with 2.0.0
+    # installed) -- an unpinned upper bound let every CI job installing this
+    # extra silently start pulling a version that can't import mcp_server.py.
+    # pixi.lock already pins the unaffected 1.28.1 for pixi installs; this
+    # upper bound gives pip installs (`pip install -e ".[dev,mcp]"`, what CI's
+    # unit-tests job actually runs) the same protection.
     "mcp[cli]>=1.2.0,<2.0.0",
 ]
 dev = [
