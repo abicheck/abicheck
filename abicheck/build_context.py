@@ -93,6 +93,17 @@ _MAX_RESPONSE_FILE_DEPTH = 4
 #: level deep) while several orders of magnitude below a blowup.
 _MAX_RESPONSE_FILE_EXPANSIONS = 64
 
+#: Aggregate cap on the number of *tokens* actually emitted into the
+#: expanded argv across one top-level expansion call. The file-read cap
+#: above bounds fan-out but not per-file size: a single response file near
+#: the 1 MiB byte cap can itself pack ~95k short whitespace-separated
+#: ``@loop.rsp`` tokens, so 64 reads of a file that dense could still emit
+#: several million tokens before the read budget is exhausted (Codex
+#: review, second round). A generous ceiling for any real build (which
+#: rarely emits more than a few thousand flags total) while bounding
+#: worst-case output size independent of how the file-read budget is spent.
+_MAX_RESPONSE_FILE_OUTPUT_TOKENS = 20000
+
 #: Response files feeding a single compile action are typically a handful of
 #: KB even for a very long include-dir list (oneDAL's own longest is well
 #: under this); a much larger file is either not a real response file or not
@@ -220,6 +231,7 @@ def _expand_response_files(
     root: Path,
     _depth: int = 0,
     _budget: list[int] | None = None,
+    _output_budget: list[int] | None = None,
 ) -> list[str]:
     """Inline GNU-style ``@response-file`` arguments in a compiler argv.
 
@@ -251,23 +263,28 @@ def _expand_response_files(
     Unreadable/oversized/out-of-tree files, and unparsable file contents,
     degrade to keeping the original ``@file`` token rather than raising —
     matching ``_extract_flags``'s existing "skip what we don't understand"
-    contract for any other flag it doesn't recognize. *_budget* (internal,
-    shared across the whole recursive call tree via a single-element list)
-    is the remaining count of response files this call may still read —
-    see *_MAX_RESPONSE_FILE_EXPANSIONS* — bounding aggregate work
-    independently of *_depth*, since depth alone does not bound the total
-    number of reads a self-referential response file can trigger.
+    contract for any other flag it doesn't recognize. *_budget*/
+    *_output_budget* (internal, shared across the whole recursive call tree
+    via single-element lists) are the remaining count of response files this
+    call may still read (see *_MAX_RESPONSE_FILE_EXPANSIONS*) and the
+    remaining number of tokens it may still emit (see
+    *_MAX_RESPONSE_FILE_OUTPUT_TOKENS*) respectively — two independent caps,
+    since bounding file reads alone still lets one large, token-dense file
+    (near the byte cap, packed with short tokens) emit an outsized amount of
+    output within that read budget (Codex review, second round).
     """
     if _depth > _MAX_RESPONSE_FILE_DEPTH:
         return arguments
     if _budget is None:
         _budget = [_MAX_RESPONSE_FILE_EXPANSIONS]
+    if _output_budget is None:
+        _output_budget = [_MAX_RESPONSE_FILE_OUTPUT_TOKENS]
     expanded: list[str] = []
     for arg in arguments:
         if not arg.startswith("@") or len(arg) == 1:
             expanded.append(arg)
             continue
-        if _budget[0] <= 0:
+        if _budget[0] <= 0 or _output_budget[0] <= 0:
             expanded.append(arg)
             continue
         raw_path = Path(arg[1:])
@@ -282,8 +299,11 @@ def _expand_response_files(
         except ValueError:
             expanded.append(arg)
             continue
+        _output_budget[0] -= len(tokens)
         expanded.extend(
-            _expand_response_files(tokens, directory, root, _depth + 1, _budget)
+            _expand_response_files(
+                tokens, directory, root, _depth + 1, _budget, _output_budget
+            )
         )
     return expanded
 

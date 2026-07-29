@@ -364,6 +364,40 @@ class TestCompileEntry:
         # Some @loop.rsp tokens survive un-expanded once the budget runs out.
         assert any(a == "@loop.rsp" for a in entry.arguments)
 
+    def test_single_dense_response_file_output_is_bounded(
+        self, tmp_path: Path
+    ) -> None:
+        """The file-read cap alone does not bound *output size*: a single
+        response file packed with many short self-reference tokens can
+        still emit a huge amount of output within just one or two reads.
+        A near-1 MiB file packed with ~10-byte ``@loop.rsp `` tokens can
+        contain ~100k of them; with only the read-count cap, 64 reads of a
+        file that dense could still emit millions of tokens (Codex review,
+        second round). A separate cumulative *output-token* budget must cap
+        the total regardless of how few files were actually read."""
+        db_dir = tmp_path
+        loop = db_dir / "loop.rsp"
+        # Well above the ~20k output-token budget, but small enough to write
+        # quickly in a test (proving the budget -- not the byte cap -- is
+        # what stops this).
+        loop.write_text(" ".join(["@loop.rsp"] * 25_000))
+        import time
+
+        start = time.monotonic()
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@loop.rsp", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0
+        # Bounded well below the 25,000 tokens a single unbounded read would
+        # produce, let alone what further recursive expansion could reach.
+        assert len(entry.arguments) < 30_000
+
 
 # ---------------------------------------------------------------------------
 # Tests: _extract_flags
