@@ -363,11 +363,20 @@ started.**
   binaries this ADR never asked the caller to provide paths for — out of
   scope here). The implementable check is therefore coarser, at DSO-set
   granularity: suppress an unversioned, unresolved-in-set import for a
-  consumer **iff every one of that consumer's non-intra DT_NEEDED sonames
-  is on the caller-supplied `bundle_system_providers` allow-list** —
-  mirroring the shape `_detect_intra_dep_removed`'s existing
-  `extra_needed`-all-covered check already uses, just without also
-  requiring the symbol to look system-shaped. This is deliberately
+  consumer **iff that consumer has at least one non-intra `DT_NEEDED`
+  edge, and every one of them is on the caller-supplied
+  `bundle_system_providers` allow-list** — mirroring the shape
+  `_detect_intra_dep_removed`'s existing check uses **exactly**, including
+  its non-empty guard (`if extra_needed and all(...)`, not just
+  `all(...)`): `all()` over an empty list is vacuously `True` in Python, so
+  a consumer with *zero* non-intra `DT_NEEDED` edges (e.g. the sibling that
+  used to provide the symbol was itself dropped from the set, taking its
+  DT_NEEDED edge with it) would otherwise suppress unconditionally —
+  exactly the genuinely-broken intra-set reference this detector exists to
+  catch. Requiring at least one external edge before the all-covered check
+  applies closes that vacuous-truth gap; a unit test for the empty-edge
+  case (no non-intra DT_NEEDED at all, symbol genuinely unresolved) must
+  still produce the finding. This is deliberately
   all-or-nothing per consumer: if a consumer needs both an allow-listed
   `libvendor.so` and a second, undeclared external DSO, suppression does
   **not** apply and the finding still fires for every one of that
@@ -391,7 +400,11 @@ started.**
   the regression test for this round's escape-hatch correctness; (c) a
   consumer needing symbols from **both** an allow-listed DSO and a second,
   undeclared external DSO still produces the finding (the documented
-  DSO-set-granularity limitation above, not a silent false negative).
+  DSO-set-granularity limitation above, not a silent false negative);
+  (d) a consumer with **zero** non-intra `DT_NEEDED` edges (its would-be
+  provider was itself dropped from the set) still produces the finding
+  regardless of `--bundle-system-providers` — the vacuous-`all([])` guard
+  regression test.
 - **The set-level deadline (Phase 1) must reach this phase too, not stop
   after the last member scan.** Phase 1's remaining-budget threading only
   covers each artifact's `run_scan_core` call; building the resolution
@@ -463,6 +476,23 @@ started.**
   per member plus the bundle layer) before `ARTIFACT` is made optional —
   landing the optional-positional change without this branch would leave
   `--artifact-set --dry-run` broken from day one.
+  **The per-member estimate itself needs a real fix, not a reuse of
+  today's estimator as-is (ADR-056's correction).**
+  `_intrinsic_layer_estimates`/`_source_layer_estimates`
+  (`abicheck/service_scan.py`) only scale their `L0_binary` row by
+  `len(req.binaries)` — `L1_debug`/`L2_header` and every
+  `L3_build`/`L4_graph`/`L5_source` row are computed **once**, regardless
+  of set size, because they were written for a single-binary `ScanRequest`
+  and nothing scales them per member. Phase 1's `run_scan_set` runs
+  `run_scan_core` once per artifact (each with its own header parse and,
+  at `--depth build`/`source`, its own build replay), so reusing the
+  existing single-`ScanRequest` estimate for `--artifact-set --dry-run`/
+  `abi_estimate` would understate the dominant cost by roughly N× at any
+  depth beyond `binary` — the opposite of what a budget-planning estimate
+  is for. The set-aware dry-run path must sum a real per-member estimate
+  across every layer (not just `L0_binary`) plus the bundle-analysis cost
+  from Phase 2, not call the existing single-artifact estimator once and
+  multiply only what it already happens to scale.
 - `abicheck/mcp_server.py`: add `artifact_set` **and**
   `bundle_system_providers` params to `abi_scan`, same validation shape as
   CLI (ADR-043 D10 parity — land together, not as a follow-up PR). Route an

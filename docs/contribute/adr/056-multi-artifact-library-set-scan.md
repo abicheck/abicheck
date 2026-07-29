@@ -40,11 +40,19 @@ single-artifact:
   one artifact") from an earlier repeated `--binary` flag. The service layer
   enforces this explicitly: `ScanRequest.binaries: list[Path]`
   (`service_scan.py:226`) is already plural-typed, and the cost estimator
-  (`_intrinsic_layer_estimates`) already sums over `len(req.binaries)`
-  correctly — but `run_scan` (`service_scan.py:881-883`) hard-rejects
-  `len(req.binaries) != 1`. This is unfinished scaffolding, not a
-  deliberate plural-then-narrowed design: no comment, test, or ADR explains
-  why the field is plural while the guard is singular.
+  (`_intrinsic_layer_estimates`) already sums its **`L0_binary` row** over
+  `len(req.binaries)` — but `run_scan` (`service_scan.py:881-883`)
+  hard-rejects `len(req.binaries) != 1`. This is unfinished scaffolding,
+  not a deliberate plural-then-narrowed design: no comment, test, or ADR
+  explains why the field is plural while the guard is singular.
+  **Correction (checked against the live estimator, not assumed):** only
+  that one `L0_binary` row is `len(req.binaries)`-aware —
+  `L1_debug`/`L2_header` (`_intrinsic_layer_estimates`) and every
+  `L3_build`/`L4_graph`/`L5_source` row
+  (`_source_layer_estimates`) are computed **once**, independent of
+  `len(req.binaries)`. The estimator is not "already plural-aware" as a
+  whole; only its cheapest row is. See G34 Phase 1/3 for what this means
+  for `run_scan_set`'s own cost accounting.
 - The GitHub Action's bash pre-flight validator (`action/validate-inputs.sh`)
   independently enforces the same single-artifact contract for `scan mode`
   and `deps tree`/`deps compare`, added specifically after a real user
@@ -287,8 +295,9 @@ Explicitly **not** in this ADR's scope:
   release directories — not the full diff-driven 9-kind set, which
   structurally needs an old side (see D2).
 - Finishes `ScanRequest.binaries`'s already-plural typing instead of leaving
-  it as dead-end scaffolding — the cost estimator's existing
-  `len(req.binaries)`-aware code becomes correct rather than unreachable.
+  it as dead-end scaffolding — the estimator's existing `L0_binary`
+  `len(req.binaries)`-aware row becomes reachable (the other rows still
+  need the fix G34 Phase 1/3 describes to scale correctly too).
 - Reuses `bundle.py`'s existing types (`BundleSnapshot`, `ResolutionGraph`,
   `BundleFinding`) rather than inventing parallel ones for `scan`; only one
   new, narrower audit-scoped `ChangeKind` is added (D2), not a duplicate of
