@@ -239,11 +239,28 @@ _CONSTRAINT_CLAUSE_RE = re.compile(r"^(==|!=|>=|<=|>|<)?\s*(\d+(?:\.\d+){0,3})$"
 
 
 def _extract_version_token(text: str) -> str | None:
-    match = _DOTTED_VERSION_RE.search(text)
-    if match is not None:
-        return match.group()
-    match = _BARE_VERSION_RE.search(text)
-    return match.group() if match is not None else None
+    """Extract the real compiler version from a raw ``--version`` banner.
+
+    Restricted to the banner's first line: GCC/Clang always print the
+    actual version there, and every line after it is copyright/warranty
+    boilerplate that could otherwise contribute a spurious digit match.
+    Within that line, the *last* dotted match is taken, not the first: a
+    cross-compiler binding's own invoked name can itself embed a dotted
+    number ahead of the real version -- not just the bare target-triple
+    digits (``86``, ``64``) the first fix already accounted for, but a
+    genuinely dotted one, e.g. a target-triple OS version
+    (``x86_64-pc-solaris2.11-gcc (GCC) 13.2.0`` previously extracted
+    ``"2.11"`` instead of the real ``"13.2.0"``, rejecting a valid
+    ``>=13,<14`` constraint -- Codex review, fresh evidence). The real
+    version is conventionally the last token on the line, after any
+    invoked-name prefix and parenthetical package/build descriptor.
+    """
+    first_line = text.splitlines()[0] if text else ""
+    dotted_matches: list[str] = _DOTTED_VERSION_RE.findall(first_line)
+    if dotted_matches:
+        return dotted_matches[-1]
+    bare_matches: list[str] = _BARE_VERSION_RE.findall(first_line)
+    return bare_matches[-1] if bare_matches else None
 
 
 def _probe_compiler_family(metadata: dict[str, str]) -> str | None:

@@ -97,6 +97,18 @@ class TestVersionSatisfies:
         banner = "x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
         assert tp.version_satisfies(banner, ">=13,<14") is True
 
+    def test_dotted_target_os_version_in_prefix_does_not_shadow_real_version(
+        self,
+    ) -> None:
+        # Regression: a cross-compiler binding name can itself embed a
+        # dotted number ahead of the real version -- not just bare
+        # target-triple digits (the case above), but a genuinely dotted
+        # target-triple OS version. "x86_64-pc-solaris2.11-gcc" previously
+        # extracted "2.11" instead of the real "13.2.0" (Codex review,
+        # fresh evidence).
+        banner = "x86_64-pc-solaris2.11-gcc (GCC) 13.2.0"
+        assert tp.version_satisfies(banner, ">=13,<14") is True
+
     def test_no_version_number_raises(self) -> None:
         with pytest.raises(tp.ToolchainProbeError, match="no version number"):
             tp.version_satisfies("unavailable: no such tool", ">=1")
