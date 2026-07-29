@@ -1009,6 +1009,43 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["dep::A"]
 
+    def test_kept_touched_alias_suffix_guards_coincidental_dependency_suffix(
+        self,
+    ):
+        """Codex review (twenty-first round): `kept_touched_aliases` (the
+        guard that keeps a candidate's own bare-suffix spelling from
+        coincidentally matching an unrelated kept-pointing alias's name)
+        previously excluded only the literal alias key (`api::Handle`),
+        never its namespace-suffix expansion (`Handle`). A signature
+        spelling the backend's bare-dropped `Handle` -- exactly the
+        convention this module already accounts for everywhere else --
+        slipped past the guard entirely, letting an unrelated
+        `dep::Handle` retain through the coincidental collision even
+        though the alias unambiguously pointed at the kept `api::Own`."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Own",
+                    kind="struct",
+                    qualified_name="api::Own",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    qualified_name="dep::Handle",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"api::Handle": "api::Own"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Own"]
+
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
         two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle

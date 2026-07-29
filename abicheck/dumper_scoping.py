@@ -438,11 +438,20 @@ def _directly_referenced_dependency_names(
     # that points at a kept ``api::Own``) -- an alias's legitimate
     # reachability-derived contribution to a genuinely-referenced
     # candidate's spellings, below, is never subject to this exclusion.
-    kept_touched_aliases = {
-        alias
-        for alias, reached in reachable_by_alias.items()
-        if reached & kept_spellings
-    }
+    kept_touched_aliases: set[str] = set()
+    for alias, reached in reachable_by_alias.items():
+        if reached & kept_spellings:
+            kept_touched_aliases.add(alias)
+            # A real backend's namespace-dropping convention means a
+            # kept-pointing alias's own bare-suffix spelling is exactly as
+            # capable of coincidentally colliding with an unrelated
+            # candidate's own bare-suffix spelling as its literal
+            # qualified name is (Codex review, fresh evidence): the
+            # earlier guard only ever excluded the literal alias key
+            # (``api::Handle``), never its derived suffix (``Handle``),
+            # so a signature spelling the bare-dropped form let an
+            # unrelated ``dep::Handle`` slip past this guard entirely.
+            kept_touched_aliases.update(_namespace_suffix_spellings(alias)[1:])
 
     key_owners: dict[str, set[str]] = {}
     own_spellings_of: dict[int, set[str]] = {}
