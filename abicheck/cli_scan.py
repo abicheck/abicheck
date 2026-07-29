@@ -83,8 +83,11 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
     BREAKING_KINDS,
 )
 from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_compare_helpers import _warn_force_public_ignored
+from .cli_helpers_compare import _collect_force_public_symbols
 from .cli_options import (
     compile_context_options,
+    env_matrix_option,
     lang_option,
     merge_compile_config,
     policy_options,
@@ -615,6 +618,41 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
 )
 @policy_options  # ADR-049 Phase 5: --against config-surface parity with `compare`
 @scope_options  # (--policy/--policy-file/--suppress/--scope-public-headers)
+@click.option(
+    "--strict-suppressions",
+    is_flag=True,
+    default=False,
+    help="With --against: fail with exit code 1 if any --suppress rule has "
+    "expired (mirrors `compare --strict-suppressions`, ADR-049 Phase 5 §6.4).",
+)
+@click.option(
+    "--public-symbol",
+    "public_symbols",
+    multiple=True,
+    help="With --against: force a symbol (mangled or demangled name) into the "
+    "public surface even when header provenance can't see it (mirrors "
+    "`compare --public-symbol`). Repeatable. Only meaningful with "
+    "--scope-public-headers.",
+)
+@click.option(
+    "--public-symbols-list",
+    "public_symbols_list",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="With --against: file of symbols to force public (one per line; '#' "
+    "comments and blank lines ignored), merged with --public-symbol (mirrors "
+    "`compare --public-symbols-list`).",
+)
+@click.option(
+    "--pattern-verdicts/--no-pattern-verdicts",
+    "pattern_verdicts",
+    default=False,
+    help="With --against: modulate verdicts with idiom/anti-pattern evidence "
+    "(ADR-027, mirrors `compare --pattern-verdicts`): demote opaque-pointer/"
+    "PIMPL-hidden layout changes and raise breaks when an opacity/handle "
+    "guarantee is lost.",
+)
+@env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract), --against only
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -658,6 +696,11 @@ def scan_cmd(
     policy_file_path: Path | None,
     policy: str,
     scope_public_headers: bool,
+    strict_suppressions: bool,
+    public_symbols: tuple[str, ...],
+    public_symbols_list: Path | None,
+    pattern_verdicts: bool,
+    env_matrix_path: Path | None,
     lang: str,
     allow_build_query: bool,
     fmt: str,
@@ -758,8 +801,21 @@ def scan_cmd(
     # --against` invocation with none of these flags behaves exactly as
     # before.
     suppression, policy_file = _load_suppression_and_policy(
-        suppress, policy, policy_file_path
+        suppress, policy, policy_file_path, strict_suppressions=strict_suppressions
     )
+
+    # ADR-049 Phase 5 §6.4: --against also reuses `compare`'s own force-public
+    # overlay (--public-symbol/--public-symbols-list) and env-matrix
+    # (--env-matrix) config surface, both of which `compare_snapshots` already
+    # accepts as plain kwargs (`force_public_symbols`/`env_matrix`) -- no new
+    # engine capability, just CLI/service plumbing parity.
+    force_public_symbols = _collect_force_public_symbols(
+        public_symbols, public_symbols_list
+    )
+    _warn_force_public_ignored(force_public_symbols, scope_public_headers)
+    from .service import load_env_matrix
+
+    env_matrix = load_env_matrix(env_matrix_path)
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
@@ -891,6 +947,9 @@ def scan_cmd(
             policy=policy,
             policy_file=policy_file,
             scope_to_public_surface=scope_public_headers,
+            force_public_symbols=force_public_symbols,
+            pattern_verdicts=pattern_verdicts,
+            env_matrix=env_matrix,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,

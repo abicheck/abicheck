@@ -74,10 +74,21 @@ def test_baseline_is_native_library_real_json_is_not_native(tmp_path: Path) -> N
 def test_scan_exposes_against_config_surface_options() -> None:
     # ADR-049 Phase 5 §6.4: `--against` gets the same config surface as
     # `compare` (`--policy`/`--policy-file`/`--suppress`/
-    # `--scope-public-headers`), not a hardcoded strict_abi/unsuppressed/
-    # scoped-True baseline comparison.
+    # `--scope-public-headers`/`--strict-suppressions`/`--public-symbol`/
+    # `--public-symbols-list`/`--pattern-verdicts`/`--env-matrix`), not a
+    # hardcoded strict_abi/unsuppressed/scoped-True baseline comparison.
     dests = {p.name for p in scan_cmd.params}
-    assert {"suppress", "policy_file_path", "policy", "scope_public_headers"} <= dests
+    assert {
+        "suppress",
+        "policy_file_path",
+        "policy",
+        "scope_public_headers",
+        "strict_suppressions",
+        "public_symbols",
+        "public_symbols_list",
+        "pattern_verdicts",
+        "env_matrix_path",
+    } <= dests
 
 
 def test_scan_exposes_side_aware_header_options() -> None:
@@ -253,11 +264,17 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
         policy_file=None,
         extra_changes,
         scope_to_public_surface,
+        force_public_symbols=None,
+        pattern_verdicts=False,
+        env_matrix=None,
     ):
         captured["suppression"] = suppression
         captured["policy"] = policy
         captured["policy_file"] = policy_file
         captured["scope_to_public_surface"] = scope_to_public_surface
+        captured["force_public_symbols"] = force_public_symbols
+        captured["pattern_verdicts"] = pattern_verdicts
+        captured["env_matrix"] = env_matrix
         return _FakeDiff()
 
     monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
@@ -270,14 +287,21 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
 
     sentinel_suppression = object()
     sentinel_policy_file = object()
+    sentinel_env_matrix = object()
     _run(
         suppression=sentinel_suppression,
         policy="sdk_vendor",
         policy_file=sentinel_policy_file,
         scope_to_public_surface=False,
+        force_public_symbols={"foo"},
+        pattern_verdicts=True,
+        env_matrix=sentinel_env_matrix,
     )
 
     assert captured["suppression"] is sentinel_suppression
     assert captured["policy"] == "sdk_vendor"
     assert captured["policy_file"] is sentinel_policy_file
     assert captured["scope_to_public_surface"] is False
+    assert captured["force_public_symbols"] == {"foo"}
+    assert captured["pattern_verdicts"] is True
+    assert captured["env_matrix"] is sentinel_env_matrix

@@ -146,6 +146,9 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `policy` | `str` | `'strict_abi'` |
 | `policy_file` | `PolicyFile \| None` | `None` |
 | `scope_to_public_surface` | `bool` | `True` |
+| `force_public_symbols` | `set[str] \| None` | `None` |
+| `pattern_verdicts` | `bool` | `False` |
+| `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 
 ## `ScanResult`
 

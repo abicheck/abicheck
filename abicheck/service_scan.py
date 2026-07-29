@@ -44,6 +44,7 @@ from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
     from .suppression import SuppressionList
 
@@ -251,6 +252,9 @@ class ScanRequest:
     policy: str = "strict_abi"
     policy_file: PolicyFile | None = None
     scope_to_public_surface: bool = True
+    force_public_symbols: set[str] | None = None
+    pattern_verdicts: bool = False
+    env_matrix: EnvironmentMatrix | None = None
 
 
 @dataclass(frozen=True)
@@ -977,6 +981,9 @@ def run_scan(req: ScanRequest) -> ScanResult:
             policy=req.policy,
             policy_file=req.policy_file,
             scope_to_public_surface=req.scope_to_public_surface,
+            force_public_symbols=req.force_public_symbols,
+            pattern_verdicts=req.pattern_verdicts,
+            env_matrix=req.env_matrix,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

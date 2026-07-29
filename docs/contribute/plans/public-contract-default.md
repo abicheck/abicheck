@@ -1226,21 +1226,51 @@ suppression/policy/policy_file/scope_to_public_surface arguments into
 `compare_snapshots` unchanged
 (`test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots`).
 
-Still not yet done, deliberately out of scope for these two slices (each is
-real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
+**Updated (2026-07-29, same PR): a third slice landed -- the rest of
+`compare`'s policy-adjacent config surface, plus real cross-command parity
+tests.** `scan --against` now also accepts `--strict-suppressions` (reuses
+`_load_suppression_and_policy`'s existing `strict_suppressions` kwarg --
+already there for `compare`/`compare-release`, just not threaded from
+`scan_cmd` before), `--public-symbol`/`--public-symbols-list` (the
+force-public overlay, via the same `_collect_force_public_symbols`/
+`_warn_force_public_ignored` helpers `compare` uses), `--pattern-verdicts`,
+and `--env-matrix` (loaded via `service.load_env_matrix`, same as
+`compare`) -- all four were already plain kwargs `compare_snapshots` itself
+accepted (`force_public_symbols`/`pattern_verdicts`/`env_matrix`), so this
+is CLI/service plumbing parity, not new engine capability. `ScanRequest`
+gained matching fields for the Python API. New:
+`tests/test_scan_compare_parity.py` runs `compare` and `scan --against` on
+the *same* JSON snapshot pair through Click's `CliRunner` and asserts they
+agree end to end (exit code) under identical suppression/scope flags --
+unsuppressed removal breaks both (exit 4), the same suppression file makes
+both compatible (exit 0), and `--no-scope-public-headers` agrees on both
+sides too. This is deliberately narrow (one concrete suppression scenario,
+not every flag/input combination §6.4's Gate lists), but it is a real,
+executable field-for-field parity assertion between the two commands where
+none existed before.
+
+Still not yet done, deliberately out of scope for these three slices (each
+is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is
-still just the plan's own vocabulary, not live; `scan --against` still has
-no `--strict-suppressions`/`--env-matrix`/`--force-public`/
-`--pattern-verdicts` flags (`compare`'s remaining config-surface options
-beyond policy/suppress/scope). Neither a "suppression ledger" nor an
-"unsuppressible coverage ledger" exists yet as a named concept anywhere in
-the codebase (the closest prior art is the differently-named,
-differently-shaped ADR-024 audit ledger in `post_processing.py`/
-`cli_audit.py`). No field-for-field parity test between `compare` and
-`scan --against` exists yet (`tests/test_l0_export_delta.py` and the new
-kwarg-capture test above check the shared collector/config-threading in
-isolation, which is not the same as asserting the two commands' end-to-end
-output agrees on the fields §6.4 names).
+still just the plan's own vocabulary, not live. Neither a "suppression
+ledger" nor an "unsuppressible coverage ledger" exists yet as a named
+concept anywhere in the codebase (the closest prior art is the
+differently-named, differently-shaped ADR-024 audit ledger in
+`post_processing.py`/`cli_audit.py`) -- designing what either of those
+means (what gets recorded, when a suppression counts as "covering" a
+finding, what "unsuppressible" gates on) is a genuinely new piece of design
+work, not a mechanical port of an existing `compare` flag, and hasn't been
+attempted. The parity test suite above covers one concrete scenario, not
+the exhaustive binaries/snapshots/mixed-inputs/policies/packs/suppressions/
+explicit-scope matrix §6.4 names in full. `compare`'s remaining
+config-surface options that are genuinely out of scope for "shared
+authoritative comparison" (`--used-by`/`--verify-runtime`/
+`--required-symbol(s)` app-usage scoping, `--follow-deps`/`--search-path`/
+`--ld-library-path` dependency-graph traversal, `--probe-matrix` build-config
+snapshots, `--post-manifest` POC export-manifest scoping) were deliberately
+not ported to `scan --against` -- each is its own subsystem with its own
+input model that doesn't obviously map onto `scan`'s classify/tier/level
+orchestration, not a plain kwarg `compare_snapshots` already accepts.
 
 ### Phase 6 — opt-in public mode and corpus validation
 

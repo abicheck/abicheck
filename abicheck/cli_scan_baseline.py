@@ -44,6 +44,7 @@ from .buildsource.risk import RiskRules
 from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 
 if TYPE_CHECKING:
+    from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
     from .service_scan import CompileContext
     from .suppression import SuppressionList
@@ -265,6 +266,9 @@ def _run_baseline_compare(
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
     scope_to_public_surface: bool = True,
+    force_public_symbols: set[str] | None = None,
+    pattern_verdicts: bool = False,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -396,6 +400,9 @@ def _run_baseline_compare(
         policy_file=policy_file,
         extra_changes=merged_extra,
         scope_to_public_surface=scope_to_public_surface,
+        force_public_symbols=force_public_symbols,
+        pattern_verdicts=pattern_verdicts,
+        env_matrix=env_matrix,
     )
     summary: dict[str, Any] = {
         "breaking": len(diff.breaking),

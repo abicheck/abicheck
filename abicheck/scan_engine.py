@@ -79,6 +79,7 @@ from .errors import ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
+    from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
     from .service_scan import CompileContext
     from .suppression import SuppressionList
@@ -732,6 +733,9 @@ def run_scan_core(
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
     scope_to_public_surface: bool = True,
+    force_public_symbols: set[str] | None = None,
+    pattern_verdicts: bool = False,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -950,6 +954,9 @@ def run_scan_core(
                     policy=policy,
                     policy_file=policy_file,
                     scope_to_public_surface=scope_to_public_surface,
+                    force_public_symbols=force_public_symbols,
+                    pattern_verdicts=pattern_verdicts,
+                    env_matrix=env_matrix,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start
