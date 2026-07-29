@@ -161,6 +161,33 @@ class TestArtifactSetCliValidation:
         assert result.exit_code != 0
         assert "--artifact-set must not be empty" in result.output
 
+    def test_run_scan_set_artifact_set_error_becomes_usage_error(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # P2 regression (Codex review, x2): run_scan_set() propagates
+        # audit_bundle()'s ambiguous-duplicate-SONAME ArtifactSetError
+        # instead of degrading to a "successful" bundle_incomplete result
+        # -- the CLI must convert that into a click.UsageError (exit 64),
+        # not let it escape as an unhandled traceback.
+        import abicheck.service_scan as service_scan_mod
+        from abicheck.bundle import ArtifactSetError
+
+        p1 = tmp_path / "liba.so"
+        p2 = tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+
+        def _fake_run_scan_set(req):
+            raise ArtifactSetError("ambiguous duplicate SONAME provider(s)")
+
+        monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
+
+        result = runner.invoke(
+            main, ["scan", "--artifact-set", f"{p1},{p2}"]
+        )
+        assert result.exit_code != 0
+        assert "ambiguous duplicate SONAME" in result.output
+
     def test_rejects_against_with_artifact_set(
         self, runner: CliRunner, snap_a: Path
     ) -> None:
@@ -392,19 +419,25 @@ class TestRunScanSetBundleAuditDeadline:
 
 
 class TestRunScanSetAmbiguousSoname:
-    """P2 regression (Codex review): audit_bundle() rejects an ambiguous
-    duplicate-SONAME set (ArtifactSetError) -- run_scan_set must degrade to
-    an incomplete bundle section, the same as a discover_artifact_set
-    failure, rather than letting the error propagate out of an
-    already-executed multi-member scan.
+    """P2 regression (Codex review, x2): audit_bundle() rejects an
+    ambiguous duplicate-SONAME set (ArtifactSetError). Originally degraded
+    to bundle_incomplete=True the same way a discover_artifact_set failure
+    does -- but unlike that check (a redundant collision check that's
+    supposed to have already run at the CLI/MCP front door), this is the
+    *only* point a duplicate SONAME is detectable (it needs the parsed ELF
+    metadata), so degrading it let a genuinely invalid set exit 0 with the
+    cross-library audit silently skipped. run_scan_set now propagates it
+    instead, and the CLI (cli_scan._run_artifact_set) converts it to a
+    click.UsageError (exit 64) the same way discover_artifact_set's own
+    ArtifactSetError already is.
     """
 
-    def test_ambiguous_soname_marks_bundle_incomplete(
+    def test_ambiguous_soname_propagates(
         self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.bundle as bundle_mod
         from abicheck.bundle import ArtifactSetError
-        from abicheck.service import ScanRequest, ScanSetResult, run_scan_set
+        from abicheck.service import ScanRequest, run_scan_set
 
         def _fake_discover(paths, *, explicit):
             return {"liba.so": snap_a, "libb.so": snap_b}
@@ -415,13 +448,8 @@ class TestRunScanSetAmbiguousSoname:
         monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
         monkeypatch.setattr(bundle_mod, "audit_bundle", _fake_audit_bundle)
 
-        result = run_scan_set(
-            ScanRequest(binaries=[snap_a, snap_b], mode="audit")
-        )
-        assert isinstance(result, ScanSetResult)
-        assert result.bundle_incomplete is True
-        assert result.bundle_findings == []
-        assert len(result.per_artifact) == 2
+        with pytest.raises(ArtifactSetError, match="ambiguous duplicate SONAME"):
+            run_scan_set(ScanRequest(binaries=[snap_a, snap_b], mode="audit"))
 
 
 class TestRunScanSetBundleSnapshotCompleteness:

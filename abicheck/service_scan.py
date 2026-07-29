@@ -1650,22 +1650,25 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         # per-header/per-TU work), so running audit_bundle() under this
         # scope lets a real overflow raise mid-parse instead of only being
         # caught afterward.
+        #
+        # Unlike the discover_artifact_set() ArtifactSetError above (a
+        # collision check that's already supposed to have run at the
+        # CLI/MCP front door before req.binaries was even populated, so
+        # reaching it here is anomalous), audit_bundle()'s ambiguous
+        # duplicate-SONAME rejection is only detectable *here*, after
+        # actually parsing every member's ELF metadata -- there is no
+        # earlier validation step that could have caught it. Degrading to
+        # bundle_incomplete=True let a genuinely invalid artifact set exit
+        # 0 with the cross-library audit silently skipped, which a caller
+        # checking only the exit code would read as full success (P2,
+        # Codex review) -- propagate instead so the CLI surfaces it as the
+        # usage error it is (64, "bad flags/inputs" per AGENTS.md's exit
+        # code table), same as discover_artifact_set's own duplicate-name
+        # rejection already does at the CLI layer.
         with _deadline.deadline_scope(remaining):
             audit = audit_bundle(
                 libraries, bundle_system_providers=req.bundle_system_providers
             )
-    except ArtifactSetError:
-        # Ambiguous duplicate-SONAME rejection (Codex review) surfaces here
-        # the same way a discovery failure does above -- degrade to an
-        # incomplete bundle section rather than raising out of an
-        # already-executed multi-member scan.
-        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
-        return ScanSetResult(
-            verdict=verdict,
-            exit_code=exit_code,
-            per_artifact=per_artifact,
-            bundle_incomplete=True,
-        )
     except _deadline.DeadlineExceeded:
         return ScanSetResult(
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact

@@ -663,7 +663,16 @@ def _run_artifact_set(
         bundle_system_providers=bsp,
         changed_src=changed_src,
     )
-    result = run_scan_set(req)
+    try:
+        # run_scan_set()'s own audit_bundle() call can raise ArtifactSetError
+        # too (e.g. an ambiguous duplicate-SONAME set, only detectable after
+        # parsing every member's ELF metadata) -- propagated rather than
+        # degraded to a "successful" bundle_incomplete result (Codex
+        # review), surfaced here the same way discover_artifact_set's own
+        # ArtifactSetError already is above.
+        result = run_scan_set(req)
+    except ArtifactSetError as exc:
+        raise click.UsageError(str(exc)) from exc
 
     text = (
         json.dumps(result.to_dict(), indent=2)
