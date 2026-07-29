@@ -218,3 +218,9 @@ def test_scan_against_exposes_suppression_ledger_like_compare(
     assert diff["suppressed_count"] == 1
     assert diff["suppressed"][0]["symbol"] == "_Z3barv"
     assert diff["suppressed"][0]["kind"] == "func_removed"
+    # Codex review: which rule silenced it must be attributable too (falls
+    # back to the rule's `reason` since `suppress_bar` sets no `label`).
+    assert (
+        diff["suppressed"][0]["suppression_rule"]
+        == "intentionally removed, see MIGRATION.md"
+    )

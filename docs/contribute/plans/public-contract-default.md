@@ -1287,7 +1287,25 @@ independently of the existing gating-findings truncation) to
 `_baseline_finding_dicts` projector. New test
 `test_scan_against_exposes_suppression_ledger_like_compare` asserts `scan
 --against --suppress --format json` surfaces the same audit trail
-end-to-end (not just that the flag threads through in isolation).
+end-to-end (not just that the flag threads through in isolation). Also
+bumped `SCAN_SCHEMA_VERSION` to `1.4` for these additive `diff` keys (Codex
+review caught the missing bump) and pinned a test that had hardcoded the
+prior literal `"1.3"` to the live constant instead.
+
+**Updated (2026-07-29, same PR): one more Codex-caught gap in the same
+suppression ledger.** `_baseline_finding_dicts`' projection dropped
+`Change.suppression_rule` -- the ledger could show *which finding* was
+silenced but not *which `--suppress` rule* silenced it, unlike `compare`'s
+own `reporter._suppressed_change_entry`
+(`impact_assessment.decision.suppression_rule`). Fixed by having
+`_baseline_finding_dicts` add a `suppression_rule` key, but only for
+`bucket="suppressed"` entries -- the breaking/api_break/risk buckets keep
+their exact prior shape unchanged (an existing strict-equality test and two
+sibling modules, `cli_compare_release.py`/`stack_report.py`, already pin
+that shape). New assertions in both the CLI end-to-end parity test and the
+unit-level truncation test confirm the rule label (falling back to a rule's
+`reason` when it has no `label`, same as `compare`) round-trips through
+JSON.
 
 Still not yet done, deliberately out of scope for these four slices (each
 is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`

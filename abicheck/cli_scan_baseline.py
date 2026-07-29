@@ -205,19 +205,31 @@ def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, A
     Reads only duck-typed attributes (not ``DiffResult`` internals) so this
     stays safe to call against the lightweight fakes/stubs used in tests, not
     just a real ``Change``.
+
+    The ``bucket="suppressed"`` case (Codex review, PR #657) also carries
+    ``suppression_rule`` -- which ``--suppress`` rule silenced the finding
+    (``Change.suppression_rule``, set by ``checker._filter_suppressed_changes``)
+    -- mirroring `compare`'s own suppression audit trail
+    (``reporter._suppressed_change_entry``'s
+    ``impact_assessment.decision.suppression_rule``). Kept out of the other
+    (breaking/api_break/risk) buckets' dicts, which never carry a
+    ``suppression_rule`` value and whose exact shape existing tests and
+    sibling modules (``cli_compare_release.py``, ``stack_report.py``) already
+    pin.
     """
     findings = []
     for c in changes:
         kind = getattr(c, "kind", None)
-        findings.append(
-            {
-                "bucket": bucket,
-                "kind": getattr(kind, "value", str(kind)),
-                "symbol": getattr(c, "symbol", None),
-                "description": getattr(c, "description", None),
-                "source_location": getattr(c, "source_location", None),
-            }
-        )
+        entry: dict[str, Any] = {
+            "bucket": bucket,
+            "kind": getattr(kind, "value", str(kind)),
+            "symbol": getattr(c, "symbol", None),
+            "description": getattr(c, "description", None),
+            "source_location": getattr(c, "source_location", None),
+        }
+        if bucket == "suppressed":
+            entry["suppression_rule"] = getattr(c, "suppression_rule", None)
+        findings.append(entry)
     return findings
 
 

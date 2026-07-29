@@ -219,6 +219,7 @@ def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> 
             symbol=f"sym{i}",
             description=f"removed sym{i}",
             source_location=None,
+            suppression_rule=f"rule{i}",
         )
         for i in range(_MAX_BASELINE_FINDINGS + 5)
     ]
@@ -261,3 +262,6 @@ def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> 
     assert summary["suppressed_truncated"] is True
     # The (separate, unrelated) gating-findings truncation must not fire here.
     assert "findings_truncated" not in summary
+    # Codex review: which --suppress rule silenced each finding must be
+    # attributable (Change.suppression_rule), not dropped by the projection.
+    assert summary["suppressed"][0]["suppression_rule"] == "rule0"
