@@ -71,6 +71,15 @@ def test_baseline_is_native_library_real_json_is_not_native(tmp_path: Path) -> N
     assert cli_scan._baseline_is_native_library(snap) is False
 
 
+def test_scan_exposes_against_config_surface_options() -> None:
+    # ADR-049 Phase 5 §6.4: `--against` gets the same config surface as
+    # `compare` (`--policy`/`--policy-file`/`--suppress`/
+    # `--scope-public-headers`), not a hardcoded strict_abi/unsuppressed/
+    # scoped-True baseline comparison.
+    dests = {p.name for p in scan_cmd.params}
+    assert {"suppress", "policy_file_path", "policy", "scope_public_headers"} <= dests
+
+
 def test_scan_exposes_side_aware_header_options() -> None:
     # The standalone --baseline-header/--baseline-include options are gone;
     # -H/--header and -I/--include are now side-aware (ADR-040), so
@@ -217,3 +226,58 @@ def test_snapshot_baseline_does_not_warn(
     # A .json snapshot has headers baked in → reuse is harmless → no warning.
     _run(baseline=Path("old/libfoo.abi.json"))
     assert "-H old=" not in capsys.readouterr().err
+
+
+def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR-049 Phase 5 §6.4: `scan --against` reuses the same
+    # suppression/policy/scope config surface as direct `compare` --
+    # `_run_baseline_compare` must forward its own suppression/policy/
+    # policy_file/scope_to_public_surface params into `compare_snapshots`
+    # rather than the previously-hardcoded strict_abi/None/True.
+    import abicheck.cli_buildsource as cbs
+    import abicheck.service as service
+
+    captured: dict[str, object] = {}
+
+    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+        return _FakeSnap()
+
+    def fake_compare_snapshots(
+        old,
+        new,
+        suppression=None,
+        *,
+        policy="strict_abi",
+        policy_file=None,
+        extra_changes,
+        scope_to_public_surface,
+    ):
+        captured["suppression"] = suppression
+        captured["policy"] = policy
+        captured["policy_file"] = policy_file
+        captured["scope_to_public_surface"] = scope_to_public_surface
+        return _FakeDiff()
+
+    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    monkeypatch.setattr(service, "compare_snapshots", fake_compare_snapshots)
+    monkeypatch.setattr(
+        cbs,
+        "prepare_embedded_build_source",
+        lambda old, new, cm, extra, *rest: (list(extra), [], {}, None),
+    )
+
+    sentinel_suppression = object()
+    sentinel_policy_file = object()
+    _run(
+        suppression=sentinel_suppression,
+        policy="sdk_vendor",
+        policy_file=sentinel_policy_file,
+        scope_to_public_surface=False,
+    )
+
+    assert captured["suppression"] is sentinel_suppression
+    assert captured["policy"] == "sdk_vendor"
+    assert captured["policy_file"] is sentinel_policy_file
+    assert captured["scope_to_public_surface"] is False

@@ -44,7 +44,9 @@ from .buildsource.risk import RiskRules
 from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 
 if TYPE_CHECKING:
+    from .policy_file import PolicyFile
     from .service_scan import CompileContext
+    from .suppression import SuppressionList
 
 
 def _public_provenance_set(
@@ -259,6 +261,10 @@ def _run_baseline_compare(
     baseline_includes: list[Path] | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
+    suppression: SuppressionList | None = None,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+    scope_to_public_surface: bool = True,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -385,8 +391,11 @@ def _run_baseline_compare(
     diff = compare_snapshots(
         old_snap,
         new_snap,
+        suppression,
+        policy=policy,
+        policy_file=policy_file,
         extra_changes=merged_extra,
-        scope_to_public_surface=True,
+        scope_to_public_surface=scope_to_public_surface,
     )
     summary: dict[str, Any] = {
         "breaking": len(diff.breaking),
@@ -417,11 +426,8 @@ def _run_baseline_compare(
         summary["findings"] = findings
         if total_gating > _MAX_BASELINE_FINDINGS:
             summary["findings_truncated"] = True
+    from .cli_compare_helpers import _verdict_exit_code
+
     verdict = diff.verdict.value
-    if verdict == "BREAKING":
-        exit_code = 4
-    elif verdict == "API_BREAK":
-        exit_code = 2
-    else:
-        exit_code = 0
+    exit_code = _verdict_exit_code(diff.verdict)
     return verdict, exit_code, summary

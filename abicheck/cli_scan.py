@@ -87,11 +87,13 @@ from .cli_options import (
     compile_context_options,
     lang_option,
     merge_compile_config,
+    policy_options,
     resolve_compile_context,
+    scope_options,
     split_sided_paths,
     verbose_option,
 )
-from .cli_params import DEPTH_PARAM, SIDED_PATH_PARAM
+from .cli_params import DEPTH_PARAM, SIDED_PATH_PARAM, _load_suppression_and_policy
 from .cli_scan_baseline import (
     _baseline_is_native_library,  # noqa: F401 - re-export for scan tests/service_scan
     _emit_estimate,  # noqa: F401 - re-export; --estimate CLI flag removed, kept for direct callers
@@ -611,6 +613,8 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     default=None,
     help="Override the risk_rules profile (YAML).",
 )
+@policy_options  # ADR-049 Phase 5: --against config-surface parity with `compare`
+@scope_options  # (--policy/--policy-file/--suppress/--scope-public-headers)
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -650,6 +654,10 @@ def scan_cmd(
     dry_run: bool,
     crosschecks: tuple[str, ...],
     risk_rules_path: Path | None,
+    suppress: Path | None,
+    policy_file_path: Path | None,
+    policy: str,
+    scope_public_headers: bool,
     lang: str,
     allow_build_query: bool,
     fmt: str,
@@ -740,6 +748,18 @@ def scan_cmd(
     includes = includes_tuple
     binary = artifact
     baseline = against
+
+    # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
+    # loader (`_load_suppression_and_policy`) so a scan baseline comparison
+    # can be scoped/suppressed/policy-classified the same way a direct
+    # `compare` run is, instead of the previously-hardcoded
+    # policy="strict_abi"/suppression=None. A no-op (returns (None, None))
+    # when neither --suppress nor --policy-file is given, so a plain `scan
+    # --against` invocation with none of these flags behaves exactly as
+    # before.
+    suppression, policy_file = _load_suppression_and_policy(
+        suppress, policy, policy_file_path
+    )
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
@@ -867,6 +887,10 @@ def scan_cmd(
             # and that `--mode audit` uses for a binary-only lint — treating it as a
             # pin would break those best-effort paths (Codex review).
             pinned_explicit=_pinned_explicit,
+            suppression=suppression,
+            policy=policy,
+            policy_file=policy_file,
+            scope_to_public_surface=scope_public_headers,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,

@@ -44,6 +44,8 @@ from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from .policy_file import PolicyFile
+    from .suppression import SuppressionList
 
 _logger = logging.getLogger(__name__)
 
@@ -240,6 +242,15 @@ class ScanRequest:
     lang: str = "c++"
     # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
     compile: CompileContext = field(default_factory=CompileContext)
+    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4):
+    # a `baseline` comparison can be scoped/suppressed/policy-classified the
+    # same way a direct `compare` run is, instead of always using the fixed
+    # policy="strict_abi"/suppression=None/scope_to_public_surface=True the
+    # engine previously hardcoded.
+    suppression: SuppressionList | None = None
+    policy: str = "strict_abi"
+    policy_file: PolicyFile | None = None
+    scope_to_public_surface: bool = True
 
 
 @dataclass(frozen=True)
@@ -962,6 +973,10 @@ def run_scan(req: ScanRequest) -> ScanResult:
             pinned_explicit=pinned_explicit,
             compile_context=None if req.compile.is_default else req.compile,
             defer_cleanup=build_dir_cleanups,
+            suppression=req.suppression,
+            policy=req.policy,
+            policy_file=req.policy_file,
+            scope_to_public_surface=req.scope_to_public_surface,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

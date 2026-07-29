@@ -1194,25 +1194,53 @@ the existing CLI-registration SCC -- the same by-design function-local-import
 pattern every other member already uses, not a new dependency direction (see
 that allowlist's own inline comment for the reasoning).
 
-Not yet done, deliberately out of scope for this slice (each is real,
-separately-scoped Phase 5 work, not implied by this one dedup): `scan
---against` still has no `--policy`/`--policy-file`/`--suppress`/
-`--strict-suppressions`/`--scope-public-headers`/`--env-matrix`/
-`--force-public`/`--pattern-verdicts` flags at all, so it silently runs
-`policy="strict_abi"`, `suppression=None`, `scope_to_public_surface=True`
-hardcoded rather than sharing `compare`'s config surface; it also still
-derives its own exit code inline (`cli_scan_baseline.py`'s own
-BREAKING=4/API_BREAK=2 mapping) instead of reusing
-`cli_compare_helpers._verdict_exit_code`. `CompatibilityEvaluationConfig`
+**Updated (2026-07-29, same PR as the note above): a second slice landed --
+`scan --against` config-surface parity.** `scan_cmd` (`cli_scan.py`) now
+carries `@policy_options`/`@scope_options`, the exact same decorators
+`compare` uses, giving it real `--policy`/`--policy-file`/`--suppress`/
+`--scope-public-headers` flags reusing `compare`'s own
+`_load_suppression_and_policy` loader (`cli_params.py`) -- a no-op
+returning `(None, None)` when neither `--suppress` nor `--policy-file` is
+given, so a plain `scan --against` invocation with none of these flags is
+unchanged. The resulting `suppression`/`policy`/`policy_file`/
+`scope_to_public_surface` values are threaded through `run_scan_core`
+(`scan_engine.py`) into `_run_baseline_compare`'s own `compare_snapshots`
+call (`cli_scan_baseline.py`), replacing the previously-hardcoded
+`policy="strict_abi"`/`suppression=None`/`scope_to_public_surface=True`.
+`_run_baseline_compare` also now calls the same
+`cli_compare_helpers._verdict_exit_code` `compare` already uses instead of
+its own hand-rolled BREAKING=4/API_BREAK=2 inline mapping.
+`abicheck.service_scan.ScanRequest` gained matching
+`suppression`/`policy`/`policy_file`/`scope_to_public_surface` fields (all
+defaulted to the prior hardcoded behavior) so the Python API gets the same
+config surface, threaded into its own `run_scan_core` call in
+`service_scan.run_scan`. The MCP `abi_scan`/`abi_estimate` tools do **not**
+yet expose these as tool parameters -- deliberately deferred, since adding
+MCP-surface parameters needs its own generated-doc regeneration
+(`gen_mcp_reference.py`) and tool-schema review, not a drive-by extension
+of this CLI/service-layer slice. New tests: `test_scan_baseline_headers.py`
+gained a CLI param-surface check
+(`test_scan_exposes_against_config_surface_options`) and a kwarg-capture
+test asserting `_run_baseline_compare` forwards its own
+suppression/policy/policy_file/scope_to_public_surface arguments into
+`compare_snapshots` unchanged
+(`test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots`).
+
+Still not yet done, deliberately out of scope for these two slices (each is
+real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is
-still just the plan's own vocabulary, not live. Neither a "suppression
-ledger" nor an "unsuppressible coverage ledger" exists yet as a named
-concept anywhere in the codebase (the closest prior art is the differently-named,
-differently-shaped ADR-024 audit ledger in `post_processing.py`/`cli_audit.py`).
-No field-for-field parity test between `compare` and `scan --against` exists
-yet (`tests/test_l0_export_delta.py` tests the shared collector in isolation,
-which is not the same as asserting the two commands' end-to-end output
-agrees on the fields §6.4 names).
+still just the plan's own vocabulary, not live; `scan --against` still has
+no `--strict-suppressions`/`--env-matrix`/`--force-public`/
+`--pattern-verdicts` flags (`compare`'s remaining config-surface options
+beyond policy/suppress/scope). Neither a "suppression ledger" nor an
+"unsuppressible coverage ledger" exists yet as a named concept anywhere in
+the codebase (the closest prior art is the differently-named,
+differently-shaped ADR-024 audit ledger in `post_processing.py`/
+`cli_audit.py`). No field-for-field parity test between `compare` and
+`scan --against` exists yet (`tests/test_l0_export_delta.py` and the new
+kwarg-capture test above check the shared collector/config-threading in
+isolation, which is not the same as asserting the two commands' end-to-end
+output agrees on the fields §6.4 names).
 
 ### Phase 6 — opt-in public mode and corpus validation
 

@@ -32,7 +32,10 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
     ):
         return list(extra_changes), [], {}, None
 
-    def fake_compare_snapshots(old, new, *, extra_changes, scope_to_public_surface):  # noqa: ANN001
+    def fake_compare_snapshots(
+        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
+        extra_changes, scope_to_public_surface
+    ):  # noqa: ANN001
         calls.append(
             {
                 "extra_changes": list(extra_changes),
@@ -109,7 +112,10 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch
     ):
         return list(extra_changes), [], {}, None
 
-    def fake_compare_snapshots(old, new, *, extra_changes, scope_to_public_surface):  # noqa: ANN001
+    def fake_compare_snapshots(
+        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
+        extra_changes, scope_to_public_surface
+    ):  # noqa: ANN001
         if not scope_to_public_surface:
             return SimpleNamespace(
                 breaking=[advisory],
@@ -170,7 +176,10 @@ def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> Non
     ):
         return list(extra_changes), [], {}, None
 
-    def fake_compare_snapshots(old, new, *, extra_changes, scope_to_public_surface):  # noqa: ANN001
+    def fake_compare_snapshots(
+        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
+        extra_changes, scope_to_public_surface
+    ):  # noqa: ANN001
         return SimpleNamespace(
             breaking=many_breaks,
             source_breaks=[],

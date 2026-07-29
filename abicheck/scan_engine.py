@@ -79,7 +79,9 @@ from .errors import ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
+    from .policy_file import PolicyFile
     from .service_scan import CompileContext
+    from .suppression import SuppressionList
 
 
 def _is_cl_style_driver_name(path: str) -> bool:
@@ -726,6 +728,10 @@ def run_scan_core(
     compile_context: CompileContext | None = None,
     defer_cleanup: list[Callable[[], None]] | None = None,
     abi3_floor: tuple[int, int] | None = None,
+    suppression: SuppressionList | None = None,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+    scope_to_public_surface: bool = True,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -940,6 +946,10 @@ def run_scan_core(
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
                     debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                    suppression=suppression,
+                    policy=policy,
+                    policy_file=policy_file,
+                    scope_to_public_surface=scope_to_public_surface,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start
