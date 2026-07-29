@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,7 @@ from abicheck.build_context import (
     _extract_flags,
     _is_cl_style_driver,
     _safe_resolve,
+    _split_command_line_driver_aware,
     _split_windows_command_line,
     _std_sort_key,
     _try_consume_define_undef,
@@ -214,10 +216,96 @@ class TestLoadCompileDb:
         assert expanded_count == 1
         assert unexpanded_count == 9
 
+    def test_symlinked_compile_commands_json_uses_target_directory_as_jail(
+        self, tmp_path: Path
+    ) -> None:
+        """A ``compile_commands.json`` symlinked into the source tree from an
+        out-of-tree build directory (a common setup) must jail response-file
+        expansion to the *real* (target) directory the entries and their
+        ``@file`` references actually live beside -- using the symlink's own
+        parent instead would treat every response file next to the real
+        database as out-of-tree and never expand it (Codex review, seventh
+        round)."""
+        real_build_dir = tmp_path / "real_build"
+        real_build_dir.mkdir()
+        rsp = real_build_dir / "args.rsp"
+        rsp.write_text("-Iinclude/foo -DBAR=1\n")
+        db = [
+            {
+                "directory": str(real_build_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@args.rsp", "-c", "src/foo.cpp"],
+            }
+        ]
+        (real_build_dir / "compile_commands.json").write_text(json.dumps(db))
+
+        src_tree = tmp_path / "src_tree"
+        src_tree.mkdir()
+        symlink_db = src_tree / "compile_commands.json"
+        symlink_db.symlink_to(real_build_dir / "compile_commands.json")
+
+        entries = load_compile_db(symlink_db)
+        assert len(entries) == 1
+        assert "-Iinclude/foo" in entries[0].arguments
+        assert "-DBAR=1" in entries[0].arguments
+
+    def test_cache_token_budget_bounds_memory_for_distinct_over_budget_files(
+        self, tmp_path: Path
+    ) -> None:
+        """A distinct response file under the fixed per-entry output cap
+        (so not caught by the sixth-round fixed-cap check) but over the
+        shared *_cache_token_budget* must not be retained in ``_file_cache``
+        in full -- many such distinct, never-actually-used files could
+        otherwise accumulate unbounded cached memory without ever charging
+        the DB-wide output budget (Codex review, seventh round)."""
+        db_dir = tmp_path
+        rsp = db_dir / "dense.rsp"
+        rsp.write_text("-Ia -Ib -Ic -Id\n")  # 4 tokens: well under the 20k cap
+        file_cache: dict[tuple[str, bool], list[str] | None] = {}
+        cache_token_budget = [3]  # smaller than this file's 4 tokens
+        arguments = _expand_response_files(
+            ["c++", "@dense.rsp", "-c", "src/foo.cpp"],
+            db_dir,
+            _safe_resolve(db_dir) or db_dir,
+            _file_cache=file_cache,
+            _cache_token_budget=cache_token_budget,
+        )
+        assert "@dense.rsp" in arguments
+        cache_key = (str(_safe_resolve(rsp)), False)
+        assert cache_key in file_cache
+        assert file_cache[cache_key] is None
+
 
 # ---------------------------------------------------------------------------
 # Tests: CompileEntry
 # ---------------------------------------------------------------------------
+
+
+class TestSplitCommandLineDriverAware:
+    def test_command_string_cl_driver_uses_windows_quoting(self) -> None:
+        """A top-level ``command``/``arguments`` *string* naming a CL-style
+        driver must use MSVC quoting for the whole string, not just for
+        response-file bodies -- the initial os.name-based guess is wrong on
+        a non-Windows host and must be corrected once the real driver token
+        is known (CodeRabbit review)."""
+        text = 'clang-cl -I"include\\\\foo bar" -c a.cpp'
+        tokens = _split_command_line_driver_aware(text)
+        assert "-Iinclude\\\\foo bar" in tokens
+
+    def test_command_string_gnu_driver_uses_gnu_quoting(self) -> None:
+        """Same quoting-sensitive text as above, but with a GNU driver --
+        the doubled backslash collapses to one, the opposite of the
+        CL-driver case, confirming the driver (not a fixed guess) decides."""
+        text = 'clang++ -I"include\\\\foo bar" -c a.cpp'
+        tokens = _split_command_line_driver_aware(text)
+        assert "-Iinclude\\foo bar" in tokens
+
+    def test_command_string_launcher_wrapped_cl_driver(self) -> None:
+        """A launcher (ccache/sccache/…) prefix must not defeat driver
+        detection for the top-level string either."""
+        text = 'sccache clang-cl -I"include\\\\foo bar" -c a.cpp'
+        tokens = _split_command_line_driver_aware(text)
+        assert "-Iinclude\\\\foo bar" in tokens
 
 
 class TestCompileEntry:
@@ -568,6 +656,9 @@ class TestCompileEntry:
         assert cache_key in file_cache
         assert file_cache[cache_key] is None
 
+    @pytest.mark.skipif(
+        os.name == "nt", reason="symlink creation requires privileges on Windows"
+    )
     def test_symlink_loop_response_file_degrades_gracefully(
         self, tmp_path: Path
     ) -> None:
