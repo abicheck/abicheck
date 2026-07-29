@@ -1,0 +1,285 @@
+# G34 — Producer/consumer compiler-profile separation and compiler-matrix hardening
+
+**Origin:** a status-review of the toolchain-profile/compiler-matrix surface
+(`abicheck/buildsource/project_targets.py`'s `ProfileCompileSpec`,
+`abicheck/buildsource/run_plan.py`, `.github/workflows/check-project.yml`).
+Confirms the semantic model already in place (a separate scan per compiler
+profile, fail-closed aggregation, no cross-product blind sweep) is sound,
+but finds the schema conflates two independent axes into one
+`profiles.<id>` block, and finds five concrete gaps in the Actions matrix
+that block a genuine "one artifact, several supported client compilers"
+scenario today. Two narrower items from this review (compiler-version
+enforcement; a real toolchain-identity probe) were already flagged as open
+in `AGENTS.md`'s "Known gaps" under the now-reverted GCC-argument-rendering
+entry — this plan is their actionable home, generalized to the full
+producer/consumer split the same investigation surfaced.
+**Type:** Initiative plan (cross-cutting; spans
+`abicheck/buildsource/project_targets.py`, `abicheck/buildsource/run_plan.py`,
+`abicheck/cli_project.py`, `abicheck/aggregate*.py`/`abicheck/service_scan.py`
+aggregate reconciliation, `.github/workflows/check-project.yml`,
+`actions/check-target/action.yml`, `action.yml`).
+**Effort:** XL, phased over multiple PRs — see per-phase estimate below.
+**Risk:** low for additive schema fields (Phase 0); medium for Actions-matrix
+scheduling changes (Phase C: a real OS-aware runner selection touches a
+widely-used reusable workflow); medium-high for the toolchain-identity probe
+(Phase A: shells out to the resolved compiler on every gated run, needs a
+caching/skip story so it doesn't regress `dump`/`compare` latency).
+
+## Problem
+
+`profiles.<id>` today names exactly one compiler and is used for two
+different things at once:
+
+1. **Producer/artifact identity** — the compiler the library binary was
+   actually built with (affects mangling, layout, vtables, calling
+   convention, exception/RTTI model, the linked standard-library ABI).
+2. **Consumer/client identity** — the compiler a user of the library
+   compiles their own code with against the public headers (affects which
+   `#ifdef __GNUC__`/`__clang__`/`_MSC_VER` branch, which standard-library
+   ABI, which template instantiation, which `sizeof`/packing the client
+   actually sees).
+
+For the common case (library and its clients share one toolchain) folding
+both into one profile is fine and is exactly what today's
+`profiles.<id>.compile` (`ProfileCompileSpec`: `compiler_family`,
+`compiler_version`, `target`, `standard`, `stdlib`, `binding`,
+`abi_macros`, `args`) already does well. It breaks down for "one binary,
+several supported client compilers/dialects" (e.g. a `.so` built once with
+GCC 14 but contractually supporting GCC 11/14 and Clang 20 clients under
+different C++ standards and standard-library ABIs): expressing that today
+needs one synthetic profile per producer×consumer combination
+(`linux-gcc14-build-client-gcc11`, `linux-gcc14-build-client-clang20`, ...),
+each re-declaring the same candidate binary/`build-output.json` under a
+different profile id.
+
+On top of the schema gap, five concrete mechanical gaps in
+`.github/workflows/check-project.yml` block a real GCC/Clang/MSVC matrix
+from running through the shared reusable workflow at all today (each
+confirmed by reading the workflow, not asserted from a design doc):
+
+- **Every check cell runs on `runs-on: ubuntu-latest`** (hardcoded,
+  independent of a profile's own `os:`/`arch:` fields) — there is no way to
+  route an `os: windows` profile's check cell to a `windows-latest` runner
+  through this workflow.
+- **`dependency-source` is not per-cell.** `actions/check-target/action.yml`
+  and `check-project.yml` still forward only the old boolean
+  `install-deps: true|false` (`check-project.yml` ~line 839) into the root
+  Action, even though the root `action.yml` itself already supports
+  `dependency-source: conda-forge|conda-forge-gcc14|conda-forge-clang20|
+  system|none` — so a GCC-profile cell and a Clang-profile cell in the same
+  run-plan can't each provision their own matching conda environment
+  through this workflow.
+- **`ast-frontend`/`sources`/`compile-db`/`build-info`/`sysroot`/`policy`
+  stay global workflow inputs.** Only `compile_gcc_path`/`compile_gcc_options`
+  get a per-cell override (from `profiles.<id>.compile`, per the P1
+  toolchain-profile audit already landed) — a project can't express "GCC
+  profile parses via CastXML, DPC++ profile parses via the direct-clang
+  `icpx` frontend" in one `check-project.yml` call.
+- **`compiler_family`/`compiler_version` are shape-validated but not
+  enforced.** `run_plan.py`'s own docstring says so explicitly: they are
+  "deliberately not projected into any forwarded field" and a real
+  toolchain-identity probe "does not exist yet." A profile can declare
+  `compiler_family: gcc`, `compiler_version: ">=14,<15"` and have `binding`
+  resolve to a Clang 12 executable with no error — the snapshot honestly
+  records what actually ran, but nothing fails the gated check for the
+  mismatch itself.
+- **No per-finding cross-profile reconciliation.** `aggregate` (G32/ADR-050,
+  done) already produces `affected_profiles`/`incomplete_profiles`/
+  `unanalyzed_profiles` and a `verdict_by_profile` map at the *target*
+  level, but does not merge the *same logical finding* appearing in two
+  different profiles' reports into one entry with its own
+  `affected_profiles` list — this was flagged as an explicit open item
+  in `docs/contribute/plans/index.md`'s G32 row ("this is pure
+  target-level aggregation, not per-finding reconciliation") and is not a
+  new gap this review discovered, just one this plan's Phase D closes.
+
+## Goal & acceptance criteria
+
+### Phase 0 — schema: separate producer and consumer profile axes (S/M)
+
+- [ ] `.abicheck.yml` gains an explicit `consumer_profiles:` block (name
+      TBD at implementation time — candidate:
+      `profiles.<id>.consumer_compile`, sibling to the existing
+      `profiles.<id>.compile`) carrying the *same* `ProfileCompileSpec`
+      shape (`compiler_family`/`compiler_version`/`target`/`standard`/
+      `stdlib`/`binding`/`abi_macros`/`args`) but resolved and applied to
+      the **header-AST (L2) extraction step only** — the producer/artifact
+      `compile:` block continues to govern binary-facing (L0/L1) extraction
+      and the toolchain used to build the compared candidate.
+- [ ] A profile with no `consumer_compile:` overlay behaves exactly as
+      today (producer compile spec doubles as the consumer's) — this is
+      additive, not a breaking schema change; existing single-profile
+      projects need zero edits.
+- [ ] A profile *with* `consumer_compile:` runs L0/L1 extraction once
+      (producer toolchain) and L2/L4 header extraction under the consumer
+      toolchain, then merges them into one snapshot the same way an
+      existing hybrid/dual-backend snapshot already merges facts from two
+      producers (see `dumper_hybrid.merge_snapshots()` for the existing
+      merge pattern to extend, not duplicate).
+- [ ] `tests/test_project_targets.py`/`tests/test_run_plan*.py` cover:
+      producer-only profile (today's behavior, unchanged), producer +
+      consumer profile (two extraction passes merged), and a
+      shape-validation test that a `consumer_compile:` block with an
+      invalid family/version string fails the same way `compile:` already
+      does.
+
+### Phase A — toolchain-identity enforcement (L, risk: medium-high)
+
+- [ ] A real probe step resolves `compile.binding` (and, once Phase 0
+      lands, `consumer_compile.binding`) to its actual executable, runs a
+      cheap identity check (`--version`-equivalent per family, reusing the
+      existing raw-`--version`-capture plumbing already in snapshot
+      provenance — see `AbiSnapshot.ast_toolchain`/`ast_fallback_reason`)
+      and compares the result against the profile's declared
+      `compiler_family`/`compiler_version` constraint.
+- [ ] A mismatch is a **hard usage error** before any header/binary
+      extraction runs (fail fast, matching the existing "usage error ≠ ABI
+      finding" exit-code convention, `cli._EXIT_USAGE_ERROR`) — not a
+      silent snapshot annotation a caller has to notice after the fact.
+- [ ] The probe result is cached per resolved executable path + mtime/hash
+      (mirroring `snapshot_cache.py`'s existing content-hash caching
+      approach) so a repeated `check-project.yml` matrix run doesn't add a
+      subprocess invocation per cell beyond the first.
+- [ ] Unit tests stub the probe subprocess (no real compiler dependency in
+      the fast test lane); one `integration`-marked test exercises it
+      against a real installed compiler.
+
+### Phase B — per-profile AST frontend (M)
+
+- [ ] `profiles.<id>.compile.frontend` (or `consumer_compile.frontend` once
+      Phase 0 lands) accepts the same values as the global `--ast-frontend`
+      (`auto`/`castxml`/`clang`/`hybrid`), overriding the global default for
+      that profile's cell only — same precedence pattern already
+      established for `compile_gcc_path`/`compile_gcc_options` (profile
+      overlay wins over the global input, per the P1 toolchain-profile
+      audit's own comment in `check-project.yml`).
+- [ ] `run_plan.py`'s per-cell `RunPlanCell` (or equivalent) gains a
+      resolved `ast_frontend` field threaded the same way
+      `compile_gcc_path`/`compile_gcc_options` already are.
+- [ ] A fixture project with one GCC profile (castxml) and one Clang/DPC++
+      profile (direct-clang `icpx`) in the same `.abicheck.yml` produces
+      two cells that actually invoke different frontends — asserted via
+      each cell's own `run-plan.json` output, not just schema validation.
+
+### Phase C — Actions-matrix native-OS scheduling + per-cell dependency source (L)
+
+- [ ] `check-project.yml`'s check-matrix job's `runs-on:` is derived from
+      the resolved profile's `os:` field (`ubuntu-latest`/`windows-latest`/
+      `macos-latest`) instead of the current hardcoded `ubuntu-latest` —
+      this is the change with the widest blast radius in this plan (a
+      reusable workflow every project consuming `check-project.yml`
+      depends on), so it ships behind the existing `matrix.profile_id`
+      indirection with a compatibility test asserting an `os`-less profile
+      (today's default) still resolves to `ubuntu-latest` unchanged.
+- [ ] `check-project.yml`/`actions/check-target/action.yml` gain a
+      per-cell `dependency-source` input, resolved from the profile the
+      same way `compile_gcc_path`/`compile_gcc_options` already are,
+      forwarded to the root `action.yml`'s existing `dependency-source`
+      input instead of only the legacy `install-deps` boolean.
+- [ ] `docs/reference/check-target.md` and the GitHub Actions integration
+      docs (G30) document the new inputs; `tests/test_build_source_cli.py`
+      (or a dedicated new test module) covers the `os:`-to-`runs-on:`
+      resolution logic in isolation (this is plain Python string mapping,
+      testable without actually running the workflow).
+- [ ] Out of scope for this phase: an actual native `windows-latest` CI
+      lane exercising a real MSVC profile end-to-end through
+      `check-project.yml` — that needs a real fixture project and belongs
+      in G17 (real-world validation corpus) once the scheduling mechanism
+      itself lands here.
+
+### Phase D — per-finding cross-profile reconciliation (M, depends on G32)
+
+- [ ] A new aggregate stage (extending `abicheck/aggregate*.py`'s existing
+      per-profile grouping, G32/ADR-050) computes a stable per-finding
+      identity (reusing `finding_identity.py`'s tiered
+      canonical/normalized/reduced resolution, ADR-049 Phase 2 — the same
+      identity model `diff_filtering.py`'s cross-detector dedup key
+      already uses) across every profile's report for one target, and
+      emits one entry per distinct finding with its own
+      `affected_profiles`/`unaffected_profiles` lists instead of the
+      finding appearing once per profile report.
+- [ ] A finding present in every analyzed profile and one present in only
+      one profile are visibly distinguished in the aggregate JSON/Markdown
+      output (not just inferable by cross-referencing per-profile reports
+      by hand).
+- [ ] `tests/test_aggregate*.py` gains a fixture with the same finding
+      appearing (with the same reduced identity) in two profile reports
+      and a profile-specific finding appearing in only one, asserting the
+      merged/split output shape.
+
+## Design
+
+The producer/consumer split (Phase 0) is additive schema, not a rewrite:
+`ProfileCompileSpec` already carries every field a consumer overlay needs
+(`project_targets.py:663`); the new block is a second, optional instance of
+the same dataclass, resolved through the same `_compose_gcc_options`/
+binding-resolution path (`run_plan.py`) but applied only to the L2/L4
+extraction step instead of the whole cell. The toolchain-identity probe
+(Phase A) is new subprocess-probing logic but slots into the same place
+`run_plan.py`'s docstring already names as the missing piece ("checking the
+resolved executable against `compiler_family`... requires a real subprocess
+probe and is not implemented"). Phase C's `os:`-to-`runs-on:` mapping is
+pure data transformation inside `check-project.yml`'s existing matrix
+generation step (Python, not new infrastructure) followed by a matrix
+`runs-on:` expression keyed off it. Phase D reuses `finding_identity.py`
+and `diff_filtering.py`'s existing identity-resolution machinery rather
+than inventing a second one.
+
+## Files & surfaces
+
+- `abicheck/buildsource/project_targets.py` — `ProfileCompileSpec`, new
+  consumer-overlay dataclass/field, shape validation.
+- `abicheck/buildsource/run_plan.py` — per-cell resolution of the consumer
+  overlay, the toolchain-identity probe call site, per-cell
+  `ast_frontend`/`dependency_source` fields.
+- `abicheck/dumper_hybrid.py` — extend `merge_snapshots()` (or add a
+  sibling merge path) for producer-toolchain L0/L1 + consumer-toolchain
+  L2/L4 merging.
+- `abicheck/aggregate*.py` / `abicheck/finding_identity.py` /
+  `abicheck/diff_filtering.py` — Phase D's per-finding reconciliation.
+- `.github/workflows/check-project.yml`, `actions/check-target/action.yml`,
+  `action.yml` — Phase C's scheduling and per-cell `dependency-source`.
+- `docs/reference/check-target.md`, `docs/contribute/adr/047-*.md` (or a
+  new ADR if the producer/consumer split is judged architecturally
+  significant enough at implementation time — this plan doesn't presume
+  which).
+
+## Tests
+
+Covered per-phase above. No golden-file changes expected (additive schema
++ new aggregate fields, not a change to existing output shapes).
+
+## Example fixtures
+
+A new `tests/fixtures/run_plan/producer_consumer_matrix/` (sibling to the
+existing `tests/fixtures/run_plan/toolchain_matrix/`) with one producer
+profile and two consumer overlays (GCC client, Clang client) — mirroring
+the existing toolchain-matrix fixture's own disclaimer that it exercises
+config/toolchain projection, not real compiler execution; a real
+end-to-end GCC-vs-Clang-consumer example (compiled, not just projected)
+belongs in G20's example catalog once this plan's schema lands.
+
+## Effort & risk
+
+XL overall, phased as scoped per-phase above (S/M, L, M, L, M) so each
+phase is independently mergeable and independently risk-assessed rather
+than one large cross-cutting PR. Phase C carries the highest
+blast-radius risk (a widely-consumed reusable workflow); Phase A carries
+the highest correctness risk (a probe that's wrong in either direction —
+false-reject a valid toolchain, or false-accept a mismatched one — directly
+gates every project using it).
+
+## Out of scope
+
+- A real native `windows-latest` MSVC end-to-end fixture (belongs in G17
+  once Phase C's scheduling mechanism exists).
+- A full `artifact_profiles:`/`consumer_profiles:`/`compatibility_matrix:`
+  three-block schema redesign as sketched in the originating review — Phase
+  0 intentionally ships the smaller "one optional consumer overlay per
+  existing profile" version first; a fuller redesign is a candidate
+  follow-up only if Phase 0's overlay shape proves insufficient in
+  practice.
+- Vendor/accelerator frontend correctness (CUDA, OpenACC, non-DPC++ SYCL
+  toolchains) beyond what the existing direct-clang backend already
+  recognizes as clang-family — no new frontend work is implied by this
+  plan.
