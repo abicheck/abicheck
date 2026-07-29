@@ -125,20 +125,24 @@ def _frozen_mapping(m: Mapping[str, object]) -> MappingProxyType[str, object]:
 
 
 def _frozen_sorted_tuple(s: Sequence[str]) -> tuple[str, ...]:
-    """Freeze *s* into a ``str``-sorted tuple.
+    """Freeze *s* into a deduplicated, ``str``-sorted tuple.
 
     For a collection that is semantically a *set* observed during evidence
     collection (declarations found, manifests found, scope paths searched,
     type-graph node identifiers) -- not a sequence where discovery order
-    carries meaning -- two independent collectors visiting the same items
-    in a different order must still produce an equal, identically-
-    serialized result (this phase's own order-independent round-trip
-    gate). Sorting by string value, not insertion order, is what makes
-    that hold (Codex review, fresh evidence: the same order-preservation
-    gap already fixed for ``ContractEvidenceBlock.providers`` applies
-    here too).
+    or repetition count carries meaning -- two independent collectors
+    visiting the same items in a different order, or the same collector
+    observing one item through multiple traversal paths, must still
+    produce an equal, identically-serialized result (this phase's own
+    order-independent round-trip gate). Sorting by string value, not
+    insertion order, and deduplicating are both required to make that
+    hold -- sorting alone still lets repeated-observation multiplicity
+    change the tuple's length (Codex review, fresh evidence: first the
+    order-preservation gap already fixed for
+    ``ContractEvidenceBlock.providers``, then this same collection's own
+    duplicate-preservation gap).
     """
-    return tuple(sorted(_frozen_tuple(s, element_type=str)))
+    return tuple(sorted(set(_frozen_tuple(s, element_type=str))))
 
 
 def _require_version_int(value: object, *, owner: str, field_name: str) -> None:
@@ -238,11 +242,12 @@ class TypeGraphSnapshot:
             # and pushing a bespoke inner-list conversion onto every future
             # reader (Codex review, fresh evidence).
             edges.append((edge[0], edge[1]))
-        # Edges are an unordered set of graph relationships (same reasoning
-        # as ``nodes`` above) -- sort by (from, to) tuple comparison so
-        # discovery order doesn't affect equality/serialization (Codex
-        # review, fresh evidence).
-        object.__setattr__(self, "edges", tuple(sorted(edges)))
+        # Edges are an unordered, deduplicated set of graph relationships
+        # (same reasoning as ``nodes`` above) -- sort by (from, to) tuple
+        # comparison and drop duplicates so neither discovery order nor
+        # repeated-observation multiplicity affects equality/serialization
+        # (Codex review, fresh evidence).
+        object.__setattr__(self, "edges", tuple(sorted(set(edges))))
 
 
 # --------------------------------------------------------------------------

@@ -153,6 +153,17 @@ class TestTypeGraphSnapshot:
         assert g_a.nodes == ("a", "b")
         assert g_a.edges == (("a", "b"), ("y", "z"))
 
+    def test_nodes_and_edges_deduplicated(self):
+        # Regression (Codex review, fresh evidence): sorting alone still
+        # lets repeated-observation multiplicity (the same node/edge
+        # reached through multiple traversal paths) change the tuple's
+        # length; a semantic set must also drop duplicates.
+        g = TypeGraphSnapshot(
+            nodes=["a", "a", "b"], edges=[("a", "b"), ("a", "b"), ("y", "z")]
+        )
+        assert g.nodes == ("a", "b")
+        assert g.edges == (("a", "b"), ("y", "z"))
+
     def test_edge_list_with_wrong_length_rejected(self):
         with pytest.raises(TypeError):
             TypeGraphSnapshot(edges=[["a"]])
@@ -211,6 +222,11 @@ class TestEvidenceSearchRecord:
         assert rec_a.requested_scope == ("a/", "b/")
         assert rec_a.searched_scope == ("x/", "y/")
 
+    def test_requested_and_searched_scope_deduplicated(self):
+        rec = _record(requested_scope=["a/", "a/", "b/"], searched_scope=["x/", "x/"])
+        assert rec.requested_scope == ("a/", "b/")
+        assert rec.searched_scope == ("x/",)
+
     def test_optional_str_fields_accept_none(self):
         rec = _record(
             entity_class=None, entity_scope=None, domain_identity=None, reason_code=None
@@ -262,6 +278,13 @@ class TestProviderEvidenceEntry:
         assert entry_a == entry_b
         assert entry_a.declarations == ("a", "b")
         assert entry_a.manifests == ("x", "y")
+
+    def test_declarations_and_manifests_deduplicated(self):
+        entry = ProviderEvidenceEntry(
+            record=_record(), declarations=["a", "a", "b"], manifests=["x", "x"]
+        )
+        assert entry.declarations == ("a", "b")
+        assert entry.manifests == ("x",)
 
     def test_type_graph_type_checked(self):
         with pytest.raises(TypeError):
@@ -378,6 +401,13 @@ class TestDecisionReceiptBlock:
         assert receipt_a == receipt_b
         assert receipt_a.evaluated_contract_roots == ("a", "b")
         assert receipt_a.evaluated_type_closure == ("x", "y")
+
+    def test_roots_and_closure_deduplicated(self):
+        receipt = DecisionReceiptBlock(
+            evaluated_contract_roots=["a", "a", "b"], evaluated_type_closure=["x", "x"]
+        )
+        assert receipt.evaluated_contract_roots == ("a", "b")
+        assert receipt.evaluated_type_closure == ("x",)
 
     def test_relevance_by_finding_coerces_raw_values(self):
         receipt = DecisionReceiptBlock(relevance_by_finding={"f1": "IN_CONTRACT"})
