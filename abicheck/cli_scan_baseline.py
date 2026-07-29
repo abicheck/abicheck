@@ -354,36 +354,16 @@ def _run_baseline_compare(
     # the hard ELF-only removal kind keeps the L0 authority while avoiding the
     # older false-positive class where advisory cross-check findings were folded
     # into the verdict wholesale.
-    l0_hard_removals: list[Any] = []
+    #
+    # Shares abicheck.l0_export_delta.collect_l0_export_delta with
+    # cli_helpers_compare.fold_l0_hard_removals (direct `compare`) -- ADR-049
+    # Phase 5 §6.3 -- rather than each hand-copying the same
+    # resolve-symbols-only-and-diff-unscoped extraction.
+    l0_hard_removals: tuple[Any, ...] = ()
     if not symbols_only:
-        l0_old_snap = resolve_input(
-            baseline,
-            [],
-            [],
-            version="",
-            lang=lang,
-            symbols_only=True,
-        )
-        l0_new_snap = resolve_input(
-            binary,
-            [],
-            [],
-            version="",
-            lang=lang,
-            symbols_only=True,
-        )
-        l0_diff = compare_snapshots(
-            l0_old_snap,
-            l0_new_snap,
-            extra_changes=[],
-            scope_to_public_surface=False,
-        )
-        l0_hard_removals = [
-            change
-            for change in getattr(l0_diff, "breaking", ())
-            if getattr(getattr(change, "kind", None), "value", None)
-            == "func_removed_elf_only"
-        ]
+        from .l0_export_delta import collect_l0_export_delta
+
+        l0_hard_removals = collect_l0_export_delta(baseline, binary, lang)
     # Fold embedded build-info/source (L3/L4/L5) diff findings into extra_changes
     # before comparing — mirrors the compare command (Codex review). Only engage
     # when a snapshot actually carries an embedded pack; otherwise pass

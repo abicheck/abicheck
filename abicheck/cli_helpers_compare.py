@@ -657,12 +657,15 @@ def fold_l0_hard_removals(
     diff has nothing to compare it against and a real ``BREAKING`` removal
     is missed.
 
-    Mirrors the fold-in in ``cli_scan_baseline._run_baseline_compare``
-    (PR #494, locked in by ``tests/test_pr494_scan_regressions.py``):
-    re-resolve both inputs symbols-only (bypassing the header AST
-    entirely) and diff them unscoped, then fold only the hard
-    ``func_removed_elf_only`` fact back into *extra_changes* — never a
-    full advisory dump. Per ADR-028 D3 (artifact-backed evidence stays
+    Delegates the actual "resolve both inputs symbols-only and diff them
+    unscoped" extraction to :func:`abicheck.l0_export_delta.collect_l0_export_delta`
+    (ADR-049 Phase 5 §6.3) -- the same function ``cli_scan_baseline._run_baseline_compare``
+    now calls for ``scan --against`` (PR #494 originally hand-copied this
+    logic in both places, locked in by ``tests/test_pr494_scan_regressions.py``;
+    this function's own contribution beyond that shared core is only the
+    staleness check below, since only this call site re-derives paths from
+    an already-resolved snapshot that could have been read from a stale
+    pre-dumped JSON file). Per ADR-028 D3 (artifact-backed evidence stays
     authoritative), this only restores a fact the ELF layer already
     asserts; it cannot manufacture a break that isn't really there.
 
@@ -708,9 +711,6 @@ def fold_l0_hard_removals(
     set later. Size still applies unconditionally to both sides — it isn't
     epoch-gated and remains a real (if imperfect) identity signal.
     """
-    from .errors import AbicheckError
-    from .service import compare_snapshots, resolve_input
-
     old_path = getattr(old, "source_path", None)
     new_path = getattr(new, "source_path", None)
     if not old_path or not new_path:
@@ -746,33 +746,7 @@ def fold_l0_hard_removals(
     ):
         return extra_changes
 
-    # This deliberately re-resolves both sides with no headers — the point is
-    # to see what ELF/DWARF alone exports — so the "no headers provided" note
-    # `resolve_input` would otherwise log is expected, not a real input
-    # problem; swallow it rather than confuse the user with a warning about
-    # an internal probe they didn't ask for.
-    try:
-        l0_old = resolve_input(
-            Path(old_path), [], [], version="", lang=lang, symbols_only=True,
-            notify=lambda _msg: None,
-        )
-        l0_new = resolve_input(
-            Path(new_path), [], [], version="", lang=lang, symbols_only=True,
-            notify=lambda _msg: None,
-        )
-        # compare_snapshots is a thin wrapper over checker.compare — a
-        # failure there is just as much a "this best-effort probe didn't
-        # pan out" case as a resolve_input failure, so it must not escape
-        # this guard and abort the real compare (Codex/CodeRabbit review).
-        l0_diff = compare_snapshots(
-            l0_old, l0_new, extra_changes=[], scope_to_public_surface=False
-        )
-    except AbicheckError:
-        return extra_changes
-    l0_hard_removals = [
-        change
-        for change in getattr(l0_diff, "breaking", ())
-        if getattr(getattr(change, "kind", None), "value", None)
-        == "func_removed_elf_only"
-    ]
+    from .l0_export_delta import collect_l0_export_delta
+
+    l0_hard_removals = collect_l0_export_delta(Path(old_path), Path(new_path), lang)
     return [*(extra_changes or []), *l0_hard_removals]

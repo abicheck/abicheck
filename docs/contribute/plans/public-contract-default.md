@@ -1168,6 +1168,52 @@ normative stage order.
 **Gate:** field-for-field parity tests across binaries, snapshots, mixed inputs,
 policies, packs, suppressions, and explicit scope.
 
+**Updated (2026-07-29):** landed the first concrete slice of "route both
+direct compare and scan baseline compare through the same core" -- not the
+full phase, which stays open. §6.3's collector, `collect_l0_export_delta()`,
+now lives in one new leaf module, `abicheck/l0_export_delta.py`: the
+"re-resolve both sides symbols-only, diff them unscoped, and keep only the
+`func_removed_elf_only` fact" logic that recovers a hard ELF/DWARF removal a
+macro-gated header pass can hide (`examples/case97_api_depends_on_consumer_env`)
+was previously hand-copied verbatim in
+`cli_helpers_compare.fold_l0_hard_removals` (direct `compare`) and
+`cli_scan_baseline._run_baseline_compare` (`scan --against`) -- each
+docstring explicitly cross-referenced the other as its twin, and PR #494's
+own regression tests (`tests/test_pr494_scan_regressions.py`) already assumed
+they'd stay in lockstep by hand. Both call sites now call the same function;
+`fold_l0_hard_removals` keeps only the staleness check that is genuinely
+specific to it (re-deriving paths from an already-resolved snapshot that
+could have been read back from a stale pre-dumped JSON file -- `scan
+--against` already holds the real, freshly-resolved paths and has nothing to
+go stale against). New tests in `tests/test_l0_export_delta.py` cover the
+collector in isolation (resolve failure, compare failure, the exact
+`func_removed_elf_only` fold, and non-matching-kind rejection), independent
+of either call site's own staleness/scoping tests. `scripts/check_ai_readiness.py`'s
+`IMPORT_CYCLE_ALLOWLIST` gained one new member (`l0_export_delta`) joining
+the existing CLI-registration SCC -- the same by-design function-local-import
+pattern every other member already uses, not a new dependency direction (see
+that allowlist's own inline comment for the reasoning).
+
+Not yet done, deliberately out of scope for this slice (each is real,
+separately-scoped Phase 5 work, not implied by this one dedup): `scan
+--against` still has no `--policy`/`--policy-file`/`--suppress`/
+`--strict-suppressions`/`--scope-public-headers`/`--env-matrix`/
+`--force-public`/`--pattern-verdicts` flags at all, so it silently runs
+`policy="strict_abi"`, `suppression=None`, `scope_to_public_surface=True`
+hardcoded rather than sharing `compare`'s config surface; it also still
+derives its own exit code inline (`cli_scan_baseline.py`'s own
+BREAKING=4/API_BREAK=2 mapping) instead of reusing
+`cli_compare_helpers._verdict_exit_code`. `CompatibilityEvaluationConfig`
+(Phase 1) is still constructed by neither command -- "same typed config" is
+still just the plan's own vocabulary, not live. Neither a "suppression
+ledger" nor an "unsuppressible coverage ledger" exists yet as a named
+concept anywhere in the codebase (the closest prior art is the differently-named,
+differently-shaped ADR-024 audit ledger in `post_processing.py`/`cli_audit.py`).
+No field-for-field parity test between `compare` and `scan --against` exists
+yet (`tests/test_l0_export_delta.py` tests the shared collector in isolation,
+which is not the same as asserting the two commands' end-to-end output
+agrees on the fields §6.4 names).
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve
