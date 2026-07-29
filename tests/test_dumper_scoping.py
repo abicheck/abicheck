@@ -685,12 +685,15 @@ class TestDirectlyReferencedDependencyRetention:
         assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
 
     def test_long_typedef_chain_resolves_beyond_a_fixed_hop_count(self):
-        """Codex review (P2, fifth round): a chain of ten distinct alias
-        hops must still resolve to the real dependency identity -- an
-        earlier version capped expansion at a fixed 8 rounds, truncating a
-        legitimate longer chain before it ever reached the target."""
-        typedefs = {f"A{i}": f"A{i + 1}" for i in range(10)}
-        typedefs["A10"] = "std::Thing"
+        """Codex review (P2, fifth/sixth rounds): a chain of fifty distinct
+        alias hops must still resolve to the real dependency identity --
+        two successive earlier versions capped expansion at a fixed round
+        count (8, then 32), each truncating a legitimate longer chain
+        before it ever reached the target. Resolution is now via
+        pointer-doubling (`_resolve_typedef_chains`), which has no fixed
+        cap at all -- convergence is O(log(chain depth))."""
+        typedefs = {f"A{i}": f"A{i + 1}" for i in range(50)}
+        typedefs["A50"] = "std::Thing"
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
@@ -731,6 +734,30 @@ class TestDirectlyReferencedDependencyRetention:
         scope_snapshot_excluding_dependencies(snap)
         elapsed = time.monotonic() - start
         assert elapsed < 5.0, f"typedef resolution took {elapsed:.2f}s, expected < 5s"
+
+    def test_typedef_matching_stays_fast_with_many_candidates_and_typedefs(self):
+        """Codex review (sixth round): matching resolved typedef targets
+        against dependency candidates one-by-one was
+        O(dep_candidates x typedefs) -- confirmed empirically at ~5.6s for
+        3,000 candidates x 3,000 typedefs. Must stay well under that now
+        that resolved targets are scanned once via a shared reverse
+        index."""
+        import time
+
+        typedefs = {f"Alias{i}": f"target{i}" for i in range(1500)}
+        types = [_rec(f"Dep{i}", source_header=_SYSTEM_HEADER) for i in range(1500)]
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run")],
+            types=types,
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"typedef matching took {elapsed:.2f}s, expected < 5s"
 
     def test_typedef_alias_bare_suffix_spelling_resolves_dependency_record(self):
         """Self-review follow-up: a real backend can spell a typedef alias

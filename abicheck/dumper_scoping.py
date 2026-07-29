@@ -105,72 +105,62 @@ from .type_reachability import (
     _finditer_allow_nested,
     _namespace_suffix_spellings,
     _stripped_signature_spelling,
-    type_string_references_name,
 )
 
-#: Generous upper bound on typedef-alias chain depth (self-review
-#: follow-up) -- see :func:`_resolve_typedef_chain`'s docstring for why
-#: this is a small constant rather than scaling with the typedef count.
-_MAX_TYPEDEF_CHAIN_HOPS = 32
 
+def _resolve_typedef_chains(
+    typedefs: dict[str, str], pattern: re.Pattern[str] | None
+) -> dict[str, str]:
+    """Resolve every ``typedefs`` key's full expansion in one shared pass,
+    via pointer-doubling rather than per-alias chain-walking.
 
-def _resolve_typedef_chain(
-    alias: str, typedefs: dict[str, str], pattern: re.Pattern[str] | None
-) -> str:
-    """Expand every typedef-key token embedded anywhere in *alias*'s target,
-    repeatedly, until a round produces no change or repeats an
-    already-seen string -- not just a whole-string chain (``using Handle =
-    Thing; using Thing = std::Thing;``) but a typedef key embedded *inside*
-    a decorated intermediate target (``using Ptr = Handle *; using Handle =
+    Each round substitutes every whole-token typedef-key occurrence in
+    every alias's *current* text using every other alias's *current*
+    (already-doubled) resolution -- not just the raw immediate target --
+    so the effective resolved depth doubles each round: after round *k*,
+    every alias reflects up to 2^k hops of chaining. This handles both a
+    whole-string chain (``using Handle = Thing; using Thing =
+    std::Thing;``) and a typedef key embedded *inside* a decorated
+    intermediate target (``using Ptr = Handle *; using Handle =
     std::Thing;`` -- ``"Handle *"`` is not itself a typedef key, only the
-    ``"Handle"`` token within it is) (Codex review, fresh evidence: an
-    earlier version only followed a chain when the *entire* target string
-    was itself a key, missing this combination of chaining and
-    decoration). Each round substitutes every whole-token typedef-key
-    occurrence in the current text with its target via *pattern* (one
+    embedded ``"Handle"`` token is) uniformly, since substitution always
+    operates on whole tokens anywhere in the text via *pattern* (one
     compiled boundary-aware alternation over every ``typedefs`` key, from
-    :func:`abicheck.type_reachability._compile_spelling_pattern`, reused for
-    substitution rather than detection).
+    :func:`abicheck.type_reachability._compile_spelling_pattern` --
+    compiled once by the caller and reused here, not recompiled per alias:
+    an earlier version did the latter, making typedef resolution alone
+    O(typedef count^2) before any signature is even scanned, confirmed
+    empirically at ~30s for 3,000 typedefs).
 
-    *pattern* must be compiled once by the caller and passed in, not
-    recompiled per call (Codex review, fresh evidence: an earlier version
-    compiled it fresh inside this function -- called once per typedef key
-    -- making default scoping's typedef-resolution pass alone O(typedef
-    count^2) before signatures are even scanned; confirmed empirically at
-    ~30s for 3,000 typedefs, exactly the class of quadratic cost the
-    per-candidate signature-scan fix earlier in this module's history was
-    meant to eliminate).
-
-    Bounded to :data:`_MAX_TYPEDEF_CHAIN_HOPS` rounds (self-review
-    follow-up): each round only advances a linear chain by one hop (a
-    single-token string substitutes to another single token, needing
-    another round to expand *that*), so bounding by ``len(typedefs) + 1``
-    -- correct, since a chain of distinct substitutions can't legitimately
-    need more hops than there are typedefs -- still means resolving *every*
-    alias in a snapshot with a long linear typedef chain costs
-    O(typedef count^2) overall (each of N aliases independently walks up to
-    N hops), reproducing the same class of quadratic blowup the
-    per-call-pattern-recompilation fix above just eliminated (confirmed
-    empirically: resolving all aliases in a synthetic 3,000-entry linear
-    chain still took ~26s with the pattern precompiled). A real C++ typedef
-    graph is never meaningfully this deep -- alias chains beyond a handful
-    of hops don't occur in practice -- so capping at a small constant
-    generous enough for any real chain, rather than scaling with
-    ``len(typedefs)``, removes the pathological cost without truncating any
-    legitimate real-world chain (the cycle guard below still terminates a
-    self-referential or mutually-cyclic alias immediately either way).
+    An earlier per-alias walker capped expansion at a fixed hop count to
+    avoid the same O(N^2) blowup for a pathologically deep *linear* chain
+    (Codex review, fresh evidence: any fixed cap, however generous,
+    truncates a real chain deeper than it) -- pointer-doubling removes the
+    need for a cap entirely: convergence takes O(log(chain depth)) rounds
+    regardless of how deep the real chain is, and each round is O(typedef
+    count) work (one pattern scan per alias's text), for O(N log N) total
+    instead of O(N^2). A self-referential or mutually-cyclic alias simply
+    stops changing once every round's substitution reproduces the same
+    text (verified: a two-alias mutual cycle stabilizes to each alias
+    resolving to itself after two rounds) -- a safe terminal state, not an
+    infinite loop.
     """
-    text = typedefs.get(alias, alias)
-    if pattern is None:
-        return text
-    seen = {text}
-    for _ in range(_MAX_TYPEDEF_CHAIN_HOPS):
-        expanded = pattern.sub(lambda m: typedefs.get(m.group(), m.group()), text)
-        if expanded == text or expanded in seen:
+    resolved = dict(typedefs)
+    if pattern is None or not typedefs:
+        return resolved
+    max_rounds = len(typedefs).bit_length() + 1
+    for _ in range(max_rounds):
+        changed = False
+        next_resolved: dict[str, str] = {}
+        for alias, text in resolved.items():
+            expanded = pattern.sub(lambda m: resolved.get(m.group(), m.group()), text)
+            next_resolved[alias] = expanded
+            if expanded != text:
+                changed = True
+        resolved = next_resolved
+        if not changed:
             break
-        text = expanded
-        seen.add(text)
-    return text
+    return resolved
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
@@ -246,11 +236,11 @@ def _directly_referenced_dependency_names(
     (``basic_string<...>``, DWARF's own convention) -- matched via each
     candidate's stripped form too, not only its exact identity. An alias
     chain (``using Handle = Thing; using Thing = std::Thing;``) is
-    followed via :func:`_resolve_typedef_chain` before matching, and a
+    followed via :func:`_resolve_typedef_chains` before matching, and a
     *decorated* target (``using Handle = std::Thing *;`` -- the target
     string is not equal to the candidate identity, only references it as a
-    substring token) is recognized via
-    :func:`abicheck.type_reachability.type_string_references_name` rather
+    substring token) is recognized by scanning every resolved target with
+    one compiled pattern over every candidate's own matching keys, rather
     than requiring exact equality (Codex review, fresh evidence). Mirrors
     :func:`abicheck.type_reachability`'s own typedef-following. A resolved
     typedef alias also contributes its own namespace-suffix spellings (not
@@ -309,10 +299,7 @@ def _directly_referenced_dependency_names(
 
     typedefs = typedefs or {}
     typedef_key_pattern = _compile_spelling_pattern(typedefs.keys())
-    resolved_targets = {
-        alias: _resolve_typedef_chain(alias, typedefs, typedef_key_pattern)
-        for alias in typedefs
-    }
+    resolved_targets = _resolve_typedef_chains(typedefs, typedef_key_pattern)
 
     kept_spellings = {
         suffix
@@ -325,20 +312,40 @@ def _directly_referenced_dependency_names(
     }
 
     identity_of: dict[int, str] = {}
-    candidate_spellings: dict[int, set[str]] = {}
+    stripped_of: dict[int, str | None] = {}
+    # matching key (a candidate's own identity or stripped form) -> every
+    # identity it could belong to -- built once so resolved typedef targets
+    # are scanned once in total (below), not once per dependency candidate
+    # (Codex review, fresh evidence: the naive per-candidate scan over every
+    # resolved target is O(dep_candidates x typedefs), confirmed empirically
+    # at ~5.6s for 3,000 candidates x 3,000 typedefs).
+    key_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = _candidate_identity(candidate)
         stripped = _stripped_signature_spelling(identity)
         identity_of[id(candidate)] = identity
+        stripped_of[id(candidate)] = stripped
+        for key in filter(None, (identity, stripped)):
+            key_owners.setdefault(key, set()).add(identity)
+
+    identity_aliases: dict[str, set[str]] = {}
+    key_pattern = _compile_spelling_pattern(key_owners.keys())
+    if key_pattern is not None:
+        for alias, resolved in resolved_targets.items():
+            for match in _finditer_allow_nested(key_pattern, resolved):
+                for identity in key_owners[match.group()]:
+                    identity_aliases.setdefault(identity, set()).add(alias)
+
+    candidate_spellings: dict[int, set[str]] = {}
+    for candidate in dep_candidates:
+        identity = identity_of[id(candidate)]
+        stripped = stripped_of[id(candidate)]
         spellings = {identity, *_namespace_suffix_spellings(identity)}
         if stripped:
             spellings.add(stripped)
-        for alias, resolved in resolved_targets.items():
-            for key in filter(None, (identity, stripped)):
-                if resolved == key or type_string_references_name(resolved, key):
-                    spellings.add(alias)
-                    spellings.update(_namespace_suffix_spellings(alias)[1:])
-                    break
+        for alias in identity_aliases.get(identity, ()):
+            spellings.add(alias)
+            spellings.update(_namespace_suffix_spellings(alias)[1:])
         candidate_spellings[id(candidate)] = spellings
 
     spelling_owners: dict[str, set[str]] = {}
