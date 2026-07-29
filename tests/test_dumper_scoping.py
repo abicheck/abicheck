@@ -446,6 +446,35 @@ class TestDwarfAdvancedScoping:
         assert scoped.dwarf_advanced is not None
         assert set(scoped.dwarf_advanced.value_abi_traits) == {"foo"}
 
+    def test_kept_functions_bare_name_does_not_shadow_a_different_excluded_symbol(self):
+        """Codex review, fresh evidence, second round: the collision guard
+        above must key only on kept functions' own *mangled* field, not
+        their bare *name* too -- a kept C++ function named "dep" with a real,
+        different mangled key (``_ZN4mine3depEv``) must not itself shadow an
+        unrelated excluded C function genuinely keyed bare "dep": the two
+        real DWARF keys don't collide, so excluding the C function's entry
+        is still correct and must not be blocked just because a kept
+        function happens to share its bare *name* (not its real mangled
+        key) with that spelling."""
+        kept_fn = _fn("dep", mangled="_ZN4mine3depEv", source_header=_OWN_HEADER)
+        excluded_fn = _fn("dep", mangled="dep", source_header=_SYSTEM_HEADER)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[kept_fn, excluded_fn],
+            dwarf_advanced=AdvancedDwarfMetadata(
+                has_dwarf=True,
+                value_abi_traits={
+                    "_ZN4mine3depEv": "p0:nontrivial",
+                    "dep": "p0:nontrivial",
+                },
+            ),
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.dwarf_advanced is not None
+        assert set(scoped.dwarf_advanced.value_abi_traits) == {"_ZN4mine3depEv"}
+
 
 class TestCrossPlatformSystemHeaderPaths:
     """_SYSTEM_HEADER_DIRS covers more than /usr/include -- exercise each

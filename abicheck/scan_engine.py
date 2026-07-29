@@ -42,6 +42,8 @@ note through the advisories list like every other cross-cutting message.
 
 from __future__ import annotations
 
+import json
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -207,6 +209,7 @@ def _build_new_snapshot(
     defer_cleanup: list[Callable[[], None]] | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
+    include_dependencies: bool = False,
 ) -> tuple[Any, list[Path]]:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -280,7 +283,12 @@ def _build_new_snapshot(
             # "full" while a `dump`-produced --against baseline defaults to
             # "filtered", so the new comparability gate hard-fails the
             # routine "scan against a plain dump'd baseline" workflow.
-            include_dependencies=False,
+            # *include_dependencies* itself is derived from the baseline's
+            # own explicit tag when one is given (see run_scan_core's
+            # _scan_candidate_include_dependencies) so the inverse, explicit
+            # `dump --include-dependencies` baseline workflow isn't
+            # hard-broken the other way (Codex review, fresh evidence).
+            include_dependencies=include_dependencies,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
@@ -333,6 +341,37 @@ def _build_new_snapshot(
     # same include context — else the baseline side fails on dependency headers the
     # candidate resolved via the seed (Codex review).
     return snap, includes
+
+
+def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
+    """Whether the candidate's own dependency-scope filtering should match a
+    ``--against``/``--baseline`` JSON snapshot's *explicit* ``"full"`` tag.
+
+    Defaults to ``False`` (filtered, matching `dump`/`compare`'s own default)
+    -- correct for the single most common case: no baseline, a native-binary
+    baseline (which now resolves filtered too), or a JSON baseline that is
+    itself filtered/untagged. Only a JSON baseline explicitly dumped with
+    ``dump --include-dependencies`` (tagged ``"full"``) needs the candidate
+    to go unfiltered too, else the comparability gate hard-fails that
+    legitimate, if less common, inverse workflow (Codex review, fresh
+    evidence) -- and ``scan`` has no ``--include-dependencies`` flag of its
+    own to let a caller request it directly. A cheap, best-effort JSON peek
+    (not a full ``resolve_input``/dump) so this never triggers expensive
+    work merely to decide a default; any failure to read/parse falls back to
+    the filtered default.
+    """
+    if baseline is None:
+        return False
+    from .cli_scan_baseline import _baseline_is_native_library
+
+    if _baseline_is_native_library(baseline):
+        return False
+    try:
+        with open(baseline, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return bool(data.get("dependency_scope") == "full")
 
 
 def _load_exports_for_poi(path: Path | None, lang: str) -> Any | None:
@@ -816,6 +855,7 @@ def run_scan_core(
                 defer_cleanup=defer_cleanup,
                 symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
                 debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                include_dependencies=_scan_candidate_include_dependencies(baseline),
             )
     except deadline.DeadlineExceeded as exc:
         elapsed = time.monotonic() - start

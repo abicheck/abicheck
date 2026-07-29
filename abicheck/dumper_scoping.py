@@ -1107,14 +1107,19 @@ def scope_snapshot_excluding_dependencies(
     # the linker). Trusting the excluded function's bare spelling there would
     # wrongly drop the *kept* function's own real DWARF-advanced entry
     # (Codex review, fresh evidence). Any excluded mangled spelling that also
-    # names a kept function is therefore never trusted to exclude anything.
-    kept_names_and_mangled = {f.name for f in kept_functions} | {
-        f.mangled for f in kept_functions if f.mangled
-    }
+    # matches a kept function's own *mangled* field is therefore never
+    # trusted to exclude anything -- deliberately checked against
+    # kept_functions' ``mangled`` only, not their bare ``name`` too: a kept
+    # C++ function named e.g. "dep" with a real, different mangled key
+    # (``_ZN4mine3depEv``) must not itself shadow an unrelated excluded C
+    # function genuinely keyed ``"dep"`` -- their real DWARF keys don't
+    # collide, so excluding the latter is still correct and safe (a second,
+    # independent Codex review round, fresh evidence).
+    kept_mangled = {f.mangled for f in kept_functions if f.mangled}
     excluded_symbols = {
         f.mangled
         for f in excluded_functions
-        if f.mangled and f.mangled not in kept_names_and_mangled
+        if f.mangled and f.mangled not in kept_mangled
     }
     return dataclasses.replace(
         snap,

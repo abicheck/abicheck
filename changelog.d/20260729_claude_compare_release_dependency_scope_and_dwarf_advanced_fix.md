@@ -83,3 +83,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`cli_dump_helpers.py`) already derived these via a
   `_dump_manifest_header_roots` helper; moved it to `dumper_scoping.py` as
   the shared `dump_manifest_header_roots` and wired it into the wrapper too.
+- **Two more real gaps, both Codex review, fresh evidence after the most
+  recent round of fixes above**: (1) the kept-vs-excluded collision guard
+  in `dumper_scoping.py` checked an excluded mangled spelling against every
+  *kept* function's bare `name` in addition to its `mangled` field — a kept
+  C++ function named e.g. `"dep"` with a real, different mangled key
+  (`_ZN4mine3depEv`) would then wrongly shadow an unrelated excluded C
+  function genuinely keyed bare `"dep"`, whose real DWARF key doesn't
+  collide at all, letting that dependency's advanced facts leak through
+  unfiltered. The guard now checks only kept functions' own `mangled`
+  field. (2) `scan`'s candidate unconditionally defaulted to filtered
+  dependency scope, which would hard-break the inverse, legitimate
+  `--against`/`--baseline` workflow against a JSON snapshot explicitly
+  dumped with `dump --include-dependencies` (tagged `"full"`) — `scan` has
+  no `--include-dependencies` flag of its own to request that. The
+  candidate's mode is now derived from a JSON baseline's own explicit tag
+  (a cheap, best-effort peek, not a full parse) when one is given, falling
+  back to filtered for no baseline, a native-binary baseline, or an
+  untagged/filtered one.

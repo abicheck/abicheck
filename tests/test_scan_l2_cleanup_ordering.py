@@ -172,3 +172,52 @@ def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_pat
             defer_cleanup=[],
         )
     assert events == ["cleanup"]  # released despite the failure
+
+
+class TestScanCandidateIncludeDependencies:
+    """Codex review, fresh evidence: ``scan``'s candidate now defaults to
+    filtered dependency scope (matching a default ``dump`` baseline), but
+    that alone would hard-break the inverse, explicit
+    ``dump --include-dependencies`` baseline workflow -- scan has no
+    ``--include-dependencies`` flag of its own, so the candidate's mode is
+    derived from a JSON baseline's own explicit tag instead."""
+
+    def test_no_baseline_defaults_to_filtered(self):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        assert _scan_candidate_include_dependencies(None) is False
+
+    def test_native_baseline_defaults_to_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        native = tmp_path / "libfoo.so"
+        native.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        assert _scan_candidate_include_dependencies(native) is False
+
+    def test_json_baseline_tagged_full_matches_full(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text('{"dependency_scope": "full"}', encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_json_baseline_tagged_filtered_stays_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text('{"dependency_scope": "filtered"}', encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_json_baseline_with_no_tag_stays_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text("{}", encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_unreadable_json_baseline_falls_back_to_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text("not json", encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is False
