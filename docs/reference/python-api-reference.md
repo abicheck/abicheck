@@ -42,6 +42,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `env_matrix_path` | `Path \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
+| `depth` | `str \| None` | `None` |
+| `frontend_context` | `str` | `'host'` |
 
 ## `CompileContext`
 
@@ -90,6 +92,11 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `pdb` | `Path \| None` | `None` |
 | `debug_roots` | `tuple[Path, ...]` | `()` |
 | `include_dependencies` | `bool` | `True` |
+| `sources` | `Path \| None` | `None` |
+| `build_info` | `Path \| None` | `None` |
+| `dump_manifest` | `DumpManifest \| None` | `None` |
+| `compile` | `CompileContext \| None` | `None` |
+| `public_header_dirs` | `tuple[Path, ...]` | `()` |
 
 ## `LayerResult`
 

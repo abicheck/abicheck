@@ -60,6 +60,32 @@ class TestInputSpec:
         with pytest.raises(dataclasses.FrozenInstanceError):
             spec.path = Path("other.so")  # type: ignore[misc]
 
+    # ── ADR-055 D1: sources/build_info/dump_manifest/compile/public_header_dirs ──
+
+    def test_adr055_fields_default_to_none_or_empty(self):
+        spec = InputSpec.of("lib.so")
+        assert spec.sources is None
+        assert spec.build_info is None
+        assert spec.dump_manifest is None
+        assert spec.compile is None
+        assert spec.public_header_dirs == ()
+
+    def test_of_coerces_sources_and_build_info_to_path(self):
+        spec = InputSpec.of("lib.so", sources="src", build_info="build")
+        assert spec.sources == Path("src")
+        assert spec.build_info == Path("build")
+
+    def test_of_coerces_public_header_dirs(self):
+        spec = InputSpec.of("lib.so", public_header_dirs=["a", "b"])
+        assert spec.public_header_dirs == (Path("a"), Path("b"))
+
+    def test_of_passes_through_compile_and_dump_manifest(self):
+        from abicheck.compile_context import CompileContext
+
+        compile_ctx = CompileContext(sysroot=Path("/sysroot"))
+        spec = InputSpec.of("lib.so", compile=compile_ctx)
+        assert spec.compile is compile_ctx
+
 
 class TestCompareRequestDefaults:
     def test_scope_public_defaults_true(self):
@@ -78,6 +104,9 @@ class TestCompareRequestDefaults:
         assert req.force_public_symbols is None
         assert req.pattern_verdicts is False
         assert req.enable_debuginfod is False
+        # ADR-055 D1
+        assert req.depth is None
+        assert req.frontend_context == "host"
 
     def test_is_frozen(self):
         req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
@@ -178,6 +207,25 @@ class TestCompareRequestValidate:
         req = CompareRequest(
             old=InputSpec.of("a"), new=InputSpec.of("b"), policy_file_path=present
         )
+        assert req.validation_errors() == []
+
+    # ── ADR-055 D1: --depth validation ────────────────────────────────────────
+
+    @pytest.mark.parametrize("depth", ["binary", "headers", "build", "source", "BUILD"])
+    def test_supported_depths_accepted(self, depth):
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"), depth=depth)
+        assert req.validation_errors() == []
+
+    def test_unsupported_depth_rejected(self):
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"), depth="graph")
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "graph" in errors[0]
+        with pytest.raises(ValidationError, match="graph"):
+            req.validate()
+
+    def test_depth_none_is_not_validated(self):
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"), depth=None)
         assert req.validation_errors() == []
 
 

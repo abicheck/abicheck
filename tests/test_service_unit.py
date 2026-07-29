@@ -1777,6 +1777,148 @@ class TestRunCompare:
         )
 
 
+class TestCompareRequestAdr055Evidence:
+    """ADR-055 D1: CompareRequest/InputSpec's depth/sources/build_info/compile/
+    frontend_context/dump_manifest/public_header_dirs fields, wired into
+    run_compare_request via service_compare_evidence.py."""
+
+    def _make_snap_file(self, tmp_path, name, version):
+        snap = AbiSnapshot(library=name, version=version)
+        p = tmp_path / f"{name}_{version}.json"
+        save_snapshot(snap, p)
+        return p
+
+    def _spy_resolve_input(self, monkeypatch):
+        from abicheck import service as service_mod
+
+        calls: list[dict] = []
+        original_resolve = service_mod.resolve_input
+
+        def _spy(path, headers, includes, version, lang, **kwargs):
+            calls.append({"path": path, "headers": headers, **kwargs})
+            return original_resolve(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+        return calls
+
+    def test_depth_binary_clears_headers(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        old_h = tmp_path / "old.h"
+        calls = self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, headers=[old_h]),
+            new=InputSpec.of(new_p),
+            depth="binary",
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["headers"] == []
+
+    def test_public_header_dirs_unioned_into_resolve_input(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        extra_dir = tmp_path / "extra_public"
+        extra_dir.mkdir()
+        calls = self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, public_header_dirs=[extra_dir]),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert extra_dir in calls_by_path[old_p]["public_header_dirs"]
+
+    def test_dump_manifest_forwarded_to_resolve_input(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        calls = self._spy_resolve_input(monkeypatch)
+        sentinel = object()
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, dump_manifest=sentinel),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["dump_manifest"] is sentinel
+
+    def test_per_side_compile_override_wins_over_pair_compile(self, tmp_path, monkeypatch):
+        from abicheck.compile_context import CompileContext
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        calls = self._spy_resolve_input(monkeypatch)
+        side_compile = CompileContext(sysroot=Path("/custom-sysroot"))
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, compile=side_compile),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["compile"] is side_compile
+
+    def test_frontend_context_default_fills_missing_side_compile(
+        self, tmp_path, monkeypatch
+    ):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        calls = self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p),
+            new=InputSpec.of(new_p),
+            frontend_context="device",
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["compile"].frontend_context == "device"
+        assert calls_by_path[new_p]["compile"].frontend_context == "device"
+
+    def test_sources_triggers_embed_build_source(self, tmp_path, monkeypatch):
+        from abicheck import service as service_mod
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        embed_calls: list[dict] = []
+
+        def _fake_embed(snap, **kwargs):
+            embed_calls.append(kwargs)
+
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source", _fake_embed
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=src_dir),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        assert len(embed_calls) == 1
+        assert embed_calls[0]["sources"] == src_dir
+        assert embed_calls[0]["collect_mode"] != "off"
+
+    def test_no_evidence_fields_skips_embed_build_source(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+
+        embed_calls: list[dict] = []
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source",
+            lambda snap, **kwargs: embed_calls.append(kwargs),
+        )
+
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        run_compare_request(request)
+        assert embed_calls == []
+
+
 class TestDiagnosticComparisonThreading:
     """ADR-050 D2's escape hatch, threaded through every service.py
     chokepoint (rollout-risk follow-up, PR #624): checker.compare()'s

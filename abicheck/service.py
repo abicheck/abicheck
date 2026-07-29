@@ -84,6 +84,7 @@ if TYPE_CHECKING:
     from .dwarf_metadata import DwarfMetadata
     from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
+    from .service_compare_evidence import SideEvidence
     from .suppression import SuppressionList
 
 _logger = logging.getLogger(__name__)
@@ -1710,11 +1711,9 @@ def run_compare_request(
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
 
-    # Pair-wide C++20 dialect resolution (P0 fix): CompareRequest has no
-    # explicit --gcc-options equivalent today, so this is the only lever
-    # available here. Shared core (service_scan.pair_wide_cxx20_std_override)
-    # also drives the CLI compare path (cli_helpers_compare._pair_wide_dialect_override)
-    # so the policy can't drift between front-ends.
+    # Pair-wide C++20 dialect resolution (P0 fix); folded into each side's
+    # effective CompileContext below alongside ADR-055 D1's per-side
+    # `InputSpec.compile` override (service_compare_evidence.py).
     pair_compile: CompileContext | None = None
     override = pair_wide_cxx20_std_override(
         lang, request.old.headers, request.new.headers, None, ()
@@ -1723,60 +1722,59 @@ def run_compare_request(
         pair_compile = CompileContext(gcc_option_tokens=override)
 
     # request.{old,new}.headers double as the public-header set for provenance
-    # tagging — same rule as the single-pair CLI path (cli_resolve._resolve_compare_snapshots):
-    # CompareRequest has no lower-level "parse only, don't classify" mode, so a
-    # header supplied to compare is by definition the public contract. Split
-    # into files/directories before tagging (not passed through unsplit): a
-    # directory entry fingerprinted as an individual file identity corrupts
-    # compute_extraction_contract's scope_fingerprint common-root computation
-    # (see split_public_header_inputs's docstring) — this is exactly the
-    # --devel-pkg release-compare path's own header_dir umbrella, which
-    # previously made a byte-identical self-comparison spuriously raise
-    # ScopeMismatchError.
+    # tagging (same rule as cli_resolve._resolve_compare_snapshots). Split into
+    # files/directories before tagging: an unsplit directory entry corrupts
+    # compute_extraction_contract's scope_fingerprint (split_public_header_
+    # inputs's own docstring). ADR-055 D1's `InputSpec.public_header_dirs` is
+    # unioned in afterward.
     old_public_headers, old_public_header_dirs = split_public_header_inputs(
         request.old.headers
     )
     new_public_headers, new_public_header_dirs = split_public_header_inputs(
         request.new.headers
     )
+    old_public_header_dirs += list(request.old.public_header_dirs)
+    new_public_header_dirs += list(request.new.public_header_dirs)
+
+    from .cli_buildsource import embed_build_source  # ADR-055 D1
+    from .service_compare_evidence import resolve_compare_request_evidence
+
+    old_evidence, new_evidence = resolve_compare_request_evidence(request, pair_compile)
+
+    def _resolve_side(
+        side: InputSpec,
+        evidence: SideEvidence,
+        fmt: str | None,
+        public_headers: list[Path],
+        public_header_dirs: list[Path],
+    ) -> AbiSnapshot:
+        snap = resolve_input(
+            side.path,
+            evidence.headers,
+            list(side.includes),
+            side.version,
+            lang,
+            is_elf=True if fmt == "elf" else None,
+            pdb_path=side.pdb,
+            debug_roots=list(side.debug_roots) or None,
+            enable_debuginfod=request.enable_debuginfod,
+            debuginfod_url=request.debuginfod_url,
+            header_backend=header_backend,
+            compile=evidence.compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            include_dependencies=side.include_dependencies,
+            dump_manifest=side.dump_manifest,
+        )
+        if side.sources or side.build_info:
+            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode)
+        return snap
 
     def _resolve_old_side() -> AbiSnapshot:
-        return resolve_input(
-            request.old.path,
-            list(request.old.headers),
-            list(request.old.includes),
-            request.old.version,
-            lang,
-            is_elf=True if old_fmt == "elf" else None,
-            pdb_path=request.old.pdb,
-            debug_roots=list(request.old.debug_roots) or None,
-            enable_debuginfod=request.enable_debuginfod,
-            debuginfod_url=request.debuginfod_url,
-            header_backend=header_backend,
-            compile=pair_compile,
-            public_headers=old_public_headers,
-            public_header_dirs=old_public_header_dirs,
-            include_dependencies=request.old.include_dependencies,
-        )
+        return _resolve_side(request.old, old_evidence, old_fmt, old_public_headers, old_public_header_dirs)
 
     def _resolve_new_side() -> AbiSnapshot:
-        return resolve_input(
-            request.new.path,
-            list(request.new.headers),
-            list(request.new.includes),
-            request.new.version,
-            lang,
-            is_elf=True if new_fmt == "elf" else None,
-            pdb_path=request.new.pdb,
-            debug_roots=list(request.new.debug_roots) or None,
-            enable_debuginfod=request.enable_debuginfod,
-            debuginfod_url=request.debuginfod_url,
-            header_backend=header_backend,
-            compile=pair_compile,
-            public_headers=new_public_headers,
-            public_header_dirs=new_public_header_dirs,
-            include_dependencies=request.new.include_dependencies,
-        )
+        return _resolve_side(request.new, new_evidence, new_fmt, new_public_headers, new_public_header_dirs)
 
     # Old/new resolution has no data dependency on each other until they're
     # both fed into compare_snapshots() below, so run them concurrently —
