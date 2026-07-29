@@ -145,7 +145,19 @@ started.**
      `exit_code = max(step_2_exit_code, 1)`) — an evidence-contract error
      is a real problem but a lesser one than a confirmed break, matching
      that verdict's existing standalone exit code (1) in the single-artifact
-     contract.
+     contract. **`verdict` follows the same rule as `exit_code`, not left
+     implicit:** the set's `verdict` string is set to
+     `"EVIDENCE_CONTRACT_ERROR"` whenever step 2's worst compatibility
+     verdict is `NO_CHANGE`/`COMPATIBLE`/`COMPATIBLE_WITH_RISK` (i.e. the
+     error is the dominant problem in the set); when step 2 already
+     produced `API_BREAK`/`BREAKING`, `verdict` stays that stronger value
+     and `EVIDENCE_CONTRACT_ERROR`'s presence is only reflected in the
+     exit-code floor and in a per-member flag inside `per_artifact`, not by
+     overwriting a worse verdict string. Without this rule an API/MCP
+     consumer gating on `.verdict` (e.g. treating anything other than
+     `"COMPATIBLE"`-family as a problem) and a CLI/Action consumer gating
+     on `.exit_code` could reach different pass/fail conclusions for the
+     identical set.
   This precedence must be spelled out in `run_scan_set`'s own docstring and
   covered by a dedicated unit test (mixed BREAKING + budget-overflow member
   set resolves to `BUDGET_OVERFLOW`/5; mixed COMPATIBLE +
@@ -236,14 +248,22 @@ started.**
   (`_path_looks_like_elf` check, `continue`) and returns a graph built from
   whatever survived — correct for `compare-release`'s existing directory
   scan (a mixed-format release directory legitimately has non-library
-  files to skip), but wrong for an explicit `scan --artifact-set` audit: a
-  PE/Mach-O-only set, or a set whose relevant members all get silently
-  skipped, would otherwise produce a clean `bundle_verdict` even though no
-  cross-artifact audit actually ran. The generalized entry point must
-  either reject the invocation (`click.UsageError`/equivalent) when zero
-  ELF members survive filtering, or mark the bundle section of the report
-  as explicitly unsupported/incomplete (not silently absent) — never a
-  bare "no findings."
+  files to skip), but wrong for an explicit `scan --artifact-set` audit.
+  Two distinct cases, both requiring an explicit reject/mark-incomplete
+  outcome rather than a silently clean `bundle_verdict`:
+  1. **Directory form** (`--artifact-set DIR`) — zero ELF members survive
+     filtering: reject the invocation (`click.UsageError`/equivalent).
+  2. **Explicit-list form** (`--artifact-set a.so,plugin.dll,...`) — *any*
+     caller-named member is unsupported, even if others are fine. Unlike
+     the directory form (where "some files aren't libraries" is expected
+     and skipping is correct), every entry in an explicit, comma-separated
+     list was named by the user as part of the set they want audited —
+     silently dropping `plugin.dll` and reporting a clean bundle for just
+     `liba.so` would misrepresent the audit as covering the full
+     caller-declared set when it didn't. The explicit-list path must
+     reject or mark the result incomplete for *any* unsupported named
+     member, not only when the whole set collapses to zero.
+  Never a bare "no findings" for either case.
 - Add `ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` (exact name TBD),
   `default_verdict = COMPATIBLE_WITH_RISK`, registered in
   `change_registry.py` alongside ADR-023's existing 9 `bundle_*` entries.
@@ -266,7 +286,15 @@ started.**
   the same established, shipped precedent (unregistered, called directly
   from the bundle-analysis entry point) rather than the general
   `@registry.detector` convention — noted explicitly here so a future
-  reviewer doesn't read the omission as an oversight.
+  reviewer doesn't read the omission as an oversight. Confirmed against the
+  actual enforcement mechanism, not just precedent: the AI-readiness
+  `changekind-detector` check (`scripts/check_ai_readiness.py`,
+  `check_changekind_detector_crossref`) only WARNs if `ChangeKind.<NAME>`
+  never appears as a literal token anywhere in `abicheck/` outside
+  `checker_policy.py` — it does not require `@registry.detector`
+  specifically, so this kind is not silently exempt from any check; it
+  simply isn't gated on that particular decorator, the same as its 9
+  `bundle_*` siblings.
 - New audit-mode detector — **do not call `_detect_intra_dep_removed`
   directly, and do not assume extending its `system_providers` set alone is
   enough.** In the live detector, an allow-listed `extra_needed` edge only
@@ -308,6 +336,19 @@ started.**
   `--bundle-system-providers`/`bundle_system_providers` correctly
   suppresses it, including for a non-system-shaped custom symbol name —
   the regression test for this round's escape-hatch correctness.
+- **The set-level deadline (Phase 1) must reach this phase too, not stop
+  after the last member scan.** Phase 1's remaining-budget threading only
+  covers each artifact's `run_scan_core` call; building the resolution
+  graph and running the new audit detector over a large-symbol bundle
+  happens *after* the last member finishes, with no deadline check of its
+  own — a set could exhaust its whole advertised `--budget` on N member
+  scans and then keep running an unbounded amount of extra time in bundle
+  construction/detection before `run_scan_set` returns. `build_bundle_snapshot`/
+  the new audit detector must accept the same set-level deadline
+  (remaining budget after the last member scan) and raise the existing
+  budget-overflow condition if exceeded, so `ScanSetResult` can end up
+  `BUDGET_OVERFLOW` from bundle-phase work too, not only from a member
+  scan.
 - **Not started.**
 
 ### Phase 3 — CLI + MCP surface
@@ -336,6 +377,17 @@ started.**
   (Phase 1) instead of the existing singular `run_scan_subprocess`, so the
   MCP tool timeout still terminates the process tree for a hung
   multi-artifact scan.
+  **`binary_path` must become optional in the same change.** The live
+  `abi_scan(binary_path: str, ...)` (`abicheck/mcp_server.py`) declares
+  `binary_path` with no default, so it is required in the generated MCP
+  tool schema — an `artifact_set`-only call would be rejected by MCP's own
+  schema validation before the tool body's XOR check ever runs. Make
+  `binary_path: str | None = None` and enforce, inside the tool body, that
+  exactly one of `binary_path`/`artifact_set` is given and that `against`
+  is rejected together with `artifact_set` — the same three-way validation
+  `cli_scan.py`'s CLI flags enforce (Phase 3's CLI bullet above), mirrored
+  on the MCP side rather than assumed to follow from "same validation
+  shape as CLI" alone.
 - `action.yml` (repo-root composite Action manifest — not under `action/`;
   `action/` holds the shell implementation only) + `action/run.sh` +
   `action/validate-inputs.sh`: the
@@ -462,16 +514,33 @@ stale — this is a hard requirement, not optional polish.
 
 ## Tests
 
-- `tests/test_scan_estimate.py` — updated rejection test + new
-  plural-acceptance regression test (Phase 1).
+- `tests/test_scan_estimate.py::test_run_scan_rejects_multiple_binaries` —
+  **stays unchanged** (Phase 1: `run_scan` itself keeps rejecting a
+  multi-item `binaries` list; only the new `run_scan_set` accepts them).
+  New, separate acceptance test for `run_scan_set` with a multi-item list
+  (Phase 1).
 - `tests/test_bundle.py` — extended for the new audit-mode entry point
   (Phase 2), alongside its existing `compare`-side coverage.
 - `tests/test_scan_artifact_set.py` (new) — CLI/service end-to-end for
   `scan --artifact-set` (Phase 1-4 combined).
 - `tests/test_cli_root_surface.py` — flag-level surface assertion updated
   (Phase 3).
-- `tests/test_mcp_*` — `abi_scan`'s new `artifact_set` param covered
-  alongside existing `abi_scan` tests (Phase 3).
+- `tests/test_mcp_*` — `abi_scan`'s new `artifact_set`/
+  `bundle_system_providers` params (and `binary_path` becoming optional)
+  covered alongside existing `abi_scan` tests (Phase 3).
+- **Action tests (Phase 3) — currently missing from this plan, added
+  here.** `validate-inputs.sh` and `run.sh` deliberately duplicate input
+  validation (`action/AGENTS.md`) and must stay in sync; a bare code
+  change to either without test coverage is exactly the drift that
+  duplication risks. Add: `tests/test_action_validate_inputs.py` coverage
+  for the new `new-library-set`/`bundle-system-providers` inputs'
+  mutual-exclusion/XOR validation (mirroring the CLI-side checks, Phase 3
+  above); and a `run.sh`/composite-Action test confirming
+  `new-library-set` and `bundle-system-providers` actually reach
+  `--artifact-set`/`--bundle-system-providers` on the resulting CLI
+  invocation, for **both** `mode: scan` and `mode: compare` (per the
+  earlier-round correction that `bundle-system-providers` must forward in
+  both modes, not just the new scan branch).
 
 ## Example fixtures
 
@@ -479,6 +548,16 @@ At least one two-library audit-mode case (no old side, one intra-bundle
 finding — e.g. a sibling importing a symbol the set no longer provides
 anywhere), following ADR-023's own example-case obligations for its
 `compare`-side bundle findings.
+
+## Changelog
+
+This plan touches `abicheck/**/*.py` (`service_scan.py`, `bundle.py`,
+`cli_scan.py`, `mcp_server.py`, `service.py`) across every phase, so per
+`AGENTS.md`'s Conventions section a `changelog.d/` fragment (`scriv
+create`, `### Added` for the new `--artifact-set`/`scan` capability) is
+required in the same PR — CI's `changelog-check.yml` rejects a PR touching
+those paths without one. Land it with whichever phase first touches
+`abicheck/**/*.py` (Phase 1), not deferred to the last phase.
 
 ## Effort & risk
 
