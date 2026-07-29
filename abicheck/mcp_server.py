@@ -31,7 +31,7 @@ import logging
 import platform
 import sys
 import time as _time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -529,6 +529,53 @@ def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
     }
     _add_contract_evaluation_fields(entry, c)
     return entry
+
+
+def _stamp_scoped_only_contract_evaluation(
+    changes: Sequence[Any], old_snap: Any, new_snap: Any
+) -> None:
+    """Stamp ADR-049 Phase 3's shadow contract-relevance decision onto
+    *changes* synthesized *after* ``compare_snapshots`` already ran.
+
+    ``used_by``/``required_symbols`` scoping
+    (``appcompat.scope_diff_to_app``/``scope_diff_to_required_symbols``) can
+    produce fresh ``Change`` objects (e.g. a synthetic
+    ``consumer_required_symbol_removed`` or a PE ordinal-retarget finding)
+    that were never part of ``result.changes``/``pp_ctx.out_of_surface`` --
+    the only two collections ``checker._apply_contract_evaluation_shadow``
+    stamps *inside* ``compare()`` itself. Without this, a scoped-only
+    finding folded into the top-level ``changes`` array (see the
+    ``scoped_only_changes`` loop below) stayed permanently unstamped even
+    when the caller opted into ``contract_evaluation=True`` -- unlike an
+    ordinary ``result.changes`` entry, which ``_mcp_change_entry`` already
+    serializes correctly once stamped (Codex review, fresh evidence: this
+    is a distinct gap from the top-level-array one, since these findings
+    follow an entirely separate, post-comparison path).
+
+    Mirrors ``_apply_contract_evaluation_shadow``'s own mode selection:
+    ``abi_compare`` never overrides ``scope_to_public_surface`` (always
+    ``compare_snapshots``'s default, ``True``), so this always evaluates
+    under ``ContractMode.PUBLIC``. A change that already carries a
+    ``contract_relevance`` (reused from ``result.changes`` rather than
+    freshly synthesized) is left untouched -- evaluation is idempotent in
+    principle, but skipping is cheaper and avoids relying on that.
+    """
+    from .contract_evaluation import evaluate_change_contract_relevance
+    from .contract_relevance_types import ContractMode
+    from .surface import compute_public_surface
+
+    unstamped = [c for c in changes if getattr(c, "contract_relevance", None) is None]
+    if not unstamped:
+        return
+    surf_old = compute_public_surface(old_snap)
+    surf_new = compute_public_surface(new_snap)
+    for c in unstamped:
+        decision = evaluate_change_contract_relevance(
+            c, surf_old, surf_new, mode=ContractMode.PUBLIC
+        )
+        c.contract_relevance = decision.relevance
+        c.contract_reason_code = decision.reason_code
+        c.contract_assurance = decision.assurance
 
 
 # ---------------------------------------------------------------------------
@@ -1176,7 +1223,10 @@ def abi_compare(
             # mirrors the identical fold-in in
             # cli_compare_helpers._fold_scoped_compat_into_text).
             existing_ids = {_finding_id(c) for c in result.changes}
-            for c in getattr(result, "scoped_only_changes", ()) or ():
+            scoped_only = getattr(result, "scoped_only_changes", ()) or ()
+            if contract_evaluation:
+                _stamp_scoped_only_contract_evaluation(scoped_only, old_snap, new_snap)
+            for c in scoped_only:
                 if _finding_id(c) not in existing_ids:
                     response["changes"].append(_mcp_change_entry(c, active_policy))
             from .severity import missing_contract_exit_code

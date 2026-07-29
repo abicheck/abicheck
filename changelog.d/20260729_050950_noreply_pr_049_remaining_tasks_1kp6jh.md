@@ -55,14 +55,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   `--policy-file`.
 
 -->
+<!--
 ### Fixed
 
-- **Pin `mcp[cli]<2.0.0`** — `mcp` 2.0.0 (released 2026-07-29) dropped
-  `mcp.server.fastmcp` entirely (`ModuleNotFoundError` in a clean install),
-  so the previously-unbounded `mcp[cli]>=1.2.0` requirement let
-  `pip install abicheck[mcp]` (and CI's `pip install -e ".[dev,mcp]"`)
-  silently start installing a version that can't import `mcp_server.py`.
+- **Short bold summary** — the rest of the sentence: what changed, for
+  whom, and why it matters. Backtick identifiers like `ChangeKind` or
+  `--policy-file`.
 
+-->
 <!--
 ### Performance
 

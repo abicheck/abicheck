@@ -1647,6 +1647,56 @@ class TestAbiCompare:
         report_kinds = [c["kind"] for c in data["report"]["changes"]]
         assert "pe_ordinal_retargeted" in report_kinds
 
+    def test_used_by_scoped_only_change_gets_contract_evaluation_too(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): a scoped-only Change
+        # synthesized by scope_diff_to_app *after* compare_snapshots already
+        # ran was never part of the collections compare()'s own shadow
+        # evaluator stamps -- so it stayed permanently unstamped even with
+        # contract_evaluation=True, unlike an ordinary result.changes entry.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0")
+        new = _make_snapshot("2.0")
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5", description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+        assert scoped_only.contract_relevance is None
+
+        def _scoped_for(*_args, **_kwargs):
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old_p), new_lib_path=str(new_p),
+                required_symbols={"foo"}, required_symbol_count=1,
+                breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
+            )
+
+        from abicheck import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input",
+            MagicMock(side_effect=[old, new]),
+        )
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        scoped_entries = [c for c in data["changes"] if c["kind"] == "pe_ordinal_retargeted"]
+        assert scoped_entries
+        assert all("contract_relevance" in c for c in scoped_entries)
+
     def test_used_by_root_cause_markdown_report_does_not_duplicate_scoped_finding(
         self, tmp_path: Path, monkeypatch
     ):
