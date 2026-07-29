@@ -16,13 +16,22 @@
 """Toolchain-identity enforcement (G34 Phase A).
 
 Validates that a ``profiles.<id>.compile``/``consumer_compile`` overlay's
-declared ``compiler_family``/``compiler_version`` actually match the real
-executable its ``binding`` resolves to, via a *trusted* toolchain-bindings
-file (:mod:`.toolchain_bindings`) — the same trust boundary that module
-documents: an auto-discovered ``.abicheck.yml`` may declare a logical binding
-id and a family/version constraint, but never a raw executable path, so the
-real probe only ever runs against a path the bindings file (an explicit
-``--config``/CI-managed source) actually names.
+declared ``compiler_family``/``compiler_version``/``target`` actually match
+the real executable its ``binding`` resolves to, via a *trusted*
+toolchain-bindings file (:mod:`.toolchain_bindings`) — the same trust
+boundary that module documents: an auto-discovered ``.abicheck.yml`` may
+declare a logical binding id and a family/version/target constraint, but
+never a raw executable path, so the real probe only ever runs against a
+path the bindings file (an explicit ``--config``/CI-managed source)
+actually names. A resolved binding whose probe fails outright (wrong
+format, not executable, times out) is reported as a probe error rather than
+silently falling through to a basename-only family guess — an unusable
+tool is not the same as a tool with a matching identity. ``target`` is
+checked coarsely (leading architecture component only, with a small
+alias table for ``amd64``/``arm64``-style spellings) rather than a full
+triple string match, since vendor/OS component spelling legitimately
+differs between a `--target=` value and a `-dumpmachine` probe for the
+same real toolchain.
 
 Reuses :mod:`abicheck.dumper_toolchain`'s existing, cached, bounded
 ``--version``-capture plumbing (:func:`~abicheck.dumper_toolchain._tool_identity_metadata`)
@@ -70,6 +79,22 @@ _FAMILY_ALIASES: dict[str, str] = {
 #: Family spellings this module deliberately never probes — see module
 #: docstring. Checked against the *declared* ``compiler_family`` value.
 _UNPROBED_FAMILIES: frozenset[str] = frozenset({"msvc", "cl", "cl.exe"})
+
+#: Common alternate spellings for a target triple's leading architecture
+#: component, so ``target: amd64-...``/``arm64-...`` (Windows-flavored
+#: spellings) don't false-positive against a GNU-triple probe's
+#: ``x86_64``/``aarch64``.
+_ARCH_ALIASES: dict[str, str] = {
+    "amd64": "x86_64",
+    "x64": "x86_64",
+    "arm64": "aarch64",
+}
+
+
+def _normalize_arch(arch: str) -> str:
+    arch = arch.strip().lower()
+    return _ARCH_ALIASES.get(arch, arch)
+
 
 #: A dotted version number (2-4 components) is preferred over a bare one:
 #: a cross-compiler binding's own name (e.g. ``x86_64-linux-gnu-gcc-13``,
@@ -216,7 +241,8 @@ def _check_one_overlay(
     declared_version = (
         getattr(compile_spec, "compiler_version", "") if compile_spec else ""
     )
-    if not binding_id or not (declared_family or declared_version):
+    declared_target = getattr(compile_spec, "target", "") if compile_spec else ""
+    if not binding_id or not (declared_family or declared_version or declared_target):
         return []
     if declared_family.strip().lower() in _UNPROBED_FAMILIES:
         return []
@@ -227,10 +253,21 @@ def _check_one_overlay(
 
     where = f"profiles.{profile_id}.{overlay_key}"
     metadata = _tool_identity_metadata(path)
-    if "error" in metadata:
+    version_text = metadata.get("version", "")
+    if "error" in metadata or version_text.startswith("unavailable:"):
+        # A regular file that exists but can't actually run (wrong format,
+        # not executable, timed out) reports its failure inside `version`,
+        # not `error` -- dumper_toolchain._tool_version_output() swallows
+        # OSError/TimeoutExpired internally rather than raising them, so
+        # _tool_identity_metadata()'s own try/except never sees it. Left
+        # unchecked, a stale binding merely *named* like a real compiler
+        # (e.g. "gcc") would still pass family matching on basename alone,
+        # reporting successful validation for a tool that cannot execute at
+        # all (Codex review, fresh evidence).
+        reason = metadata.get("error") or version_text
         return [
             f"{where}: toolchain binding {binding_id!r} (resolved to {path!r}) "
-            f"could not be probed: {metadata['error']}"
+            f"could not be probed: {reason}"
         ]
 
     errors: list[str] = []
@@ -256,6 +293,18 @@ def _check_one_overlay(
                     f"{where}.compiler_version declares {declared_version!r} but "
                     f"toolchain binding {binding_id!r} ({path!r}) reported version "
                     f"output {metadata.get('version', '')!r}, which does not satisfy it"
+                )
+    if declared_target:
+        probed_triple = metadata.get("target_triple")
+        if probed_triple:
+            declared_arch = _normalize_arch(declared_target.split("-", 1)[0])
+            probed_arch = _normalize_arch(probed_triple.split("-", 1)[0])
+            if declared_arch and probed_arch and declared_arch != probed_arch:
+                errors.append(
+                    f"{where}.target declares {declared_target!r} (architecture "
+                    f"{declared_arch!r}) but toolchain binding {binding_id!r} "
+                    f"({path!r}) resolved to target triple {probed_triple!r} "
+                    f"(architecture {probed_arch!r})"
                 )
     return errors
 

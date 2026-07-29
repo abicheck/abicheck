@@ -152,6 +152,7 @@ class TestProbeCompilerFamily:
 class _FakeCompileSpec:
     compiler_family: str = ""
     compiler_version: str = ""
+    target: str = ""
     binding: str = ""
 
 
@@ -318,6 +319,128 @@ class TestCheckProfileToolchainIdentity:
         errors = tp.check_profile_toolchain_identity(profiles, bf)
         assert len(errors) == 1
         assert "could not be probed" in errors[0]
+
+    def test_unavailable_version_capture_is_reported_as_a_probe_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: dumper_toolchain._tool_version_output() swallows a
+        # failed --version invocation (wrong format, not executable, timed
+        # out) into the "version" string itself, not "error" -- a stale
+        # binding merely named like a real compiler (e.g. "gcc") must not
+        # pass family matching on basename alone when it can't even run.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "unavailable:OSError:[Errno 8] Exec format error",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(compiler_family="gcc", binding="gcc14"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "could not be probed" in errors[0]
+
+    def test_matching_target_architecture_yields_no_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "x86_64-linux-gnu",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="gcc14"),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_target_architecture_alias_is_reconciled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "aarch64-linux-gnu",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="arm64-linux-gnu", binding="gcc14"),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_mismatched_target_architecture_yields_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a target: declared with a mismatched architecture
+        # (e.g. aarch64 bound to a real x86_64 gcc) previously passed
+        # validation silently -- target was never checked at all.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "x86_64-linux-gnu",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc", target="aarch64-linux-gnu", binding="gcc14"
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "p1.compile.target" in errors[0]
+        assert "aarch64" in errors[0]
+        assert "x86_64" in errors[0]
+
+    def test_target_only_declared_with_no_probed_triple_is_skipped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A tool that doesn't support -dumpmachine has no target_triple key
+        # at all (dumper_toolchain._tool_target_triple returns None); no
+        # basis to compare against, so this must not error.
+        _stub_metadata(
+            monkeypatch,
+            {"/opt/gcc": {"selected": "/opt/gcc", "version": "gcc 13.2.0"}},
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="gcc14"),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
 
     def test_version_only_declared_checks_without_a_family(
         self, monkeypatch: pytest.MonkeyPatch
