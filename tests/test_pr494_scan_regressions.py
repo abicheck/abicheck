@@ -205,3 +205,59 @@ def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> Non
     assert summary["breaking"] == len(many_breaks)
     assert len(summary["findings"]) == _MAX_BASELINE_FINDINGS
     assert summary["findings_truncated"] is True
+
+
+def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> None:
+    """A large *suppressed* list caps independently and flags its own truncation."""
+    from abicheck.cli_scan_baseline import _MAX_BASELINE_FINDINGS
+
+    old_snap = SimpleNamespace(build_source=None)
+    new_snap = SimpleNamespace(build_source=None)
+    many_suppressed = [
+        SimpleNamespace(
+            kind=SimpleNamespace(value="func_removed"),
+            symbol=f"sym{i}",
+            description=f"removed sym{i}",
+            source_location=None,
+        )
+        for i in range(_MAX_BASELINE_FINDINGS + 5)
+    ]
+
+    def fake_resolve_input(*args, **kwargs):  # noqa: ANN002, ANN003
+        return old_snap
+
+    def fake_prepare_embedded_build_source(
+        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
+    ):
+        return list(extra_changes), [], {}, None
+
+    def fake_compare_snapshots(
+        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
+        extra_changes, scope_to_public_surface, force_public_symbols=None,
+        pattern_verdicts=False, env_matrix=None,
+    ):  # noqa: ANN001
+        return SimpleNamespace(
+            breaking=[],
+            source_breaks=[],
+            risk=[],
+            compatible=[],
+            suppressed_changes=many_suppressed,
+            verdict=_Verdict("NO_CHANGE"),
+        )
+
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve_input)
+    monkeypatch.setattr("abicheck.service.compare_snapshots", fake_compare_snapshots)
+    monkeypatch.setattr(
+        "abicheck.cli_buildsource.prepare_embedded_build_source",
+        fake_prepare_embedded_build_source,
+    )
+
+    _, _, summary = _run_baseline_compare(
+        Path("old.so"), Path("new.so"), new_snap, [], "c++", "graph-full", [], [], [], []
+    )
+
+    assert summary["suppressed_count"] == len(many_suppressed)
+    assert len(summary["suppressed"]) == _MAX_BASELINE_FINDINGS
+    assert summary["suppressed_truncated"] is True
+    # The (separate, unrelated) gating-findings truncation must not fire here.
+    assert "findings_truncated" not in summary

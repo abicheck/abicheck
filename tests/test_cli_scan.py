@@ -442,7 +442,12 @@ def test_against_not_comparable_exits_6(
     payload = _payload(res)
     assert payload["verdict"] == "NOT_COMPARABLE"
     assert payload["diff"]["reason"] == "scope drift"
-    assert payload["scan_schema_version"] == "1.3"
+    # Pinned to the live constant, not a literal, so a future additive schema
+    # bump (ADR-049 Phase 5's 1.4, adding suppressed_count/suppressed) doesn't
+    # need this unrelated NOT_COMPARABLE-envelope assertion touched too.
+    from abicheck.schemas import SCAN_SCHEMA_VERSION
+
+    assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
 
 
 def test_against_not_comparable_text_format_does_not_crash(

@@ -307,7 +307,16 @@ REPORT_SCHEMA_VERSION = "2.23"
 #:       message. Mirrors compare's 2.17 ``verdict: null``/``reason`` bump —
 #:       a new possible value a pre-1.3 ``scan`` consumer could never have
 #:       received before.
-SCAN_SCHEMA_VERSION = "1.3"
+#: 1.4 — added three additive optional keys to the ``diff`` block (ADR-049
+#:       Phase 5 §6.4): ``suppressed_count`` and ``suppressed`` (present
+#:       only when ``--suppress`` actually silenced at least one finding —
+#:       mirrors compare's own ``suppressed_changes`` audit trail, projected
+#:       through the same ``_baseline_finding_dicts`` shape the existing
+#:       ``findings`` key uses) and ``suppressed_truncated`` (present only
+#:       when the suppressed-change count exceeds the same cap
+#:       ``findings_truncated`` already uses). Omitted entirely when no
+#:       suppression is in effect, matching every other additive scan key.
+SCAN_SCHEMA_VERSION = "1.4"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
