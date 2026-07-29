@@ -163,6 +163,27 @@ class TestResolutionGraph:
         assert "libalgo.so.1" in snap.resolution.intra_needed["libcore.so"]
         assert "libc.so.6" in snap.resolution.extra_needed["libcore.so"]
 
+    def test_dt_needed_resolves_via_real_filename_without_soname(self) -> None:
+        # P2 regression (Codex review): a versioned library with no
+        # DT_SONAME must still resolve a sibling's DT_NEEDED entry that
+        # names its real on-disk filename (e.g. "libfoo.so.1"), not just
+        # its canonical key ("libfoo.so") -- indexing only the canonical
+        # key misclassified this as an "extra" (external) edge instead of
+        # "intra", breaking reachability for consumers of that provider.
+        libraries = {
+            "libfoo.so": Path("/fake/libfoo.so.1"),
+            "libconsumer.so": Path("/fake/libconsumer.so"),
+        }
+        metadata = {
+            "libfoo.so": _meta(soname=""),  # no DT_SONAME
+            "libconsumer.so": _meta(
+                soname="libconsumer.so", needed=["libfoo.so.1"]
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
+        assert graph.extra_needed["libconsumer.so"] == []
+
 
 # ---------------------------------------------------------------------------
 # bundle_intra_dep_removed

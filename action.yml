@@ -586,6 +586,7 @@ runs:
         INPUT_NEW_LIBRARY_SET: ${{ inputs.new-library-set }}
         INPUT_BUNDLE_SYSTEM_PROVIDERS: ${{ inputs.bundle-system-providers }}
         INPUT_AGAINST: ${{ inputs.against }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_UPLOAD_SARIF: ${{ inputs.upload-sarif }}

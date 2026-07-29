@@ -257,6 +257,21 @@ class TestScanNewLibrarySet:
         )
         assert result.returncode == 1
 
+    def test_rejects_dry_run_with_new_library_set(self) -> None:
+        # P2 regression (Codex review): --artifact-set estimation isn't
+        # implemented; without this preflight check a dry-run + set step
+        # incurred the full toolchain install before the CLI's own
+        # UsageError.
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_DRY_RUN": "true",
+            }
+        )
+        assert result.returncode == 1
+        assert "dry-run" in result.stdout
+
     def test_warns_new_library_set_outside_scan(self) -> None:
         result = _run_validate(
             {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"}

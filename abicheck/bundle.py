@@ -317,8 +317,19 @@ def _compute_resolution_graph(
     for name, meta in metadata.items():
         if meta.soname:
             soname_to_name[meta.soname] = name
-        # Also map raw filename so a missing SONAME doesn't hide siblings.
+        # Also map the canonical key itself so a missing SONAME doesn't hide
+        # siblings when a consumer's DT_NEEDED happens to spell the
+        # canonical form verbatim.
         soname_to_name.setdefault(name, name)
+        # And the library's *actual* on-disk filename (e.g. "libfoo.so.1")
+        # -- distinct from the canonical key (e.g. "libfoo.so") whenever the
+        # library is versioned. Without a DT_SONAME, a sibling's DT_NEEDED
+        # entry names this real filename verbatim; indexing only the
+        # canonical key left that edge unresolved, misclassifying a real
+        # intra-bundle DT_NEEDED as "extra" (external) and breaking
+        # reachability for consumers of that provider (Codex review).
+        if name in libraries:
+            soname_to_name.setdefault(libraries[name].name, name)
 
     # Index exports.
     for name, meta in metadata.items():
