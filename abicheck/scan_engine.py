@@ -43,6 +43,7 @@ note through the advisories list like every other cross-cutting message.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import time
 from collections.abc import Callable
@@ -387,6 +388,32 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
 
     if detect_binary_format(baseline) is not None:
         return False
+    # `dependency_scope` (model.py) is declared as one of `AbiSnapshot`'s very
+    # last fields -- serialized (via dataclasses.asdict field order) as one
+    # of the last keys in the JSON object, right before `schema_version` is
+    # appended, well after the (potentially huge) functions/types/DWARF
+    # payload. A real `dump`-produced snapshot is `json.dumps(..., indent=2)`
+    # (never minified), so the tag is reliably within the file's last ~4KB
+    # regardless of how large the payload before it is. Try a cheap tail
+    # regex scan first -- avoiding a full json.load for exactly the case
+    # Codex flagged as most expensive (an explicitly unfiltered "full"
+    # snapshot, which by definition can carry the largest transitive
+    # dependency surface) -- and only fall back to the full parse when the
+    # tail scan doesn't confidently resolve it (non-standard formatting, a
+    # tiny file, the key genuinely absent, ...), so correctness never
+    # actually depends on the heuristic.
+    try:
+        size = baseline.stat().st_size
+        with open(baseline, "rb") as f:
+            f.seek(max(0, size - 4096))
+            tail = f.read().decode("utf-8", errors="ignore")
+        match = re.search(r'"dependency_scope"\s*:\s*"(full|filtered)"', tail)
+        if match is not None:
+            return match.group(1) == "full"
+        if re.search(r'"dependency_scope"\s*:\s*null', tail) is not None:
+            return False
+    except OSError:
+        pass
     try:
         with open(baseline, encoding="utf-8") as f:
             data = json.load(f)

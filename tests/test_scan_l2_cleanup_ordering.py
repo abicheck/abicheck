@@ -267,3 +267,72 @@ class TestScanCandidateIncludeDependencies:
         baseline = tmp_path / "baseline.json"
         baseline.write_text("[]", encoding="utf-8")
         assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_large_full_baseline_avoids_full_json_parse(self, tmp_path, monkeypatch):
+        """Codex review, fresh evidence: dependency_scope is one of
+        AbiSnapshot's last serialized fields (model.py), so a real
+        `dump`-produced snapshot (json.dumps(..., indent=2), never
+        minified) carries the tag within the file's last ~4KB regardless of
+        how large the functions/types/DWARF payload before it is -- an
+        explicitly unfiltered "full" snapshot is precisely the mode most
+        likely to carry the largest such payload. The tail-scan fast path
+        must resolve this without ever calling json.load."""
+        import json as json_mod
+
+        from abicheck import scan_engine
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        huge_payload = {"functions": [{"name": f"f{i}"} for i in range(50_000)]}
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text(
+            json_mod.dumps(
+                {**huge_payload, "dependency_scope": "full", "schema_version": 18},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("must not fully json.load a large baseline")
+
+        monkeypatch.setattr(scan_engine.json, "load", fail_if_called)
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_large_filtered_baseline_avoids_full_json_parse(
+        self, tmp_path, monkeypatch
+    ):
+        import json as json_mod
+
+        from abicheck import scan_engine
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        huge_payload = {"functions": [{"name": f"f{i}"} for i in range(50_000)]}
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text(
+            json_mod.dumps(
+                {**huge_payload, "dependency_scope": "filtered", "schema_version": 18},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("must not fully json.load a large baseline")
+
+        monkeypatch.setattr(scan_engine.json, "load", fail_if_called)
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_tail_scan_miss_falls_back_to_full_parse(self, tmp_path):
+        """A file whose tail doesn't confidently resolve the tag (e.g. the
+        key sits earlier than the last 4KB, an unusual formatting choice)
+        must still fall back to the full json.load path rather than
+        silently guessing wrong."""
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        padding = " " * 8192
+        baseline.write_text(
+            '{"dependency_scope": "full", "padding": "' + padding + '"}',
+            encoding="utf-8",
+        )
+        assert _scan_candidate_include_dependencies(baseline) is True

@@ -277,14 +277,24 @@ class CompareRequest:
                 f"unsupported AST frontend {self.frontend!r}: choose from {allowed}"
             )
         elif frontend == "android" and not (
-            self.has_sources or self.old.sources or self.new.sources
+            self.has_sources
+            or self.old.sources
+            or self.new.sources
+            or self.old.build_info
+            or self.new.build_info
         ):
             # D8/D9: 'android' reuses a pre-captured header-abi dump; it has no
             # header-AST path, so a header-only run can't use it. ADR-055 D1
             # (Codex review): either side's own `InputSpec.sources` also
             # satisfies this -- not just the legacy `has_sources` flag, which
             # a typed caller using the new field alone would otherwise have to
-            # redundantly set too.
+            # redundantly set too. A second review round: `InputSpec.
+            # build_info` alone must count too -- `embed_build_source`
+            # auto-detects a pack directory in *either* `sources` or
+            # `build_info` (`cli_buildsource.py`'s own `bi_is_pack`/
+            # `src_is_pack`), so a prebuilt evidence pack passed via
+            # `build_info` is exactly the same "already have a pre-captured
+            # header-abi dump" case this rule exists to allow.
             errors.append(
                 "the 'android' AST frontend is source-ABI only (it has no "
                 "header-AST path); supply source inputs (--sources) to use it"

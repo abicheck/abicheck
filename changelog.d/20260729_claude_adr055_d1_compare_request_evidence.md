@@ -78,7 +78,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   before use, since an accepted case-insensitive spelling (e.g. `"DEVICE"`)
   previously bypassed validation entirely and then compared unequal to the
   lowercase literal every real consumer (the DPC++/SYCL AST-context selector)
-  checks against.
+  checks against; the `android` frontend's feasibility check now also accepts
+  either side's `InputSpec.build_info` (not just `sources`/`has_sources`),
+  since `embed_build_source` auto-detects a prebuilt evidence pack in either
+  input the same way.
   `CompileContext` itself moved to a new leaf module
   (`abicheck.compile_context`, re-exported from `service_scan` for
   back-compat) so `api_types.py` can type against it without joining the
@@ -88,3 +91,23 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   inference, the set-input evidence-flag rejection guard, per-side
   AST-frontend override) — migrating the CLI onto this path, or extending it
   further to match, is deliberately left as follow-up work.
+
+### Fixed
+
+- **`scan --against`'s dependency-scope baseline peek no longer fully
+  parses a large JSON snapshot** just to read one top-level tag: since
+  `AbiSnapshot.dependency_scope` is one of the last fields serialized, a
+  cheap tail-byte regex scan resolves it directly for a real
+  `dump`-produced snapshot, falling back to the full `json.load` only when
+  the tail scan can't confidently resolve the tag. Previously an explicitly
+  unfiltered (`"full"`) baseline — precisely the mode most likely to carry
+  the largest transitive dependency surface — paid the full parse cost
+  before the real comparison parsed it again.
+- **A corrupt/hand-edited `dependency_scope` value now fails snapshot
+  loading** instead of silently downgrading to `None`. The comparability
+  gate deliberately treats a `None` side as "an old, untagged snapshot with
+  no recoverable mode" and skips the filtered-vs-full mismatch check for
+  it; silently mapping an invalid value (e.g. a `"filterd"` typo) to `None`
+  the same way let a corrupt current-schema snapshot exploit that same
+  leniency and bypass a real mismatch. Only a genuinely absent key or an
+  explicit `null` still load as `None`.

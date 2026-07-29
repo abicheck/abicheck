@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .build_mode import BuildMode
 
-from .errors import IncompatibleSnapshotSchemaError
+from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -1034,19 +1034,29 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         else None
     )
     # Schema v18 — dependency-scoping mode. Missing key (every pre-v18
-    # snapshot) loads as None, same as every other additive optional field;
-    # see AbiSnapshot.dependency_scope's own docstring for why the
-    # comparability gate does NOT treat None as either mode. Only the two
-    # values a producer can actually write are accepted (Codex review) — any
-    # other string (or non-string) is not a value this codebase's own
-    # producers ever write, so it's treated the same as "not recorded"
-    # rather than trusted at face value for a comparability decision.
+    # snapshot) or an explicit ``null`` (a current-schema snapshot that never
+    # went through the tagging wrapper) both load as None, same as every
+    # other additive optional field; see AbiSnapshot.dependency_scope's own
+    # docstring for why the comparability gate does NOT treat None as either
+    # mode. A *present, non-null* value that isn't one of the two values a
+    # producer can actually write is a different case (Codex review,
+    # second round): the comparability gate deliberately lets a None side
+    # through unchecked (an untagged legacy snapshot has no way to recover
+    # its real mode), so silently downgrading a corrupt/hand-edited value
+    # (e.g. a "filterd" typo) to None would let it exploit that same
+    # leniency and bypass a real filtered-vs-full mismatch instead of
+    # failing loudly.
     raw_dependency_scope = d.get("dependency_scope")
-    dependency_scope = (
-        raw_dependency_scope
-        if raw_dependency_scope in ("filtered", "full")
-        else None
-    )
+    if raw_dependency_scope is not None and raw_dependency_scope not in (
+        "filtered",
+        "full",
+    ):
+        raise SnapshotError(
+            f"invalid dependency_scope {raw_dependency_scope!r} in snapshot "
+            "-- expected 'filtered', 'full', or the key to be absent/null; "
+            "this snapshot is corrupt or was hand-edited."
+        )
+    dependency_scope = raw_dependency_scope
 
     snap = AbiSnapshot(
         library=d["library"],

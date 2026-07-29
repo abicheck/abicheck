@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from abicheck.errors import SnapshotError
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -299,8 +302,9 @@ class TestHeaderCvFactsReliableRoundTrip:
 
 class TestDependencyScopeRoundtrip:
     """Schema v18 — AbiSnapshot.dependency_scope round-trips like every
-    other purely-additive optional field, and a pre-v18 snapshot with no
-    key at all loads it as None."""
+    other purely-additive optional field; a pre-v18 snapshot with no key at
+    all, or an explicit null, loads it as None; but a present, invalid
+    value is rejected outright rather than silently downgraded to None."""
 
     def test_round_trip_preserves_filtered(self) -> None:
         snap = _make_snap(from_headers=True, dependency_scope="filtered")
@@ -319,16 +323,22 @@ class TestDependencyScopeRoundtrip:
         assert "dependency_scope" not in d
         assert snapshot_from_dict(d).dependency_scope is None
 
-    def test_unrecognized_string_value_loads_as_none(self) -> None:
-        # Not a value this codebase's own producers ever write -- treated
-        # the same as "not recorded" rather than trusted at face value for
-        # a comparability decision (Codex/CodeRabbit review).
+    def test_unrecognized_string_value_rejected(self) -> None:
+        # Codex review, second round: a present, non-null value that isn't
+        # "filtered"/"full" is not a value this codebase's own producers
+        # ever write -- silently downgrading it to None would let a
+        # corrupt/hand-edited snapshot (e.g. a "filterd" typo) exploit the
+        # comparability gate's deliberate "a None side is never checked"
+        # leniency and bypass a real filtered-vs-full mismatch. Must fail
+        # loading instead of silently becoming "not recorded".
         d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope="bogus")
-        assert snapshot_from_dict(d).dependency_scope is None
+        with pytest.raises(SnapshotError, match="bogus"):
+            snapshot_from_dict(d)
 
-    def test_non_string_value_loads_as_none(self) -> None:
+    def test_non_string_value_rejected(self) -> None:
         d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope=123)
-        assert snapshot_from_dict(d).dependency_scope is None
+        with pytest.raises(SnapshotError, match="123"):
+            snapshot_from_dict(d)
 
     def test_explicit_null_loads_as_none(self) -> None:
         d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope=None)

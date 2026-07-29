@@ -220,6 +220,20 @@ class TestCompareRequestValidate:
         )
         assert req.validation_errors() == []
 
+    def test_android_frontend_with_inputspec_build_info_accepted(self, tmp_path):
+        """Codex review (third round): InputSpec.build_info alone must also
+        satisfy the android feasibility rule, not just sources/has_sources --
+        embed_build_source auto-detects a pack directory in either
+        build_info or sources, so a prebuilt evidence pack passed via
+        build_info is exactly the same "already have a pre-captured
+        header-abi dump" case this rule exists to allow."""
+        req = CompareRequest(
+            old=InputSpec.of("a", build_info=tmp_path),
+            new=InputSpec.of("b"),
+            frontend="android",
+        )
+        assert req.validation_errors() == []
+
     def test_missing_policy_file_rejected(self, tmp_path):
         # D9 pre-flight: a --policy-file path that doesn't exist errors identically
         # from CLI and MCP (one Tier-2 rule).

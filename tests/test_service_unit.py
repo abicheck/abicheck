@@ -2336,7 +2336,6 @@ class TestCompareRequestAdr055Evidence:
             old=InputSpec.of(old_p, build_info=build_dir),
             new=InputSpec.of(new_p),
             frontend="android",
-            has_sources=True,
         )
         result, _, _ = run_compare_request(request)
         assert isinstance(result, DiffResult)
