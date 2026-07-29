@@ -99,7 +99,7 @@ for a library set, not a change to its existing single-artifact form:
 ```text
 abicheck scan ARTIFACT               # unchanged: exactly one artifact
 abicheck scan --artifact-set DIR     # new: every discoverable shared library in DIR
-abicheck scan --artifact-set a.so,b.so,c.so   # new: explicit repeated-path form
+abicheck scan --artifact-set a.so,b.so,c.so   # new: explicit comma-separated path form
 ```
 
 `scan`'s positional `ARTIFACT` is a required `@click.argument` in

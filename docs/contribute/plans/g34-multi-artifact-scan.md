@@ -19,7 +19,7 @@ not yet accepted for implementation. This plan is the phased breakdown *if*
 ADR-056 is accepted; no phase here should be started before that.
 **Type:** Initiative plan (cross-cutting; not tied to a single
 `usecase-registry.yaml` gap — spans `abicheck/service_scan.py`,
-`abicheck/bundle.py`, `abicheck/cli.py`, `abicheck/mcp_server.py`,
+`abicheck/bundle.py`, `abicheck/cli_scan.py`, `abicheck/mcp_server.py`,
 `reporter.py`).
 **Effort:** M · **Risk:** low-medium — additive-only (existing single-artifact
 `scan ARTIFACT` invocation is unchanged byte-for-byte), but touches a shared
@@ -34,9 +34,10 @@ See ADR-056's Context section for the full investigation. Summary:
 
 - `scan`/`dump` are hard single-artifact by explicit, recent design
   (ADR-043 D5, 2026-07-16) — but `ScanRequest.binaries: list[Path]` is
-  already plural-typed and the cost estimator already sums over it; only
-  `run_scan`'s guard forces length 1. Unfinished scaffolding, not a
-  considered-and-rejected design.
+  already plural-typed and the cost estimator's `L0_binary` row already
+  sums over it (its `L1`-`L5` rows don't yet — see ADR-056's correction and
+  Phase 1 below); only `run_scan`'s guard forces length 1. Unfinished
+  scaffolding, not a considered-and-rejected design.
 - `compare`'s bundle layer (ADR-023) already answers "is this multi-library
   release internally ABI-consistent" — but only when there's an old release
   to diff against, and only reachable via directory/package `compare`
@@ -99,10 +100,21 @@ Before generalizing `bundle.py` to a second caller, resolve the doc/code
 divergence ADR-023's 2026-07-29 amendment flags: either make
 `_compute_resolution_graph` actually reuse `resolver.py`/`binder.py`, or
 formally re-scope ADR-023's "Pro" claim to match the self-contained
-implementation that shipped. This is a small, independently-reviewable
-change — do it first so the third caller this plan adds (`scan
---artifact-set`) doesn't compound an already-diverged module. **Not
-started.**
+implementation that shipped.
+
+- **Documentation re-scoping: done.** ADR-023's 2026-07-29 amendment
+  (this PR) already corrects the stale "reuses `resolver.py`/`binder.py`"
+  claim in place, appending the verified-against-code correction per this
+  repo's append-don't-retcon ADR convention. No further doc work needed
+  for this option.
+- **Code reconciliation (making `_compute_resolution_graph` actually reuse
+  `resolver.py`/`binder.py`): not started**, and not required before
+  Phase 1-4 — this plan proceeds against `bundle.py`'s shipped,
+  self-contained graph as-is (now accurately documented), since a real
+  reuse of `resolver.py`/`binder.py` is a separate, independently-scoped
+  change (asymmetric single-root-binary engine vs. `bundle.py`'s symmetric
+  peer-library-set engine — not a drop-in swap) that this plan does not
+  depend on and should not bundle in.
 
 ### Phase 1 — `service_scan.py`: finish the plural `binaries` path
 
