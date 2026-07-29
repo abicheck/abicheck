@@ -1425,6 +1425,46 @@ class TestAbiCompare:
             c["contract_relevance"] == "IN_CONTRACT" for c in report_missing_entries
         )
 
+    def test_used_by_missing_symbol_gets_contract_evaluation_in_root_cause_mode(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): --report-mode root-cause
+        # serializes the exact same missing-label finding a *second* time,
+        # into root_causes[].findings (_add_entries_to_root_causes) -- the
+        # same dict object as the "changes" copy before serialization, but
+        # a JSON round trip (json.dumps then json.loads) always produces
+        # independent dict copies, so stamping only "changes" left this
+        # finding's root-cause copy unstamped.
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("entry", "_Z5entryv", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)],
+            contract_evaluation=True, report_mode="root-cause",
+        )
+        data = json.loads(raw)
+        root_cause_findings = [
+            finding
+            for group in data["report"]["root_causes"]
+            for finding in group["findings"]
+            if finding["kind"] == "used_by_missing_symbol"
+        ]
+        assert root_cause_findings
+        assert all(
+            f["contract_relevance"] == "IN_CONTRACT" for f in root_cause_findings
+        )
+
     def test_used_by_missing_symbol_omits_contract_fields_by_default(
         self, tmp_path: Path, monkeypatch
     ):
@@ -2193,6 +2233,39 @@ class TestAbiCompare:
         raw = abi_compare(str(old_p), str(new_p), report_mode="leaf")
         data = json.loads(raw)
         assert data["status"] == "ok"
+
+    def test_report_mode_leaf_type_entries_get_contract_evaluation(
+        self, tmp_path: Path
+    ):
+        # Regression (Codex review, fresh evidence): reporter._to_json_leaf's
+        # _leaf_entry builds its own dict for root TYPE_* changes instead of
+        # routing through _change_to_dict, so it never called
+        # _add_contract_evaluation_fields -- a root type change under
+        # --report-mode leaf lost contract_relevance/contract_reason_code/
+        # contract_assurance even though the identical finding kept them
+        # under the default full report mode.
+        old = _make_snapshot(
+            "1.0",
+            types=[
+                RecordType(name="S", kind="struct", size_bits=32, alignment_bits=32)
+            ],
+        )
+        new = _make_snapshot(
+            "2.0",
+            types=[
+                RecordType(name="S", kind="struct", size_bits=64, alignment_bits=32)
+            ],
+        )
+        old_p, new_p = self._make_pair(tmp_path, old, new)
+        raw = abi_compare(
+            str(old_p), str(new_p), report_mode="leaf", contract_evaluation=True
+        )
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        leaf_changes = data["report"]["leaf_changes"]
+        type_entries = [c for c in leaf_changes if c["kind"] == "type_size_changed"]
+        assert type_entries
+        assert all("contract_relevance" in c for c in type_entries)
 
     def test_policy_file_skips_base_policy_validation(self, tmp_path: Path):
         """When policy_file is provided, base policy name is not validated."""

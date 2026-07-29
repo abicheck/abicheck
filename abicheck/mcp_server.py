@@ -1359,9 +1359,23 @@ def abi_compare(
                 # top-level array carried contract fields on a missing-label
                 # entry, the embedded report's own copy of that same finding
                 # did not (Codex review, fresh evidence).
-                report_changes = response["report"].get("changes")
-                if isinstance(report_changes, list):
-                    for entry in report_changes:
+                # --report-mode root-cause additionally serializes the exact
+                # same missing-label finding a second time, into
+                # root_causes[].findings (_add_entries_to_root_causes,
+                # cli_compare_fold.py) -- the *same* dict object as the one
+                # in "changes" before serialization, but a JSON round trip
+                # (json.dumps then json.loads above) always produces
+                # independent dict copies, so stamping "changes" alone
+                # leaves the root-cause copy of this same finding unstamped
+                # (Codex review, fresh evidence).
+                candidate_lists = [response["report"].get("changes")]
+                for group in response["report"].get("root_causes") or ():
+                    if isinstance(group, dict):
+                        candidate_lists.append(group.get("findings"))
+                for entries in candidate_lists:
+                    if not isinstance(entries, list):
+                        continue
+                    for entry in entries:
                         if (
                             isinstance(entry, dict)
                             and entry.get("kind") == missing_kind
