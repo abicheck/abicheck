@@ -371,6 +371,8 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
             data = json.load(f)
     except (OSError, ValueError):
         return False
+    if not isinstance(data, dict):
+        return False
     return bool(data.get("dependency_scope") == "full")
 
 

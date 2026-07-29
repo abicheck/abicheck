@@ -221,3 +221,16 @@ class TestScanCandidateIncludeDependencies:
         baseline = tmp_path / "baseline.json"
         baseline.write_text("not json", encoding="utf-8")
         assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_json_baseline_with_non_object_top_level_falls_back_to_filtered(
+        self, tmp_path
+    ):
+        """Codex review: valid JSON whose top level isn't a mapping (e.g. a
+        bare `[]`) must not raise AttributeError out of this best-effort
+        helper -- it should degrade to the filtered default like any other
+        unreadable/malformed baseline."""
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text("[]", encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is False
