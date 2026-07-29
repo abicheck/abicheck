@@ -527,3 +527,43 @@ def test_scan_against_prefers_sources_root_config_over_cwd(
     # suppression.strict: true -- so the expired rule must still be
     # rejected (exit 1), proving the sources-root config was actually found.
     assert result.exit_code == 1, result.output
+
+
+def test_scan_against_cwd_discovered_config_compile_block_actually_applies(
+    runner: CliRunner,
+    old_snap: Path,
+    new_snap_breaking: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Codex P1 review on PR #657: a cwd-upward-discovered config's
+    # scope/suppression settings were being applied, but its compile: block
+    # (defines/include dirs/frontend/std/sysroot) never was --
+    # resolve_compile_context had no cwd-upward fallback of its own, so
+    # that half of the same file was silently dropped. Assert the config's
+    # compile.defines actually reach the CompileContext run_scan_core
+    # receives, proving the SAME discovered file now backs both halves.
+    import abicheck.cli_helpers_compare as _cch
+    import abicheck.scan_engine as _se
+
+    cwd_config = tmp_path / ".abicheck.yml"
+    cwd_config.write_text("compile:\n  defines:\n    - FOO=1\n", encoding="utf-8")
+    monkeypatch.setattr(_cch, "discover_project_config", lambda start=None: cwd_config)
+
+    captured: dict[str, object] = {}
+    real_run_scan_core = _se.run_scan_core
+
+    def spying_run_scan_core(**kw):
+        captured["compile_context"] = kw.get("compile_context")
+        return real_run_scan_core(**kw)
+
+    monkeypatch.setattr("abicheck.cli_scan.run_scan_core", spying_run_scan_core)
+
+    result = runner.invoke(
+        main, ["scan", str(new_snap_breaking), "--against", str(old_snap)]
+    )
+
+    assert result.exit_code == 4, result.output  # the real BREAKING verdict
+    cc = captured["compile_context"]
+    assert cc is not None, "compile_context.is_default was wrongly True"
+    assert "-DFOO=1" in cc.gcc_option_tokens

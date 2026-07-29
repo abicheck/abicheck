@@ -773,10 +773,59 @@ def scan_cmd(
     baseline_header = tuple(header_both) + tuple(header_old)
     baseline_include = tuple(include_both) + tuple(include_old)
 
+    # ADR-049 Phase 5 review (Codex, PR #657 P1): resolve the project config
+    # PATH + object ONCE, upfront, so the same .abicheck.yml feeds both its
+    # `compile:` block (via `resolve_compile_context`, below) and its scope/
+    # suppression settings (further below) -- previously `resolve_compile_
+    # context` had no cwd-upward discovery of its own, so a config found only
+    # by walking up from cwd never fed `compile.defines`/include dirs/
+    # frontend/std/sysroot anywhere even though its scope/suppression
+    # settings were applied: a macro- or dialect-dependent header API could
+    # then parse under the wrong context and produce a false COMPATIBLE
+    # verdict. All error handling lives here (not duplicated in
+    # `resolve_compile_context`/`resolve_compare_config`'s own callers) so
+    # `cfg_path` passed to `resolve_compile_context` below is always either
+    # `None` or a path already confirmed to parse.
+    #
+    # Precedence matches `merge_compile_config`'s own convention for the
+    # `compile:` block (explicit --config > --sources tree root); the
+    # cwd-upward fallback is scan-specific and, per the "reject comparison-
+    # only flags without --against" guard above, only attempted for an
+    # actual `--against` comparison -- a plain one-build audit never needs
+    # any of this, so it must not even try the cwd-upward walk.
+    from .buildsource.inline import discover_build_config, load_build_config
+
+    explicit_config = build_config is not None
+    cfg_path = build_config if explicit_config else discover_build_config(sources)
+    if cfg_path is None and not explicit_config and against is not None:
+        from .cli_helpers_compare import discover_project_config
+
+        cfg_path = discover_project_config()
+    project_cfg = None
+    if cfg_path is not None:
+        try:
+            project_cfg = load_build_config(cfg_path)
+        except ValueError as exc:
+            if explicit_config:
+                raise click.UsageError(
+                    f"cannot parse build config {cfg_path}: {exc}"
+                ) from exc
+            # Auto-discovered (--sources root or cwd-upward): best-effort,
+            # matching `merge_compile_config`'s own identical convention --
+            # a config the user never explicitly bound to shouldn't fail a
+            # run it wasn't asked to affect.
+            click.echo(
+                f"warning: could not parse auto-discovered {cfg_path}; "
+                f"using CLI compile/comparison settings only ({exc}).",
+                err=True,
+            )
+            cfg_path = None
+
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver bundles the cross-toolchain + frontend flags and folds the
-    # project's `.abicheck.yml` compile: block in (CLI > config; the config is
-    # --config or the one auto-discovered at the --sources root).
+    # project's `.abicheck.yml` compile: block in (CLI > config; `cfg_path`
+    # above is the exact same config the scope/suppression resolution below
+    # reads from, and is only ever `None` or already known to parse cleanly).
     compile_context, includes_tuple = resolve_compile_context(
         click.get_current_context(),
         gcc_path=gcc_path,
@@ -787,7 +836,7 @@ def scan_cmd(
         nostdinc=nostdinc,
         header_backend=header_backend,
         includes=tuple(includes),
-        build_config=build_config,
+        build_config=cfg_path,
         sources=sources,
         frontend_context=frontend_context,
     )
@@ -832,8 +881,10 @@ def scan_cmd(
     # ADR-049 Phase 5 review (Codex, PR #657): resolve scope/suppression
     # settings through the project's `.abicheck.yml` the same way `compare`
     # does (CLI > config > default, ADR-037 D4) -- reusing `compare`'s own
-    # `resolve_compare_config` rather than reading raw CLI values only.
-    # Without this, a project config's `suppression.strict`/`scope.public`/
+    # `resolve_compare_config`, and the exact same already-loaded
+    # `project_cfg` the compile-context resolution above used, rather than
+    # reading raw CLI values only or re-discovering independently. Without
+    # this, a project config's `suppression.strict`/`scope.public`/
     # `scope.public_symbols`/`scope.collapse_versioned_symbols`/
     # `suppression.require_justification` applied to `compare` but silently
     # had no effect on `scan --against`. Severity/debug/exit-code-scheme
@@ -844,46 +895,13 @@ def scan_cmd(
     # Gated on `against is not None`: every field this resolves only means
     # anything for a baseline comparison (mirrors the "reject comparison-only
     # flags without --against" guard above) -- skipping it for a plain
-    # one-build audit means a malformed *auto-discovered* config the user
-    # never asked `scan` to bind to can't fail an otherwise-unrelated audit
-    # (Codex review).
+    # one-build audit means the (already-loaded, possibly None) config never
+    # affects an audit-only run.
     collapse_versioned_symbols = False
     require_justification = False
     if against is not None:
-        from .buildsource.inline import discover_build_config, load_build_config
-        from .cli_helpers_compare import discover_project_config, resolve_compare_config
+        from .cli_helpers_compare import resolve_compare_config
 
-        # Same precedence `merge_compile_config` already uses for the
-        # `compile:` block (explicit --config > --sources-root > cwd-upward)
-        # -- otherwise the same `scan --against --sources DIR` invocation
-        # could resolve its `compile:` settings from one .abicheck.yml and
-        # its scope/suppression settings from a different one (Codex review).
-        explicit_config = build_config is not None
-        cfg_path = (
-            build_config
-            if explicit_config
-            else (discover_build_config(sources) or discover_project_config())
-        )
-        project_cfg = None
-        if cfg_path is not None:
-            try:
-                project_cfg = load_build_config(cfg_path)
-            except ValueError as exc:
-                # A malformed *explicit* --config, or one auto-discovered at
-                # the --sources root, already failed loud above inside
-                # `resolve_compile_context`'s own `merge_compile_config`
-                # (which attempts the identical load first, unconditionally)
-                # -- so reaching here with a parse failure only happens for
-                # the cwd-upward `discover_project_config()` fallback, a file
-                # `merge_compile_config` never looked at. Best-effort warn,
-                # matching `merge_compile_config`'s own auto-discovered
-                # convention -- a config the user never explicitly bound to
-                # shouldn't fail a run it wasn't asked to affect.
-                click.echo(
-                    f"warning: could not parse auto-discovered {cfg_path}; "
-                    f"using CLI comparison settings only ({exc}).",
-                    err=True,
-                )
         resolved_cfg = resolve_compare_config(
             project_cfg,
             cli_severity_preset=None,

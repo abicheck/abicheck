@@ -1420,6 +1420,35 @@ not request the same ICU-style version-suffix handling. Wired into the
 existing "reject comparison-only fields without a baseline" guard and
 `run_scan`'s `run_scan_core` call the same way the other fields are.
 
+**Updated (2026-07-29, same PR): a final Codex-caught gap, this time in
+compile-context consistency rather than scope/suppression resolution.**
+Gating the whole scope/suppression-resolution block on `against is not
+None` and switching to fail-loud-only-for-explicit-config (previous round)
+still left one inconsistency: `resolve_compile_context` runs *before* that
+block, with the raw CLI `build_config` value only -- so a `scan --against`
+run with no explicit `--config` and no `--sources` could have its
+scope/suppression settings resolved from a cwd-upward-discovered
+`.abicheck.yml`, while that same file's `compile:` block (defines, include
+dirs, frontend, std, sysroot) never reached `resolve_compile_context` at
+all. A macro- or dialect-dependent header API could then parse under the
+wrong context and produce a false `COMPATIBLE` verdict -- exactly the class
+of bug `compare`'s own "resolve config once, thread the same path into both
+resolvers" pattern already avoids. Fixed by moving all project-config path
+resolution + loading + error handling into `cli_scan.py` itself, executed
+once, upfront, before `resolve_compile_context` is even called: this
+guarantees the path passed into its `build_config` parameter is always
+either `None` or a path already confirmed to parse, so
+`merge_compile_config`'s own internal reload (which treats any non-`None`
+path as user-explicit and would otherwise fail loud on a parse error
+regardless of how the path was actually discovered) can never hit that
+branch. The later scope/suppression-resolution block was simplified to
+reuse the already-loaded config object directly instead of re-discovering
+it. New regression test: a cwd-discovered config with a
+`compile: {defines: [FOO=1]}` block, verifying the resulting
+`CompileContext.gcc_option_tokens` actually contains `-DFOO=1` (spying on
+`run_scan_core`'s `compile_context` kwarg), not just that the path gets
+threaded through structurally.
+
 Still not yet done, deliberately out of scope for these four slices (each
 is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is
