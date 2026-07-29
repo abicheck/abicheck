@@ -23,12 +23,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   standard is kept even when a side sets an unrelated override, e.g. only a
   sysroot) and the request-level `frontend_context` default; `dump_manifest`
   and `public_header_dirs` are forwarded/unioned into the existing resolution
-  path, including the dependency-scope filter (a declared-public directory is
-  no longer misclassified as a toolchain dependency); the inline evidence
-  collection's `extractor` matches whichever L2 frontend actually ran for that
-  side; and the `android` frontend's source-evidence check now also accepts
-  either side's own `InputSpec.sources`, not just the legacy `has_sources`
-  flag. `CompileContext` itself moved to a new leaf module
+  path, including the dependency-scope filter (a declared-public file or
+  directory is no longer misclassified as a toolchain dependency); the inline
+  evidence collection's `extractor` matches whichever L2 frontend actually ran
+  for that side; a per-side `compile.frontend_context` always wins over the
+  request-level default, including an explicit `"host"` on a mixed host/device
+  request; and the `android` frontend's source-evidence check now also
+  accepts either side's own `InputSpec.sources`, not just the legacy
+  `has_sources` flag. `CompileContext` itself moved to a new leaf module
   (`abicheck.compile_context`, re-exported from `service_scan` for
   back-compat) so `api_types.py` can type against it without joining the
   CLI/service import-cycle-allowlisted cluster. Does not yet match every

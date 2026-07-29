@@ -1878,6 +1878,30 @@ class TestCompareRequestAdr055Evidence:
         assert calls_by_path[old_p]["compile"].frontend_context == "device"
         assert calls_by_path[new_p]["compile"].frontend_context == "device"
 
+    def test_explicit_side_host_context_survives_device_default(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P2): "host" is also CompileContext's own default, so
+        a side that explicitly pins compile.frontend_context="host" must not
+        be silently overwritten to "device" by the request-level default --
+        only a side with no compile override at all should pick up the
+        request-level frontend_context."""
+        from abicheck.compile_context import CompileContext
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        calls = self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, compile=CompileContext(frontend_context="host")),
+            new=InputSpec.of(new_p),
+            frontend_context="device",
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["compile"].frontend_context == "host"
+        assert calls_by_path[new_p]["compile"].frontend_context == "device"
+
     def test_sources_triggers_embed_build_source(self, tmp_path, monkeypatch):
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
@@ -1965,6 +1989,40 @@ class TestCompareRequestAdr055Evidence:
         result, _, _ = run_compare_request(request)
         assert captured["extra_changes"] == [sentinel_change]
         assert sentinel_change in result.changes
+
+    def test_embedded_evidence_not_reloaded_as_out_of_band_pack(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P1): request.old/new.sources/build_info were already
+        collected inline into old/new.build_source by embed_build_source, so
+        prepare_embedded_build_source's own *_build_info/*_sources params
+        (its out-of-band pack-directory override, distinct from the already-
+        embedded facts) must be None here -- passing the same raw path again
+        would make _resolve_side_pack try to reload it as an evidence pack
+        (expecting a manifest.json) and raise ClickException."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+        )
+        captured_args = {}
+
+        def _fake_prepare(old, new, collect_mode, extra_changes, *rest, **kwargs):
+            captured_args["rest"] = rest
+            return extra_changes, [], {}, []
+
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source", _fake_prepare
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=src_dir), new=InputSpec.of(new_p)
+        )
+        run_compare_request(request)
+        assert captured_args["rest"] == (None, None, None, None)
 
     def test_extractor_matches_effective_frontend(self, tmp_path, monkeypatch):
         """Codex review (P2): embed_build_source's extractor must match the

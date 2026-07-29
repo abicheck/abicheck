@@ -2205,7 +2205,7 @@ class TestWrapRunDumpWithDependencyScope:
     def _uncached(self, tagged_snap):
         def _fn(
             path, binary_fmt, headers=None, includes=None, version="", lang="c++",
-            *, dump_manifest=None, **_kw,
+            *, dump_manifest=None, public_headers=None, public_header_dirs=None, **_kw,
         ):
             return tagged_snap
 
@@ -2296,8 +2296,14 @@ class TestWrapRunDumpWithDependencyScope:
         reached resolve_dependency_scope's header_roots at all, so a header
         under it (e.g. an installed library's own system-prefixed path) could
         be misclassified as a dependency and dropped."""
-        root = tmp_path / "mylib"
-        root.mkdir()
+        # A real, existing directory whose segments actually match the
+        # system-header heuristic (`_SYSTEM_HEADER_DIRS`'s ("usr", "include")
+        # subsequence) -- a directory root is filesystem-checked via
+        # `Path.is_dir()`, so a merely tmp_path-rooted directory that doesn't
+        # itself look like a system prefix wouldn't exercise this path at all
+        # (it would survive filtering either way).
+        root = tmp_path / "usr" / "include" / "mylib"
+        root.mkdir(parents=True)
         header = str(root / "api.h")
         snap = AbiSnapshot(
             library="lib.so",
@@ -2312,5 +2318,28 @@ class TestWrapRunDumpWithDependencyScope:
             "elf",
             include_dependencies=False,
             public_header_dirs=[root],
+        )
+        assert [f.name for f in result.functions] == ["mylib_run"]
+
+    def test_public_headers_recovered_as_roots(self):
+        """Codex review, second pass: the first fix only folded in
+        public_header_dirs, missing the file-level public_headers set -- an
+        explicitly-declared public *file* (reached transitively rather than
+        listed in `headers`, e.g. an installed library's own
+        `/usr/include/mylib/api.h`) must be protected the same way."""
+        header = "/usr/include/mylib/api.h"
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("mylib_run", source_header=header)],
+        )
+        run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
+
+        result = run_dump(
+            Path("/lib.so"),
+            "elf",
+            include_dependencies=False,
+            public_headers=[header],
         )
         assert [f.name for f in result.functions] == ["mylib_run"]

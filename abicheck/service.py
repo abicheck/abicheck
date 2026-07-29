@@ -1695,11 +1695,9 @@ def run_compare_request(
         SnapshotError: If either input cannot be loaded.
     """
     request.validate()
-    # validate() accepts lang case-insensitively; the ELF dump path does
-    # case-sensitive lang == "c" checks, so normalise here.
+    # validate() accepts lang case-insensitively; the ELF dump path does case-sensitive lang == "c" checks, so normalise here.
     lang = request.lang.lower()
-    # android (source-ABI only, gated to has_sources by validate) has no
-    # header-AST path, so it falls back to "auto" for the binary dump.
+    # android (source-ABI only, gated to has_sources by validate) has no header-AST path, so it falls back to "auto" for the binary dump.
     from .api_types import HEADER_AST_FRONTENDS
 
     header_backend = request.frontend if request.frontend.lower() in HEADER_AST_FRONTENDS else "auto"
@@ -1798,14 +1796,15 @@ def run_compare_request(
     suppression, pf = load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
-    # ADR-055 D1 (Codex review, P1): embed_build_source only writes
-    # snap.build_source -- it must still be *diffed* and folded into
-    # extra_changes (as the CLI compare path does) or source-only changes
-    # silently produce an ordinary artifact-only compatible verdict.
+    # ADR-055 D1 (Codex review, P1 x2): diff the embedded evidence into
+    # extra_changes, or a source-only change reads as artifact-only
+    # compatible. The four Nones are the out-of-band pack-override params --
+    # reusing the raw sources/build_info paths would make _resolve_side_pack
+    # try (and fail) to reload them as packs; None uses embedded facts.
     from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
 
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = prepare_embedded_build_source(
-        old, new, old_evidence.collect_mode, None, request.old.build_info, request.new.build_info, request.old.sources, request.new.sources, policy_file=pf,
+        old, new, old_evidence.collect_mode, None, None, None, None, None, policy_file=pf,
     )
     result = compare_snapshots(
         old,

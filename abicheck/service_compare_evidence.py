@@ -117,7 +117,12 @@ def _compile_context(
 ) -> CompileContext | None:
     # Merge a side's explicit compile override, the pair-wide C++20 dialect
     # override, and the request-level frontend_context default -- a per-side
-    # compile.frontend_context always wins over the request-level default.
+    # compile.frontend_context always wins over the request-level default,
+    # *including* an explicit "host" (Codex review: "host" is also
+    # CompileContext's own default, so an unconditional overwrite couldn't
+    # distinguish an explicitly-pinned host side from an unset one -- only
+    # apply the request-level default when this side supplied no compile
+    # override at all).
     base = side_compile
     if pair_compile is not None and pair_compile.gcc_option_tokens:
         # Codex review (P2): an unrelated side_compile override (e.g. only a
@@ -133,15 +138,15 @@ def _compile_context(
                 base,
                 gcc_option_tokens=base.gcc_option_tokens + pair_compile.gcc_option_tokens,
             )
-    if base is None:
-        return (
-            CompileContext(frontend_context=frontend_context)
-            if frontend_context != "host"
-            else None
-        )
-    if frontend_context != "host" and base.frontend_context == "host":
-        return dataclasses.replace(base, frontend_context=frontend_context)
-    return base
+    if side_compile is not None:
+        return base
+    if frontend_context == "host":
+        return base
+    return (
+        dataclasses.replace(base, frontend_context=frontend_context)
+        if base is not None
+        else CompileContext(frontend_context=frontend_context)
+    )
 
 
 def resolve_compare_request_evidence(
