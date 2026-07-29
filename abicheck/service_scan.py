@@ -896,6 +896,34 @@ def run_scan(req: ScanRequest) -> ScanResult:
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
     binary = req.binaries[0]
+
+    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean
+    # anything for a baseline comparison (`run_scan_core` only calls
+    # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is
+    # not ScanMode.AUDIT`) -- without one they'd be silently accepted and
+    # discarded, which could hide a `policy_file` requiring evidence the
+    # caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
+    if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
+        _non_default = [
+            name
+            for name, is_set in (
+                ("suppression", req.suppression is not None),
+                ("policy", req.policy != "strict_abi"),
+                ("policy_file", req.policy_file is not None),
+                ("scope_to_public_surface", req.scope_to_public_surface is not True),
+                ("force_public_symbols", bool(req.force_public_symbols)),
+                ("pattern_verdicts", req.pattern_verdicts),
+                ("env_matrix", req.env_matrix is not None),
+            )
+            if is_set
+        ]
+        if _non_default:
+            raise ValidationError(
+                f"ScanRequest field(s) {', '.join(_non_default)} only take "
+                "effect with a baseline comparison (req.baseline set, and "
+                "req.mode not 'audit'); they configure compare_snapshots and "
+                "have no effect otherwise."
+            )
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
 

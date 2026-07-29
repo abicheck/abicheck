@@ -3203,6 +3203,69 @@ def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
     assert ran["n"] == 1  # finally still ran the cleanup on the raise path
 
 
+def test_run_scan_rejects_comparison_only_fields_without_baseline():
+    # Codex review on PR #657: ScanRequest's policy/suppression/scope/
+    # force-public/pattern-verdict/env-matrix fields only mean anything for
+    # a baseline comparison (run_scan_core only calls _run_baseline_compare
+    # when baseline is set and mode isn't "audit"). Without a baseline they
+    # must be rejected loudly (mirrors the CLI's identical scan_cmd guard),
+    # not silently accepted and discarded.
+    from abicheck.errors import ValidationError
+    from abicheck.service_scan import ScanRequest, run_scan
+
+    req = ScanRequest(binaries=[Path("libfoo.so")], depth="binary", policy="sdk_vendor")
+    with pytest.raises(ValidationError, match="only take effect with a baseline"):
+        run_scan(req)
+
+
+def test_run_scan_rejects_comparison_only_fields_with_audit_mode_despite_baseline():
+    # Even with a baseline set, an explicit mode="audit" means run_scan_core
+    # never calls _run_baseline_compare either -- the guard must catch that
+    # combination too, not just baseline=None.
+    from abicheck.errors import ValidationError
+    from abicheck.service_scan import ScanRequest, run_scan
+
+    req = ScanRequest(
+        binaries=[Path("libfoo.so")],
+        depth="binary",
+        baseline=Path("old.abi.json"),
+        mode="audit",
+        pattern_verdicts=True,
+    )
+    with pytest.raises(ValidationError, match="only take effect with a baseline"):
+        run_scan(req)
+
+
+def test_run_scan_allows_comparison_fields_with_a_real_baseline(monkeypatch):
+    # The new guard must not fire for the case it's meant to allow: a real
+    # baseline comparison actually using the config surface.
+    from types import SimpleNamespace
+
+    from abicheck import service_scan as _ss
+
+    def fake_core(**kw):
+        outcome = SimpleNamespace(
+            verdict="COMPATIBLE",
+            exit_code=0,
+            coverage=[],
+            crosscheck={},
+            to_dict=lambda: {},
+        )
+        return SimpleNamespace(outcome=outcome, findings=[])
+
+    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
+    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
+
+    req = _ss.ScanRequest(
+        binaries=[Path("libfoo.so")],
+        depth="binary",
+        baseline=Path("old.abi.json"),
+        policy="sdk_vendor",
+    )
+    res = _ss.run_scan(req)
+    assert res.verdict == "COMPATIBLE"
+
+
 # ── _try_attach_numpy_capi_surface() ────────────────────────────────────────
 
 

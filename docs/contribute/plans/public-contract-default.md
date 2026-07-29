@@ -1307,6 +1307,24 @@ unit-level truncation test confirm the rule label (falling back to a rule's
 `reason` when it has no `label`, same as `compare`) round-trips through
 JSON.
 
+**Updated (2026-07-29, same PR): the CLI's "reject comparison-only flags
+without --against" guard had a Python-API-side gap too.** The `scan_cmd`
+guard (added earlier this slice) only lives in the CLI front-end;
+`service_scan.run_scan` -- the Python API entry point behind the same
+`ScanRequest` fields -- had no equivalent, so a library caller could set
+e.g. `ScanRequest(policy_file=..., baseline=None)` and have it silently
+accepted and discarded, same failure mode the CLI guard was built to close.
+Fixed by adding the identical rejection in `run_scan` itself (raising
+`ValidationError`, this module's own established validation-error type,
+rather than `click.UsageError` which is CLI-specific) -- gated on
+`req.baseline is None OR ScanMode(req.mode) is ScanMode.AUDIT`, since an
+explicit `mode="audit"` skips the baseline compare in `run_scan_core` even
+when a baseline path is set (a case the CLI guard doesn't need to consider,
+since the public CLI has no `--mode` flag left to set it explicitly). Three
+new tests in `test_service_unit.py` cover: rejection with no baseline,
+rejection with a baseline but `mode="audit"`, and that a real baseline
+comparison using the config surface is unaffected.
+
 Still not yet done, deliberately out of scope for these four slices (each
 is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is
