@@ -566,10 +566,13 @@ def test_scan_engine_clang_bin_honors_gcc_prefix_when_available(monkeypatch) -> 
     """A ``--gcc-prefix`` composes a prefixed clang driver name, but only wins
     when that specific binary is actually resolvable on PATH."""
     import abicheck.scan_engine as se
+    from abicheck import dumper_clang
     from abicheck.service_scan import CompileContext
 
     monkeypatch.setattr(
-        se.shutil, "which", lambda name: name if name.endswith("clang++") else None
+        dumper_clang.shutil,
+        "which",
+        lambda name: name if name.endswith("clang++") else None,
     )
     ctx = CompileContext(gcc_prefix="/opt/x86_64-linux-gnu-")
     assert se._preprocessor_scan_clang_bin(ctx) == "/opt/x86_64-linux-gnu-clang++"
@@ -584,9 +587,10 @@ def test_scan_engine_clang_bin_falls_back_when_prefixed_clang_missing(
     that worked before this resolver existed, not silently downgrade S2 to
     ``not_collected`` by guessing a nonexistent binary name (Codex review)."""
     import abicheck.scan_engine as se
+    from abicheck import dumper_clang
     from abicheck.service_scan import CompileContext
 
-    monkeypatch.setattr(se.shutil, "which", lambda name: None)
+    monkeypatch.setattr(dumper_clang.shutil, "which", lambda name: None)
     ctx = CompileContext(gcc_prefix="aarch64-linux-gnu-")
     assert se._preprocessor_scan_clang_bin(ctx) == "clang++"
 

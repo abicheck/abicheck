@@ -305,6 +305,7 @@ def _write_snapshot_output(
     depth: str | None = None,
     include_dependencies: bool = False,
     header_roots: tuple[Path, ...] = (),
+    clang_bin: str = "clang",
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -314,23 +315,22 @@ def _write_snapshot_output(
     ``compare old.json new.json`` needs no out-of-band packs. *collect_mode* (the
     ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
     ``build`` captures L3 build context only, ``off`` collects nothing.
-    *build_query* / *build_compile_db* are the CLI equivalents of the
-    ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys. *extractor* is
-    the L4 source-ABI frontend — the same ``--ast-frontend`` knob that drives the
-    L2 header AST (ADR-037 D8): one frontend choice across both pipeline stages.
-    *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when
-    given, ``check_requested_depth_satisfied`` raises if the snapshot did not
-    actually reach it. Unless *include_dependencies* is set (``dump
-    --include-dependencies``), toolchain/system-header declarations are
-    excluded from the snapshot right before serialization by default, once
-    every embed step above has had its chance to fill in the snapshot — see
-    ``dumper_scoping.py`` for exactly what "dependency" means here (header
-    origin, not ABI visibility) and what this still doesn't filter.
-    *header_roots* is the actual ``-H``/``--header`` input the dump was
-    invoked with, forwarded to ``scope_snapshot_excluding_dependencies`` so a
-    header that IS one of those roots (or lives under one) is never treated
-    as a dependency just because it happens to sit under a system prefix
-    (e.g. an installed library dumped via its real ``/usr/include`` path).
+    *build_query* / *build_compile_db* are the CLI equivalents of the ``.abicheck.yml``
+    ``build.query`` / ``build.compile_db`` keys. *extractor* is the L4 source-ABI
+    frontend — the same ``--ast-frontend`` knob that drives the L2 header AST
+    (ADR-037 D8): one frontend choice across both pipeline stages. *clang_bin* is
+    the caller-resolved L4 replay compiler (forwarded to ``embed_build_source``).
+    *depth* is the raw ``--depth`` CLI value (``None`` when not passed); when given,
+    ``check_requested_depth_satisfied`` raises if the snapshot did not actually reach
+    it. Unless *include_dependencies* is set (``dump --include-dependencies``),
+    toolchain/system-header declarations are excluded from the snapshot right before
+    serialization by default, once every embed step above has had its chance to fill
+    in the snapshot — see ``dumper_scoping.py`` for what "dependency" means here.
+    *header_roots* is the actual ``-H``/``--header`` input the dump was invoked with,
+    forwarded to ``scope_snapshot_excluding_dependencies`` so a header that IS one of
+    those roots (or lives under one) is never treated as a dependency just because it
+    happens to sit under a system prefix (e.g. an installed library dumped via its real
+    ``/usr/include`` path).
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -339,7 +339,7 @@ def _write_snapshot_output(
             build_config=build_config, allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             build_query=build_query, build_compile_db=build_compile_db,
-            extractor=extractor,
+            extractor=extractor, clang_bin=clang_bin,
         )
         # G21.7: fail loud — if a requested evidence layer came back empty, say so
         # prominently instead of leaving it buried in the coverage rows. Permissive
@@ -855,7 +855,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Source-only dump (no binary) for the parallel-baseline flow.
     if so_path is None:
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, include_dependencies=include_dependencies)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix)
         return
 
     effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)

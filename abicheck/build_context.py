@@ -75,6 +75,88 @@ _SYSROOT_RE = re.compile(r"^--sysroot=(.+)$")
 _VISIBILITY_RE = re.compile(r"^-fvisibility=(.+)$")
 
 
+#: GNU ``@response-file`` expansion depth cap (``ld``/``ar``/make-generated
+#: response files can ``@include`` one another) — bounds the recursion below
+#: against a self-referential or absurdly deep chain rather than assuming
+#: real build systems never nest them.
+_MAX_RESPONSE_FILE_DEPTH = 4
+
+#: Response files feeding a single compile action are typically a handful of
+#: KB even for a very long include-dir list (oneDAL's own longest is well
+#: under this); a much larger file is either not a real response file or not
+#: one worth trusting blindly.
+_MAX_RESPONSE_FILE_BYTES = 1024 * 1024
+
+
+def _read_response_file(path: Path) -> str | None:
+    """Best-effort, bounded read of a GNU ``@response-file``.
+
+    Returns ``None`` (never raises) for anything that isn't a plausible
+    response file — missing, not a regular file, or oversized — so the
+    caller can fall back to keeping the original ``@file`` token untouched
+    instead of losing the rest of the argument list.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    if not path.is_file() or st.st_size > _MAX_RESPONSE_FILE_BYTES:
+        return None
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if len(data) > _MAX_RESPONSE_FILE_BYTES:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def _expand_response_files(
+    arguments: list[str], directory: Path, _depth: int = 0
+) -> list[str]:
+    """Inline GNU-style ``@response-file`` arguments in a compiler argv.
+
+    Make-generated ``compile_commands.json`` entries commonly spell a long
+    include-dir list as ``clang++ @build/inc_folders.txt -c foo.cpp`` instead
+    of literal ``-I`` tokens, to stay under the platform argv length limit —
+    this is standard practice for make-based build systems, not a malformed
+    entry. Left unexpanded, every flag the response file carries (almost
+    always ``-I``/``-D``) is invisible to :func:`_extract_flags` and to the
+    L3 ``CompileUnit`` this same argv projects into
+    (``adapters/compile_db.py`` reuses ``entry.arguments`` verbatim) — every
+    ``-I`` is silently dropped long before either parser runs, producing a
+    ``file not found`` on every translation unit regardless of which
+    compiler ends up invoked. A response file's own contents may themselves
+    ``@include`` another one, so expansion recurses, bounded by
+    *_MAX_RESPONSE_FILE_DEPTH*.
+
+    Unreadable/oversized files, and unparsable file contents, degrade to
+    keeping the original ``@file`` token rather than raising — matching
+    ``_extract_flags``'s existing "skip what we don't understand" contract
+    for any other flag it doesn't recognize.
+    """
+    if _depth > _MAX_RESPONSE_FILE_DEPTH:
+        return arguments
+    expanded: list[str] = []
+    for arg in arguments:
+        if not arg.startswith("@") or len(arg) == 1:
+            expanded.append(arg)
+            continue
+        raw_path = Path(arg[1:])
+        path = raw_path if raw_path.is_absolute() else directory / raw_path
+        text = _read_response_file(path)
+        if text is None:
+            expanded.append(arg)
+            continue
+        try:
+            tokens = shlex.split(text, posix=os.name != "nt")
+        except ValueError:
+            expanded.append(arg)
+            continue
+        expanded.extend(_expand_response_files(tokens, directory, _depth + 1))
+    return expanded
+
+
 @dataclass
 class CompileEntry:
     """One entry from compile_commands.json."""
@@ -89,6 +171,9 @@ class CompileEntry:
 
         Handles both ``arguments`` (JSON array) and ``command`` (shell string)
         forms as specified by the Clang compilation database standard.
+        ``@response-file`` arguments are expanded inline (see
+        :func:`_expand_response_files`) so every downstream consumer of
+        ``arguments`` sees the real flags, not an opaque ``@file`` token.
         """
         directory = Path(str(raw.get("directory", db_dir)))
         file_str = str(raw.get("file", ""))
@@ -106,6 +191,8 @@ class CompileEntry:
             arguments = shlex.split(str(raw["command"]), posix=os.name != "nt")
         else:
             arguments = []
+
+        arguments = _expand_response_files(arguments, directory)
 
         return cls(file=file_path.resolve(), directory=directory, arguments=arguments)
 

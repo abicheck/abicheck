@@ -118,7 +118,7 @@ _DEPFILE_OUTPUT_PREFIXES = (
 )
 
 
-def depfile_args_from_argv(argv: list[str]) -> list[str]:
+def depfile_args_from_argv(argv: list[str], directory: str | None = None) -> list[str]:
     """Strip a recorded compile argv down to the args usable after ``clang -MM``.
 
     A compile database stores the full command — possibly launcher-wrapped, like
@@ -130,6 +130,25 @@ def depfile_args_from_argv(argv: list[str]) -> list[str]:
     token, drop the ``-c`` compile action, the ``-o``/``-MF``/… outputs and any
     pre-existing dependency flags, keeping the source plus the ABI-relevant
     ``-I``/``-D``/``-std`` context that decides what is included.
+
+    A recorded argv may itself still carry an unexpanded GNU
+    ``@response-file`` (make-based build systems commonly spell a long
+    include-dir list that way) — this is normally already expanded upstream
+    by :func:`abicheck.build_context._expand_response_files` when the argv
+    came from a ``compile_commands.json``/make-transcript adapter, but a
+    build-emitted ``abicheck_inputs/`` pack or another future adapter could
+    still hand this function a raw, unexpanded one. When *directory* (the
+    compile unit's own working directory, e.g. ``CompileUnit.directory``) is
+    given, such a token is expanded inline before the filtering loop below —
+    not merely dropped — so its ``-I``/``-D`` flags are not silently lost.
+    Expanding *before* filtering, rather than after, is deliberate: it keeps
+    the loop's existing unsafe-flag denylist (``-Xclang``, ``-load``, ``-cc1``,
+    ``--config``, …) as the single choke point a flag smuggled inside a
+    response file still has to pass, instead of opening a second, unfiltered
+    path to reach ``clang -MM`` (a compile database may come from an
+    untrusted PR artifact). Without a *directory* to resolve a relative
+    response-file path against, the token is dropped as before rather than
+    guessed at.
     """
     if not argv:
         return []
@@ -145,6 +164,12 @@ def depfile_args_from_argv(argv: list[str]) -> list[str]:
         if unwrapped and not unwrapped[0].startswith("-")
         else list(unwrapped)
     )
+    if directory is not None and any(a.startswith("@") and len(a) > 1 for a in args):
+        from pathlib import Path
+
+        from ..build_context import _expand_response_files
+
+        args = _expand_response_files(args, Path(directory))
     out: list[str] = []
     skip_next = False
     for tok in args:
@@ -348,7 +373,11 @@ class ClangIncludeExtractor:
                 )
                 break
             attempted += 1
-            argv = depfile_args_from_argv(cu.argv) if cu.argv else [cu.source]
+            argv = (
+                depfile_args_from_argv(cu.argv, directory=cu.directory)
+                if cu.argv
+                else [cu.source]
+            )
             if not argv:
                 argv = [cu.source]
             # `-M` (not `-MM`) so depfiles include *system*-classified headers: a

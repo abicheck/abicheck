@@ -214,6 +214,40 @@ def test_depfile_args_strips_clang_plugin_loading_options() -> None:
     ) == ["foo.cpp", "-DABI=1"]
 
 
+def test_depfile_args_expands_response_file_when_directory_given(tmp_path) -> None:
+    """A GNU ``@response-file`` (make-based build systems commonly spell a long
+    include-dir list this way) is inlined -- not dropped -- when a *directory*
+    to resolve it against is supplied, so its ``-I`` flags reach ``clang -MM``
+    instead of every include path silently vanishing."""
+    rsp = tmp_path / "inc_folders.txt"
+    rsp.write_text("-Iinclude/foo -Iinclude/bar\n")
+    assert depfile_args_from_argv(
+        ["clang++", "-c", "foo.cpp", f"@{rsp.name}"],
+        directory=str(tmp_path),
+    ) == ["foo.cpp", "-Iinclude/foo", "-Iinclude/bar"]
+
+
+def test_depfile_args_response_file_content_still_filtered(tmp_path) -> None:
+    """A flag smuggled inside an expanded response file must still pass through
+    the same unsafe-flag denylist as a literal argv token -- expansion happens
+    before filtering, not after, so this stays the one choke point (a compile
+    database may come from an untrusted PR artifact)."""
+    rsp = tmp_path / "args.rsp"
+    rsp.write_text("-Iinclude -Xclang -load -Xclang ./evil.so\n")
+    assert depfile_args_from_argv(
+        ["clang++", "-c", "foo.cpp", f"@{rsp.name}"],
+        directory=str(tmp_path),
+    ) == ["foo.cpp", "-Iinclude"]
+
+
+def test_depfile_args_response_file_without_directory_drops_token() -> None:
+    """No *directory* to resolve a relative ``@file`` against -- keep the
+    conservative drop-the-token behavior rather than guessing a base path."""
+    assert depfile_args_from_argv(
+        ["clang++", "-c", "foo.cpp", "@args.rsp", "-Iinc"]
+    ) == ["foo.cpp", "-Iinc"]
+
+
 def test_parse_depfile_line_continuations() -> None:
     text = "foo.o: foo.cpp \\\n  inc/a.h \\\n  inc/b.h\n"
     assert parse_depfile(text) == ["foo.cpp", "inc/a.h", "inc/b.h"]

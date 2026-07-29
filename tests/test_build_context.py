@@ -181,6 +181,39 @@ class TestCompileEntry:
         )
         assert entry.arguments == []
 
+    def test_response_file_expanded(self, tmp_path: Path) -> None:
+        """A GNU ``@response-file`` argument (make-based build systems commonly
+        spell a long include-dir list this way) is inlined so its ``-I``/``-D``
+        flags actually reach the caller, instead of vanishing as one opaque
+        ``@file`` token no downstream parser matches."""
+        rsp = tmp_path / "inc_folders.txt"
+        rsp.write_text("-Iinclude/foo -DBAR=1\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", f"@{rsp.name}", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert f"@{rsp.name}" not in entry.arguments
+        assert "-Iinclude/foo" in entry.arguments
+        assert "-DBAR=1" in entry.arguments
+
+    def test_response_file_missing_keeps_token(self, tmp_path: Path) -> None:
+        """An unreadable ``@file`` degrades to keeping the original token
+        rather than raising or silently dropping the rest of the argv."""
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@does-not-exist.txt", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert "@does-not-exist.txt" in entry.arguments
+        assert "-c" in entry.arguments
+
 
 # ---------------------------------------------------------------------------
 # Tests: _extract_flags

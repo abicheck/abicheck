@@ -3708,3 +3708,71 @@ def test_pointer_typedef_own_volatile_marks_field_volatile() -> None:
     (t,) = _ClangAstParser(root, set(), set()).parse_types()
     (field,) = t.fields
     assert field.is_volatile is True
+
+
+# ---------------------------------------------------------------------------
+# Tests: resolve_source_frontend_clang_bin — the shared S2/L4 clang_bin
+# resolver used by scan_engine._preprocessor_scan_clang_bin and
+# cli_buildsource.embed_build_source's clang_bin (dump/scan L4 replay).
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_source_frontend_clang_bin_no_overrides() -> None:
+    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+
+    assert resolve_source_frontend_clang_bin(None, None) == "clang"
+    assert (
+        resolve_source_frontend_clang_bin(None, None, fallback="clang++") == "clang++"
+    )
+
+
+def test_resolve_source_frontend_clang_bin_honors_clang_family_gcc_path() -> None:
+    """A ``--gcc-path`` pointing at a clang-family binary (e.g. an Intel oneAPI
+    ``icpx`` symlink) is used directly for L4/S2 replay, not a plain fallback —
+    otherwise a non-default toolchain's real compiler is silently ignored."""
+    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+
+    assert resolve_source_frontend_clang_bin("/opt/bin/icpx", None) == "/opt/bin/icpx"
+
+
+def test_resolve_source_frontend_clang_bin_ignores_non_clang_gcc_path() -> None:
+    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+
+    assert (
+        resolve_source_frontend_clang_bin("g++", None, fallback="clang++") == "clang++"
+    )
+
+
+def test_resolve_source_frontend_clang_bin_excludes_cl_style_driver() -> None:
+    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+
+    assert (
+        resolve_source_frontend_clang_bin("clang-cl", None, fallback="clang++")
+        == "clang++"
+    )
+
+
+def test_resolve_source_frontend_clang_bin_prefix_when_available(monkeypatch) -> None:
+    from abicheck import dumper_clang
+
+    monkeypatch.setattr(
+        dumper_clang.shutil,
+        "which",
+        lambda name: name if name.endswith("clang") else None,
+    )
+    assert (
+        dumper_clang.resolve_source_frontend_clang_bin(None, "/opt/x86_64-linux-gnu-")
+        == "/opt/x86_64-linux-gnu-clang"
+    )
+
+
+def test_resolve_source_frontend_clang_bin_prefix_missing_falls_back(
+    monkeypatch,
+) -> None:
+    from abicheck import dumper_clang
+
+    monkeypatch.setattr(dumper_clang.shutil, "which", lambda name: None)
+    assert (
+        dumper_clang.resolve_source_frontend_clang_bin(None, "aarch64-linux-gnu-")
+        == "clang"
+    )

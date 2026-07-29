@@ -291,6 +291,66 @@ def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     return sycl_enabled
 
 
+def _is_cl_style_driver_name(path: str) -> bool:
+    """True for a CL-compatible driver name (``clang-cl``, Intel's ``dpcpp-cl``).
+
+    A CL-style driver parses MSVC-shaped flags (``/E``, ``/d1PP``) instead of
+    GNU-shaped ones, so it must never be selected as the binary for a
+    GNU-flag-only invocation (the S2 preprocessor pre-scan, L4 source-ABI
+    replay) — a CL driver can silently accept flags like ``-dM``/``-M`` as
+    ordinary compile input and "succeed" without producing the expected
+    output. Narrow, name-only heuristic: any stem ending in ``-cl`` (covers
+    ``clang-cl``/``clang-cl.exe`` and ``dpcpp-cl``), consistent with the
+    equally name-only :func:`_is_clang_family_binary` this complements.
+    """
+    return Path(path).stem.lower().endswith("-cl")
+
+
+def resolve_source_frontend_clang_bin(
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    *,
+    fallback: str = "clang",
+) -> str:
+    """Resolve the clang binary a build-context-aware source frontend (the S2
+    preprocessor pre-scan, L4 source-ABI replay/``embed_build_source``)
+    should invoke, from the same ``--gcc-path``/``--gcc-prefix`` override a
+    dump's ``CompileContext`` already carries for the L2 header AST —
+    instead of hardcoding a generic ``clang``/``clang++`` regardless of what
+    toolchain the caller actually pointed at.
+
+    Mirrors :func:`_resolve_clang_bin`'s two override cases (``--gcc-path``
+    only when it is actually a GNU-mode clang-family binary — castxml/GCC
+    binaries can't take clang-only flags, and a CL-mode driver can't take
+    the GNU-mode flags these frontends always use,
+    :func:`_is_cl_style_driver_name`; ``--gcc-prefix`` maps to the prefixed
+    clang driver, but only when that specific prefixed binary is actually on
+    PATH — a documented GCC cross-toolchain prefix is not evidence a
+    same-prefixed Clang exists, and guessing wrong would silently downgrade
+    an already-working plain fallback to a "not found" skip), without that
+    function's raise-on-missing for the explicit-binary case: these callers
+    already degrade gracefully (an availability check, a coverage/skip row)
+    when the resolved binary isn't on PATH, so this stays a pure resolver.
+
+    Without this, a dump/scan driven by a non-default toolchain (e.g.
+    ``--gcc-path icpx``, which accepts icx/icpx-only flags) always shelled
+    out to a plain ``clang``/``clang++`` for L4/S2 instead, failing every
+    invocation and silently degrading source-ABI coverage even though the
+    real build's own compiler was resolvable right here.
+    """
+    if (
+        gcc_path
+        and _is_clang_family_binary(gcc_path)
+        and not _is_cl_style_driver_name(gcc_path)
+    ):
+        return gcc_path
+    if gcc_prefix:
+        prefixed = f"{gcc_prefix}{fallback}"
+        if shutil.which(prefixed):
+            return prefixed
+    return fallback
+
+
 def _resolve_clang_bin(
     compiler: str,
     gcc_path: str | None,
