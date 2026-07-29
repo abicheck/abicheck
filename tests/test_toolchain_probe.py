@@ -179,6 +179,54 @@ class TestProbeCompilerFamily:
         }
         assert tp._probe_compiler_family(metadata) == "clang"
 
+    def test_gcc_ar_auxiliary_tool_is_not_misread_as_gnu(self) -> None:
+        # Regression: gcc-ar/gcc-nm/gcc-ranlib are GNU Binutils components
+        # bundled alongside a GCC install, not compilers -- their basename
+        # contains "gcc" as a substring and their own --version banner
+        # carries the same "Free Software Foundation, Inc." copyright
+        # notice every GCC/cc1 banner does, so a profile binding one of
+        # them with compiler_family: gcc previously passed with no error at
+        # all (Codex review, fresh evidence, reproduced against the real
+        # installed /usr/bin/gcc-ar).
+        metadata = {
+            "selected": "/usr/bin/gcc-ar",
+            "version": "GNU ar (GNU Binutils for Ubuntu) 2.42",
+        }
+        assert tp._probe_compiler_family(metadata) is None
+
+    def test_clang_format_auxiliary_tool_is_not_misread_as_clang(self) -> None:
+        # Regression: clang-format/clang-tidy are separate LLVM tools, not
+        # the compiler -- their basename contains "clang" as a substring
+        # and was previously accepted unconditionally for compiler_family:
+        # clang (Codex review, fresh evidence, reproduced against the real
+        # installed /usr/bin/clang-format).
+        metadata = {
+            "selected": "/usr/bin/clang-format",
+            "version": "Ubuntu clang-format version 18.1.3 (1ubuntu1)",
+        }
+        assert tp._probe_compiler_family(metadata) is None
+
+    def test_versioned_and_cross_prefixed_gcc_driver_names_still_resolve(self) -> None:
+        # The tightened driver-name pattern must still accept the real,
+        # common spellings it's meant to keep working: a bare version
+        # suffix (Debian/Ubuntu's own packaging convention) and a
+        # cross-compiler-triple prefix.
+        assert tp._probe_compiler_family({"selected": "/usr/bin/gcc-13"}) == "gnu"
+        assert (
+            tp._probe_compiler_family({"selected": "/usr/bin/arm-none-eabi-gcc"})
+            == "gnu"
+        )
+
+    def test_versioned_and_cross_prefixed_clang_driver_names_still_resolve(
+        self,
+    ) -> None:
+        assert tp._probe_compiler_family({"selected": "/usr/bin/clang-18"}) == "clang"
+        assert (
+            tp._probe_compiler_family({"selected": "/usr/bin/x86_64-w64-mingw32-clang"})
+            == "clang"
+        )
+        assert tp._probe_compiler_family({"selected": "/usr/bin/clang-cl"}) == "clang"
+
     def test_gnu_signature_phrase_fallback(self) -> None:
         metadata = {
             "selected": "/opt/cc1",
@@ -576,6 +624,34 @@ class TestCheckProfileToolchainIdentity:
         errors = tp.check_profile_toolchain_identity(profiles, bf)
         assert len(errors) == 1
         assert "could not be probed" in errors[0]
+
+    def test_declared_gcc_family_against_a_resolved_gcc_ar_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression, end-to-end: a profile binding an auxiliary GNU
+        # Binutils tool (gcc-ar) with compiler_family: gcc must be rejected
+        # -- it is not a compiler, even though its basename contains "gcc"
+        # and its banner carries the same FSF copyright notice a real GCC
+        # does (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/usr/bin/gcc-ar": {
+                    "selected": "/usr/bin/gcc-ar",
+                    "version": "GNU ar (GNU Binutils for Ubuntu) 2.42",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/usr/bin/gcc-ar"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(compiler_family="gcc", binding="gcc14"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "could not be determined" in errors[0]
 
     def test_matching_family_and_version_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch

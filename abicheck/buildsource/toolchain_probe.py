@@ -395,6 +395,26 @@ _INTEL_ONEAPI_ALIAS_NAMES = frozenset({"icx", "icpx", "dpcpp", "dpcpp-cl"})
 _CLASSIC_ICC_ALIAS_NAMES = frozenset({"icc", "icpc"})
 _ICC_BANNER_RE = re.compile(r"intel\(r\)\s+c\+\+\s+compiler|\bicc\b|\bicpc\b")
 
+#: Genuine GCC/Clang compiler-driver basenames -- the exact alias
+#: (``gcc``/``g++``/``clang``/``clang++``/``clang-cl``), optionally
+#: cross-compiler-triple-prefixed (``arm-none-eabi-gcc``,
+#: ``x86_64-w64-mingw32-clang``) and/or version-suffixed (``gcc-13``,
+#: ``clang-18``). Deliberately excludes a *different*, same-family
+#: auxiliary tool whose basename merely contains the driver name as a
+#: substring: ``gcc-ar``/``gcc-nm``/``gcc-ranlib`` (GNU Binutils components
+#: installed alongside a GCC toolchain) and ``clang-format``/``clang-tidy``
+#: (separate LLVM tools) are not compilers, and a plain substring check
+#: previously accepted any of them for a declared ``compiler_family: gcc``/
+#: ``clang`` profile with no error at all (Codex review, fresh evidence:
+#: `/usr/bin/gcc-ar` bound with `compiler_family: gcc` passed
+#: unconditionally). A trailing version suffix must be purely numeric,
+#: which is exactly what excludes ``-ar``/``-nm``/``-ranlib``/``-format``/
+#: ``-tidy`` here without naming each one explicitly.
+_GCC_DRIVER_NAME_RE = re.compile(r"(?:^|-)(?:gcc|g\+\+)(?:-\d+(?:\.\d+)*)?$")
+_CLANG_DRIVER_NAME_RE = re.compile(
+    r"(?:^|-)(?:clang(?:\+\+)?|clang-cl)(?:-\d+(?:\.\d+)*)?$"
+)
+
 
 def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
     """Best-effort compiler family for *this* validation gate.
@@ -405,19 +425,20 @@ def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
     both the *selected* path's basename and the resolved *realpath*'s
     basename, since a generic driver alias/symlink (``cc``, ``c++``, or a
     Windows-style ``gcc`` that is actually Clang under the hood) can name
-    something generic while resolving to the real compiler binary. Falls
-    back to a signature phrase in the probed ``--version`` banner text
-    (GCC always prints "Free Software Foundation, Inc."; Clang always
-    prints "clang version"). Returns ``None`` — skip the comparison,
-    never guess — when nothing here is conclusive.
+    something generic while resolving to the real compiler binary, via
+    :data:`_GCC_DRIVER_NAME_RE`/:data:`_CLANG_DRIVER_NAME_RE` (an exact
+    driver-alias match, not a bare substring check -- see their docstring
+    for why). Falls back to a signature phrase in the probed ``--version``
+    banner text (Clang always prints "clang version"; GCC/cc1 always print
+    "Free Software Foundation, Inc." -- but so does every GNU Binutils
+    component, e.g. ``gcc-ar``'s own "GNU ar (GNU Binutils for ...)"
+    banner, so that fallback is additionally rejected whenever the banner
+    also mentions "binutils", the one phrase real gcc/g++/cc1 banners never
+    contain (Codex review, fresh evidence)). Returns ``None`` — skip the
+    comparison, never guess — when nothing here is conclusive.
     """
     stems = [
         Path(candidate).stem.lower()
-        for candidate in (metadata.get("selected", ""), metadata.get("realpath", ""))
-        if candidate
-    ]
-    names = [
-        Path(candidate).name.lower()
         for candidate in (metadata.get("selected", ""), metadata.get("realpath", ""))
         if candidate
     ]
@@ -432,13 +453,16 @@ def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
         version_text
     ):
         return "icc"
-    if any("clang" in name for name in names) or "clang version" in version_text:
+    if (
+        any(_CLANG_DRIVER_NAME_RE.search(stem) for stem in stems)
+        or "clang version" in version_text
+    ):
         return "clang"
-    if any(name in ("cl", "cl.exe") for name in names):
+    if any(stem == "cl" for stem in stems):
         return "msvc"
-    if any("gcc" in name or "g++" in name for name in names):
+    if any(_GCC_DRIVER_NAME_RE.search(stem) for stem in stems):
         return "gnu"
-    if "free software foundation" in version_text:
+    if "free software foundation" in version_text and "binutils" not in version_text:
         return "gnu"
     return None
 
