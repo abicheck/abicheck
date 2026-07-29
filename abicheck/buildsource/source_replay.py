@@ -374,7 +374,9 @@ def _headers_only_set_cover(
     public header no recorded TU includes is left to the heuristic by returning
     ``None`` only when the graph covers nothing at all.
     """
-    public = sorted(set(public_header_roots_for(build)) | set(public_header_roots or ()))
+    public = sorted(
+        set(public_header_roots_for(build)) | set(public_header_roots or ())
+    )
     if not public:
         return None
     by_id = {cu.id: cu for cu in build.compile_units}
@@ -494,7 +496,9 @@ def _cover_with_heuristic_fallback(
 
 
 def _uncovered_public_headers(
-    roots: Sequence[str], units: Sequence[CompileUnit], include_map: dict[str, list[str]]
+    roots: Sequence[str],
+    units: Sequence[CompileUnit],
+    include_map: dict[str, list[str]],
 ) -> list[str]:
     """Public roots not reached by the selected units' include graph."""
     if not roots or not include_map:
@@ -1364,8 +1368,22 @@ def _extract_one(
 
 
 def _extractor_version(extractor: SourceAbiExtractor) -> str:
-    """Pull a version string off an extractor for the cache key, if it exposes one."""
-    return str(getattr(extractor, "version", "") or "")
+    """Pull a version string off an extractor for the cache key, if it exposes one.
+
+    Also folds in ``cache_identity_extra()`` when the extractor exposes it
+    (``ClangSourceExtractor`` does, to fold a resolved ``--gcc-path``
+    compiler override into the D8 key — see its docstring) — mirrors
+    ``_cache_public_header_roots()``'s optional-hook pattern below, so a
+    per-instance identity detail an extractor cares about can ride the
+    cache key without changing this function's signature (Codex review).
+    """
+    version = str(getattr(extractor, "version", "") or "")
+    extra_hook = getattr(extractor, "cache_identity_extra", None)
+    if callable(extra_hook):
+        extra = extra_hook()
+        if extra:
+            version = f"{version}+{extra}"
+    return version
 
 
 def _cache_public_header_roots(

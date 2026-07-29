@@ -103,18 +103,15 @@ from .clang_public_roots import (  # noqa: F401
     _path_suffixes,
     _root_spelling,
     _strip_leading_sample_dir,
+    clang_cache_identity_extra,
 )
 from .clang_source_edges import build_source_edges
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
-#: folded into the per-TU cache key (ADR-030 D8). Bump on ANY change to the
-#: emitted-record recipe so a stale ``--cache-dir`` never silently reuses a dump
-#: from an older recipe. 0.6: emit external-linkage ``variables``. 0.7: stamp
-#: ``fact_set``/``coverage`` (ADR-038 C.8) and populate ``source_edges``
-#: (P1 #17-18) from the already-parsed AST — bumped so a ``--cache-dir``
-#: populated by 0.6 is invalidated rather than silently reused with the new
-#: fields defaulting to empty (Codex review).
-CLANG_EXTRACTOR_VERSION = "0.7"
+#: folded into the per-TU cache key (ADR-030 D8). Bump on ANY recipe change so a
+#: stale ``--cache-dir`` never reuses an old dump. 0.8: also folds in the
+#: resolved compiler override (Codex review).
+CLANG_EXTRACTOR_VERSION = "0.8"
 
 
 @functools.lru_cache(maxsize=8)
@@ -1743,6 +1740,9 @@ class ClangSourceExtractor:
             for_cache=True,
             compiler_binary=self.compiler_binary,
         )
+
+    def cache_identity_extra(self) -> str:
+        return clang_cache_identity_extra(self.clang_bin, self.compiler_binary)
 
     def extract(
         self,

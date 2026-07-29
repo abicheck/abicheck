@@ -176,6 +176,42 @@ class TestLoadCompileDb:
         assert all("-Iinclude/foo" in e.arguments for e in entries)
         assert len(read_calls) == 1
 
+    def test_db_wide_output_budget_bounds_aggregate_expansion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even with the response-file *read* deduped by the shared cache,
+        each entry still walks and re-materializes its own expanded argv --
+        so a database-wide *output* budget, independent of the per-entry
+        one, must still bound the aggregate across many entries once that
+        budget is small enough to actually bite (Codex review, fifth
+        round)."""
+        import abicheck.build_context as build_context_module
+
+        monkeypatch.setattr(
+            build_context_module, "_MAX_RESPONSE_FILE_DB_OUTPUT_TOKENS", 5
+        )
+        rsp = tmp_path / "shared.rsp"
+        rsp.write_text("-Ia -Ib -Ic -Id\n")  # 4 tokens
+        db = [
+            {
+                "directory": str(tmp_path),
+                "file": f"src/tu{i}.cpp",
+                "arguments": ["c++", f"@{rsp.name}", "-c", f"src/tu{i}.cpp"],
+            }
+            for i in range(10)
+        ]
+        f = tmp_path / "compile_commands.json"
+        f.write_text(json.dumps(db))
+
+        entries = load_compile_db(f)
+        assert len(entries) == 10
+        expanded_count = sum(1 for e in entries if "-Ia" in e.arguments)
+        unexpanded_count = sum(1 for e in entries if f"@{rsp.name}" in e.arguments)
+        # Budget of 5 allows exactly one 4-token expansion before going
+        # non-positive; every entry after that must keep the literal token.
+        assert expanded_count == 1
+        assert unexpanded_count == 9
+
 
 # ---------------------------------------------------------------------------
 # Tests: CompileEntry

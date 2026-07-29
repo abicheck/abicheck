@@ -104,6 +104,20 @@ _MAX_RESPONSE_FILE_EXPANSIONS = 64
 #: worst-case output size independent of how the file-read budget is spent.
 _MAX_RESPONSE_FILE_OUTPUT_TOKENS = 20000
 
+#: Aggregate cap on the number of tokens emitted across *every* entry in one
+#: ``load_compile_db()`` call, on top of the per-entry cap above and
+#: independent of the *_file_cache* read/parse dedup. Caching a response
+#: file's own tokenization removes redundant I/O when many entries share
+#: one ``@file``, but each entry still walks and re-materializes its own
+#: fully expanded argv list -- an untrusted database with thousands of
+#: entries each pointing at one dense (near-per-entry-cap) response file
+#: can still turn a few MB of JSON into a large aggregate amount of list
+#: allocation/CPU work even with zero extra disk reads (Codex review, fifth
+#: round). Sized generously above any real single project's total expanded
+#: flag volume (thousands of entries at a few hundred flags each) while
+#: still bounding worst-case aggregate output independent of entry count.
+_MAX_RESPONSE_FILE_DB_OUTPUT_TOKENS = 2_000_000
+
 #: Response files feeding a single compile action are typically a handful of
 #: KB even for a very long include-dir list (oneDAL's own longest is well
 #: under this); a much larger file is either not a real response file or not
@@ -284,6 +298,7 @@ def _expand_response_files(
     *,
     cl_style: bool = False,
     _file_cache: _ResponseFileCache | None = None,
+    _db_output_budget: list[int] | None = None,
 ) -> list[str]:
     """Inline GNU-style ``@response-file`` arguments in a compiler argv.
 
@@ -340,6 +355,15 @@ def _expand_response_files(
     consume *_budget*, since no file is actually read) but still goes
     through the same recursive expansion, output-budget accounting, and
     depth limit as a miss, so nested ``@file`` handling is unaffected.
+
+    *_db_output_budget* (internal, shared the same way as *_file_cache*)
+    additionally bounds the aggregate number of tokens emitted across
+    *every* entry in the whole database, on top of the existing per-entry
+    *_output_budget* -- caching removes redundant I/O for a repeated file,
+    but each entry still walks and re-materializes its own expanded argv
+    list, so thousands of entries referencing one dense file can still
+    amplify into a large aggregate amount of list allocation/CPU work with
+    zero extra disk reads (Codex review, fifth round).
     """
     if _depth > _MAX_RESPONSE_FILE_DEPTH:
         return arguments
@@ -354,7 +378,9 @@ def _expand_response_files(
         if not arg.startswith("@") or len(arg) == 1:
             expanded.append(arg)
             continue
-        if _output_budget[0] <= 0:
+        if _output_budget[0] <= 0 or (
+            _db_output_budget is not None and _db_output_budget[0] <= 0
+        ):
             expanded.append(arg)
             continue
         raw_path = Path(arg[1:])
@@ -381,7 +407,9 @@ def _expand_response_files(
         if tokens is None:
             expanded.append(arg)
             continue
-        if len(tokens) > _output_budget[0]:
+        if len(tokens) > _output_budget[0] or (
+            _db_output_budget is not None and len(tokens) > _db_output_budget[0]
+        ):
             # This single file's own token count already exceeds the
             # remaining output budget -- the pre-loop budget check above
             # only rejects a *subsequent* @file once the budget has already
@@ -394,6 +422,8 @@ def _expand_response_files(
             expanded.append(arg)
             continue
         _output_budget[0] -= len(tokens)
+        if _db_output_budget is not None:
+            _db_output_budget[0] -= len(tokens)
         expanded.extend(
             _expand_response_files(
                 tokens,
@@ -404,6 +434,7 @@ def _expand_response_files(
                 _output_budget,
                 cl_style=cl_style,
                 _file_cache=_file_cache,
+                _db_output_budget=_db_output_budget,
             )
         )
     return expanded
@@ -423,6 +454,7 @@ class CompileEntry:
         raw: dict[str, object],
         db_dir: Path,
         _file_cache: _ResponseFileCache | None = None,
+        _db_output_budget: list[int] | None = None,
     ) -> CompileEntry:
         """Parse a single compile_commands.json entry.
 
@@ -432,10 +464,12 @@ class CompileEntry:
         *db_dir* (see :func:`_expand_response_files`) so every downstream
         consumer of ``arguments`` sees the real flags, not an opaque
         ``@file`` token — without reading outside the compilation
-        database's own trusted directory. *_file_cache*, when supplied by
-        :func:`load_compile_db`, is shared across every entry in the same
-        compile database so a response file referenced by many entries is
-        only actually read/tokenized once (see :func:`_expand_response_files`).
+        database's own trusted directory. *_file_cache*/*_db_output_budget*,
+        when supplied by :func:`load_compile_db`, are shared across every
+        entry in the same compile database so a response file referenced by
+        many entries is only actually read/tokenized once, and the
+        aggregate expansion work across the whole database stays bounded
+        (see :func:`_expand_response_files`).
         """
         directory = Path(str(raw.get("directory", db_dir)))
         file_str = str(raw.get("file", ""))
@@ -469,6 +503,7 @@ class CompileEntry:
             _safe_resolve(db_dir) or db_dir,
             cl_style=cl_style,
             _file_cache=_file_cache,
+            _db_output_budget=_db_output_budget,
         )
 
         return cls(file=file_path.resolve(), directory=directory, arguments=arguments)
@@ -600,14 +635,19 @@ def load_compile_db(path: Path) -> list[CompileEntry]:
     # Shared across every entry in this database so a response file
     # referenced by many entries (a common pattern, and an amplification
     # vector for an untrusted database) is only actually read/tokenized
-    # once (Codex review) -- see _expand_response_files's _file_cache.
+    # once, and so the aggregate expansion output across the whole database
+    # stays bounded even once I/O is deduped (Codex review) -- see
+    # _expand_response_files's _file_cache/_db_output_budget.
     file_cache: _ResponseFileCache = {}
+    db_output_budget = [_MAX_RESPONSE_FILE_DB_OUTPUT_TOKENS]
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             _logger.warning("Skipping non-object entry at index %d", i)
             continue
         try:
-            entries.append(CompileEntry.from_dict(item, db_dir, file_cache))
+            entries.append(
+                CompileEntry.from_dict(item, db_dir, file_cache, db_output_budget)
+            )
         except (KeyError, TypeError, ValueError, OSError) as exc:
             _logger.warning("Skipping malformed entry at index %d: %s", i, exc)
 

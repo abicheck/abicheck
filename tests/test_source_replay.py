@@ -30,11 +30,13 @@ from abicheck import deadline
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
 from abicheck.buildsource.source_abi import SourceAbiTu, SourceEntity, SourceLocation
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
+from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
 from abicheck.buildsource.source_replay import (
     CI_MODE_TO_SCOPE,
     REPLAY_SCOPES,
     SourceAbiCache,
     _extract_cache_misses,
+    _extractor_version,
     compute_tu_cache_key,
     public_header_roots_for,
     run_source_replay,
@@ -44,7 +46,9 @@ from abicheck.buildsource.source_replay import (
 
 
 def _cu(cu_id: str, source: str, target_id: str = "", **kw: object) -> CompileUnit:
-    return CompileUnit(id=cu_id, source=source, target_id=target_id, language="CXX", **kw)  # type: ignore[arg-type]
+    return CompileUnit(
+        id=cu_id, source=source, target_id=target_id, language="CXX", **kw
+    )  # type: ignore[arg-type]
 
 
 def _worker_records_remaining_deadline(cu: CompileUnit) -> tuple[None, str]:
@@ -98,7 +102,9 @@ class _FakeExtractor:
             kind="function",
             qualified_name=f"fn_{compile_unit.source}",
             mangled_name=f"_Z{len(compile_unit.id)}",
-            source_location=SourceLocation(path="include/foo.h", origin="PUBLIC_HEADER"),
+            source_location=SourceLocation(
+                path="include/foo.h", origin="PUBLIC_HEADER"
+            ),
             visibility="public_header",
             api_relevant=True,
         )
@@ -144,13 +150,13 @@ def test_scope_headers_only_picks_one_unit_per_header_target() -> None:
 def test_scope_headers_only_falls_back_when_no_public_headers() -> None:
     build = BuildEvidence(compile_units=[_cu("cu://x", "x.cpp")])
     # No targets/public headers to scope by → fall back to all units.
-    assert {u.id for u in select_compile_units(build, scope="headers-only")} == {"cu://x"}
+    assert {u.id for u in select_compile_units(build, scope="headers-only")} == {
+        "cu://x"
+    }
 
 
 def test_scope_changed_matches_source_paths() -> None:
-    units = select_compile_units(
-        _build(), scope="changed", changed_paths=["src/b.cpp"]
-    )
+    units = select_compile_units(_build(), scope="changed", changed_paths=["src/b.cpp"])
     assert {u.id for u in units} == {"cu://b"}
 
 
@@ -181,7 +187,9 @@ def test_scope_changed_falls_back_for_header_without_target_metadata() -> None:
     build = BuildEvidence(
         compile_units=[_cu("cu://a", "src/a.cpp"), _cu("cu://b", "src/b.cpp")]
     )
-    units = select_compile_units(build, scope="changed", changed_paths=["include/api.h"])
+    units = select_compile_units(
+        build, scope="changed", changed_paths=["include/api.h"]
+    )
     assert {u.id for u in units} == {"cu://a", "cu://b"}
 
 
@@ -189,7 +197,9 @@ def test_scope_changed_non_header_no_match_stays_empty() -> None:
     # A changed *non-header* that matches no source must NOT trigger the
     # fail-open header fallback (no over-broad replay for an unrelated file).
     build = BuildEvidence(compile_units=[_cu("cu://a", "src/a.cpp")])
-    assert select_compile_units(build, scope="changed", changed_paths=["README.md"]) == []
+    assert (
+        select_compile_units(build, scope="changed", changed_paths=["README.md"]) == []
+    )
 
 
 def test_scope_changed_unowned_header_fails_open_despite_target_metadata() -> None:
@@ -320,8 +330,7 @@ def test_headers_only_full_fanout_is_reported() -> None:
     assert surface.coverage["compile_units_selected"] == 2
     assert surface.coverage["scope_widened_to_full"] is True
     assert (
-        "headers-only had no include graph"
-        in surface.coverage["scope_widened_reason"]
+        "headers-only had no include graph" in surface.coverage["scope_widened_reason"]
     )
     assert surface.coverage["elapsed_s"] >= 0.0
     assert surface.coverage["extract_s"] >= 0.0
@@ -479,7 +488,9 @@ def test_changed_with_include_graph_is_precise() -> None:
         "cu://d": ["include/bar.h"],
     }
     units = select_compile_units(
-        _build(), scope="changed", changed_paths=["include/foo.h"],
+        _build(),
+        scope="changed",
+        changed_paths=["include/foo.h"],
         include_map=include_map,
     )
     assert {u.id for u in units} == {"cu://a"}
@@ -495,7 +506,9 @@ def test_changed_full_include_graph_no_match_selects_nothing() -> None:
         "cu://d": ["include/other.h"],
     }
     units = select_compile_units(
-        _build(), scope="changed", changed_paths=["include/ghost.h"],
+        _build(),
+        scope="changed",
+        changed_paths=["include/ghost.h"],
         include_map=include_map,
     )
     assert units == []
@@ -506,7 +519,9 @@ def test_changed_partial_include_graph_falls_back_to_fan_out() -> None:
     # a header changed with incomplete coverage still fails open to all units.
     include_map = {"cu://a": ["include/other.h"]}
     units = select_compile_units(
-        _build(), scope="changed", changed_paths=["include/ghost.h"],
+        _build(),
+        scope="changed",
+        changed_paths=["include/ghost.h"],
         include_map=include_map,
     )
     assert {u.id for u in units} == {u.id for u in _build().compile_units}
@@ -517,7 +532,9 @@ def test_changed_with_graph_still_matches_changed_source() -> None:
     # includes nothing relevant.
     include_map = {"cu://b": ["include/other.h"]}
     units = select_compile_units(
-        _build(), scope="changed", changed_paths=["src/b.cpp"],
+        _build(),
+        scope="changed",
+        changed_paths=["src/b.cpp"],
         include_map=include_map,
     )
     assert {u.id for u in units} == {"cu://b"}
@@ -567,13 +584,17 @@ def test_cache_key_changes_with_source_content(tmp_path: Path) -> None:
     src.write_text("int a;\n")
     cu = _cu("cu://x", str(src))
     k1 = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=[],
     )
     src.write_text("int a; int b;\n")
     k2 = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=[],
     )
     assert k1 and k2 and k1 != k2
 
@@ -583,19 +604,85 @@ def test_cache_key_changes_with_extractor_and_flags(tmp_path: Path) -> None:
     src.write_text("int a;\n")
     cu = _cu("cu://x", str(src), standard="c++17")
     base = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=[],
     )
     other_tool = compute_tu_cache_key(
-        extractor_name="castxml-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=[],
+        extractor_name="castxml-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=[],
     )
     cu_flag = _cu("cu://x", str(src), standard="c++17", abi_relevant_flags=["-m32"])
     flagged = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu_flag, public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu_flag,
+        public_header_roots=[],
     )
     assert base != other_tool != flagged != base
+
+
+def test_extractor_version_folds_in_cache_identity_extra_hook() -> None:
+    """An extractor's optional ``cache_identity_extra()`` hook (mirroring the
+    existing ``effective_public_header_roots_for_cache`` pattern) rides the
+    cache-key version string when present, so a per-instance identity
+    detail like a resolved compiler override can invalidate a stale cache
+    without changing ``_extractor_version()``'s own signature."""
+
+    class _NoHook:
+        version = "1.0"
+
+    class _WithHook:
+        version = "1.0"
+
+        def cache_identity_extra(self) -> str:
+            return "extra"
+
+    assert _extractor_version(_NoHook()) == "1.0"
+    assert _extractor_version(_WithHook()) == "1.0+extra"
+
+
+def test_extractor_version_changes_with_clang_bin_override() -> None:
+    """A resolved ``--gcc-path`` override (``clang_bin``/``compiler_binary``)
+    must change ``ClangSourceExtractor``'s cache identity -- otherwise a
+    warm ``--source-abi-cache-dir`` populated under plain ``clang`` would be
+    treated as a hit for a later run honoring a different compiler,
+    silently reusing stale source-ABI facts (Codex review, fifth round)."""
+    default = ClangSourceExtractor()
+    overridden = ClangSourceExtractor(clang_bin="icpx", compiler_binary="icpx")
+    cl_mode = ClangSourceExtractor(clang_bin="clang-cl", compiler_binary="clang-cl")
+    versions = {
+        _extractor_version(default),
+        _extractor_version(overridden),
+        _extractor_version(cl_mode),
+    }
+    assert len(versions) == 3
+
+
+def test_cache_key_changes_with_extractor_compiler_override(tmp_path: Path) -> None:
+    """End-to-end: compute_tu_cache_key() itself changes when the extractor's
+    resolved compiler override changes, for an otherwise-identical TU."""
+    src = tmp_path / "foo.cpp"
+    src.write_text("int a;\n")
+    cu = _cu("cu://x", str(src), standard="c++17")
+    default = ClangSourceExtractor()
+    overridden = ClangSourceExtractor(clang_bin="icpx", compiler_binary="icpx")
+    key_default = compute_tu_cache_key(
+        extractor_name="clang-source",
+        extractor_version=_extractor_version(default),
+        compile_unit=cu,
+        public_header_roots=[],
+    )
+    key_overridden = compute_tu_cache_key(
+        extractor_name="clang-source",
+        extractor_version=_extractor_version(overridden),
+        compile_unit=cu,
+        public_header_roots=[],
+    )
+    assert key_default and key_overridden and key_default != key_overridden
 
 
 def test_cache_key_changes_with_header_content(tmp_path: Path) -> None:
@@ -605,13 +692,17 @@ def test_cache_key_changes_with_header_content(tmp_path: Path) -> None:
     hdr.write_text("int x;\n")
     cu = _cu("cu://x", str(src))
     k1 = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=[str(hdr)],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=[str(hdr)],
     )
     hdr.write_text("int x; int y;\n")
     k2 = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=[str(hdr)],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=[str(hdr)],
     )
     assert k1 and k2 and k1 != k2
 
@@ -715,12 +806,16 @@ def test_cache_key_changes_with_argv_forced_include(tmp_path: Path) -> None:
     old = _cu("cu://x", str(src), argv=["clang++", "-include", "old.h", "-c", "a.cpp"])
     new = _cu("cu://x", str(src), argv=["clang++", "-include", "new.h", "-c", "a.cpp"])
     k_old = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=old, public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=old,
+        public_header_roots=[],
     )
     k_new = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=new, public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=new,
+        public_header_roots=[],
     )
     assert k_old and k_new and k_old != k_new
 
@@ -731,12 +826,16 @@ def test_cache_key_changes_with_iquote_path(tmp_path: Path) -> None:
     a = _cu("cu://x", str(src), argv=["clang++", "-iquote", "dirA", "-c", "a.cpp"])
     b = _cu("cu://x", str(src), argv=["clang++", "-iquote", "dirB", "-c", "a.cpp"])
     ka = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=a, public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=a,
+        public_header_roots=[],
     )
     kb = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=b, public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=b,
+        public_header_roots=[],
     )
     assert ka and kb and ka != kb
 
@@ -750,12 +849,16 @@ def test_cache_key_includes_source_location(tmp_path: Path) -> None:
     src_a.write_text("int x;\n")
     src_b.write_text("int x;\n")  # identical content, different location
     key_a = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=_cu("cu://a", str(src_a)), public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=_cu("cu://a", str(src_a)),
+        public_header_roots=[],
     )
     key_b = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=_cu("cu://b", str(src_b)), public_header_roots=[],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=_cu("cu://b", str(src_b)),
+        public_header_roots=[],
     )
     assert key_a and key_b and key_a != key_b
 
@@ -770,13 +873,17 @@ def test_cache_key_changes_with_header_directory_content(tmp_path: Path) -> None
     (inc / "h.h").write_text("int x;\n")
     cu = _cu("cu://x", str(src))
     k1 = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=[str(inc)],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=[str(inc)],
     )
     (inc / "h.h").write_text("int x; int y;\n")
     k2 = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=[str(inc)],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=[str(inc)],
     )
     assert k1 and k2 and k1 != k2
 
@@ -788,8 +895,10 @@ def test_cache_key_uses_path_string_for_missing_root(tmp_path: Path) -> None:
     src.write_text("int a;\n")
     cu = _cu("cu://x", str(src))
     key = compute_tu_cache_key(
-        extractor_name="clang-source", extractor_version="0.1",
-        compile_unit=cu, public_header_roots=["does/not/exist.h"],
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu,
+        public_header_roots=["does/not/exist.h"],
     )
     assert key is not None
 
@@ -800,7 +909,10 @@ def test_cache_key_uses_path_string_for_missing_root(tmp_path: Path) -> None:
 def test_run_source_replay_links_selected_units() -> None:
     extractor = _FakeExtractor()
     surface, diagnostics = run_source_replay(
-        _build(), extractor, scope="target", target_id="target://libfoo",
+        _build(),
+        extractor,
+        scope="target",
+        target_id="target://libfoo",
         public_header_roots=["include/foo.h"],
     )
     assert diagnostics == []
@@ -813,11 +925,17 @@ def test_run_source_replay_links_selected_units() -> None:
 def test_run_source_replay_forwards_include_graph_for_precise_changed() -> None:
     extractor = _FakeExtractor()
     surface, _ = run_source_replay(
-        _build(), extractor, scope="changed",
+        _build(),
+        extractor,
+        scope="changed",
         changed_paths=["include/foo.h"],
         public_header_roots=["include/foo.h"],
-        include_map={"cu://a": ["include/foo.h"], "cu://b": ["include/other.h"],
-                     "cu://c": ["include/bar.h"], "cu://d": ["include/bar.h"]},
+        include_map={
+            "cu://a": ["include/foo.h"],
+            "cu://b": ["include/other.h"],
+            "cu://c": ["include/bar.h"],
+            "cu://d": ["include/bar.h"],
+        },
     )
     # Only the TU that includes the changed header is parsed (precise mapping).
     assert extractor.calls == ["cu://a"]
@@ -827,7 +945,10 @@ def test_run_source_replay_forwards_include_graph_for_precise_changed() -> None:
 def test_run_source_replay_records_failures_as_diagnostics() -> None:
     extractor = _FakeExtractor(fail_for={"cu://b"})
     surface, diagnostics = run_source_replay(
-        _build(), extractor, scope="target", target_id="target://libfoo",
+        _build(),
+        extractor,
+        scope="target",
+        target_id="target://libfoo",
         public_header_roots=["include/foo.h"],
     )
     # cu://b failed → recorded as a diagnostic, cu://a still linked (partial L4).
@@ -854,13 +975,21 @@ def test_run_source_replay_uses_cache_to_skip_reextraction(tmp_path: Path) -> No
     cache = SourceAbiCache(tmp_path / "cache")
     first = _FakeExtractor()
     run_source_replay(
-        build, first, scope="full", public_header_roots=[], cache=cache,
+        build,
+        first,
+        scope="full",
+        public_header_roots=[],
+        cache=cache,
     )
     assert first.calls == ["cu://a"]
     # Second run hits the cache: the extractor is never called again.
     second = _FakeExtractor()
     surface, _ = run_source_replay(
-        build, second, scope="full", public_header_roots=[], cache=cache,
+        build,
+        second,
+        scope="full",
+        public_header_roots=[],
+        cache=cache,
     )
     assert second.calls == []
     assert len(surface.reachable_declarations) == 1
@@ -872,20 +1001,24 @@ def test_run_source_replay_uses_cache_to_skip_reextraction(tmp_path: Path) -> No
 import pytest as _pytest  # noqa: E402
 
 
-@_pytest.mark.parametrize("paths,expected", [
-    (["CMakeLists.txt"], "build"),
-    (["cmake/foo.cmake"], "build"),
-    (["Makefile", "docs/x.md"], "build"),
-    (["BUILD.bazel"], "build"),
-    (["meson.build"], "build"),
-    (["src/foo.cpp"], "source-changed"),
-    (["include/foo.hpp"], "source-changed"),
-    (["src/foo.cpp", "CMakeLists.txt"], "source-changed"),  # source wins (superset)
-    (["README.md", "docs/x.rst"], "off"),
-    ([], "off"),
-])
+@_pytest.mark.parametrize(
+    "paths,expected",
+    [
+        (["CMakeLists.txt"], "build"),
+        (["cmake/foo.cmake"], "build"),
+        (["Makefile", "docs/x.md"], "build"),
+        (["BUILD.bazel"], "build"),
+        (["meson.build"], "build"),
+        (["src/foo.cpp"], "source-changed"),
+        (["include/foo.hpp"], "source-changed"),
+        (["src/foo.cpp", "CMakeLists.txt"], "source-changed"),  # source wins (superset)
+        (["README.md", "docs/x.rst"], "off"),
+        ([], "off"),
+    ],
+)
 def test_recommend_collect_mode(paths, expected):
     from abicheck.buildsource.source_replay import recommend_collect_mode
+
     assert recommend_collect_mode(paths) == expected
 
 
@@ -895,6 +1028,7 @@ def test_graph_full_maps_to_full_scope():
         collection_for_ci_mode,
         scope_for_ci_mode,
     )
+
     assert scope_for_ci_mode("graph-full") == "full"
     scope, layers = collection_for_ci_mode("graph-full")
     assert scope == "full"
@@ -904,14 +1038,19 @@ def test_graph_full_maps_to_full_scope():
 def _build_many(n: int) -> BuildEvidence:
     return BuildEvidence(
         targets=[Target(id="target://lib", public_headers=["include/foo.h"])],
-        compile_units=[_cu(f"cu://u{i}", f"src/u{i}.cpp", "target://lib") for i in range(n)],
+        compile_units=[
+            _cu(f"cu://u{i}", f"src/u{i}.cpp", "target://lib") for i in range(n)
+        ],
     )
 
 
 def _replay_all(extractor, jobs, monkeypatch):
     monkeypatch.setenv("ABICHECK_L4_JOBS", str(jobs))
     return run_source_replay(
-        _build_many(12), extractor, scope="target", target_id="target://lib",
+        _build_many(12),
+        extractor,
+        scope="target",
+        target_id="target://lib",
         public_header_roots=["include/foo.h"],
     )
 
@@ -919,15 +1058,23 @@ def _replay_all(extractor, jobs, monkeypatch):
 def test_parallel_l4_is_deterministic(monkeypatch):
     """P06: parallel extraction (ABICHECK_L4_JOBS>1) yields a byte-identical
     surface + diagnostics to the serial run, including ordering."""
-    s_serial, d_serial = _replay_all(_FakeExtractor(fail_for={"cu://u3", "cu://u9"}), 1, monkeypatch)
-    s_par, d_par = _replay_all(_FakeExtractor(fail_for={"cu://u3", "cu://u9"}), 6, monkeypatch)
+    s_serial, d_serial = _replay_all(
+        _FakeExtractor(fail_for={"cu://u3", "cu://u9"}), 1, monkeypatch
+    )
+    s_par, d_par = _replay_all(
+        _FakeExtractor(fail_for={"cu://u3", "cu://u9"}), 6, monkeypatch
+    )
 
-    assert d_serial == d_par                      # same diagnostics, same order
+    assert d_serial == d_par  # same diagnostics, same order
     assert len(d_serial) == 2
-    assert s_serial.coverage["compile_units_parsed"] == s_par.coverage["compile_units_parsed"] == 10
+    assert (
+        s_serial.coverage["compile_units_parsed"]
+        == s_par.coverage["compile_units_parsed"]
+        == 10
+    )
     ids_serial = [e.id for e in s_serial.reachable_declarations]
     ids_par = [e.id for e in s_par.reachable_declarations]
-    assert ids_serial == ids_par                  # same linked surface, same order
+    assert ids_serial == ids_par  # same linked surface, same order
 
 
 def test_extract_cache_misses_propagates_deadline_into_pool_workers() -> None:
