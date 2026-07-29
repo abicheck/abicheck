@@ -275,6 +275,12 @@ def _build_new_snapshot(
             compile=compile_context,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
+            # Filter dependency scope by default, matching `dump`/`compare`
+            # (Codex review): without this, scan's candidate defaults to
+            # "full" while a `dump`-produced --against baseline defaults to
+            # "filtered", so the new comparability gate hard-fails the
+            # routine "scan against a plain dump'd baseline" workflow.
+            include_dependencies=False,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc

@@ -78,6 +78,38 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
     assert events.index("cleanup") < events.index("embed")
 
 
+def test_scan_candidate_filters_dependency_scope_by_default(monkeypatch, tmp_path):
+    """Codex review: scan's own candidate resolve_input() call used to leave
+    include_dependencies at its True/"full" default, mismatching a `dump`-
+    produced --against baseline's "filtered" default and hard-failing the
+    new comparability gate on the routine "scan against a plain dump'd
+    baseline" workflow."""
+    resolve_kwargs: dict = {}
+
+    def fake_resolve(*args, **kwargs):
+        resolve_kwargs.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_l2_includes",
+        lambda **kwargs: (list(kwargs["includes"]), []),
+    )
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+
+    _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=None,
+        collect_mode="off",
+        lang="c++",
+        allow_build_query=False,
+        defer_cleanup=[],
+    )
+
+    assert resolve_kwargs["include_dependencies"] is False
+
+
 def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
     # _build_new_snapshot returns the *effective* (seeded) includes so a --baseline
     # compare can header-parse the old native library with the same build-derived

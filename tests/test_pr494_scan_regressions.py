@@ -265,3 +265,50 @@ def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> 
     # Codex review: which --suppress rule silenced each finding must be
     # attributable (Change.suppression_rule), not dropped by the projection.
     assert summary["suppressed"][0]["suppression_rule"] == "rule0"
+
+
+def test_scan_baseline_compare_filters_dependency_scope_by_default(monkeypatch) -> None:
+    """Codex review: a `dump`-produced --against baseline defaults to
+    dependency_scope="filtered"; scan's own baseline resolve_input() call
+    used to leave include_dependencies at its True/"full" default, so the
+    new comparability gate hard-failed the routine "scan against a plain
+    dump'd baseline" workflow with ScopeMismatchError. Assert the baseline
+    resolve_input() call now matches the candidate's own default."""
+
+    old_snap = SimpleNamespace(build_source=None)
+    new_snap = SimpleNamespace(build_source=None)
+    calls: list[dict[str, object]] = []
+
+    def fake_resolve_input(*args, **kwargs):  # noqa: ANN002, ANN003
+        calls.append(kwargs)
+        return old_snap
+
+    def fake_prepare_embedded_build_source(
+        old, new, collect_mode, extra_changes, *args, **kwargs  # noqa: ANN001, ANN002, ANN003
+    ):
+        return list(extra_changes), [], {}, None
+
+    def fake_compare_snapshots(
+        old, new, suppression=None, *, policy="strict_abi", policy_file=None,
+        extra_changes, scope_to_public_surface, force_public_symbols=None,
+        pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
+    ):  # noqa: ANN001
+        return SimpleNamespace(
+            breaking=[], source_breaks=[], risk=[], compatible=[],
+            verdict=_Verdict("NO_CHANGE"),
+        )
+
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve_input)
+    monkeypatch.setattr("abicheck.service.compare_snapshots", fake_compare_snapshots)
+    monkeypatch.setattr(
+        "abicheck.cli_buildsource.prepare_embedded_build_source",
+        fake_prepare_embedded_build_source,
+    )
+
+    _run_baseline_compare(
+        Path("old.so"), Path("new.so"), new_snap, [], "c++", "graph-full", [], [], [], []
+    )
+
+    # The first resolve_input() call is the baseline (`old_snap`); the
+    # l0-removal-preservation pass's two symbols_only=True calls follow.
+    assert calls[0]["include_dependencies"] is False

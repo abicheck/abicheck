@@ -46,3 +46,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   parameter-less inner function) — invisible to the generated Python API
   reference and to any signature-driven caller. The wrapper now carries an
   explicit `__signature__` that includes the parameter.
+- **`scan --against`/`--baseline` no longer hard-fails against a plain
+  `dump`-produced baseline** (Codex review): `dump`'s default output is
+  dependency-scope `"filtered"`, but `scan`'s own candidate and native-
+  baseline `resolve_input()` calls left `include_dependencies` at its
+  `True`/`"full"` default — so comparing a freshly scanned candidate against
+  an ordinary, default-settings `dump` baseline hit the new comparability
+  gate's `ScopeMismatchError` on the single most common `scan --against`
+  workflow. Both calls now default to filtered too, matching `dump`/`compare`.
