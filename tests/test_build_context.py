@@ -1264,6 +1264,17 @@ class TestIsClStyleDriver:
     def test_recognizes_absolute_path_driver(self) -> None:
         assert _is_cl_style_driver("/usr/bin/clang-cl-17.0") is True
 
+    def test_recognizes_windows_backslash_path_on_any_host(self) -> None:
+        """``Path(argv0).stem`` only splits on ``/`` even on POSIX, so a
+        Windows-style compiler path recorded in a cross-compiled/Windows-
+        generated compile_commands.json (scanned on Linux CI) previously
+        kept the whole backslash path as its "stem" and never matched,
+        silently picking GNU quoting for a real CL-mode driver (found while
+        consolidating this against the equivalent basename-splitting
+        helpers elsewhere in the codebase)."""
+        assert _is_cl_style_driver("C:\\VS\\bin\\clang-cl.exe") is True
+        assert _is_cl_style_driver("C:\\mingw64\\bin\\g++.exe") is False
+
 
 class TestSplitWindowsCommandLine:
     def test_simple_space_separated(self) -> None:

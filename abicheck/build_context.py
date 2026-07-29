@@ -217,8 +217,19 @@ def _is_cl_style_driver(argv0: str) -> bool:
     (including MinGW GCC or GNU-mode clang++ running on Windows) uses GNU
     ``@file`` quoting, not MSVC's, so dispatching purely on ``os.name``
     corrupts a quoted/backslash-escaped argument for that combination
-    (Codex review)."""
-    stem = Path(argv0).stem.lower()
+    (Codex review).
+
+    Uses the shared cross-platform ``basename()`` (not ``Path(argv0).stem``):
+    ``Path().stem`` only splits on ``/`` even on POSIX, so a Windows-style
+    compiler path recorded in a cross-compiled/Windows-generated
+    ``compile_commands.json`` (e.g. ``C:\\VS\\bin\\clang-cl.exe``) scanned on
+    Linux CI kept the whole path as its "stem" and never matched
+    ``_CL_STYLE_DRIVER_STEMS``, silently picking GNU quoting for a real
+    CL-mode driver (found while consolidating this against the equivalent
+    helpers in ``dumper_clang.py``/``source_extractors/_argv.py``)."""
+    from .buildsource.source_extractors._argv import basename
+
+    stem = basename(argv0).lower()
     if stem.endswith(".exe"):
         stem = stem[: -len(".exe")]
     stem = _DRIVER_VERSION_SUFFIX_RE.sub("", stem)
