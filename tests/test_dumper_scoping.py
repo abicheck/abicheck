@@ -735,6 +735,40 @@ class TestDirectlyReferencedDependencyRetention:
         elapsed = time.monotonic() - start
         assert elapsed < 5.0, f"typedef resolution took {elapsed:.2f}s, expected < 5s"
 
+    def test_long_typedef_chain_reachability_stays_fast(self):
+        """Codex review (eighteenth round, P2): the previous full-table
+        relaxation rescanned every alias's entire edge set on each of up to
+        `len(typedefs)` rounds, advancing a long outer-to-inner chain
+        (`A0 -> A1 -> ... -> dep::Thing`) only one hop per round --
+        confirmed empirically at ~4.9s for 4,000 chained aliases and
+        ~20.4s for 8,000 (quadratic in chain length). A reverse-edge
+        worklist must resolve a much longer chain well under a second."""
+        import time
+
+        n = 8000
+        typedefs = {f"A{i}": f"A{i + 1}" for i in range(n)}
+        typedefs[f"A{n}"] = "dep::Thing"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("A0",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"long typedef chain reachability took {elapsed:.2f}s"
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
     def test_self_referential_typedefs_do_not_blow_up(self):
         """Codex review (ninth round): `typedef struct Foo Foo;` -- a
         common, real C/C++ idiom -- creates a direct self-reference
@@ -906,6 +940,43 @@ class TestDirectlyReferencedDependencyRetention:
             "dep::A",
             "dep::B",
         ]
+
+    def test_resolved_typedef_owner_takes_precedence_over_coincidental_suffix(
+        self,
+    ):
+        """Codex review (eighteenth round): a public signature spells
+        `Handle`, and `typedefs["Handle"]` resolves to `dep::Actual` --
+        but an unrelated dependency record `dep::Handle` also derives the
+        bare suffix `Handle`. The resolved alias's own name is a literal,
+        exact-name match (the same strength as a candidate's own exact
+        identity), while `dep::Handle`'s claim on the same spelling is
+        only a namespace-stripped guess, never its literal identity.
+        Treating them as equally-strong competing owners (dropping both)
+        hid a real layout change to the directly-referenced `dep::Actual`;
+        the resolved alias must win and `dep::Actual` alone is retained."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Actual",
+                    kind="struct",
+                    qualified_name="dep::Actual",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    qualified_name="dep::Handle",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "dep::Actual"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Actual"]
 
     def test_typedef_matching_stays_fast_with_many_candidates_and_typedefs(self):
         """Codex review (sixth round): matching resolved typedef targets

@@ -92,6 +92,7 @@ project.
 from __future__ import annotations
 
 import dataclasses
+from collections import deque
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -165,17 +166,33 @@ def _typedef_alias_reachability(
             if token in interesting_keys:
                 reachable[alias].add(token)
 
-    max_rounds = len(typedefs) + 1
-    for _ in range(max_rounds):
-        changed = False
-        for alias, refs in embedded_refs.items():
-            for ref in refs:
-                added = reachable[ref] - reachable[alias]
-                if added:
-                    reachable[alias] |= added
-                    changed = True
-        if not changed:
-            break
+    # Propagate via a reverse-edge worklist rather than a full-table
+    # relaxation (Codex review, fresh evidence): the previous approach
+    # rescanned every alias's *entire* edge set on every round, up to
+    # ``len(typedefs)`` rounds, advancing a long outer-to-inner chain
+    # (``A0 -> A1 -> ... -> dep::Thing``) only one hop per round -- measured
+    # at ~4.9s for 4,000 chained aliases and ~20.4s for 8,000, i.e.
+    # quadratic in chain length. A reverse-edge worklist only re-examines an
+    # alias when one of the aliases it points to has just gained a new
+    # reachable key, so each edge does work proportional to how many times
+    # it actually carries new information, not to the total alias count.
+    reverse_refs: dict[str, set[str]] = {alias: set() for alias in typedefs}
+    for alias, refs in embedded_refs.items():
+        for ref in refs:
+            reverse_refs.setdefault(ref, set()).add(alias)
+
+    queue: deque[str] = deque(typedefs)
+    queued = set(typedefs)
+    while queue:
+        node = queue.popleft()
+        queued.discard(node)
+        for pred in reverse_refs.get(node, ()):
+            added = reachable[node] - reachable[pred]
+            if added:
+                reachable[pred] |= added
+                if pred not in queued:
+                    queue.append(pred)
+                    queued.add(pred)
     return {a: frozenset(v) for a, v in reachable.items()}
 
 
@@ -472,12 +489,15 @@ def _directly_referenced_dependency_names(
     # check, applied uniformly to both categories) silently hid a real
     # layout change to either type.
     own_spelling_owners: dict[str, set[str]] = {}
+    own_exact_owners: dict[str, set[str]] = {}
     alias_spelling_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = identity_of[id(candidate)]
         own = own_spellings_of[id(candidate)]
         for spelling in own:
             own_spelling_owners.setdefault(spelling, set()).add(identity)
+            if spelling == identity:
+                own_exact_owners.setdefault(spelling, set()).add(identity)
         for spelling in candidate_spellings[id(candidate)] - own:
             alias_spelling_owners.setdefault(spelling, set()).add(identity)
 
@@ -486,18 +506,43 @@ def _directly_referenced_dependency_names(
     # (own- or alias-derived) and not colliding with a kept type's/enum's
     # own spelling; a spelling reached *only* via alias reachability keeps
     # every distinct owner the alias legitimately reaches.
+    #
+    # A resolved typedef alias's own name is as direct a signal as a
+    # candidate's own *exact* identity -- both are literal, exact-name
+    # matches, not a guess -- but a candidate's merely *derived* spelling
+    # (a namespace-suffix or stdlib-stripped variant, never the literal
+    # identity itself) is weaker: it exists only because a real backend's
+    # namespace-dropping convention makes that guess necessary at all
+    # (Codex review, fresh evidence). Without this distinction, a public
+    # signature spelling ``Handle`` where ``typedefs["Handle"]`` resolves
+    # to ``dep::Actual`` was treated as equally ambiguous against an
+    # unrelated ``dep::Handle`` merely because its own bare-suffix
+    # spelling *also* happens to be ``Handle`` -- dropping both and hiding
+    # a real layout change to the directly-referenced ``dep::Actual``.
+    # Only a spelling with no exact-identity owner at all defers to this
+    # precedence; two exact identities (or an exact identity colliding
+    # with an alias) colliding on the same spelling is still genuine,
+    # unresolvable ambiguity, unchanged from before.
     spelling_index: dict[str, set[str]] = {}
     for spelling in own_spelling_owners.keys() | alias_spelling_owners.keys():
         if spelling in kept_spellings:
             continue
         own_owners = own_spelling_owners.get(spelling, set())
+        exact_owners = own_exact_owners.get(spelling, set())
         alias_owners = alias_spelling_owners.get(spelling, set())
-        if own_owners:
+        if not own_owners:
+            if alias_owners:
+                spelling_index[spelling] = set(alias_owners)
+        elif exact_owners:
             all_owners = own_owners | alias_owners
             if len(all_owners) == 1:
                 spelling_index[spelling] = set(all_owners)
         elif alias_owners:
+            # own_owners are derived-only (no exact-identity claim) --
+            # defer to the resolved alias's stronger, literal-name match.
             spelling_index[spelling] = set(alias_owners)
+        elif len(own_owners) == 1:
+            spelling_index[spelling] = set(own_owners)
 
     pattern = _compile_spelling_pattern(spelling_index)
     if pattern is None:
