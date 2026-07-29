@@ -28,11 +28,19 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
+import abicheck.service  # noqa: F401 - force real import before any test
+
+# monkeypatches abicheck.service_scan.run_scan_set: service.py's own
+# `from .service_scan import run_scan_set` re-export only executes once, at
+# first import -- if that first import happened lazily *after* a test had
+# already patched service_scan.run_scan_set, service.run_scan_set would
+# permanently bind to the patched value for the rest of the process.
 from abicheck.cli import main
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import (
@@ -164,6 +172,50 @@ class TestArtifactSetCliValidation:
         assert "colliding library identities" in result.output
 
 
+class TestArtifactSetCompileContextForwarding:
+    """P1 regression (Codex review): --gcc-path/--sysroot/etc. must reach
+    ScanRequest.compile for --artifact-set, not silently fall back to the
+    host toolchain the way an un-forwarded CompileContext() default would.
+    """
+
+    def test_forwards_compile_context_options(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.service_scan as service_scan_mod
+        from abicheck.service_scan import ScanSetResult
+
+        p1 = tmp_path / "liba.so"
+        p2 = tmp_path / "libb.so"
+        p1.write_bytes(b"\x7fELF" + b"\0" * 12)
+        p2.write_bytes(b"\x7fELF" + b"\0" * 12)
+        sysroot_dir = tmp_path / "sysroot"
+        sysroot_dir.mkdir()
+
+        captured: dict[str, object] = {}
+
+        def _fake_run_scan_set(req):
+            captured["req"] = req
+            return ScanSetResult(verdict="COMPATIBLE", exit_code=0)
+
+        monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
+
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                "--artifact-set", f"{p1},{p2}",
+                "--gcc-path", "/usr/bin/my-cross-gcc",
+                "--sysroot", str(sysroot_dir),
+                "--nostdinc",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        req = captured["req"]
+        assert req.compile.gcc_path == "/usr/bin/my-cross-gcc"
+        assert req.compile.sysroot == sysroot_dir
+        assert req.compile.nostdinc is True
+
+
 # ---------------------------------------------------------------------------
 # Service layer: run_scan_set acceptance (JSON-snapshot members — no ELF
 # parsing needed for the per-member scans; the bundle-audit step's own
@@ -247,6 +299,12 @@ def _build_tiny_so(out_dir: Path, name: str, src: str, *, extra_ldflags: list[st
     return out
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="Uses GNU ld flags (-Wl,-soname, -Wl,--no-as-needed); "
+    "Mach-O ld and link.exe don't accept them. Bundle analysis "
+    "itself is ELF/Linux-only per ADR-018 / ADR-023.",
+)
 @pytest.mark.integration
 class TestArtifactSetCliEndToEnd:
     def test_scan_artifact_set_reports_unresolved_intra_dependency(

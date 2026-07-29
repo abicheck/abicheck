@@ -923,7 +923,26 @@ class ScanSetResult:
             "verdict": self.verdict,
             "exit_code": self.exit_code,
             "per_artifact": [a.to_dict() for a in self.per_artifact],
-            "bundle_findings": len(self.bundle_findings),
+            # Full finding records (kind/symbol/consumer/provider/description),
+            # not just a count -- mirrors cli_compare_release_helpers.py's
+            # summary["bundle_findings"] JSON shape for the two-sided release
+            # path, so a machine consumer of either can identify and act on
+            # the condition that produced bundle_verdict, not just its count
+            # (Codex review).
+            "bundle_findings": [
+                {
+                    "kind": f.kind.value,
+                    "symbol": f.symbol,
+                    "consumer_library": f.consumer_library,
+                    "provider_library": f.provider_library,
+                    "description": f.description,
+                    "old_value": f.old_value,
+                    "new_value": f.new_value,
+                    "affected_libraries": list(f.affected_libraries),
+                }
+                for f in self.bundle_findings
+            ],
+            "bundle_finding_count": len(self.bundle_findings),
             "bundle_verdict": self.bundle_verdict,
             "bundle_incomplete": self.bundle_incomplete,
         }
@@ -1547,6 +1566,24 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
 
 
 def _scan_set_subprocess_worker(req: ScanRequest, q: Any) -> None:
+    """Child-process entry for :func:`run_scan_set_subprocess` (ADR-056).
+
+    Mirrors :func:`_scan_subprocess_worker`'s process-group detachment and
+    SIGTERM cleanup verbatim — same race, same fix: without these, a
+    clang/castxml child one of `run_scan_set`'s member scans spawns can
+    detach into its own process group in the gap between the parent's
+    descendant-pgid snapshot and its terminate() call, and outlive the
+    worker as an orphan (Codex review).
+    """
+    import os
+
+    from . import deadline
+
+    deadline.install_sigterm_cleanup()
+    try:
+        os.setsid()
+    except (OSError, AttributeError):
+        pass
     try:
         q.put(("ok", run_scan_set(req).to_dict()))
     except BaseException as exc:  # noqa: BLE001 — convey, don't crash the worker

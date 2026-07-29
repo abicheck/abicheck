@@ -670,7 +670,8 @@ def _detect_unresolved_intra_dependency(
                     )
                     resolved = target_lib is not None and target_lib in reachable
                     resolved = resolved and any(
-                        p.library == target_lib for p in providers
+                        p.library == target_lib and p.version == consumer.version
+                        for p in providers
                     )
                 else:
                     resolved = any(

@@ -558,15 +558,22 @@ def _run_artifact_set(
     allow_build_query: bool,
     fmt: str,
     output: Path | None,
+    header_backend: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    frontend_context: str,
 ) -> None:
     """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one.
 
     No old side (no ``--against``): discovers the declared set, scans each
     member (the same always-on tier + pinned level every single-binary scan
     runs), and adds one cross-library bundle-audit pass over the whole set.
-    Deliberately does not thread the cross-toolchain/frontend flags
-    (``--gcc-path`` et al.) or ``--dry-run`` through yet — see G34's status
-    for what's still deferred from this first slice.
+    Deliberately does not thread ``--dry-run`` through yet — see G34's
+    status for what's still deferred from this first slice.
     """
     from .bundle import ArtifactSetError, discover_artifact_set
     from .service import Budget, ScanRequest
@@ -596,6 +603,25 @@ def _run_artifact_set(
             "(there is no old side to scope to)."
         )
 
+    # L2 compile context (dump<->scan<->compare parity, ADR-037 D3): the same
+    # resolver the single-binary path uses, so an --artifact-set cross-scan
+    # doesn't silently parse headers against the host toolchain when the
+    # caller explicitly selected a target sysroot/toolchain (Codex review).
+    compile_context, includes_tuple = resolve_compile_context(
+        click.get_current_context(),
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=tuple(gcc_option_tokens),
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        header_backend=header_backend,
+        includes=tuple(include_both),
+        build_config=build_config,
+        sources=sources,
+        frontend_context=frontend_context,
+    )
+
     changed, changed_src, seeded = _resolve_changed_seed(
         changed_paths_opt, since, sources
     )
@@ -609,7 +635,7 @@ def _run_artifact_set(
     req = ScanRequest(
         binaries=list(discovered.values()),
         headers=list(header_both),
-        includes=list(include_both),
+        includes=list(includes_tuple),
         public_header_dirs=list(public_header_dirs),
         sources=sources,
         compile_db=compile_db,
@@ -622,6 +648,7 @@ def _run_artifact_set(
         seeded=seeded,
         budget=Budget(total_timeout=budget_s),
         lang=lang,
+        compile=compile_context,
         abi3_floor=abi3_floor,
         enabled_checks=enabled_checks,
         severities=severities,
@@ -957,6 +984,14 @@ def scan_cmd(
             allow_build_query=allow_build_query,
             fmt=fmt,
             output=output,
+            header_backend=header_backend,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            frontend_context=frontend_context,
         )
         return
     if bundle_system_providers:

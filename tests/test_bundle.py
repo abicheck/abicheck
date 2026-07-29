@@ -1544,6 +1544,36 @@ class TestUnresolvedIntraDependency:
             for f in findings
         )
 
+    def test_version_soname_target_matches_but_version_differs(self) -> None:
+        # Consumer's verneed pins the exact provider soname (liba.so.1) AND
+        # requires foo@V2 from it; liba.so is reachable and does export foo,
+        # but only at V1. The version_soname branch must still check
+        # p.version == consumer.version, not just p.library == target_lib
+        # (P1 regression: the soname-precise match alone let a wrong-version
+        # export on the *correct* library read as resolved).
+        new = _snapshot(
+            {
+                "liba.so": _meta(
+                    soname="liba.so.1",
+                    exports=["foo"],
+                    export_versions={"foo": "V1"},
+                ),
+                "libconsumer.so": _meta(
+                    soname="libconsumer.so.1",
+                    needed=["liba.so.1"],
+                    imports=["foo"],
+                    import_versions={"foo": "V2"},
+                    import_version_sonames={"foo": "liba.so.1"},
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
     def test_same_label_different_provider_produces_finding(self) -> None:
         # Consumer's verneed targets liba.so for foo@V1; liba.so no longer
         # exports it, but unrelated sibling libb.so also exports foo@V1.
