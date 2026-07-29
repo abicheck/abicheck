@@ -216,6 +216,14 @@ def _typedef_alias_reachability(
     return {a: frozenset(v) for a, v in reachable.items()}
 
 
+#: Elaborated-type-specifier keywords a ``RecordType.kind``/``EnumType``
+#: spelling is prefixed with (``struct``/``class``/``union Foo``, ``enum
+#: Foo``) -- see the elaborated-spelling generation in
+#: ``_directly_referenced_dependency_names`` and its nested-match
+#: suppression at the end of that function.
+_TAG_KEYWORDS = frozenset({"struct", "class", "union", "enum"})
+
+
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
     return names | qualified_names
 
@@ -686,8 +694,29 @@ def _directly_referenced_dependency_names(
     pattern = _compile_spelling_pattern(spelling_index)
     if pattern is None:
         return set()
+    matches = _finditer_allow_nested(pattern, haystack)
+    # A typedef alias (or any other bare spelling) nested strictly inside
+    # an already-matched elaborated ``struct``/``union``/``enum <name>``
+    # span must not contribute its own resolution (Codex review, fresh
+    # evidence): ``typedef struct Other Foo; void f(struct Foo *);`` means
+    # only the tag ``Foo``, never the typedef -- in C/C++, an elaborated-
+    # type-specifier resolves exclusively through the tag namespace, so
+    # the compiler never even considers a same-named typedef there. Both
+    # ``"struct Foo"`` (the elaborated spelling) and the bare ``"Foo"``
+    # (the typedef alias's own spelling) can match the identical text at
+    # once via nested matching, and without this filter the bare match's
+    # alias resolution incorrectly pulled in the typedef's unrelated
+    # target alongside the correctly-resolved tag.
+    elaborated_ends = {
+        m.end() for m in matches if m.group().partition(" ")[0] in _TAG_KEYWORDS
+    }
     referenced: set[str] = set()
-    for match in _finditer_allow_nested(pattern, haystack):
+    for match in matches:
+        if (
+            match.end() in elaborated_ends
+            and match.group().partition(" ")[0] not in _TAG_KEYWORDS
+        ):
+            continue
         referenced.update(spelling_index[match.group()])
     return referenced
 

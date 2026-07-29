@@ -1207,6 +1207,41 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
 
+    def test_elaborated_reference_does_not_also_resolve_nested_typedef_alias(
+        self,
+    ):
+        """Codex review (thirty-second round, P2): `typedef struct Other
+        Foo;` alongside a kept signature explicitly spelling `struct Foo
+        *`. Both the complete elaborated spelling `struct Foo` and the
+        nested bare `Foo` (the typedef alias's own spelling) can match
+        the identical text at once via nested matching -- but in C/C++,
+        an elaborated-type-specifier resolves exclusively through the
+        tag namespace, so the compiler never even considers a same-named
+        typedef there. Only the tag `Foo` may be retained; the unrelated
+        typedef target `Other` must not be, even though `Foo` the
+        typedef alias legitimately resolves to it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("struct Foo *",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Other",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Foo": "struct Other"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Foo"]
+
     def test_typedef_chain_through_a_shadowing_key_does_not_reach_dependency(
         self,
     ):
