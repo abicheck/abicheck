@@ -1616,6 +1616,39 @@ class TestUnresolvedIntraDependency:
             for f in findings
         )
 
+    def test_unversioned_import_not_resolved_by_nondefault_only_export(
+        self,
+    ) -> None:
+        # P2 regression (Codex review): a provider exporting a symbol only
+        # as a non-default versioned definition (foo@V1, not foo@@V1)
+        # cannot satisfy an unversioned consumer reference -- the dynamic
+        # linker requires a *default* definition for that. ProviderEntry
+        # previously dropped ElfSymbol.is_default entirely, so any
+        # reachable provider of the bare symbol name resolved an
+        # unversioned import regardless of default-ness.
+        provider_meta = _meta(soname="libcore.so.1")
+        provider_meta.symbols.append(
+            ElfSymbol(
+                name="foo", visibility="default", version="V1", is_default=False
+            )
+        )
+        new = _snapshot(
+            {
+                "libcore.so": provider_meta,
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["foo"],
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
     def test_version_soname_target_matches_but_version_differs(self) -> None:
         # Consumer's verneed pins the exact provider soname (liba.so.1) AND
         # requires foo@V2 from it; liba.so is reachable and does export foo,

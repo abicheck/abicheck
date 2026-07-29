@@ -69,6 +69,15 @@ class ProviderEntry:
 
     library: str  # e.g. "libcore.so"
     version: str  # gnu.version_d tag, "" if unversioned
+    # True for an unversioned export, or a versioned "@@default" definition
+    # (ElfSymbol.is_default); False for a "@specific" (non-default) versioned
+    # definition. The dynamic linker can only satisfy an *unversioned*
+    # symbol reference against a default definition -- a provider whose
+    # only definition of this symbol is non-default-only cannot satisfy an
+    # unversioned import, even though the symbol name itself is "reachable"
+    # (Codex review). Defaults to True for the few synthetic ProviderEntry
+    # construction sites that have no real per-symbol version data.
+    is_default: bool = True
 
 
 @dataclass(frozen=True)

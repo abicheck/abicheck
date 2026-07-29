@@ -534,7 +534,9 @@ def _compute_resolution_graph(
             if sym.visibility not in ("default", "protected"):
                 continue
             graph.provides.setdefault(sym.name, []).append(
-                ProviderEntry(library=name, version=sym.version),
+                ProviderEntry(
+                    library=name, version=sym.version, is_default=sym.is_default
+                ),
             )
 
     # Index DT_NEEDED edges and intra-bundle imports.
@@ -915,7 +917,15 @@ def _detect_unresolved_intra_dependency(
                         for p in providers
                     )
             else:
-                resolved = any(p.library in reachable for p in providers)
+                # P2 regression (Codex review): an unversioned consumer
+                # reference can only be satisfied by an unversioned or
+                # default-version ("@@default") provider definition -- a
+                # provider that exports this symbol *only* as a non-default
+                # versioned definition ("foo@V1", not "foo@@V1") cannot
+                # satisfy it, even though the bare symbol name is reachable.
+                resolved = any(
+                    p.library in reachable and p.is_default for p in providers
+                )
 
             if resolved:
                 continue
