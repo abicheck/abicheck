@@ -1762,6 +1762,12 @@ def test_dump_manifest_header_roots_includes_public_headers_and_project_owned_in
     pub_dir = Path("/usr/include/mylib/public_dir")
     owned_include = Path("/usr/include/mylib/owned_include")
     unowned_include = Path("/usr/include/other/not_owned")
+    # Codex review, second round: a TU may force-include a private support
+    # header alongside a public one (dump_manifest.py's own docstring) --
+    # not required to already be in roots or a project_owned include, so a
+    # forced-include header under a system-prefixed path was otherwise
+    # misclassified as a toolchain dependency and filtered out.
+    forced_private = Path("/usr/include/mylib/internal_support.h")
     manifest = DumpManifest(
         base_dir=tmp_path,
         roots=(root,),
@@ -1770,6 +1776,7 @@ def test_dump_manifest_header_roots_includes_public_headers_and_project_owned_in
         translation_units=(
             TranslationUnit(
                 name="tu1",
+                forced_includes=(forced_private,),
                 includes=(
                     IncludeEntry(path=owned_include, project_owned=True),
                     IncludeEntry(path=unowned_include, project_owned=False),
@@ -1784,6 +1791,7 @@ def test_dump_manifest_header_roots_includes_public_headers_and_project_owned_in
     assert pub_path in roots
     assert pub_dir in roots
     assert owned_include in roots
+    assert forced_private in roots
     assert unowned_include not in roots
 
 

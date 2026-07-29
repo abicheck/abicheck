@@ -38,6 +38,7 @@ from .buildsource.build_query import (
     PRUNED_HEADER_DIR_SEGMENTS,
     drain_build_dir_cleanups,
 )
+from .compile_context import CompileContext as CompileContext  # re-exported, ADR-055 D1
 from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 from .schemas import SCAN_SCHEMA_VERSION
@@ -144,38 +145,10 @@ class Budget:
     partial_ok: bool = True  # a partial scan (missing tool/layer) is success
 
 
-@dataclass(frozen=True)
-class CompileContext:
-    """L2 header-AST compile context — shared by ``dump`` and ``scan``.
-
-    The cross-toolchain + frontend knobs the header frontend needs to parse the
-    public headers: the cross-compiler (``--gcc-path``/``--gcc-prefix``), extra
-    compiler flags (``--gcc-options``/``--gcc-option``), an alternate
-    ``--sysroot``, ``--nostdinc``, and which ``--ast-frontend`` to drive. ADR-037
-    D3 (parity: ``dump`` and ``scan`` carry the *same* family via one decorator)
-    and the ADR-035 amendment (``scan`` must be able to reach a real L2 — the
-    cross-source checks depend on header provenance). All fields defaulted, so a
-    bare ``CompileContext()`` is additive over every request and dump path.
-    """
-
-    gcc_path: str | None = None
-    gcc_prefix: str | None = None
-    gcc_options: str | None = None
-    gcc_option_tokens: tuple[str, ...] = ()
-    sysroot: Path | None = None
-    nostdinc: bool = False
-    frontend: str = "auto"  # --ast-frontend (auto/castxml/clang)
-    # --frontend-context (ADR-050 D3/D5): which AST context the L2 header
-    # frontend should target -- "host" (default) or "device" (SYCL/DPC++
-    # offload target, real selector in sycl_context.py; see
-    # dump_manifest.py's own docstring for the manifest-field half of this
-    # same rule).
-    frontend_context: str = "host"
-
-    @property
-    def is_default(self) -> bool:
-        """True when nothing was customised (lets call sites skip threading)."""
-        return self == CompileContext()
+# CompileContext itself now lives in the leaf `compile_context` module
+# (ADR-055 D1, imported at the top of this file and re-exported here) so a
+# module outside this file's import-cycle-allowlisted cluster (api_types.py,
+# in particular) can depend on the type without joining the cluster itself.
 
 
 def pair_wide_cxx20_std_override(

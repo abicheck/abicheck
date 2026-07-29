@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "5"
+_SNAPSHOT_CACHE_VERSION: str = "6"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -84,6 +84,17 @@ _SNAPSHOT_CACHE_VERSION: str = "5"
 # different snapshot; sorting collapsed them to the same key and let a warm
 # cache silently serve the wrong order's result. Bumped so an old,
 # order-collapsed cache entry is never replayed as if it were order-aware.
+#
+# v6 (dependency-scope comparability gate, PR #651 follow-up, Codex review):
+# ``cached_run_dump`` (``service_dump_cache.py``) returns a cache hit
+# directly, without ever calling the ``run_dump`` callable it was passed --
+# so a pre-existing cache entry (written before ``service.run_dump`` started
+# tagging its result ``AbiSnapshot.dependency_scope="full"``) would keep
+# replaying with that field ``None`` forever, silently bypassing
+# ``comparability._check_dependency_scope_comparable`` for exactly the
+# scenario it exists to catch (a stale cached "live dump" compared against a
+# freshly filtered ``dump`` baseline). Bumped so every such entry is
+# invalidated and recomputed through the now-tagging ``run_dump``.
 
 
 def _get_cache_dir() -> Path:

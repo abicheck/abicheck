@@ -119,6 +119,8 @@ def diff_embedded_build_source(
     new_snapshot: AbiSnapshot,
     old_snapshot: AbiSnapshot | None = None,
     policy_file: PolicyFile | None = None,
+    *,
+    quiet: bool = False,
 ) -> tuple[list[Change], list[dict[str, object]], dict[str, object]]:
     """Diff each side's build-info + source facts, echo coverage, return findings.
 
@@ -129,7 +131,10 @@ def diff_embedded_build_source(
     override artifact-backed verdicts. The D7 coverage table is printed to
     stderr (covers every output format) and also returned as serialized rows so
     the JSON report can carry a structured ``layer_coverage`` block. Returns
-    ``(changes, coverage_rows)``.
+    ``(changes, coverage_rows)``. ``quiet=True`` (Codex review) suppresses every
+    ``click.echo`` this function makes -- the returned/embedded data is
+    unaffected -- for a non-CLI caller (``service.run_compare_request``) that
+    has no CLI output stream to write to and no way to suppress it otherwise.
 
     When ``old_snapshot`` is supplied, the base and target coverage are compared
     layer-by-layer: if the base was analyzed with evidence the target lacks
@@ -149,7 +154,7 @@ def diff_embedded_build_source(
     new_pack = _resolve_side_pack(new_build_info, new_sources, new_snapshot)
 
     if old_pack is None and new_pack is None:
-        if collect_mode != "off":
+        if collect_mode != "off" and not quiet:
             click.echo(
                 f"Note: --depth collected evidence mode '{collect_mode}' was "
                 "requested but no build-info/source facts were embedded or "
@@ -244,15 +249,16 @@ def diff_embedded_build_source(
     # still exposes old/new asymmetry to humans.
     coverage = _optional_coverage(new_pack)
     intrinsic = _intrinsic_coverage(new_snapshot)
-    _echo_coverage(intrinsic, coverage)
-    if old_snapshot is not None:
-        _echo_compare_side_coverage(
-            _intrinsic_coverage(old_snapshot),
-            _optional_coverage(old_pack),
-            intrinsic,
-            coverage,
-        )
-    _echo_capabilities(intrinsic, coverage)
+    if not quiet:
+        _echo_coverage(intrinsic, coverage)
+        if old_snapshot is not None:
+            _echo_compare_side_coverage(
+                _intrinsic_coverage(old_snapshot),
+                _optional_coverage(old_pack),
+                intrinsic,
+                coverage,
+            )
+        _echo_capabilities(intrinsic, coverage)
     coverage_rows: list[dict[str, object]] = [
         c.to_dict() for c in (*intrinsic, *coverage)
     ]
@@ -270,6 +276,8 @@ def prepare_embedded_build_source(
     old_sources: Path | None,
     new_sources: Path | None,
     policy_file: PolicyFile | None = None,
+    *,
+    quiet: bool = False,
 ) -> tuple[
     list[Change] | None, list[dict[str, object]], dict[str, object], list[Change]
 ]:
@@ -279,7 +287,10 @@ def prepare_embedded_build_source(
     is in play; folds the evidence findings into ``extra_changes``; and wall-clocks
     the inline diffing for the ADR-033 D6/D9 ``extractor.duration_seconds`` metric.
     ``policy_file`` carries the ADR-033 D7 evidence-policy knobs that modulate the
-    findings' verdict category. Returns
+    findings' verdict category. ``quiet`` forwards to
+    :func:`diff_embedded_build_source` (Codex review: a non-CLI caller has no
+    stream to write coverage tables to and no way to suppress them otherwise).
+    Returns
     ``(extra_changes, layer_coverage_rows, evidence_metrics, ev_changes)``; the
     metrics still need :func:`attach_evidence_metrics` for run-wide totals.
     """
@@ -310,6 +321,7 @@ def prepare_embedded_build_source(
         new_snapshot,
         old_snapshot,
         policy_file,
+        quiet=quiet,
     )
     if metrics:
         metrics["extractor.duration_seconds"] = round(time.perf_counter() - start, 4)
@@ -322,6 +334,8 @@ def attach_evidence_metrics(
     result: DiffResult,
     metrics: dict[str, object],
     injected_changes: list[Change],
+    *,
+    quiet: bool = False,
 ) -> None:
     """Finalize and attach the ADR-033 D9 evidence metrics onto ``result``.
 
@@ -331,7 +345,8 @@ def attach_evidence_metrics(
     ``evidence_category`` tag, and artifact-backed is everything not externally
     injected via ``extra_changes`` (build/source evidence *and* probe-matrix
     findings — none from L0–L2 diffing). Adds the suppression/surface-demotion
-    totals, then echoes the D6 timing summary. No-op when no evidence involved.
+    totals, then echoes the D6 timing summary unless ``quiet`` (Codex review: a
+    non-CLI caller has no stream to write it to). No-op when no evidence involved.
     """
     if not metrics:
         return
@@ -341,7 +356,8 @@ def attach_evidence_metrics(
     metrics["findings.demoted_by_surface.count"] = result.out_of_surface_count
     metrics["findings.suppressed_with_reason.count"] = result.suppressed_count
     result.evidence_metrics = metrics
-    echo_evidence_metrics(metrics)
+    if not quiet:
+        echo_evidence_metrics(metrics)
 
 
 def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:

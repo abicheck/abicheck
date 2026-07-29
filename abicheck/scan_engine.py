@@ -42,6 +42,8 @@ note through the advisories list like every other cross-cutting message.
 
 from __future__ import annotations
 
+import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -207,6 +209,7 @@ def _build_new_snapshot(
     defer_cleanup: list[Callable[[], None]] | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
+    include_dependencies: bool = False,
 ) -> tuple[Any, list[Path]]:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -275,6 +278,17 @@ def _build_new_snapshot(
             compile=compile_context,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
+            # Filter dependency scope by default, matching `dump`/`compare`
+            # (Codex review): without this, scan's candidate defaults to
+            # "full" while a `dump`-produced --against baseline defaults to
+            # "filtered", so the new comparability gate hard-fails the
+            # routine "scan against a plain dump'd baseline" workflow.
+            # *include_dependencies* itself is derived from the baseline's
+            # own explicit tag when one is given (see run_scan_core's
+            # _scan_candidate_include_dependencies) so the inverse, explicit
+            # `dump --include-dependencies` baseline workflow isn't
+            # hard-broken the other way (Codex review, fresh evidence).
+            include_dependencies=include_dependencies,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
@@ -327,6 +341,86 @@ def _build_new_snapshot(
     # same include context — else the baseline side fails on dependency headers the
     # candidate resolved via the seed (Codex review).
     return snap, includes
+
+
+def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
+    """Whether the candidate's own dependency-scope filtering should match a
+    ``--against``/``--baseline`` JSON snapshot's *explicit* ``"full"`` tag.
+
+    Defaults to ``False`` (filtered, matching `dump`/`compare`'s own default)
+    -- correct for the single most common case: no baseline, a native-binary
+    baseline (which now resolves filtered too), or a JSON baseline that is
+    itself filtered/untagged. Only a JSON baseline explicitly dumped with
+    ``dump --include-dependencies`` (tagged ``"full"``) needs the candidate
+    to go unfiltered too, else the comparability gate hard-fails that
+    legitimate, if less common, inverse workflow (Codex review, fresh
+    evidence) -- and ``scan`` has no ``--include-dependencies`` flag of its
+    own to let a caller request it directly. A cheap, best-effort JSON peek
+    (not a full ``resolve_input``/dump) so this never triggers expensive
+    work merely to decide a default; any failure to read/parse falls back to
+    the filtered default.
+
+    Deliberately does NOT pre-filter on :func:`cli_scan_baseline.
+    _baseline_is_native_library` before attempting the JSON parse (Codex
+    review, fresh evidence): that helper's own filename-suffix fallback
+    (``".so" in name``, ...) only applies once magic-byte sniffing finds no
+    recognized binary format -- exactly the case for a real JSON snapshot
+    saved under a library-like name (e.g. a baseline written to
+    ``libfoo.so.json`` and then renamed, or just handed a ``libfoo.so``
+    path by a caller's own naming convention). Calling it first would skip
+    the peek entirely for that baseline, silently keeping the candidate
+    filtered against a "full"-tagged snapshot.
+
+    Content-sniffs the first 4 bytes via :func:`binary_utils.
+    detect_binary_format` first, though (a real magic-byte check, not the
+    filename-fallback heuristic above) -- a real native binary's raw bytes
+    would still fail to decode/parse as JSON either way, but only after
+    ``json.load`` reads and decodes the *entire* file first; for a large
+    native baseline that's a real, avoidable memory/I/O cost merely to
+    choose a default (Codex review, fresh evidence). A recognized magic
+    number short-circuits straight to the filtered default without ever
+    opening the file as text.
+    """
+    if baseline is None:
+        return False
+    from .binary_utils import detect_binary_format
+
+    if detect_binary_format(baseline) is not None:
+        return False
+    # `dependency_scope` (model.py) is declared as one of `AbiSnapshot`'s very
+    # last fields -- serialized (via dataclasses.asdict field order) as one
+    # of the last keys in the JSON object, right before `schema_version` is
+    # appended, well after the (potentially huge) functions/types/DWARF
+    # payload. A real `dump`-produced snapshot is `json.dumps(..., indent=2)`
+    # (never minified), so the tag is reliably within the file's last ~4KB
+    # regardless of how large the payload before it is. Try a cheap tail
+    # regex scan first -- avoiding a full json.load for exactly the case
+    # Codex flagged as most expensive (an explicitly unfiltered "full"
+    # snapshot, which by definition can carry the largest transitive
+    # dependency surface) -- and only fall back to the full parse when the
+    # tail scan doesn't confidently resolve it (non-standard formatting, a
+    # tiny file, the key genuinely absent, ...), so correctness never
+    # actually depends on the heuristic.
+    try:
+        size = baseline.stat().st_size
+        with open(baseline, "rb") as f:
+            f.seek(max(0, size - 4096))
+            tail = f.read().decode("utf-8", errors="ignore")
+        match = re.search(r'"dependency_scope"\s*:\s*"(full|filtered)"', tail)
+        if match is not None:
+            return match.group(1) == "full"
+        if re.search(r'"dependency_scope"\s*:\s*null', tail) is not None:
+            return False
+    except OSError:
+        pass
+    try:
+        with open(baseline, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get("dependency_scope") == "full")
 
 
 def _load_exports_for_poi(path: Path | None, lang: str) -> Any | None:
@@ -810,6 +904,7 @@ def run_scan_core(
                 defer_cleanup=defer_cleanup,
                 symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
                 debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                include_dependencies=_scan_candidate_include_dependencies(baseline),
             )
     except deadline.DeadlineExceeded as exc:
         elapsed = time.monotonic() - start

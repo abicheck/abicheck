@@ -92,11 +92,16 @@ class ProfileMismatchError(AbicheckError):
 
 class ScopeMismatchError(AbicheckError):
     """Raised by :func:`abicheck.comparability.check_contracts_comparable`
-    when both sides of a compare carry a ``scope_fingerprint`` and it
-    differs (ADR-050 D2) — the two snapshots do not cover the same declared
-    surface (a manifest/CLI-flag drift between two extraction runs), so
+    when both sides of a compare do not cover the same declared surface, so
     ``compare`` must report ``not_comparable`` instead of producing any
-    verdict.
+    verdict. Two independent causes:
+
+    - Both sides carry a ``scope_fingerprint`` and it differs (ADR-050 D2)
+      — a manifest/CLI-flag drift between two extraction runs.
+    - Both sides carry an explicit, differing
+      :attr:`abicheck.model.AbiSnapshot.dependency_scope` (schema v18) — one
+      side excludes toolchain/system-header declarations
+      (``dumper_scoping.py``, ``dump``'s default) and the other does not.
     """
 
 

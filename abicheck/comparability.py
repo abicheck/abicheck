@@ -1234,8 +1234,73 @@ class ComparabilityMismatch:
     otherwise have raised (scope is checked first, so a scope mismatch
     shadows a co-occurring profile one, same as the raising path)."""
 
-    kind: str  # "scope" | "profile"
+    kind: str  # "scope" | "profile" | "dependency_scope"
     reason: str
+
+
+def _check_dependency_scope_comparable(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> ComparabilityMismatch | None:
+    """Independent of and checked before the fingerprint-based gate below:
+    refuses to compare a dependency-filtered snapshot (``dump``'s default,
+    since ``dumper_scoping.py``) against an unfiltered one — the asymmetry a
+    plain ``dump old.so -H ... -o baseline.json`` followed by
+    ``compare baseline.json new.so -H ...`` used to produce, back when
+    ``compare``'s own live-binary dumping never applied this filter by
+    default (``compare`` now filters by default too, matching ``dump`` —
+    this gate still matters for a direct Python API caller of
+    ``service.run_dump``, whose own default remains unfiltered ("full") for
+    backward compatibility). Neither ``scope_fingerprint`` nor
+    ``profile_fingerprint`` observe this axis at all
+    (dependency scope isn't a declared-header-set or compile-context fact —
+    it's a post-parse filtering decision made after both are already
+    computed), so this cannot be folded into either fingerprint's existing
+    field set without a much larger change to their carve-out logic; a
+    separate, simple check is deliberately lower-risk here.
+
+    Only fires when at least one side actually has header-derived
+    declarations (``from_headers``) — the axis this field describes is
+    meaningless for a binary/DWARF-only snapshot, and neither side needing to
+    have dependency-scoped anything means there's nothing to mismatch.
+
+    **Deliberately does NOT treat a missing/``None`` value as ``"full"``**
+    (Codex review, PR #651 follow-up): ``dumper_scoping.py``'s default
+    filtering already shipped before this field existed, so an ordinary
+    pre-v18 baseline dumped with `dump`'s default (no
+    ``--include-dependencies``) is almost always *already filtered* content
+    that simply predates the tag — treating its ``None`` as ``"full"`` would
+    spuriously ``ScopeMismatchError`` the single most common workflow
+    (compare a committed/cached baseline against a fresh default dump),
+    exactly the class of regression this codebase's own schema-version
+    history repeatedly warns against. There is no way to recover which of
+    "filtered" or "full" an old, untagged snapshot actually is from the
+    object alone, so this only fires when BOTH sides carry an explicit,
+    non-``None`` value and they differ — every live-binary or ``dump``
+    snapshot produced by a current abicheck build is tagged
+    ``"filtered"``/``"full"`` explicitly
+    (``dumper_scoping.resolve_dependency_scope``, via
+    ``wrap_run_dump_with_dependency_scope``), so the originally-reported
+    danger — a filtered snapshot compared against an unfiltered one — is
+    still caught once both sides come from a current abicheck build. Only a
+    genuinely ambiguous old baseline (``None``) is left unchecked on this
+    axis, the same conservative only-flag-what's-confidently-known bias
+    ``dumper_scoping.py`` itself already uses throughout.
+    """
+    if not (old.from_headers or new.from_headers):
+        return None
+    old_scope = old.dependency_scope
+    new_scope = new.dependency_scope
+    if old_scope is None or new_scope is None or old_scope == new_scope:
+        return None
+    reason = (
+        "old and new snapshots have different dependency-scoping modes "
+        f"(old: {old_scope!r}, new: {new_scope!r}) — one side excludes "
+        "toolchain/system-header declarations (`dump`'s default; see "
+        "dumper_scoping.py) and the other does not, so they do not cover "
+        "the same declared surface. Regenerate both snapshots with the same "
+        "mode: pass --include-dependencies on both sides, or on neither."
+    )
+    return ComparabilityMismatch(kind="dependency_scope", reason=reason)
 
 
 def check_contracts_comparable(
@@ -1442,6 +1507,12 @@ def check_contracts_comparable(
     force a tentative diff through a genuine contract mismatch. ``None`` is
     returned (in either mode) when the pair is comparable.
     """
+    dependency_scope_mismatch = _check_dependency_scope_comparable(old, new)
+    if dependency_scope_mismatch is not None:
+        if diagnostic:
+            return dependency_scope_mismatch
+        raise ScopeMismatchError(dependency_scope_mismatch.reason)
+
     old_contract = old.contract
     new_contract = new.contract
 

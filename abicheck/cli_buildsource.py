@@ -96,6 +96,7 @@ def embed_build_source(
     public_headers: tuple[str, ...] = (),
     public_header_dirs: tuple[str, ...] = (),
     defer_cleanup: list[Callable[[], None]] | None = None,
+    quiet: bool = False,
 ) -> None:
     """Embed build-info / source facts inline in *snap* (single-artifact UX).
 
@@ -117,6 +118,10 @@ def embed_build_source(
     The combined facts ride inside the ``.abi.json`` so a later
     ``compare old.json new.json`` works with no out-of-band directories. Also
     records the matching content-addressed ``build_source_pack`` reference.
+    ``quiet=True`` (Codex review) suppresses this function's own
+    ``click.echo`` (e.g. the "no compile_commands.json found" warning) for a
+    non-CLI caller (``service.run_compare_request``) with no stream to write
+    to and no way to suppress it otherwise.
     """
     from .buildsource.inline import (
         collect_inline_pack,
@@ -237,7 +242,7 @@ def embed_build_source(
             e.name in ("build_query", "build_query_auto")
             for e in inline_pack.manifest.extractors
         )
-        if not _has_l3 and bi_pack is None and not _has_query_note:
+        if not _has_l3 and bi_pack is None and not _has_query_note and not quiet:
             _tree = raw_sources if raw_sources is not None else raw_build_info
             _deeper = "/L4/L5" if ("L4" in layers or "L5" in layers) else ""
             click.echo(

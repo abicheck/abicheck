@@ -204,6 +204,7 @@ def _dump_native_binary(
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    include_dependencies: bool = True,
 ) -> AbiSnapshot:
     """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -243,6 +244,7 @@ def _dump_native_binary(
             header_backend=header_backend,
             compile=compile,
             notify=_click_notify,
+            include_dependencies=include_dependencies,
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -270,6 +272,7 @@ def _resolve_input(
     public_header_dirs: list[Path] | None = None,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
+    include_dependencies: bool = True,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -342,6 +345,7 @@ def _resolve_input(
             include_labels=include_labels,
             dump_manifest=dump_manifest,
             notify=_click_notify,
+            include_dependencies=include_dependencies,
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -523,8 +527,17 @@ def _resolve_compare_snapshots(
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: DumpManifest | None = None,
     new_dump_manifest: DumpManifest | None = None,
+    include_dependencies: bool = False,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
+
+    ``include_dependencies`` (default ``False``, mirroring ``dump``'s own
+    default): both sides are filtered via
+    ``dumper_scoping.resolve_dependency_scope`` the same way ``dump``
+    filters by default -- this is what makes ``dump old.so -o base.json``
+    then ``compare base.json new.so`` compare consistently by default,
+    instead of the historical asymmetry (a filtered ``dump`` baseline vs.
+    compare's always-unfiltered live-binary dumping).
 
     ``header_backend`` is the both-sides default; ``old_header_backend`` /
     ``new_header_backend`` override it for one side only (``None`` = inherit).
@@ -590,6 +603,7 @@ def _resolve_compare_snapshots(
         public_header_dirs=old_public_header_dirs,
         include_labels=include_labels,
         dump_manifest=old_dump_manifest,
+        include_dependencies=include_dependencies,
     )
     new = _resolve_input(
         new_input,
@@ -610,6 +624,7 @@ def _resolve_compare_snapshots(
         public_header_dirs=new_public_header_dirs,
         include_labels=include_labels,
         dump_manifest=new_dump_manifest,
+        include_dependencies=include_dependencies,
     )
     if follow_deps:
         if old_fmt == "elf":

@@ -361,6 +361,12 @@ def _run_baseline_compare(
             compile=compile_context,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
+            # Matches the candidate's own resolve_input() default in
+            # scan_engine.py's run_scan_core -- a no-op for a JSON snapshot
+            # baseline (already-serialized, no dumping happens), but keeps a
+            # *native* --baseline library filtered consistently with the
+            # candidate (Codex review).
+            include_dependencies=False,
         )
     except AbicheckError as exc:
         raise click.ClickException(

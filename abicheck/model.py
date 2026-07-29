@@ -799,6 +799,32 @@ class AbiSnapshot:
     # for the same reason as the other optional metadata fields above.
     contract: ExtractionContract | None = field(default=None, kw_only=True)
 
+    # Dependency-scoping mode (schema v18) — whether toolchain/system-header
+    # declarations were excluded from this snapshot's flat lists/DWARF
+    # collections by ``dumper_scoping.scope_snapshot_excluding_dependencies``
+    # ("filtered") or deliberately kept ("full", via ``--include-dependencies``).
+    # ``dump`` and ``compare``'s own live-binary dumping (``service.run_dump``)
+    # both filter by default and tag "filtered"; a direct Python API caller of
+    # ``service.run_dump``/``resolve_input`` gets the opposite default
+    # (``include_dependencies=True``, tagging "full"), preserving every other
+    # caller (``scan``, MCP, ...) that doesn't opt in explicitly.
+    # ``None`` means "not recorded" — every snapshot predating this field.
+    # Deliberately NOT treated as equivalent to ``"full"`` anywhere: since
+    # ``dumper_scoping.py``'s filtering already shipped as the ``dump``
+    # default before this field existed, an ordinary pre-v18 baseline is
+    # usually already-filtered content that simply predates the tag —
+    # assuming ``"full"`` for it would spuriously flag the single most
+    # common workflow (compare a cached baseline against a fresh dump) as
+    # not comparable. ``comparability.check_contracts_comparable`` only
+    # raises ``ScopeMismatchError`` when BOTH sides carry an explicit,
+    # non-``None`` value and they differ — which still catches the
+    # originally-reported danger (a filtered ``dump`` baseline compared
+    # against an unfiltered ``compare`` live dump, e.g. one built by a
+    # direct Python API caller) once both sides come from a current abicheck
+    # build, without touching the irrecoverable ambiguity of an old,
+    # untagged snapshot.
+    dependency_scope: str | None = field(default=None, kw_only=True)
+
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
     # snapshot that predates the explicit ``from_headers`` key, rather than set

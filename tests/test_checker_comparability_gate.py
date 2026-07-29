@@ -162,3 +162,124 @@ def test_compare_contract_coverage_none_when_both_sides_comparable(tmp_path):
     result = compare(old, new)
     assert result.contract_coverage is None
     assert result.assurance is None
+
+
+def _scoped_snap(
+    version: str, from_headers: bool, dependency_scope: str | None
+) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libtest.so.1",
+        version=version,
+        from_headers=from_headers,
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fv",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+        dependency_scope=dependency_scope,
+    )
+
+
+class TestDependencyScopeComparabilityGate:
+    """The asymmetry PR #649/dumper_scoping.py introduced: `dump`'s default
+    output is dependency-filtered, but `compare`'s own live-binary dumping
+    didn't apply that filter -- comparing one of each could silently
+    produce an ordinary (possibly wrong) verdict. `compare`'s live-binary
+    dumping has since been made to filter by default too (matching `dump`,
+    a later follow-up in this same PR -- see
+    changelog.d/20260729_claude_compare_default_dependency_filtering.md),
+    so the mismatch this gate guards against now arises mainly from an
+    *explicit* `--include-dependencies` override on only one side, or a
+    pre-v18/legacy snapshot mixed with a current-build one -- not from
+    ordinary live-binary compare defaults disagreeing with each other."""
+
+    def test_filtered_vs_full_raises_scope_mismatch(self):
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
+        with pytest.raises(ScopeMismatchError):
+            compare(old, new)
+
+    def test_filtered_vs_legacy_none_baseline_is_not_flagged(self):
+        # A pre-v18 baseline predates this field but NOT dumper_scoping.py's
+        # default filtering (which already shipped as `dump`'s default) --
+        # its None is genuinely ambiguous (it's usually already-filtered
+        # content that simply predates the tag), so it must NOT be assumed
+        # to mean "full": doing so would spuriously flag the single most
+        # common workflow (compare a cached baseline against a fresh dump)
+        # as not comparable (Codex review, PR #651 follow-up).
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
+        assert compare(old, new) is not None  # must not raise
+
+    def test_full_vs_legacy_none_baseline_is_not_flagged(self):
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
+        assert compare(old, new) is not None  # must not raise
+
+    def test_both_filtered_is_comparable(self):
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
+        assert compare(old, new) is not None  # must not raise
+
+    def test_both_full_is_comparable(self):
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="full")
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
+        assert compare(old, new) is not None  # must not raise
+
+    def test_both_none_is_comparable(self):
+        # A pair of legacy/untagged snapshots (pre-v18, or an in-memory one
+        # built without going through run_dump's tagging wrapper) -- not the
+        # normal live-binary compare() result any more, since that path is
+        # now tagged "filtered"/"full" by default (CodeRabbit review: this
+        # comment previously described dependency_scope=None as the ordinary
+        # live-compare case, which stopped being true once compare's own
+        # live-binary dumping started filtering -- and tagging -- by
+        # default). Untagged sides are deliberately never compared on this
+        # axis regardless of why they're untagged; see the gate's own
+        # docstring.
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope=None)
+        assert compare(old, new) is not None  # must not raise
+
+    def test_binary_only_snapshots_are_unaffected(self):
+        # from_headers=False on both sides: the dependency-scope axis is
+        # meaningless for a binary/DWARF-only compare, even if the field
+        # happens to carry a value.
+        old = _scoped_snap("1.0", from_headers=False, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=False, dependency_scope="full")
+        assert compare(old, new) is not None  # must not raise
+
+    def test_one_sided_from_headers_with_differing_scope_still_raises(self):
+        # The gate's guard is `old.from_headers or new.from_headers` -- only
+        # ONE side needs to be header-derived for the axis to be meaningful.
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=False, dependency_scope="full")
+        with pytest.raises(ScopeMismatchError):
+            compare(old, new)
+
+    def test_diagnostic_mode_returns_reason_instead_of_raising(self):
+        from abicheck.comparability import check_contracts_comparable
+
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
+        mismatch = check_contracts_comparable(old, new, diagnostic=True)
+        assert mismatch is not None
+        assert mismatch.kind == "dependency_scope"
+
+    def test_legacy_none_vs_tagged_reports_partial_contract_coverage(self):
+        """Codex review, fresh evidence: a mixed None/explicit-tag pair is
+        deliberately *permitted* (not raised) since there's no way to
+        recover which mode the untagged side actually used -- but silently
+        proceeding left `contract_coverage` at `None` (full coverage),
+        so a legacy "full"-mode snapshot compared against a freshly
+        "filtered" one could produce a wrong verdict with the report still
+        reading as fully verified. `contract_coverage` must mark this axis
+        unverified the same way it already does for a mixed
+        profile/scope-fingerprint pair."""
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
+        result = compare(old, new)
+        assert result.contract_coverage == "partial"

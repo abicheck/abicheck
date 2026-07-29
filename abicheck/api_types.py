@@ -27,6 +27,21 @@ This module is Phase 1 of the G22 plan: it introduces :class:`InputSpec`,
 :class:`OutputSpec`. Later phases extend ``CompareRequest`` with the depth
 (D5), policy/severity (D4), and frontend (D8) fields the ADR sketches — each as
 an additive field with a default.
+
+ADR-055 D1 (this module's ``InputSpec.sources``/``build_info``/
+``dump_manifest``/``compile``/``public_header_dirs`` and
+``CompareRequest.depth``/``frontend_context``) closes the gap that ADR's own
+Gap 1 documents: ``CompareRequest`` previously had no way to express
+``compare``'s ``--depth``/``--sources``/``--build-info``/``--dump-manifest``/
+per-side ``CompileContext`` feature set at all, so a Python caller wanting
+that had to fall back to loose keyword arguments on lower-level functions.
+``service.run_compare_request`` reads these new fields directly (see its own
+docstring for exactly how); it does not yet match every capability of the
+CLI's own, separately-maintained ``cli_resolve._resolve_compare_snapshots``
+(project-config ``source.method`` inference, the set-input evidence-flag
+rejection guard, per-side AST-frontend override) — migrating the CLI onto
+this path, or extending it further to match, is deliberately left as
+follow-up work (ADR-055's own "Two-resolution-path finding").
 """
 
 from __future__ import annotations
@@ -34,9 +49,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .errors import ValidationError
+
+if TYPE_CHECKING:
+    from .compile_context import CompileContext
+    from .dump_manifest import DumpManifest
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
 SUPPORTED_LANGS = frozenset({"c", "c++"})
@@ -85,6 +104,35 @@ class InputSpec:
     version: str = ""
     pdb: Path | None = None
     debug_roots: tuple[Path, ...] = ()
+    # Mirrors `dump --include-dependencies`/`compare --include-dependencies`
+    # (dumper_scoping.py): default True preserves the historical unfiltered
+    # behavior for any caller that doesn't opt in; `run_compare` (and the
+    # CLI's `--include-dependencies` default False) sets it explicitly.
+    include_dependencies: bool = True
+    # ADR-055 D1: this side's inline build/source evidence (mirrors
+    # `--sources`/`--build-info`, side-scoped like the CLI's own
+    # `old=`/`new=` sided values) -- `run_compare_request` embeds them via
+    # `cli_buildsource.embed_build_source` when set, at `CompareRequest.depth`'s
+    # resolved collect mode. `None` on both sides is a no-op (unchanged
+    # behavior from before this field existed).
+    sources: Path | None = None
+    build_info: Path | None = None
+    # ADR-055 D1 / ADR-050 D3: a parsed `--dump-manifest` document for this
+    # side only, in place of a single header list -- forwarded directly to
+    # `resolve_input`'s own `dump_manifest` parameter, which already supports
+    # it (this field is new surface on the *request*, not new resolution
+    # logic).
+    dump_manifest: DumpManifest | None = None
+    # ADR-055 D1: this side's L2 cross-toolchain/AST-frontend override
+    # (`--gcc-*`/`--sysroot`/`--nostdinc`/`--ast-frontend`, ADR-037 D3).
+    # `None` falls back to whatever `run_compare_request` would otherwise
+    # resolve (e.g. its own pair-wide C++20 dialect override) -- this is a
+    # per-side override layered on top of that, not a replacement for it.
+    compile: CompileContext | None = None
+    # ADR-055 D1: additional public-header *directories* beyond what's
+    # already inferred by splitting `headers` into files/dirs
+    # (`split_public_header_inputs`) -- mirrors `--public-header-dir`.
+    public_header_dirs: tuple[Path, ...] = ()
 
     @classmethod
     def of(
@@ -96,6 +144,12 @@ class InputSpec:
         version: str = "",
         pdb: Path | str | None = None,
         debug_roots: Iterable[Path | str] | None = None,
+        include_dependencies: bool = True,
+        sources: Path | str | None = None,
+        build_info: Path | str | None = None,
+        dump_manifest: DumpManifest | None = None,
+        compile: CompileContext | None = None,
+        public_header_dirs: Iterable[Path | str] | None = None,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -105,6 +159,12 @@ class InputSpec:
             version=version,
             pdb=Path(pdb) if pdb is not None else None,
             debug_roots=_path_tuple(debug_roots),
+            include_dependencies=include_dependencies,
+            sources=Path(sources) if sources is not None else None,
+            build_info=Path(build_info) if build_info is not None else None,
+            dump_manifest=dump_manifest,
+            compile=compile,
+            public_header_dirs=_path_tuple(public_header_dirs),
         )
 
 
@@ -177,6 +237,25 @@ class CompareRequest:
     # what makes the shadow evaluator reachable through the real Tier-2
     # chokepoint at all (Codex review, fresh evidence).
     contract_evaluation: bool = False
+    # ADR-055 D1: the friendly evidence-depth dial (`--depth`, same vocabulary
+    # as `dump`/`scan`: binary/headers/build/source). `None` (the default)
+    # infers the collect mode from whether either side sets `sources`/
+    # `build_info` instead of defaulting to "off" -- matching the CLI's own
+    # `--depth`-omitted inference (P1 fix in `cli_compare_helpers.py`), not
+    # a fixed default. `"binary"` also clears both sides' `headers` before
+    # resolving (matching the CLI's identical `depth == "binary"` handling),
+    # since a binary-only depth request that still carries headers would
+    # otherwise silently keep running L2.
+    depth: str | None = None
+    # ADR-055 D1 / ADR-050: request-level default for `CompileContext.
+    # frontend_context` (`--frontend-context`, host|device), applied to a
+    # side whose own `InputSpec.compile.frontend_context` reads as the class
+    # default ("host") -- `CompileContext.frontend_context` has no "unset"
+    # representation, so this can't distinguish a side that explicitly wants
+    # "host" from one that just never touched the field; see
+    # `service_compare_evidence._compile_context`'s own docstring for the
+    # accepted limitation and how to work around it.
+    frontend_context: str = "host"
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -197,13 +276,38 @@ class CompareRequest:
             errors.append(
                 f"unsupported AST frontend {self.frontend!r}: choose from {allowed}"
             )
-        elif frontend == "android" and not self.has_sources:
+        elif frontend == "android" and not (
+            self.has_sources
+            or self.old.sources
+            or self.new.sources
+            or self.old.build_info
+            or self.new.build_info
+        ):
             # D8/D9: 'android' reuses a pre-captured header-abi dump; it has no
-            # header-AST path, so a header-only run can't use it.
+            # header-AST path, so a header-only run can't use it. ADR-055 D1
+            # (Codex review): either side's own `InputSpec.sources` also
+            # satisfies this -- not just the legacy `has_sources` flag, which
+            # a typed caller using the new field alone would otherwise have to
+            # redundantly set too. A second review round: `InputSpec.
+            # build_info` alone must count too -- `embed_build_source`
+            # auto-detects a pack directory in *either* `sources` or
+            # `build_info` (`cli_buildsource.py`'s own `bi_is_pack`/
+            # `src_is_pack`), so a prebuilt evidence pack passed via
+            # `build_info` is exactly the same "already have a pre-captured
+            # header-abi dump" case this rule exists to allow.
             errors.append(
                 "the 'android' AST frontend is source-ABI only (it has no "
                 "header-AST path); supply source inputs (--sources) to use it"
             )
+        # ADR-055 D1 (Codex review, two rounds): whether `InputSpec.sources`
+        # is compatible with `frontend == "android"` depends on whether it's
+        # a genuine raw source tree (run_compare_request's inline
+        # embed_build_source has no real Android extractor -- rejected) or a
+        # prebuilt evidence pack (loaded as pre-captured facts, no extractor
+        # ever runs -- valid). That distinction needs filesystem access plus
+        # helpers from the CLI/service import-cycle-allowlisted cluster this
+        # leaf module deliberately stays out of, so it's checked at runtime
+        # in service.run_compare_request instead of here.
         if not self.policy:
             errors.append("policy profile name must not be empty")
         # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
@@ -215,6 +319,32 @@ class CompareRequest:
             errors.append(f"policy file not found: {self.policy_file_path}")
         if self.env_matrix_path is not None and not Path(self.env_matrix_path).exists():
             errors.append(f"environment matrix file not found: {self.env_matrix_path}")
+        if self.depth is not None:
+            from .buildsource.scan_levels import USER_DEPTHS
+
+            if self.depth.lower() not in USER_DEPTHS:
+                allowed = ", ".join(sorted(USER_DEPTHS))
+                errors.append(
+                    f"unsupported depth {self.depth!r}: choose from {allowed}"
+                )
+        # ADR-055 D1 (Codex review): validated case-insensitively like the
+        # other enums above -- an unvalidated value (e.g. "DEVICE") would
+        # pass here but then compare unequal to the lowercase "host"/"device"
+        # literals every actual consumer checks against, silently behaving as
+        # neither.
+        if self.frontend_context.lower() not in ("host", "device"):
+            errors.append(
+                f"unsupported frontend context {self.frontend_context!r}: "
+                "choose from device, host"
+            )
+        # Codex: a per-side InputSpec.compile.frontend_context bypassed this enum check entirely -- validate it here too, same message shape.
+        for label, side in (("old", self.old), ("new", self.new)):
+            if side.compile is not None and side.compile.frontend_context.lower() not in ("host", "device"):
+                errors.append(f"unsupported {label} frontend context {side.compile.frontend_context!r}: choose from device, host")
+        # CodeRabbit review: dump_manifest replaces headers for the primary AST; forwarding both mixes two declared surfaces into one snapshot's provenance/dialect detection. Belongs in this Tier-2 pre-flight validate() (mirrors the CLI's --dump-manifest/-H UsageError), not only checked at runtime in run_compare_request -- moved here so a caller using validation_errors()/validate() alone also catches it.
+        for label, side in (("old", self.old), ("new", self.new)):
+            if side.dump_manifest is not None and side.headers:
+                errors.append(f"dump_manifest and a header for the {label} side (InputSpec.headers) are mutually exclusive -- declare the {label} side's public surface in the manifest's own base profile instead.")
         return errors
 
     def validate(self) -> CompareRequest:

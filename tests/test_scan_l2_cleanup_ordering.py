@@ -78,6 +78,38 @@ def test_scan_l2_seed_cleanup_runs_before_embed(monkeypatch, tmp_path):
     assert events.index("cleanup") < events.index("embed")
 
 
+def test_scan_candidate_filters_dependency_scope_by_default(monkeypatch, tmp_path):
+    """Codex review: scan's own candidate resolve_input() call used to leave
+    include_dependencies at its True/"full" default, mismatching a `dump`-
+    produced --against baseline's "filtered" default and hard-failing the
+    new comparability gate on the routine "scan against a plain dump'd
+    baseline" workflow."""
+    resolve_kwargs: dict = {}
+
+    def fake_resolve(*args, **kwargs):
+        resolve_kwargs.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.l2_seed.seed_l2_includes",
+        lambda **kwargs: (list(kwargs["includes"]), []),
+    )
+    monkeypatch.setattr("abicheck.service.resolve_input", fake_resolve)
+
+    _build_new_snapshot(
+        binary=tmp_path / "lib.so",
+        headers=[tmp_path / "h.h"],
+        includes=[],
+        sources=None,
+        collect_mode="off",
+        lang="c++",
+        allow_build_query=False,
+        defer_cleanup=[],
+    )
+
+    assert resolve_kwargs["include_dependencies"] is False
+
+
 def test_scan_returns_seeded_includes_for_baseline(monkeypatch, tmp_path):
     # _build_new_snapshot returns the *effective* (seeded) includes so a --baseline
     # compare can header-parse the old native library with the same build-derived
@@ -140,3 +172,167 @@ def test_scan_l2_seed_cleanup_runs_even_when_resolve_raises(monkeypatch, tmp_pat
             defer_cleanup=[],
         )
     assert events == ["cleanup"]  # released despite the failure
+
+
+class TestScanCandidateIncludeDependencies:
+    """Codex review, fresh evidence: ``scan``'s candidate now defaults to
+    filtered dependency scope (matching a default ``dump`` baseline), but
+    that alone would hard-break the inverse, explicit
+    ``dump --include-dependencies`` baseline workflow -- scan has no
+    ``--include-dependencies`` flag of its own, so the candidate's mode is
+    derived from a JSON baseline's own explicit tag instead."""
+
+    def test_no_baseline_defaults_to_filtered(self):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        assert _scan_candidate_include_dependencies(None) is False
+
+    def test_native_baseline_defaults_to_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        native = tmp_path / "libfoo.so"
+        native.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        assert _scan_candidate_include_dependencies(native) is False
+
+    def test_native_baseline_short_circuits_before_reading_as_text(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review, fresh evidence: a recognized magic number must
+        short-circuit to the filtered default without ever opening the file
+        as UTF-8 text -- json.load()'s fp.read() would otherwise decode the
+        entire file merely to fail parsing it, a real, avoidable memory/I/O
+        cost for a large native baseline."""
+        from abicheck import scan_engine
+
+        native = tmp_path / "libfoo.so"
+        native.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        def fail_if_opened(*args, **kwargs):
+            raise AssertionError("must not open the native binary as text")
+
+        monkeypatch.setattr(scan_engine, "open", fail_if_opened, raising=False)
+        assert scan_engine._scan_candidate_include_dependencies(native) is False
+
+    def test_json_baseline_tagged_full_matches_full(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text('{"dependency_scope": "full"}', encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_json_baseline_tagged_filtered_stays_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text('{"dependency_scope": "filtered"}', encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_json_baseline_with_no_tag_stays_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text("{}", encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_json_baseline_with_library_like_name_still_read(self, tmp_path):
+        """Codex review, fresh evidence: a real JSON snapshot saved under a
+        library-like filename (no recognized binary magic bytes, so
+        cli_scan_baseline._baseline_is_native_library falls back to its
+        ".so" in name filename heuristic and would call this native) must
+        still have its dependency_scope tag read -- pre-filtering on that
+        helper before attempting the JSON parse would silently skip the
+        peek for exactly this baseline shape."""
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "libfoo.so"
+        baseline.write_text('{"dependency_scope": "full"}', encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_unreadable_json_baseline_falls_back_to_filtered(self, tmp_path):
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text("not json", encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_json_baseline_with_non_object_top_level_falls_back_to_filtered(
+        self, tmp_path
+    ):
+        """Codex review: valid JSON whose top level isn't a mapping (e.g. a
+        bare `[]`) must not raise AttributeError out of this best-effort
+        helper -- it should degrade to the filtered default like any other
+        unreadable/malformed baseline."""
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text("[]", encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_large_full_baseline_avoids_full_json_parse(self, tmp_path, monkeypatch):
+        """Codex review, fresh evidence: dependency_scope is one of
+        AbiSnapshot's last serialized fields (model.py), so a real
+        `dump`-produced snapshot (json.dumps(..., indent=2), never
+        minified) carries the tag within the file's last ~4KB regardless of
+        how large the functions/types/DWARF payload before it is -- an
+        explicitly unfiltered "full" snapshot is precisely the mode most
+        likely to carry the largest such payload. The tail-scan fast path
+        must resolve this without ever calling json.load."""
+        import json as json_mod
+
+        from abicheck import scan_engine
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        huge_payload = {"functions": [{"name": f"f{i}"} for i in range(50_000)]}
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text(
+            json_mod.dumps(
+                {**huge_payload, "dependency_scope": "full", "schema_version": 18},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("must not fully json.load a large baseline")
+
+        monkeypatch.setattr(scan_engine.json, "load", fail_if_called)
+        assert _scan_candidate_include_dependencies(baseline) is True
+
+    def test_large_filtered_baseline_avoids_full_json_parse(
+        self, tmp_path, monkeypatch
+    ):
+        import json as json_mod
+
+        from abicheck import scan_engine
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        huge_payload = {"functions": [{"name": f"f{i}"} for i in range(50_000)]}
+        baseline = tmp_path / "baseline.json"
+        baseline.write_text(
+            json_mod.dumps(
+                {**huge_payload, "dependency_scope": "filtered", "schema_version": 18},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("must not fully json.load a large baseline")
+
+        monkeypatch.setattr(scan_engine.json, "load", fail_if_called)
+        assert _scan_candidate_include_dependencies(baseline) is False
+
+    def test_tail_scan_miss_falls_back_to_full_parse(self, tmp_path):
+        """A file whose tail doesn't confidently resolve the tag (e.g. the
+        key sits earlier than the last 4KB, an unusual formatting choice)
+        must still fall back to the full json.load path rather than
+        silently guessing wrong."""
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "baseline.json"
+        padding = " " * 8192
+        baseline.write_text(
+            '{"dependency_scope": "full", "padding": "' + padding + '"}',
+            encoding="utf-8",
+        )
+        assert _scan_candidate_include_dependencies(baseline) is True

@@ -467,6 +467,35 @@ def severity_options(func: F) -> F:
     return func
 
 
+def include_dependencies_option(func: F) -> F:
+    """``--include-dependencies``, shared by ``dump`` and ``compare``
+    (dumper_scoping.py): by default, toolchain/system-header declarations
+    (std::/SYCL/etc. pulled in transitively by #include) are excluded from
+    a header-AST dump -- a header-origin filter, not a public-API-surface
+    one (the library's own private/internal declarations are always kept,
+    exactly like its public ones). Pass this flag to get the old, unfiltered
+    full dump instead. A no-op when there are no header-derived declarations
+    at all (a binary-only/DWARF-only dump). Filters the flat
+    function/variable/type/enum lists (typedefs are always kept) and the
+    DWARF/DWARF-advanced collections keyed off them; an embedded header-only
+    semantic graph (always attached by default) is not filtered. A filtered
+    and an unfiltered snapshot are not comparable -- mixing them raises
+    ScopeMismatchError."""
+    func = click.option(
+        "--include-dependencies",
+        "include_dependencies",
+        is_flag=True,
+        default=False,
+        help="Include toolchain/system-header declarations (std::/SYCL/etc. "
+        "pulled in transitively by #include). By default these are "
+        "excluded -- pass this flag to get the old, unfiltered full "
+        "surface instead. A no-op on a binary-only/DWARF-only dump. "
+        "Mixing a filtered and an unfiltered snapshot across a "
+        "comparison raises ScopeMismatchError (dumper_scoping.py).",
+    )(func)
+    return func
+
+
 def scope_options(func: F) -> F:
     """Public-surface scoping (`--scope-public-headers/--no-`).
 
@@ -1628,6 +1657,13 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "target (host, or a future device/DPC++ selector). A per-run "
         "extraction-target choice, not a stable project setting -- like "
         "--ast-frontend."
+    ),
+    "--include-dependencies": (
+        "Shared with dump (cli_options.include_dependencies_option): whether "
+        "to include toolchain/system-header declarations in a live-binary "
+        "side's dependency scope for this comparison. Which mode a given "
+        "invocation needs varies per run (matching whatever a baseline was "
+        "dumped with), not a stable project setting."
     ),
 }
 

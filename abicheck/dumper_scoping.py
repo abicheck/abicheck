@@ -92,9 +92,12 @@ project.
 from __future__ import annotations
 
 import dataclasses
+import functools
+import inspect
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
@@ -223,6 +226,61 @@ def _typedef_alias_reachability(
 #: ``_directly_referenced_dependency_names`` and its nested-match
 #: suppression at the end of that function.
 _TAG_KEYWORDS = frozenset({"struct", "class", "union", "enum"})
+
+
+def dump_manifest_header_roots(dump_manifest: Any) -> tuple[Path, ...]:
+    """Every path a ``--dump-manifest`` document declares as project-owned,
+    for forwarding into :func:`scope_snapshot_excluding_dependencies`'s
+    ``header_roots`` -- not just ``roots`` (Codex review).
+    ``public_header_paths``/``public_header_dirs`` (the manifest's own
+    ADR-015 provenance-input equivalent of ``--public-header``/
+    ``--public-header-dir``) and any per-translation-unit include directory
+    explicitly marked ``project_owned: true`` are just as much "the dump's
+    actual root set" as ``roots`` -- a declaration under one of them must
+    not be misclassified as a dependency just because those paths happen to
+    sit under a system prefix, the same reasoning ``roots`` itself already
+    gets. Shared by both ``dump`` (``cli_dump_helpers.py``) and
+    ``compare``'s implicit live-binary dumping (this module's own
+    ``apply_dependency_scope_to_run_dump_result``) so a manifest's roots are
+    never dropped just because the dumping path used ``--dump-manifest``
+    instead of ``-H`` (Codex review).
+    """
+    if dump_manifest is None:
+        return ()
+    roots = [
+        *dump_manifest.roots,
+        *dump_manifest.public_header_paths,
+        *dump_manifest.public_header_dirs,
+    ]
+    for tu in dump_manifest.translation_units:
+        # Codex review: forced_includes is "what this TU actually compiles"
+        # (dump_manifest.py's own docstring: "a TU may force-include a
+        # private support header alongside a public one") -- not required to
+        # already be in roots/project_owned includes, so a private support
+        # header force-included from a system-prefixed install path was
+        # otherwise misclassified as a toolchain dependency and filtered out.
+        roots.extend(tu.forced_includes)
+        roots.extend(inc.path for inc in tu.includes if inc.project_owned)
+    return tuple(roots)
+
+
+def dump_manifest_public_roots(dump_manifest: Any) -> tuple[Path, ...]:
+    """The manifest's *declared-public* roots only (``roots``/
+    ``public_header_paths``/``public_header_dirs``) -- unlike
+    :func:`dump_manifest_header_roots`, deliberately excludes each TU's
+    ``project_owned`` include directories (Codex review). Those are
+    sibling/private support roots used only to keep
+    ``resolve_dependency_scope`` from misclassifying a project-owned
+    directory as a toolchain dependency; they are not declared public API
+    surface. Forwarding them into L4 source replay's own public-header set
+    (as :func:`dump_manifest_header_roots` is for) would make the source
+    extractors treat every declaration under a private support directory as
+    API-relevant, false-flagging private-header churn as a source break."""
+    if dump_manifest is None:
+        return ()
+    return tuple(
+        (*dump_manifest.roots, *dump_manifest.public_header_paths, *dump_manifest.public_header_dirs)
+    )
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
@@ -790,27 +848,60 @@ def _scoped_dwarf(
 def _scoped_dwarf_advanced(
     adv: AdvancedDwarfMetadata | None,
     kept_identifiers: set[str],
-    kept_symbols: set[str],
+    excluded_symbols: set[str],
 ) -> AdvancedDwarfMetadata | None:
     """Filter Sprint-4 advanced DWARF metadata the same way: type-keyed
     collections (``packed_structs``/``all_struct_names``) via
     :func:`_name_matches`, function-keyed collections (keyed by mangled
-    ``linkage_name``) via *kept_symbols*."""
+    ``linkage_name``) by dropping only *excluded_symbols* -- every
+    dependency-header function's own ``mangled`` spelling -- rather than
+    requiring a match against the kept set (Codex review). The two
+    directions need different tolerances for an unreliable bare
+    ``mangled == name`` header-AST spelling (see ``tu_merge.py``'s own
+    documented limitation on why that field isn't always real mangling):
+    for a *kept* (non-dependency) function it must never be trusted to
+    positively identify the entry, since a perfectly ordinary C++ function
+    can carry one too (an auto-detected-as-C header parse, or an
+    uninstantiated template) and DWARF's real key won't match the bare
+    guess -- dropping on that mismatch would lose the function's own real
+    finding. For an *excluded* function, the bare spelling is safe to
+    exclude by: a genuinely unmangled symbol (C/``extern "C"``) carries the
+    *same* bare spelling at the real linker level too, so it still matches
+    DWARF's actual key; the residual failure mode (an excluded function
+    whose true mangled DWARF key isn't its bare name either) merely leaves
+    that one entry unfiltered -- the same false-negative-over-false-positive
+    bias this module uses throughout, not a new risk to any kept function
+    (a kept function's own real mangled name is never bare-equal to an
+    unrelated excluded symbol's bare name in a valid binary: two distinct
+    globals sharing one unmangled C symbol name would already be an ODR
+    violation the linker itself would have rejected).
+
+    Codex review, re-confirmed with a concrete repro (excluded C++ dependency
+    function whose header-AST ``mangled`` is an unreliable bare ``"dep"``
+    while DWARF's real ``linkage_name`` is ``_ZN3dep3depEv``): this is
+    exactly the already-accepted residual failure mode above, not a new gap
+    -- ``excluded_symbols`` has no way to recover the real DWARF key from an
+    unreliable bare spelling without either a genuine Function-to-DWARF
+    correlation this codebase doesn't have, or re-demangling every
+    ``linkage_name`` (a real perf cost on every dump/compare, for a benefit
+    this false-negative-biased filter already deliberately forgoes
+    elsewhere). Left unfiltered under its real key, same as any other
+    excluded function whose true mangled DWARF key isn't its bare name."""
     if adv is None or not adv.has_dwarf:
         return adv
     return dataclasses.replace(
         adv,
         calling_conventions={
-            k: v for k, v in adv.calling_conventions.items() if k in kept_symbols
+            k: v for k, v in adv.calling_conventions.items() if k not in excluded_symbols
         },
         value_abi_traits={
-            k: v for k, v in adv.value_abi_traits.items() if k in kept_symbols
+            k: v for k, v in adv.value_abi_traits.items() if k not in excluded_symbols
         },
         return_value_sizes={
-            k: v for k, v in adv.return_value_sizes.items() if k in kept_symbols
+            k: v for k, v in adv.return_value_sizes.items() if k not in excluded_symbols
         },
         return_memory_classified={
-            k for k in adv.return_memory_classified if k in kept_symbols
+            k for k in adv.return_memory_classified if k not in excluded_symbols
         },
         packed_structs={
             k for k in adv.packed_structs if _name_matches(k, kept_identifiers)
@@ -819,12 +910,127 @@ def _scoped_dwarf_advanced(
             k for k in adv.all_struct_names if _name_matches(k, kept_identifiers)
         },
         frame_registers={
-            k: v for k, v in adv.frame_registers.items() if k in kept_symbols
+            k: v for k, v in adv.frame_registers.items() if k not in excluded_symbols
         },
         callee_saved_regs={
-            k: v for k, v in adv.callee_saved_regs.items() if k in kept_symbols
+            k: v for k, v in adv.callee_saved_regs.items() if k not in excluded_symbols
         },
     )
+
+
+def resolve_dependency_scope(
+    snap: AbiSnapshot,
+    include_dependencies: bool,
+    header_roots: Sequence[Path | str] | None = None,
+) -> AbiSnapshot:
+    """The single choke point both ``dump``'s serialization step and
+    ``service.run_dump`` (compare's live-binary dumping, scan, MCP, ...) call:
+    apply :func:`scope_snapshot_excluding_dependencies` (``dependency_scope``
+    ``"filtered"``) unless *include_dependencies* opts out, in which case
+    just record the user's actual intent as ``"full"`` (a no-op when there
+    are no header-derived declarations to tag at all — see
+    ``AbiSnapshot.dependency_scope``'s own docstring). Applying the same
+    function at both choke points is what makes ``dump`` and ``compare``'s
+    live-binary dumping filter consistently instead of only ``dump``
+    filtering by default while ``compare`` silently never does."""
+    if not include_dependencies:
+        return scope_snapshot_excluding_dependencies(snap, header_roots)
+    if not snap.from_headers:
+        return snap
+    return dataclasses.replace(snap, dependency_scope="full")
+
+
+def apply_dependency_scope_to_run_dump_result(
+    snap: AbiSnapshot,
+    include_dependencies: bool,
+    bound_args: inspect.BoundArguments,
+) -> AbiSnapshot:
+    """``service.run_dump``'s own choke point: *include_dependencies*
+    defaults to ``True`` there (preserving every existing caller — scan,
+    MCP, ``dump``'s own inline calls — that doesn't pass it explicitly);
+    only ``compare`` opts into ``False`` to filter its live-binary dumping
+    the same way ``dump`` filters by default. *bound_args* is
+    ``inspect.Signature.bind_partial(*args, **kwargs)`` against the real
+    dumping function's signature — used to recover the caller's ``headers``
+    regardless of whether it was passed positionally or by keyword, the
+    same ``-H``/``--header`` root set :func:`resolve_dependency_scope` needs
+    to avoid misclassifying an installed library's own system-prefixed path
+    as a dependency. ``--dump-manifest`` is mutually exclusive with ``-H``,
+    so ``headers`` alone is empty for a manifest-driven dump — its own
+    project-owned roots (:func:`dump_manifest_header_roots`) are folded in
+    too, the same way ``cli_dump_helpers.py``'s ``dump`` path already does,
+    else a manifest project header installed under a system-like prefix
+    would be misclassified as a dependency (Codex review). ``public_headers``/
+    ``public_header_dirs`` (ADR-024 Phase 1 / ADR-055 D1's ``InputSpec.
+    public_header_dirs``) are folded in too -- an explicitly-declared public
+    file or directory rooted under a system-like prefix (e.g. an installed
+    library's own ``/usr/include/mylib/api.h``, reached transitively rather
+    than listed in ``headers``) must not be misclassified as a dependency
+    either (Codex review, twice: the first pass only folded in
+    ``public_header_dirs``, missing the file-level ``public_headers`` set)."""
+    headers = tuple(bound_args.arguments.get("headers") or ())
+    manifest_roots = dump_manifest_header_roots(bound_args.arguments.get("dump_manifest"))
+    public_headers = tuple(bound_args.arguments.get("public_headers") or ())
+    public_header_dirs = tuple(bound_args.arguments.get("public_header_dirs") or ())
+    return resolve_dependency_scope(
+        snap,
+        include_dependencies,
+        headers + manifest_roots + public_headers + public_header_dirs,
+    )
+
+
+def wrap_run_dump_with_dependency_scope(
+    uncached_fn: Callable[..., AbiSnapshot],
+) -> Callable[..., AbiSnapshot]:
+    """Build ``service.run_dump`` from ``service._run_dump_uncached``: a
+    thin wrapper adding an *include_dependencies* keyword (default ``True``)
+    and applying :func:`apply_dependency_scope_to_run_dump_result` to the
+    result — see that function's own docstring.
+
+    ``functools.wraps`` copies ``__wrapped__`` from *uncached_fn*, which
+    ``inspect.signature`` follows by default — silently hiding the new
+    ``include_dependencies`` keyword from anything that introspects the
+    wrapper's signature (the generated Python API reference, or a
+    signature-driven caller/validation framework), even though it's a real,
+    accepted parameter (Codex review). ``__signature__`` is set explicitly
+    below to the real, extended signature so introspection sees it.
+    """
+    sig = inspect.signature(uncached_fn)
+    new_param = inspect.Parameter(
+        "include_dependencies",
+        kind=inspect.Parameter.KEYWORD_ONLY,
+        default=True,
+        # A bare string, matching every other parameter's annotation here:
+        # this module (like the rest of the codebase) has `from __future__
+        # import annotations`, so `inspect.signature` on a real function
+        # already returns string annotations, not type objects.
+        annotation="bool",
+    )
+    old_params = list(sig.parameters.values())
+    # A KEYWORD_ONLY parameter must sort before any VAR_KEYWORD (**kwargs) one
+    # -- insert just ahead of it rather than always appending, so this stays
+    # valid even against a caller signature that ends in **kwargs (as a test
+    # double's does; the real `_run_dump_uncached` has none).
+    insert_at = next(
+        (i for i, p in enumerate(old_params) if p.kind is inspect.Parameter.VAR_KEYWORD),
+        len(old_params),
+    )
+    extended_sig = sig.replace(
+        parameters=[*old_params[:insert_at], new_param, *old_params[insert_at:]]
+    )
+
+    @functools.wraps(uncached_fn)
+    def run_dump(
+        *args: object, include_dependencies: bool = True, **kwargs: object
+    ) -> AbiSnapshot:
+        return apply_dependency_scope_to_run_dump_result(
+            uncached_fn(*args, **kwargs),
+            include_dependencies,
+            sig.bind_partial(*args, **kwargs),
+        )
+
+    run_dump.__signature__ = extended_sig  # type: ignore[attr-defined]
+    return run_dump
 
 
 def scope_snapshot_excluding_dependencies(
@@ -939,7 +1145,31 @@ def scope_snapshot_excluding_dependencies(
         {t.qualified_name for t in kept_types if t.qualified_name}
         | {e.qualified_name for e in kept_enums if e.qualified_name},
     )
-    kept_symbols = {f.mangled for f in kept_functions if f.mangled}
+    excluded_functions = [f for f in snap.functions if _is_dep(f.source_header)]
+    # A kept function's own header-AST spelling can be exactly this same
+    # ambiguous shape too -- a kept `extern "C" foo` genuinely has mangled ==
+    # name == "foo", and an unrelated excluded C++ dependency function can
+    # independently fail to recover its own real (different) mangled name,
+    # falling back to a bare spelling that happens to equal that same "foo"
+    # (no ODR conflict: the two are distinct real symbols, e.g. "foo" vs
+    # "_ZN3dep3fooEi" -- collision only in this unreliable *spelling*, not at
+    # the linker). Trusting the excluded function's bare spelling there would
+    # wrongly drop the *kept* function's own real DWARF-advanced entry
+    # (Codex review, fresh evidence). Any excluded mangled spelling that also
+    # matches a kept function's own *mangled* field is therefore never
+    # trusted to exclude anything -- deliberately checked against
+    # kept_functions' ``mangled`` only, not their bare ``name`` too: a kept
+    # C++ function named e.g. "dep" with a real, different mangled key
+    # (``_ZN4mine3depEv``) must not itself shadow an unrelated excluded C
+    # function genuinely keyed ``"dep"`` -- their real DWARF keys don't
+    # collide, so excluding the latter is still correct and safe (a second,
+    # independent Codex review round, fresh evidence).
+    kept_mangled = {f.mangled for f in kept_functions if f.mangled}
+    excluded_symbols = {
+        f.mangled
+        for f in excluded_functions
+        if f.mangled and f.mangled not in kept_mangled
+    }
     return dataclasses.replace(
         snap,
         functions=kept_functions,
@@ -948,8 +1178,13 @@ def scope_snapshot_excluding_dependencies(
         enums=kept_enums,
         dwarf=_scoped_dwarf(snap.dwarf, kept_identifiers),
         dwarf_advanced=_scoped_dwarf_advanced(
-            snap.dwarf_advanced, kept_identifiers, kept_symbols
+            snap.dwarf_advanced, kept_identifiers, excluded_symbols
         ),
+        # Records that this snapshot went through dependency-exclusion —
+        # comparability.check_contracts_comparable uses this to refuse to
+        # compare a filtered snapshot against an unfiltered one (see
+        # AbiSnapshot.dependency_scope's own docstring).
+        dependency_scope="filtered",
         # dataclasses.replace() otherwise carries these lazy lookup-index
         # caches over from *snap* verbatim: if the input snapshot's index()
         # was already called (e.g. by an earlier pipeline step), the copy

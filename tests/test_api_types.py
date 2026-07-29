@@ -60,6 +60,32 @@ class TestInputSpec:
         with pytest.raises(dataclasses.FrozenInstanceError):
             spec.path = Path("other.so")  # type: ignore[misc]
 
+    # ── ADR-055 D1: sources/build_info/dump_manifest/compile/public_header_dirs ──
+
+    def test_adr055_fields_default_to_none_or_empty(self):
+        spec = InputSpec.of("lib.so")
+        assert spec.sources is None
+        assert spec.build_info is None
+        assert spec.dump_manifest is None
+        assert spec.compile is None
+        assert spec.public_header_dirs == ()
+
+    def test_of_coerces_sources_and_build_info_to_path(self):
+        spec = InputSpec.of("lib.so", sources="src", build_info="build")
+        assert spec.sources == Path("src")
+        assert spec.build_info == Path("build")
+
+    def test_of_coerces_public_header_dirs(self):
+        spec = InputSpec.of("lib.so", public_header_dirs=["a", "b"])
+        assert spec.public_header_dirs == (Path("a"), Path("b"))
+
+    def test_of_passes_through_compile_and_dump_manifest(self):
+        from abicheck.compile_context import CompileContext
+
+        compile_ctx = CompileContext(sysroot=Path("/sysroot"))
+        spec = InputSpec.of("lib.so", compile=compile_ctx)
+        assert spec.compile is compile_ctx
+
 
 class TestCompareRequestDefaults:
     def test_scope_public_defaults_true(self):
@@ -78,6 +104,9 @@ class TestCompareRequestDefaults:
         assert req.force_public_symbols is None
         assert req.pattern_verdicts is False
         assert req.enable_debuginfod is False
+        # ADR-055 D1
+        assert req.depth is None
+        assert req.frontend_context == "host"
 
     def test_is_frozen(self):
         req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
@@ -162,6 +191,49 @@ class TestCompareRequestValidate:
         )
         assert req.validation_errors() == []
 
+    def test_android_frontend_with_legacy_has_sources_accepted(self):
+        # ADR-055 D1: has_sources=True (no inline InputSpec.sources/build_info)
+        # is the one combination that's actually reachable -- it reuses a
+        # pre-captured header-abi dump outside run_compare_request's own
+        # inline evidence collection.
+        req = CompareRequest(
+            old=InputSpec.of("a"),
+            new=InputSpec.of("b"),
+            frontend="android",
+            has_sources=True,
+        )
+        assert req.validation_errors() == []
+
+    def test_android_frontend_with_inputspec_sources_accepted_at_validation_time(
+        self, tmp_path
+    ):
+        """ADR-055 D1 (Codex review, second round): whether InputSpec.sources
+        is compatible with frontend="android" depends on whether it's a raw
+        tree (rejected) or a prebuilt evidence pack (valid) -- that
+        filesystem-dependent distinction is checked at runtime in
+        service.run_compare_request, not here (this leaf module has no
+        cluster-only pack-detection helpers available)."""
+        req = CompareRequest(
+            old=InputSpec.of("a", sources=tmp_path),
+            new=InputSpec.of("b"),
+            frontend="android",
+        )
+        assert req.validation_errors() == []
+
+    def test_android_frontend_with_inputspec_build_info_accepted(self, tmp_path):
+        """Codex review (third round): InputSpec.build_info alone must also
+        satisfy the android feasibility rule, not just sources/has_sources --
+        embed_build_source auto-detects a pack directory in either
+        build_info or sources, so a prebuilt evidence pack passed via
+        build_info is exactly the same "already have a pre-captured
+        header-abi dump" case this rule exists to allow."""
+        req = CompareRequest(
+            old=InputSpec.of("a", build_info=tmp_path),
+            new=InputSpec.of("b"),
+            frontend="android",
+        )
+        assert req.validation_errors() == []
+
     def test_missing_policy_file_rejected(self, tmp_path):
         # D9 pre-flight: a --policy-file path that doesn't exist errors identically
         # from CLI and MCP (one Tier-2 rule).
@@ -177,6 +249,81 @@ class TestCompareRequestValidate:
         present.write_text("base_policy: strict_abi\n")
         req = CompareRequest(
             old=InputSpec.of("a"), new=InputSpec.of("b"), policy_file_path=present
+        )
+        assert req.validation_errors() == []
+
+    # ── ADR-055 D1: --depth validation ────────────────────────────────────────
+
+    @pytest.mark.parametrize("depth", ["binary", "headers", "build", "source", "BUILD"])
+    def test_supported_depths_accepted(self, depth):
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"), depth=depth)
+        assert req.validation_errors() == []
+
+    def test_unsupported_depth_rejected(self):
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"), depth="graph")
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "graph" in errors[0]
+        with pytest.raises(ValidationError, match="graph"):
+            req.validate()
+
+    def test_depth_none_is_not_validated(self):
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"), depth=None)
+        assert req.validation_errors() == []
+
+    # ── ADR-055 D1: frontend_context validation ───────────────────────────────
+
+    @pytest.mark.parametrize("value", ["host", "device", "HOST", "Device"])
+    def test_supported_frontend_contexts_accepted(self, value):
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), frontend_context=value
+        )
+        assert req.validation_errors() == []
+
+    def test_unsupported_frontend_context_rejected(self):
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), frontend_context="DEVICE2"
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "DEVICE2" in errors[0]
+        with pytest.raises(ValidationError, match="DEVICE2"):
+            req.validate()
+
+    def test_headers_alongside_dump_manifest_rejected(self, tmp_path):
+        """CodeRabbit review: dump_manifest replaces headers for the primary
+        AST -- forwarding both mixes two declared surfaces into one
+        snapshot's provenance/dialect detection (mirrors the CLI's own
+        --dump-manifest/-H UsageError). Previously only checked at runtime in
+        service.run_compare_request; moved into this Tier-2 pre-flight
+        validate() so a caller using validation_errors()/validate() alone
+        also catches it, not only one that goes on to call
+        run_compare_request."""
+        from abicheck.dump_manifest import DumpManifest, TranslationUnit
+
+        dm = DumpManifest(
+            base_dir=tmp_path, translation_units=(TranslationUnit(name="old.h"),)
+        )
+        req = CompareRequest(
+            old=InputSpec.of("a", headers=["old.h"], dump_manifest=dm),
+            new=InputSpec.of("b"),
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "mutually exclusive" in errors[0] and "old" in errors[0]
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            req.validate()
+
+    def test_dump_manifest_alone_is_not_rejected_by_validate(self, tmp_path):
+        """A dump_manifest with no ordinary headers on that side must not be
+        caught by the mutual-exclusivity guard above."""
+        from abicheck.dump_manifest import DumpManifest, TranslationUnit
+
+        dm = DumpManifest(
+            base_dir=tmp_path, translation_units=(TranslationUnit(name="old.h"),)
+        )
+        req = CompareRequest(
+            old=InputSpec.of("a", dump_manifest=dm), new=InputSpec.of("b")
         )
         assert req.validation_errors() == []
 

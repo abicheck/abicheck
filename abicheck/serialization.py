@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .build_mode import BuildMode
 
-from .errors import IncompatibleSnapshotSchemaError
+from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -163,7 +163,20 @@ from .model import (
 #     usual version-mismatch `UserWarning` instead of silently discarding
 #     this provenance on re-save, matching every other purely-additive bump
 #     from v9 onward (Codex review, PR #636).
-SCHEMA_VERSION: int = 17
+# v18: `AbiSnapshot.dependency_scope` — records whether `dump`'s default
+#     toolchain/system-header exclusion (`dumper_scoping.py`) was applied
+#     ("filtered") or opted out of via `--include-dependencies` ("full").
+#     Purely additive: a pre-v18 reader loads it as its default (`None`),
+#     i.e. "not recorded". `comparability.check_contracts_comparable`
+#     deliberately does NOT treat that `None` as either mode -- an ordinary
+#     pre-v18 baseline is usually already-filtered content that simply
+#     predates the tag, so assuming "full" would spuriously flag the single
+#     most common workflow (compare a cached baseline against a fresh
+#     dump). The gate only raises when BOTH sides carry an explicit,
+#     differing tag; a `None` on either side is left unchecked on this axis
+#     (see `AbiSnapshot.dependency_scope`'s own docstring for the full
+#     reasoning).
+SCHEMA_VERSION: int = 18
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -1020,6 +1033,30 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         if isinstance(raw_frontend_context_kind, str)
         else None
     )
+    # Schema v18 — dependency-scoping mode. Missing key (every pre-v18
+    # snapshot) or an explicit ``null`` (a current-schema snapshot that never
+    # went through the tagging wrapper) both load as None, same as every
+    # other additive optional field; see AbiSnapshot.dependency_scope's own
+    # docstring for why the comparability gate does NOT treat None as either
+    # mode. A *present, non-null* value that isn't one of the two values a
+    # producer can actually write is a different case (Codex review,
+    # second round): the comparability gate deliberately lets a None side
+    # through unchecked (an untagged legacy snapshot has no way to recover
+    # its real mode), so silently downgrading a corrupt/hand-edited value
+    # (e.g. a "filterd" typo) to None would let it exploit that same
+    # leniency and bypass a real filtered-vs-full mismatch instead of
+    # failing loudly.
+    raw_dependency_scope = d.get("dependency_scope")
+    if raw_dependency_scope is not None and raw_dependency_scope not in (
+        "filtered",
+        "full",
+    ):
+        raise SnapshotError(
+            f"invalid dependency_scope {raw_dependency_scope!r} in snapshot "
+            "-- expected 'filtered', 'full', or the key to be absent/null; "
+            "this snapshot is corrupt or was hand-edited."
+        )
+    dependency_scope = raw_dependency_scope
 
     snap = AbiSnapshot(
         library=d["library"],
@@ -1058,6 +1095,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         ast_toolchain_supported=ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
         frontend_context_kind=frontend_context_kind,
+        dependency_scope=dependency_scope,
         ast_resolved_standard=ast_resolved_standard,
         ast_cplusplus_macro=ast_cplusplus_macro,
         ast_compile_args=ast_compile_args,

@@ -68,6 +68,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _run_bundle_analysis,
 )
 from .cli_options import (
+    include_dependencies_option,
     lang_option,
     output_options,
     policy_options,
@@ -106,6 +107,7 @@ def _run_compare_pair(
     new_pdb_path: Path | None,
     scope_to_public_surface: bool = True,
     pattern_verdicts: bool = False,
+    include_dependencies: bool = True,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -113,7 +115,11 @@ def _run_compare_pair(
     ADR-037 D1) rather than calling ``checker.compare`` directly — this is what
     keeps ``compare-release`` and ``compare`` on one classification path so a
     library gets the same verdict from either command (no ``scope_public``
-    default drift).
+    default drift). ``include_dependencies`` (default ``True``) is the same
+    reasoning applied to dependency-scope: without threading it through here
+    too, a directory/package `compare` would silently stay unfiltered
+    regardless of `--include-dependencies`, drifting from a single-pair
+    `compare` of the identical library (Codex review).
     """
     from . import service
 
@@ -139,6 +145,7 @@ def _run_compare_pair(
         new_pdb_path=new_pdb_path,
         scope_to_public_surface=scope_to_public_surface,
         pattern_verdicts=pattern_verdicts,
+        include_dependencies=include_dependencies,
     )
 
 
@@ -159,6 +166,7 @@ _CompareReleaseCommonArgs = tuple[
     str,
     Path | None,
     Path | None,
+    bool,
     bool,
 ]
 
@@ -199,6 +207,7 @@ def _compare_one_library(
     policy_file_path: Path | None,
     output_dir: Path | None,
     scope_to_public_surface: bool = True,
+    include_dependencies: bool = True,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -232,6 +241,7 @@ def _compare_one_library(
             old_pdb_path=old_dbg,
             new_pdb_path=new_dbg,
             scope_to_public_surface=scope_to_public_surface,
+            include_dependencies=include_dependencies,
         )
         v = result.verdict.value
         # compatible_additions historically counts *all* compatible changes
@@ -389,6 +399,7 @@ def _compare_release_libraries(
     annotate_additions: bool = False,
     jobs: int = 1,
     scope_to_public_surface: bool = True,
+    include_dependencies: bool = True,
     severity_config: SeverityConfig | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
@@ -426,6 +437,7 @@ def _compare_release_libraries(
         policy_file_path,
         output_dir,
         scope_to_public_surface,
+        include_dependencies,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -498,6 +510,7 @@ def _compare_release_libraries(
             collect_diff_results=collect_diff_results,
             annotate=annotate,
             scope_to_public_surface=scope_to_public_surface,
+            include_dependencies=include_dependencies,
             severity_config=severity_config,
             worst_verdict=worst_verdict,
         )
@@ -581,6 +594,7 @@ def _collect_release_extras(
     collect_diff_results: bool,
     annotate: bool,
     scope_to_public_surface: bool = True,
+    include_dependencies: bool = True,
     severity_config: SeverityConfig | None = None,
     worst_verdict: str = "NO_CHANGE",
 ) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
@@ -618,6 +632,7 @@ def _collect_release_extras(
                 old_pdb_path=old_dbg,
                 new_pdb_path=new_dbg,
                 scope_to_public_surface=scope_to_public_surface,
+                include_dependencies=include_dependencies,
             )
         except Exception as exc:
             click.echo(
@@ -1084,6 +1099,7 @@ def _strip_diff_results_and_adjust_verdict(
     "migration, and manifest mismatches.",
 )
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3)
+@include_dependencies_option
 @click.option(
     "--probe-matrix-old",
     "probe_matrix_old",
@@ -1141,6 +1157,7 @@ def compare_release_cmd(
     bundle_cohorts: tuple[str, ...],
     no_bundle_analysis: bool,
     scope_public_headers: bool,
+    include_dependencies: bool,
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
     severity_preset: str | None,
@@ -1327,6 +1344,7 @@ def compare_release_cmd(
             annotate_additions=annotate_additions,
             jobs=jobs,
             scope_to_public_surface=scope_public_headers,
+            include_dependencies=include_dependencies,
             severity_config=severity_config,
         )
 

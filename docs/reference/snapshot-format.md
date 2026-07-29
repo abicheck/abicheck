@@ -19,13 +19,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`17`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`18`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 17,
+  "schema_version": 18,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -46,8 +46,10 @@ compatibility table below), (v15) structured compile-context provenance
 for the header-AST parse (`ast_resolved_standard`, `ast_cplusplus_macro`,
 `ast_compile_args`, `ast_sysroot`), (v16) DWARF-vs-header-AST layout
 coherence (`dwarf_layout_coherence`, `dwarf_layout_coherence_mismatches` —
-see "Compile-context provenance" below), and (v17) which SYCL/DPC++ AST pass
-a header-AST snapshot was built from (`frontend_context_kind`, ADR-050 D5).
+see "Compile-context provenance" below), (v17) which SYCL/DPC++ AST pass
+a header-AST snapshot was built from (`frontend_context_kind`, ADR-050 D5),
+and (v18) whether `dump`'s default toolchain/system-header exclusion was
+applied (`dependency_scope`, see `dumper_scoping.py`).
 
 ### Forward / backward compatibility
 
@@ -58,7 +60,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 17`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 18`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -96,7 +98,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `17`). |
+| `schema_version` | int | Snapshot format version (currently `18`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -107,6 +109,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 | `created_at` | string \| null | ISO 8601 timestamp set at dump time. |
 | `build_id` | string \| null | Opaque CI identifier (run ID, build number). |
 | `contract` | object \| null | ADR-050 D1 extraction-contract fingerprints (schema v14, *verdict-blocking* — see "Forward / backward compatibility" above): `profile_fingerprint`/`scope_fingerprint` plus their named resolved sub-inputs, proving two snapshots were extracted under a comparable profile/scope. `null` when no producer populated it yet. |
+| `dependency_scope` | string \| null | (schema v18) `"filtered"` when the toolchain/system-header exclusion (`dumper_scoping.py`) was applied, `"full"` when opted out via `--include-dependencies`. `dump` and `compare`'s live-binary dumping (`service.run_dump`) both filter by default (`include_dependencies=False`) and tag `"filtered"`; a Python API caller of `service.run_dump`/`resolve_input` gets the opposite default (`include_dependencies=True`, tagging `"full"`), preserving every existing caller (MCP, ...) that doesn't opt in explicitly. `scan`'s own candidate is the one exception: it also filters by default, but derives its actual mode from a `--against`/`--baseline` JSON snapshot's own explicit tag (`scan_engine._scan_candidate_include_dependencies`) — unfiltered only when that baseline is itself explicitly tagged `"full"`, since `scan` has no `--include-dependencies` flag of its own to request that directly. `null` on any pre-v18 snapshot or any snapshot with no header-derived declarations. `comparability.check_contracts_comparable` raises `ScopeMismatchError` only when BOTH sides carry an explicit, non-null value and they differ — `null` is deliberately NOT treated as `"full"` (an ordinary pre-v18 baseline is usually already-filtered content that simply predates this tag; assuming `"full"` for it would spuriously flag the routine "compare a cached baseline against a fresh dump" workflow), so a genuinely ambiguous untagged snapshot is left unchecked on this axis rather than guessed at. |
 
 ### Compile-context provenance (schema v15, header-AST parses only)
 
@@ -225,7 +228,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `17`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `18`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

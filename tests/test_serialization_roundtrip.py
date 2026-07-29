@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from abicheck.errors import SnapshotError
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -221,7 +224,7 @@ class TestHeaderCvFactsReliableRoundTrip:
 
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 17
+        assert j["schema_version"] == SCHEMA_VERSION == 18
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -290,11 +293,56 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert legacy.header_cv_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 17
+        assert reserialized["schema_version"] == 18
         assert reserialized["header_cv_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
         assert reloaded.header_cv_facts_reliable is False
+
+
+class TestDependencyScopeRoundtrip:
+    """Schema v18 — AbiSnapshot.dependency_scope round-trips like every
+    other purely-additive optional field; a pre-v18 snapshot with no key at
+    all, or an explicit null, loads it as None; but a present, invalid
+    value is rejected outright rather than silently downgraded to None."""
+
+    def test_round_trip_preserves_filtered(self) -> None:
+        snap = _make_snap(from_headers=True, dependency_scope="filtered")
+        j = json.loads(snapshot_to_json(snap))
+        assert j["dependency_scope"] == "filtered"
+        assert snapshot_from_dict(j).dependency_scope == "filtered"
+
+    def test_round_trip_preserves_full(self) -> None:
+        snap = _make_snap(from_headers=True, dependency_scope="full")
+        j = json.loads(snapshot_to_json(snap))
+        restored = snapshot_from_dict(j)
+        assert restored.dependency_scope == "full"
+
+    def test_missing_key_loads_as_none(self) -> None:
+        d = _minimal_dict(schema_version=17, from_headers=True)
+        assert "dependency_scope" not in d
+        assert snapshot_from_dict(d).dependency_scope is None
+
+    def test_unrecognized_string_value_rejected(self) -> None:
+        # Codex review, second round: a present, non-null value that isn't
+        # "filtered"/"full" is not a value this codebase's own producers
+        # ever write -- silently downgrading it to None would let a
+        # corrupt/hand-edited snapshot (e.g. a "filterd" typo) exploit the
+        # comparability gate's deliberate "a None side is never checked"
+        # leniency and bypass a real filtered-vs-full mismatch. Must fail
+        # loading instead of silently becoming "not recorded".
+        d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope="bogus")
+        with pytest.raises(SnapshotError, match="bogus"):
+            snapshot_from_dict(d)
+
+    def test_non_string_value_rejected(self) -> None:
+        d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope=123)
+        with pytest.raises(SnapshotError, match="123"):
+            snapshot_from_dict(d)
+
+    def test_explicit_null_loads_as_none(self) -> None:
+        d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope=None)
+        assert snapshot_from_dict(d).dependency_scope is None
 
 
 # ── constants ─────────────────────────────────────────────────────────────
