@@ -66,11 +66,16 @@ See ADR-056's Context section for the full investigation. Summary:
   `docs/reference/cli-reference.md` updated in the same PR as the CLI flag
   (AGENTS.md's root-surface-change discipline, applied here to a flag
   addition on an existing command rather than a new root verb).
-- **Acceptance gate:** any new `ChangeKind` this plan introduces (none
-  expected — Phase 1 reuses ADR-023's existing 9 `bundle_*` kinds) would
-  need the shared new-`ChangeKind` checklist from
-  [G24](g24-linux-abi-gap-closure.md#shared-checklist-every-new-changekind-in-this-plan);
-  not currently triggered since no new kind is planned.
+- **Acceptance gate:** **triggered.** ADR-056 D2 requires one new,
+  audit-scoped `ChangeKind` (e.g. `bundle_unresolved_intra_dependency`,
+  `default_verdict = COMPATIBLE_WITH_RISK`) distinct from ADR-023's existing
+  9 `bundle_*` kinds, since none of those can fire without an old side to
+  diff against (see D2's correction). Phase 2 below owns the enum entry,
+  `change_registry.py` metadata, detector implementation, and the
+  `changekind-partition`/`changekind-detector`/`changekind-docs`
+  AI-readiness checks this triggers — follow the shared new-`ChangeKind`
+  checklist from
+  [G24](g24-linux-abi-gap-closure.md#shared-checklist-every-new-changekind-in-this-plan).
 
 ## Design (phases)
 
@@ -104,16 +109,33 @@ started.**
 
 ### Phase 2 — `bundle.py`: audit-mode entry point (no old side)
 
-- Generalize `build_bundle_snapshot()`/`compare_bundle()`'s entry point so
-  a caller can supply `list[AbiSnapshot]` + paths directly (today only
-  reachable through `compare-release`'s directory-matching code, which
-  always assumes an old and a new side).
-- New audit-mode variant: given only a "new" side's `list[AbiSnapshot]` +
-  `ResolutionGraph`, emit the subset of `BundleFinding`s that make sense
-  with no diff to read from (case 1's shape — "sibling still imports a
-  symbol nothing in the set provides" — applies directly to a single-side
-  resolution graph; cases 2/3/5 which key off a per-library *diff*'s
-  changes do not apply in audit mode and are out of scope for Phase 2).
+- Generalize `build_bundle_snapshot()`'s entry point so a caller can supply
+  `list[AbiSnapshot]` + paths directly (today only reachable through
+  `compare-release`'s directory-matching code, which always assumes an old
+  and a new side).
+- Add `ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` (exact name TBD),
+  `default_verdict = COMPATIBLE_WITH_RISK`, registered in
+  `change_registry.py` alongside ADR-023's existing 9 `bundle_*` entries.
+  This is a **new** kind, not a reuse of `bundle_intra_dep_removed` — see
+  ADR-056 D2's correction for why reuse is unsafe.
+- New audit-mode detector — **do not call `_detect_intra_dep_removed`
+  directly.** Write a separate, more conservative function: given only a
+  "new" side's `list[AbiSnapshot]` + `ResolutionGraph`, find symbols with
+  consumers but no intra-set provider, apply the same
+  `_import_is_external`/system-symbol-allow-list filtering
+  `_detect_intra_dep_removed` already does, but additionally treat any
+  *unversioned* import with no intra-set provider as **not automatically
+  intra-set** — `_import_is_external`'s existing unversioned-import
+  behavior (`return False`) is correct for the diff-driven case (ADR-023)
+  and unsafe for the no-diff audit case (ADR-056 D2), so the audit
+  detector needs its own classification step here rather than inheriting
+  the diff-tuned one. Emit `BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` with
+  `COMPATIBLE_WITH_RISK` severity and a description that says "no provider
+  found in this artifact set" (not "removed").
+- Unit tests: a case with a genuinely external, unversioned dependency
+  correctly does **not** produce a finding (or produces the risk-level one
+  reviewable rather than a false `BREAKING`) — this is the regression test
+  for the P1 false-positive the ADR-056 correction was written to close.
 - **Not started.**
 
 ### Phase 3 — CLI + MCP surface
@@ -147,6 +169,17 @@ started.**
   `run.sh` wiring, would let a `mode: scan` Action run pass preflight and
   then fail deeper in the pipeline — worse than today's clear, early
   rejection.
+- Regenerate the generated reference pages this phase's surface changes
+  drift out of sync (`docs/AGENTS.md`'s "Regenerating generated docs" —
+  `scripts/verify.py --profile pr` fails on a stale generated file, this
+  is not optional cleanup):
+  - `python scripts/gen_mcp_reference.py` → `docs/reference/mcp-tools-reference.md`
+    (needs the `mcp` extra installed) for the new `artifact_set` param.
+  - `python scripts/gen_action_reference.py` → `docs/reference/github-action-inputs.md`
+    for the new `new-library-set` input.
+  - `python scripts/gen_cli_reference.py` → `docs/reference/cli-reference.md`
+    for `--artifact-set` (already listed under G34.4 above; grouped here
+    since all three generators run together in practice).
 - **Not started.**
 
 ### Phase 4 — Reporting
@@ -179,6 +212,9 @@ action/action.yml            # Phase 3 — new new-library-set input
 action/run.sh                # Phase 3 — forward new-library-set to --artifact-set
 action/validate-inputs.sh    # Phase 3 — narrow rejection once run.sh/action.yml support the new input
 reporter.py / report_summary.py  # Phase 4 — bundle section on scan reports
+docs/reference/mcp-tools-reference.md      # Phase 3 — generated, gen_mcp_reference.py
+docs/reference/github-action-inputs.md     # Phase 3 — generated, gen_action_reference.py
+docs/reference/cli-reference.md            # Phase 3 — generated, gen_cli_reference.py
 ```
 
 New:

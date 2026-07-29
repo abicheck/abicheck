@@ -171,19 +171,57 @@ new-side resolution graph — `bundle_intra_dep_removed`,
 `bundle_provider_changed`, both manifest-instantiation kinds, and both
 library-added/-removed kinds all require an old side to diff against. A
 library-set `scan` audit has no old side by construction, so none of those
-apply. What *does* carry over directly is the resolution graph's own
-`unresolved: list[UnresolvedImport]` field (ADR-023's "Resolution graph"
-section) computed from the current set alone: a sibling importing a symbol
-nothing in today's bundle provides (and not covered by the system
-allow-list) is a real, single-snapshot-computable finding — reported as a
-new, audit-scoped kind (e.g. `bundle_unresolved_intra_dependency`, exact
-name TBD at implementation time) rather than reusing
-`bundle_intra_dep_removed`'s name, since that kind's own registry
-description is specifically "no longer provides" (a removal, which implies
-a diff) and reusing it for a no-diff audit would misdescribe the finding.
-`bundle_intra_dep_resolved_to_different_version` is also diff-shaped (old
-`gnu.version` vs. new) and does not apply. See G34 Phase 2 for the
-audit-mode entry point this implies.
+apply.
+
+**Correction (checked against the shipped code, not ADR-023's original
+design table):** `ResolutionGraph` (`abicheck/bundle_models.py`) has no
+`unresolved: list[UnresolvedImport]` field — that field only ever existed
+in ADR-023's proposed design; what shipped is `provides`/`consumers`/
+`intra_needed`/`extra_needed`, and the "symbol nothing in the bundle
+provides" computation lives inline in `_detect_intra_dep_removed`
+(`abicheck/bundle.py`), not as a precomputed graph field. Generalizing that
+detector to a no-old-side audit is **not** a safe drop-in reuse:
+`_detect_intra_dep_removed` relies on `_import_is_external` to rule out a
+legitimately external dependency before flagging a finding, and
+`_import_is_external` returns `False` immediately for any *unversioned*
+import (`consumer.version == ""`, `abicheck/bundle.py`) — by design, since
+in `compare`'s diff-driven case an unversioned sibling import that used to
+resolve and now doesn't is exactly the regression the detector exists to
+catch. An audit-only `--artifact-set` has no "used to resolve" history to
+lean on: a library in the set that legitimately imports an unversioned
+symbol from a real dependency *outside* the declared set (any DSO not on
+the `--bundle-system-providers` allow-list) would be indistinguishable from
+a genuinely broken intra-set reference, and reusing the detector unmodified
+would report it as `BREAKING` — a false positive, not a corner case.
+
+The audit-scoped finding this ADR authorizes must therefore be more
+conservative than a direct reuse of `_detect_intra_dep_removed`:
+
+- `--artifact-set` audits under a **declared closed-world assumption**: the
+  user is asserting the given set is the complete intra-set surface they
+  care about, with any known external dependency named via
+  `--bundle-system-providers` (same escape hatch ADR-023 already defines).
+  This must be stated plainly in the command's `--help` text and docs, not
+  left implicit.
+- Even under that assumption, an unversioned import with no intra-set
+  provider is **evidence of an unresolved reference, not proof of one** —
+  the audit has no diff to confirm it ever worked. The new kind's
+  `default_verdict` is therefore `COMPATIBLE_WITH_RISK`, not `BREAKING`
+  (mirroring `bundle_provider_changed`'s own precedent in ADR-023's table
+  for an indeterminate-until-confirmed case), and its description/evidence
+  must say explicitly "no provider found in this artifact set" rather than
+  implying removal.
+- Reported as a new, audit-scoped kind (e.g.
+  `bundle_unresolved_intra_dependency`, exact name TBD at implementation
+  time) rather than reusing `bundle_intra_dep_removed`'s name — that kind's
+  own registry description is specifically "no longer provides" (implies a
+  diff confirming a prior working state), which this finding cannot claim.
+- `bundle_intra_dep_resolved_to_different_version` is also diff-shaped (old
+  `gnu.version` vs. new) and does not apply.
+
+See G34 Phase 2 for the audit-mode entry point this implies, including the
+requirement that it build its own conservative check rather than calling
+`_detect_intra_dep_removed` directly.
 
 Explicitly **not** in this ADR's scope:
 
