@@ -633,31 +633,33 @@ def _check_one_overlay(
     declared_target = getattr(compile_spec, "target", "") if compile_spec else ""
     if not binding_id or not (declared_family or declared_version or declared_target):
         return []
-    if declared_family.strip().lower() in _UNPROBED_FAMILIES:
-        return []
     path = bindings_file.bindings.get(binding_id)
     if path is None:
         # Already reported by check_profile_bindings_resolve; avoid duplicating.
         return []
-    if not declared_family and Path(path).stem.lower() in _UNPROBED_FAMILIES:
-        # Same documented MSVC exemption as the declared_family check above,
-        # but keyed on the *resolved* binding path instead: a profile that
-        # declares only target:/compiler_version: (no compiler_family:) but
-        # whose binding resolves to a real cl.exe still reached the probe
-        # below, which fails outright since cl.exe has no --version flag --
-        # reported as "could not be probed", contradicting this module's own
-        # documented "a declared MSVC family/binding is silently skipped"
-        # (CodeRabbit review, fresh evidence). Gated on an EMPTY
-        # declared_family, not merely "not already handled by the
-        # declared_family check above": by this point declared_family is
-        # either empty or some non-MSVC value (gcc/clang/icx/...), since the
-        # in-_UNPROBED_FAMILIES case already returned above -- a profile
-        # that explicitly declares a conflicting family (e.g.
-        # `compiler_family: gcc`) against a binding that resolves to real
-        # cl.exe must still be probed and reported as a mismatch, not
-        # silently exempted just because the resolved binary happens to be
-        # MSVC (Codex review, fresh evidence: `compiler_family: gcc` bound
-        # to cl.exe previously passed unconditionally).
+    if Path(path).stem.lower() in _UNPROBED_FAMILIES and (
+        not declared_family or declared_family.strip().lower() in _UNPROBED_FAMILIES
+    ):
+        # MSVC's cl.exe has no --version flag -- the fixed probe this
+        # module reuses always runs exactly that flag -- so a binding that
+        # actually resolves to cl.exe genuinely cannot be identity-checked
+        # with the plumbing available here (see module docstring), whether
+        # compiler_family: msvc was declared explicitly or left unset.
+        #
+        # Both conditions are required, not resolved-path-alone: an earlier
+        # revision of this guard skipped whenever `compiler_family: msvc`
+        # was merely *declared*, regardless of what the binding actually
+        # resolved to -- so a profile declaring `compiler_family: msvc`
+        # whose binding resolves to a real, probeable `/usr/bin/gcc` was
+        # also silently exempted (Codex review, fresh evidence). A later
+        # revision fixed that by keying the skip on the resolved path
+        # alone instead, but that overcorrected in the other direction:
+        # a profile explicitly declaring a genuinely different, checkable
+        # family (`compiler_family: gcc`) against a binding that resolves
+        # to a real `cl.exe` must still fall through to the probe below
+        # and be reported as unprobeable, not silently exempted just
+        # because the resolved binary happens to be MSVC -- exactly the
+        # regression the combined condition here restores.
         return []
 
     where = f"profiles.{profile_id}.{overlay_key}"

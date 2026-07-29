@@ -614,6 +614,30 @@ class TestCheckProfileToolchainIdentity:
         }
         assert tp.check_profile_toolchain_identity(profiles, bf) == []
 
+    def test_declared_msvc_family_against_a_resolved_gcc_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: the MSVC skip was keyed purely on the *declared*
+        # compiler_family, so a profile declaring compiler_family: msvc
+        # whose binding resolves to a real, probeable /usr/bin/gcc was
+        # also silently exempted -- the inverse of the already-fixed
+        # "declared gcc bound to a real cl.exe" gap (Codex review, fresh
+        # evidence).
+        _stub_metadata(
+            monkeypatch,
+            {"/usr/bin/gcc": {"selected": "/usr/bin/gcc", "version": "gcc 13.2.0"}},
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"msvc14": "/usr/bin/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(compiler_family="msvc", binding="msvc14"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "resolved to family 'gnu'" in errors[0]
+
     def test_msvc_family_is_never_probed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _boom(path: str) -> dict[str, str]:
             raise AssertionError("MSVC bindings must not be probed")
