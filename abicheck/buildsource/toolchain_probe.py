@@ -111,10 +111,28 @@ _ARCH_ALIASES: dict[str, str] = {
     "arm64": "aarch64",
 }
 
+#: A 32-bit ARM sub-architecture spelling (``arm``, ``armv7``, ``armv7a``,
+#: ``armv6``, ``armv5te``, ...) -- deliberately anchored so it never matches
+#: a 64-bit ``arm64``/``aarch64`` spelling (those go through
+#: :data:`_ARCH_ALIASES`/stay as ``"aarch64"`` instead). GCC's own
+#: cross-compiler ``-dumpmachine`` output conventionally reports the bare
+#: generic ``arm`` regardless of which ARM instruction-set version it
+#: actually targets (that's controlled by ``-march=``/``-mcpu=`` compile
+#: flags, not the triple itself), while a Clang-style declared ``target:``
+#: commonly spells the same real hard-float ARM toolchain with an explicit
+#: sub-architecture version (``armv7``/``armv7a``) -- an exact string
+#: comparison rejected an otherwise-valid, OS/environment-matching ARM
+#: profile purely over this spelling difference (Codex review, fresh
+#: evidence).
+_ARM_SUBARCH_RE = re.compile(r"^arm(v\d+[a-z]*)?$")
+
 
 def _normalize_arch(arch: str) -> str:
     arch = arch.strip().lower()
-    return _ARCH_ALIASES.get(arch, arch)
+    arch = _ARCH_ALIASES.get(arch, arch)
+    if _ARM_SUBARCH_RE.match(arch):
+        return "arm"
+    return arch
 
 
 #: Coarse OS-family markers checked anywhere in a target triple, since a

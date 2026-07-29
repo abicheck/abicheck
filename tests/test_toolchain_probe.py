@@ -322,6 +322,40 @@ class TestProbeCompilerFamily:
         assert tp._probe_compiler_family(metadata) != "icx"
 
 
+class TestNormalizeArch:
+    @pytest.mark.parametrize(
+        ("arch", "expected"),
+        [
+            ("arm", "arm"),
+            ("armv7", "arm"),
+            ("armv7a", "arm"),
+            ("armv6", "arm"),
+            ("armv5te", "arm"),
+            ("ARMV7A", "arm"),
+        ],
+    )
+    def test_arm_subarch_spellings_normalize_to_arm(
+        self, arch: str, expected: str
+    ) -> None:
+        # Regression: GCC's own -dumpmachine conventionally reports the bare
+        # generic "arm" regardless of ARM instruction-set version (that's
+        # controlled by -march=/-mcpu= compile flags, not the triple),
+        # while a Clang-style declared target commonly spells the same real
+        # hard-float toolchain with an explicit sub-architecture version
+        # (armv7/armv7a) -- an exact string comparison previously rejected
+        # an otherwise-valid, OS/environment-matching ARM profile purely
+        # over this spelling difference (Codex review, fresh evidence).
+        assert tp._normalize_arch(arch) == expected
+
+    def test_arm64_and_aarch64_are_not_folded_into_32_bit_arm(self) -> None:
+        assert tp._normalize_arch("arm64") == "aarch64"
+        assert tp._normalize_arch("aarch64") == "aarch64"
+
+    def test_unrelated_arch_is_unaffected(self) -> None:
+        assert tp._normalize_arch("x86_64") == "x86_64"
+        assert tp._normalize_arch("armeb") == "armeb"
+
+
 class TestOsFamily:
     @pytest.mark.parametrize(
         ("triple", "expected"),
@@ -869,6 +903,40 @@ class TestCheckProfileToolchainIdentity:
                     compiler_family="gcc",
                     target="x86_64-pc-windows-gnu",
                     binding="mingw14",
+                ),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_gcc_arm_binding_against_a_declared_armv7a_target_yields_no_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a GCC ARM hard-float cross-compiler's probed
+        # target_triple reports the generic "arm-linux-gnueabihf" (its
+        # sub-architecture is controlled by -march=/-mcpu=, not the
+        # triple), while a declared target commonly spells the same real
+        # toolchain with an explicit Clang-style sub-architecture version
+        # ("armv7a-linux-gnueabihf") -- an exact architecture-component
+        # comparison previously rejected this otherwise-valid, matching-ABI
+        # profile (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/arm-gcc": {
+                    "selected": "/opt/arm-gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "arm-linux-gnueabihf",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"armgcc": "/opt/arm-gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc",
+                    target="armv7a-linux-gnueabihf",
+                    binding="armgcc",
                 ),
             )
         }
