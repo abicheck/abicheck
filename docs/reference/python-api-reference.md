@@ -142,6 +142,10 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `budget` | `Budget` | `Budget(total_timeout=None, max_tus=None, partial_ok=True)` |
 | `lang` | `str` | `'c++'` |
 | `compile` | `CompileContext` | `CompileContext(gcc_path=None, gcc_prefix=None, gcc_options=None, gcc_option_tokens=(), sysroot=None, nostdinc=False, frontend='auto', frontend_context='host')` |
+| `suppression` | `SuppressionList \| None` | `None` |
+| `policy` | `str` | `'strict_abi'` |
+| `policy_file` | `PolicyFile \| None` | `None` |
+| `scope_to_public_surface` | `bool` | `True` |
 
 ## `ScanResult`
 
