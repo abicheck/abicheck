@@ -1466,6 +1466,234 @@ class TestSystemProvidersAllowList:
 
 
 # ---------------------------------------------------------------------------
+# Audit-mode (no old side) bundle finding — ADR-056, scan --artifact-set
+# ---------------------------------------------------------------------------
+
+
+class TestUnresolvedIntraDependency:
+    """`_detect_unresolved_intra_dependency` — the audit-mode sibling of
+    `_detect_intra_dep_removed` (no old side, single resolution graph)."""
+
+    def _detect(self, snapshot: BundleSnapshot, system_providers: set[str] | None = None):
+        from abicheck.bundle import _detect_unresolved_intra_dependency
+
+        return _detect_unresolved_intra_dependency(
+            snapshot, system_providers or set()
+        )
+
+    def test_detects_missing_provider(self) -> None:
+        new = _snapshot(
+            {
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    imports=["mystery_symbol"],
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert len(findings) == 1
+        assert findings[0].kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+        assert findings[0].symbol == "mystery_symbol"
+        assert findings[0].consumer_library == "libalgo.so"
+
+    def test_resolved_import_no_finding(self) -> None:
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_add"],
+                ),
+            }
+        )
+        assert self._detect(new) == []
+
+    def test_skips_weak_import(self) -> None:
+        from abicheck.elf_metadata import ElfImport, SymbolBinding
+
+        meta = _meta(soname="libplugin.so.1")
+        meta.imports.append(
+            ElfImport(name="optional_hook", binding=SymbolBinding.WEAK)
+        )
+        new = _snapshot({"libplugin.so": meta})
+        assert self._detect(new) == []
+
+    def test_version_mismatch_produces_finding(self) -> None:
+        # Consumer requires foo@V2; the only intra-set provider exports foo@V1.
+        # A real, load-time-unresolvable mismatch (P1 regression).
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=["foo"],
+                    export_versions={"foo": "V1"},
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["foo"],
+                    import_versions={"foo": "V2"},
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
+    def test_same_label_different_provider_produces_finding(self) -> None:
+        # Consumer's verneed targets liba.so for foo@V1; liba.so no longer
+        # exports it, but unrelated sibling libb.so also exports foo@V1.
+        # Label-only matching would wrongly accept libb.so.
+        new = _snapshot(
+            {
+                "liba.so": _meta(soname="liba.so.1"),  # dropped foo
+                "libb.so": _meta(
+                    soname="libb.so.1",
+                    exports=["foo"],
+                    export_versions={"foo": "V1"},
+                ),
+                "libconsumer.so": _meta(
+                    soname="libconsumer.so.1",
+                    needed=["liba.so.1", "libb.so.1"],
+                    imports=["foo"],
+                    import_versions={"foo": "V1"},
+                    import_version_sonames={"foo": "liba.so.1"},
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
+    def test_mixed_intra_and_external_consumer_not_suppressed(self) -> None:
+        # P1 soundness fix: a consumer depending on both an intra-set
+        # library (which stopped exporting the symbol) and an ordinary
+        # external one (libc.so.6) must still produce the finding — the
+        # coarse allow-list suppression only applies to a purely-external
+        # consumer.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # stopped exporting
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libc.so.6"],
+                    imports=["core_symbol"],
+                ),
+            }
+        )
+        from abicheck.bundle import DEFAULT_SYSTEM_PROVIDERS
+
+        findings = self._detect(new, set(DEFAULT_SYSTEM_PROVIDERS))
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "core_symbol"
+            for f in findings
+        )
+
+    def test_purely_external_consumer_suppressed_with_allow_list(self) -> None:
+        new = _snapshot(
+            {
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libvendor.so.1"],
+                    imports=["vendor_init"],
+                ),
+            }
+        )
+        without_allow_list = self._detect(new)
+        assert any(f.symbol == "vendor_init" for f in without_allow_list)
+
+        with_allow_list = self._detect(new, {"libvendor.so.1"})
+        assert not any(f.symbol == "vendor_init" for f in with_allow_list)
+
+    def test_unversioned_zero_edges_not_suppressed(self) -> None:
+        # Vacuous-all([])-guard regression: a consumer with zero non-intra
+        # DT_NEEDED edges must not be suppressed merely because all() over
+        # an empty list is vacuously True.
+        new = _snapshot(
+            {
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", imports=["orphan_symbol"]
+                ),
+            }
+        )
+        findings = self._detect(new, {"anything"})
+        assert any(f.symbol == "orphan_symbol" for f in findings)
+
+    def test_unreachable_provider_still_produces_finding(self) -> None:
+        # libconsumer imports foo but has no DT_NEEDED path (direct or
+        # transitive) to unrelated sibling libplugin — merely including
+        # libplugin in the set must not count as resolving the import.
+        new = _snapshot(
+            {
+                "libconsumer.so": _meta(soname="libconsumer.so.1", imports=["foo"]),
+                "libplugin.so": _meta(soname="libplugin.so.1", exports=["foo"]),
+            }
+        )
+        findings = self._detect(new)
+        assert any(f.symbol == "foo" for f in findings)
+
+    def test_reachable_provider_via_transitive_dependency(self) -> None:
+        # libalgo -> libcore -> libbase; libbase provides the symbol.
+        new = _snapshot(
+            {
+                "libbase.so": _meta(soname="libbase.so.1", exports=["base_fn"]),
+                "libcore.so": _meta(
+                    soname="libcore.so.1", needed=["libbase.so.1"]
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["base_fn"],
+                ),
+            }
+        )
+        assert self._detect(new) == []
+
+
+class TestArtifactSetDiscovery:
+    def test_rejects_colliding_explicit_paths(self, tmp_path: Path) -> None:
+        from abicheck.bundle import ArtifactSetError, discover_artifact_set
+
+        d1 = tmp_path / "dir1"
+        d2 = tmp_path / "dir2"
+        d1.mkdir()
+        d2.mkdir()
+        p1 = d1 / "libfoo.so"
+        p2 = d2 / "libfoo.so"
+        p1.write_bytes(b"\x7fELF")
+        p2.write_bytes(b"\x7fELF")
+        with pytest.raises(ArtifactSetError):
+            discover_artifact_set([p1, p2], explicit=True)
+
+    def test_dedupes_symlink_alias(self, tmp_path: Path) -> None:
+        from abicheck.bundle import discover_artifact_set
+
+        real = tmp_path / "libfoo.so.1"
+        real.write_bytes(b"\x7fELF")
+        if sys.platform != "win32":
+            link = tmp_path / "libfoo.so"
+            link.symlink_to(real)
+            result = discover_artifact_set([real, link], explicit=False)
+            assert len(result) == 1
+
+    def test_rejects_unsupported_explicit_member(self, tmp_path: Path) -> None:
+        from abicheck.bundle import ArtifactSetError, discover_artifact_set
+
+        not_elf = tmp_path / "readme.txt"
+        not_elf.write_text("not a library")
+        with pytest.raises(ArtifactSetError):
+            discover_artifact_set([not_elf], explicit=True)
+
+
+# ---------------------------------------------------------------------------
 # Verdict aggregation
 # ---------------------------------------------------------------------------
 

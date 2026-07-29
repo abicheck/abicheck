@@ -35,7 +35,7 @@ single-artifact:
   one path in its signature. There is no dedicated rejection message; a
   directory falls through `resolve_input`'s format-sniffing chain to a
   generic "cannot detect format" error.
-- `scan`: `abicheck/cli.py`'s `ARTIFACT` argument is a single positional,
+- `scan`: `abicheck/cli_scan.py`'s `ARTIFACT` argument is a single positional,
   deliberately narrowed by **ADR-043 D5** ("`scan` always targets exactly
   one artifact") from an earlier repeated `--binary` flag. The service layer
   enforces this explicitly: `ScanRequest.binaries: list[Path]`

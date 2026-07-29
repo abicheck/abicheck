@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -62,7 +63,7 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
 )
-from .checker_policy import ChangeKind, Verdict
+from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
 
@@ -129,6 +130,160 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
         metadata=metadata,
         resolution=resolution,
     )
+
+
+class ArtifactSetError(ValueError):
+    """Raised by :func:`discover_artifact_set` for an invalid `--artifact-set`.
+
+    A plain, framework-agnostic exception — the CLI layer (``cli_scan.py``)
+    turns this into a ``click.UsageError`` (exit 64); this module has no
+    click dependency.
+    """
+
+
+def discover_artifact_set(
+    paths: list[Path], *, explicit: bool
+) -> dict[str, Path]:
+    """Resolve a list of paths into a ``{canonical_name: path}`` bundle map.
+
+    ADR-056: shared by both ``--artifact-set`` forms (a directory the caller
+    already expanded to its member files, or an explicit comma-separated
+    path list) — the caller passes ``explicit=True`` only for the latter.
+
+    Two corrections folded in after review (both real, not edge cases):
+
+    - **Symlink-alias deduplication.** A completely ordinary Unix install
+      layout has both a versioned real file (``libfoo.so.1``) and an
+      unversioned dev symlink to it (``libfoo.so``) — ``discover_shared_
+      libraries()`` (``abicheck/package.py``) lists both as separate
+      discovered paths, and both canonicalize to the same name. Resolving
+      each path (``Path.resolve()``) and deduplicating identical targets
+      *before* collision-checking means this common layout is accepted, not
+      rejected.
+    - **Collision rejection for genuinely distinct files.** Once aliases are
+      collapsed, two *different* resolved files that still canonicalize to
+      the same library name (e.g. an explicit ``dir1/libfoo.so,
+      dir2/libfoo.so`` naming two unrelated real files) are rejected
+      outright — unlike ``compare``'s two-sided old-vs-new matching
+      (``_build_match_map``), a one-sided audit set has no "newest version
+      wins" tiebreak that would be sound here.
+
+    For the explicit-list form, every named path must look like a real ELF
+    input (:func:`_path_looks_like_elf`) — every entry was deliberately
+    named by the caller, so silently dropping an unsupported one (the way
+    :func:`build_bundle_snapshot` does for a directory scan, where "some
+    files aren't libraries" is expected) would misrepresent the audit as
+    covering the full declared set. Raises :class:`ArtifactSetError` for any
+    unsupported explicit member, or for a genuine name collision.
+    """
+    from .binary_utils import _canonical_library_key
+
+    resolved_by_real: dict[Path, Path] = {}
+    for path in paths:
+        try:
+            real = path.resolve()
+        except OSError:
+            real = path
+        # Keep the first-seen original (unresolved) path for user-facing
+        # messages/reporting identity; only the resolution key is the
+        # canonicalized real path.
+        resolved_by_real.setdefault(real, path)
+
+    if explicit:
+        unsupported = [
+            p for p in resolved_by_real.values() if not _path_looks_like_elf(p)
+        ]
+        if unsupported:
+            names = ", ".join(str(p) for p in unsupported)
+            raise ArtifactSetError(
+                f"--artifact-set names unsupported (non-ELF) member(s): {names}. "
+                "Every explicitly-named path must be a real library; "
+                "for a mixed directory, pass the directory instead."
+            )
+
+    buckets: dict[str, list[Path]] = {}
+    for path in resolved_by_real.values():
+        buckets.setdefault(_canonical_library_key(path), []).append(path)
+
+    collisions = {key: vals for key, vals in buckets.items() if len(vals) > 1}
+    if collisions:
+        detail = "; ".join(
+            f"'{key}': {[str(p) for p in vals]}" for key, vals in collisions.items()
+        )
+        raise ArtifactSetError(
+            f"--artifact-set has colliding library identities: {detail}. "
+            "Each library in an artifact set must have a distinct canonical "
+            "name; rename or drop the duplicate(s)."
+        )
+
+    return {key: vals[0] for key, vals in buckets.items()}
+
+
+@dataclass
+class BundleAuditResult:
+    """Output of :func:`audit_bundle` — the no-old-side sibling of
+    :class:`BundleDiffResult`.
+
+    Unlike :class:`BundleDiffResult` there is no ``old_root``/``per_library``:
+    an audit has exactly one side (the declared artifact set), no diff to
+    read, and therefore only the subset of bundle findings computable from a
+    single-side resolution graph (see
+    :func:`_detect_unresolved_intra_dependency`).
+    """
+
+    snapshot: BundleSnapshot
+    findings: list[BundleFinding] = field(default_factory=list)
+
+    @property
+    def verdict(self) -> Verdict:
+        changes = [f.to_change() for f in self.findings]
+        return compute_verdict(changes)
+
+
+def audit_bundle(
+    libraries: dict[str, Path],
+    *,
+    bundle_system_providers: Iterable[str] = (),
+) -> BundleAuditResult:
+    """Run the audit-mode (no old side) bundle analysis for a declared set.
+
+    ADR-056: the ``scan --artifact-set`` entry point into the bundle layer.
+    ``libraries`` is expected to already be collision-free and ELF-validated
+    (:func:`discover_artifact_set`) — this function does not re-validate
+    that, it only builds the snapshot and runs the audit-mode detector.
+    """
+    snapshot = build_bundle_snapshot(libraries)
+    sys_providers = set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)
+    findings = _detect_unresolved_intra_dependency(snapshot, sys_providers)
+    return BundleAuditResult(snapshot=snapshot, findings=findings)
+
+
+def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
+    """Markdown lines for a list of bundle findings (G34 Phase 4).
+
+    Shared by ``cli_compare_release_helpers._release_md_bundle_findings``
+    (:class:`BundleDiffResult`'s two-sided findings) and
+    ``cli_scan._render_artifact_set_text`` (:class:`BundleAuditResult`'s
+    single-sided ``scan --artifact-set`` findings, ADR-056) — the rendering
+    itself only ever needs the flat ``list[BundleFinding]``, never the
+    wrapper object, so one function covers both call sites. Returns ``[]``
+    for an empty list (the caller decides whether/how to still render a
+    section heading for "no findings").
+    """
+    lines: list[str] = []
+    for f in findings:
+        # Library-scoped findings (bundle_library_added /
+        # bundle_library_removed) carry the library name in `symbol`;
+        # manifest/import findings carry the symbol. Both are non-empty in
+        # practice, but guard against future finding shapes with no attribution.
+        lines.append(
+            f"- **{f.kind.value}**"
+            + (f" — `{f.symbol}`" if f.symbol else "")
+            + (f" (consumer: `{f.consumer_library}`)" if f.consumer_library else "")
+            + (f" (provider: `{f.provider_library}`)" if f.provider_library else ""),
+        )
+        lines.append(f"  - {f.description}")
+    return lines
 
 
 def _compute_resolution_graph(
@@ -409,6 +564,148 @@ def _detect_intra_dep_removed(
                         f"{consumer.library} imports {symbol}, but no library in "
                         f"the new bundle exports it. Runtime load of "
                         f"{consumer.library} will fail with undefined symbol."
+                    ),
+                    consumer_library=consumer.library,
+                    affected_libraries=[consumer.library],
+                ),
+            )
+    return findings
+
+
+def _reachable_intra_libraries(snapshot: BundleSnapshot, root: str) -> set[str]:
+    """BFS over intra-bundle ``DT_NEEDED`` edges starting at ``root``.
+
+    Returns every library transitively reachable from ``root`` through the
+    bundle's own resolution graph (i.e. what would actually be loaded when
+    ``root`` is loaded) — not including ``root`` itself. Used by
+    :func:`_detect_unresolved_intra_dependency` so a symbol is only
+    considered resolved by a provider the consumer can actually reach, not
+    merely one present somewhere else in the declared set.
+    """
+    seen: set[str] = set()
+    queue = [root]
+    while queue:
+        lib = queue.pop()
+        for soname in snapshot.resolution.intra_needed.get(lib, []):
+            target = snapshot.provider_library_for_soname(soname)
+            if target is None or target in seen:
+                continue
+            seen.add(target)
+            queue.append(target)
+    return seen
+
+
+def _detect_unresolved_intra_dependency(
+    new: BundleSnapshot,
+    system_providers: set[str],
+) -> list[BundleFinding]:
+    """Audit-mode (no old side) sibling of :func:`_detect_intra_dep_removed`.
+
+    ADR-056 D2: ``scan --artifact-set`` has no per-library diff to read
+    (unlike :func:`_detect_intra_dep_removed`, driven by a diff's
+    ``func_removed``/``var_removed`` changes) — this operates purely off the
+    new-side resolution graph. It is deliberately **not** a call into
+    :func:`_detect_intra_dep_removed` and differs from it in three ways that
+    matter for soundness here:
+
+    1. **Version-aware, reachability-constrained provider matching.**
+       ``providers_for(symbol)`` is name-only and set-wide.
+       ``ProviderEntry.version``/``ConsumerEntry.version`` are consulted so a
+       version mismatch (consumer needs ``foo@V2``, set only provides
+       ``foo@V1``) is not mistaken for a resolved import; when the precise
+       ``ConsumerEntry.version_soname`` is known, the match is further
+       pinned to that exact provider library (GNU version *labels* are not
+       globally unique, so two siblings can both export ``foo@V1`` and a
+       label-only match could accept the wrong one). Every candidate
+       provider must additionally be reachable from the consumer through
+       :func:`_reachable_intra_libraries` — a name/version match on a
+       library the consumer has no ``DT_NEEDED`` path to would never
+       actually be loaded together with the consumer.
+    2. **A narrower, explicitly-approximate suppression path for unversioned
+       imports.** Mirrors ``_detect_intra_dep_removed``'s
+       ``e in system_providers or _looks_system(e)`` allow-list union
+       (built-in ``DEFAULT_SYSTEM_PROVIDERS`` plus caller-supplied
+       ``--bundle-system-providers``) and its non-empty guard
+       (``extra_edges and all(...)``, never a bare ``all([])``), but adds a
+       requirement that one-sided audit needs and the diff-driven detector
+       does not: the consumer must have **zero** intra-bundle ``DT_NEEDED``
+       edges. A consumer that still depends on an intra-set library (which
+       simply stopped exporting the symbol) has a real, in-set candidate
+       provider that this coarse allow-list check cannot rule out — only a
+       consumer whose entire dependency set is external is eligible for
+       this suppression path. Deliberately has **no** symbol-name-shape
+       fallback (``_looks_system_symbol``): ``--bundle-system-providers``
+       exists specifically to cover a legitimate, non-system-shaped custom
+       export (e.g. ``vendor_init``) that a shape heuristic would never
+       match.
+    3. Emits ``ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY`` (not
+       ``BUNDLE_INTRA_DEP_REMOVED`` — that kind's own description implies a
+       diff-confirmed removal, which this finding cannot claim) at
+       ``COMPATIBLE_WITH_RISK``, not ``BREAKING``: an audit has no old side
+       to confirm the symbol ever resolved, so this is reported as a risk to
+       investigate, not a confirmed break.
+    """
+    findings: list[BundleFinding] = []
+    reachable_cache: dict[str, set[str]] = {}
+
+    def _reachable(lib: str) -> set[str]:
+        if lib not in reachable_cache:
+            reachable_cache[lib] = _reachable_intra_libraries(new, lib)
+        return reachable_cache[lib]
+
+    for symbol, consumers in new.resolution.consumers.items():
+        providers = new.resolution.providers_for(symbol)
+        for consumer in consumers:
+            if consumer.weak:
+                continue
+            consumer_meta = new.metadata.get(consumer.library)
+            if consumer_meta is None:
+                continue
+            reachable = _reachable(consumer.library)
+
+            if consumer.version:
+                if consumer.version_soname:
+                    target_lib = new.provider_library_for_soname(
+                        consumer.version_soname
+                    )
+                    resolved = target_lib is not None and target_lib in reachable
+                    resolved = resolved and any(
+                        p.library == target_lib for p in providers
+                    )
+                else:
+                    resolved = any(
+                        p.version == consumer.version and p.library in reachable
+                        for p in providers
+                    )
+            else:
+                resolved = any(p.library in reachable for p in providers)
+
+            if resolved:
+                continue
+            if _import_is_external(consumer, consumer_meta, new):
+                continue
+
+            if not consumer.version:
+                intra_edges = new.resolution.intra_needed.get(consumer.library, [])
+                extra_edges = new.resolution.extra_needed.get(consumer.library, [])
+                if (
+                    not intra_edges
+                    and extra_edges
+                    and all(
+                        e in system_providers or _looks_system(e)
+                        for e in extra_edges
+                    )
+                ):
+                    continue
+
+            findings.append(
+                BundleFinding(
+                    kind=ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY,
+                    symbol=symbol,
+                    description=(
+                        f"{consumer.library} imports {symbol}, but no provider "
+                        "was found for it in this artifact set (audit mode — "
+                        "no old side to confirm this ever resolved)."
                     ),
                     consumer_library=consumer.library,
                     affected_libraries=[consumer.library],

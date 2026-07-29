@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 import click
 
-from .bundle import BundleDiffResult
+from .bundle import BundleDiffResult, render_bundle_findings_markdown
 from .checker import DiffResult
 from .model import AbiSnapshot
 
@@ -839,20 +839,10 @@ def _release_md_bundle_findings(bundle_result: BundleDiffResult | None) -> list[
     """Markdown section for cross-library (bundle) findings."""
     if bundle_result is None or not bundle_result.bundle_findings:
         return []
-    lines = ["", "## 🔗 Bundle (Cross-Library) Findings", ""]
-    for f in bundle_result.bundle_findings:
-        # Library-scoped findings (bundle_library_added /
-        # bundle_library_removed) carry the library name in `symbol`;
-        # manifest/import findings carry the symbol. Both are non-empty in
-        # practice, but guard against future finding shapes with no attribution.
-        lines.append(
-            f"- **{f.kind.value}**"
-            + (f" — `{f.symbol}`" if f.symbol else "")
-            + (f" (consumer: `{f.consumer_library}`)" if f.consumer_library else "")
-            + (f" (provider: `{f.provider_library}`)" if f.provider_library else ""),
-        )
-        lines.append(f"  - {f.description}")
-    return lines
+    return [
+        "", "## 🔗 Bundle (Cross-Library) Findings", "",
+        *render_bundle_findings_markdown(bundle_result.bundle_findings),
+    ]
 
 
 def _release_md_matrix_findings(matrix_result: DiffResult | None) -> list[str]:

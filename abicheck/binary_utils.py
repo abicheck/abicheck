@@ -159,3 +159,23 @@ def strip_vendor_hash(name: str) -> str:
     the filename/SONAME spelling, never the content.
     """
     return _VENDOR_HASH_RE.sub("", name)
+
+
+def _canonical_library_key(path: Path) -> str:
+    """Canonical key used to match libraries across releases.
+
+    For ELF versioned names, canonicalize to ``*.so`` (e.g. ``libfoo.so.1.2`` → ``libfoo.so``).
+    Vendored auditwheel/delocate hash suffixes are stripped first (G9) so the
+    same bundled dependency pairs across rebuilds despite its hash changing.
+
+    Lives in this leaf module (not ``cli_helpers_compare.py``, which re-exports
+    it for back-compat) so ``bundle.py``'s ``discover_artifact_set`` (ADR-056)
+    can use it without a ``bundle -> cli_helpers_compare -> service ->
+    service_scan -> bundle`` import cycle (`service_scan.py` imports `bundle`
+    for the ``--artifact-set`` audit path).
+    """
+    lower = strip_vendor_hash(path.name.lower())
+    m = re.search(r"\.so(?:\.|$)", lower)
+    if m:
+        return lower[: m.start() + 3]
+    return lower

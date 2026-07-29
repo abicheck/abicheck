@@ -229,6 +229,22 @@ class ScanRequest:
     pattern_verdicts: bool = False
     env_matrix: EnvironmentMatrix | None = None
     collapse_versioned_symbols: bool = False
+    # ADR-056: options the single-binary CLI path (cli_scan.py) already
+    # forwards straight to run_scan_core, bypassing ScanRequest entirely.
+    # run_scan itself still ignores these (unchanged behavior); run_scan_set
+    # (--artifact-set) is the first caller that actually honors them, so a
+    # multi-artifact scan doesn't silently drop --abi3/--crosscheck/
+    # --build-config/--risk-rules relative to an equivalent single-binary run.
+    abi3_floor: tuple[int, int] | None = None
+    enabled_checks: frozenset[str] | None = None  # None = ALL_CHECKS default
+    severities: dict[str, str] = field(default_factory=dict)
+    build_config: Path | None = None
+    allow_build_query: bool = False
+    risk_rules_path: Path | None = None
+    # ADR-056 D2: caller-declared external DSO allow-list for the
+    # --artifact-set audit-mode bundle detector (closed-world escape hatch).
+    # Unused by run_scan.
+    bundle_system_providers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -807,6 +823,112 @@ class ScanResult:
         }
 
 
+@dataclass(frozen=True)
+class ScanArtifactResult:
+    """One member's :class:`ScanResult`, with the identity that result alone
+    doesn't carry (ADR-056 — neither `ScanResult` nor its nested report
+    carries a binary path or library name anywhere).
+    """
+
+    artifact: Path
+    result: ScanResult
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"artifact": str(self.artifact), **self.result.to_dict()}
+
+
+# ADR-056 D3: ScanSetResult's own explicit verdict/exit-code precedence —
+# deliberately NOT a reuse of compare-release's `_RELEASE_VERDICT_ORDER`
+# (`cli_compare_release_helpers.py`), which has no entries for the two
+# scan-specific failure verdicts (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`)
+# a ScanResult can carry. See _aggregate_scan_set_verdict's docstring.
+_SCAN_SET_COMPAT_ORDER: dict[str, int] = {
+    "NO_CHANGE": 0,
+    "COMPATIBLE": 0,
+    "COMPATIBLE_WITH_RISK": 1,
+    "API_BREAK": 2,
+    "BREAKING": 3,
+}
+_SCAN_SET_COMPAT_EXIT: dict[str, int] = {
+    "NO_CHANGE": 0,
+    "COMPATIBLE": 0,
+    "COMPATIBLE_WITH_RISK": 0,
+    "API_BREAK": 2,
+    "BREAKING": 4,
+}
+
+
+def _aggregate_scan_set_verdict(
+    per_artifact: list[ScanArtifactResult], bundle_verdict: str | None
+) -> tuple[str, int]:
+    """Combine per-member + bundle verdicts into one set-level verdict/exit.
+
+    1. Any member ``BUDGET_OVERFLOW`` -> the whole set is ``BUDGET_OVERFLOW``,
+       exit 5. Dominates every other outcome (ADR-050 D2's ``not_comparable``
+       precedent: a member whose analysis didn't finish is worse than one
+       that finished and found a break, because its true result is unknown).
+    2. Else, the worst compatibility verdict across `per_artifact` + the
+       bundle layer's own verdict (`_SCAN_SET_COMPAT_ORDER`), with the
+       matching exit code.
+    3. Any member ``EVIDENCE_CONTRACT_ERROR`` floors the exit code at 1
+       without lowering a worse one from step 2, and — mirroring the exit
+       code — becomes the reported verdict *only* when step 2's worst
+       compatibility verdict was NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK
+       (i.e. the error is the dominant problem); a stronger API_BREAK/
+       BREAKING from step 2 keeps that verdict string.
+    """
+    if any(a.result.verdict == "BUDGET_OVERFLOW" for a in per_artifact):
+        return "BUDGET_OVERFLOW", 5
+
+    worst_verdict = "NO_CHANGE"
+    worst_rank = 0
+    candidates = [a.result.verdict for a in per_artifact]
+    if bundle_verdict is not None:
+        candidates.append(bundle_verdict)
+    for v in candidates:
+        rank = _SCAN_SET_COMPAT_ORDER.get(v)
+        if rank is not None and rank >= worst_rank:
+            worst_rank = rank
+            worst_verdict = v
+    exit_code = _SCAN_SET_COMPAT_EXIT.get(worst_verdict, 0)
+
+    has_evidence_error = any(
+        a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact
+    )
+    if has_evidence_error:
+        exit_code = max(exit_code, 1)
+        if worst_rank <= _SCAN_SET_COMPAT_ORDER["COMPATIBLE_WITH_RISK"]:
+            worst_verdict = "EVIDENCE_CONTRACT_ERROR"
+
+    return worst_verdict, exit_code
+
+
+@dataclass(frozen=True)
+class ScanSetResult:
+    """Result of :func:`run_scan_set` — the ``--artifact-set`` sibling of
+    :class:`ScanResult` (ADR-056). Not a change to what `run_scan`/
+    `ScanResult` return for the single-binary path.
+    """
+
+    verdict: str
+    exit_code: int
+    per_artifact: list[ScanArtifactResult] = field(default_factory=list)
+    bundle_findings: list[Any] = field(default_factory=list)
+    bundle_verdict: str | None = None
+    bundle_incomplete: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scan_schema_version": SCAN_SCHEMA_VERSION,
+            "verdict": self.verdict,
+            "exit_code": self.exit_code,
+            "per_artifact": [a.to_dict() for a in self.per_artifact],
+            "bundle_findings": len(self.bundle_findings),
+            "bundle_verdict": self.bundle_verdict,
+            "bundle_incomplete": self.bundle_incomplete,
+        }
+
+
 def _layers_from_coverage(coverage: list[dict[str, Any]]) -> list[LayerResult]:
     """Map the engine's coverage rows onto typed :class:`LayerResult`s."""
     out: list[LayerResult] = []
@@ -1196,6 +1318,256 @@ def run_scan_subprocess(req: ScanRequest, timeout: float) -> dict[str, Any]:
     ctx = mp.get_context("spawn")  # no inherited locks/fds; portable
     q: Any = ctx.Queue()
     proc = ctx.Process(target=_scan_subprocess_worker, args=(req, q), daemon=True)
+    proc.start()
+    try:
+        try:
+            status, payload = q.get(timeout=timeout)
+        except _queue.Empty:
+            raise TimeoutError(f"scan exceeded {timeout:.0f}s") from None
+    finally:
+        if proc.is_alive():
+            _kill_process_tree(proc)
+        else:
+            proc.join(1)
+    if status == "err":
+        raise RuntimeError(payload)
+    return payload  # type: ignore[no-any-return]
+
+
+def _run_scan_one_member(
+    req: ScanRequest,
+    binary: Path,
+    *,
+    start: float,
+    budget_s: float | None,
+    changed_src: str,
+) -> ScanResult:
+    """One member's scan, for :func:`run_scan_set` (ADR-056).
+
+    Mirrors :func:`run_scan`'s body (kept as a separate function rather than
+    a refactor of `run_scan` itself, so `run_scan`'s existing behavior/tests
+    stay byte-for-byte unchanged) with two differences:
+
+    - Accepts an externally-supplied ``start``/``budget_s`` instead of
+      calling ``_time.monotonic()`` itself. `run_scan_set` passes the *same*
+      ``start`` and the *original, unreduced* total ``budget_s`` to every
+      member — `run_scan_core`'s own ``_remaining_budget_s(start, budget_s)``
+      already computes ``budget_s - (now - start)`` internally, so this
+      alone produces the correct shrinking remaining budget across members.
+      Passing an already-reduced ``budget_s`` here instead would
+      double-subtract elapsed time.
+    - Forwards `req.abi3_floor`/`enabled_checks`/`severities`/
+      `build_config`/`allow_build_query`/`risk_rules_path`, which `run_scan`
+      itself still ignores (unchanged behavior) but which the single-binary
+      CLI path (`cli_scan.py`) already passes directly to `run_scan_core` —
+      an `--artifact-set` scan must not silently drop them relative to an
+      equivalent single-binary `scan` invocation with the same flags.
+    """
+    (
+        RiskRules,
+        score_changed_paths,
+        EvidenceDepth,
+        ScanMode,
+        SourceMethod,
+        level_to_collect_mode,
+        resolve_level,
+        parse_user_depth,
+        SourceScope,
+    ) = _scan_imports()
+    from .buildsource.crosscheck import ALL_CHECKS
+    from .cli_scan_baseline import _load_risk_rules, _public_provenance_set
+    from .scan_engine import (
+        _BudgetOverflow,
+        _EvidenceContractError,
+        run_scan_core,
+    )
+
+    sm = SourceMethod(req.source_method) if req.source_method else None
+    dp = parse_user_depth(req.depth)
+
+    changed = [p for p in req.changed_paths if p]
+    seeded = req.seeded or bool(changed)
+    risk_rules = (
+        _load_risk_rules(req.risk_rules_path)
+        if req.risk_rules_path is not None
+        else RiskRules.default()
+    )
+    risk = score_changed_paths(changed, risk_rules)
+
+    scan_mode = ScanMode(req.mode)
+    pinned_explicit = (dp is not None) or (
+        sm is not None and sm is not SourceMethod.AUTO
+    )
+    is_auto = sm is SourceMethod.AUTO
+    auto_method = risk.recommended_method if (is_auto and seeded) else None
+    resolved, eff_depth = resolve_level(
+        mode=scan_mode, source_method=sm, depth=dp, auto_method=auto_method
+    )
+    collect_mode = level_to_collect_mode(
+        resolved,
+        eff_depth,
+        source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
+    )
+    eff_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
+    prov_headers, prov_dirs = _public_provenance_set(
+        eff_headers, list(req.public_header_dirs)
+    )
+    effective_build_info = req.compile_db or req.build_info
+    budget_str = f"{budget_s:g}s" if budget_s is not None else None
+
+    build_dir_cleanups: list[Callable[[], None]] = []
+    try:
+        core = run_scan_core(
+            start=start,
+            binary=binary,
+            headers=eff_headers,
+            includes=list(req.includes),
+            public_headers=prov_headers,
+            public_header_dirs=prov_dirs,
+            sources=req.sources,
+            effective_build_info=effective_build_info,
+            build_config=req.build_config,
+            baseline=None,
+            lang=req.lang,
+            allow_build_query=req.allow_build_query,
+            scan_mode=scan_mode,
+            resolved=resolved,
+            eff_depth_enum=eff_depth,
+            collect_mode=collect_mode,
+            changed=changed,
+            changed_src=changed_src,
+            seeded=seeded,
+            risk=risk,
+            is_auto=is_auto,
+            enabled_checks=(
+                req.enabled_checks
+                if req.enabled_checks is not None
+                else frozenset(ALL_CHECKS)
+            ),
+            severities=dict(req.severities),
+            budget=budget_str,
+            budget_s=budget_s,
+            pinned_explicit=pinned_explicit,
+            compile_context=None if req.compile.is_default else req.compile,
+            defer_cleanup=build_dir_cleanups,
+            abi3_floor=req.abi3_floor,
+        )
+    except _BudgetOverflow:
+        return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
+    except _EvidenceContractError:
+        return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
+    finally:
+        drain_build_dir_cleanups(build_dir_cleanups)
+
+    outcome = core.outcome
+    return ScanResult(
+        verdict=outcome.verdict,
+        exit_code=outcome.exit_code,
+        findings=core.findings,
+        layers=_layers_from_coverage(outcome.coverage),
+        confidence={
+            k: list(v) for k, v in outcome.crosscheck.get("providers", {}).items()
+        },
+        estimate=[],
+        report=outcome.to_dict(),
+    )
+
+
+def run_scan_set(req: ScanRequest) -> ScanSetResult:
+    """Execute an audit-mode, no-old-side scan over a *set* of artifacts
+    (ADR-056, ``scan --artifact-set``).
+
+    The plural sibling of :func:`run_scan`, sharing `ScanRequest` but never
+    touching `run_scan`'s own code path — `req.binaries` must have 2+
+    entries (use `run_scan` for exactly one). `req.baseline` must be
+    ``None``: this is a service-layer, not just a CLI-layer, guard — a
+    directly-constructed `ScanRequest(binaries=[...], baseline=old)` handed
+    straight to this public, re-exported entry point would otherwise
+    silently compare every member against the same single baseline
+    (ADR-056 D2 scopes `--artifact-set` to audit-only).
+    """
+    import time as _time
+
+    from .bundle import ArtifactSetError, audit_bundle, discover_artifact_set
+
+    if len(req.binaries) < 2:
+        raise ValueError("run_scan_set requires 2 or more binaries")
+    if req.baseline is not None:
+        raise ValueError("run_scan_set does not accept req.baseline (audit-only)")
+
+    start = _time.monotonic()
+    budget_s = req.budget.total_timeout
+
+    per_artifact: list[ScanArtifactResult] = []
+    for binary in req.binaries:
+        result = _run_scan_one_member(
+            req, binary, start=start, budget_s=budget_s, changed_src="run_scan_set"
+        )
+        per_artifact.append(ScanArtifactResult(artifact=binary, result=result))
+        if result.verdict == "BUDGET_OVERFLOW":
+            # The failure-guard contract: never keep scanning past overflow.
+            return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5,
+                                  per_artifact=per_artifact)
+
+    try:
+        libraries = discover_artifact_set(list(req.binaries), explicit=True)
+    except ArtifactSetError:
+        # Collision/unsupported-member checks already ran in the CLI/MCP
+        # front door before req.binaries was populated (ADR-056); if one
+        # somehow reaches here, mark the bundle section incomplete rather
+        # than raising out of an already-executed multi-member scan.
+        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
+        return ScanSetResult(
+            verdict=verdict,
+            exit_code=exit_code,
+            per_artifact=per_artifact,
+            bundle_incomplete=True,
+        )
+
+    remaining = (
+        None if budget_s is None else budget_s - (_time.monotonic() - start)
+    )
+    if remaining is not None and remaining <= 0:
+        return ScanSetResult(
+            verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
+        )
+
+    audit = audit_bundle(
+        libraries, bundle_system_providers=req.bundle_system_providers
+    )
+    bundle_verdict = audit.verdict.value
+    verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, bundle_verdict)
+    return ScanSetResult(
+        verdict=verdict,
+        exit_code=exit_code,
+        per_artifact=per_artifact,
+        bundle_findings=list(audit.findings),
+        bundle_verdict=bundle_verdict,
+    )
+
+
+def _scan_set_subprocess_worker(req: ScanRequest, q: Any) -> None:
+    try:
+        q.put(("ok", run_scan_set(req).to_dict()))
+    except BaseException as exc:  # noqa: BLE001 — convey, don't crash the worker
+        q.put(("err", f"{type(exc).__name__}: {exc}"))
+
+
+def run_scan_set_subprocess(req: ScanRequest, timeout: float) -> dict[str, Any]:
+    """Run :func:`run_scan_set` in a killable child process (ADR-056).
+
+    The plural sibling of :func:`run_scan_subprocess` — MCP `abi_scan` must
+    route an `artifact_set` call through this, not the singular wrapper, so
+    the MCP tool timeout still terminates the process tree for a hung
+    multi-artifact scan instead of either being rejected outright or running
+    unbounded in the MCP server's own process.
+    """
+    import multiprocessing as mp
+    import queue as _queue
+
+    ctx = mp.get_context("spawn")
+    q: Any = ctx.Queue()
+    proc = ctx.Process(target=_scan_set_subprocess_worker, args=(req, q), daemon=True)
     proc.start()
     try:
         try:

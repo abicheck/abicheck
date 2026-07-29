@@ -133,17 +133,29 @@ class BundleSnapshot:
         Matches on either the raw filename (``libfoo.so``) or the soname
         encoded by the library (``libfoo.so.1``).
         """
+        return self.provider_library_for_soname(soname) is not None
+
+    def provider_library_for_soname(self, soname: str) -> str | None:
+        """Resolve ``soname`` to the bundle library name it identifies, if any.
+
+        Same matching rules as :meth:`is_intra_bundle_provider` (raw filename
+        or encoded soname, with filename-stem fallback in either direction),
+        but returns the matched library name instead of a bool — used by
+        ADR-056's audit-mode detector to resolve a consumer's precise
+        ``version_soname`` to the specific provider it must come from,
+        rather than merely confirming *some* provider resolves it.
+        """
         if soname in self.libraries:
-            return True
+            return soname
         for name, meta in self.metadata.items():
             if meta.soname == soname:
-                return True
+                return name
             # Allow filename-stem fallback (libfoo.so matches libfoo.so.1)
             if soname.startswith(name + "."):
-                return True
+                return name
             if name.startswith(soname + "."):
-                return True
-        return False
+                return name
+        return None
 
 
 @dataclass
