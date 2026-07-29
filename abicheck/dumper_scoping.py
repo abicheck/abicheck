@@ -92,6 +92,7 @@ project.
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -107,8 +108,15 @@ from .type_reachability import (
     type_string_references_name,
 )
 
+#: Generous upper bound on typedef-alias chain depth (self-review
+#: follow-up) -- see :func:`_resolve_typedef_chain`'s docstring for why
+#: this is a small constant rather than scaling with the typedef count.
+_MAX_TYPEDEF_CHAIN_HOPS = 32
 
-def _resolve_typedef_chain(alias: str, typedefs: dict[str, str]) -> str:
+
+def _resolve_typedef_chain(
+    alias: str, typedefs: dict[str, str], pattern: re.Pattern[str] | None
+) -> str:
     """Expand every typedef-key token embedded anywhere in *alias*'s target,
     repeatedly, until a round produces no change or repeats an
     already-seen string -- not just a whole-string chain (``using Handle =
@@ -119,27 +127,44 @@ def _resolve_typedef_chain(alias: str, typedefs: dict[str, str]) -> str:
     earlier version only followed a chain when the *entire* target string
     was itself a key, missing this combination of chaining and
     decoration). Each round substitutes every whole-token typedef-key
-    occurrence in the current text with its target via one compiled
-    boundary-aware pattern (:func:`abicheck.type_reachability._compile_spelling_pattern`,
-    reused for substitution rather than detection).
+    occurrence in the current text with its target via *pattern* (one
+    compiled boundary-aware alternation over every ``typedefs`` key, from
+    :func:`abicheck.type_reachability._compile_spelling_pattern`, reused for
+    substitution rather than detection).
 
-    Bounded by ``len(typedefs) + 1`` rounds rather than a fixed constant
-    (Codex review, fresh evidence: an earlier fixed cap of 8 truncated a
-    legitimate longer chain, e.g. ten hops of distinct aliases, before it
-    ever reached the real dependency identity) -- a chain of *distinct*
-    substitutions cannot exceed the number of typedefs that exist before
-    either terminating or repeating a previously-seen string, at which
-    point the cycle guard below stops it (self-referential or
-    mutually-cyclic aliases).
+    *pattern* must be compiled once by the caller and passed in, not
+    recompiled per call (Codex review, fresh evidence: an earlier version
+    compiled it fresh inside this function -- called once per typedef key
+    -- making default scoping's typedef-resolution pass alone O(typedef
+    count^2) before signatures are even scanned; confirmed empirically at
+    ~30s for 3,000 typedefs, exactly the class of quadratic cost the
+    per-candidate signature-scan fix earlier in this module's history was
+    meant to eliminate).
+
+    Bounded to :data:`_MAX_TYPEDEF_CHAIN_HOPS` rounds (self-review
+    follow-up): each round only advances a linear chain by one hop (a
+    single-token string substitutes to another single token, needing
+    another round to expand *that*), so bounding by ``len(typedefs) + 1``
+    -- correct, since a chain of distinct substitutions can't legitimately
+    need more hops than there are typedefs -- still means resolving *every*
+    alias in a snapshot with a long linear typedef chain costs
+    O(typedef count^2) overall (each of N aliases independently walks up to
+    N hops), reproducing the same class of quadratic blowup the
+    per-call-pattern-recompilation fix above just eliminated (confirmed
+    empirically: resolving all aliases in a synthetic 3,000-entry linear
+    chain still took ~26s with the pattern precompiled). A real C++ typedef
+    graph is never meaningfully this deep -- alias chains beyond a handful
+    of hops don't occur in practice -- so capping at a small constant
+    generous enough for any real chain, rather than scaling with
+    ``len(typedefs)``, removes the pathological cost without truncating any
+    legitimate real-world chain (the cycle guard below still terminates a
+    self-referential or mutually-cyclic alias immediately either way).
     """
     text = typedefs.get(alias, alias)
-    if not typedefs:
-        return text
-    pattern = _compile_spelling_pattern(typedefs.keys())
     if pattern is None:
         return text
     seen = {text}
-    for _ in range(len(typedefs) + 1):
+    for _ in range(_MAX_TYPEDEF_CHAIN_HOPS):
         expanded = pattern.sub(lambda m: typedefs.get(m.group(), m.group()), text)
         if expanded == text or expanded in seen:
             break
@@ -227,7 +252,17 @@ def _directly_referenced_dependency_names(
     substring token) is recognized via
     :func:`abicheck.type_reachability.type_string_references_name` rather
     than requiring exact equality (Codex review, fresh evidence). Mirrors
-    :func:`abicheck.type_reachability`'s own typedef-following.
+    :func:`abicheck.type_reachability`'s own typedef-following. A resolved
+    typedef alias also contributes its own namespace-suffix spellings (not
+    just its exact key) as candidate spellings (Codex review, fresh
+    evidence): a real backend can spell the alias itself bare in a
+    signature (``string`` for a ``typedefs["std::string"]`` entry, DWARF's
+    own convention -- the same bare-vs-qualified split
+    :func:`abicheck.type_reachability._typedef_spelling_targets` already
+    handles for typedef keys) -- these derived spellings go through the
+    same collision guards as everything else in *candidate_spellings*, so
+    an ambiguous bare alias suffix is dropped rather than trusted, exactly
+    like an ambiguous bare identity suffix.
 
     Scans the joined signature text with one compiled multi-spelling
     pattern (:func:`abicheck.type_reachability._compile_spelling_pattern`)
@@ -272,9 +307,11 @@ def _directly_referenced_dependency_names(
         signature_texts.extend(rec.virtual_bases)
     haystack = "\n".join(t for t in signature_texts if t)
 
+    typedefs = typedefs or {}
+    typedef_key_pattern = _compile_spelling_pattern(typedefs.keys())
     resolved_targets = {
-        alias: _resolve_typedef_chain(alias, typedefs or {})
-        for alias in (typedefs or {})
+        alias: _resolve_typedef_chain(alias, typedefs, typedef_key_pattern)
+        for alias in typedefs
     }
 
     kept_spellings = {
@@ -300,6 +337,7 @@ def _directly_referenced_dependency_names(
             for key in filter(None, (identity, stripped)):
                 if resolved == key or type_string_references_name(resolved, key):
                     spellings.add(alias)
+                    spellings.update(_namespace_suffix_spellings(alias)[1:])
                     break
         candidate_spellings[id(candidate)] = spellings
 

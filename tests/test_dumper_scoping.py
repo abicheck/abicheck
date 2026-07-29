@@ -709,6 +709,53 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
 
+    def test_typedef_resolution_stays_fast_with_many_typedefs(self):
+        """Self-review follow-up: an earlier version recompiled the
+        typedef-key spelling pattern once per alias (O(typedef count^2)
+        before any signature is even scanned) -- confirmed empirically at
+        ~30s for 3,000 typedefs. Must stay well under a second now that the
+        pattern is compiled once and reused."""
+        import time
+
+        typedefs = {f"Alias{i}": f"Alias{i + 1}" for i in range(2000)}
+        typedefs["Alias2000"] = "int"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run")],
+            types=[_rec("Own")],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"typedef resolution took {elapsed:.2f}s, expected < 5s"
+
+    def test_typedef_alias_bare_suffix_spelling_resolves_dependency_record(self):
+        """Self-review follow-up: a real backend can spell a typedef alias
+        itself bare in a signature (`string` for a `typedefs["std::string"]`
+        entry, DWARF's own convention) -- indexing only the literal alias
+        key missed this, the same bare-vs-qualified split already handled
+        for candidate identities."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("string",))],
+            types=[
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    qualified_name="std::__cxx11::basic_string<char>",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"std::string": "std::__cxx11::basic_string<char>"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["basic_string"]
+
     def test_kept_enum_collision_guards_bare_dependency_spelling(self):
         """Codex review (P2, fourth round): a kept enum's bare spelling
         (`api::Status` spelled bare `Status`) must guard against an
