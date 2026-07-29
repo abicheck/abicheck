@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from abicheck.dumper_scoping import (
-    _looks_like_real_mangled_name,
     resolve_dependency_scope,
     scope_snapshot_excluding_dependencies,
     wrap_run_dump_with_dependency_scope,
@@ -324,20 +323,6 @@ class TestDwarfScoping:
         assert set(scoped.dwarf.structs) == {"Own"}
 
 
-class TestLooksLikeRealMangledName:
-    def test_differing_mangled_and_name_is_trusted(self):
-        assert _looks_like_real_mangled_name("_Z3run", "run") is True
-
-    def test_bare_name_with_itanium_marker_is_trusted(self):
-        # A degenerate case (a real Itanium mangled form never equals its own
-        # bare name), but exercises the fallback branch directly: a marker
-        # prefix is trusted even when mangled == name.
-        assert _looks_like_real_mangled_name("_Zfoo", "_Zfoo") is True
-
-    def test_bare_name_with_no_marker_is_not_trusted(self):
-        assert _looks_like_real_mangled_name("distance", "distance") is False
-
-
 class TestDwarfAdvancedScoping:
     def test_type_and_symbol_keyed_collections_filtered(self):
         sys_fn = _fn("sys_fn", mangled="_Z6sys_fn", source_header=_SYSTEM_HEADER)
@@ -400,6 +385,32 @@ class TestDwarfAdvancedScoping:
             dwarf_advanced=AdvancedDwarfMetadata(
                 has_dwarf=True,
                 value_abi_traits={"_Z6sys_fn": "p0:nontrivial"},
+            ),
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.dwarf_advanced is not None
+        assert set(scoped.dwarf_advanced.value_abi_traits) == set()
+
+    def test_dependency_function_with_bare_unmangled_name_still_dropped(self):
+        """Codex review: a genuine C/``extern "C"`` dependency function's
+        header-AST ``mangled`` field also falls back to its bare ``name`` --
+        but for a *genuinely* unmangled symbol, that bare spelling is also
+        its real linker-level name, so it must still be excluded (unlike the
+        kept-function case in
+        ``test_kept_function_with_unmangled_bare_name_keeps_dwarf_advanced_entry``,
+        where the bare spelling is merely an unreliable guess at a *real*
+        mangled name). Regression: an earlier fix over-corrected by
+        requiring a confident mangling marker for exclusion too, which left
+        this class of dependency noise unfiltered."""
+        dep_fn = _fn("dep", mangled="dep", source_header=_SYSTEM_HEADER)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[dep_fn],
+            dwarf_advanced=AdvancedDwarfMetadata(
+                has_dwarf=True,
+                value_abi_traits={"dep": "p0:nontrivial"},
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)

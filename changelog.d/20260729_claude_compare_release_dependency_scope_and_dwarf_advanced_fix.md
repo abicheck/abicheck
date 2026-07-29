@@ -21,17 +21,21 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   used to keep a DWARF-advanced entry (`value_abi_traits`,
   `calling_conventions`, ...) only when its linkage-mangled symbol matched a
   *kept* header-AST function's own `mangled` field — but a header-AST backend
-  can't always recover a genuine mangled name (e.g. a header auto-detected as
-  plain C, or an uninstantiated C++ template; a known, already-documented
-  limitation of `Function.mangled`'s `mangled == name` fallback), so a
-  perfectly ordinary, non-dependency C++ function could silently lose its own
-  real DWARF finding (e.g. a `value_abi_trait_changed` calling-convention
-  break) once dependency filtering actually ran. The filter now instead drops
-  only symbols *confidently* identified as belonging to an excluded
-  (dependency-header) function — one whose mangled spelling differs from its
-  bare name or carries a recognizable Itanium/MSVC mangling marker — keeping
-  everything else by default, matching this module's existing
-  false-negative-over-false-positive design bias.
+  can't always recover a genuine mangled name for an ordinary C++ function
+  (e.g. a header auto-detected as plain C, or an uninstantiated C++ template;
+  a known, already-documented limitation of `Function.mangled`'s
+  `mangled == name` fallback), so a perfectly ordinary, non-dependency C++
+  function could silently lose its own real DWARF finding (e.g. a
+  `value_abi_trait_changed` calling-convention break) once dependency
+  filtering actually ran. The filter now instead drops every excluded
+  (dependency-header) function's own `mangled` spelling directly, kept or
+  not — the bare-name ambiguity above only ever affects whether that
+  spelling can be *trusted to identify* an entry it wasn't derived from, not
+  whether an excluded function's *own* entry should be dropped (a genuinely
+  unmangled C/`extern "C"` symbol's bare spelling is also its real linker-level
+  name, so it still matches DWARF's key; a follow-up review round caught an
+  over-correction that required a confident mangling marker for exclusion
+  too, which left this class of dependency noise unfiltered again).
 - **Two more `include_dependencies` propagation gaps, both Codex review**:
   `resolve_input()`'s recursive call following a GNU ld linker script to its
   real target dropped the flag back to its default (`True`), so filtering

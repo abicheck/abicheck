@@ -789,29 +789,6 @@ def _scoped_dwarf(
     )
 
 
-def _looks_like_real_mangled_name(mangled: str, name: str) -> bool:
-    """Whether *mangled* is confidently a genuine linker-mangled symbol.
-
-    A header-AST backend's ``Function.mangled`` falls back to the bare
-    ``name`` whenever the real mangled form isn't available -- not just for
-    genuine C/``extern "C"`` linkage, but also (empirically confirmed, see
-    ``tu_merge.py``'s own documented limitation) for an auto-detected-as-C
-    header parse of what is actually a C++ TU, or an uninstantiated C++
-    template. ``mangled == name`` is therefore not proof the symbol is
-    genuinely unmangled -- treating it as such would make
-    :func:`_scoped_dwarf_advanced` drop a real DWARF-derived finding (e.g.
-    ``value_abi_trait_changed``) for a perfectly ordinary, non-dependency
-    C++ function whose header-AST spelling merely couldn't be mangled. Only
-    a name carrying a recognizable Itanium (``_Z``/``__Z``) or MSVC (``?``)
-    mangling marker is trusted here -- everything else is treated as
-    "unknown, not confidently a dependency symbol" (the same
-    false-negative-over-false-positive bias this module uses throughout).
-    """
-    if mangled != name:
-        return True
-    return mangled.startswith(("_Z", "__Z", "?"))
-
-
 def _scoped_dwarf_advanced(
     adv: AdvancedDwarfMetadata | None,
     kept_identifiers: set[str],
@@ -820,12 +797,28 @@ def _scoped_dwarf_advanced(
     """Filter Sprint-4 advanced DWARF metadata the same way: type-keyed
     collections (``packed_structs``/``all_struct_names``) via
     :func:`_name_matches`, function-keyed collections (keyed by mangled
-    ``linkage_name``) by dropping only *excluded_symbols* -- confidently
-    dependency-header functions -- rather than requiring a match against
-    the kept set. A DWARF-only symbol with no header-AST counterpart at all
-    (or one whose header-AST mangled spelling could not be recovered, see
-    :func:`_looks_like_real_mangled_name`) is therefore kept by default
-    instead of being silently dropped for lacking a confident match."""
+    ``linkage_name``) by dropping only *excluded_symbols* -- every
+    dependency-header function's own ``mangled`` spelling -- rather than
+    requiring a match against the kept set (Codex review). The two
+    directions need different tolerances for an unreliable bare
+    ``mangled == name`` header-AST spelling (see ``tu_merge.py``'s own
+    documented limitation on why that field isn't always real mangling):
+    for a *kept* (non-dependency) function it must never be trusted to
+    positively identify the entry, since a perfectly ordinary C++ function
+    can carry one too (an auto-detected-as-C header parse, or an
+    uninstantiated template) and DWARF's real key won't match the bare
+    guess -- dropping on that mismatch would lose the function's own real
+    finding. For an *excluded* function, the bare spelling is safe to
+    exclude by: a genuinely unmangled symbol (C/``extern "C"``) carries the
+    *same* bare spelling at the real linker level too, so it still matches
+    DWARF's actual key; the residual failure mode (an excluded function
+    whose true mangled DWARF key isn't its bare name either) merely leaves
+    that one entry unfiltered -- the same false-negative-over-false-positive
+    bias this module uses throughout, not a new risk to any kept function
+    (a kept function's own real mangled name is never bare-equal to an
+    unrelated excluded symbol's bare name in a valid binary: two distinct
+    globals sharing one unmangled C symbol name would already be an ODR
+    violation the linker itself would have rejected)."""
     if adv is None or not adv.has_dwarf:
         return adv
     return dataclasses.replace(
@@ -1067,11 +1060,7 @@ def scope_snapshot_excluding_dependencies(
         | {e.qualified_name for e in kept_enums if e.qualified_name},
     )
     excluded_functions = [f for f in snap.functions if _is_dep(f.source_header)]
-    excluded_symbols = {
-        f.mangled
-        for f in excluded_functions
-        if f.mangled and _looks_like_real_mangled_name(f.mangled, f.name)
-    }
+    excluded_symbols = {f.mangled for f in excluded_functions if f.mangled}
     return dataclasses.replace(
         snap,
         functions=kept_functions,
