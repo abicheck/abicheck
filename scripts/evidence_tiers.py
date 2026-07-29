@@ -248,6 +248,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "experimental_graduated": "L0",
     "experimental_removed_without_replacement": "L0",
     "bundle_intra_dep_removed": "L0",
+    "bundle_unresolved_intra_dependency": "L0",
     "bundle_intra_dep_signature_changed": "L0",
     "bundle_manifest_instantiation_removed": "L0",
     "bundle_provider_changed": "L0",

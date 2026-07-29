@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (395 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (396 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`examples/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -34,6 +34,7 @@ One row per `ChangeKind` (395 total). Columns fuse the verdict partition (`check
 | `bundle_manifest_instantiation_removed` | breaking | `BREAKING` | `error` | L0 | `bundle_manifest_instantiation_removed` | — |
 | `bundle_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_provider_changed` | — |
 | `bundle_soname_skew` | breaking | `BREAKING` | `error` | L0 | `bundle_soname_skew` | — |
+| `bundle_unresolved_intra_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_unresolved_intra_dependency` | — |
 | `call_graph_public_entry_reachability_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `call_graph_public_entry_reachability_changed` | — |
 | `calling_convention_changed` | breaking | `BREAKING` | `error` | L1 | `calling_convention_changed` | [case64](examples/case64_calling_convention_changed.md) |
 | `cet_protection_improved` | quality | `COMPATIBLE` | `warning` | L0 | `cet_protection_improved` | — |

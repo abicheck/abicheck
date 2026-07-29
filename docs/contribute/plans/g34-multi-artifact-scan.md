@@ -364,6 +364,19 @@ implementation that shipped.
      (`click.UsageError`/exit 64) naming the colliding paths — there is no
      sound way to silently pick one, unlike `compare`'s old-vs-new case
      where "newest version wins" is a meaningful tiebreak.
+     **Correction — deduplicate symlink aliases before collision-checking,
+     don't reject them.** `discover_shared_libraries()`
+     (`abicheck/package.py`, `os.walk(..., followlinks=False)`) lists a
+     symlink file (`libfoo.so -> libfoo.so.1`) and its real target
+     (`libfoo.so.1`) as two separate discovered paths — a completely
+     ordinary Unix install/package layout, not an edge case — and both
+     canonicalize to the same `_canonical_library_key`. Rejecting that as
+     a collision would fail `--artifact-set DIR` on common, correct
+     directory layouts. Resolve each discovered path (`Path.resolve()`
+     or an inode/`os.path.samefile` check) and deduplicate identical
+     targets *before* the collision check; only reject when two distinct
+     underlying files (different resolved paths/inodes) canonicalize to
+     the same name.
   Never a bare "no findings" for any of the three cases.
 - Add `ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` (exact name TBD),
   `default_verdict = COMPATIBLE_WITH_RISK`, registered in
@@ -432,9 +445,24 @@ implementation that shipped.
   provider sharing the label. Only when `version_soname` is empty
   (unavailable, e.g. a JSON snapshot predating the field) fall back to
   label-only matching among `providers_for(symbol)`, mirroring
-  `_import_is_external`'s own two-tier fallback structure. For an
-  unversioned consumer import, any provider name-matches, unchanged from
-  today. When no compatible provider exists under this scheme, treat the
+  `_import_is_external`'s own two-tier fallback structure. **For an
+  unversioned consumer import, a name-matching provider must also be
+  DT_NEEDED-reachable from the consumer, not merely present anywhere in
+  the declared set (P1).** `providers_for(symbol)` is set-wide, not
+  scoped to the consumer's own dependency closure — if `libconsumer.so`
+  imports `foo` but has no `DT_NEEDED` path (direct or transitive) to
+  unrelated sibling `libplugin.so`, merely including `libplugin.so`
+  somewhere in the artifact set must not count as resolving `foo`, since
+  the real loader would never load `libplugin.so` while loading
+  `libconsumer.so`. Add a small BFS helper over `ResolutionGraph.intra_needed`
+  (soname → library-name resolved the same way
+  `BundleSnapshot.is_intra_bundle_provider` already does) computing the
+  set of libraries transitively reachable from a given consumer, and
+  require an unversioned match's provider library to be in that set. The
+  *versioned* path above doesn't need this — a specific
+  `version_soname`-resolved provider is target-precise by construction —
+  but the unversioned name-only fallback does. When no compatible
+  provider exists under this scheme, treat the
   symbol as unresolved-in-set the same as a name-level miss, subject to
   the same weak-import/suppression-path handling below. Cover with two
   tests: (a) consumer requires `foo@V2`, set only provides `foo@V1` —
@@ -774,13 +802,19 @@ result-rendering path — not from anything `scan` calls.
   sibling `_emit_scan_set_report`) that calls the shared helper above for
   the bundle section and reuses `_render_text`/JSON assembly for each
   `per_artifact` entry.
-- `bundle.json`/`bundle.md` file outputs (ADR-023's `--output-dir`
-  contract) — decide whether `--artifact-set` follows the same
-  `--output-dir` convention `compare-release` uses or folds the bundle
-  section into `scan`'s existing single-file output; `scan` has no
-  `--output-dir` concept today, only `-o/--output` for one file, so this
-  needs an explicit choice, not an assumption that `compare-release`'s
-  shape transfers unchanged.
+- **`-o`/`--output` contract for `--artifact-set`: one aggregate document,
+  not `--output-dir`, decided here rather than left to the implementer.**
+  `scan` has no `--output-dir` concept today, only `-o/--output` writing
+  one file; `--artifact-set` keeps that same shape rather than introducing
+  `compare-release`'s separate `--output-dir`/`bundle.json`/`bundle.md`
+  convention (a new CLI concept this ADR doesn't otherwise need). `-o
+  result.json` writes one `ScanSetResult.to_dict()` document — `per_artifact`
+  as an array of each member's serialized result plus the bundle section —
+  not one file per member (which risks the same file being overwritten
+  across members) and not a directory of files. Text output (`-o
+  result.txt`/stdout) renders each member's summary in sequence followed by
+  the bundle-findings section. Add a test asserting a single `-o` write
+  produces one well-formed aggregate document for a multi-member set.
 - **Not started.**
 
 ### Phase 5 — Deferred (explicitly out of scope, see ADR-056 D2)
