@@ -1539,8 +1539,17 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     (ADR-056 D2 scopes `--artifact-set` to audit-only).
     """
     import time as _time
+    from dataclasses import replace
 
     from .bundle import ArtifactSetError, audit_bundle, discover_artifact_set
+
+    # run_scan_set is audit-only by definition (ADR-056 D2) -- normalize
+    # mode here rather than trust every caller to set it. Without this, the
+    # documented minimal form ``run_scan_set(ScanRequest(binaries=[...]))``
+    # left req.mode at ScanRequest's own default ("pr"), so each member's
+    # report claimed mode: "pr" despite this entry point never accepting a
+    # baseline (Codex review).
+    req = replace(req, mode="audit")
 
     # Canonicalize/deduplicate before the cardinality check: two literal
     # duplicates or symlink aliases of one DSO must not silently pass as a

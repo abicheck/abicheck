@@ -1845,6 +1845,56 @@ class TestBuildBundleSnapshotDeadlineCheckpoint:
         assert snap.libraries == {}
 
 
+class TestReachableIntraLibrariesSymlinkAlias:
+    """P2 regression (Codex review): _reachable_intra_libraries() BFS used
+    provider_library_for_soname()'s independent name/soname/filename-stem
+    heuristic to resolve an intra-bundle DT_NEEDED edge, which doesn't know
+    about a resolved-through-symlink real filename --
+    _compute_resolution_graph() classified that edge as intra correctly
+    (using its own soname_to_name map, which the resolved-basename fix
+    populates), but the BFS resolving the *same* edge disagreed, so a
+    provider discovered via a differently-named symlink alias
+    (``aaa.so -> libreal.so.1``, no DT_SONAME) was never marked reachable,
+    producing a false bundle_unresolved_intra_dependency finding for a
+    genuinely resolved import.
+    """
+
+    def test_provider_reachable_via_symlink_alias_real_filename(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle import (
+            _compute_resolution_graph,
+            _detect_unresolved_intra_dependency,
+        )
+
+        real = tmp_path / "libreal.so.1"
+        real.write_bytes(b"")
+        link = tmp_path / "aaa.so"  # arbitrarily named, sorts before the target
+        link.symlink_to(real)
+
+        libraries = {
+            "aaa.so": link,
+            "libconsumer.so": tmp_path / "libconsumer.so",
+        }
+        metadata = {
+            "aaa.so": _meta(soname="", exports=["foo"]),  # no DT_SONAME
+            "libconsumer.so": _meta(
+                soname="libconsumer.so",
+                needed=["libreal.so.1"],
+                imports=["foo"],
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        # Sanity: the edge really is classified as intra (pre-existing fix).
+        assert graph.intra_needed["libconsumer.so"] == ["libreal.so.1"]
+
+        snapshot = BundleSnapshot(
+            root=tmp_path, libraries=libraries, metadata=metadata, resolution=graph
+        )
+        findings = _detect_unresolved_intra_dependency(snapshot, set())
+        assert findings == []
+
+
 class TestArtifactSetDiscovery:
     def test_rejects_colliding_explicit_paths(self, tmp_path: Path) -> None:
         from abicheck.bundle import ArtifactSetError, discover_artifact_set

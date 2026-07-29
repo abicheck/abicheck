@@ -387,6 +387,8 @@ def _compute_resolution_graph(
             soname_to_name.setdefault(resolved_name, name)
             soname_to_name.setdefault(libraries[name].name, name)
 
+    graph.soname_to_name = soname_to_name
+
     # Index exports.
     for name, meta in metadata.items():
         for sym in meta.symbols:
@@ -666,8 +668,17 @@ def _reachable_intra_libraries(snapshot: BundleSnapshot, root: str) -> set[str]:
     while queue:
         lib = queue.pop()
         for soname in snapshot.resolution.intra_needed.get(lib, []):
-            target = snapshot.provider_library_for_soname(soname)
-            if target is None or target in seen:
+            # Resolve via the exact same soname_to_name map
+            # _compute_resolution_graph() used to classify this edge as
+            # intra in the first place -- provider_library_for_soname()'s
+            # independent name/soname/filename-stem heuristic doesn't know
+            # about a resolved-through-symlink real filename, so a library
+            # discovered via a differently-named alias (Codex review)
+            # classified correctly as intra could still resolve to no
+            # target here, understating reachability and producing a false
+            # bundle_unresolved_intra_dependency finding.
+            target = snapshot.resolution.soname_to_name.get(soname)
+            if target is None or target == lib or target in seen:
                 continue
             seen.add(target)
             queue.append(target)
@@ -744,7 +755,14 @@ def _detect_unresolved_intra_dependency(
 
             if consumer.version:
                 if consumer.version_soname:
-                    target_lib = new.provider_library_for_soname(
+                    # Same soname_to_name map _reachable_intra_libraries()
+                    # uses (Codex review) -- provider_library_for_soname()'s
+                    # independent heuristic has the identical
+                    # resolved-through-symlink gap, so a version_soname
+                    # naming a provider's real on-disk filename could fail
+                    # to resolve here even when that provider is genuinely
+                    # reachable.
+                    target_lib = new.resolution.soname_to_name.get(
                         consumer.version_soname
                     )
                     resolved = target_lib is not None and target_lib in reachable

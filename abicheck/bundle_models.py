@@ -103,6 +103,17 @@ class ResolutionGraph:
     # library -> DT_NEEDED sonames that did NOT resolve inside the bundle
     # (likely system libs — see DEFAULT_SYSTEM_PROVIDERS).
     extra_needed: dict[str, list[str]] = field(default_factory=dict)
+    # The exact reverse map _compute_resolution_graph() used to classify
+    # each DT_NEEDED edge as intra vs. extra (soname / canonical key / real
+    # on-disk filename -> library name). Stored so a later BFS resolving
+    # those same edges (_reachable_intra_libraries) uses the identical
+    # mapping instead of independently re-deriving one -- the two used to
+    # disagree for a versioned, no-DT_SONAME library discovered via a
+    # differently-named symlink alias, where the classifying map's
+    # resolved-real-filename entry had no equivalent in
+    # provider_library_for_soname()'s own name/soname/stem heuristic
+    # (Codex review).
+    soname_to_name: dict[str, str] = field(default_factory=dict)
 
     def providers_for(self, symbol: str) -> list[ProviderEntry]:
         return list(self.provides.get(symbol, ()))

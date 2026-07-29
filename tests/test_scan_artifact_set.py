@@ -489,6 +489,23 @@ class TestRunScanSet:
         with pytest.raises(ValueError):
             run_scan_set(ScanRequest(binaries=[snap_a]))
 
+    def test_default_mode_is_normalized_to_audit(
+        self, snap_a: Path, snap_b: Path
+    ) -> None:
+        # P2 regression (Codex review): the documented minimal form
+        # run_scan_set(ScanRequest(binaries=[...])) left req.mode at
+        # ScanRequest's own "pr" default (run_scan_set never overrode it
+        # before forwarding to each member) -- every member's report
+        # claimed mode: "pr" despite this entry point being audit-only by
+        # definition (ADR-056 D2, no baseline accepted).
+        from abicheck.service import ScanRequest, run_scan_set
+
+        result = run_scan_set(ScanRequest(binaries=[snap_a, snap_b]))
+        for member in result.per_artifact:
+            report = member.result.report
+            assert report is not None
+            assert report["mode"] == "audit"
+
     def test_rejects_baseline(self, snap_a: Path, snap_b: Path) -> None:
         from abicheck.service import ScanRequest, run_scan_set
 
