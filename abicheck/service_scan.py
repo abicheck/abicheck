@@ -1564,7 +1564,7 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     import time as _time
     from dataclasses import replace
 
-    from .bundle import ArtifactSetError, audit_bundle, discover_artifact_set
+    from .bundle import audit_bundle, discover_artifact_set
 
     # run_scan_set is audit-only by definition (ADR-056 D2) -- normalize
     # mode here rather than trust every caller to set it. Without this, the
@@ -1613,20 +1613,16 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
             return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5,
                                   per_artifact=per_artifact)
 
-    try:
-        libraries = discover_artifact_set(list(binaries), explicit=True)
-    except ArtifactSetError:
-        # Collision/unsupported-member checks already ran in the CLI/MCP
-        # front door before req.binaries was populated (ADR-056); if one
-        # somehow reaches here, mark the bundle section incomplete rather
-        # than raising out of an already-executed multi-member scan.
-        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
-        return ScanSetResult(
-            verdict=verdict,
-            exit_code=exit_code,
-            per_artifact=per_artifact,
-            bundle_incomplete=True,
-        )
+    # run_scan_set is a public, re-exported service entry point (ADR-056) --
+    # a direct Python API caller can reach it without ever going through
+    # cli_scan._run_artifact_set's own discover_artifact_set prevalidation,
+    # so a collision/unsupported-member error here is not necessarily
+    # anomalous the way it would be for a CLI-originated request. Letting
+    # it propagate (rather than degrading to bundle_incomplete=True, which
+    # could report a misleading exit-0 "success" for a set that was never
+    # actually auditable) mirrors the audit_bundle() ArtifactSetError fix
+    # just below (Codex review).
+    libraries = discover_artifact_set(list(binaries), explicit=True)
 
     remaining = (
         None if budget_s is None else budget_s - (_time.monotonic() - start)
@@ -1651,20 +1647,18 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         # scope lets a real overflow raise mid-parse instead of only being
         # caught afterward.
         #
-        # Unlike the discover_artifact_set() ArtifactSetError above (a
-        # collision check that's already supposed to have run at the
-        # CLI/MCP front door before req.binaries was even populated, so
-        # reaching it here is anomalous), audit_bundle()'s ambiguous
-        # duplicate-SONAME rejection is only detectable *here*, after
-        # actually parsing every member's ELF metadata -- there is no
-        # earlier validation step that could have caught it. Degrading to
-        # bundle_incomplete=True let a genuinely invalid artifact set exit
-        # 0 with the cross-library audit silently skipped, which a caller
-        # checking only the exit code would read as full success (P2,
-        # Codex review) -- propagate instead so the CLI surfaces it as the
-        # usage error it is (64, "bad flags/inputs" per AGENTS.md's exit
-        # code table), same as discover_artifact_set's own duplicate-name
-        # rejection already does at the CLI layer.
+        # audit_bundle()'s ambiguous duplicate-SONAME rejection
+        # (ArtifactSetError) is only detectable *here*, after actually
+        # parsing every member's ELF metadata -- propagates the same way
+        # discover_artifact_set()'s own ArtifactSetError does above (P2,
+        # Codex review x2): degrading either to bundle_incomplete=True let
+        # a genuinely invalid artifact set exit 0 with the cross-library
+        # audit silently skipped, misreading as full success for a direct
+        # Python API caller that never went through
+        # cli_scan._run_artifact_set's own prevalidation. The CLI's own
+        # try/except around run_scan_set() converts this into a
+        # click.UsageError (exit 64, "bad flags/inputs" per AGENTS.md's
+        # exit code table).
         with _deadline.deadline_scope(remaining):
             audit = audit_bundle(
                 libraries, bundle_system_providers=req.bundle_system_providers

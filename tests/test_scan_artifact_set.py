@@ -59,6 +59,26 @@ def _write_snapshot(path: Path, snap: AbiSnapshot) -> Path:
     return path
 
 
+def _bypass_discovery_validation(
+    monkeypatch: pytest.MonkeyPatch, *binaries: Path
+) -> None:
+    """Patch discover_artifact_set() to a trivial passthrough for tests that
+    exercise run_scan_set()'s per-member scanning, not the bundle-audit
+    layer itself -- avoids needing real ELF fixtures (discover_artifact_set
+    now propagates ArtifactSetError for non-ELF members instead of
+    degrading, Codex review) while still reaching audit_bundle(), whose own
+    build_bundle_snapshot() already tolerates non-ELF members by skipping
+    them (the separate, still-degrading bundle-snapshot-completeness path
+    tested by TestRunScanSetBundleSnapshotCompleteness).
+    """
+    import abicheck.bundle as bundle_mod
+
+    def _fake_discover(paths, *, explicit):
+        return {p.name: p for p in binaries}
+
+    monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+
+
 def _write_elf_shared_object_stub(path: Path) -> None:
     """Write a minimal, structurally-valid ELF64 shared-object (ET_DYN, no
     program headers) -- enough to pass package._is_elf_shared_object's
@@ -452,6 +472,33 @@ class TestRunScanSetAmbiguousSoname:
             run_scan_set(ScanRequest(binaries=[snap_a, snap_b], mode="audit"))
 
 
+class TestRunScanSetDiscoveryArtifactSetError:
+    """P2 regression (Codex review): run_scan_set() is a public,
+    re-exported service entry point -- a direct Python API caller can
+    reach discover_artifact_set()'s own ArtifactSetError (e.g. a
+    collision under _canonical_library_key) without ever going through
+    cli_scan._run_artifact_set's own prevalidation. Degrading it to
+    bundle_incomplete=True let such a request return an exit-0-looking
+    "successful" result despite the set never having been auditable; must
+    propagate, mirroring the audit_bundle() ArtifactSetError fix.
+    """
+
+    def test_collision_propagates(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle import ArtifactSetError
+        from abicheck.service import ScanRequest, run_scan_set
+
+        def _fake_discover(paths, *, explicit):
+            raise ArtifactSetError("colliding library identities")
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+
+        with pytest.raises(ArtifactSetError, match="colliding library identities"):
+            run_scan_set(ScanRequest(binaries=[snap_a, snap_b], mode="audit"))
+
+
 class TestRunScanSetBundleSnapshotCompleteness:
     """P2 regression (Codex review): discover_artifact_set only validates
     that every member *looks like* ELF -- build_bundle_snapshot() can still
@@ -518,6 +565,7 @@ class TestRunScanSetLevelExplicit:
             return real_run_scan_core(*args, **kwargs)
 
         monkeypatch.setattr(scan_engine_mod, "run_scan_core", _spy)
+        _bypass_discovery_validation(monkeypatch, snap_a, snap_b)
 
         run_scan_set(
             ScanRequest(binaries=[snap_a, snap_b], mode="audit", depth="binary")
@@ -533,7 +581,7 @@ class TestRunScanSet:
             run_scan_set(ScanRequest(binaries=[snap_a]))
 
     def test_default_mode_is_normalized_to_audit(
-        self, snap_a: Path, snap_b: Path
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # P2 regression (Codex review): the documented minimal form
         # run_scan_set(ScanRequest(binaries=[...])) left req.mode at
@@ -543,6 +591,7 @@ class TestRunScanSet:
         # definition (ADR-056 D2, no baseline accepted).
         from abicheck.service import ScanRequest, run_scan_set
 
+        _bypass_discovery_validation(monkeypatch, snap_a, snap_b)
         result = run_scan_set(ScanRequest(binaries=[snap_a, snap_b]))
         for member in result.per_artifact:
             report = member.result.report
@@ -558,10 +607,11 @@ class TestRunScanSet:
             )
 
     def test_scans_every_member_and_marks_bundle_incomplete(
-        self, snap_a: Path, snap_b: Path
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from abicheck.service import ScanRequest, ScanSetResult, run_scan_set
 
+        _bypass_discovery_validation(monkeypatch, snap_a, snap_b)
         result = run_scan_set(
             ScanRequest(binaries=[snap_a, snap_b], mode="audit")
         )
@@ -581,9 +631,12 @@ class TestRunScanSet:
         assert d["per_artifact"][0]["artifact"] == str(snap_a)
         assert d["bundle_incomplete"] is True
 
-    def test_to_dict_roundtrip_shape(self, snap_a: Path, snap_b: Path) -> None:
+    def test_to_dict_roundtrip_shape(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from abicheck.service import ScanRequest, run_scan_set
 
+        _bypass_discovery_validation(monkeypatch, snap_a, snap_b)
         result = run_scan_set(ScanRequest(binaries=[snap_a, snap_b]))
         d = result.to_dict()
         assert d["verdict"] == result.verdict
@@ -618,7 +671,7 @@ class TestRunScanSet:
             run_scan_set(ScanRequest(binaries=[snap_a, alias]))
 
     def test_forwards_changed_src_to_every_member(
-        self, snap_a: Path, snap_b: Path
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # P2 regression (Codex review): run_scan_set previously hard-coded
         # every member's changed_path_source to the literal "run_scan_set",
@@ -627,6 +680,7 @@ class TestRunScanSet:
         # ScanRequest.changed_src.
         from abicheck.service import ScanRequest, run_scan_set
 
+        _bypass_discovery_validation(monkeypatch, snap_a, snap_b)
         result = run_scan_set(
             ScanRequest(
                 binaries=[snap_a, snap_b],
