@@ -1245,9 +1245,13 @@ def _check_dependency_scope_comparable(
     refuses to compare a dependency-filtered snapshot (``dump``'s default,
     since ``dumper_scoping.py``) against an unfiltered one — the asymmetry a
     plain ``dump old.so -H ... -o baseline.json`` followed by
-    ``compare baseline.json new.so -H ...`` produces today, since ``compare``'s
-    own live-binary dumping never applies this filter. Neither
-    ``scope_fingerprint`` nor ``profile_fingerprint`` observe this axis at all
+    ``compare baseline.json new.so -H ...`` used to produce, back when
+    ``compare``'s own live-binary dumping never applied this filter by
+    default (``compare`` now filters by default too, matching ``dump`` —
+    this gate still matters for a direct Python API caller of
+    ``service.run_dump``, whose own default remains unfiltered ("full") for
+    backward compatibility). Neither ``scope_fingerprint`` nor
+    ``profile_fingerprint`` observe this axis at all
     (dependency scope isn't a declared-header-set or compile-context fact —
     it's a post-parse filtering decision made after both are already
     computed), so this cannot be folded into either fingerprint's existing
@@ -1271,17 +1275,16 @@ def _check_dependency_scope_comparable(
     history repeatedly warns against. There is no way to recover which of
     "filtered" or "full" an old, untagged snapshot actually is from the
     object alone, so this only fires when BOTH sides carry an explicit,
-    non-``None`` value and they differ — a live-binary snapshot from
-    ``service.run_dump`` (never filtered) is always tagged ``"full"``
-    (``_tag_live_dump_dependency_scope``), and a fresh ``dump`` output is
-    always tagged ``"filtered"``/``"full"`` explicitly
-    (``dumper_scoping.resolve_dependency_scope``), so the originally-reported
-    danger — a filtered `dump` baseline compared against an unfiltered fresh
-    `compare` dump — is still caught once both sides come from a current
-    abicheck build. Only a genuinely ambiguous old baseline (``None``) is
-    left unchecked on this axis, the same conservative
-    only-flag-what's-confidently-known bias ``dumper_scoping.py`` itself
-    already uses throughout.
+    non-``None`` value and they differ — every live-binary or ``dump``
+    snapshot produced by a current abicheck build is tagged
+    ``"filtered"``/``"full"`` explicitly
+    (``dumper_scoping.resolve_dependency_scope``, via
+    ``wrap_run_dump_with_dependency_scope``), so the originally-reported
+    danger — a filtered snapshot compared against an unfiltered one — is
+    still caught once both sides come from a current abicheck build. Only a
+    genuinely ambiguous old baseline (``None``) is left unchecked on this
+    axis, the same conservative only-flag-what's-confidently-known bias
+    ``dumper_scoping.py`` itself already uses throughout.
     """
     if not (old.from_headers or new.from_headers):
         return None

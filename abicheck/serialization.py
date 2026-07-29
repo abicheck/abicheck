@@ -167,12 +167,15 @@ from .model import (
 #     toolchain/system-header exclusion (`dumper_scoping.py`) was applied
 #     ("filtered") or opted out of via `--include-dependencies` ("full").
 #     Purely additive: a pre-v18 reader loads it as its default (`None`),
-#     i.e. "not recorded" — `comparability.check_contracts_comparable`
-#     treats that the same as `"full"` (the only behavior that existed
-#     before dumper_scoping.py), so an old baseline compared against a
-#     freshly filtered dump is still correctly caught as a scope mismatch
-#     rather than silently comparing a filtered snapshot against an
-#     unfiltered one.
+#     i.e. "not recorded". `comparability.check_contracts_comparable`
+#     deliberately does NOT treat that `None` as either mode -- an ordinary
+#     pre-v18 baseline is usually already-filtered content that simply
+#     predates the tag, so assuming "full" would spuriously flag the single
+#     most common workflow (compare a cached baseline against a fresh
+#     dump). The gate only raises when BOTH sides carry an explicit,
+#     differing tag; a `None` on either side is left unchecked on this axis
+#     (see `AbiSnapshot.dependency_scope`'s own docstring for the full
+#     reasoning).
 SCHEMA_VERSION: int = 18
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).

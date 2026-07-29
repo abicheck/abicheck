@@ -454,10 +454,18 @@ def cached_run_dump(
     (which would be a cycle: ``service.py`` calls this function).
 
     ``include_dependencies`` is folded into the cache key (see
-    ``_build_extra`` below): a filtered and an unfiltered dump of the
-    identical binary/headers are genuinely different snapshot content
-    (``dumper_scoping.resolve_dependency_scope``), so they must never share
-    a cache entry.
+    ``_build_extra`` below): a filtered and an unfiltered dump of a
+    header-derived binary/headers pair are genuinely different snapshot
+    content (``dumper_scoping.resolve_dependency_scope``), so they must
+    never share a cache entry. The split is unconditional even though
+    ``resolve_dependency_scope`` is a no-op for a header-less
+    (``from_headers=False``) dump -- e.g. a ``symbols_only`` call -- where
+    two otherwise-identical calls differing only in ``include_dependencies``
+    would produce byte-identical snapshots but still miss each other's cache
+    entry. Correctness requires the split for the header-derived case;
+    accepting the avoidable cache-miss cost for the header-less case is
+    simpler than threading a cheap "will this dump have headers" pre-check
+    through every cacheable call shape.
     """
     _headers = headers or []
     _includes = includes or []
@@ -568,9 +576,11 @@ def cached_run_dump(
         # not a printable delimiter, is the only collision-safe choice here
         # too): _manifest_extra is "" for a non-manifest dump, so this is a
         # no-op split for the legacy path. The dependency-scope mode is
-        # appended unconditionally (never a no-op split) -- a filtered and
-        # an unfiltered dump of the same binary/headers are genuinely
-        # different content and must never share a cache entry.
+        # appended unconditionally, even for a header-less dump where it has
+        # no effect on the actual output (see this function's own docstring)
+        # -- correctness for the header-derived case requires the split, and
+        # a cheap up-front "will this dump have headers" check isn't
+        # available at this point to skip it for the no-op case.
         scope_extra = "filtered" if not include_dependencies else "full"
         return f"{base}\x00{_manifest_extra}\x00{scope_extra}"
 
