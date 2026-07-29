@@ -1068,6 +1068,16 @@ def run_scan(req: ScanRequest) -> ScanResult:
     pinned_explicit = (dp is not None) or (
         sm is not None and sm is not SourceMethod.AUTO
     )
+    sm_pin = sm is not None and sm is not SourceMethod.AUTO
+    # Mirrors cli_scan._scan_explicit_flags'/_run_scan_one_member's
+    # level_explicit: consent to auto-running a trusted --config's
+    # build.query (a non-auto source_method, or an explicit depth with no
+    # source_method pinned). Without this the singular Python API path
+    # left level_explicit at run_scan_core's False default, so an explicit
+    # build_config + depth="build"/"source" could return
+    # EVIDENCE_CONTRACT_ERROR instead of auto-running the query the CLI
+    # and run_scan_set both already consent to (Codex review).
+    level_explicit = sm_pin or (sm is None and dp is not None)
     is_auto = sm is SourceMethod.AUTO
     auto_method = risk.recommended_method if (is_auto and seeded) else None
     resolved, eff_depth = resolve_level(
@@ -1134,6 +1144,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             budget=budget_str,
             budget_s=budget_s,
             pinned_explicit=pinned_explicit,
+            level_explicit=level_explicit,
             compile_context=None if req.compile.is_default else req.compile,
             defer_cleanup=build_dir_cleanups,
             suppression=req.suppression,

@@ -958,6 +958,29 @@ def test_run_scan_forwards_new_scan_request_controls(
     assert captured["allow_build_query"] is True
 
 
+def test_run_scan_forwards_level_explicit(monkeypatch, snap_path: Path) -> None:
+    # P2 regression (Codex review): run_scan() never computed/forwarded
+    # level_explicit at all, so run_scan_core defaulted it to False and
+    # refused to auto-run a trusted --config's build.query even for an
+    # explicit depth="build"/"source" -- unlike the CLI and run_scan_set,
+    # which both compute this the same way (sm_pin or (sm is None and dp
+    # is not None)).
+    import abicheck.scan_engine as scan_engine_mod
+    from abicheck.service import ScanRequest, run_scan
+
+    captured: dict[str, object] = {}
+    real_run_scan_core = scan_engine_mod.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["level_explicit"] = kwargs.get("level_explicit")
+        return real_run_scan_core(*args, **kwargs)
+
+    monkeypatch.setattr(scan_engine_mod, "run_scan_core", _spy)
+
+    run_scan(ScanRequest(binaries=[snap_path], mode="audit", depth="binary"))
+    assert captured["level_explicit"] is True
+
+
 def test_run_scan_binary_depth_suppresses_headers(
     monkeypatch, snap_path: Path, header: Path
 ) -> None:

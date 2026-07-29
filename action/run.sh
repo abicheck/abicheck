@@ -966,7 +966,15 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       echo "| Old root | \`${INPUT_OLD_ROOT:-}\` |"
       echo "| New root | \`${INPUT_NEW_ROOT:-}\` |"
     elif [[ "$MODE" == "scan" ]]; then
-      echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
+      # new-library-set (ADR-056, --artifact-set) has no INPUT_NEW_LIBRARY
+      # value at all -- render the set operand instead so the summary
+      # doesn't show an empty Binary row for every artifact-set run
+      # (Codex review).
+      if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
+        echo "| Artifact set | \`${INPUT_NEW_LIBRARY_SET}\` |"
+      else
+        echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
+      fi
       if [[ -n "${INPUT_AGAINST:-}" ]]; then
         echo "| Against | \`${INPUT_AGAINST}\` |"
       fi
