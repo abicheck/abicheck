@@ -307,6 +307,7 @@ def _build_new_snapshot(
             clang_bin=resolve_source_frontend_clang_bin(
                 compile_context.gcc_path if compile_context else None,
                 compile_context.gcc_prefix if compile_context else None,
+                exclude_cl_style=False,
             ),
             changed_paths=changed_paths,
             public_headers=tuple(

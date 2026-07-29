@@ -391,7 +391,9 @@ def dump_source_only(
         extractor=extractor,
         depth=depth,
         include_dependencies=include_dependencies,
-        clang_bin=resolve_source_frontend_clang_bin(gcc_path, gcc_prefix),
+        clang_bin=resolve_source_frontend_clang_bin(
+            gcc_path, gcc_prefix, exclude_cl_style=False
+        ),
     )
 
 

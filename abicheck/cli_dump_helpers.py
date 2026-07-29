@@ -1197,6 +1197,7 @@ def handle_non_elf_dump(
         clang_bin=resolve_source_frontend_clang_bin(
             getattr(compile_context, "gcc_path", None),
             getattr(compile_context, "gcc_prefix", None),
+            exclude_cl_style=False,
         ),
     )
 
@@ -1750,5 +1751,7 @@ def perform_elf_dump(
         depth=depth,
         include_dependencies=include_dependencies,
         header_roots=tuple(headers) + _dump_manifest_header_roots(dump_manifest),
-        clang_bin=resolve_source_frontend_clang_bin(gcc_path, gcc_prefix),
+        clang_bin=resolve_source_frontend_clang_bin(
+            gcc_path, gcc_prefix, exclude_cl_style=False
+        ),
     )

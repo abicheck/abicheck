@@ -311,6 +311,7 @@ def resolve_source_frontend_clang_bin(
     gcc_prefix: str | None,
     *,
     fallback: str = "clang",
+    exclude_cl_style: bool = True,
 ) -> str:
     """Resolve the clang binary a build-context-aware source frontend (the S2
     preprocessor pre-scan, L4 source-ABI replay/``embed_build_source``)
@@ -321,27 +322,37 @@ def resolve_source_frontend_clang_bin(
 
     Mirrors :func:`_resolve_clang_bin`'s two override cases (``--gcc-path``
     only when it is actually a GNU-mode clang-family binary — castxml/GCC
-    binaries can't take clang-only flags, and a CL-mode driver can't take
-    the GNU-mode flags these frontends always use,
-    :func:`_is_cl_style_driver_name`; ``--gcc-prefix`` maps to the prefixed
-    clang driver, but only when that specific prefixed binary is actually on
-    PATH — a documented GCC cross-toolchain prefix is not evidence a
-    same-prefixed Clang exists, and guessing wrong would silently downgrade
-    an already-working plain fallback to a "not found" skip), without that
-    function's raise-on-missing for the explicit-binary case: these callers
-    already degrade gracefully (an availability check, a coverage/skip row)
-    when the resolved binary isn't on PATH, so this stays a pure resolver.
+    binaries can't take clang-only flags; ``--gcc-prefix`` maps to the
+    prefixed clang driver, but only when that specific prefixed binary is
+    actually on PATH — a documented GCC cross-toolchain prefix is not
+    evidence a same-prefixed Clang exists, and guessing wrong would silently
+    downgrade an already-working plain fallback to a "not found" skip),
+    without that function's raise-on-missing for the explicit-binary case:
+    these callers already degrade gracefully (an availability check, a
+    coverage/skip row) when the resolved binary isn't on PATH, so this stays
+    a pure resolver.
 
-    Without this, a dump/scan driven by a non-default toolchain (e.g.
-    ``--gcc-path icpx``, which accepts icx/icpx-only flags) always shelled
-    out to a plain ``clang``/``clang++`` for L4/S2 instead, failing every
-    invocation and silently degrading source-ABI coverage even though the
-    real build's own compiler was resolvable right here.
+    *exclude_cl_style* (default ``True``, matching the original S2-only
+    behavior) rejects a CL-mode driver (``clang-cl``, ``dpcpp-cl``,
+    :func:`_is_cl_style_driver_name`) via *gcc_path* — correct for the S2
+    preprocessor pre-scan, which always shells out with fixed GNU-mode flags
+    (``-E -dM``, ``-M``) a CL-mode driver can't take. L4 source-ABI replay
+    (``ClangSourceExtractor``) is different: it already detects a CL compile
+    unit and re-drives the same binary with ``--driver-mode=cl``, so
+    excluding it here would silently fall back to a plain, non-CL ``clang``
+    that can't parse the real (e.g. Intel DPC++ ``dpcpp-cl``) build context —
+    L4 callers pass ``exclude_cl_style=False``.
+
+    Without this function, a dump/scan driven by a non-default toolchain
+    (e.g. ``--gcc-path icpx``, which accepts icx/icpx-only flags) always
+    shelled out to a plain ``clang``/``clang++`` for L4/S2 instead, failing
+    every invocation and silently degrading source-ABI coverage even though
+    the real build's own compiler was resolvable right here.
     """
     if (
         gcc_path
         and _is_clang_family_binary(gcc_path)
-        and not _is_cl_style_driver_name(gcc_path)
+        and (not exclude_cl_style or not _is_cl_style_driver_name(gcc_path))
     ):
         return gcc_path
     if gcc_prefix:

@@ -168,13 +168,20 @@ def depfile_args_from_argv(argv: list[str], directory: str | None = None) -> lis
         from pathlib import Path
 
         from ..build_context import _expand_response_files, _safe_resolve
+        from .source_extractors._argv import unredact_home
 
         # The compile unit's own working directory is both the base a relative
         # @file resolves against AND the trusted root it must stay under (no
         # separate "compile database location" is available at this call
         # site) -- an untrusted CompileUnit must not be able to smuggle an
         # absolute/traversal path to read arbitrary filesystem content.
-        cu_dir = Path(directory)
+        # unredact_home() first: a persisted CompileUnit.directory may carry
+        # RedactionPolicy's "~" home-dir placeholder (e.g. "~/build"), which
+        # bare Path() would treat as a literal, non-existent relative
+        # component (Path("~/build") stays under the process cwd, it does
+        # not expand "~") -- silently failing every response-file expansion
+        # for a redacted compile unit (Codex review).
+        cu_dir = Path(unredact_home(directory))
         args = _expand_response_files(args, cu_dir, _safe_resolve(cu_dir) or cu_dir)
     out: list[str] = []
     skip_next = False

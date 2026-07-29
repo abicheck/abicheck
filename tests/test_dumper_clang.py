@@ -3752,6 +3752,29 @@ def test_resolve_source_frontend_clang_bin_excludes_cl_style_driver() -> None:
     )
 
 
+def test_resolve_source_frontend_clang_bin_keeps_cl_style_when_not_excluded() -> None:
+    """L4 source-ABI replay (``ClangSourceExtractor``) already detects a CL
+    compile unit and re-drives it with ``--driver-mode=cl`` -- unlike the S2
+    preprocessor pre-scan, it must not fall back to a plain, non-CL
+    ``clang``/``clang++`` for a ``--gcc-path clang-cl``/``dpcpp-cl`` build,
+    or an Intel DPC++/SYCL context parsed at L2 gets replayed through stock
+    Clang at L4 and silently loses source-ABI coverage."""
+    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+
+    assert (
+        resolve_source_frontend_clang_bin(
+            "clang-cl", None, fallback="clang++", exclude_cl_style=False
+        )
+        == "clang-cl"
+    )
+    assert (
+        resolve_source_frontend_clang_bin(
+            "/opt/oneapi/bin/dpcpp-cl", None, exclude_cl_style=False
+        )
+        == "/opt/oneapi/bin/dpcpp-cl"
+    )
+
+
 def test_resolve_source_frontend_clang_bin_prefix_when_available(monkeypatch) -> None:
     from abicheck import dumper_clang
 

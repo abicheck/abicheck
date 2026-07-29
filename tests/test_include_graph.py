@@ -265,6 +265,26 @@ def test_depfile_args_response_file_outside_directory_rejected(tmp_path) -> None
     assert "-Dleaked=1" not in result
 
 
+def test_depfile_args_expands_response_file_with_redacted_home_directory(
+    tmp_path, monkeypatch
+) -> None:
+    """``CompileUnit.directory`` may be persisted with RedactionPolicy's ``~``
+    home-dir placeholder (e.g. ``~/build``) -- a bare ``Path()`` never expands
+    that (it stays a literal, non-existent relative component under the
+    process cwd), so the response file would silently fail to resolve for
+    every redacted compile unit. The directory must be unredacted first."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    rsp = build_dir / "inc_folders.txt"
+    rsp.write_text("-Iinclude/foo\n")
+    assert depfile_args_from_argv(
+        ["clang++", "-c", "foo.cpp", f"@{rsp.name}"],
+        directory="~/build",
+    ) == ["foo.cpp", "-Iinclude/foo"]
+
+
 def test_parse_depfile_line_continuations() -> None:
     text = "foo.o: foo.cpp \\\n  inc/a.h \\\n  inc/b.h\n"
     assert parse_depfile(text) == ["foo.cpp", "inc/a.h", "inc/b.h"]
