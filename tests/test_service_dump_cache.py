@@ -407,6 +407,35 @@ class TestCachedRunDump:
         assert len(calls) == 1
         assert snap1.functions[0].name == snap2.functions[0].name == "foo"
 
+    def test_bumped_cache_version_invalidates_pre_dependency_scope_entries(
+        self, tmp_path, monkeypatch
+    ):
+        """Regression for the PR #651 follow-up (Codex review): a cache
+        entry written under the OLD ``_SNAPSHOT_CACHE_VERSION`` (before
+        ``service.run_dump`` started tagging its result
+        ``dependency_scope="full"``) must not be replayed verbatim once the
+        version is bumped -- ``cached_run_dump`` returns a cache hit
+        directly, without ever calling the passed-in ``run_dump`` (and
+        therefore without ever tagging it), so a stale untagged entry would
+        otherwise bypass the dependency-scope comparability gate forever."""
+        from abicheck import snapshot_cache as snapshot_cache_mod
+
+        binary = tmp_path / "lib.so"
+        binary.write_bytes(b"ELF fake content")
+        calls = []
+
+        def fake_run_dump(path, binary_fmt, headers, includes, version, lang, **kwargs):
+            calls.append(1)
+            return _sample_snap()
+
+        monkeypatch.setattr(snapshot_cache_mod, "_SNAPSHOT_CACHE_VERSION", "OLD")
+        cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
+        assert len(calls) == 1
+
+        monkeypatch.setattr(snapshot_cache_mod, "_SNAPSHOT_CACHE_VERSION", "NEW")
+        cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
+        assert len(calls) == 2  # re-run, not served from the old-version entry
+
     def test_input_change_during_dump_is_not_cached_under_new_key(self, tmp_path):
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF fake content")

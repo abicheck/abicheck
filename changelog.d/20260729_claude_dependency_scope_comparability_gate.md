@@ -33,4 +33,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   filtering (so the recommended workflow succeeds instead of merely failing
   safely for a genuinely mismatched pair) is deliberately out of scope for
   this fix — a larger, separately-tracked change spanning `dump`/`compare`/
-  `scan`/the Python API/MCP/the GitHub Action.
+  `scan`/the Python API/MCP/the GitHub Action. Also bumps
+  `snapshot_cache._SNAPSHOT_CACHE_VERSION` (whole-snapshot disk cache) to
+  invalidate any pre-existing cache entry written before `run_dump` started
+  tagging its result — a warm cache hit returns the cached snapshot directly
+  without ever calling `run_dump`, so a stale, untagged entry would
+  otherwise keep bypassing the new gate indefinitely.
