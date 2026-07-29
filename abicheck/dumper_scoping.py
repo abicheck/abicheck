@@ -291,6 +291,23 @@ def _directly_referenced_dependency_names(
     positives instead. Deliberately left as the same
     false-negative-over-false-positive degradation this whole module
     already uses throughout, consistent with the existing precedent.
+
+    **Sharper consequence of the same root cause (Codex review, fresh
+    evidence):** since both ``dumper_clang.py`` and ``dumper_castxml.py``'s
+    ``parse_typedefs()`` key ``snapshot.typedefs`` by bare name, two
+    *different* namespaced aliases that happen to share one leaf name
+    (an own ``api::Handle`` and an unrelated dependency's ``dep::Handle``)
+    collide as the same dict key -- Python dict constructions are
+    last-write-wins, so one alias's real target is silently and
+    completely overwritten by the other's, not merely stripped of its
+    namespace. This can misattribute a kept, bare-spelled signature to the
+    *wrong* alias's target (the survivor), which is a false positive this
+    module's design otherwise avoids -- but the data is already lost by
+    the time ``snapshot.typedefs`` reaches this function; no local guard
+    here can recover which of the two real aliases the surviving entry
+    belongs to. This is not fixable at this layer -- same
+    ``parse_typedefs()`` root cause, same declined fix, same blast radius
+    as above.
     """
     signature_texts: list[str] = []
     for fn in kept_functions:
