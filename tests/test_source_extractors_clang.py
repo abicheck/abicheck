@@ -622,6 +622,22 @@ def test_build_command_msvc_driver_mode() -> None:
     assert not any(a.startswith("--target=") for a in cmd)
 
 
+def test_build_command_dpcpp_cl_driver_mode() -> None:
+    """Intel's oneAPI DPC++/C++ CL-compatible driver (``dpcpp-cl``) must be
+    driven through ``--driver-mode=cl`` the same as ``clang-cl`` -- without
+    this, ``dumper_clang.resolve_source_frontend_clang_bin``'s
+    ``exclude_cl_style=False`` (L4 source-ABI replay) resolves a
+    ``--gcc-path dpcpp-cl`` override correctly, but this module built a
+    GNU-shaped command for it instead (Codex review)."""
+    cmd = build_clang_command(
+        _cu(standard="c++20", defines={"WIN": "1"}, include_paths=["inc"]),
+        Path("a.cpp"),
+        compiler_binary="dpcpp-cl",
+    )
+    assert "--driver-mode=cl" in cmd
+    assert "/std:c++20" in cmd
+
+
 def test_build_command_carries_abi_flags_and_unwraps_launcher() -> None:
     cu = _cu(
         argv=["ccache", "clang++", "-c", "foo.cpp"],

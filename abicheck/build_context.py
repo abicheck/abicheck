@@ -88,6 +88,80 @@ _MAX_RESPONSE_FILE_DEPTH = 4
 _MAX_RESPONSE_FILE_BYTES = 1024 * 1024
 
 
+def _split_windows_command_line(text: str) -> list[str]:
+    """Tokenize a command line / response-file body using Windows/MSVC argv
+    rules (the same backslash-before-quote escaping ``CommandLineToArgvW``
+    and ``cl.exe`` use), instead of ``shlex.split(text, posix=False)`` —
+    which implements POSIX-shell quoting, not MSVC's, so a quoted path like
+    ``-I"C:\\Program Files\\SDK"`` gets split mid-path on the embedded space
+    (Codex review).
+
+    Rules (Microsoft's documented C runtime argv-parsing convention):
+    whitespace (space/tab/newline) delimits arguments unless inside a
+    double-quoted span; a run of N backslashes immediately followed by a
+    double-quote emits ``N // 2`` literal backslashes, and if N is odd the
+    final backslash escapes the quote (a literal ``"`` is emitted, the
+    quoted-span state is untouched) while an even N instead toggles the
+    quoted-span state; a run of backslashes NOT followed by a double-quote
+    is emitted literally. Never raises — unlike ``shlex.split``, malformed
+    quoting has no invalid state under these rules.
+    """
+    args: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    seen_token = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if not in_quotes and c in " \t\r\n":
+            if seen_token:
+                args.append("".join(current))
+                current = []
+                seen_token = False
+            i += 1
+            continue
+        seen_token = True
+        if c == "\\":
+            j = i
+            while j < n and text[j] == "\\":
+                j += 1
+            num_backslashes = j - i
+            if j < n and text[j] == '"':
+                current.append("\\" * (num_backslashes // 2))
+                if num_backslashes % 2 == 1:
+                    current.append('"')
+                    j += 1
+                else:
+                    in_quotes = not in_quotes
+                    j += 1
+            else:
+                current.append("\\" * num_backslashes)
+            i = j
+            continue
+        if c == '"':
+            in_quotes = not in_quotes
+            i += 1
+            continue
+        current.append(c)
+        i += 1
+    if seen_token:
+        args.append("".join(current))
+    return args
+
+
+def _split_command_line(text: str) -> list[str]:
+    """Tokenize a compile-db ``command``/``arguments``-string or a
+    response-file body, dispatching to the argv-quoting convention of the
+    host platform: POSIX shell quoting off ``os.name`` everywhere except
+    Windows, where :func:`_split_windows_command_line` implements the real
+    MSVC/``CommandLineToArgvW`` rules instead of ``shlex``'s ``posix=False``
+    mode (which is not actually Windows-argv-compatible)."""
+    if os.name == "nt":
+        return _split_windows_command_line(text)
+    return shlex.split(text, posix=True)
+
+
 def _safe_resolve(path: Path) -> Path | None:
     try:
         return path.resolve()
@@ -145,12 +219,18 @@ def _expand_response_files(
     ``file not found`` on every translation unit regardless of which
     compiler ends up invoked. A response file's own contents may themselves
     ``@include`` another one, so expansion recurses, bounded by
-    *_MAX_RESPONSE_FILE_DEPTH*, resolving a nested ``@file`` relative to the
-    *including* response file's own directory (matching Clang/GNU response-
-    file nesting semantics) rather than the original *directory* -- so
-    ``build/subdir/a.rsp`` can reference a sibling ``@b.rsp``. *root* is the
-    trusted directory a resolved ``@file`` must stay under (see
-    :func:`_read_response_file`).
+    *_MAX_RESPONSE_FILE_DEPTH*, resolving every nested ``@file`` against the
+    *original* *directory* (the compile action's own working directory) at
+    every recursion level, never the including response file's own
+    directory. This is deliberate, not an oversight: it's GCC/binutils'
+    (and Clang's own command-line ``@file``, as opposed to its separate
+    ``--config`` configuration-file mechanism) documented behavior for a
+    *command-line* response file — only Clang configuration files use
+    includer-relative nesting (via the ``<CFGDIR>`` token), which is a
+    different, unrelated feature this parser never encounters (a
+    ``compile_commands.json`` entry is a verbatim compiler invocation, never
+    a ``--config`` file). *root* is the trusted directory a resolved
+    ``@file`` must stay under (see :func:`_read_response_file`).
 
     Unreadable/oversized/out-of-tree files, and unparsable file contents,
     degrade to keeping the original ``@file`` token rather than raising —
@@ -171,13 +251,11 @@ def _expand_response_files(
             expanded.append(arg)
             continue
         try:
-            tokens = shlex.split(text, posix=os.name != "nt")
+            tokens = _split_command_line(text)
         except ValueError:
             expanded.append(arg)
             continue
-        expanded.extend(
-            _expand_response_files(tokens, path.parent, root, _depth + 1)
-        )
+        expanded.extend(_expand_response_files(tokens, directory, root, _depth + 1))
     return expanded
 
 
@@ -212,9 +290,9 @@ class CompileEntry:
             if isinstance(args_raw, list):
                 arguments = [str(a) for a in args_raw]
             else:
-                arguments = shlex.split(str(args_raw), posix=os.name != "nt")
+                arguments = _split_command_line(str(args_raw))
         elif "command" in raw:
-            arguments = shlex.split(str(raw["command"]), posix=os.name != "nt")
+            arguments = _split_command_line(str(raw["command"]))
         else:
             arguments = []
 

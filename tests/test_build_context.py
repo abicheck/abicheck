@@ -26,6 +26,7 @@ from abicheck.build_context import (
     CompileEntry,
     _entry_matches_filter,
     _extract_flags,
+    _split_windows_command_line,
     _std_sort_key,
     _try_consume_define_undef,
     _try_consume_sysroot,
@@ -281,18 +282,22 @@ class TestCompileEntry:
         )
         assert "-Iinclude/foo" in entry.arguments
 
-    def test_nested_response_file_resolves_relative_to_including_file(
+    def test_nested_response_file_resolves_relative_to_original_directory(
         self, tmp_path: Path
     ) -> None:
         """A response file referenced from *inside* another response file
-        resolves relative to the including file's own directory (matching
-        Clang/GNU response-file nesting semantics), not the original entry
-        directory -- so ``sub/a.rsp`` can reference a sibling ``@b.rsp``
-        living in ``sub/``, not in the top-level entry directory."""
+        (``@sub/a.rsp`` itself containing ``@b.rsp``) resolves relative to
+        the *original* compile-entry directory at every nesting level, not
+        the including file's own directory -- matching GCC/binutils' (and
+        Clang's own command-line ``@file``, as opposed to its separate
+        ``--config`` mechanism) documented CWD-relative behavior for a
+        command-line response file. A ``b.rsp`` living next to ``a.rsp`` in
+        ``sub/`` is NOT what a bare ``@b.rsp`` reference resolves to; a
+        ``db_dir/b.rsp`` is."""
         db_dir = tmp_path
         sub = db_dir / "sub"
         sub.mkdir()
-        (sub / "b.rsp").write_text("-Dnested=1\n")
+        (db_dir / "b.rsp").write_text("-Dnested=1\n")
         (sub / "a.rsp").write_text("-Itop @b.rsp\n")
         entry = CompileEntry.from_dict(
             {
@@ -304,6 +309,30 @@ class TestCompileEntry:
         )
         assert "-Itop" in entry.arguments
         assert "-Dnested=1" in entry.arguments
+
+    def test_nested_response_file_does_not_use_including_files_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """The inverse of the above: a ``b.rsp`` placed *beside* the
+        including ``sub/a.rsp`` (not at the original directory) is NOT
+        picked up by a bare nested ``@b.rsp`` reference -- confirming
+        nesting does not switch its base to the including file's directory."""
+        db_dir = tmp_path
+        sub = db_dir / "sub"
+        sub.mkdir()
+        (sub / "b.rsp").write_text("-Dwrong=1\n")
+        (sub / "a.rsp").write_text("-Itop @b.rsp\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@sub/a.rsp", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "-Itop" in entry.arguments
+        assert "-Dwrong=1" not in entry.arguments
+        assert "@b.rsp" in entry.arguments
 
 
 # ---------------------------------------------------------------------------
@@ -874,3 +903,47 @@ class TestSplitDefineUndef:
         new_i = _try_consume_define_undef("-std=c++17", ["-std=c++17"], 0, ctx)
         assert new_i == 0
         assert not ctx.defines
+
+
+# ---------------------------------------------------------------------------
+# Tests: _split_windows_command_line
+# ---------------------------------------------------------------------------
+
+
+class TestSplitWindowsCommandLine:
+    def test_simple_space_separated(self) -> None:
+        assert _split_windows_command_line("-Ifoo -Dbar=1 -c") == [
+            "-Ifoo",
+            "-Dbar=1",
+            "-c",
+        ]
+
+    def test_quoted_path_with_space_stays_one_token(self) -> None:
+        """The motivating case: a quoted include path containing a space
+        (e.g. an SDK under ``Program Files``) must not split mid-path --
+        shlex's ``posix=False`` mode gets this wrong (Codex review)."""
+        assert _split_windows_command_line(
+            '-I"C:\\Program Files\\SDK" -c foo.cpp'
+        ) == ['-IC:\\Program Files\\SDK', "-c", "foo.cpp"]
+
+    def test_even_backslashes_before_quote_toggle_quoting(self) -> None:
+        # Two backslashes before the quote -> one literal backslash (the
+        # pair), and the quote toggles quoting (consumed, not emitted).
+        assert _split_windows_command_line('-I\\\\"C:\\SDK"') == [
+            "-I\\C:\\SDK"
+        ]
+
+    def test_odd_backslashes_before_quote_escape_it(self) -> None:
+        # One backslash before the quote -> zero literal backslashes (no
+        # complete pair) and the backslash escapes the quote to a literal
+        # `"`; the backslash itself is consumed, not emitted.
+        assert _split_windows_command_line('-Ifoo\\"bar') == ['-Ifoo"bar']
+
+    def test_literal_backslash_not_before_quote(self) -> None:
+        assert _split_windows_command_line("C:\\SDK\\include") == [
+            "C:\\SDK\\include"
+        ]
+
+    def test_never_raises_on_unbalanced_quote(self) -> None:
+        # Unlike shlex.split, an unterminated quote has no invalid state.
+        assert _split_windows_command_line('-I"C:\\SDK') == ["-IC:\\SDK"]

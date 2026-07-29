@@ -38,7 +38,16 @@ from ..build_evidence import CompileUnit
 #: Languages that make the GNU fallback compiler ``g++`` rather than ``gcc``.
 CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
 #: Compiler basenames that mean the extractor should run in MSVC mode.
-MSVC_BINARIES = frozenset({"cl", "cl.exe", "clang-cl", "clang-cl.exe"})
+#: ``dpcpp-cl``/``dpcpp-cl.exe`` is Intel's oneAPI DPC++/C++ CL-compatible
+#: driver (the same CL-mode convention as ``clang-cl``, just Intel-branded);
+#: without it here, ``dumper_clang.resolve_source_frontend_clang_bin``'s
+#: ``exclude_cl_style=False`` (L4 source-ABI replay) resolves ``--gcc-path
+#: dpcpp-cl`` correctly, but this module still built a GNU-shaped command for
+#: it instead of adding ``--driver-mode=cl``, so the CL-mode override never
+#: actually reached the driver (Codex review).
+MSVC_BINARIES = frozenset(
+    {"cl", "cl.exe", "clang-cl", "clang-cl.exe", "dpcpp-cl", "dpcpp-cl.exe"}
+)
 #: Compiler-launcher wrappers that prefix the real compiler in a build action
 #: (``ccache clang++ -c foo.cpp``). The extractor must emulate the real compiler,
 #: not the launcher, which would otherwise run without its compiler operand.
