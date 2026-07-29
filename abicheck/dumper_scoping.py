@@ -848,7 +848,19 @@ def _scoped_dwarf_advanced(
     (a kept function's own real mangled name is never bare-equal to an
     unrelated excluded symbol's bare name in a valid binary: two distinct
     globals sharing one unmangled C symbol name would already be an ODR
-    violation the linker itself would have rejected)."""
+    violation the linker itself would have rejected).
+
+    Codex review, re-confirmed with a concrete repro (excluded C++ dependency
+    function whose header-AST ``mangled`` is an unreliable bare ``"dep"``
+    while DWARF's real ``linkage_name`` is ``_ZN3dep3depEv``): this is
+    exactly the already-accepted residual failure mode above, not a new gap
+    -- ``excluded_symbols`` has no way to recover the real DWARF key from an
+    unreliable bare spelling without either a genuine Function-to-DWARF
+    correlation this codebase doesn't have, or re-demangling every
+    ``linkage_name`` (a real perf cost on every dump/compare, for a benefit
+    this false-negative-biased filter already deliberately forgoes
+    elsewhere). Left unfiltered under its real key, same as any other
+    excluded function whose true mangled DWARF key isn't its bare name."""
     if adv is None or not adv.has_dwarf:
         return adv
     return dataclasses.replace(

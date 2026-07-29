@@ -2162,6 +2162,69 @@ class TestCompareRequestAdr055Evidence:
         assert str(header) in embed_calls[0]["public_headers"]
         assert str(header_dir) in embed_calls[0]["public_header_dirs"]
 
+    def test_dump_manifest_public_roots_forwarded_to_embed_build_source(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P1, second round): a dump_manifest replaces
+        `headers` entirely, so public_headers/public_header_dirs (both
+        derived from `headers`) stay empty for a manifest-driven request --
+        the manifest's own roots (public_header_paths/public_header_dirs)
+        must still reach source replay, or it can classify the manifest's
+        API declarations as non-public and omit source-only breaks."""
+        from types import SimpleNamespace
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        manifest = SimpleNamespace(
+            roots=[],
+            public_header_paths=["/proj/api.h"],
+            public_header_dirs=["/proj/include"],
+            translation_units=[],
+        )
+
+        embed_calls: list[dict] = []
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source",
+            lambda snap, **kwargs: embed_calls.append(kwargs),
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=src_dir, dump_manifest=manifest),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        assert "/proj/api.h" in embed_calls[0]["public_header_dirs"]
+        assert "/proj/include" in embed_calls[0]["public_header_dirs"]
+
+    def test_binary_depth_clears_public_headers_for_scope_fingerprint(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P2): depth="binary" clears the actual header parse
+        but a headerless dump still fingerprints public_headers/
+        public_header_dirs for scope_fingerprint -- old/new sides with
+        differing header lists must not spuriously ScopeMismatchError
+        despite the request explicitly selecting binary-only evidence."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        old_h = tmp_path / "old.h"
+        calls = self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, headers=[old_h]),
+            new=InputSpec.of(new_p),
+            depth="binary",
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["public_headers"] == []
+        assert calls_by_path[old_p]["public_header_dirs"] == []
+
     def test_request_frontend_case_is_normalized_for_extractor(
         self, tmp_path, monkeypatch
     ):

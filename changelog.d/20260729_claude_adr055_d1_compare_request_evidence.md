@@ -25,9 +25,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   and `public_header_dirs` are forwarded/unioned into the existing resolution
   path, including the dependency-scope filter (a declared-public file or
   directory is no longer misclassified as a toolchain dependency); `depth ==
-  "binary"` also clears `dump_manifest`, not just `headers`; the side's
-  public-header roots are forwarded into the inline evidence collection too,
-  so source replay's own public-header set isn't silently left empty; the
+  "binary"` also clears `dump_manifest` and the header-derived public-header
+  provenance/fingerprint set, not just `headers`, since a headerless dump
+  still fingerprints those for `compute_extraction_contract`'s
+  `scope_fingerprint` and would otherwise spuriously `ScopeMismatchError` on
+  differing header lists; the side's public-header roots (plus a
+  `dump_manifest`'s own `public_header_paths`/`public_header_dirs`, since a
+  manifest-driven request has no `headers` for them to derive from) are
+  forwarded into the inline evidence collection too, so source replay's own
+  public-header set isn't silently left empty; the
   inline evidence collection's `extractor` matches whichever L2 frontend
   actually ran for that side — resolved to a concrete backend (e.g. the
   default `"auto"` resolves to `castxml`, matching L2's own default), using a

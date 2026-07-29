@@ -1705,9 +1705,7 @@ def run_compare_request(
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
 
-    # Pair-wide C++20 dialect resolution (P0 fix); folded into each side's
-    # effective CompileContext below alongside ADR-055 D1's per-side
-    # `InputSpec.compile` override (service_compare_evidence.py).
+    # Pair-wide C++20 dialect resolution (P0 fix); folded into each side's effective CompileContext below alongside ADR-055 D1's per-side compile override (service_compare_evidence.py).
     pair_compile: CompileContext | None = None
     override = pair_wide_cxx20_std_override(lang, request.old.headers, request.new.headers, None, ())
     if override is not None:
@@ -1727,7 +1725,9 @@ def run_compare_request(
     )
     old_public_header_dirs += list(request.old.public_header_dirs)
     new_public_header_dirs += list(request.new.public_header_dirs)
-
+    # Codex: binary depth clears evidence.headers, but a headerless dump still fingerprints these -- clear too, else differing lists spuriously ScopeMismatchError.
+    if request.depth is not None and request.depth.lower() == "binary":
+        old_public_headers = new_public_headers = old_public_header_dirs = new_public_header_dirs = []
     from . import service_compare_evidence as _sce  # ADR-055 D1
     from .cli_buildsource import embed_build_source
 
@@ -1759,14 +1759,13 @@ def run_compare_request(
             dump_manifest=evidence.dump_manifest,
         )
         if side.sources or side.build_info:
-            extractor = _sce.effective_frontend(evidence.compile, header_backend)
-            # Codex review (P1): same public-header roots as resolve_input above -- else source replay's public_headers is empty, hiding source-only breaks.
-            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=extractor, public_headers=tuple(str(p) for p in public_headers), public_header_dirs=tuple(str(p) for p in public_header_dirs))
+            # Codex: same public-header roots as resolve_input, plus dump_manifest's own roots (it replaces headers, else public_headers/dirs stay empty) -- else source replay hides source-only breaks.
+            from .dumper_scoping import dump_manifest_header_roots
+            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=_sce.effective_frontend(evidence.compile, header_backend), public_headers=tuple(str(p) for p in public_headers), public_header_dirs=tuple(str(p) for p in public_header_dirs) + tuple(str(p) for p in dump_manifest_header_roots(evidence.dump_manifest)))
         return snap
 
     def _resolve_old_side() -> AbiSnapshot:
         return _resolve_side(request.old, old_evidence, old_fmt, old_public_headers, old_public_header_dirs)
-
     def _resolve_new_side() -> AbiSnapshot:
         return _resolve_side(request.new, new_evidence, new_fmt, new_public_headers, new_public_header_dirs)
 
