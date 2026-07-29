@@ -392,15 +392,28 @@ def _directly_referenced_dependency_names(
 
     typedefs = typedefs or {}
 
-    kept_spellings = {
-        suffix
-        for rec in kept_types
-        for suffix in _namespace_suffix_spellings(_candidate_identity(rec))
-    } | {
-        suffix
-        for enum in kept_enums
-        for suffix in _namespace_suffix_spellings(_candidate_identity(enum))
-    }
+    # Elaborated-type-specifier spellings (``struct Foo``, ``union Foo``,
+    # ``enum Foo``) must collision-guard against a kept type's/enum's own
+    # spelling the same way a dependency candidate's own elaborated
+    # spelling does (Codex review, fresh evidence): a kept ``api::Foo``
+    # and an unrelated dependency-header global ``struct Foo`` share the
+    # bare tag name ``Foo``, and a declaration inside ``api::`` can spell
+    # a reference to the kept type as bare ``struct Foo *`` (the same
+    # namespace-dropping convention already accounted for everywhere
+    # else in this module) -- but only the bare ``Foo`` suffix was ever
+    # added to *kept_spellings*, never its elaborated form, so ``struct
+    # Foo`` slipped past this guard and let the unrelated dependency
+    # ``struct Foo`` be retained as if the signature's elaborated
+    # reference named it.
+    kept_spellings = set()
+    for rec in kept_types:
+        suffixes = _namespace_suffix_spellings(_candidate_identity(rec))
+        kept_spellings.update(suffixes)
+        kept_spellings.update(f"{rec.kind} {s}" for s in suffixes)
+    for enum in kept_enums:
+        suffixes = _namespace_suffix_spellings(_candidate_identity(enum))
+        kept_spellings.update(suffixes)
+        kept_spellings.update(f"enum {s}" for s in suffixes)
 
     identity_of: dict[int, str] = {}
     raw_own_spellings_of: dict[int, set[str]] = {}

@@ -1171,6 +1171,42 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.name for t in scoped.types] == ["Handle"]
 
+    def test_elaborated_spelling_still_collision_guards_against_kept_type(
+        self,
+    ):
+        """Codex review (thirty-first round, P1): a kept `api::Foo` and an
+        unrelated dependency-header global `struct Foo` share the bare
+        tag name `Foo`. A declaration inside `api::` can spell a
+        reference to the kept type as bare `struct Foo *` (the same
+        namespace-dropping convention this module already accounts for
+        elsewhere) -- but `kept_spellings` only ever added the bare `Foo`
+        suffix, never its elaborated form, so `struct Foo` slipped past
+        the kept-type collision guard and retained the unrelated
+        dependency `Foo` as if the signature's elaborated reference
+        named it. Only `api::Foo` (the kept type) may be retained;
+        the dependency `Foo` must not be."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("struct Foo *",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    qualified_name="api::Foo",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+
     def test_typedef_chain_through_a_shadowing_key_does_not_reach_dependency(
         self,
     ):
