@@ -83,15 +83,20 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
     BREAKING_KINDS,
 )
 from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_compare_helpers import _cli_flag, _warn_force_public_ignored
+from .cli_helpers_compare import _collect_force_public_symbols
 from .cli_options import (
     compile_context_options,
+    env_matrix_option,
     lang_option,
     merge_compile_config,
+    policy_options,
     resolve_compile_context,
+    scope_options,
     split_sided_paths,
     verbose_option,
 )
-from .cli_params import DEPTH_PARAM, SIDED_PATH_PARAM
+from .cli_params import DEPTH_PARAM, SIDED_PATH_PARAM, _load_suppression_and_policy
 from .cli_scan_baseline import (
     _baseline_is_native_library,  # noqa: F401 - re-export for scan tests/service_scan
     _emit_estimate,  # noqa: F401 - re-export; --estimate CLI flag removed, kept for direct callers
@@ -532,7 +537,10 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
     help="Trusted project .abicheck.yml (enables build.query with "
-    "--allow-build-query).",
+    "--allow-build-query). Also supplies scope/suppression settings "
+    "(scope.public, scope.public_symbols, suppression.strict) the same way "
+    "`compare --config` does (CLI flags override); auto-discovered upward "
+    "from the current directory when omitted.",
 )
 @click.option(
     "--against",
@@ -611,6 +619,43 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     default=None,
     help="Override the risk_rules profile (YAML).",
 )
+@policy_options  # ADR-049 Phase 5: --against config-surface parity with `compare`
+@scope_options  # (--policy/--policy-file/--suppress/--scope-public-headers)
+@click.option(
+    "--strict-suppressions",
+    is_flag=True,
+    default=False,
+    help="With --against: fail with exit code 1 if any --suppress rule has "
+    "expired (mirrors `compare --strict-suppressions`, ADR-049 Phase 5 §6.4).",
+)
+@click.option(
+    "--public-symbol",
+    "public_symbols",
+    multiple=True,
+    help="With --against: force a symbol (mangled or demangled name) into the "
+    "public surface even when header provenance can't see it (mirrors "
+    "`compare --public-symbol`). Repeatable. Only meaningful with "
+    "--scope-public-headers.",
+)
+@click.option(
+    "--public-symbols-list",
+    "public_symbols_list",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="With --against: file of symbols to force public (one per line; '#' "
+    "comments and blank lines ignored), merged with --public-symbol (mirrors "
+    "`compare --public-symbols-list`).",
+)
+@click.option(
+    "--pattern-verdicts/--no-pattern-verdicts",
+    "pattern_verdicts",
+    default=False,
+    help="With --against: modulate verdicts with idiom/anti-pattern evidence "
+    "(ADR-027, mirrors `compare --pattern-verdicts`): demote opaque-pointer/"
+    "PIMPL-hidden layout changes and raise breaks when an opacity/handle "
+    "guarantee is lost.",
+)
+@env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract), --against only
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -650,6 +695,15 @@ def scan_cmd(
     dry_run: bool,
     crosschecks: tuple[str, ...],
     risk_rules_path: Path | None,
+    suppress: Path | None,
+    policy_file_path: Path | None,
+    policy: str,
+    scope_public_headers: bool,
+    strict_suppressions: bool,
+    public_symbols: tuple[str, ...],
+    public_symbols_list: Path | None,
+    pattern_verdicts: bool,
+    env_matrix_path: Path | None,
     lang: str,
     allow_build_query: bool,
     fmt: str,
@@ -719,10 +773,59 @@ def scan_cmd(
     baseline_header = tuple(header_both) + tuple(header_old)
     baseline_include = tuple(include_both) + tuple(include_old)
 
+    # ADR-049 Phase 5 review (Codex, PR #657 P1): resolve the project config
+    # PATH + object ONCE, upfront, so the same .abicheck.yml feeds both its
+    # `compile:` block (via `resolve_compile_context`, below) and its scope/
+    # suppression settings (further below) -- previously `resolve_compile_
+    # context` had no cwd-upward discovery of its own, so a config found only
+    # by walking up from cwd never fed `compile.defines`/include dirs/
+    # frontend/std/sysroot anywhere even though its scope/suppression
+    # settings were applied: a macro- or dialect-dependent header API could
+    # then parse under the wrong context and produce a false COMPATIBLE
+    # verdict. All error handling lives here (not duplicated in
+    # `resolve_compile_context`/`resolve_compare_config`'s own callers) so
+    # `cfg_path` passed to `resolve_compile_context` below is always either
+    # `None` or a path already confirmed to parse.
+    #
+    # Precedence matches `merge_compile_config`'s own convention for the
+    # `compile:` block (explicit --config > --sources tree root); the
+    # cwd-upward fallback is scan-specific and, per the "reject comparison-
+    # only flags without --against" guard above, only attempted for an
+    # actual `--against` comparison -- a plain one-build audit never needs
+    # any of this, so it must not even try the cwd-upward walk.
+    from .buildsource.inline import discover_build_config, load_build_config
+
+    explicit_config = build_config is not None
+    cfg_path = build_config if explicit_config else discover_build_config(sources)
+    if cfg_path is None and not explicit_config and against is not None:
+        from .cli_helpers_compare import discover_project_config
+
+        cfg_path = discover_project_config()
+    project_cfg = None
+    if cfg_path is not None:
+        try:
+            project_cfg = load_build_config(cfg_path)
+        except ValueError as exc:
+            if explicit_config:
+                raise click.UsageError(
+                    f"cannot parse build config {cfg_path}: {exc}"
+                ) from exc
+            # Auto-discovered (--sources root or cwd-upward): best-effort,
+            # matching `merge_compile_config`'s own identical convention --
+            # a config the user never explicitly bound to shouldn't fail a
+            # run it wasn't asked to affect.
+            click.echo(
+                f"warning: could not parse auto-discovered {cfg_path}; "
+                f"using CLI compile/comparison settings only ({exc}).",
+                err=True,
+            )
+            cfg_path = None
+
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver bundles the cross-toolchain + frontend flags and folds the
-    # project's `.abicheck.yml` compile: block in (CLI > config; the config is
-    # --config or the one auto-discovered at the --sources root).
+    # project's `.abicheck.yml` compile: block in (CLI > config; `cfg_path`
+    # above is the exact same config the scope/suppression resolution below
+    # reads from, and is only ever `None` or already known to parse cleanly).
     compile_context, includes_tuple = resolve_compile_context(
         click.get_current_context(),
         gcc_path=gcc_path,
@@ -733,13 +836,128 @@ def scan_cmd(
         nostdinc=nostdinc,
         header_backend=header_backend,
         includes=tuple(includes),
-        build_config=build_config,
+        build_config=cfg_path,
         sources=sources,
         frontend_context=frontend_context,
     )
     includes = includes_tuple
     binary = artifact
     baseline = against
+
+    # ADR-049 Phase 5 review (Codex, PR #657): every flag below only means
+    # anything for a --against comparison -- `run_scan_core` calls
+    # `_run_baseline_compare` only when a baseline is given, so without
+    # --against these would otherwise be silently parsed, validated (a
+    # malformed --env-matrix would still fail an unrelated one-build audit),
+    # and then discarded -- hiding e.g. a --policy-file require_evidence
+    # setting the user actually needed. Reject them explicitly rather than
+    # accepting no-op configuration.
+    if against is None:
+        ctx = click.get_current_context()
+        _comparison_only_flags = {
+            "suppress": "--suppress",
+            "policy_file_path": "--policy-file",
+            "policy": "--policy",
+            "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
+            "strict_suppressions": "--strict-suppressions",
+            "public_symbols": "--public-symbol",
+            "public_symbols_list": "--public-symbols-list",
+            "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
+            "env_matrix_path": "--env-matrix",
+        }
+        explicit = [
+            flag
+            for dest, flag in _comparison_only_flags.items()
+            if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+        ]
+        if explicit:
+            noun = "flag" if len(explicit) == 1 else "flags"
+            raise click.UsageError(
+                f"{', '.join(explicit)} only take effect with --against (they "
+                f"configure the baseline comparison); drop {'this' if len(explicit) == 1 else 'these'} "
+                f"{noun} or pass --against."
+            )
+
+    # ADR-049 Phase 5 review (Codex, PR #657): resolve scope/suppression
+    # settings through the project's `.abicheck.yml` the same way `compare`
+    # does (CLI > config > default, ADR-037 D4) -- reusing `compare`'s own
+    # `resolve_compare_config`, and the exact same already-loaded
+    # `project_cfg` the compile-context resolution above used, rather than
+    # reading raw CLI values only or re-discovering independently. Without
+    # this, a project config's `suppression.strict`/`scope.public`/
+    # `scope.public_symbols`/`scope.collapse_versioned_symbols`/
+    # `suppression.require_justification` applied to `compare` but silently
+    # had no effect on `scan --against`. Severity/debug/exit-code-scheme
+    # config keys are also resolved here (required positional args of the
+    # shared function) but deliberately discarded -- `scan` has no
+    # equivalent flags for them.
+    #
+    # Gated on `against is not None`: every field this resolves only means
+    # anything for a baseline comparison (mirrors the "reject comparison-only
+    # flags without --against" guard above) -- skipping it for a plain
+    # one-build audit means the (already-loaded, possibly None) config never
+    # affects an audit-only run.
+    collapse_versioned_symbols = False
+    require_justification = False
+    if against is not None:
+        from .cli_helpers_compare import resolve_compare_config
+
+        resolved_cfg = resolve_compare_config(
+            project_cfg,
+            cli_severity_preset=None,
+            cli_severity_abi_breaking=None,
+            cli_severity_potential_breaking=None,
+            cli_severity_quality_issues=None,
+            cli_severity_addition=None,
+            cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
+            cli_collapse_versioned_symbols=None,
+            cli_public_symbols=public_symbols,
+            cli_strict_suppressions=_cli_flag(
+                "strict_suppressions", strict_suppressions
+            ),
+        )
+        scope_public_headers = resolved_cfg.scope_public
+        strict_suppressions = resolved_cfg.strict_suppressions
+        public_symbols = tuple(resolved_cfg.public_symbols)
+        # `scan` has no --collapse-versioned-symbols/--require-justification
+        # flags of its own (config-only for scan, same as compare's hidden/
+        # demoted equivalents), so these are purely `resolved_cfg`'s config >
+        # default resolution with no CLI override to consider.
+        collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
+        require_justification = resolved_cfg.require_justification
+
+    # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
+    # loader (`_load_suppression_and_policy`) so a scan baseline comparison
+    # can be scoped/suppressed/policy-classified the same way a direct
+    # `compare` run is, instead of the previously-hardcoded
+    # policy="strict_abi"/suppression=None. A no-op (returns (None, None))
+    # when neither --suppress nor --policy-file is given, so a plain `scan
+    # --against` invocation with none of these flags behaves exactly as
+    # before.
+    suppression, policy_file = _load_suppression_and_policy(
+        suppress,
+        policy,
+        policy_file_path,
+        strict_suppressions=strict_suppressions,
+        require_justification=require_justification,
+    )
+
+    # ADR-049 Phase 5 §6.4: --against also reuses `compare`'s own force-public
+    # overlay (--public-symbol/--public-symbols-list) and env-matrix
+    # (--env-matrix) config surface, both of which `compare_snapshots` already
+    # accepts as plain kwargs (`force_public_symbols`/`env_matrix`) -- no new
+    # engine capability, just CLI/service plumbing parity.
+    force_public_symbols = _collect_force_public_symbols(
+        public_symbols, public_symbols_list
+    )
+    _warn_force_public_ignored(force_public_symbols, scope_public_headers)
+    from .errors import AbicheckError
+    from .service import load_env_matrix
+
+    try:
+        env_matrix = load_env_matrix(env_matrix_path)
+    except AbicheckError as exc:
+        raise click.UsageError(str(exc)) from exc
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
@@ -867,6 +1085,14 @@ def scan_cmd(
             # and that `--mode audit` uses for a binary-only lint — treating it as a
             # pin would break those best-effort paths (Codex review).
             pinned_explicit=_pinned_explicit,
+            suppression=suppression,
+            policy=policy,
+            policy_file=policy_file,
+            scope_to_public_surface=scope_public_headers,
+            force_public_symbols=force_public_symbols,
+            pattern_verdicts=pattern_verdicts,
+            env_matrix=env_matrix,
+            collapse_versioned_symbols=collapse_versioned_symbols,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,

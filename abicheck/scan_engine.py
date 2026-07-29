@@ -78,7 +78,10 @@ from .errors import ProfileMismatchError, ScopeMismatchError
 from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
+    from .environment_matrix import EnvironmentMatrix
+    from .policy_file import PolicyFile
     from .service_scan import CompileContext
+    from .suppression import SuppressionList
 
 
 def _preprocessor_scan_clang_bin(compile_context: CompileContext | None) -> str:
@@ -693,6 +696,14 @@ def run_scan_core(
     compile_context: CompileContext | None = None,
     defer_cleanup: list[Callable[[], None]] | None = None,
     abi3_floor: tuple[int, int] | None = None,
+    suppression: SuppressionList | None = None,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+    scope_to_public_surface: bool = True,
+    force_public_symbols: set[str] | None = None,
+    pattern_verdicts: bool = False,
+    env_matrix: EnvironmentMatrix | None = None,
+    collapse_versioned_symbols: bool = False,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -907,6 +918,14 @@ def run_scan_core(
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
                     debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                    suppression=suppression,
+                    policy=policy,
+                    policy_file=policy_file,
+                    scope_to_public_surface=scope_to_public_surface,
+                    force_public_symbols=force_public_symbols,
+                    pattern_verdicts=pattern_verdicts,
+                    env_matrix=env_matrix,
+                    collapse_versioned_symbols=collapse_versioned_symbols,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start

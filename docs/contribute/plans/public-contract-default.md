@@ -1168,6 +1168,315 @@ normative stage order.
 **Gate:** field-for-field parity tests across binaries, snapshots, mixed inputs,
 policies, packs, suppressions, and explicit scope.
 
+**Updated (2026-07-29):** landed the first concrete slice of "route both
+direct compare and scan baseline compare through the same core" -- not the
+full phase, which stays open. §6.3's collector, `collect_l0_export_delta()`,
+now lives in one new leaf module, `abicheck/l0_export_delta.py`: the
+"re-resolve both sides symbols-only, diff them unscoped, and keep only the
+`func_removed_elf_only` fact" logic that recovers a hard ELF/DWARF removal a
+macro-gated header pass can hide (`examples/case97_api_depends_on_consumer_env`)
+was previously hand-copied verbatim in
+`cli_helpers_compare.fold_l0_hard_removals` (direct `compare`) and
+`cli_scan_baseline._run_baseline_compare` (`scan --against`) -- each
+docstring explicitly cross-referenced the other as its twin, and PR #494's
+own regression tests (`tests/test_pr494_scan_regressions.py`) already assumed
+they'd stay in lockstep by hand. Both call sites now call the same function;
+`fold_l0_hard_removals` keeps only the staleness check that is genuinely
+specific to it (re-deriving paths from an already-resolved snapshot that
+could have been read back from a stale pre-dumped JSON file -- `scan
+--against` already holds the real, freshly-resolved paths and has nothing to
+go stale against). New tests in `tests/test_l0_export_delta.py` cover the
+collector in isolation (resolve failure, compare failure, the exact
+`func_removed_elf_only` fold, and non-matching-kind rejection), independent
+of either call site's own staleness/scoping tests. `scripts/check_ai_readiness.py`'s
+`IMPORT_CYCLE_ALLOWLIST` gained one new member (`l0_export_delta`) joining
+the existing CLI-registration SCC -- the same by-design function-local-import
+pattern every other member already uses, not a new dependency direction (see
+that allowlist's own inline comment for the reasoning).
+
+**Updated (2026-07-29, same PR as the note above): a second slice landed --
+`scan --against` config-surface parity.** `scan_cmd` (`cli_scan.py`) now
+carries `@policy_options`/`@scope_options`, the exact same decorators
+`compare` uses, giving it real `--policy`/`--policy-file`/`--suppress`/
+`--scope-public-headers` flags reusing `compare`'s own
+`_load_suppression_and_policy` loader (`cli_params.py`) -- a no-op
+returning `(None, None)` when neither `--suppress` nor `--policy-file` is
+given, so a plain `scan --against` invocation with none of these flags is
+unchanged. The resulting `suppression`/`policy`/`policy_file`/
+`scope_to_public_surface` values are threaded through `run_scan_core`
+(`scan_engine.py`) into `_run_baseline_compare`'s own `compare_snapshots`
+call (`cli_scan_baseline.py`), replacing the previously-hardcoded
+`policy="strict_abi"`/`suppression=None`/`scope_to_public_surface=True`.
+`_run_baseline_compare` also now calls the same
+`cli_compare_helpers._verdict_exit_code` `compare` already uses instead of
+its own hand-rolled BREAKING=4/API_BREAK=2 inline mapping.
+`abicheck.service_scan.ScanRequest` gained matching
+`suppression`/`policy`/`policy_file`/`scope_to_public_surface` fields (all
+defaulted to the prior hardcoded behavior) so the Python API gets the same
+config surface, threaded into its own `run_scan_core` call in
+`service_scan.run_scan`. The MCP `abi_scan`/`abi_estimate` tools do **not**
+yet expose these as tool parameters -- deliberately deferred, since adding
+MCP-surface parameters needs its own generated-doc regeneration
+(`gen_mcp_reference.py`) and tool-schema review, not a drive-by extension
+of this CLI/service-layer slice. New tests: `test_scan_baseline_headers.py`
+gained a CLI param-surface check
+(`test_scan_exposes_against_config_surface_options`) and a kwarg-capture
+test asserting `_run_baseline_compare` forwards its own
+suppression/policy/policy_file/scope_to_public_surface arguments into
+`compare_snapshots` unchanged
+(`test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots`).
+
+**Updated (2026-07-29, same PR): a third slice landed -- the rest of
+`compare`'s policy-adjacent config surface, plus real cross-command parity
+tests.** `scan --against` now also accepts `--strict-suppressions` (reuses
+`_load_suppression_and_policy`'s existing `strict_suppressions` kwarg --
+already there for `compare`/`compare-release`, just not threaded from
+`scan_cmd` before), `--public-symbol`/`--public-symbols-list` (the
+force-public overlay, via the same `_collect_force_public_symbols`/
+`_warn_force_public_ignored` helpers `compare` uses), `--pattern-verdicts`,
+and `--env-matrix` (loaded via `service.load_env_matrix`, same as
+`compare`) -- all four were already plain kwargs `compare_snapshots` itself
+accepted (`force_public_symbols`/`pattern_verdicts`/`env_matrix`), so this
+is CLI/service plumbing parity, not new engine capability. `ScanRequest`
+gained matching fields for the Python API. New:
+`tests/test_scan_compare_parity.py` runs `compare` and `scan --against` on
+the *same* JSON snapshot pair through Click's `CliRunner` and asserts they
+agree end to end (exit code) under identical suppression/scope flags --
+unsuppressed removal breaks both (exit 4), the same suppression file makes
+both compatible (exit 0), and `--no-scope-public-headers` agrees on both
+sides too. This is deliberately narrow (one concrete suppression scenario,
+not every flag/input combination §6.4's Gate lists), but it is a real,
+executable field-for-field parity assertion between the two commands where
+none existed before.
+
+**Two Codex review rounds on this same slice found real, fixed gaps.**
+First: `_run_baseline_compare` forwarded `policy_file` to `compare_snapshots`
+but not to `prepare_embedded_build_source` (`cli_buildsource_helpers.py`),
+which is what actually applies `require_evidence`/evidence-verdict
+overrides (ADR-033 D7) -- a `--policy-file` requiring evidence had no
+effect on `scan --against`, fixed by threading `policy_file` into that call
+too. `--env-matrix` with malformed YAML also raised an uncaught
+`ValidationError` instead of `compare`'s existing `AbicheckError` ->
+`click.UsageError` handling; fixed the same way. Second: every one of these
+config-surface flags only means anything for a `--against` comparison
+(`run_scan_core` calls `_run_baseline_compare` only when a baseline is
+given) -- without `--against` they were silently parsed (and, for
+`--env-matrix`, even validated against a file that could never matter) and
+then discarded, which could hide a `--policy-file` requiring evidence the
+user actually needed. `scan_cmd` now rejects any of them (via
+`ctx.get_parameter_source(...) == COMMANDLINE`) with a `click.UsageError`
+(exit 64) when passed without `--against`, rather than accepting silent
+no-op configuration. New tests: `test_scan_rejects_comparison_only_flags_without_against`
+(parametrized over four of the flags) and
+`test_scan_without_against_and_without_comparison_flags_is_unaffected`
+(the guard must not fire for a plain audit that touches none of them).
+
+**Updated (2026-07-29, same PR): a fourth slice closed a real, related gap
+-- `scan --against`'s own suppression audit trail.** Investigating "no
+suppression ledger exists" (below) turned up prior art that was closer than
+first thought: `DiffResult.suppressed_changes` ("full audit trail" per its
+own field comment, `checker_types.py`) and `reporter.py`'s `_add_suppression`
+already give `compare`'s JSON report a per-run list of every finding a
+`--suppress` rule silenced, including which rule (`Change.suppression_rule`).
+`scan --against` newly honors suppression (this Phase 5's earlier slices)
+but its own summary never surfaced *which* finding got silenced -- an
+asymmetry between the two commands' audit trails, not a missing concept.
+Fixed by adding the equivalent (`suppressed_count`/`suppressed`, capped
+independently of the existing gating-findings truncation) to
+`_run_baseline_compare`'s summary dict, reusing the existing
+`_baseline_finding_dicts` projector. New test
+`test_scan_against_exposes_suppression_ledger_like_compare` asserts `scan
+--against --suppress --format json` surfaces the same audit trail
+end-to-end (not just that the flag threads through in isolation). Also
+bumped `SCAN_SCHEMA_VERSION` to `1.4` for these additive `diff` keys (Codex
+review caught the missing bump) and pinned a test that had hardcoded the
+prior literal `"1.3"` to the live constant instead.
+
+**Updated (2026-07-29, same PR): one more Codex-caught gap in the same
+suppression ledger.** `_baseline_finding_dicts`' projection dropped
+`Change.suppression_rule` -- the ledger could show *which finding* was
+silenced but not *which `--suppress` rule* silenced it, unlike `compare`'s
+own `reporter._suppressed_change_entry`
+(`impact_assessment.decision.suppression_rule`). Fixed by having
+`_baseline_finding_dicts` add a `suppression_rule` key, but only for
+`bucket="suppressed"` entries -- the breaking/api_break/risk buckets keep
+their exact prior shape unchanged (an existing strict-equality test and two
+sibling modules, `cli_compare_release.py`/`stack_report.py`, already pin
+that shape). New assertions in both the CLI end-to-end parity test and the
+unit-level truncation test confirm the rule label (falling back to a rule's
+`reason` when it has no `label`, same as `compare`) round-trips through
+JSON.
+
+**Updated (2026-07-29, same PR): the CLI's "reject comparison-only flags
+without --against" guard had a Python-API-side gap too.** The `scan_cmd`
+guard (added earlier this slice) only lives in the CLI front-end;
+`service_scan.run_scan` -- the Python API entry point behind the same
+`ScanRequest` fields -- had no equivalent, so a library caller could set
+e.g. `ScanRequest(policy_file=..., baseline=None)` and have it silently
+accepted and discarded, same failure mode the CLI guard was built to close.
+Fixed by adding the identical rejection in `run_scan` itself (raising
+`ValidationError`, this module's own established validation-error type,
+rather than `click.UsageError` which is CLI-specific) -- gated on
+`req.baseline is None OR ScanMode(req.mode) is ScanMode.AUDIT`, since an
+explicit `mode="audit"` skips the baseline compare in `run_scan_core` even
+when a baseline path is set (a case the CLI guard doesn't need to consider,
+since the public CLI has no `--mode` flag left to set it explicitly). Three
+new tests in `test_service_unit.py` cover: rejection with no baseline,
+rejection with a baseline but `mode="audit"`, and that a real baseline
+comparison using the config surface is unaffected.
+
+**Updated (2026-07-29, same PR): the CLI-flag-only reading was itself
+incomplete -- project-config resolution was still missing entirely.**
+`scan --against` read `--scope-public-headers`/`--public-symbol`/
+`--strict-suppressions` from raw CLI values only, never resolving them
+through the project's `.abicheck.yml` the way `compare` does (CLI flag >
+config > built-in default, ADR-037 D4, `cli_helpers_compare.
+resolve_compare_config`). Concretely: a project config declaring
+`suppression.strict: true` (already honored by `compare`) silently had no
+effect on `scan --against` -- an expired `--suppress` rule that `compare`
+rejects would pass through `scan --against` unnoticed. Fixed by resolving
+`scan`'s existing `--config`/`build_config` option (previously only used
+for the `build.query` gate) through the *same* `resolve_compare_config`/
+`discover_project_config` functions `compare` uses -- `scan_cmd` now loads
+the project config once (auto-discovered upward from cwd when `--config`
+is omitted, matching `compare`) and overwrites its local
+`scope_public_headers`/`strict_suppressions`/`public_symbols` with the
+resolved (CLI-explicit-beats-config-beats-default) values before loading
+suppression/collecting the force-public overlay. Severity/debug/exit-code-
+scheme config keys are resolved too (required positional args of the
+shared function) but deliberately discarded -- `scan` has no equivalent
+flags for them. New test
+`test_scan_against_honors_config_suppression_strict_like_compare` runs
+`compare` and `scan --against` against the same expired-suppression-rule
+fixture with only a config-declared `suppression.strict: true` (no CLI
+flag on either side) and asserts both reject it identically (exit 1).
+
+**Updated (2026-07-29, same PR): the config-resolution fix above was
+itself incomplete -- two more `resolved_cfg` fields were computed and then
+discarded.** `resolve_compare_config` also resolves
+`collapse_versioned_symbols` (`scope.collapse_versioned_symbols`) and
+`require_justification` (`suppression.require_justification`), but
+`scan_cmd` only ever read `.scope_public`/`.strict_suppressions`/
+`.public_symbols` off the result. Concretely: an ICU-style version-suffix
+rename (most removed symbols reappearing renamed only by version token)
+reported `BREAKING` under `scan --against --config` while `compare
+--config` correctly demoted it to `COMPATIBLE_WITH_RISK`, and a reason-less
+`--suppress` rule was silently accepted by `scan --against --config` even
+under a config declaring `suppression.require_justification: true`. Fixed
+by reading both fields off `resolved_cfg` (neither has a `scan`-side CLI
+flag of its own -- config-only, same as `compare`'s own hidden/demoted
+`--collapse-versioned-symbols`/`--require-justification`) and threading
+`collapse_versioned_symbols` through `run_scan_core`/
+`_run_baseline_compare`/`compare_snapshots` (which already accepted it as a
+plain kwarg) and `require_justification` into `_load_suppression_and_policy`
+(ditto). New tests: an end-to-end `compare`-vs-`scan --against` parity
+check for `require_justification` (mirroring the `strict_suppressions` one
+above), and a kwarg-capture unit test confirming
+`collapse_versioned_symbols` reaches `compare_snapshots` (constructing a
+real ICU-style versioned-rename fixture end-to-end was judged not worth
+the added fixture complexity when the kwarg-threading is what was actually
+missing, not the underlying detector logic itself).
+
+**Updated (2026-07-29, same PR): three more Codex-caught gaps in the same
+config-resolution fix, all fixed together.** (1) The new comparison-config
+resolution only ever searched cwd upward (`discover_project_config()`),
+while `resolve_compile_context`'s own `compile:` block resolution already
+prefers the `--sources` tree root (`discover_build_config(sources)`) --
+`scan --against --sources DIR` run from outside `DIR` could resolve its
+`compile:` settings from one `.abicheck.yml` and its scope/suppression
+settings from a different one. Fixed by adopting the identical precedence
+(`explicit --config` > `--sources` root > cwd-upward). (2) The whole
+resolution block ran even for a plain one-build audit (no `--against`),
+where every field it resolves is comparison-only -- a malformed
+*auto-discovered* config could fail an otherwise-unrelated audit outright.
+Fixed by gating the entire block on `against is not None`, with
+`collapse_versioned_symbols`/`require_justification` defaulting to `False`
+outside it (mirrors the "reject comparison-only flags without `--against`"
+guard's own reasoning). (3) Even inside that gate, any config parse
+failure reaching this code unconditionally raised `click.UsageError` --
+but `merge_compile_config` already attempts the *identical* load first
+(unconditionally, for an explicit `--config` or one found at the
+`--sources` root) and is deliberately best-effort there (warn + fallback)
+for anything not explicitly bound to. Reaching this code's own parse
+failure can therefore only happen for the cwd-upward fallback
+`merge_compile_config` never attempts -- so fail-loud here was both
+inconsistent with the established convention and, for the explicit/
+sources-root cases, literally unreachable dead code (confirmed via
+coverage: the `if explicit_config: raise` branch was never hit by any real
+scenario, since `merge_compile_config` always fails first for those two
+cases). Simplified to always warn + fall back, matching
+`merge_compile_config` exactly. New/updated tests: a sources-root-discovery
+end-to-end test (config found via `--sources`, no CLI flag, still rejects
+an expired suppression), an audit-mode test asserting
+`discover_project_config` is never even called without `--against`, and
+the earlier malformed-auto-discovered-config test updated from "must be a
+usage error" to "must warn and fall back" (it had encoded the exact
+behavior this round's fixes corrected).
+
+Separately, `ScanRequest` (Python API) gained a `collapse_versioned_symbols`
+field -- the CLI threads a config-resolved value through `run_scan_core`,
+but the typed request object had no equivalent, so a library caller could
+not request the same ICU-style version-suffix handling. Wired into the
+existing "reject comparison-only fields without a baseline" guard and
+`run_scan`'s `run_scan_core` call the same way the other fields are.
+
+**Updated (2026-07-29, same PR): a final Codex-caught gap, this time in
+compile-context consistency rather than scope/suppression resolution.**
+Gating the whole scope/suppression-resolution block on `against is not
+None` and switching to fail-loud-only-for-explicit-config (previous round)
+still left one inconsistency: `resolve_compile_context` runs *before* that
+block, with the raw CLI `build_config` value only -- so a `scan --against`
+run with no explicit `--config` and no `--sources` could have its
+scope/suppression settings resolved from a cwd-upward-discovered
+`.abicheck.yml`, while that same file's `compile:` block (defines, include
+dirs, frontend, std, sysroot) never reached `resolve_compile_context` at
+all. A macro- or dialect-dependent header API could then parse under the
+wrong context and produce a false `COMPATIBLE` verdict -- exactly the class
+of bug `compare`'s own "resolve config once, thread the same path into both
+resolvers" pattern already avoids. Fixed by moving all project-config path
+resolution + loading + error handling into `cli_scan.py` itself, executed
+once, upfront, before `resolve_compile_context` is even called: this
+guarantees the path passed into its `build_config` parameter is always
+either `None` or a path already confirmed to parse, so
+`merge_compile_config`'s own internal reload (which treats any non-`None`
+path as user-explicit and would otherwise fail loud on a parse error
+regardless of how the path was actually discovered) can never hit that
+branch. The later scope/suppression-resolution block was simplified to
+reuse the already-loaded config object directly instead of re-discovering
+it. New regression test: a cwd-discovered config with a
+`compile: {defines: [FOO=1]}` block, verifying the resulting
+`CompileContext.gcc_option_tokens` actually contains `-DFOO=1` (spying on
+`run_scan_core`'s `compile_context` kwarg), not just that the path gets
+threaded through structurally.
+
+Still not yet done, deliberately out of scope for these four slices (each
+is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
+(Phase 1) is still constructed by neither command -- "same typed config" is
+still just the plan's own vocabulary, not live. The "unsuppressible
+coverage ledger" specifically (as opposed to the ordinary suppression audit
+trail just closed above) remains undesigned -- there is still no concept in
+the codebase for *which* `ChangeKind`s categorically cannot be suppressed
+regardless of policy, nor a ledger proving a given run's suppressions never
+touched one. `SuppressionList.audit()`/`SuppressionAudit`
+(`suppression.py`) is a second, still-orphaned piece of related prior art
+found during this investigation -- stale-rule/high-risk-match/expiry
+analysis over a whole suppression file, exposed by neither `compare` nor
+`scan` today; wiring it in (e.g. a `--audit-suppressions` flag) is a
+separate, real follow-up, not attempted here since it is additive UI on top
+of the file, not part of per-run comparison output the way
+`suppressed_changes` is. The parity test suite above covers one concrete
+scenario (plus, now, the suppression-ledger scenario), not
+the exhaustive binaries/snapshots/mixed-inputs/policies/packs/suppressions/
+explicit-scope matrix §6.4 names in full. `compare`'s remaining
+config-surface options that are genuinely out of scope for "shared
+authoritative comparison" (`--used-by`/`--verify-runtime`/
+`--required-symbol(s)` app-usage scoping, `--follow-deps`/`--search-path`/
+`--ld-library-path` dependency-graph traversal, `--probe-matrix` build-config
+snapshots, `--post-manifest` POC export-manifest scoping) were deliberately
+not ported to `scan --against` -- each is its own subsystem with its own
+input model that doesn't obviously map onto `scan`'s classify/tier/level
+orchestration, not a plain kwarg `compare_snapshots` already accepts.
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve

@@ -71,6 +71,26 @@ def test_baseline_is_native_library_real_json_is_not_native(tmp_path: Path) -> N
     assert cli_scan._baseline_is_native_library(snap) is False
 
 
+def test_scan_exposes_against_config_surface_options() -> None:
+    # ADR-049 Phase 5 §6.4: `--against` gets the same config surface as
+    # `compare` (`--policy`/`--policy-file`/`--suppress`/
+    # `--scope-public-headers`/`--strict-suppressions`/`--public-symbol`/
+    # `--public-symbols-list`/`--pattern-verdicts`/`--env-matrix`), not a
+    # hardcoded strict_abi/unsuppressed/scoped-True baseline comparison.
+    dests = {p.name for p in scan_cmd.params}
+    assert {
+        "suppress",
+        "policy_file_path",
+        "policy",
+        "scope_public_headers",
+        "strict_suppressions",
+        "public_symbols",
+        "public_symbols_list",
+        "pattern_verdicts",
+        "env_matrix_path",
+    } <= dests
+
+
 def test_scan_exposes_side_aware_header_options() -> None:
     # The standalone --baseline-header/--baseline-include options are gone;
     # -H/--header and -I/--include are now side-aware (ADR-040), so
@@ -119,7 +139,7 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setattr(
         cbs,
         "prepare_embedded_build_source",
-        lambda old, new, cm, extra, *rest: (list(extra), [], {}, None),
+        lambda old, new, cm, extra, *rest, **kw: (list(extra), [], {}, None),
     )
     return captured
 
@@ -217,3 +237,186 @@ def test_snapshot_baseline_does_not_warn(
     # A .json snapshot has headers baked in → reuse is harmless → no warning.
     _run(baseline=Path("old/libfoo.abi.json"))
     assert "-H old=" not in capsys.readouterr().err
+
+
+def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR-049 Phase 5 §6.4: `scan --against` reuses the same
+    # suppression/policy/scope config surface as direct `compare` --
+    # `_run_baseline_compare` must forward its own suppression/policy/
+    # policy_file/scope_to_public_surface params into `compare_snapshots`
+    # rather than the previously-hardcoded strict_abi/None/True.
+    import abicheck.cli_buildsource as cbs
+    import abicheck.service as service
+
+    captured: dict[str, object] = {}
+
+    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+        return _FakeSnap()
+
+    def fake_compare_snapshots(
+        old,
+        new,
+        suppression=None,
+        *,
+        policy="strict_abi",
+        policy_file=None,
+        extra_changes,
+        scope_to_public_surface,
+        force_public_symbols=None,
+        pattern_verdicts=False,
+        env_matrix=None,
+        collapse_versioned_symbols=False,
+    ):
+        captured["suppression"] = suppression
+        captured["policy"] = policy
+        captured["policy_file"] = policy_file
+        captured["scope_to_public_surface"] = scope_to_public_surface
+        captured["force_public_symbols"] = force_public_symbols
+        captured["pattern_verdicts"] = pattern_verdicts
+        captured["env_matrix"] = env_matrix
+        return _FakeDiff()
+
+    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    monkeypatch.setattr(service, "compare_snapshots", fake_compare_snapshots)
+    monkeypatch.setattr(
+        cbs,
+        "prepare_embedded_build_source",
+        lambda old, new, cm, extra, *rest, **kw: (list(extra), [], {}, None),
+    )
+
+    sentinel_suppression = object()
+    sentinel_policy_file = object()
+    sentinel_env_matrix = object()
+    _run(
+        suppression=sentinel_suppression,
+        policy="sdk_vendor",
+        policy_file=sentinel_policy_file,
+        scope_to_public_surface=False,
+        force_public_symbols={"foo"},
+        pattern_verdicts=True,
+        env_matrix=sentinel_env_matrix,
+    )
+
+    assert captured["suppression"] is sentinel_suppression
+    assert captured["policy"] == "sdk_vendor"
+    assert captured["policy_file"] is sentinel_policy_file
+    assert captured["scope_to_public_surface"] is False
+    assert captured["force_public_symbols"] == {"foo"}
+    assert captured["pattern_verdicts"] is True
+    assert captured["env_matrix"] is sentinel_env_matrix
+
+
+def test_run_baseline_compare_forwards_policy_file_to_embedded_build_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Codex P1 review on PR #657: `--policy-file`'s evidence_policy knobs
+    # (require_evidence / evidence-verdict overrides, ADR-033 D7) are applied
+    # by `prepare_embedded_build_source`, not `compare_snapshots` -- passing
+    # `policy_file` only to the latter silently drops mandatory-evidence
+    # enforcement for `scan --against`. Assert `_run_baseline_compare` forwards
+    # its own `policy_file` into the `prepare_embedded_build_source` call too.
+    import abicheck.cli_buildsource as cbs
+    import abicheck.service as service
+
+    captured: dict[str, object] = {}
+
+    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+        return _FakeSnap()
+
+    def fake_prepare_embedded_build_source(old, new, cm, extra, *rest, **kw):  # type: ignore[no-untyped-def]
+        captured["policy_file"] = kw.get("policy_file")
+        return list(extra), [], {}, None
+
+    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    monkeypatch.setattr(service, "compare_snapshots", lambda *a, **k: _FakeDiff())
+    monkeypatch.setattr(
+        cbs, "prepare_embedded_build_source", fake_prepare_embedded_build_source
+    )
+
+    sentinel_policy_file = object()
+    _run(policy_file=sentinel_policy_file)
+
+    assert captured["policy_file"] is sentinel_policy_file
+
+
+def test_scan_against_bad_env_matrix_is_usage_error(tmp_path: Path) -> None:
+    # Codex P2 review on PR #657: a malformed --env-matrix file must surface
+    # as a repository-wide usage error (exit 64), matching `compare`'s own
+    # AbicheckError -> click.UsageError handling -- not an uncaught traceback.
+    # --against is required here so this actually reaches load_env_matrix's
+    # own try/except, rather than the (separately tested) "comparison-only
+    # flags need --against" guard short-circuiting first.
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    bad_matrix = tmp_path / "env.yaml"
+    bad_matrix.write_text("runtime_floors: [unclosed\n  GLIBC: {")
+    snap = tmp_path / "artifact.so"
+    snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+    baseline = tmp_path / "baseline.abi.json"
+    baseline.write_text('{"format": "abicheck-snapshot"}', encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "scan",
+            str(snap),
+            "--against",
+            str(baseline),
+            "--env-matrix",
+            str(bad_matrix),
+        ],
+    )
+
+    assert result.exit_code == 64, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        ["--strict-suppressions"],
+        ["--policy", "sdk_vendor"],
+        ["--pattern-verdicts"],
+        ["--public-symbol", "foo"],
+    ],
+)
+def test_scan_rejects_comparison_only_flags_without_against(
+    tmp_path: Path, extra_args: list[str]
+) -> None:
+    # Codex P2 review on PR #657: without --against, run_scan_core never
+    # calls _run_baseline_compare, so these flags would otherwise be
+    # silently parsed and discarded -- including a --policy-file
+    # require_evidence setting the user actually needed. Must be a loud
+    # usage error (exit 64), not a silent no-op.
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    snap = tmp_path / "artifact.so"
+    snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+
+    result = CliRunner().invoke(main, ["scan", str(snap), *extra_args])
+
+    assert result.exit_code == 64, result.output
+    assert "only take effect with --against" in result.output
+
+
+def test_scan_without_against_and_without_comparison_flags_is_unaffected(
+    tmp_path: Path,
+) -> None:
+    # The new usage-error guard must not fire for a plain one-build audit
+    # that never touches any of the comparison-only flags.
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    snap = tmp_path / "artifact.so"
+    snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+
+    result = CliRunner().invoke(main, ["scan", str(snap)])
+
+    assert "only take effect with --against" not in result.output

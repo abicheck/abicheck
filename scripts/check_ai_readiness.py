@@ -1106,6 +1106,19 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # modules rather than introducing a new one. No init deadlock — the
         # package still imports cleanly.
         #
+        # `l0_export_delta` joins the same SCC (ADR-049 Phase 5 §6.3): the one
+        # L0 hard-removal extraction shared by direct `compare`
+        # (`cli_helpers_compare.fold_l0_hard_removals`) and `scan --against`
+        # (`cli_scan_baseline._run_baseline_compare`) was split out of both
+        # call sites into this leaf module so neither hand-copies the same
+        # "resolve symbols-only and diff unscoped" logic. It reaches
+        # `service.compare_snapshots`/`resolve_input` function-locally
+        # (exactly like `cli_helpers_compare`/`cli_scan_baseline` already do),
+        # and both of those already-member modules import it back
+        # function-locally — so this closes the same cluster of cycles
+        # through already-member modules, not a new dependency direction.
+        # No init deadlock.
+        #
         # `cli_config`, `cli_doctor`, and `cli_graph` also join this same SCC —
         # each already had its own standalone `{"cli", "cli_X"}` entry above,
         # which covers the trivial two-node cycle from `cli`'s tail-of-module
@@ -1167,6 +1180,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_stack",
                 "cli_suggest",
                 "cli_surface",
+                "l0_export_delta",
                 "scan_engine",
                 "service",
                 "service_scan",

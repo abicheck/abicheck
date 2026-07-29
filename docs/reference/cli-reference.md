@@ -406,7 +406,7 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--sources` | no | — | Source tree (compile DB auto-discovered within it). |
 | `--build-info` | no | — | Out-of-tree build dir / compile\_commands.json / pack supplying build context. |
 | `--compile-db` | no | — | Explicit compile\_commands.json (use when not under --sources). |
-| `--config` | no | — | Trusted project .abicheck.yml (enables build.query with --allow-build-query). |
+| `--config` | no | — | Trusted project .abicheck.yml (enables build.query with --allow-build-query). Also supplies scope/suppression settings (scope.public, scope.public\_symbols, suppression.strict) the same way `compare --config` does (CLI flags override); auto-discovered upward from the current directory when omitted. |
 | `--against` | no | — | Previous native library or saved ABI dump to compare ARTIFACT against (a single file -- not a directory or package; for those use `abicheck compare OLD\_PACKAGE NEW\_PACKAGE`). Without --against, scan runs a one-build audit/hygiene/source consistency scan only; with it, scan also compares ARTIFACT against this (the two modes are not separate flags -- --against alone selects between them). |
 | `--depth` | no | — | Evidence depth to collect -- the single dial, named by what you get: binary (symbols only), headers (+header AST), build (+build context), source (+source replay & call graph). Omit for 'auto' (risk-driven when a --since/--changed-path seed is present, else a sensible default). --depth source uses changed-path scope when --since/--changed-path is given, else the current library target -- never a zero-TU no-op. |
 | `--since` | no | — | Focus the scan on files changed vs a git ref (e.g. origin/main). |
@@ -416,6 +416,15 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--dry-run` | no | `False` | Resolve and validate the invocation -- classify inputs, resolve changed paths, show the audit checks and (if --against) the comparison that would run, and print projected per-layer cost -- without scanning. Writes nothing; incompatible with -o/--output. |
 | `--crosscheck` | no | — | Per-check level KEY=LEVEL (off\|info\|warning\|error); repeatable. |
 | `--risk-rules` | no | — | Override the risk\_rules profile (YAML). |
+| `--policy` | no | `strict_abi` | Built-in policy profile for verdict classification. Ignored when --policy-file is given. Choices: `strict_abi`, `sdk_vendor`, `plugin_abi`. |
+| `--policy-file` | no | — | YAML policy file with per-kind verdict overrides, or a built-in name (e.g. 'security'). Overrides --policy. |
+| `--suppress` | no | — | Suppression file (YAML) to filter known/intentional changes. |
+| `--scope-public-headers`, `--no-scope-public-headers` | no | `True` | Restrict findings to the public-header ABI surface (ADR-024): changes to symbols/types not reachable from public-header-declared exported API are recorded as filtered, not reported. Internal-type leaks are never hidden. On by default; use --no-scope-public-headers to report every finding regardless of surface. |
+| `--strict-suppressions` | no | `False` | With --against: fail with exit code 1 if any --suppress rule has expired (mirrors `compare --strict-suppressions`, ADR-049 Phase 5 §6.4). |
+| `--public-symbol` | no | — | With --against: force a symbol (mangled or demangled name) into the public surface even when header provenance can't see it (mirrors `compare --public-symbol`). Repeatable. Only meaningful with --scope-public-headers. |
+| `--public-symbols-list` | no | — | With --against: file of symbols to force public (one per line; '#' comments and blank lines ignored), merged with --public-symbol (mirrors `compare --public-symbols-list`). |
+| `--pattern-verdicts`, `--no-pattern-verdicts` | no | `False` | With --against: modulate verdicts with idiom/anti-pattern evidence (ADR-027, mirrors `compare --pattern-verdicts`): demote opaque-pointer/PIMPL-hidden layout changes and raise breaks when an opacity/handle guarantee is lost. |
+| `--env-matrix` | no | — | Environment-matrix YAML declaring deployment constraints (ADR-020b). With runtime\_floors (e.g. 'runtime\_floors: {GLIBC: "2.28"}'), a new symbol-version requirement is judged against the declared floor: at/below it -> compatible, above it -> breaking, instead of the default deployment-risk verdict. |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--format` | no | `text` | Output format. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |

@@ -44,6 +44,9 @@ from .schemas import SCAN_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from .environment_matrix import EnvironmentMatrix
+    from .policy_file import PolicyFile
+    from .suppression import SuppressionList
 
 _logger = logging.getLogger(__name__)
 
@@ -240,6 +243,19 @@ class ScanRequest:
     lang: str = "c++"
     # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
     compile: CompileContext = field(default_factory=CompileContext)
+    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4):
+    # a `baseline` comparison can be scoped/suppressed/policy-classified the
+    # same way a direct `compare` run is, instead of always using the fixed
+    # policy="strict_abi"/suppression=None/scope_to_public_surface=True the
+    # engine previously hardcoded.
+    suppression: SuppressionList | None = None
+    policy: str = "strict_abi"
+    policy_file: PolicyFile | None = None
+    scope_to_public_surface: bool = True
+    force_public_symbols: set[str] | None = None
+    pattern_verdicts: bool = False
+    env_matrix: EnvironmentMatrix | None = None
+    collapse_versioned_symbols: bool = False
 
 
 @dataclass(frozen=True)
@@ -881,6 +897,35 @@ def run_scan(req: ScanRequest) -> ScanResult:
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
     binary = req.binaries[0]
+
+    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean
+    # anything for a baseline comparison (`run_scan_core` only calls
+    # `_run_baseline_compare` when `baseline is not None` AND `scan_mode is
+    # not ScanMode.AUDIT`) -- without one they'd be silently accepted and
+    # discarded, which could hide a `policy_file` requiring evidence the
+    # caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
+    if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
+        _non_default = [
+            name
+            for name, is_set in (
+                ("suppression", req.suppression is not None),
+                ("policy", req.policy != "strict_abi"),
+                ("policy_file", req.policy_file is not None),
+                ("scope_to_public_surface", req.scope_to_public_surface is not True),
+                ("force_public_symbols", bool(req.force_public_symbols)),
+                ("pattern_verdicts", req.pattern_verdicts),
+                ("env_matrix", req.env_matrix is not None),
+                ("collapse_versioned_symbols", req.collapse_versioned_symbols),
+            )
+            if is_set
+        ]
+        if _non_default:
+            raise ValidationError(
+                f"ScanRequest field(s) {', '.join(_non_default)} only take "
+                "effect with a baseline comparison (req.baseline set, and "
+                "req.mode not 'audit'); they configure compare_snapshots and "
+                "have no effect otherwise."
+            )
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
 
@@ -962,6 +1007,14 @@ def run_scan(req: ScanRequest) -> ScanResult:
             pinned_explicit=pinned_explicit,
             compile_context=None if req.compile.is_default else req.compile,
             defer_cleanup=build_dir_cleanups,
+            suppression=req.suppression,
+            policy=req.policy,
+            policy_file=req.policy_file,
+            scope_to_public_surface=req.scope_to_public_surface,
+            force_public_symbols=req.force_public_symbols,
+            pattern_verdicts=req.pattern_verdicts,
+            env_matrix=req.env_matrix,
+            collapse_versioned_symbols=req.collapse_versioned_symbols,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

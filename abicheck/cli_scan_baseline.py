@@ -44,7 +44,10 @@ from .buildsource.risk import RiskRules
 from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 
 if TYPE_CHECKING:
+    from .environment_matrix import EnvironmentMatrix
+    from .policy_file import PolicyFile
     from .service_scan import CompileContext
+    from .suppression import SuppressionList
 
 
 def _public_provenance_set(
@@ -202,19 +205,31 @@ def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, A
     Reads only duck-typed attributes (not ``DiffResult`` internals) so this
     stays safe to call against the lightweight fakes/stubs used in tests, not
     just a real ``Change``.
+
+    The ``bucket="suppressed"`` case (Codex review, PR #657) also carries
+    ``suppression_rule`` -- which ``--suppress`` rule silenced the finding
+    (``Change.suppression_rule``, set by ``checker._filter_suppressed_changes``)
+    -- mirroring `compare`'s own suppression audit trail
+    (``reporter._suppressed_change_entry``'s
+    ``impact_assessment.decision.suppression_rule``). Kept out of the other
+    (breaking/api_break/risk) buckets' dicts, which never carry a
+    ``suppression_rule`` value and whose exact shape existing tests and
+    sibling modules (``cli_compare_release.py``, ``stack_report.py``) already
+    pin.
     """
     findings = []
     for c in changes:
         kind = getattr(c, "kind", None)
-        findings.append(
-            {
-                "bucket": bucket,
-                "kind": getattr(kind, "value", str(kind)),
-                "symbol": getattr(c, "symbol", None),
-                "description": getattr(c, "description", None),
-                "source_location": getattr(c, "source_location", None),
-            }
-        )
+        entry: dict[str, Any] = {
+            "bucket": bucket,
+            "kind": getattr(kind, "value", str(kind)),
+            "symbol": getattr(c, "symbol", None),
+            "description": getattr(c, "description", None),
+            "source_location": getattr(c, "source_location", None),
+        }
+        if bucket == "suppressed":
+            entry["suppression_rule"] = getattr(c, "suppression_rule", None)
+        findings.append(entry)
     return findings
 
 
@@ -259,6 +274,14 @@ def _run_baseline_compare(
     baseline_includes: list[Path] | None = None,
     symbols_only: bool = False,
     debug_presence_only: bool = False,
+    suppression: SuppressionList | None = None,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+    scope_to_public_surface: bool = True,
+    force_public_symbols: set[str] | None = None,
+    pattern_verdicts: bool = False,
+    env_matrix: EnvironmentMatrix | None = None,
+    collapse_versioned_symbols: bool = False,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -354,36 +377,16 @@ def _run_baseline_compare(
     # the hard ELF-only removal kind keeps the L0 authority while avoiding the
     # older false-positive class where advisory cross-check findings were folded
     # into the verdict wholesale.
-    l0_hard_removals: list[Any] = []
+    #
+    # Shares abicheck.l0_export_delta.collect_l0_export_delta with
+    # cli_helpers_compare.fold_l0_hard_removals (direct `compare`) -- ADR-049
+    # Phase 5 §6.3 -- rather than each hand-copying the same
+    # resolve-symbols-only-and-diff-unscoped extraction.
+    l0_hard_removals: tuple[Any, ...] = ()
     if not symbols_only:
-        l0_old_snap = resolve_input(
-            baseline,
-            [],
-            [],
-            version="",
-            lang=lang,
-            symbols_only=True,
-        )
-        l0_new_snap = resolve_input(
-            binary,
-            [],
-            [],
-            version="",
-            lang=lang,
-            symbols_only=True,
-        )
-        l0_diff = compare_snapshots(
-            l0_old_snap,
-            l0_new_snap,
-            extra_changes=[],
-            scope_to_public_surface=False,
-        )
-        l0_hard_removals = [
-            change
-            for change in getattr(l0_diff, "breaking", ())
-            if getattr(getattr(change, "kind", None), "value", None)
-            == "func_removed_elf_only"
-        ]
+        from .l0_export_delta import collect_l0_export_delta
+
+        l0_hard_removals = collect_l0_export_delta(baseline, binary, lang)
     # Fold embedded build-info/source (L3/L4/L5) diff findings into extra_changes
     # before comparing — mirrors the compare command (Codex review). Only engage
     # when a snapshot actually carries an embedded pack; otherwise pass
@@ -401,12 +404,20 @@ def _run_baseline_compare(
         None,
         None,
         None,
+        policy_file=policy_file,
     )
     diff = compare_snapshots(
         old_snap,
         new_snap,
+        suppression,
+        policy=policy,
+        policy_file=policy_file,
         extra_changes=merged_extra,
-        scope_to_public_surface=True,
+        scope_to_public_surface=scope_to_public_surface,
+        force_public_symbols=force_public_symbols,
+        pattern_verdicts=pattern_verdicts,
+        env_matrix=env_matrix,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     summary: dict[str, Any] = {
         "breaking": len(diff.breaking),
@@ -437,11 +448,26 @@ def _run_baseline_compare(
         summary["findings"] = findings
         if total_gating > _MAX_BASELINE_FINDINGS:
             summary["findings_truncated"] = True
+
+    # ADR-049 Phase 5: surface the same suppression audit trail `compare`'s
+    # own JSON report already exposes (`DiffResult.suppressed_changes`,
+    # reporter.py's `_add_suppression`) -- without this, `scan --against`'s
+    # summary silently hid which findings a `--suppress` rule removed, even
+    # though the rule itself is honored (threaded into `compare_snapshots`
+    # earlier in this same Phase 5 slice). Capped independently of the
+    # gating-findings truncation above -- a large suppression file
+    # shouldn't crowd out real gating findings from the always-on summary.
+    suppressed_changes = getattr(diff, "suppressed_changes", None) or []
+    if suppressed_changes:
+        summary["suppressed_count"] = len(suppressed_changes)
+        summary["suppressed"] = _baseline_finding_dicts(
+            suppressed_changes[:_MAX_BASELINE_FINDINGS], "suppressed"
+        )
+        if len(suppressed_changes) > _MAX_BASELINE_FINDINGS:
+            summary["suppressed_truncated"] = True
+
+    from .cli_compare_helpers import _verdict_exit_code
+
     verdict = diff.verdict.value
-    if verdict == "BREAKING":
-        exit_code = 4
-    elif verdict == "API_BREAK":
-        exit_code = 2
-    else:
-        exit_code = 0
+    exit_code = _verdict_exit_code(diff.verdict)
     return verdict, exit_code, summary
