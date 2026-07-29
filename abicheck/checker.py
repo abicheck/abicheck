@@ -716,10 +716,21 @@ def compare(
     new_profile = new.contract.profile_fingerprint if new.contract else None
     old_scope = old.contract.scope_fingerprint if old.contract else None
     new_scope = new.contract.scope_fingerprint if new.contract else None
+    # Mirrors the profile/scope-fingerprint mixed-presence check above for the
+    # dependency_scope axis: check_contracts_comparable deliberately permits a
+    # None (pre-v18/genuinely-untagged) side against an explicitly-tagged one
+    # (see _check_dependency_scope_comparable's own docstring) rather than
+    # raising, since there is no way to recover which mode the untagged side
+    # actually used — but that means the comparison silently proceeds without
+    # ever having verified this axis matches. Without this, a legacy
+    # "full"-mode snapshot compared against a freshly "filtered" one could
+    # produce a wrong verdict with the report still reading as fully verified
+    # (Codex review, fresh evidence).
     contract_coverage: Literal["partial"] | None = (
         "partial"
         if (old_profile is None) != (new_profile is None)
         or (old_scope is None) != (new_scope is None)
+        or (old.dependency_scope is None) != (new.dependency_scope is None)
         else None
     )
 

@@ -253,3 +253,18 @@ class TestDependencyScopeComparabilityGate:
         mismatch = check_contracts_comparable(old, new, diagnostic=True)
         assert mismatch is not None
         assert mismatch.kind == "dependency_scope"
+
+    def test_legacy_none_vs_tagged_reports_partial_contract_coverage(self):
+        """Codex review, fresh evidence: a mixed None/explicit-tag pair is
+        deliberately *permitted* (not raised) since there's no way to
+        recover which mode the untagged side actually used -- but silently
+        proceeding left `contract_coverage` at `None` (full coverage),
+        so a legacy "full"-mode snapshot compared against a freshly
+        "filtered" one could produce a wrong verdict with the report still
+        reading as fully verified. `contract_coverage` must mark this axis
+        unverified the same way it already does for a mixed
+        profile/scope-fingerprint pair."""
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
+        result = compare(old, new)
+        assert result.contract_coverage == "partial"

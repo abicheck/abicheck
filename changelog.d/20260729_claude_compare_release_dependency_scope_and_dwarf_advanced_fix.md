@@ -54,3 +54,20 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   an ordinary, default-settings `dump` baseline hit the new comparability
   gate's `ScopeMismatchError` on the single most common `scan --against`
   workflow. Both calls now default to filtered too, matching `dump`/`compare`.
+- **Two more real gaps, both Codex review, fresh evidence after the DWARF-
+  advanced-metadata fix above**: (1) trusting an excluded (dependency)
+  function's bare `mangled == name` spelling to exclude a DWARF-advanced
+  entry could wrongly drop a *kept* function's own entry when a kept
+  `extern "C" foo` and an unrelated excluded C++ dependency function (whose
+  own real, different mangled name a header-AST backend failed to recover)
+  happen to share that same bare spelling — no ODR conflict at the linker
+  level, just an unreliable-spelling collision. An excluded mangled spelling
+  that also names a kept function is no longer trusted to exclude anything.
+  (2) `contract_coverage` only reflected a mixed-presence profile/scope
+  fingerprint pair, not a mixed `None`/tagged `dependency_scope` pair — the
+  comparability gate deliberately *permits* comparing a genuinely-untagged
+  (pre-v18) snapshot against an explicitly-tagged one (there's no way to
+  recover which mode the untagged side used), but that left the report
+  reading as fully verified even though this axis was never actually
+  checked. `contract_coverage` now reports `"partial"` for a mixed
+  `dependency_scope` pair too.

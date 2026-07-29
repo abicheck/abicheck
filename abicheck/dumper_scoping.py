@@ -1060,7 +1060,25 @@ def scope_snapshot_excluding_dependencies(
         | {e.qualified_name for e in kept_enums if e.qualified_name},
     )
     excluded_functions = [f for f in snap.functions if _is_dep(f.source_header)]
-    excluded_symbols = {f.mangled for f in excluded_functions if f.mangled}
+    # A kept function's own header-AST spelling can be exactly this same
+    # ambiguous shape too -- a kept `extern "C" foo` genuinely has mangled ==
+    # name == "foo", and an unrelated excluded C++ dependency function can
+    # independently fail to recover its own real (different) mangled name,
+    # falling back to a bare spelling that happens to equal that same "foo"
+    # (no ODR conflict: the two are distinct real symbols, e.g. "foo" vs
+    # "_ZN3dep3fooEi" -- collision only in this unreliable *spelling*, not at
+    # the linker). Trusting the excluded function's bare spelling there would
+    # wrongly drop the *kept* function's own real DWARF-advanced entry
+    # (Codex review, fresh evidence). Any excluded mangled spelling that also
+    # names a kept function is therefore never trusted to exclude anything.
+    kept_names_and_mangled = {f.name for f in kept_functions} | {
+        f.mangled for f in kept_functions if f.mangled
+    }
+    excluded_symbols = {
+        f.mangled
+        for f in excluded_functions
+        if f.mangled and f.mangled not in kept_names_and_mangled
+    }
     return dataclasses.replace(
         snap,
         functions=kept_functions,

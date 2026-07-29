@@ -417,6 +417,34 @@ class TestDwarfAdvancedScoping:
         assert scoped.dwarf_advanced is not None
         assert set(scoped.dwarf_advanced.value_abi_traits) == set()
 
+    def test_ambiguous_bare_spelling_shared_with_a_kept_function_is_not_excluded(self):
+        """Codex review, fresh evidence: a kept `extern "C" foo` genuinely has
+        mangled == name == "foo", and an unrelated excluded C++ dependency
+        function can independently fail to recover its own (different) real
+        mangled name, falling back to a bare spelling that happens to equal
+        that same "foo" -- no ODR conflict (they're distinct real symbols),
+        but trusting the excluded function's bare spelling to exclude "foo"
+        would wrongly drop the *kept* function's own real DWARF-advanced
+        entry. Regression for the fix in
+        test_dependency_function_with_bare_unmangled_name_still_dropped,
+        which (correctly, for a non-colliding bare name) started trusting an
+        excluded function's bare spelling again."""
+        kept_fn = _fn("foo", mangled="foo", source_header=_OWN_HEADER)
+        excluded_fn = _fn("foo", mangled="foo", source_header=_SYSTEM_HEADER)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[kept_fn, excluded_fn],
+            dwarf_advanced=AdvancedDwarfMetadata(
+                has_dwarf=True,
+                value_abi_traits={"foo": "p0:nontrivial"},
+            ),
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.dwarf_advanced is not None
+        assert set(scoped.dwarf_advanced.value_abi_traits) == {"foo"}
+
 
 class TestCrossPlatformSystemHeaderPaths:
     """_SYSTEM_HEADER_DIRS covers more than /usr/include -- exercise each
