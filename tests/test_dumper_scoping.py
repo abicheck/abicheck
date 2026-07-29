@@ -531,6 +531,59 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [e.name for e in scoped.enums] == ["errc"]
 
+    def test_ambiguous_bare_name_does_not_cross_admit_unrelated_type(self):
+        """Codex review (P2): two dependency records sharing a bare `name`
+        under different `qualified_name`s -- only the one actually named in
+        a kept signature must be retained, not both via the shared bare
+        spelling."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("std::Thing *",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="vendor::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
+    def test_typedef_alias_resolves_dependency_target_record(self):
+        """Codex review (P1): a signature spells a dependency type through a
+        typedef alias (`std::string`) while the record's own identity is the
+        underlying spelling (`std::__cxx11::basic_string<...>`) -- the link
+        lives only in `snapshot.typedefs` and must still be followed."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("std::string",))],
+            types=[
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    qualified_name="std::__cxx11::basic_string<char>",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"std::string": "std::__cxx11::basic_string<char>"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == [
+            "std::__cxx11::basic_string<char>"
+        ]
+
     def test_unreferenced_dependency_type_still_excluded(self):
         snap = AbiSnapshot(
             library="libfoo.so",

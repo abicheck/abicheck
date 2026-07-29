@@ -106,11 +106,18 @@ def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
     return names | qualified_names
 
 
+def _candidate_identity(candidate: RecordType | EnumType) -> str:
+    """The most specific spelling identifying *candidate*: its fully-qualified
+    name when the producer populated one, else its bare ``name``."""
+    return getattr(candidate, "qualified_name", None) or candidate.name
+
+
 def _directly_referenced_dependency_names(
     kept_functions: Sequence[Function],
     kept_variables: Sequence[Variable],
     kept_types: Sequence[RecordType],
     dep_candidates: Sequence[RecordType | EnumType],
+    typedefs: dict[str, str] | None = None,
 ) -> set[str]:
     """Which *dep_candidates* (dependency-header types/enums about to be
     dropped) are directly named by a kept, non-dependency declaration's own
@@ -129,6 +136,22 @@ def _directly_referenced_dependency_names(
     fields/bases -- chasing further would re-admit the transitive
     implementation closure (e.g. ``std::string``'s own
     ``_Alloc_hider`` field) this scoping exists to drop.
+
+    Returns each retained candidate's :func:`_candidate_identity` (not its
+    bare ``name``): two dependency candidates can share the same bare name
+    under different fully-qualified identities (``std::Thing`` vs.
+    ``vendor::Thing``), and returning bare names would let one's match
+    re-admit the other's unrelated layout (Codex review). For the same
+    reason, a candidate's bare ``name`` is only used as a matching spelling
+    when it is unique among *dep_candidates* -- an ambiguous bare name is
+    not trusted to mean any one of them.
+
+    *typedefs* (``AbiSnapshot.typedefs``, alias -> underlying-type spelling)
+    is consulted so a dependency type only reachable through a typedef
+    alias in the kept signatures (e.g. a signature spells ``std::string``
+    while the record's own identity is the underlying
+    ``std::__cxx11::basic_string<...>``) is still recognized (Codex review)
+    -- mirrors :func:`abicheck.type_reachability`'s own typedef-following.
     """
     signature_texts: list[str] = []
     for fn in kept_functions:
@@ -142,15 +165,34 @@ def _directly_referenced_dependency_names(
         signature_texts.extend(rec.virtual_bases)
     haystack = "\n".join(t for t in signature_texts if t)
 
+    aliases_by_target: dict[str, list[str]] = {}
+    for alias, target in (typedefs or {}).items():
+        aliases_by_target.setdefault(target, []).append(alias)
+
+    bare_name_identities: dict[str, set[str]] = {}
+    for candidate in dep_candidates:
+        bare_name_identities.setdefault(candidate.name, set()).add(
+            _candidate_identity(candidate)
+        )
+
     referenced: set[str] = set()
     for candidate in dep_candidates:
+        identity = _candidate_identity(candidate)
         qualified_name = getattr(candidate, "qualified_name", None)
-        for spelling in filter(None, (qualified_name, candidate.name)):
+        spellings: set[str] = set()
+        if qualified_name:
+            spellings.add(qualified_name)
+        if len(bare_name_identities[candidate.name]) == 1:
+            spellings.add(candidate.name)
+        for key in (identity, candidate.name):
+            spellings.update(aliases_by_target.get(key, ()))
+
+        for spelling in spellings:
             # Cheap substring pre-check (fast C-level scan) before paying
             # for the boundary-aware regex-equivalent match -- most
             # candidates never appear in the haystack at all.
             if spelling in haystack and type_string_references_name(haystack, spelling):
-                referenced.add(candidate.name)
+                referenced.add(identity)
                 break
     return referenced
 
@@ -285,14 +327,18 @@ def scope_snapshot_excluding_dependencies(
     dep_enums = [e for e in snap.enums if _is_dep(e.source_header)]
     if dep_types or dep_enums:
         directly_referenced = _directly_referenced_dependency_names(
-            kept_functions, kept_variables, kept_types, [*dep_types, *dep_enums]
+            kept_functions,
+            kept_variables,
+            kept_types,
+            [*dep_types, *dep_enums],
+            snap.typedefs,
         )
         if directly_referenced:
             kept_types = kept_types + [
-                t for t in dep_types if t.name in directly_referenced
+                t for t in dep_types if _candidate_identity(t) in directly_referenced
             ]
             kept_enums = kept_enums + [
-                e for e in dep_enums if e.name in directly_referenced
+                e for e in dep_enums if _candidate_identity(e) in directly_referenced
             ]
 
     kept_identifiers = _kept_identifiers(
