@@ -32,3 +32,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   bare name or carries a recognizable Itanium/MSVC mangling marker — keeping
   everything else by default, matching this module's existing
   false-negative-over-false-positive design bias.
+- **Two more `include_dependencies` propagation gaps, both Codex review**:
+  `resolve_input()`'s recursive call following a GNU ld linker script to its
+  real target dropped the flag back to its default (`True`), so filtering
+  silently stopped for any operand that happened to be a linker script
+  instead of the DSO directly. And `service.run_dump`'s public wrapper
+  hid its own `include_dependencies` keyword from `inspect.signature()`
+  (via `functools.wraps` following `__wrapped__` back to the unwrapped,
+  parameter-less inner function) — invisible to the generated Python API
+  reference and to any signature-driven caller. The wrapper now carries an
+  explicit `__signature__` that includes the parameter.

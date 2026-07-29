@@ -906,8 +906,39 @@ def wrap_run_dump_with_dependency_scope(
     """Build ``service.run_dump`` from ``service._run_dump_uncached``: a
     thin wrapper adding an *include_dependencies* keyword (default ``True``)
     and applying :func:`apply_dependency_scope_to_run_dump_result` to the
-    result — see that function's own docstring."""
+    result — see that function's own docstring.
+
+    ``functools.wraps`` copies ``__wrapped__`` from *uncached_fn*, which
+    ``inspect.signature`` follows by default — silently hiding the new
+    ``include_dependencies`` keyword from anything that introspects the
+    wrapper's signature (the generated Python API reference, or a
+    signature-driven caller/validation framework), even though it's a real,
+    accepted parameter (Codex review). ``__signature__`` is set explicitly
+    below to the real, extended signature so introspection sees it.
+    """
     sig = inspect.signature(uncached_fn)
+    new_param = inspect.Parameter(
+        "include_dependencies",
+        kind=inspect.Parameter.KEYWORD_ONLY,
+        default=True,
+        # A bare string, matching every other parameter's annotation here:
+        # this module (like the rest of the codebase) has `from __future__
+        # import annotations`, so `inspect.signature` on a real function
+        # already returns string annotations, not type objects.
+        annotation="bool",
+    )
+    old_params = list(sig.parameters.values())
+    # A KEYWORD_ONLY parameter must sort before any VAR_KEYWORD (**kwargs) one
+    # -- insert just ahead of it rather than always appending, so this stays
+    # valid even against a caller signature that ends in **kwargs (as a test
+    # double's does; the real `_run_dump_uncached` has none).
+    insert_at = next(
+        (i for i, p in enumerate(old_params) if p.kind is inspect.Parameter.VAR_KEYWORD),
+        len(old_params),
+    )
+    extended_sig = sig.replace(
+        parameters=[*old_params[:insert_at], new_param, *old_params[insert_at:]]
+    )
 
     @functools.wraps(uncached_fn)
     def run_dump(
@@ -919,6 +950,7 @@ def wrap_run_dump_with_dependency_scope(
             sig.bind_partial(*args, **kwargs),
         )
 
+    run_dump.__signature__ = extended_sig  # type: ignore[attr-defined]
     return run_dump
 
 

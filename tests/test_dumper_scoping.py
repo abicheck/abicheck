@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from abicheck.dumper_scoping import (
+    _looks_like_real_mangled_name,
     resolve_dependency_scope,
     scope_snapshot_excluding_dependencies,
     wrap_run_dump_with_dependency_scope,
@@ -321,6 +322,20 @@ class TestDwarfScoping:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert scoped.dwarf is not None
         assert set(scoped.dwarf.structs) == {"Own"}
+
+
+class TestLooksLikeRealMangledName:
+    def test_differing_mangled_and_name_is_trusted(self):
+        assert _looks_like_real_mangled_name("_Z3run", "run") is True
+
+    def test_bare_name_with_itanium_marker_is_trusted(self):
+        # A degenerate case (a real Itanium mangled form never equals its own
+        # bare name), but exercises the fallback branch directly: a marker
+        # prefix is trusted even when mangled == name.
+        assert _looks_like_real_mangled_name("_Zfoo", "_Zfoo") is True
+
+    def test_bare_name_with_no_marker_is_not_trusted(self):
+        assert _looks_like_real_mangled_name("distance", "distance") is False
 
 
 class TestDwarfAdvancedScoping:

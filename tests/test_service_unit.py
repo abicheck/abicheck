@@ -232,6 +232,23 @@ class TestResolveInput:
         assert "header_graph" not in kwargs
         assert "header_graph_includes" not in kwargs
 
+    def test_include_dependencies_reaches_target_through_linker_script(self, tmp_path):
+        """Codex review: the recursive resolve_input() call following a GNU
+        ld linker script to its real target used to drop include_dependencies
+        back to its default (True), so `compare --include-dependencies`
+        (filtered by default) silently stopped filtering for any operand
+        that happened to be a linker script instead of the DSO directly."""
+        target = tmp_path / "libfoo.so.1"
+        target.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        script = tmp_path / "libfoo.so"
+        script.write_text("INPUT(libfoo.so.1)\n", encoding="utf-8")
+        snap = AbiSnapshot(library="test", version="1.0")
+        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+            resolve_input(script, include_dependencies=False)
+        assert mock.call_count == 1
+        _, kwargs = mock.call_args
+        assert kwargs["include_dependencies"] is False
+
     def test_header_graph_lang_matches_elf_main_pass_normalization(self, tmp_path):
         """Codex review: ``_dump_elf`` normalizes ``lang`` to only ever force
         "c" explicitly (letting auto-detection run for the default "c++"),

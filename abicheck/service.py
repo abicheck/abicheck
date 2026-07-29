@@ -468,6 +468,7 @@ def resolve_input(
                     notify=notify,
                     include_labels=include_labels,
                     dump_manifest=dump_manifest,
+                    include_dependencies=include_dependencies,
                 )
             raise ValidationError(
                 f"'{path}' is a GNU ld linker script (INPUT/GROUP), not a binary, "

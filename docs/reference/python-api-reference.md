@@ -386,6 +386,7 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `notify` | `Callable[[str], None] \| None` | `None` |
 | `include_labels` | `dict[Path, str] \| None` | `None` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
+| `include_dependencies` | `bool` | `True` |
 
 **Returns:** `AbiSnapshot`
 
