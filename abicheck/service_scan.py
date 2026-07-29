@@ -245,6 +245,12 @@ class ScanRequest:
     # --artifact-set audit-mode bundle detector (closed-world escape hatch).
     # Unused by run_scan.
     bundle_system_providers: tuple[str, ...] = ()
+    # ADR-056: real changed-path provenance (e.g. "--since origin/main" or
+    # "--changed-path"), as computed by cli_scan._resolve_changed_seed.
+    # run_scan_set forwards this into each member's report instead of a
+    # hardcoded placeholder; unused by run_scan (which threads its own
+    # changed_src through _run_scan_one_member's caller directly).
+    changed_src: str = "run_scan_set"
 
 
 @dataclass(frozen=True)
@@ -1515,8 +1521,28 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
 
     from .bundle import ArtifactSetError, audit_bundle, discover_artifact_set
 
-    if len(req.binaries) < 2:
-        raise ValueError("run_scan_set requires 2 or more binaries")
+    # Canonicalize/deduplicate before the cardinality check: two literal
+    # duplicates or symlink aliases of one DSO must not silently pass as a
+    # valid 2-member set (discover_artifact_set below dedupes via
+    # Path.resolve() too, which would otherwise report a "complete" audit
+    # of what's really a single library) (Codex review).
+    seen_resolved: set[Path] = set()
+    binaries: list[Path] = []
+    for binary in req.binaries:
+        try:
+            resolved = binary.resolve()
+        except OSError:
+            resolved = binary
+        if resolved in seen_resolved:
+            continue
+        seen_resolved.add(resolved)
+        binaries.append(binary)
+
+    if len(binaries) < 2:
+        raise ValueError(
+            "run_scan_set requires 2 or more distinct binaries "
+            "(duplicate/symlink-aliased paths do not count separately)"
+        )
     if req.baseline is not None:
         raise ValueError("run_scan_set does not accept req.baseline (audit-only)")
 
@@ -1524,9 +1550,9 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     budget_s = req.budget.total_timeout
 
     per_artifact: list[ScanArtifactResult] = []
-    for binary in req.binaries:
+    for binary in binaries:
         result = _run_scan_one_member(
-            req, binary, start=start, budget_s=budget_s, changed_src="run_scan_set"
+            req, binary, start=start, budget_s=budget_s, changed_src=req.changed_src
         )
         per_artifact.append(ScanArtifactResult(artifact=binary, result=result))
         if result.verdict == "BUDGET_OVERFLOW":
@@ -1535,7 +1561,7 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
                                   per_artifact=per_artifact)
 
     try:
-        libraries = discover_artifact_set(list(req.binaries), explicit=True)
+        libraries = discover_artifact_set(list(binaries), explicit=True)
     except ArtifactSetError:
         # Collision/unsupported-member checks already ran in the CLI/MCP
         # front door before req.binaries was populated (ADR-056); if one

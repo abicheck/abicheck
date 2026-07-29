@@ -613,16 +613,32 @@ elif [[ "$MODE" == "scan" ]]; then
     CMD+=("$SCAN_ARTIFACT")
   fi
 
-  # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
-  # the --against side; old-header/old-include and new-header/new-include
-  # scope to one side only (ADR-040 L1) so a candidate-only header doesn't
-  # leak into the baseline side's parse (Codex review).
-  add_flag "-H" "${INPUT_HEADER:-}"
-  add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
-  add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
-  add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
-  add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
+  if [[ -n "$SCAN_ARTIFACT_SET" ]]; then
+    # --artifact-set has no old side, so cli_scan._run_artifact_set rejects
+    # old=/new= scoping outright -- old-header/old-include are meaningless
+    # here (reject loudly rather than let the CLI's own UsageError surface
+    # only after toolchain install) and new-header/new-include map to the
+    # bare flags, not "-H new=..."/"-I new=..." (Codex review).
+    if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
+      echo "::error::mode: scan with new-library-set does not support old-header/old-include -- new-library-set is audit-only (no old side, ADR-056)."
+      exit 1
+    fi
+    add_flag "-H" "${INPUT_HEADER:-}"
+    add_flag "-H" "${INPUT_NEW_HEADER:-}"
+    add_flag "-I" "${INPUT_INCLUDE:-}"
+    add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
+  else
+    # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
+    # the --against side; old-header/old-include and new-header/new-include
+    # scope to one side only (ADR-040 L1) so a candidate-only header doesn't
+    # leak into the baseline side's parse (Codex review).
+    add_flag "-H" "${INPUT_HEADER:-}"
+    add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
+    add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
+    add_flag "-I" "${INPUT_INCLUDE:-}"
+    add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
+    add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
+  fi
 
   # Cross-compiler flags -- documented root-Action inputs, but previously
   # only wired to dump mode's branch (Codex review, same gap as compare

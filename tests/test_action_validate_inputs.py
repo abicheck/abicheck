@@ -257,6 +257,27 @@ class TestScanNewLibrarySet:
         )
         assert result.returncode == 1
 
+    def test_rejects_old_header_with_new_library_set(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_OLD_HEADER": "old/include/foo.h",
+            }
+        )
+        assert result.returncode == 1
+        assert "old-header" in result.stdout
+
+    def test_rejects_old_include_with_new_library_set(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_OLD_INCLUDE": "old/include",
+            }
+        )
+        assert result.returncode == 1
+
     def test_rejects_dry_run_with_new_library_set(self) -> None:
         # P2 regression (Codex review): --artifact-set estimation isn't
         # implemented; without this preflight check a dry-run + set step

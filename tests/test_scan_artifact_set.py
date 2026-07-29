@@ -462,6 +462,55 @@ class TestRunScanSet:
         assert d["exit_code"] == result.exit_code
         assert len(d["per_artifact"]) == 2
 
+    def test_rejects_duplicate_binary_even_when_listed_twice(
+        self, snap_a: Path
+    ) -> None:
+        # P2 regression (Codex review): the same path (or a symlink alias)
+        # passed twice must not silently satisfy the "2 or more binaries"
+        # cardinality check -- discover_artifact_set dedupes via
+        # Path.resolve() later, so an undeduplicated pair would be reported
+        # as a "complete" 2-member audit of what's really one library.
+        from abicheck.service import ScanRequest, run_scan_set
+
+        with pytest.raises(ValueError, match="distinct"):
+            run_scan_set(ScanRequest(binaries=[snap_a, snap_a]))
+
+    def test_rejects_symlink_alias_of_same_binary(
+        self, snap_a: Path, tmp_path: Path
+    ) -> None:
+        from abicheck.service import ScanRequest, run_scan_set
+
+        alias = tmp_path / "alias.abi.json"
+        try:
+            alias.symlink_to(snap_a)
+        except OSError:
+            pytest.skip("symlinks unsupported in this environment")
+
+        with pytest.raises(ValueError, match="distinct"):
+            run_scan_set(ScanRequest(binaries=[snap_a, alias]))
+
+    def test_forwards_changed_src_to_every_member(
+        self, snap_a: Path, snap_b: Path
+    ) -> None:
+        # P2 regression (Codex review): run_scan_set previously hard-coded
+        # every member's changed_path_source to the literal "run_scan_set",
+        # discarding the real --since/--changed-path provenance a caller
+        # (e.g. cli_scan._run_artifact_set) computes and passes through
+        # ScanRequest.changed_src.
+        from abicheck.service import ScanRequest, run_scan_set
+
+        result = run_scan_set(
+            ScanRequest(
+                binaries=[snap_a, snap_b],
+                mode="audit",
+                changed_src="--since origin/main",
+            )
+        )
+        for member in result.per_artifact:
+            report = member.result.report
+            assert report is not None
+            assert report["changed_paths"]["source"] == "--since origin/main"
+
 
 # ---------------------------------------------------------------------------
 # Real end-to-end: two genuinely compiled, cross-referencing .so files, one

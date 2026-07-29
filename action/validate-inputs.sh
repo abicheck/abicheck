@@ -102,6 +102,13 @@ case "$MODE" in
       if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
         _fail "mode: scan with new-library-set does not support dry-run -- --artifact-set estimation is not implemented yet. Remove dry-run, or use new-library (a single artifact) to preview a scan."
       fi
+      # cli_scan._run_artifact_set rejects old=/new= header/include scoping
+      # outright (no old side for a set) -- old-header/old-include are
+      # meaningless here; run.sh maps new-header/new-include to bare flags
+      # instead (Codex review, keeping this script and run.sh synchronized).
+      if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
+        _fail "mode: scan with new-library-set does not support old-header/old-include -- new-library-set is audit-only (no old side, ADR-056)."
+      fi
     elif [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, use new-library-set to audit a set with no old side, or use mode: compare against a directory/package for a multi-library binary comparison."
     fi

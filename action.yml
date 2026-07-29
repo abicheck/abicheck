@@ -587,6 +587,8 @@ runs:
         INPUT_BUNDLE_SYSTEM_PROVIDERS: ${{ inputs.bundle-system-providers }}
         INPUT_AGAINST: ${{ inputs.against }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        INPUT_OLD_HEADER: ${{ inputs.old-header }}
+        INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
         INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_UPLOAD_SARIF: ${{ inputs.upload-sarif }}

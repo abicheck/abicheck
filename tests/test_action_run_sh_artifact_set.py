@@ -134,6 +134,44 @@ class TestScanArtifactSetForwarding:
         i = cmd.index("--bundle-system-providers")
         assert cmd[i + 1] == "libvendor.so.1"
 
+    def test_new_library_set_maps_new_header_to_bare_flag(self) -> None:
+        # P2 regression (Codex review): _run_artifact_set rejects old=/new=
+        # header scoping outright (no old side for a set) -- new-header must
+        # map to a bare -H, not "-H new=...".
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_NEW_HEADER": "include/foo.h",
+            }
+        )
+        i = cmd.index("-H")
+        assert cmd[i + 1] == "include/foo.h"
+        assert "new=include/foo.h" not in cmd
+
+    def test_new_library_set_maps_new_include_to_bare_flag(self) -> None:
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_NEW_INCLUDE": "include/",
+            }
+        )
+        i = cmd.index("-I")
+        assert cmd[i + 1] == "include/"
+        assert "new=include/" not in cmd
+
+    def test_new_library_set_rejects_old_header(self) -> None:
+        result = _run_raw(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_OLD_HEADER": "old/include/foo.h",
+            }
+        )
+        assert result.returncode != 0
+        assert "old-header" in result.stdout
+
     def test_bare_new_library_still_uses_positional_form(self) -> None:
         cmd = _run_cmd({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"})
         assert "scan" in cmd

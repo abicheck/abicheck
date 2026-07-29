@@ -661,6 +661,7 @@ def _run_artifact_set(
         allow_build_query=allow_build_query,
         risk_rules_path=risk_rules_path,
         bundle_system_providers=bsp,
+        changed_src=changed_src,
     )
     result = run_scan_set(req)
 
