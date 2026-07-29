@@ -344,7 +344,27 @@ implementation that shipped.
      caller-declared set when it didn't. The explicit-list path must
      reject or mark the result incomplete for *any* unsupported named
      member, not only when the whole set collapses to zero.
-  Never a bare "no findings" for either case.
+  3. **Colliding canonical identities — reject, don't silently keep one.**
+     `build_bundle_snapshot(libraries: dict[str, Path])`
+     (`abicheck/bundle.py`) is keyed by canonical library name; `compare`'s
+     own directory-matching path (`_build_match_map`,
+     `abicheck/cli_helpers_compare.py`) already has to resolve this for
+     two-sided old-vs-new matching (picks the newest version on a tie), but
+     that resolution strategy doesn't apply to a one-sided audit set — for
+     `--artifact-set dir1/libfoo.so,dir2/libfoo.so` (two explicit paths
+     canonicalizing to the same name) or a directory containing two
+     same-named libraries, silently building the dict would keep only one
+     path's `AbiSnapshot` in the bundle graph while `run_scan_set` still
+     scanned both individually — the bundle graph would then attribute
+     provider/consumer findings using only one of the two, producing
+     incorrect results for the dropped one without any indication anything
+     was dropped. Discovery must check for a canonical-name collision
+     across the resolved member set *before* handing it to
+     `build_bundle_snapshot` and reject with a usage error
+     (`click.UsageError`/exit 64) naming the colliding paths — there is no
+     sound way to silently pick one, unlike `compare`'s old-vs-new case
+     where "newest version wins" is a meaningful tiebreak.
+  Never a bare "no findings" for any of the three cases.
 - Add `ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` (exact name TBD),
   `default_verdict = COMPATIBLE_WITH_RISK`, registered in
   `change_registry.py` alongside ADR-023's existing 9 `bundle_*` entries.
@@ -393,15 +413,37 @@ implementation that shipped.
   currently indistinguishable from a consumer whose `foo` import is
   correctly satisfied, since `providers_for("foo")` returns non-empty
   either way. The new audit detector's provider check must confirm
-  **version compatibility, not just name match**: for a *versioned*
-  consumer import, only count a provider whose `version` matches (or, for
-  an unversioned consumer import, any provider name-matches, unchanged
-  from today); when no version-compatible provider exists, treat the
+  **version compatibility, not just label match**: GNU version *labels*
+  are not globally unique across providers (`abicheck/bundle.py`'s own
+  `_import_is_external` docstring — two siblings can both legitimately
+  export a symbol under the same label, e.g. `V1`), so matching by
+  `ConsumerEntry.version == ProviderEntry.version` alone is still
+  attributable to the wrong provider: if a consumer's verneed specifically
+  targets `liba.so` for `foo@V1`, `liba.so` drops the export, and an
+  unrelated sibling `libb.so` happens to also export `foo@V1`, label-only
+  matching would wrongly accept `libb.so` as satisfying the consumer. When
+  `ConsumerEntry.version_soname` is populated (the precise, per-symbol
+  verneed provider — the same field `_import_is_external` already prefers
+  for exactly this reason), the provider check must resolve that soname to
+  its actual bundle library (reusing/extending
+  `BundleSnapshot.is_intra_bundle_provider`'s own soname-to-library
+  matching, `abicheck/bundle_models.py`) and require the matching
+  `ProviderEntry.library` to be that specific library — not just any
+  provider sharing the label. Only when `version_soname` is empty
+  (unavailable, e.g. a JSON snapshot predating the field) fall back to
+  label-only matching among `providers_for(symbol)`, mirroring
+  `_import_is_external`'s own two-tier fallback structure. For an
+  unversioned consumer import, any provider name-matches, unchanged from
+  today. When no compatible provider exists under this scheme, treat the
   symbol as unresolved-in-set the same as a name-level miss, subject to
-  the same weak-import/suppression-path handling below. Cover with a
-  version-mismatch audit test (consumer requires `foo@V2`, set only
-  provides `foo@V1`) confirming this now produces a finding instead of a
-  clean `bundle_verdict`.
+  the same weak-import/suppression-path handling below. Cover with two
+  tests: (a) consumer requires `foo@V2`, set only provides `foo@V1` —
+  produces a finding instead of a clean `bundle_verdict`; (b) consumer's
+  verneed targets `liba.so` for `foo@V1` (via `version_soname`), `liba.so`
+  no longer exports it, but unrelated sibling `libb.so` also exports
+  `foo@V1` — must still produce a finding (the same-label-different-
+  provider regression this correction closes), not be masked by the wrong
+  provider matching on label alone.
 - New audit-mode detector — **do not call `_detect_intra_dep_removed`
   directly, and do not assume extending its `system_providers` set alone is
   enough.** In the live detector, an allow-listed `extra_needed` edge only
@@ -799,7 +841,9 @@ stale — this is a hard requirement, not optional polish.
 - `tests/test_bundle.py` — extended for the new audit-mode entry point
   (Phase 2), alongside its existing `compare`-side coverage.
 - `tests/test_scan_artifact_set.py` (new) — CLI/service end-to-end for
-  `scan --artifact-set` (Phase 1-4 combined).
+  `scan --artifact-set` (Phase 1-4 combined), including a colliding-
+  canonical-name rejection test (two explicit paths, or a directory with
+  two same-named libraries) — the discovery-collision regression test.
 - `tests/test_cli_root_surface.py` — flag-level surface assertion updated
   (Phase 3).
 - `tests/test_mcp_*` — `abi_scan`'s new `artifact_set`/
