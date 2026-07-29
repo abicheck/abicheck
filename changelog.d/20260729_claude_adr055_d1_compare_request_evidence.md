@@ -48,12 +48,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   "explicitly set to the default" — see
   `service_compare_evidence._compile_context`'s docstring); the `android`
   frontend's source-evidence check now also accepts either side's own
-  `InputSpec.sources`, not just the legacy `has_sources` flag — but
-  `InputSpec.sources`/`build_info` are rejected together with `frontend=
-  "android"`, since `run_compare_request`'s inline evidence collection has no
-  real Android source extractor and would otherwise silently substitute
-  Clang; only the legacy `has_sources=True` (pre-captured dump, no inline
-  path) combination is supported for `android` today; a `depth="source"`
+  `InputSpec.sources`, not just the legacy `has_sources` flag; `frontend=
+  "android"` combined with a *raw* source tree in `InputSpec.sources` is
+  rejected at runtime (`run_compare_request`'s inline evidence collection has
+  no real Android source extractor and would otherwise silently substitute
+  Clang), but a prebuilt evidence pack (`BuildSourcePack`/build-emitted
+  `abicheck_inputs/`, auto-detected the same way `embed_build_source` already
+  does) is allowed, since it's loaded as pre-captured facts with no extractor
+  ever running — `build_info` alone is likewise unaffected, since it never
+  feeds L4 extraction; a `depth="source"`
   request that would attempt L4 replay with the `hybrid` AST frontend is
   similarly rejected (mirroring `dump`'s own `--depth source`/`--ast-frontend
   hybrid` `UsageError` — L4 has no dual-backend hybrid extractor); a

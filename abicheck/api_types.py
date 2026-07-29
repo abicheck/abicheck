@@ -289,30 +289,15 @@ class CompareRequest:
                 "the 'android' AST frontend is source-ABI only (it has no "
                 "header-AST path); supply source inputs (--sources) to use it"
             )
-        elif frontend == "android" and (
-            self.old.sources
-            or self.new.sources
-            or self.old.build_info
-            or self.new.build_info
-        ):
-            # ADR-055 D1 (Codex review): `InputSpec.sources`/`build_info`
-            # drive `run_compare_request`'s inline `embed_build_source` call,
-            # whose extractor resolution (`_make_source_extractor`) only
-            # special-cases "castxml", falling back to Clang for anything
-            # else -- there is no real Android source-extractor wired into
-            # that pipeline (unlike `buildsource.source_extractors.resolver`,
-            # which knows an "android" choice but has no caller). Silently
-            # running Clang instead of the advertised adapter would produce
-            # wrong results, so this combination is rejected until Android
-            # replay is actually wired into `run_compare_request`; the
-            # legacy `has_sources=True` (no inline path) is unaffected.
-            errors.append(
-                "the 'android' AST frontend's source-ABI replay is not yet "
-                "wired into run_compare_request's inline evidence collection "
-                "(InputSpec.sources/build_info) -- it currently only supports "
-                "reusing a pre-captured header-abi dump (has_sources=True, "
-                "with no inline sources/build_info set)"
-            )
+        # ADR-055 D1 (Codex review, two rounds): whether `InputSpec.sources`
+        # is compatible with `frontend == "android"` depends on whether it's
+        # a genuine raw source tree (run_compare_request's inline
+        # embed_build_source has no real Android extractor -- rejected) or a
+        # prebuilt evidence pack (loaded as pre-captured facts, no extractor
+        # ever runs -- valid). That distinction needs filesystem access plus
+        # helpers from the CLI/service import-cycle-allowlisted cluster this
+        # leaf module deliberately stays out of, so it's checked at runtime
+        # in service.run_compare_request instead of here.
         if not self.policy:
             errors.append("policy profile name must not be empty")
         # D9 pre-flight: a --policy-file path that doesn't exist is a hard error

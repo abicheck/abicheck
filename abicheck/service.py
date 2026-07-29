@@ -1695,15 +1695,13 @@ def run_compare_request(
         SnapshotError: If either input cannot be loaded.
     """
     request.validate()
-    # validate() accepts lang case-insensitively; the ELF dump path does case-sensitive lang == "c" checks, so normalise here.
+    # validate() accepts lang case-insensitively; the ELF dump path does case-sensitive lang == "c" checks, so normalise here. android (no header-AST path) falls back to "auto" for the binary dump.
     lang = request.lang.lower()
-    # android (source-ABI only, gated to has_sources by validate) has no header-AST path, so it falls back to "auto" for the binary dump.
     from .api_types import HEADER_AST_FRONTENDS
     frontend_lower = request.frontend.lower()
     header_backend = frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
-
     # Pair-wide C++20 dialect resolution (P0 fix); folded into each side's effective CompileContext below. A dump_manifest replaces `headers` (empty), so its own forced_includes must feed the same C++20 scan too (Codex review) or a manifest-only side's C++20 signal goes undetected.
     def _manifest_forced_includes(dm: object) -> list[Path]:
         return [inc for tu in getattr(dm, "translation_units", ()) for inc in tu.forced_includes]
@@ -1724,14 +1722,16 @@ def run_compare_request(
     from .cli_buildsource import embed_build_source
 
     old_evidence, new_evidence = _sce.resolve_compare_request_evidence(request, pair_compile)
-    # Codex review (P1): mirror cli.py's --depth source + --ast-frontend hybrid UsageError -- L4 source-ABI replay has no dual-backend hybrid extractor, so an explicit depth="source" would otherwise silently reach an artifact-only verdict. Scoped to an explicit depth (implicit-default is allowed to degrade) and a genuine raw source tree (a prebuilt pack is loaded, not extracted -- no extractor runs).
+    # Codex: "hybrid" (explicit depth="source") and "android" have no real embed_build_source extractor -- reject only a raw tree needing real extraction, never a prebuilt pack or build_info alone (never feeds L4). Mirrors cli.py's own --depth source + --ast-frontend hybrid UsageError.
+    from .buildsource.inline import is_pack_dir
+    from .cli_buildsource_helpers import _is_inputs_pack_dir
+    def _is_raw_source_tree(p: Path | None) -> bool:
+        return p is not None and not (is_pack_dir(p) or _is_inputs_pack_dir(p))
+    if frontend_lower == "android" and any(_is_raw_source_tree(s.sources) for s in (request.old, request.new)):
+        raise ValidationError("the 'android' AST frontend's source-ABI replay is not yet wired into run_compare_request's inline evidence collection for a raw source tree -- pass a prebuilt evidence pack directory instead, or use has_sources=True with no inline sources/build_info.")
     if request.depth is not None and request.depth.lower() == "source":
-        from .buildsource.inline import is_pack_dir
-        from .cli_buildsource_helpers import _is_inputs_pack_dir
         for side, evidence in ((request.old, old_evidence), (request.new, new_evidence)):
-            if side.sources is None or is_pack_dir(side.sources) or _is_inputs_pack_dir(side.sources):
-                continue
-            if _sce.effective_frontend(evidence.compile, header_backend) == "hybrid":
+            if _is_raw_source_tree(side.sources) and _sce.effective_frontend(evidence.compile, header_backend) == "hybrid":
                 raise ValidationError("depth='source' is incompatible with the 'hybrid' AST frontend: L4 source-ABI replay has no dual-backend hybrid extractor. Use 'castxml' or 'clang' for a depth='source' request.")
 
     def _resolve_side(

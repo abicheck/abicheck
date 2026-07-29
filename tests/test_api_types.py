@@ -204,31 +204,21 @@ class TestCompareRequestValidate:
         )
         assert req.validation_errors() == []
 
-    def test_android_frontend_with_inputspec_sources_rejected(self, tmp_path):
-        """Codex review (P2): InputSpec.sources/build_info drive
-        run_compare_request's inline embed_build_source call, which has no
-        real Android extractor -- silently running Clang instead of the
-        advertised adapter would produce wrong results, so this combination
-        is rejected until Android replay is wired into that path."""
+    def test_android_frontend_with_inputspec_sources_accepted_at_validation_time(
+        self, tmp_path
+    ):
+        """ADR-055 D1 (Codex review, second round): whether InputSpec.sources
+        is compatible with frontend="android" depends on whether it's a raw
+        tree (rejected) or a prebuilt evidence pack (valid) -- that
+        filesystem-dependent distinction is checked at runtime in
+        service.run_compare_request, not here (this leaf module has no
+        cluster-only pack-detection helpers available)."""
         req = CompareRequest(
             old=InputSpec.of("a", sources=tmp_path),
             new=InputSpec.of("b"),
             frontend="android",
         )
-        errors = req.validation_errors()
-        assert len(errors) == 1
-        assert "android" in errors[0] and "not yet wired" in errors[0]
-
-    def test_android_frontend_with_inputspec_build_info_rejected(self, tmp_path):
-        req = CompareRequest(
-            old=InputSpec.of("a", build_info=tmp_path),
-            new=InputSpec.of("b"),
-            frontend="android",
-            has_sources=True,
-        )
-        errors = req.validation_errors()
-        assert len(errors) == 1
-        assert "android" in errors[0] and "not yet wired" in errors[0]
+        assert req.validation_errors() == []
 
     def test_missing_policy_file_rejected(self, tmp_path):
         # D9 pre-flight: a --policy-file path that doesn't exist errors identically

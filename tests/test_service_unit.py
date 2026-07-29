@@ -2263,6 +2263,84 @@ class TestCompareRequestAdr055Evidence:
         with pytest.raises(ValidationError, match="hybrid"):
             run_compare_request(request)
 
+    def test_android_frontend_rejected_for_raw_source_tree(self, tmp_path):
+        """Codex review (P2): frontend="android" combined with a genuine raw
+        source tree must be rejected -- embed_build_source's inline
+        collection pipeline has no real Android extractor and would
+        otherwise silently substitute Clang."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=src_dir),
+            new=InputSpec.of(new_p),
+            frontend="android",
+            has_sources=True,
+        )
+        with pytest.raises(ValidationError, match="android"):
+            run_compare_request(request)
+
+    def test_android_frontend_allowed_for_prebuilt_evidence_pack(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P2, second round): a prebuilt BuildSourcePack/inputs
+        pack is loaded as pre-captured facts by embed_build_source -- no
+        extractor ever runs for it, so frontend="android" combined with a
+        genuine pack directory must be allowed, not rejected."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+
+        monkeypatch.setattr(
+            "abicheck.buildsource.inline.is_pack_dir",
+            lambda p: p == pack_dir,
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=pack_dir),
+            new=InputSpec.of(new_p),
+            frontend="android",
+            has_sources=True,
+        )
+        result, _, _ = run_compare_request(request)
+        assert isinstance(result, DiffResult)
+
+    def test_android_frontend_allowed_with_build_info_only(self, tmp_path, monkeypatch):
+        """build_info alone never drives L4 extraction (only L3 compile-DB
+        resolution), so it plays no part in the android/hybrid extractor
+        rejection -- must be allowed even as a raw (non-pack) directory."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, build_info=build_dir),
+            new=InputSpec.of(new_p),
+            frontend="android",
+            has_sources=True,
+        )
+        result, _, _ = run_compare_request(request)
+        assert isinstance(result, DiffResult)
+
     def test_hybrid_frontend_allowed_without_explicit_source_depth(
         self, tmp_path, monkeypatch
     ):
