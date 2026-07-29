@@ -108,14 +108,12 @@ from .type_reachability import (
 )
 
 
-def _resolve_typedef_chain(
-    alias: str, typedefs: dict[str, str], max_rounds: int = 8
-) -> str:
+def _resolve_typedef_chain(alias: str, typedefs: dict[str, str]) -> str:
     """Expand every typedef-key token embedded anywhere in *alias*'s target,
-    repeatedly, cycle-safe and bounded to *max_rounds* -- not just a
-    whole-string chain (``using Handle = Thing; using Thing =
-    std::Thing;``) but a typedef key embedded *inside* a decorated
-    intermediate target (``using Ptr = Handle *; using Handle =
+    repeatedly, until a round produces no change or repeats an
+    already-seen string -- not just a whole-string chain (``using Handle =
+    Thing; using Thing = std::Thing;``) but a typedef key embedded *inside*
+    a decorated intermediate target (``using Ptr = Handle *; using Handle =
     std::Thing;`` -- ``"Handle *"`` is not itself a typedef key, only the
     ``"Handle"`` token within it is) (Codex review, fresh evidence: an
     earlier version only followed a chain when the *entire* target string
@@ -123,9 +121,16 @@ def _resolve_typedef_chain(
     decoration). Each round substitutes every whole-token typedef-key
     occurrence in the current text with its target via one compiled
     boundary-aware pattern (:func:`abicheck.type_reachability._compile_spelling_pattern`,
-    reused for substitution rather than detection); stops when a round
-    produces no change or repeats an already-seen string (self-referential
-    or mutually-cyclic aliases).
+    reused for substitution rather than detection).
+
+    Bounded by ``len(typedefs) + 1`` rounds rather than a fixed constant
+    (Codex review, fresh evidence: an earlier fixed cap of 8 truncated a
+    legitimate longer chain, e.g. ten hops of distinct aliases, before it
+    ever reached the real dependency identity) -- a chain of *distinct*
+    substitutions cannot exceed the number of typedefs that exist before
+    either terminating or repeating a previously-seen string, at which
+    point the cycle guard below stops it (self-referential or
+    mutually-cyclic aliases).
     """
     text = typedefs.get(alias, alias)
     if not typedefs:
@@ -134,7 +139,7 @@ def _resolve_typedef_chain(
     if pattern is None:
         return text
     seen = {text}
-    for _ in range(max_rounds):
+    for _ in range(len(typedefs) + 1):
         expanded = pattern.sub(lambda m: typedefs.get(m.group(), m.group()), text)
         if expanded == text or expanded in seen:
             break

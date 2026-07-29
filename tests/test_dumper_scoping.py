@@ -684,6 +684,31 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
 
+    def test_long_typedef_chain_resolves_beyond_a_fixed_hop_count(self):
+        """Codex review (P2, fifth round): a chain of ten distinct alias
+        hops must still resolve to the real dependency identity -- an
+        earlier version capped expansion at a fixed 8 rounds, truncating a
+        legitimate longer chain before it ever reached the target."""
+        typedefs = {f"A{i}": f"A{i + 1}" for i in range(10)}
+        typedefs["A10"] = "std::Thing"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("A0",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs=typedefs,
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
     def test_kept_enum_collision_guards_bare_dependency_spelling(self):
         """Codex review (P2, fourth round): a kept enum's bare spelling
         (`api::Status` spelled bare `Status`) must guard against an
