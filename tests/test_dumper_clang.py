@@ -3775,6 +3775,26 @@ def test_resolve_source_frontend_clang_bin_keeps_cl_style_when_not_excluded() ->
     )
 
 
+def test_resolve_source_frontend_clang_bin_excludes_versioned_cl_driver() -> None:
+    """LLVM/Debian packaging commonly ships a versioned CL-mode driver
+    (``clang-cl-20``) alongside the unversioned name -- the version suffix
+    must not hide it from CL-style exclusion, or the S2 pre-scan drives it
+    with GNU-only flags (``-dM``/``-M``) it silently ignores instead of
+    falling back to plain ``clang++`` (Codex review)."""
+    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+
+    assert (
+        resolve_source_frontend_clang_bin("clang-cl-20", None, fallback="clang++")
+        == "clang++"
+    )
+    assert (
+        resolve_source_frontend_clang_bin(
+            "/usr/bin/clang-cl-20.exe", None, fallback="clang++"
+        )
+        == "clang++"
+    )
+
+
 def test_resolve_source_frontend_clang_bin_prefix_when_available(monkeypatch) -> None:
     from abicheck import dumper_clang
 

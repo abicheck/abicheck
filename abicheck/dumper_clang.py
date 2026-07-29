@@ -302,8 +302,18 @@ def _is_cl_style_driver_name(path: str) -> bool:
     output. Narrow, name-only heuristic: any stem ending in ``-cl`` (covers
     ``clang-cl``/``clang-cl.exe`` and ``dpcpp-cl``), consistent with the
     equally name-only :func:`_is_clang_family_binary` this complements.
+
+    Strips a trailing numeric version suffix first (``clang-cl-20`` ->
+    ``clang-cl``) -- LLVM/Debian packaging commonly ships a versioned
+    executable alongside (or instead of) the unversioned name; without
+    stripping it a packaged ``--gcc-path clang-cl-20`` would not be
+    recognized as CL-style and would wrongly reach the GNU-only S2
+    pre-scan, which silently ignores its unknown ``-dM``/``-M`` flags
+    (Codex review) instead of being excluded and falling back to plain
+    ``clang++``.
     """
-    return Path(path).stem.lower().endswith("-cl")
+    stem = Path(path).stem.lower()
+    return re.sub(r"-\d+(?:\.\d+)*$", "", stem).endswith("-cl")
 
 
 def resolve_source_frontend_clang_bin(

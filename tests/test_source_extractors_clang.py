@@ -638,6 +638,21 @@ def test_build_command_dpcpp_cl_driver_mode() -> None:
     assert "/std:c++20" in cmd
 
 
+def test_build_command_versioned_cl_driver_mode() -> None:
+    """LLVM/Debian packaging commonly ships a versioned CL-mode driver
+    (``clang-cl-20``) alongside the unversioned name -- the version suffix
+    must not hide it from MSVC-mode detection, or the command is built
+    GNU-shaped for a driver that only understands ``/``-style flags (Codex
+    review)."""
+    cmd = build_clang_command(
+        _cu(standard="c++20", defines={"WIN": "1"}, include_paths=["inc"]),
+        Path("a.cpp"),
+        compiler_binary="clang-cl-20",
+    )
+    assert "--driver-mode=cl" in cmd
+    assert "/std:c++20" in cmd
+
+
 def test_build_command_carries_abi_flags_and_unwraps_launcher() -> None:
     cu = _cu(
         argv=["ccache", "clang++", "-c", "foo.cpp"],
