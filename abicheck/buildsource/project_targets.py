@@ -799,6 +799,21 @@ class ProfileSpec:
     root ``compile:`` block (:class:`~abicheck.buildsource.inline.BuildConfig`);
     a run-plan consumer is expected to merge root-then-profile, same
     precedence as every other config layer in this project.
+
+    The optional ``consumer_compile:`` overlay (G34 Phase 0, same
+    :class:`ProfileCompileSpec` shape) separates the two axes ``compile:``
+    otherwise conflates: ``compile:`` is the *producer/artifact* toolchain
+    the library binary was actually built with; ``consumer_compile:`` is a
+    *client* toolchain a user of the library compiles their own code with
+    against the public headers, when it differs from the producer (e.g. a
+    ``.so`` built once with GCC 14 but contractually supporting a Clang 20
+    client under a different standard/standard-library). A profile with no
+    ``consumer_compile:`` behaves exactly as today — its ``compile:`` block
+    doubles as the consumer's, so existing single-toolchain projects need no
+    edits. Shape-validated identically to ``compile:``; a run-plan/dumper
+    consumer applying it to the header-AST (L2) extraction step only is not
+    yet wired (see ``docs/contribute/plans/
+    g34-producer-consumer-compiler-profile-separation.md``'s Phase 0).
     """
 
     id: str = ""
@@ -806,6 +821,7 @@ class ProfileSpec:
     os: str = ""
     arch: str = ""
     compile: ProfileCompileSpec | None = None
+    consumer_compile: ProfileCompileSpec | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"contract": self.contract}
@@ -815,6 +831,8 @@ class ProfileSpec:
             d["arch"] = self.arch
         if self.compile is not None and not self.compile.is_empty:
             d["compile"] = self.compile.to_dict()
+        if self.consumer_compile is not None and not self.consumer_compile.is_empty:
+            d["consumer_compile"] = self.consumer_compile.to_dict()
         return d
 
     @classmethod
@@ -824,7 +842,9 @@ class ProfileSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = _unknown_keys(d, {"contract", "os", "arch", "compile"})
+        unknown = _unknown_keys(
+            d, {"contract", "os", "arch", "compile", "consumer_compile"}
+        )
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         contract = d.get("contract", True)
@@ -838,12 +858,18 @@ class ProfileSpec:
             compile_spec = ProfileCompileSpec.from_dict(
                 f"{where}.compile", d["compile"]
             )
+        consumer_compile_spec: ProfileCompileSpec | None = None
+        if "consumer_compile" in d:
+            consumer_compile_spec = ProfileCompileSpec.from_dict(
+                f"{where}.consumer_compile", d["consumer_compile"]
+            )
         return cls(
             id=name,
             contract=contract,
             os=str(d.get("os", "") or ""),
             arch=str(d.get("arch", "") or ""),
             compile=compile_spec,
+            consumer_compile=consumer_compile_spec,
         )
 
 

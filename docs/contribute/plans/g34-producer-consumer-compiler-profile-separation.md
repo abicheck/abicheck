@@ -104,31 +104,43 @@ confirmed by reading the workflow, not asserted from a design doc):
 
 ### Phase 0 — schema: separate producer and consumer profile axes (S/M)
 
-- [ ] `.abicheck.yml` gains an explicit `consumer_profiles:` block (name
-      TBD at implementation time — candidate:
-      `profiles.<id>.consumer_compile`, sibling to the existing
-      `profiles.<id>.compile`) carrying the *same* `ProfileCompileSpec`
-      shape (`compiler_family`/`compiler_version`/`target`/`standard`/
-      `stdlib`/`binding`/`abi_macros`/`args`) but resolved and applied to
-      the **header-AST (L2) extraction step only** — the producer/artifact
-      `compile:` block continues to govern binary-facing (L0/L1) extraction
-      and the toolchain used to build the compared candidate.
-- [ ] A profile with no `consumer_compile:` overlay behaves exactly as
-      today (producer compile spec doubles as the consumer's) — this is
-      additive, not a breaking schema change; existing single-profile
-      projects need zero edits.
+- [x] `.abicheck.yml` gains `profiles.<id>.consumer_compile` (sibling to
+      the existing `profiles.<id>.compile`), carrying the *same*
+      `ProfileCompileSpec` shape (`compiler_family`/`compiler_version`/
+      `target`/`standard`/`stdlib`/`binding`/`abi_macros`/`args`) —
+      `ProfileSpec.consumer_compile` (`project_targets.py`), shape-validated
+      identically to `compile:` (unknown-key/type/whitespace-injection
+      guards all reused via the same `ProfileCompileSpec.from_dict`).
+      **Not yet done:** actually resolving/applying it to the
+      **header-AST (L2) extraction step only** — this slice is config-schema
+      projection only (see the next two open items).
+- [x] A profile with no `consumer_compile:` overlay behaves exactly as
+      today (`profile.consumer_compile is None`, omitted from `to_dict()`)
+      — additive, not a breaking schema change; existing single-profile
+      projects need zero edits. Covered in
+      `tests/test_project_targets_consumer_compile.py`.
 - [ ] A profile *with* `consumer_compile:` runs L0/L1 extraction once
       (producer toolchain) and L2/L4 header extraction under the consumer
       toolchain, then merges them into one snapshot the same way an
       existing hybrid/dual-backend snapshot already merges facts from two
       producers (see `dumper_hybrid.merge_snapshots()` for the existing
-      merge pattern to extend, not duplicate).
-- [ ] `tests/test_project_targets.py`/`tests/test_run_plan*.py` cover:
-      producer-only profile (today's behavior, unchanged), producer +
-      consumer profile (two extraction passes merged), and a
-      shape-validation test that a `consumer_compile:` block with an
-      invalid family/version string fails the same way `compile:` already
-      does.
+      merge pattern to extend, not duplicate). **Still open** — this is
+      the actual extraction/merge integration; the schema and its
+      `run_plan.py` projection (below) land first as an independently
+      mergeable, lower-risk slice.
+- [x] `run_plan.py` projects `consumer_compile:` into the generated cell
+      the same way `compile:` already does, as its own, independently
+      resolved `RunPlanCheck.consumer_compile_gcc_path`/
+      `consumer_compile_gcc_options` pair (`_consumer_compile_fields_for_profile`)
+      — never falling back to the producer overlay's own resolved values.
+- [x] `tests/test_project_targets_consumer_compile.py` (shape parsing,
+      round-trip, absence-is-None, unknown-key/not-a-mapping validation
+      errors) and `tests/test_run_plan.py`'s
+      `TestConsumerCompileOverlayProjection` (target checks, bundle checks,
+      independent binding resolution) cover the schema/projection slice
+      landed here. **Still open:** an integration test exercising the
+      actual "producer + consumer profile → two extraction passes merged"
+      behavior, once that extraction/merge work above lands.
 
 ### Phase A — toolchain-identity enforcement (L, risk: medium-high)
 

@@ -207,6 +207,45 @@ profiles:
       binding: gcc14
 ```
 
+### `consumer_compile:` — a separate client-toolchain overlay (G34 Phase 0)
+
+The optional `consumer_compile:` sub-block accepts the identical shape as
+`compile:` (same fields, same validation), but declares a **different**
+axis: `compile:` is the *producer/artifact* toolchain the library binary
+was actually built with (mangling, layout, vtables, calling convention,
+linked standard-library ABI); `consumer_compile:` is a *client* toolchain a
+user of the library compiles their own code with against the public
+headers, when it differs from the producer (which `#ifdef __GNUC__`/
+`__clang__`/`_MSC_VER` branch, which standard-library ABI, which template
+instantiation the client actually sees). A profile with no
+`consumer_compile:` behaves exactly as today — its `compile:` block doubles
+as the consumer's, so existing single-toolchain projects need no edits:
+
+```yaml
+profiles:
+  linux-gcc14-build-clang20-client:
+    contract: true
+    os: linux
+    compile:
+      binding: gcc14
+      standard: gnu++17
+    consumer_compile:
+      binding: clang20
+      standard: gnu++20
+      stdlib: libc++
+```
+
+`consumer_compile:`'s fields reach `abicheck project plan` the same way
+`compile:`'s do, into their own separate pair —
+[`consumer_compile_gcc_path`/`consumer_compile_gcc_options`](run-plan-schema.md#runplancheck-fields)
+— never falling back to the producer overlay's own resolved values when
+absent. **Not yet wired:** actually applying `consumer_compile:` to a
+separate header-AST (L2) extraction pass and merging it with the producer
+toolchain's binary (L0/L1) facts — this schema slice only projects the
+config axis into `run-plan.json`; see
+[`docs/contribute/plans/g34-producer-consumer-compiler-profile-separation.md`](../contribute/plans/g34-producer-consumer-compiler-profile-separation.md)'s
+Phase 0 for the remaining extraction/merge integration.
+
 ### `compile.binding` — resolving a logical toolchain id
 
 `binding` is a *logical* identifier (e.g. `"gcc14"`), never a raw

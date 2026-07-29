@@ -105,6 +105,21 @@ direct-clang backend (the composed string is never actually fed to a
 literal GCC binary anywhere in this pipeline, only ever to Clang -- see
 that function's own docstring), so it was reverted -- a documented gap,
 not an oversight.
+
+**The ``profiles.<id>.consumer_compile`` overlay (G34 Phase 0) projects the
+same way, into its own separate fields:** :attr:`RunPlanCheck.
+consumer_compile_gcc_path`/:attr:`RunPlanCheck.consumer_compile_gcc_options`,
+resolved identically to ``compile:``'s own pair but from the profile's
+separate consumer-toolchain overlay (see :class:`~.project_targets.
+ProfileSpec`'s docstring for the producer/consumer distinction). A profile
+with no ``consumer_compile:`` simply leaves both fields empty -- this
+module does not fall back to the producer ``compile:`` overlay's own
+fields for them, since "no consumer overlay" and "an actual empty overlay"
+are meant to look the same to a caller either way. Actually applying these
+fields to a separate header-AST (L2) extraction pass, merged with the
+producer-toolchain binary facts, is not yet wired here -- this module only
+projects the config-schema axis; the extraction/merge integration is
+G34 Phase 0's remaining, larger piece.
 """
 
 from __future__ import annotations
@@ -246,6 +261,17 @@ class RunPlanCheck:
     #: no ``compile:`` overlay, or the overlay sets none of
     #: ``standard``/``stdlib``/``target``/``abi_macros``/``args``.
     compile_gcc_options: str = ""
+    #: This cell's profile's ``consumer_compile.binding`` (G34 Phase 0),
+    #: resolved the same way :attr:`compile_gcc_path` is. Empty unless the
+    #: profile declares a ``consumer_compile:`` overlay with a ``binding``
+    #: AND :func:`generate_run_plan` was given a *resolved_bindings* mapping
+    #: that contains it.
+    consumer_compile_gcc_path: str = ""
+    #: This cell's profile's ``consumer_compile`` overlay, composed the same
+    #: way :attr:`compile_gcc_options` is. Empty when the profile has no
+    #: ``consumer_compile:`` overlay, or the overlay sets none of
+    #: ``standard``/``stdlib``/``target``/``abi_macros``/``args``.
+    consumer_compile_gcc_options: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -276,6 +302,10 @@ class RunPlanCheck:
             d["compile_gcc_path"] = self.compile_gcc_path
         if self.compile_gcc_options:
             d["compile_gcc_options"] = self.compile_gcc_options
+        if self.consumer_compile_gcc_path:
+            d["consumer_compile_gcc_path"] = self.consumer_compile_gcc_path
+        if self.consumer_compile_gcc_options:
+            d["consumer_compile_gcc_options"] = self.consumer_compile_gcc_options
         return d
 
     @classmethod
@@ -306,6 +336,10 @@ class RunPlanCheck:
             member_binary_patterns=member_patterns,
             compile_gcc_path=_opt_str(d.get("compile_gcc_path")),
             compile_gcc_options=_opt_str(d.get("compile_gcc_options")),
+            consumer_compile_gcc_path=_opt_str(d.get("consumer_compile_gcc_path")),
+            consumer_compile_gcc_options=_opt_str(
+                d.get("consumer_compile_gcc_options")
+            ),
         )
 
 
@@ -380,6 +414,22 @@ def _resolve_profile_ids(
     return [p.id for p in config.profiles.values() if p.contract], False
 
 
+def _resolved_compile_fields(
+    compile_spec: ProfileCompileSpec | None,
+    resolved_bindings: Mapping[str, str] | None,
+) -> tuple[str, str]:
+    """Returns ``(gcc_path, gcc_options)`` for one already-resolved
+    :class:`ProfileCompileSpec` (either a profile's ``compile:`` or its
+    ``consumer_compile:`` overlay, G34 Phase 0) -- ``("", "")`` when
+    *compile_spec* is ``None``."""
+    if compile_spec is None:
+        return "", ""
+    gcc_path = ""
+    if compile_spec.binding and resolved_bindings is not None:
+        gcc_path = resolved_bindings.get(compile_spec.binding, "")
+    return gcc_path, _compose_gcc_options(compile_spec)
+
+
 def _compile_fields_for_profile(
     config: ProjectTargetsConfig,
     profile_id: str,
@@ -391,12 +441,23 @@ def _compile_fields_for_profile(
     resolvable-flags fields."""
     profile = config.profiles.get(profile_id)
     compile_spec = profile.compile if profile is not None else None
-    if compile_spec is None:
-        return "", ""
-    gcc_path = ""
-    if compile_spec.binding and resolved_bindings is not None:
-        gcc_path = resolved_bindings.get(compile_spec.binding, "")
-    return gcc_path, _compose_gcc_options(compile_spec)
+    return _resolved_compile_fields(compile_spec, resolved_bindings)
+
+
+def _consumer_compile_fields_for_profile(
+    config: ProjectTargetsConfig,
+    profile_id: str,
+    resolved_bindings: Mapping[str, str] | None,
+) -> tuple[str, str]:
+    """Returns ``(consumer_compile_gcc_path, consumer_compile_gcc_options)``
+    for *profile_id* (G34 Phase 0) -- ``("", "")`` when the profile has no
+    ``consumer_compile:`` overlay, is unknown, or declares no ``binding``/no
+    resolvable-flags fields. Mirrors :func:`_compile_fields_for_profile`
+    exactly, resolved from the profile's separate consumer-toolchain overlay
+    instead of its producer ``compile:`` block."""
+    profile = config.profiles.get(profile_id)
+    consumer_compile_spec = profile.consumer_compile if profile is not None else None
+    return _resolved_compile_fields(consumer_compile_spec, resolved_bindings)
 
 
 def _library_lookup_and_pattern(
@@ -465,6 +526,11 @@ def _generate_target_checks(
             compile_gcc_path, compile_gcc_options = _compile_fields_for_profile(
                 config, profile_id, resolved_bindings
             )
+            consumer_compile_gcc_path, consumer_compile_gcc_options = (
+                _consumer_compile_fields_for_profile(
+                    config, profile_id, resolved_bindings
+                )
+            )
             out.append(
                 RunPlanCheck(
                     check_id=check_id,
@@ -490,6 +556,8 @@ def _generate_target_checks(
                     ),
                     compile_gcc_path=compile_gcc_path,
                     compile_gcc_options=compile_gcc_options,
+                    consumer_compile_gcc_path=consumer_compile_gcc_path,
+                    consumer_compile_gcc_options=consumer_compile_gcc_options,
                 )
             )
     return out
@@ -558,6 +626,11 @@ def _generate_bundle_checks(
             compile_gcc_path, compile_gcc_options = _compile_fields_for_profile(
                 config, profile_id, resolved_bindings
             )
+            consumer_compile_gcc_path, consumer_compile_gcc_options = (
+                _consumer_compile_fields_for_profile(
+                    config, profile_id, resolved_bindings
+                )
+            )
             out.append(
                 RunPlanCheck(
                     check_id=check_id,
@@ -573,6 +646,8 @@ def _generate_bundle_checks(
                     member_binary_patterns=member_patterns,
                     compile_gcc_path=compile_gcc_path,
                     compile_gcc_options=compile_gcc_options,
+                    consumer_compile_gcc_path=consumer_compile_gcc_path,
+                    consumer_compile_gcc_options=consumer_compile_gcc_options,
                 )
             )
     return out

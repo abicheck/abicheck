@@ -569,6 +569,39 @@ class TestRunPlanRoundTrip:
         assert "compile_gcc_path" not in d
         assert "compile_gcc_options" not in d
 
+    def test_consumer_compile_overlay_fields_round_trip(self) -> None:
+        """G34 Phase 0: consumer_compile_gcc_path/consumer_compile_gcc_options
+        both serialize/deserialize, independently of the producer compile
+        overlay's own pair."""
+        check = RunPlanCheck(
+            check_id="libfoo@gcc14-clang20#release@headers",
+            kind=RUN_PLAN_KIND_TARGET,
+            target_kind="library",
+            name="libfoo",
+            profile_id="gcc14-clang20",
+            baseline_channel="release",
+            requested_depth="headers",
+            binary_pattern="build/libfoo*.so",
+            compile_gcc_path="/opt/gcc14/bin/g++",
+            compile_gcc_options="-std=gnu++17",
+            consumer_compile_gcc_path="/opt/llvm-20/bin/clang++",
+            consumer_compile_gcc_options="-std=gnu++20 -stdlib=libc++",
+        )
+        plan = RunPlan(checks=[check])
+        d = check.to_dict()
+        assert d["consumer_compile_gcc_path"] == "/opt/llvm-20/bin/clang++"
+        assert d["consumer_compile_gcc_options"] == "-std=gnu++20 -stdlib=libc++"
+        restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+        assert restored == plan
+
+    def test_consumer_compile_overlay_fields_omitted_from_dict_when_empty(
+        self,
+    ) -> None:
+        check = RunPlanCheck(check_id="libfoo@linux#release@headers")
+        d = check.to_dict()
+        assert "consumer_compile_gcc_path" not in d
+        assert "consumer_compile_gcc_options" not in d
+
 
 class TestToAggregateManifest:
     def test_uses_check_id_not_bare_name(self) -> None:
@@ -745,6 +778,140 @@ class TestProfileCompileOverlayProjection:
         [check] = plan.checks
         assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
         assert check.compile_gcc_options == "-std=gnu++20"
+
+
+class TestConsumerCompileOverlayProjection:
+    """G34 Phase 0: profiles.<id>.consumer_compile reaches the generated
+    cell as consumer_compile_gcc_path/consumer_compile_gcc_options,
+    independently of (and identically resolved to) the producer compile:
+    overlay's own pair."""
+
+    _RAW = {
+        "targets": {
+            "libfoo": {
+                "kind": "library",
+                "binary_pattern": "build/libfoo*.so",
+                "checks": [
+                    {"channel": "release", "depth": "headers", "required": True},
+                ],
+            },
+        },
+        "profiles": {
+            "gcc14-build-clang20-client": {
+                "contract": True,
+                "compile": {"binding": "gcc14", "standard": "gnu++17"},
+                "consumer_compile": {
+                    "binding": "clang20",
+                    "standard": "gnu++20",
+                    "stdlib": "libc++",
+                },
+            },
+            "plain": {"contract": True},
+        },
+        "baseline": {
+            "channels": {
+                "release": {"source": "github-release", "asset_pattern": "libfoo-*"},
+            },
+        },
+    }
+
+    def test_no_consumer_compile_overlay_leaves_both_fields_empty(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+        )
+        assert report.ok
+        [check] = [c for c in plan.checks if c.profile_id == "plain"]
+        assert check.consumer_compile_gcc_path == ""
+        assert check.consumer_compile_gcc_options == ""
+        assert "consumer_compile_gcc_path" not in check.to_dict()
+        assert "consumer_compile_gcc_options" not in check.to_dict()
+
+    def test_consumer_compile_overlay_projects_independently_of_producer(
+        self,
+    ) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+            resolved_bindings={
+                "gcc14": "/opt/gcc14/bin/g++",
+                "clang20": "/opt/llvm-20/bin/clang++",
+            },
+        )
+        assert report.ok
+        [check] = [
+            c for c in plan.checks if c.profile_id == "gcc14-build-clang20-client"
+        ]
+        # Producer compile: overlay resolves to its own pair, unaffected.
+        assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
+        assert check.compile_gcc_options == "-std=gnu++17"
+        # consumer_compile: resolves independently to its own pair.
+        assert check.consumer_compile_gcc_path == "/opt/llvm-20/bin/clang++"
+        assert check.consumer_compile_gcc_options == "-std=gnu++20 -stdlib=libc++"
+
+    def test_consumer_binding_absent_from_resolved_bindings_leaves_path_empty(
+        self,
+    ) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+            resolved_bindings={"gcc14": "/opt/gcc14/bin/g++"},
+        )
+        assert report.ok
+        [check] = [
+            c for c in plan.checks if c.profile_id == "gcc14-build-clang20-client"
+        ]
+        assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
+        assert check.consumer_compile_gcc_path == ""
+        # Options still compose regardless of binding resolution.
+        assert check.consumer_compile_gcc_options == "-std=gnu++20 -stdlib=libc++"
+
+    def test_bundle_check_also_gets_consumer_compile_fields(self) -> None:
+        raw = {
+            "targets": {
+                "libpvxs": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libpvxs.so*",
+                    "bundle": "pvxs-release",
+                },
+            },
+            "bundles": {
+                "pvxs-release": {
+                    "targets": ["libpvxs"],
+                    "checks": [
+                        {"channel": "release", "depth": "binary", "required": True},
+                    ],
+                },
+            },
+            "profiles": {
+                "gcc14-build-clang20-client": {
+                    "contract": True,
+                    "compile": {"binding": "gcc14"},
+                    "consumer_compile": {"binding": "clang20", "standard": "gnu++20"},
+                },
+            },
+            "baseline": {
+                "channels": {
+                    "release": {
+                        "source": "github-release",
+                        "asset_pattern": "pvxs-*",
+                    },
+                },
+            },
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libpvxs")},
+            resolved_bindings={"clang20": "/opt/llvm-20/bin/clang++"},
+        )
+        assert report.ok
+        [check] = plan.checks
+        assert check.consumer_compile_gcc_path == "/opt/llvm-20/bin/clang++"
+        assert check.consumer_compile_gcc_options == "-std=gnu++20"
 
 
 class TestComposeGccOptionsNotFamilyAware:
