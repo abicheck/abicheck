@@ -330,53 +330,19 @@ Explicitly **not** in this ADR's scope:
 
 ---
 
-## Implementation plan (not started — see G34 for the tracked, phased version)
+## Implementation plan
 
-1. `abicheck/service_scan.py` — replace `run_scan`'s `len() != 1` guard with
-   real multi-binary handling, **without changing `run_scan`'s existing
-   return type for the single-binary path**. `run_scan` returns
-   `ScanResult` today (`verdict`/`exit_code`/`findings`/`layers`/
-   `confidence`/`estimate`/`report`), and existing service callers,
-   `run_scan_subprocess`, and the MCP tool all consume it directly —
-   `.verdict`/`.exit_code` and `.to_dict()` are load-bearing. A single-item
-   `req.binaries` must still return exactly one `ScanResult`, unchanged. A
-   new multi-binary entry point (e.g. `run_scan_set(req) ->
-   ScanSetResult`, a new aggregate dataclass wrapping `per_artifact:
-   list[ScanResult]` + the bundle layer's findings/verdict) is added
-   alongside `run_scan`, not as a change to what `run_scan` itself returns.
-2. `abicheck/bundle.py` — generalize the entry point that currently only
-   `compare-release`'s directory matching calls (`build_bundle_snapshot`/
-   `compare_bundle`) to accept a `list[AbiSnapshot]` + path list directly,
-   so a library-set `scan` can call it without going through
-   `compare-release`'s file-matching layer at all (there is no "old vs new"
-   matching to do for a single-side audit).
-3. `abicheck/cli_scan.py` (the module the `scan` command is actually
-   registered from — see D1 above) — make the existing `ARTIFACT`
-   `@click.argument` optional, add `--artifact-set` (directory or
-   comma-separated explicit list), and enforce exactly one of the two is
-   given (`click.UsageError`, exit 64) before wiring to
-   `ScanRequest.binaries` / the new `run_scan_set` entry point.
-4. `abicheck/mcp_server.py` — add the equivalent `artifact_set` parameter to
-   `abi_scan`, same validation shape as the CLI flag.
-5. Reporter — `scan`'s report gains a `bundle_findings`/`bundle_verdict`
-   section when `--artifact-set` was used, reusing ADR-023's existing
-   `bundle.json`/`bundle.md` output shape rather than inventing a new one.
-6. Tests — `tests/test_scan_estimate.py::test_run_scan_rejects_multiple_binaries`
-   **stays unchanged**: `run_scan` itself keeps rejecting a multi-item
-   `binaries` list (this ADR's D1/implementation-plan-step-1 preserve
-   `run_scan`'s singular contract — only the new `run_scan_set` entry point
-   accepts multiple binaries), so this test remains the regression guard
-   for that preserved contract. Add a **separate**, new acceptance test for
-   `run_scan_set`; new `tests/test_scan_artifact_set.py` mirroring
-   `tests/test_bundle.py`'s shape for the audit-mode (no old side) case.
-7. `tests/test_cli_root_surface.py` / `README.md` /
-   `docs/reference/cli-reference.md` — updated together per AGENTS.md's
-   root-command-surface-change rule (this is a flag addition to an existing
-   command, not a new root verb, but the same "don't update code without
-   docs/tests in the same PR" discipline applies).
-8. Examples — at least one `--artifact-set` audit-mode example case
-   (two-library bundle, no old side, one intra-bundle finding), following
-   ADR-023's own example obligations.
+**Not started.** [G34](../plans/g34-multi-artifact-scan.md) is the single,
+tracked source of truth for the phased implementation breakdown — module
+list, task-by-task detail, and status per phase. Earlier drafts of this
+ADR duplicated that breakdown inline here as a second numbered list; it
+drifted out of sync with G34 more than once as review rounds corrected
+details in one copy but not the other (most notably: whether `run_scan`
+itself keeps rejecting a multi-item `binaries` list — it does, per D1/D2
+above; only the new `run_scan_set` entry point accepts multiple binaries).
+Per this file's own "one fact defined in exactly one place" rule
+(`docs/AGENTS.md`), the phased plan now lives only in G34; this ADR records
+the *decision* (D1/D2 above) and defers to G34 for *how* it gets built.
 
 ---
 

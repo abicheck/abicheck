@@ -58,12 +58,14 @@ See ADR-056's Context section for the full investigation. Summary:
   a new `run_scan_set`/`ScanSetResult` entry point; `run_scan`'s existing
   single-binary `ScanResult` return type is untouched, so existing service,
   `run_scan_subprocess`, and MCP callers that consume `.verdict`/
-  `.exit_code`/`.to_dict()` see no behavior change (see ADR-056's
-  implementation-plan step 1). `ScanSetResult` itself carries a **set-level**
-  `verdict`/`exit_code` (worst-of across `per_artifact` plus the bundle
-  layer's own verdict — same worst-of precedence ADR-023's `compare-release`
-  summary already uses for its per-library + bundle verdicts), not just the
-  per-artifact list — see Phase 1.
+  `.exit_code`/`.to_dict()` see no behavior change (see ADR-056 D1/D2 and
+  Phase 1 below). `ScanSetResult` itself carries a **set-level**
+  `verdict`/`exit_code` (an explicit precedence table covering scan's own
+  `BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR` failure verdicts alongside the
+  ordinary compatibility ladder and the bundle layer's verdict — see
+  Phase 1's precedence rules; deliberately **not** a reuse of
+  `compare-release`'s `_RELEASE_VERDICT_ORDER`, which has no entries for
+  either scan-specific failure state), not just the per-artifact list.
 - **G34.3** — `abi_scan` MCP tool gains the equivalent `artifact_set`
   parameter in the same change (ADR-043 D10 parity rule), not a follow-up.
 - **G34.4** — `tests/test_cli_root_surface.py`, `README.md`,
@@ -105,11 +107,8 @@ started.**
 ### Phase 1 — `service_scan.py`: finish the plural `binaries` path
 
 - Add `run_scan_set(req) -> ScanSetResult` (new aggregate dataclass:
-  `per_artifact: list[ScanResult]` + bundle findings/verdict +
-  **set-level `verdict: str`/`exit_code: int`**, worst-of across every
-  `per_artifact[i].verdict`/`.exit_code` and the bundle layer's own verdict
-  — mirroring `compare-release`'s existing per-library-plus-bundle
-  worst-of precedence, ADR-023), looping over
+  `per_artifact: list[ScanArtifactResult]` + bundle findings/verdict +
+  **set-level `verdict: str`/`exit_code: int`**), looping over
   `req.binaries` and reusing the existing single-binary dump/scan pipeline
   per artifact. **`run_scan`'s own signature and `ScanResult` return type
   stay exactly as they are today** — existing single-binary callers
@@ -118,6 +117,56 @@ started.**
   Without an explicit set-level `verdict`/`exit_code`, none of the CLI, MCP,
   or Action surfaces have a defined single result to gate on when one
   member is `BREAKING`/`API_BREAK`/budget-overflowed and another passes.
+- **Set-level precedence is its own explicit table, not
+  `compare-release`'s `_RELEASE_VERDICT_ORDER`.** That table
+  (`abicheck/cli_compare_release_helpers.py`) only ranks
+  `NO_CHANGE`/`COMPATIBLE`/`COMPATIBLE_WITH_RISK`/`API_BREAK`/`BREAKING`/
+  `ERROR`/`not_comparable` — it has no entries for `BUDGET_OVERFLOW` or
+  `EVIDENCE_CONTRACT_ERROR`, the two scan-specific failure verdicts
+  `run_scan` itself already produces (`abicheck/service_scan.py`, exit
+  codes 5 and 1 respectively) and that a `--artifact-set` member can
+  legitimately return. Reusing that table's `.get(v, 0)` lookup would
+  silently rank both as low as `NO_CHANGE`, defeating the point of
+  aggregating them at all. `ScanSetResult`'s aggregation instead follows
+  the single-artifact scan engine's own exit-code semantics explicitly:
+  1. **Any member `BUDGET_OVERFLOW`** → the whole set is `BUDGET_OVERFLOW`,
+     `exit_code = 5`. This dominates every other outcome, including a
+     confirmed `BREAKING` member — the same reasoning ADR-050 D2 already
+     established for `not_comparable` in `compare-release`: a member whose
+     analysis didn't finish is worse than one that finished and found a
+     break, because its true result is unknown, not merely bad.
+  2. **Else, worst compatibility verdict** across the members that did
+     complete (`NO_CHANGE`/`COMPATIBLE` < `COMPATIBLE_WITH_RISK` <
+     `API_BREAK` < `BREAKING`, plus the bundle layer's own verdict in the
+     same ladder), with its corresponding exit code (0/0/0/2/4 — the
+     existing single-scan severity-aware mapping).
+  3. **Any member `EVIDENCE_CONTRACT_ERROR`** raises the set's `exit_code`
+     to at least `1` without lowering a worse code from step 2 (i.e.
+     `exit_code = max(step_2_exit_code, 1)`) — an evidence-contract error
+     is a real problem but a lesser one than a confirmed break, matching
+     that verdict's existing standalone exit code (1) in the single-artifact
+     contract.
+  This precedence must be spelled out in `run_scan_set`'s own docstring and
+  covered by a dedicated unit test (mixed BREAKING + budget-overflow member
+  set resolves to `BUDGET_OVERFLOW`/5; mixed COMPATIBLE +
+  evidence-contract-error resolves to exit 1) so a different implementation
+  detail doesn't silently gate the same artifact set differently later.
+- **Artifact identity, not an anonymous list (P1).** Neither `ScanResult`
+  nor its nested `ScanOutcome`/report carries a binary path or library
+  identity anywhere (checked against the live dataclasses,
+  `abicheck/service_scan.py`) — a bare `list[ScanResult]` gives a CLI/MCP/
+  API consumer no way to attribute a given member's findings back to the
+  artifact that produced them, which matters most for the directory form
+  of `--artifact-set` where the caller may not even know which files were
+  discovered or in what order. `per_artifact` is therefore
+  `list[ScanArtifactResult]`, a new thin wrapper
+  (`path: Path`/`library: str` + the existing `ScanResult` fields, or an
+  `artifact: Path` + `result: ScanResult` pair — exact shape decided at
+  implementation time) rather than a bare `ScanResult`. Also applies to the
+  bundle layer's own consumer/provider references (already
+  library-name-keyed per ADR-023, so no change needed there) and to
+  `ScanSetResult.to_dict()`'s JSON shape, which must key or label each
+  member by artifact.
 - Public re-export: `abicheck/service.py` re-exports the scan engine's
   public API from `service_scan.py` today (`run_scan`, `ScanResult`,
   `run_scan_subprocess`, in its `__all__`) as the Tier-2 service facade —
