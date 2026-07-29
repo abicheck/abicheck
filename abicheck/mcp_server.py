@@ -501,6 +501,36 @@ def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
     return "breaking"  # fail-safe for unknown kinds
 
 
+def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
+    """Build ``abi_compare``'s top-level, compact ``changes``/scoped-only
+    entry for one ``Change``.
+
+    Also attaches ADR-049 Phase 3's shadow contract-evaluation fields
+    (``contract_relevance``/``contract_reason_code``/``contract_assurance``)
+    via ``reporter._add_contract_evaluation_fields`` -- the same helper the
+    full ``response["report"]`` JSON already uses for its own ``changes``
+    entries. Without this, a caller opting into ``contract_evaluation=True``
+    saw the shadow decision in ``response["report"]["changes"]`` but not in
+    this top-level, more commonly consumed array, silently losing the
+    result the caller asked for (Codex review, fresh evidence). A no-op
+    when *c* was never stamped (``contract_evaluation`` not requested),
+    mirroring that helper's own documented default.
+    """
+    from .reporter import _add_contract_evaluation_fields
+
+    entry: dict[str, object] = {
+        "kind": c.kind.value,
+        "symbol": c.symbol,
+        "description": c.description,
+        "impact": _impact_category(c.kind, policy),
+        "old_value": c.old_value,
+        "new_value": c.new_value,
+        "source_location": c.source_location,
+    }
+    _add_contract_evaluation_fields(entry, c)
+    return entry
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
@@ -1131,18 +1161,7 @@ def abi_compare(
                 "compatible": len(result.compatible),
                 "total_changes": len(result.changes),
             },
-            "changes": [
-                {
-                    "kind": c.kind.value,
-                    "symbol": c.symbol,
-                    "description": c.description,
-                    "impact": _impact_category(c.kind, active_policy),
-                    "old_value": c.old_value,
-                    "new_value": c.new_value,
-                    "source_location": c.source_location,
-                }
-                for c in result.changes
-            ],
+            "changes": [_mcp_change_entry(c, active_policy) for c in result.changes],
             "suppressed_count": result.suppressed_count,
         }
         if scoped_key is not None:
@@ -1159,17 +1178,7 @@ def abi_compare(
             existing_ids = {_finding_id(c) for c in result.changes}
             for c in getattr(result, "scoped_only_changes", ()) or ():
                 if _finding_id(c) not in existing_ids:
-                    response["changes"].append(
-                        {
-                            "kind": c.kind.value,
-                            "symbol": c.symbol,
-                            "description": c.description,
-                            "impact": _impact_category(c.kind, active_policy),
-                            "old_value": c.old_value,
-                            "new_value": c.new_value,
-                            "source_location": c.source_location,
-                        }
-                    )
+                    response["changes"].append(_mcp_change_entry(c, active_policy))
             from .severity import missing_contract_exit_code
 
             missing_kind = (

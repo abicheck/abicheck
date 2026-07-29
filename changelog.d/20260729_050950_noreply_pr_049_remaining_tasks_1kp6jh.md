@@ -24,6 +24,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   its line-count hard cap) — but fully tested against its own semantics,
   matching the existing `resolve_legacy_contract_mode`/
   `resolve_internal_namespaces` wirings' pattern.
+- **`abi_compare`'s top-level `changes` array now carries the shadow
+  contract-evaluation fields too**: previously, `contract_evaluation=True`
+  only stamped `response["report"]["changes"]`, leaving the more commonly
+  consumed top-level `response["changes"]` array without
+  `contract_relevance`/`contract_reason_code`/`contract_assurance` even
+  though the caller had opted in.
 
 <!--
 ### Changed
@@ -49,14 +55,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   `--policy-file`.
 
 -->
-<!--
 ### Fixed
 
-- **Short bold summary** — the rest of the sentence: what changed, for
-  whom, and why it matters. Backtick identifiers like `ChangeKind` or
-  `--policy-file`.
+- **Pin `mcp[cli]<2.0.0`** — `mcp` 2.0.0 (released 2026-07-29) dropped
+  `mcp.server.fastmcp` entirely (`ModuleNotFoundError` in a clean install),
+  so the previously-unbounded `mcp[cli]>=1.2.0` requirement let
+  `pip install abicheck[mcp]` (and CI's `pip install -e ".[dev,mcp]"`)
+  silently start installing a version that can't import `mcp_server.py`.
 
--->
 <!--
 ### Performance
 

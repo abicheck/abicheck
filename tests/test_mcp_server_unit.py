@@ -1069,6 +1069,40 @@ class TestAbiCompare:
         assert changes
         assert all("contract_relevance" in c for c in changes)
 
+    def test_contract_evaluation_stamps_the_top_level_changes_array_too(
+        self, tmp_path: Path
+    ):
+        # Regression (Codex review, fresh evidence): the top-level, compact
+        # response["changes"] array is built independently of
+        # response["report"]["changes"] -- both must carry the shadow
+        # decision when contract_evaluation=True, not just the nested one.
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        raw = abi_compare(str(old_p), str(new_p), contract_evaluation=True)
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        changes = data["changes"]
+        assert changes
+        assert all("contract_relevance" in c for c in changes)
+
+    def test_contract_evaluation_off_omits_top_level_relevance_too(
+        self, tmp_path: Path
+    ):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        raw = abi_compare(str(old_p), str(new_p))
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        changes = data["changes"]
+        assert changes
+        assert all("contract_relevance" not in c for c in changes)
+
     def test_contract_evaluation_never_changes_verdict_or_exit_code(
         self, tmp_path: Path
     ):
