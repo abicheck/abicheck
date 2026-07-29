@@ -362,10 +362,13 @@ Explicitly **not** in this ADR's scope:
    section when `--artifact-set` was used, reusing ADR-023's existing
    `bundle.json`/`bundle.md` output shape rather than inventing a new one.
 6. Tests — `tests/test_scan_estimate.py::test_run_scan_rejects_multiple_binaries`
-   needs updating to reflect the new plural-accepting behavior (a
-   single-binaries-list still works exactly as before); new
-   `tests/test_scan_artifact_set.py` mirroring `tests/test_bundle.py`'s
-   shape for the audit-mode (no old side) case.
+   **stays unchanged**: `run_scan` itself keeps rejecting a multi-item
+   `binaries` list (this ADR's D1/implementation-plan-step-1 preserve
+   `run_scan`'s singular contract — only the new `run_scan_set` entry point
+   accepts multiple binaries), so this test remains the regression guard
+   for that preserved contract. Add a **separate**, new acceptance test for
+   `run_scan_set`; new `tests/test_scan_artifact_set.py` mirroring
+   `tests/test_bundle.py`'s shape for the audit-mode (no old side) case.
 7. `tests/test_cli_root_surface.py` / `README.md` /
    `docs/reference/cli-reference.md` — updated together per AGENTS.md's
    root-command-surface-change rule (this is a flag addition to an existing

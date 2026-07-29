@@ -59,7 +59,11 @@ See ADR-056's Context section for the full investigation. Summary:
   single-binary `ScanResult` return type is untouched, so existing service,
   `run_scan_subprocess`, and MCP callers that consume `.verdict`/
   `.exit_code`/`.to_dict()` see no behavior change (see ADR-056's
-  implementation-plan step 1).
+  implementation-plan step 1). `ScanSetResult` itself carries a **set-level**
+  `verdict`/`exit_code` (worst-of across `per_artifact` plus the bundle
+  layer's own verdict — same worst-of precedence ADR-023's `compare-release`
+  summary already uses for its per-library + bundle verdicts), not just the
+  per-artifact list — see Phase 1.
 - **G34.3** — `abi_scan` MCP tool gains the equivalent `artifact_set`
   parameter in the same change (ADR-043 D10 parity rule), not a follow-up.
 - **G34.4** — `tests/test_cli_root_surface.py`, `README.md`,
@@ -75,7 +79,15 @@ See ADR-056's Context section for the full investigation. Summary:
   `changekind-partition`/`changekind-detector`/`changekind-docs`
   AI-readiness checks this triggers — follow the shared new-`ChangeKind`
   checklist from
-  [G24](g24-linux-abi-gap-closure.md#shared-checklist-every-new-changekind-in-this-plan).
+  [G24](g24-linux-abi-gap-closure.md#shared-checklist-every-new-changekind-in-this-plan),
+  **plus two obligations that checklist does not itself enumerate**:
+  `scripts/evidence_tiers.py`'s minimum-evidence-tier mapping (checked by
+  the no-unspecified-evidence-tier test) and `python
+  scripts/gen_detector_spec.py`'s regenerated
+  `docs/reference/detector-spec.{md,json}` (checked by the
+  generated-files-in-sync test) — both called out explicitly in Phase 2
+  below since a new enum member without them fails the PR gate regardless
+  of what the shared checklist lists.
 
 ## Design (phases)
 
@@ -93,12 +105,43 @@ started.**
 ### Phase 1 — `service_scan.py`: finish the plural `binaries` path
 
 - Add `run_scan_set(req) -> ScanSetResult` (new aggregate dataclass:
-  `per_artifact: list[ScanResult]` + bundle findings/verdict), looping over
+  `per_artifact: list[ScanResult]` + bundle findings/verdict +
+  **set-level `verdict: str`/`exit_code: int`**, worst-of across every
+  `per_artifact[i].verdict`/`.exit_code` and the bundle layer's own verdict
+  — mirroring `compare-release`'s existing per-library-plus-bundle
+  worst-of precedence, ADR-023), looping over
   `req.binaries` and reusing the existing single-binary dump/scan pipeline
   per artifact. **`run_scan`'s own signature and `ScanResult` return type
   stay exactly as they are today** — existing single-binary callers
   (service, `run_scan_subprocess`, MCP `abi_scan`) are unaffected; only
   `--artifact-set`/`artifact_set` callers route through `run_scan_set`.
+  Without an explicit set-level `verdict`/`exit_code`, none of the CLI, MCP,
+  or Action surfaces have a defined single result to gate on when one
+  member is `BREAKING`/`API_BREAK`/budget-overflowed and another passes.
+- Public re-export: `abicheck/service.py` re-exports the scan engine's
+  public API from `service_scan.py` today (`run_scan`, `ScanResult`,
+  `run_scan_subprocess`, in its `__all__`) as the Tier-2 service facade —
+  `abi_scan`/other MCP tools import from `.service`, not `.service_scan`
+  directly. `ScanSetResult`, `run_scan_set`, and (Phase 1's later bullet)
+  `run_scan_set_subprocess` need the same re-export + `__all__` entries in
+  `service.py`, or the MCP route to them doesn't exist without bypassing
+  the Tier-2 facade. This also changes the public service surface, so
+  `python scripts/gen_python_api_reference.py` →
+  `docs/reference/python-api-reference.md` needs regenerating (Phase 3).
+- **One budget for the whole set, not one per artifact (P1 — real
+  regression risk).** `run_scan` starts each `run_scan_core` call with a
+  fresh `_time.monotonic()` (`abicheck/service_scan.py`) and applies
+  `req.budget.total_timeout` against that fresh start. A naive loop over
+  `run_scan`/`run_scan_core` for N artifacts would therefore let each
+  member consume up to the *full* configured budget independently — a
+  `--budget 15m` on a 5-artifact set could run ~75 minutes instead of the
+  documented whole-command guard. `run_scan_set` must compute one
+  set-level deadline up front (`start = _time.monotonic()` once, before the
+  loop) and pass each artifact's *remaining* budget
+  (`req.budget.total_timeout - elapsed`) into that artifact's
+  `run_scan_core` call, failing the set with the existing budget-overflow
+  contract (exit code 5) the moment the remaining budget is exhausted
+  rather than starting a member that can't finish in time.
 - **`run_scan_set` cannot simply call `run_scan` in a loop.** `ScanResult`
   (`abicheck/service_scan.py`) has no snapshot field
   (`verdict`/`exit_code`/`findings`/`layers`/`confidence`/`estimate`/
@@ -139,12 +182,42 @@ started.**
 - Generalize `build_bundle_snapshot()`'s entry point so a caller can supply
   `list[AbiSnapshot]` + paths directly (today only reachable through
   `compare-release`'s directory-matching code, which always assumes an old
-  and a new side).
+  and a new side). **Reject, don't silently degrade, an unsupported input
+  set.** The live `build_bundle_snapshot` silently skips any non-ELF path
+  (`_path_looks_like_elf` check, `continue`) and returns a graph built from
+  whatever survived — correct for `compare-release`'s existing directory
+  scan (a mixed-format release directory legitimately has non-library
+  files to skip), but wrong for an explicit `scan --artifact-set` audit: a
+  PE/Mach-O-only set, or a set whose relevant members all get silently
+  skipped, would otherwise produce a clean `bundle_verdict` even though no
+  cross-artifact audit actually ran. The generalized entry point must
+  either reject the invocation (`click.UsageError`/equivalent) when zero
+  ELF members survive filtering, or mark the bundle section of the report
+  as explicitly unsupported/incomplete (not silently absent) — never a
+  bare "no findings."
 - Add `ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` (exact name TBD),
   `default_verdict = COMPATIBLE_WITH_RISK`, registered in
   `change_registry.py` alongside ADR-023's existing 9 `bundle_*` entries.
   This is a **new** kind, not a reuse of `bundle_intra_dep_removed` — see
-  ADR-056 D2's correction for why reuse is unsafe.
+  ADR-056 D2's correction for why reuse is unsafe. Update
+  `scripts/evidence_tiers.py` with this kind's minimum-evidence tier (an
+  ELF-symbol-level finding, same tier as the existing `bundle_*` entries)
+  — `tests/test_...::test_no_new_unspecified_evidence_tier_kinds`-shaped
+  coverage fails otherwise. Re-run `python scripts/gen_detector_spec.py` →
+  `docs/reference/detector-spec.{md,json}` after adding the enum entry —
+  a changed `ChangeKind` set with a stale generated spec fails
+  `scripts/verify.py`'s generated-files-in-sync check.
+- **Detector-registry note (not a gap):** ADR-023's existing 9 `bundle_*`
+  kinds are not registered via `@registry.detector(...)`
+  (`detector_registry.py`) — that decorator's contract is a per-library
+  `(old_snapshot, new_snapshot) -> changes` detector wired into `compare()`
+  (see `diff_symbols.py`'s detectors for the shape), which does not fit a
+  post-hoc layer that reads N already-computed per-library diffs plus a
+  cross-artifact resolution graph. This new audit-scoped detector follows
+  the same established, shipped precedent (unregistered, called directly
+  from the bundle-analysis entry point) rather than the general
+  `@registry.detector` convention — noted explicitly here so a future
+  reviewer doesn't read the omission as an oversight.
 - New audit-mode detector — **do not call `_detect_intra_dep_removed`
   directly, and do not assume extending its `system_providers` set alone is
   enough.** In the live detector, an allow-listed `extra_needed` edge only
@@ -224,8 +297,7 @@ started.**
   (`"scan does not accept a directory or package... scan analyses exactly
   one artifact"`, `run.sh` around the `scan` mode branch). Landing
   `--artifact-set` end-to-end for Action users needs: two new Action inputs
-  (`new-library-set` and `bundle-system-providers`, the latter mirroring
-  `compare`'s existing Action input of the same name), `run.sh` forwarding
+  (`new-library-set` and `bundle-system-providers`), `run.sh` forwarding
   them to `--artifact-set`/`--bundle-system-providers` instead of the
   positional artifact when `new-library-set` is set, and *then* narrowing
   `validate-inputs.sh`'s rejection to still block a bare directory/package
@@ -234,6 +306,18 @@ started.**
   `run.sh` wiring, would let a `mode: scan` Action run pass preflight and
   then fail deeper in the pipeline — worse than today's clear, early
   rejection.
+  **Correction:** `bundle-system-providers` is **not** an existing Action
+  input to mirror — checked against the live `action.yml`/`run.sh`, neither
+  declares nor forwards one today, even though `compare`'s CLI has carried
+  `--bundle-system-providers` since ADR-023. This is a pre-existing gap
+  independent of this ADR (Action users of `compare`'s bundle layer have no
+  way to extend the system-provider allow-list at all). Since this phase is
+  adding the input from scratch anyway, wire it to **both** modes —
+  `run.sh` forwards `INPUT_BUNDLE_SYSTEM_PROVIDERS` to
+  `--bundle-system-providers` in the `compare` branch too, not only the new
+  `scan --artifact-set` branch — rather than shipping a second, scan-only
+  input whose name collides in spelling but not in reach with the CLI flag
+  `compare` users would reasonably expect the same input name to control.
 - Regenerate the generated reference pages this phase's surface changes
   drift out of sync (`docs/AGENTS.md`'s "Regenerating generated docs" —
   `scripts/verify.py --profile pr` fails on a stale generated file, this
