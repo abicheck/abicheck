@@ -139,11 +139,25 @@ def _resolve_typedef_chains(
     need for a cap entirely: convergence takes O(log(chain depth)) rounds
     regardless of how deep the real chain is, and each round is O(typedef
     count) work (one pattern scan per alias's text), for O(N log N) total
-    instead of O(N^2). A self-referential or mutually-cyclic alias simply
-    stops changing once every round's substitution reproduces the same
-    text (verified: a two-alias mutual cycle stabilizes to each alias
-    resolving to itself after two rounds) -- a safe terminal state, not an
-    infinite loop.
+    instead of O(N^2).
+
+    A direct self-reference (``typedef struct Foo Foo;`` -> ``typedefs["Foo"]
+    == "struct Foo"``, a common, real C/C++ idiom) or an indirect cycle
+    that eventually reintroduces an alias's own name into its own
+    expanding text is treated as **terminal** for that specific
+    occurrence: substituting a token would otherwise replace it with the
+    alias's own *current* (already-grown) text, doubling the string length
+    every round indefinitely rather than converging (Codex review, fresh
+    evidence: confirmed empirically -- naive pointer-doubling on 2,000
+    synthetic self-referential typedefs like ``typedef struct Foo Foo;``
+    grew the aggregate resolved text to ~74MB before any signature is even
+    scanned). Whenever the token being substituted is literally the same
+    alias whose text is currently being expanded, it is left as a literal
+    token instead of substituted -- this only ever suppresses growth
+    exactly where the alias's own name has reappeared inside its own
+    expansion (whether via direct self-reference or by cycling back
+    through other aliases), never for a genuine acyclic chain, which never
+    reintroduces an earlier name and so is unaffected.
     """
     resolved = dict(typedefs)
     if pattern is None or not typedefs:
@@ -153,7 +167,14 @@ def _resolve_typedef_chains(
         changed = False
         next_resolved: dict[str, str] = {}
         for alias, text in resolved.items():
-            expanded = pattern.sub(lambda m: resolved.get(m.group(), m.group()), text)
+
+            def _substitute(m: re.Match[str], _alias: str = alias) -> str:
+                token = m.group()
+                if token == _alias:
+                    return token
+                return resolved.get(token, token)
+
+            expanded = pattern.sub(_substitute, text)
             next_resolved[alias] = expanded
             if expanded != text:
                 changed = True

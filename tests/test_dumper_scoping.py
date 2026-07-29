@@ -735,6 +735,38 @@ class TestDirectlyReferencedDependencyRetention:
         elapsed = time.monotonic() - start
         assert elapsed < 5.0, f"typedef resolution took {elapsed:.2f}s, expected < 5s"
 
+    def test_self_referential_typedefs_do_not_blow_up(self):
+        """Codex review (ninth round): `typedef struct Foo Foo;` -- a
+        common, real C/C++ idiom -- creates a direct self-reference
+        (`typedefs["Foo"] == "struct Foo"`). Naive pointer-doubling
+        substitutes the embedded `Foo` token with its own current
+        (already-grown) expansion every round, doubling the string length
+        indefinitely rather than converging -- confirmed empirically at
+        ~74MB of aggregate resolved text for 2,000 such entries. Must stay
+        fast and must not grow the text at all."""
+        import time
+
+        typedefs = {f"Foo{i}": f"struct Foo{i}" for i in range(2000)}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Foo0",))],
+            types=[
+                RecordType(
+                    name="Foo0",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"self-referential typedefs took {elapsed:.2f}s"
+        assert [t.name for t in scoped.types] == ["Foo0"]
+
     def test_typedef_matching_stays_fast_with_many_candidates_and_typedefs(self):
         """Codex review (sixth round): matching resolved typedef targets
         against dependency candidates one-by-one was
