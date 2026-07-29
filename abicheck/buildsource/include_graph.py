@@ -167,8 +167,21 @@ def depfile_args_from_argv(argv: list[str], directory: str | None = None) -> lis
     if directory is not None and any(a.startswith("@") and len(a) > 1 for a in args):
         from pathlib import Path
 
-        from ..build_context import _expand_response_files, _safe_resolve
+        from ..build_context import (
+            _expand_response_files,
+            _is_cl_style_driver,
+            _safe_resolve,
+        )
         from .source_extractors._argv import unredact_home
+
+        # Response-file quoting depends on the driver actually invoked, not
+        # the host OS (Codex review) -- unwrapped[0] is still the compiler
+        # token here (the flags-only branch above hasn't stripped it yet).
+        cl_style = (
+            bool(unwrapped)
+            and not unwrapped[0].startswith("-")
+            and (_is_cl_style_driver(unredact_home(unwrapped[0])))
+        )
 
         # The compile unit's own working directory is both the base a relative
         # @file resolves against AND the trusted root it must stay under (no
@@ -187,7 +200,9 @@ def depfile_args_from_argv(argv: list[str], directory: str | None = None) -> lis
         # already-real (non-redacted) token is a harmless no-op.
         cu_dir = Path(unredact_home(directory))
         args = [unredact_home(a) for a in args]
-        args = _expand_response_files(args, cu_dir, _safe_resolve(cu_dir) or cu_dir)
+        args = _expand_response_files(
+            args, cu_dir, _safe_resolve(cu_dir) or cu_dir, cl_style=cl_style
+        )
     out: list[str] = []
     skip_next = False
     for tok in args:

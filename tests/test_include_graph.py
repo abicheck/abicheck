@@ -227,6 +227,34 @@ def test_depfile_args_expands_response_file_when_directory_given(tmp_path) -> No
     ) == ["foo.cpp", "-Iinclude/foo", "-Iinclude/bar"]
 
 
+def test_depfile_args_response_file_cl_style_driver_uses_windows_quoting(
+    tmp_path,
+) -> None:
+    """Response-file quoting is chosen from the driver token
+    (``unwrapped[0]``) actually invoked, not the host OS (Codex review): a
+    doubled backslash before a quoted space-containing path is preserved
+    literally under CL-style/MSVC quoting, unlike the GNU/shlex quoting a
+    ``clang++``-driven entry would use for the identical text."""
+    rsp = tmp_path / "inc_folders.txt"
+    rsp.write_text('-I"include\\\\foo bar"\n')
+    assert depfile_args_from_argv(
+        ["clang-cl", "-c", "foo.cpp", f"@{rsp.name}"],
+        directory=str(tmp_path),
+    ) == ["foo.cpp", "-Iinclude\\\\foo bar"]
+
+
+def test_depfile_args_response_file_gnu_driver_uses_gnu_quoting(tmp_path) -> None:
+    """Same response-file text as the CL-style-driver test above, but with a
+    GNU-mode driver -- the doubled backslash collapses to one literal
+    backslash under GNU/shlex quoting, the opposite of the MSVC result."""
+    rsp = tmp_path / "inc_folders.txt"
+    rsp.write_text('-I"include\\\\foo bar"\n')
+    assert depfile_args_from_argv(
+        ["clang++", "-c", "foo.cpp", f"@{rsp.name}"],
+        directory=str(tmp_path),
+    ) == ["foo.cpp", "-Iinclude\\foo bar"]
+
+
 def test_depfile_args_response_file_content_still_filtered(tmp_path) -> None:
     """A flag smuggled inside an expanded response file must still pass through
     the same unsafe-flag denylist as a literal argv token -- expansion happens

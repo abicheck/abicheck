@@ -26,6 +26,7 @@ from abicheck.build_context import (
     CompileEntry,
     _entry_matches_filter,
     _extract_flags,
+    _is_cl_style_driver,
     _split_windows_command_line,
     _std_sort_key,
     _try_consume_define_undef,
@@ -201,6 +202,48 @@ class TestCompileEntry:
         assert "-Iinclude/foo" in entry.arguments
         assert "-DBAR=1" in entry.arguments
 
+    def test_response_file_gnu_driver_uses_gnu_quoting_regardless_of_host_os(
+        self, tmp_path: Path
+    ) -> None:
+        """A GNU-mode driver (clang++/g++, including MinGW GCC running on
+        Windows) uses GNU/shlex response-file quoting -- quoting is chosen
+        from the actual compiler invoked, not the host OS (Codex review). A
+        doubled backslash preceding a space-containing quoted path collapses
+        to a single literal backslash under GNU/shlex quoting, unlike the
+        MSVC rules exercised by the CL-style-driver test below."""
+        rsp = tmp_path / "inc_folders.txt"
+        rsp.write_text('-I"include\\\\foo bar"\n')
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": ["clang++", f"@{rsp.name}", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert "-Iinclude\\foo bar" in entry.arguments
+
+    def test_response_file_cl_style_driver_uses_windows_quoting(
+        self, tmp_path: Path
+    ) -> None:
+        """A CL-style driver (``clang-cl``, ``dpcpp-cl``, ``cl.exe``) uses
+        MSVC/``CommandLineToArgvW`` response-file quoting: the identical
+        doubled backslash the GNU-driver test above collapses to one literal
+        backslash is instead preserved as-is (not immediately before the
+        closing quote, so it is emitted literally, unhalved) -- verifying
+        the driver, not the host OS, selects the quoting convention."""
+        rsp = tmp_path / "inc_folders.txt"
+        rsp.write_text('-I"include\\\\foo bar"\n')
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": ["clang-cl", f"@{rsp.name}", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert "-Iinclude\\\\foo bar" in entry.arguments
+
     def test_response_file_missing_keeps_token(self, tmp_path: Path) -> None:
         """An unreadable ``@file`` degrades to keeping the original token
         rather than raising or silently dropping the rest of the argv."""
@@ -364,9 +407,7 @@ class TestCompileEntry:
         # Some @loop.rsp tokens survive un-expanded once the budget runs out.
         assert any(a == "@loop.rsp" for a in entry.arguments)
 
-    def test_single_dense_response_file_output_is_bounded(
-        self, tmp_path: Path
-    ) -> None:
+    def test_single_dense_response_file_output_is_bounded(self, tmp_path: Path) -> None:
         """The file-read cap alone does not bound *output size*: a single
         response file packed with many short self-reference tokens can
         still emit a huge amount of output within just one or two reads.
@@ -997,6 +1038,24 @@ class TestSplitDefineUndef:
 # ---------------------------------------------------------------------------
 
 
+class TestIsClStyleDriver:
+    @pytest.mark.parametrize(
+        "argv0",
+        ["cl", "cl.exe", "clang-cl", "clang-cl.exe", "dpcpp-cl", "clang-cl-20"],
+    )
+    def test_recognizes_cl_style_drivers(self, argv0: str) -> None:
+        assert _is_cl_style_driver(argv0) is True
+
+    @pytest.mark.parametrize(
+        "argv0", ["clang++", "g++", "gcc", "x86_64-w64-mingw32-g++", "clang"]
+    )
+    def test_rejects_gnu_style_drivers(self, argv0: str) -> None:
+        assert _is_cl_style_driver(argv0) is False
+
+    def test_recognizes_absolute_path_driver(self) -> None:
+        assert _is_cl_style_driver("/usr/bin/clang-cl-17.0") is True
+
+
 class TestSplitWindowsCommandLine:
     def test_simple_space_separated(self) -> None:
         assert _split_windows_command_line("-Ifoo -Dbar=1 -c") == [
@@ -1009,16 +1068,16 @@ class TestSplitWindowsCommandLine:
         """The motivating case: a quoted include path containing a space
         (e.g. an SDK under ``Program Files``) must not split mid-path --
         shlex's ``posix=False`` mode gets this wrong (Codex review)."""
-        assert _split_windows_command_line(
-            '-I"C:\\Program Files\\SDK" -c foo.cpp'
-        ) == ['-IC:\\Program Files\\SDK', "-c", "foo.cpp"]
+        assert _split_windows_command_line('-I"C:\\Program Files\\SDK" -c foo.cpp') == [
+            "-IC:\\Program Files\\SDK",
+            "-c",
+            "foo.cpp",
+        ]
 
     def test_even_backslashes_before_quote_toggle_quoting(self) -> None:
         # Two backslashes before the quote -> one literal backslash (the
         # pair), and the quote toggles quoting (consumed, not emitted).
-        assert _split_windows_command_line('-I\\\\"C:\\SDK"') == [
-            "-I\\C:\\SDK"
-        ]
+        assert _split_windows_command_line('-I\\\\"C:\\SDK"') == ["-I\\C:\\SDK"]
 
     def test_odd_backslashes_before_quote_escape_it(self) -> None:
         # One backslash before the quote -> zero literal backslashes (no
@@ -1027,9 +1086,7 @@ class TestSplitWindowsCommandLine:
         assert _split_windows_command_line('-Ifoo\\"bar') == ['-Ifoo"bar']
 
     def test_literal_backslash_not_before_quote(self) -> None:
-        assert _split_windows_command_line("C:\\SDK\\include") == [
-            "C:\\SDK\\include"
-        ]
+        assert _split_windows_command_line("C:\\SDK\\include") == ["C:\\SDK\\include"]
 
     def test_never_raises_on_unbalanced_quote(self) -> None:
         # Unlike shlex.split, an unterminated quote has no invalid state.

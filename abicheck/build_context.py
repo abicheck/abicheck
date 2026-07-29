@@ -173,14 +173,47 @@ def _split_windows_command_line(text: str) -> list[str]:
     return args
 
 
-def _split_command_line(text: str) -> list[str]:
+#: Compiler-driver stems that use MSVC/``CommandLineToArgvW`` response-file
+#: quoting regardless of host OS -- matched after stripping a trailing
+#: ``-N``/``-N.N`` version suffix (``clang-cl-20``, ``clang-cl-17.0``).
+_CL_STYLE_DRIVER_STEMS = frozenset({"cl", "clang-cl", "dpcpp-cl"})
+_DRIVER_VERSION_SUFFIX_RE = re.compile(r"-\d+(?:\.\d+)*$")
+
+
+def _is_cl_style_driver(argv0: str) -> bool:
+    """Return True if *argv0* names an MSVC-compatible driver (``cl.exe``,
+    ``clang-cl``, ``dpcpp-cl``, including versioned spellings like
+    ``clang-cl-20``), as opposed to a GNU-mode driver (``clang++``, ``g++``,
+    a MinGW-prefixed GCC, ...). Used to pick response-file quoting by the
+    *compiler actually invoked*, not the host OS: a GNU-mode driver
+    (including MinGW GCC or GNU-mode clang++ running on Windows) uses GNU
+    ``@file`` quoting, not MSVC's, so dispatching purely on ``os.name``
+    corrupts a quoted/backslash-escaped argument for that combination
+    (Codex review)."""
+    stem = Path(argv0).stem.lower()
+    if stem.endswith(".exe"):
+        stem = stem[: -len(".exe")]
+    stem = _DRIVER_VERSION_SUFFIX_RE.sub("", stem)
+    return stem in _CL_STYLE_DRIVER_STEMS
+
+
+def _split_command_line(text: str, *, cl_style: bool | None = None) -> list[str]:
     """Tokenize a compile-db ``command``/``arguments``-string or a
-    response-file body, dispatching to the argv-quoting convention of the
-    host platform: POSIX shell quoting off ``os.name`` everywhere except
-    Windows, where :func:`_split_windows_command_line` implements the real
-    MSVC/``CommandLineToArgvW`` rules instead of ``shlex``'s ``posix=False``
-    mode (which is not actually Windows-argv-compatible)."""
-    if os.name == "nt":
+    response-file body.
+
+    *cl_style* selects the argv-quoting convention explicitly (True for
+    MSVC/``CommandLineToArgvW`` rules via :func:`_split_windows_command_line`,
+    False for POSIX shell quoting via ``shlex``) — used when the actual
+    compiler driver invoked is already known (see :func:`_is_cl_style_driver`),
+    since quoting depends on the *driver*, not the host OS: a GNU-mode driver
+    on Windows still uses GNU quoting. When *cl_style* is ``None`` (the
+    top-level ``command``/``arguments`` string, tokenized before argv[0] is
+    known), falls back to dispatching off ``os.name`` as a best-effort
+    default.
+    """
+    if cl_style is None:
+        cl_style = os.name == "nt"
+    if cl_style:
         return _split_windows_command_line(text)
     return shlex.split(text, posix=True)
 
@@ -240,6 +273,8 @@ def _expand_response_files(
     _depth: int = 0,
     _budget: list[int] | None = None,
     _output_budget: list[int] | None = None,
+    *,
+    cl_style: bool = False,
 ) -> list[str]:
     """Inline GNU-style ``@response-file`` arguments in a compiler argv.
 
@@ -279,7 +314,10 @@ def _expand_response_files(
     *_MAX_RESPONSE_FILE_OUTPUT_TOKENS*) respectively — two independent caps,
     since bounding file reads alone still lets one large, token-dense file
     (near the byte cap, packed with short tokens) emit an outsized amount of
-    output within that read budget (Codex review, second round).
+    output within that read budget (Codex review, second round). *cl_style*
+    selects response-file body quoting per :func:`_split_command_line` —
+    pass the caller's own :func:`_is_cl_style_driver` result for the
+    compiler actually being invoked, not the host OS (Codex review).
     """
     if _depth > _MAX_RESPONSE_FILE_DEPTH:
         return arguments
@@ -303,7 +341,7 @@ def _expand_response_files(
             continue
         _budget[0] -= 1
         try:
-            tokens = _split_command_line(text)
+            tokens = _split_command_line(text, cl_style=cl_style)
         except ValueError:
             expanded.append(arg)
             continue
@@ -322,7 +360,13 @@ def _expand_response_files(
         _output_budget[0] -= len(tokens)
         expanded.extend(
             _expand_response_files(
-                tokens, directory, root, _depth + 1, _budget, _output_budget
+                tokens,
+                directory,
+                root,
+                _depth + 1,
+                _budget,
+                _output_budget,
+                cl_style=cl_style,
             )
         )
     return expanded
@@ -365,8 +409,12 @@ class CompileEntry:
         else:
             arguments = []
 
+        cl_style = bool(arguments) and _is_cl_style_driver(arguments[0])
         arguments = _expand_response_files(
-            arguments, directory, _safe_resolve(db_dir) or db_dir
+            arguments,
+            directory,
+            _safe_resolve(db_dir) or db_dir,
+            cl_style=cl_style,
         )
 
         return cls(file=file_path.resolve(), directory=directory, arguments=arguments)
