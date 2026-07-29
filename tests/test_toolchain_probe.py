@@ -230,13 +230,27 @@ class TestClangAcceptsTarget:
         self._run(monkeypatch, 1, "error: unknown target triple 'bogus'")
         assert tp._clang_accepts_target("/opt/clang", "digest2", "bogus") is False
 
-    def test_unrelated_failure_returns_none(
+    def test_a_differently_worded_invalid_target_diagnostic_still_returns_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: real Clang 17 and Apple/macOS clang both reject a bogus
+        # target with wording that doesn't contain "unknown target triple"
+        # (e.g. "version 'target' in target triple '...' is invalid") --
+        # classification must not depend on a specific diagnostic phrase.
+        self._run(
+            monkeypatch,
+            1,
+            "error: version 'target' in target triple 'bogus' is invalid",
+        )
+        assert tp._clang_accepts_target("/opt/clang", "digest3", "bogus") is False
+
+    def test_any_nonzero_exit_returns_false(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self._run(monkeypatch, 1, "error: unsupported option '-fsyntax-only'")
         assert (
-            tp._clang_accepts_target("/opt/clang", "digest3", "aarch64-linux-gnu")
-            is None
+            tp._clang_accepts_target("/opt/clang", "digest3b", "aarch64-linux-gnu")
+            is False
         )
 
     def test_probe_failure_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -696,6 +710,99 @@ class TestCheckProfileToolchainIdentity:
         assert len(errors) == 1
         assert "environment" in errors[0]
         assert "musl" in errors[0]
+
+    def test_unrecognized_declared_os_against_a_recognized_probed_os_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a declared OS this module's marker table doesn't
+        # recognize (e.g. Solaris) previously normalized to None, and the
+        # comparison only fired when BOTH sides were non-None -- so an
+        # unverifiable declared OS silently passed against ANY probed OS,
+        # including a genuinely different real one (Codex review, fresh
+        # evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "x86_64-linux-gnu",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc",
+                    target="x86_64-pc-solaris2.11",
+                    binding="gcc14",
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "p1.compile.target" in errors[0]
+        assert "OS" in errors[0]
+
+    def test_unrecognized_declared_env_against_a_recognized_probed_env_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a declared bare-metal environment (e.g. arm-none-eabi)
+        # normalized to None, so it silently passed against any probed
+        # environment, including an incompatible real glibc variant (Codex
+        # review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "arm-linux-gnueabi",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc", target="arm-none-eabi", binding="gcc14"
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "p1.compile.target" in errors[0]
+        assert "environment" in errors[0]
+
+    def test_both_sides_unrecognized_os_and_env_is_not_flagged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # When neither side's OS/environment marker is recognized, there is
+        # nothing to compare on either side -- this stays a silent skip
+        # (architecture still matches here), not a manufactured mismatch.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "arm-none-eabi",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc", target="arm-none-eabi", binding="gcc14"
+                ),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
 
     def test_clang_bogus_target_is_rejected_via_real_probe(
         self, monkeypatch: pytest.MonkeyPatch

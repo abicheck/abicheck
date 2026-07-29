@@ -185,18 +185,31 @@ def _clang_accepts_target(selected_path: str, digest: str, target: str) -> bool 
     ``--target=`` value, valid or not, and simply prints back), an actual
     empty-translation-unit compile with ``--target=`` fails outright for an
     unknown/misspelled triple (confirmed empirically: ``clang
-    --target=not-a-real-target -x c -fsyntax-only -`` exits nonzero with
-    "unknown target triple", while a real cross-compilation target exits 0)
-    — the check this module needs to actually validate a declared Clang
-    cross-compilation target rather than exempting it outright (Codex
-    review, fresh evidence: a misspelled ``target: not-a-real-target``
-    previously passed unconditionally). *digest* (the resolved
-    executable's content hash, from :func:`~abicheck.dumper_toolchain._tool_identity_metadata`)
-    keys the cache per exact binary revision, mirroring that module's own
-    caching convention. Returns ``None`` — skip the comparison, never
-    guess a mismatch — if the probe itself can't run (missing ``-x c``
-    support, timeout, permission error): an inconclusive probe is not the
-    same as a proven mismatch.
+    --target=not-a-real-target -x c -fsyntax-only -`` exits nonzero, while a
+    real cross-compilation target exits 0) — the check this module needs to
+    actually validate a declared Clang cross-compilation target rather than
+    exempting it outright (Codex review, fresh evidence: a misspelled
+    ``target: not-a-real-target`` previously passed unconditionally).
+
+    Classifies purely on **exit status**, not on any particular diagnostic
+    wording. An earlier version matched the literal substring "unknown
+    target triple" in stderr, which real Clang 17 (``"version 'target' in
+    target triple 'not-a-real-target' is invalid"``) and Apple/macOS clang
+    (yet another wording, confirmed by a real CI failure on macOS-latest)
+    both fail to match — silently treating a genuinely invalid target as
+    inconclusive on any Clang that doesn't happen to phrase the diagnostic
+    exactly that way. This invocation is deliberately minimal and
+    well-formed (a trivial empty translation unit, no other flags) — the
+    only reasonably expected failure mode for a *successful* subprocess
+    launch is the compiler rejecting the declared ``--target=``, so any
+    nonzero exit is classified as a proven mismatch rather than
+    inconclusive. *digest* (the resolved executable's content hash, from
+    :func:`~abicheck.dumper_toolchain._tool_identity_metadata`) keys the
+    cache per exact binary revision, mirroring that module's own caching
+    convention. Returns ``None`` — skip the comparison, never guess a
+    mismatch — only when the probe itself can't even run (missing
+    executable, timeout, permission error): that failure to launch is not
+    the same as a proven target mismatch.
     """
     try:
         process = subprocess.run(
@@ -210,14 +223,7 @@ def _clang_accepts_target(selected_path: str, digest: str, target: str) -> bool 
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    if process.returncode == 0:
-        return True
-    if "unknown target triple" in (process.stderr or "").lower():
-        return False
-    # Some other failure (unrelated flag support, environment issue) --
-    # inconclusive, not a proven target mismatch. Never guess a mismatch
-    # from an error this probe wasn't designed to interpret.
-    return None
+    return process.returncode == 0
 
 
 #: A dotted version number (2-4 components) is preferred over a bare one:
@@ -481,18 +487,26 @@ def _check_one_overlay(
                 arch_mismatch = bool(
                     declared_arch and probed_arch and declared_arch != probed_arch
                 )
+                # A mismatch is flagged whenever the two sides disagree,
+                # including when only one side's OS/environment marker is
+                # recognized -- an unrecognized marker on either side is
+                # itself unverifiable, not evidence of a match. Only "both
+                # unrecognized" is a genuine skip (nothing to compare on
+                # either side). Previously this only fired when BOTH sides
+                # were non-None, so an unrecognized declared OS/env (e.g.
+                # `x86_64-pc-solaris2.11`, `arm-none-eabi`) silently passed
+                # against any real probed triple (Codex review, fresh
+                # evidence).
                 declared_os = _os_family(declared_target)
                 probed_os = _os_family(probed_triple)
                 os_mismatch = bool(
-                    declared_os is not None
-                    and probed_os is not None
+                    (declared_os is not None or probed_os is not None)
                     and declared_os != probed_os
                 )
                 declared_env = _env_family(declared_target)
                 probed_env = _env_family(probed_triple)
                 env_mismatch = bool(
-                    declared_env is not None
-                    and probed_env is not None
+                    (declared_env is not None or probed_env is not None)
                     and declared_env != probed_env
                 )
                 if arch_mismatch or os_mismatch or env_mismatch:
