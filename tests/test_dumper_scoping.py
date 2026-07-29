@@ -1046,6 +1046,38 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["api::Own"]
 
+    def test_primitive_typedef_alias_shadows_coincidental_dependency_suffix(
+        self,
+    ):
+        """Codex review (twenty-second round): `typedefs["Handle"] =
+        "int"` -- an alias to a primitive, not to any modeled record or
+        enum -- reaches neither a kept spelling nor any dependency
+        candidate's key, so it was never recorded by
+        `kept_touched_aliases` (which only tracks an alias whose target
+        resolves to something). An unrelated `dep::Handle` deriving the
+        identical bare suffix `Handle` was therefore retained as if the
+        signature's `Handle` genuinely named it, even though it
+        unambiguously names the primitive alias instead. A typedef alias
+        existing under a name at all is a collision claim on that name,
+        regardless of what it resolves to."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    qualified_name="dep::Handle",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "int"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
         two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle

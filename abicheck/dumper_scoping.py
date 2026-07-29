@@ -453,6 +453,38 @@ def _directly_referenced_dependency_names(
             # unrelated ``dep::Handle`` slip past this guard entirely.
             kept_touched_aliases.update(_namespace_suffix_spellings(alias)[1:])
 
+    # Every typedef alias's own name is a collision claim on its spelling
+    # regardless of what its target resolves to (Codex review, fresh
+    # evidence): ``kept_touched_aliases`` above only recorded an alias
+    # whose target reaches a kept type/enum or a dependency candidate --
+    # an alias to a primitive (``typedefs["Handle"] = "int"`` or ``"void
+    # *"``) reaches neither, so it was never recorded anywhere, and an
+    # unrelated ``dep::Handle`` deriving the identical bare suffix
+    # ``Handle`` was retained as if the signature's ``Handle`` genuinely
+    # named it -- even though it unambiguously names the primitive alias
+    # instead. A typedef alias existing under a given name at all means a
+    # signature spelling that name means *that alias* first; only when
+    # the alias's own reachability separately, legitimately resolves to a
+    # candidate (via *alias_spelling_owners*, below) does that candidate
+    # still get credit for the spelling.
+    #
+    # This must be applied only as a *final* veto on a candidate's own
+    # weakest-tier (derived-only, no alias resolution) spelling claim
+    # below -- not folded into *own_spellings_of*/*key_owners* above the
+    # way *kept_touched_aliases* is: a self-referential alias (``typedefs
+    # = {"Foo0": "struct Foo0"}``) legitimately reaches its own matching
+    # candidate via *identity_aliases*, but that reachability lookup keys
+    # off ``key_owners`` -- blanket-stripping every typedef-alias-named
+    # spelling from ``own_spellings_of`` upstream would remove the very
+    # key ``identity_aliases`` needs to rediscover that legitimate
+    # self-reference, silently losing the candidate entirely (confirmed
+    # empirically: doing so broke the existing self-referential-typedef
+    # regression test).
+    all_typedef_alias_names: set[str] = set()
+    for alias in typedefs:
+        all_typedef_alias_names.add(alias)
+        all_typedef_alias_names.update(_namespace_suffix_spellings(alias)[1:])
+
     key_owners: dict[str, set[str]] = {}
     own_spellings_of: dict[int, set[str]] = {}
     for candidate in dep_candidates:
@@ -595,7 +627,15 @@ def _directly_referenced_dependency_names(
             # own_owners are derived-only (no exact-identity claim) --
             # defer to the resolved alias's stronger, literal-name match.
             spelling_index[spelling] = set(alias_owners)
-        elif len(own_owners) == 1:
+        elif len(own_owners) == 1 and spelling not in all_typedef_alias_names:
+            # A typedef alias exists under this exact name/suffix, but
+            # didn't resolve to anything via *alias_spelling_owners*
+            # above (an alias to a primitive, or one dropped as
+            # genuinely ambiguous) -- the spelling still means that
+            # alias first, not this candidate's coincidentally-matching
+            # derived suffix, so this weakest tier defers to it same as
+            # the alias-owners branch above, rather than falling through
+            # to a false single-owner match.
             spelling_index[spelling] = set(own_owners)
 
     pattern = _compile_spelling_pattern(spelling_index)
