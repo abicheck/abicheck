@@ -1721,7 +1721,6 @@ def run_compare_request(
         old_public_headers = new_public_headers = old_public_header_dirs = new_public_header_dirs = []
     from . import service_compare_evidence as _sce  # ADR-055 D1
     from .cli_buildsource import embed_build_source
-
     old_evidence, new_evidence = _sce.resolve_compare_request_evidence(request, pair_compile)
     # Codex: "hybrid" (explicit depth="source") and "android" have no real embed_build_source extractor -- reject only a raw tree needing real extraction, never a prebuilt pack or build_info alone (never feeds L4). Mirrors cli.py's own --depth source + --ast-frontend hybrid UsageError.
     from .buildsource.inline import is_pack_dir
@@ -1801,6 +1800,7 @@ def run_compare_request(
             effective = _gated_source_label(snap.build_source, snap)
             if _DEPTH_RANK.get(effective, 0) < requested_rank:
                 raise ValidationError(f"depth={request.depth!r} was requested for the {side_label} side but the resolved snapshot only reached {effective!r} evidence depth. Supply the evidence this rung needs (headers, a build/compile database, or --sources with linkable declarations) or lower depth to match what is actually available.")
+    # Codex (known, accepted limitation, not fixed here): this is a floor, not a ceiling -- a side whose input is itself an already-serialized JSON snapshot with richer embedded evidence than `depth` requested (e.g. depth="binary" against an old.json that already embeds header/build/source facts) still diffs with all of it. resolve_input's `fmt == "json"` branch (above) returns `load_snapshot(path)` verbatim, ignoring headers/depth entirely -- matching the CLI's own long-documented default ("compare old.json new.json reads build-info + source facts embedded in each snapshot", cli_options.py), which `--depth` has never projected down for a pre-built snapshot either (it only dials how deep *fresh* inline extraction goes for a raw, non-JSON input). Capping/rejecting a richer pre-existing snapshot would diverge Tier-2 behavior from that established CLI contract and needs its own scoped design, not a drive-by extension of this floor check.
     suppression, pf = load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
