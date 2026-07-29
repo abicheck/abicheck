@@ -217,13 +217,15 @@ def test_depfile_args_strips_clang_plugin_loading_options() -> None:
 def test_depfile_args_expands_response_file_when_directory_given(tmp_path) -> None:
     """A GNU ``@response-file`` (make-based build systems commonly spell a long
     include-dir list this way) is inlined -- not dropped -- when a *directory*
-    to resolve it against is supplied, so its ``-I`` flags reach ``clang -MM``
-    instead of every include path silently vanishing."""
+    to resolve it against, plus an independently-trusted *trusted_root*, are
+    both supplied, so its ``-I`` flags reach ``clang -MM`` instead of every
+    include path silently vanishing."""
     rsp = tmp_path / "inc_folders.txt"
     rsp.write_text("-Iinclude/foo -Iinclude/bar\n")
     assert depfile_args_from_argv(
         ["clang++", "-c", "foo.cpp", f"@{rsp.name}"],
         directory=str(tmp_path),
+        trusted_root=str(tmp_path),
     ) == ["foo.cpp", "-Iinclude/foo", "-Iinclude/bar"]
 
 
@@ -240,6 +242,7 @@ def test_depfile_args_response_file_cl_style_driver_uses_windows_quoting(
     assert depfile_args_from_argv(
         ["clang-cl", "-c", "foo.cpp", f"@{rsp.name}"],
         directory=str(tmp_path),
+        trusted_root=str(tmp_path),
     ) == ["foo.cpp", "-Iinclude\\\\foo bar"]
 
 
@@ -252,6 +255,7 @@ def test_depfile_args_response_file_gnu_driver_uses_gnu_quoting(tmp_path) -> Non
     assert depfile_args_from_argv(
         ["clang++", "-c", "foo.cpp", f"@{rsp.name}"],
         directory=str(tmp_path),
+        trusted_root=str(tmp_path),
     ) == ["foo.cpp", "-Iinclude\\foo bar"]
 
 
@@ -265,6 +269,7 @@ def test_depfile_args_response_file_content_still_filtered(tmp_path) -> None:
     assert depfile_args_from_argv(
         ["clang++", "-c", "foo.cpp", f"@{rsp.name}"],
         directory=str(tmp_path),
+        trusted_root=str(tmp_path),
     ) == ["foo.cpp", "-Iinclude"]
 
 
@@ -277,11 +282,10 @@ def test_depfile_args_response_file_without_directory_drops_token() -> None:
 
 
 def test_depfile_args_response_file_outside_directory_rejected(tmp_path) -> None:
-    """A response file outside the compile unit's own working directory must
-    not be read -- an untrusted CompileUnit (e.g. from a third-party
-    ``abicheck_inputs/`` pack) could otherwise smuggle an absolute/traversal
-    ``@file`` token to leak arbitrary filesystem content into the argv fed
-    to ``clang -MM``."""
+    """A response file outside the *trusted_root* must not be read -- an
+    untrusted CompileUnit (e.g. from a third-party ``abicheck_inputs/`` pack)
+    could otherwise smuggle an absolute/traversal ``@file`` token to leak
+    arbitrary filesystem content into the argv fed to ``clang -MM``."""
     cu_dir = tmp_path / "cu"
     cu_dir.mkdir()
     secret = tmp_path / "secret.txt"
@@ -289,8 +293,34 @@ def test_depfile_args_response_file_outside_directory_rejected(tmp_path) -> None
     result = depfile_args_from_argv(
         ["clang++", "-c", "foo.cpp", f"@{secret}"],
         directory=str(cu_dir),
+        trusted_root=str(cu_dir),
     )
     assert "-Dleaked=1" not in result
+
+
+def test_depfile_args_no_trusted_root_never_expands_even_with_directory(
+    tmp_path,
+) -> None:
+    """Without an independently-trusted *trusted_root*, a response file must
+    never be expanded, even when *directory* is supplied -- ``directory``
+    alone is attacker-controlled free-form content for a ``CompileUnit``
+    sourced from an untrusted build pack, so self-jailing an expansion to
+    ``directory`` is not a real jail (an attacker could set ``directory`` to
+    a sensitive path like a home directory and reference a secrets file
+    relative to it). This is the exact scenario the real production call
+    sites hit today (none of them currently supply a *trusted_root*), so
+    they must keep degrading to the safe drop-the-token behavior (Codex
+    review, seventh round)."""
+    secret_dir = tmp_path / "secrets"
+    secret_dir.mkdir()
+    secret = secret_dir / ".ssh_config"
+    secret.write_text("-Dleaked=1\n")
+    result = depfile_args_from_argv(
+        ["clang++", "-c", "foo.cpp", "@.ssh_config"],
+        directory=str(secret_dir),
+    )
+    assert "-Dleaked=1" not in result
+    assert "@.ssh_config" not in result  # dropped, not left un-expanded either
 
 
 def test_depfile_args_expands_response_file_with_redacted_home_directory(
@@ -310,6 +340,7 @@ def test_depfile_args_expands_response_file_with_redacted_home_directory(
     assert depfile_args_from_argv(
         ["clang++", "-c", "foo.cpp", f"@{rsp.name}"],
         directory="~/build",
+        trusted_root="~/build",
     ) == ["foo.cpp", "-Iinclude/foo"]
 
 
@@ -331,6 +362,7 @@ def test_depfile_args_expands_response_file_with_redacted_absolute_token(
     assert depfile_args_from_argv(
         ["clang++", "-c", "foo.cpp", "@~/build/args.rsp"],
         directory="~/build",
+        trusted_root="~/build",
     ) == ["foo.cpp", "-Iinclude/foo"]
 
 

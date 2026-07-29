@@ -231,43 +231,30 @@ def _split_command_line(text: str, *, cl_style: bool | None = None) -> list[str]
 
     *cl_style* selects the argv-quoting convention explicitly (True for
     MSVC/``CommandLineToArgvW`` rules via :func:`_split_windows_command_line`,
-    False for POSIX shell quoting via ``shlex``) — used when the actual
-    compiler driver invoked is already known (see :func:`_is_cl_style_driver`),
-    since quoting depends on the *driver*, not the host OS: a GNU-mode driver
-    on Windows still uses GNU quoting. When *cl_style* is ``None`` (the
-    top-level ``command``/``arguments`` string, tokenized before argv[0] is
-    known), falls back to dispatching off ``os.name`` as a best-effort
-    default.
+    False for POSIX shell quoting via ``shlex``) — used for a
+    ``@response-file`` *body*, since that is genuinely interpreted by
+    whichever compiler reads it (driver-dependent): a GNU-mode driver on
+    Windows still uses GNU response-file quoting.
+
+    The *top-level* ``command``/``arguments`` string is a different case and
+    deliberately stays ``os.name``-guessed (``cl_style=None``, the default):
+    it reflects whatever convention the build system/shell that *wrote* the
+    compile database entry used, which tracks the host that generated the
+    JSON, not the compiler that happens to be invoked -- a MinGW GNU-mode
+    driver invoked on Windows still has its own ``directory``/``command``
+    written with native (unquoted, backslash-containing) Windows paths by a
+    Windows-hosted build system. Re-tokenizing the top-level string by
+    driver instead was tried and reverted: POSIX ``shlex`` treats an
+    unquoted backslash as an escape character, so it silently corrupts an
+    unquoted Windows path like ``C:\\mingw64\\bin\\g++.exe`` into
+    ``C:mingw64bing++.exe`` for exactly the GNU-driver-on-Windows case this
+    would have tried to "fix" (Codex review).
     """
     if cl_style is None:
         cl_style = os.name == "nt"
     if cl_style:
         return _split_windows_command_line(text)
     return shlex.split(text, posix=True)
-
-
-def _split_command_line_driver_aware(text: str) -> list[str]:
-    """Tokenize a top-level ``command``/``arguments`` string, picking the
-    quoting convention from the driver it actually names, not ``os.name``.
-
-    The chicken-and-egg problem :func:`_split_command_line`'s docstring
-    describes (the driver token is only known *after* tokenizing) is solved
-    with a first pass using the host-default guess, then re-tokenizing with
-    the opposite convention if the guessed driver disagrees -- e.g. a
-    ``clang-cl``/``cl`` command string on a non-Windows host, or MinGW
-    ``g++`` on Windows, previously kept the wrong (``os.name``-guessed)
-    quoting for the *whole* top-level string even though response-file
-    bodies already resolved this correctly (CodeRabbit review).
-    """
-    guess_cl_style = os.name == "nt"
-    tokens = _split_command_line(text, cl_style=guess_cl_style)
-    from .buildsource.source_extractors._argv import strip_launchers
-
-    unwrapped = strip_launchers(tokens)
-    actual_cl_style = bool(unwrapped) and _is_cl_style_driver(unwrapped[0])
-    if actual_cl_style != guess_cl_style:
-        tokens = _split_command_line(text, cl_style=actual_cl_style)
-    return tokens
 
 
 def _safe_resolve(path: Path) -> Path | None:
@@ -566,9 +553,9 @@ class CompileEntry:
             if isinstance(args_raw, list):
                 arguments = [str(a) for a in args_raw]
             else:
-                arguments = _split_command_line_driver_aware(str(args_raw))
+                arguments = _split_command_line(str(args_raw))
         elif "command" in raw:
-            arguments = _split_command_line_driver_aware(str(raw["command"]))
+            arguments = _split_command_line(str(raw["command"]))
         else:
             arguments = []
 

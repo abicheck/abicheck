@@ -30,7 +30,7 @@ from abicheck.build_context import (
     _extract_flags,
     _is_cl_style_driver,
     _safe_resolve,
-    _split_command_line_driver_aware,
+    _split_command_line,
     _split_windows_command_line,
     _std_sort_key,
     _try_consume_define_undef,
@@ -281,31 +281,22 @@ class TestLoadCompileDb:
 # ---------------------------------------------------------------------------
 
 
-class TestSplitCommandLineDriverAware:
-    def test_command_string_cl_driver_uses_windows_quoting(self) -> None:
-        """A top-level ``command``/``arguments`` *string* naming a CL-style
-        driver must use MSVC quoting for the whole string, not just for
-        response-file bodies -- the initial os.name-based guess is wrong on
-        a non-Windows host and must be corrected once the real driver token
-        is known (CodeRabbit review)."""
-        text = 'clang-cl -I"include\\\\foo bar" -c a.cpp'
-        tokens = _split_command_line_driver_aware(text)
-        assert "-Iinclude\\\\foo bar" in tokens
-
-    def test_command_string_gnu_driver_uses_gnu_quoting(self) -> None:
-        """Same quoting-sensitive text as above, but with a GNU driver --
-        the doubled backslash collapses to one, the opposite of the
-        CL-driver case, confirming the driver (not a fixed guess) decides."""
-        text = 'clang++ -I"include\\\\foo bar" -c a.cpp'
-        tokens = _split_command_line_driver_aware(text)
-        assert "-Iinclude\\foo bar" in tokens
-
-    def test_command_string_launcher_wrapped_cl_driver(self) -> None:
-        """A launcher (ccache/sccache/…) prefix must not defeat driver
-        detection for the top-level string either."""
-        text = 'sccache clang-cl -I"include\\\\foo bar" -c a.cpp'
-        tokens = _split_command_line_driver_aware(text)
-        assert "-Iinclude\\\\foo bar" in tokens
+class TestSplitCommandLineTopLevelStaysHostGuessed:
+    def test_gnu_driver_on_windows_style_text_keeps_unquoted_paths_intact(
+        self,
+    ) -> None:
+        """The top-level ``command``/``arguments`` string must NOT be
+        re-tokenized by driver: a driver-aware re-tokenize was tried and
+        reverted because POSIX ``shlex`` (the GNU-driver convention) treats
+        an unquoted backslash as an escape character, corrupting a native
+        Windows path like ``C:\\mingw64\\bin\\g++.exe`` into
+        ``C:mingw64bing++.exe`` for exactly the GNU-driver-on-Windows-style-
+        text case such a "fix" would have targeted (Codex review). Passing
+        ``cl_style=True`` here simulates the Windows-host guess this
+        function makes for the top-level string via ``os.name``."""
+        text = r"C:\mingw64\bin\g++.exe -IC:\sdk"
+        tokens = _split_command_line(text, cl_style=True)
+        assert tokens == ["C:\\mingw64\\bin\\g++.exe", "-IC:\\sdk"]
 
 
 class TestCompileEntry:
