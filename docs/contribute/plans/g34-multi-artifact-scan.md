@@ -229,6 +229,24 @@ started.**
   `run_scan_core` (or a thin wrapper around it) that retains each
   artifact's `AbiSnapshot` alongside its `ScanResult`, rather than
   re-deriving snapshots by re-parsing the same binaries a second time.
+  **A member with no snapshot is a real, expected case, not an edge
+  case to paper over:** `run_scan_core` raises `_BudgetOverflow`/
+  `_EvidenceContractError` for a member that hits either condition, and
+  `run_scan`'s own `except` clauses (`abicheck/service_scan.py`) convert
+  that directly to a `ScanResult(verdict="BUDGET_OVERFLOW", ...)`/
+  `"EVIDENCE_CONTRACT_ERROR"` with **no snapshot at all** — there is
+  nothing to retain for that member. Phase 2's bundle construction must
+  treat a missing member snapshot as an incomplete-bundle condition, not
+  silently build the resolution graph from only the members that
+  succeeded: a failed member could have been the actual provider of a
+  symbol another (successful) member imports, and excluding it would let
+  the audit detector invent a false "unresolved intra-dependency" finding
+  for a symbol that was never actually missing from the true set — it was
+  only missing from the *analyzed* subset. `ScanSetResult`'s bundle
+  section must report itself as skipped/incomplete (not a clean
+  `bundle_verdict`) whenever any declared member lacks a snapshot, mirroring
+  the same "never a bare 'no findings' for an unsupported/incomplete input"
+  principle Phase 2 already applies to non-ELF members.
 - `run_scan_set` takes a `bundle_system_providers: list[str]` parameter
   (same shape as `compare-release`'s `--bundle-system-providers`,
   `abicheck/cli_options.py`/`cli_compare_release.py`) and threads it into
@@ -327,30 +345,53 @@ started.**
   1. reuse `_import_is_external`'s version/provider-soname evidence as-is
      (unaffected by this issue — it already trusts a resolved verneed
      provider outside the bundle unconditionally); and
-  2. for a consumer's *unversioned* import with no intra-set provider,
-     check the import against the caller-supplied
-     `bundle_system_providers` **DSO allow-list directly** (i.e. "is this
-     consumer's only non-intra DT_NEEDED edge for this symbol a declared
-     external provider?") and suppress unconditionally when so — no
-     system-symbol-shape check gating it, since the whole point of the
-     explicit allow-list is to cover exactly the non-system-shaped case.
-  Document the **ambiguous case** explicitly: a symbol with no verneed
-  provider info, satisfiable in principle by more than one declared
-  external provider (or by both a declared provider and something
-  unresolvable) — resolve it conservatively per this module's existing
-  false-negative-over-false-positive default (AGENTS.md "Known gaps"):
-  suppress rather than flag, and note in the finding's `evidence` that
-  attribution to a specific external provider was not confirmed. Emit
-  `BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` with `COMPATIBLE_WITH_RISK` severity
-  and a description that says "no provider found in this artifact set"
-  (not "removed") only when neither suppression path applies.
+  2. for a consumer's *unversioned* import with no intra-set provider, a
+     **DSO-level (not per-symbol) allow-list check.**
+  **Correction — the per-symbol framing in an earlier round of this plan
+  was not implementable against the real data model, fixed here.**
+  `ResolutionGraph.extra_needed` (`abicheck/bundle_models.py`) is
+  `library -> list[soname]` — a consumer-to-DSO-set fact, not a
+  per-symbol one — and `ConsumerEntry.version_soname` (the one field that
+  *does* disambiguate a specific symbol to a specific provider) is only
+  populated for a *versioned* import ("" for unversioned/unknown). So for
+  the unversioned case this path exists to handle, there is no fact in the
+  graph saying "DSO X specifically provides symbol Y" — only "this
+  consumer needs some symbols from some set of external DSOs." Attributing
+  a missing unversioned symbol to one specific declared provider among
+  several would require loading and indexing the allow-listed DSOs' own
+  exported-symbol tables (a real, larger scope expansion — parsing
+  binaries this ADR never asked the caller to provide paths for — out of
+  scope here). The implementable check is therefore coarser, at DSO-set
+  granularity: suppress an unversioned, unresolved-in-set import for a
+  consumer **iff every one of that consumer's non-intra DT_NEEDED sonames
+  is on the caller-supplied `bundle_system_providers` allow-list** —
+  mirroring the shape `_detect_intra_dep_removed`'s existing
+  `extra_needed`-all-covered check already uses, just without also
+  requiring the symbol to look system-shaped. This is deliberately
+  all-or-nothing per consumer: if a consumer needs both an allow-listed
+  `libvendor.so` and a second, undeclared external DSO, suppression does
+  **not** apply and the finding still fires for every one of that
+  consumer's unresolved unversioned symbols — a known, documented
+  imprecision (can't distinguish "provided by the allow-listed DSO" from
+  "provided by the undeclared one" at this granularity), not a silent gap.
+  Document this limitation directly in the detector's docstring and in
+  ADR-056/user-facing `--bundle-system-providers` help text: the allow-list
+  is a per-consumer, all-non-intra-deps-covered escape hatch, not a
+  per-symbol attribution mechanism.
+  Emit `BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` with `COMPATIBLE_WITH_RISK`
+  severity and a description that says "no provider found in this
+  artifact set" (not "removed") only when neither suppression path
+  applies.
 - Unit tests: (a) a case with a genuinely external, unversioned dependency
   from a DSO **not** on the allow-list correctly still produces the
   risk-level finding (the earlier-round P1 false-positive this design
   closes); (b) the same case with the DSO **added** via
   `--bundle-system-providers`/`bundle_system_providers` correctly
   suppresses it, including for a non-system-shaped custom symbol name —
-  the regression test for this round's escape-hatch correctness.
+  the regression test for this round's escape-hatch correctness; (c) a
+  consumer needing symbols from **both** an allow-listed DSO and a second,
+  undeclared external DSO still produces the finding (the documented
+  DSO-set-granularity limitation above, not a silent false negative).
 - **The set-level deadline (Phase 1) must reach this phase too, not stop
   after the last member scan.** Phase 1's remaining-budget threading only
   covers each artifact's `run_scan_core` call; building the resolution
@@ -388,16 +429,21 @@ started.**
 - **`ScanRequest` doesn't carry every option the single-binary CLI path
   uses today — this must be closed, not silently dropped.** The live
   single-binary branch (`cli_scan.py`) passes `abi3_floor`,
-  `enabled_checks`/`severities` (from `--crosscheck`), `build_config`, and
-  `allow_build_query` straight to `run_scan_core`, bypassing
-  `ScanRequest` entirely — none of those five are fields on
-  `ScanRequest` (`abicheck/service_scan.py`). If `--artifact-set` routes
-  only through `ScanRequest`/`run_scan_set` as planned above, an
-  invocation combining `--artifact-set` with `--abi3`/`--crosscheck
-  KEY=off`/`--build-config`/build-query control would silently produce
-  different findings per artifact than the equivalent single-binary `scan`
-  invocation with the same flags — a correctness gap, not a missing nice-
-  to-have. Phase 1's `run_scan_set` must accept and forward all five
+  `enabled_checks`/`severities` (from `--crosscheck`), `build_config`,
+  `allow_build_query`, **and `--risk-rules`** straight to `run_scan_core`
+  (the last of these loaded via `_load_risk_rules(risk_rules_path)` and
+  fed into `score_changed_paths`), bypassing `ScanRequest` entirely —
+  none of those six are fields on `ScanRequest`
+  (`abicheck/service_scan.py`); `run_scan` itself hardcodes
+  `RiskRules.default()` rather than accepting a custom profile. If
+  `--artifact-set` routes only through `ScanRequest`/`run_scan_set` as
+  planned above, an invocation combining `--artifact-set` with
+  `--abi3`/`--crosscheck KEY=off`/`--build-config`/build-query
+  control/`--risk-rules custom.yml` would silently produce different
+  findings (or select a different evidence depth, in the risk-rules case)
+  per artifact than the equivalent single-binary `scan` invocation with
+  the same flags — a correctness gap, not a missing nice-to-have. Phase
+  1's `run_scan_set` must accept and forward all six
   (either by extending `ScanRequest` with the missing fields — the more
   durable fix, also closing the same gap for any future `ScanRequest`
   caller — or by giving `run_scan_set` its own equivalent parameters
@@ -435,6 +481,21 @@ started.**
   `cli_scan.py`'s CLI flags enforce (Phase 3's CLI bullet above), mirrored
   on the MCP side rather than assumed to follow from "same validation
   shape as CLI" alone.
+- **`abi_estimate` needs the same `artifact_set` treatment as `abi_scan`,
+  not a follow-up.** `abi_estimate(binary_path: str, ...)`
+  (`abicheck/mcp_server.py`) is `abi_scan`'s dry-run/cost-estimate
+  counterpart on the MCP surface (the equivalent of `scan --dry-run` —
+  Phase 3's CLI dry-run bullet above), and is currently `binary_path`-only
+  the same way `abi_scan` was before this phase. Without the equivalent
+  `artifact_set` param (+ the same `binary_path`-optional /
+  mutual-exclusion treatment), an MCP caller has no way to get an
+  aggregate cost estimate for a library set before running the real
+  N-member `artifact_set` scan — forcing them to either skip estimation or
+  fall back to N separate single-binary estimates that don't reflect the
+  bundle-analysis cost. Land `abi_estimate`'s `artifact_set` param in the
+  same change as `abi_scan`'s, regenerate
+  `docs/reference/mcp-tools-reference.md` for both tools together (not
+  just `abi_scan`), and add the equivalent test coverage.
 - `action.yml` (repo-root composite Action manifest — not under `action/`;
   `action/` holds the shell implementation only) + `action/run.sh` +
   `action/validate-inputs.sh`: the
