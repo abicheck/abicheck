@@ -30,19 +30,22 @@ module (`bundle.py`) that gains a second caller, and the CLI/MCP parity rule
 `ScanArtifactResult`/`ScanSetResult`/`run_scan_set`/`run_scan_set_subprocess`),
 Phase 2 (`bundle.py`'s `discover_artifact_set`/`audit_bundle`/
 `_detect_unresolved_intra_dependency`, plus the
-`BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` `ChangeKind`), the CLI half of Phase 3
-(`scan --artifact-set`/`--bundle-system-providers` in `cli_scan.py`/
-`cli_options.py`), and Phase 4's shared bundle-findings render helper
-(`bundle.render_bundle_findings_markdown`, reused by both `cli_scan.py` and
-`cli_compare_release_helpers.py`) have shipped, with unit and CLI-level
-tests (`tests/test_bundle.py`, `tests/test_scan_artifact_set.py`) and a real
-gcc-built end-to-end case. **Still open, not silently dropped:**
+`BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` `ChangeKind`), the CLI + GitHub Action
+halves of Phase 3 (`scan --artifact-set`/`--bundle-system-providers` in
+`cli_scan.py`/`cli_options.py`; `new-library-set`/`bundle-system-providers`
+Action inputs in `action.yml`/`action/run.sh`/`action/validate-inputs.sh`,
+with `bundle-system-providers` also wired to `compare`'s pre-existing
+release-path flag, a gap independent of this ADR), and Phase 4's shared
+bundle-findings render helper (`bundle.render_bundle_findings_markdown`,
+reused by both `cli_scan.py` and `cli_compare_release_helpers.py`) have
+shipped, with unit, CLI-level, and Action-level tests (`tests/test_bundle.py`,
+`tests/test_scan_artifact_set.py`, `tests/test_action_validate_inputs.py`,
+`tests/test_action_run_sh_artifact_set.py`) and a real gcc-built end-to-end
+case. **Still open, not silently dropped:**
 
 - Phase 3's MCP half — `abi_scan`/`abi_estimate` don't yet accept an
   `artifact_set` parameter, and `docs/reference/mcp-tools-reference.md`
   hasn't been regenerated for it.
-- Phase 3's GitHub Action wiring (`action.yml`/`action/run.sh`/
-  `action/validate-inputs.sh`) and `docs/reference/github-action-inputs.md`.
 - The full example-catalog obligation (`examples/caseNNN_.../`,
   `ground_truth.json`, `examples/README.md`, `gen_examples_docs.py`) — a
   unit-level fixture covers the detector for now, not a binary example case.
@@ -801,7 +804,9 @@ implementation that shipped.
   - `python scripts/gen_cli_reference.py` → `docs/reference/cli-reference.md`
     for `--artifact-set` (already listed under G34.4 above; grouped here
     since all three generators run together in practice).
-- **Not started.**
+- **CLI + GitHub Action halves shipped** (this pass's Implementation status
+  note, above). **MCP half (`abi_scan`/`abi_estimate` `artifact_set` param,
+  `mcp-tools-reference.md` regen) not started.**
 
 ### Phase 4 — Reporting
 

@@ -21,8 +21,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`ScanArtifactResult`/`ScanSetResult`); `ScanSetResult.to_dict()`'s
   `bundle_findings` carries the full finding records (kind/symbol/
   consumer/provider/description), with a separate `bundle_finding_count`
-  for the count alone. Not yet wired into the MCP tool surface or the
-  GitHub Action — see `docs/contribute/plans/g34-*` for what remains.
+  for the count alone. Wired into the GitHub Action too — new
+  `new-library-set`/`bundle-system-providers` inputs (the latter also now
+  reaches `compare`'s pre-existing release-path `--bundle-system-providers`
+  flag, a gap independent of this feature). Not yet wired into the MCP
+  tool surface — see `docs/contribute/plans/g34-*` for what remains.
 
 ### Changed
 

@@ -257,9 +257,18 @@ fi
 
 # bundle-system-providers: the cross-library bundle-analysis layer, reached
 # by mode: compare (directory/package operands) and mode: scan (only with
-# new-library-set) -- inert everywhere else.
-if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
-  _warn "bundle-system-providers is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
+# new-library-set) -- inert everywhere else, including a mode: scan run
+# that uses the ordinary new-library input: run.sh's scan branch only
+# forwards --bundle-system-providers inside the new-library-set branch, so
+# a scalar scan silently drops it rather than erroring -- without this
+# check the Action succeeds while quietly discarding the caller's setting
+# (Codex review).
+if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
+  if [[ "$MODE" != "compare" && "$MODE" != "scan" ]]; then
+    _warn "bundle-system-providers is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
+  elif [[ "$MODE" == "scan" && -z "$NEW_LIBRARY_SET" ]]; then
+    _warn "bundle-system-providers is set but has no effect: with mode: scan it only applies when new-library-set is also set (a scalar new-library scan has no bundle-analysis layer to extend)."
+  fi
 fi
 
 # estimate, audit: deprecated scan-mode-only aliases.

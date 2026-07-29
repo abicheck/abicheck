@@ -82,6 +82,25 @@ def _snapshot(libraries: dict[str, ElfMetadata]) -> BundleSnapshot:
     )
 
 
+def _write_elf_shared_object_stub(path: Path) -> None:
+    """Write a minimal, structurally-valid ELF64 shared-object (ET_DYN, no
+    program headers) -- enough to pass package._is_elf_shared_object's
+    magic/class/type/PT_INTERP-absence checks (discover_artifact_set's
+    explicit-list form validates against that, not just the 4-byte magic
+    sniff -- Codex review), without needing a real compiled binary.
+    """
+    import struct
+
+    data = bytearray(64)
+    data[0:4] = b"\x7fELF"
+    data[4] = 2  # ELFCLASS64
+    data[5] = 1  # little-endian
+    struct.pack_into("<H", data, 16, 3)  # e_type = ET_DYN
+    struct.pack_into("<Q", data, 32, 0)  # e_phoff = 0
+    struct.pack_into("<H", data, 56, 0)  # e_phnum = 0
+    path.write_bytes(bytes(data))
+
+
 def _diff(
     library: str, *changes: Change, verdict: Verdict = Verdict.BREAKING
 ) -> DiffResult:
@@ -1698,16 +1717,16 @@ class TestArtifactSetDiscovery:
         d2.mkdir()
         p1 = d1 / "libfoo.so"
         p2 = d2 / "libfoo.so"
-        p1.write_bytes(b"\x7fELF")
-        p2.write_bytes(b"\x7fELF")
-        with pytest.raises(ArtifactSetError):
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        with pytest.raises(ArtifactSetError, match="colliding library identities"):
             discover_artifact_set([p1, p2], explicit=True)
 
     def test_dedupes_symlink_alias(self, tmp_path: Path) -> None:
         from abicheck.bundle import discover_artifact_set
 
         real = tmp_path / "libfoo.so.1"
-        real.write_bytes(b"\x7fELF")
+        _write_elf_shared_object_stub(real)
         if sys.platform != "win32":
             link = tmp_path / "libfoo.so"
             link.symlink_to(real)
@@ -1721,6 +1740,30 @@ class TestArtifactSetDiscovery:
         not_elf.write_text("not a library")
         with pytest.raises(ArtifactSetError):
             discover_artifact_set([not_elf], explicit=True)
+
+    def test_rejects_non_shared_object_elf_explicit_member(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): an explicitly-named ELF file with the
+        # right magic bytes but the wrong e_type (an executable, relocatable
+        # object, or core file, not ET_DYN) must still be rejected -- the
+        # explicit-list form is not laxer than directory discovery, which
+        # already restricts itself to real shared objects.
+        from abicheck.bundle import ArtifactSetError, discover_artifact_set
+
+        good = tmp_path / "libgood.so"
+        _write_elf_shared_object_stub(good)
+        executable = tmp_path / "not_a_library"
+        data = bytearray(64)
+        data[0:4] = b"\x7fELF"
+        data[4] = 2
+        data[5] = 1
+        import struct as _struct
+
+        _struct.pack_into("<H", data, 16, 2)  # e_type = ET_EXEC
+        executable.write_bytes(bytes(data))
+        with pytest.raises(ArtifactSetError, match="non-ELF-shared-object"):
+            discover_artifact_set([good, executable], explicit=True)
 
 
 # ---------------------------------------------------------------------------

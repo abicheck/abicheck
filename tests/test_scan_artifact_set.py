@@ -20,7 +20,8 @@ service-layer ``run_scan_set`` acceptance path) and follows
 ``tests/test_bundle.py::TestCompareReleaseBundleE2E``'s real-gcc pattern
 (``@pytest.mark.integration``) for the one true end-to-end CLI success
 case, since ``--artifact-set``'s explicit-path form validates every member
-against real ELF magic bytes before a scan even starts.
+as a real ELF shared object (not just the magic bytes) before a scan even
+starts.
 """
 
 from __future__ import annotations
@@ -56,6 +57,26 @@ from abicheck.serialization import snapshot_to_json
 def _write_snapshot(path: Path, snap: AbiSnapshot) -> Path:
     path.write_text(snapshot_to_json(snap), encoding="utf-8")
     return path
+
+
+def _write_elf_shared_object_stub(path: Path) -> None:
+    """Write a minimal, structurally-valid ELF64 shared-object (ET_DYN, no
+    program headers) -- enough to pass package._is_elf_shared_object's
+    magic/class/type/PT_INTERP-absence checks (discover_artifact_set's
+    explicit-list form validates against that, not just the 4-byte magic
+    sniff, since a bare-magic stub also passes as an executable/relocatable/
+    core file -- Codex review), without needing a real compiled binary.
+    """
+    import struct
+
+    data = bytearray(64)
+    data[0:4] = b"\x7fELF"
+    data[4] = 2  # ELFCLASS64
+    data[5] = 1  # little-endian
+    struct.pack_into("<H", data, 16, 3)  # e_type = ET_DYN
+    struct.pack_into("<Q", data, 32, 0)  # e_phoff = 0
+    struct.pack_into("<H", data, 56, 0)  # e_phnum = 0
+    path.write_bytes(bytes(data))
 
 
 def _elf(*names: str) -> ElfMetadata:
@@ -151,7 +172,7 @@ class TestArtifactSetCliValidation:
         # A single explicit member (no comma) is a valid --artifact-set
         # *syntax* but not a valid *set* — an audit needs 2+ libraries.
         only = tmp_path / "libonly.so"
-        only.write_bytes(b"\x7fELF" + b"\0" * 12)
+        _write_elf_shared_object_stub(only)
         result = runner.invoke(main, ["scan", "--artifact-set", str(only)])
         assert result.exit_code != 0
         assert "2 or more libraries" in result.output
@@ -163,8 +184,8 @@ class TestArtifactSetCliValidation:
         d1.mkdir()
         d2.mkdir()
         p1, p2 = d1 / "libfoo.so", d2 / "libfoo.so"
-        p1.write_bytes(b"\x7fELF" + b"\0" * 12)
-        p2.write_bytes(b"\x7fELF" + b"\0" * 12)
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
         result = runner.invoke(
             main, ["scan", "--artifact-set", f"{p1},{p2}"]
         )
@@ -186,8 +207,8 @@ class TestArtifactSetCompileContextForwarding:
 
         p1 = tmp_path / "liba.so"
         p2 = tmp_path / "libb.so"
-        p1.write_bytes(b"\x7fELF" + b"\0" * 12)
-        p2.write_bytes(b"\x7fELF" + b"\0" * 12)
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
         sysroot_dir = tmp_path / "sysroot"
         sysroot_dir.mkdir()
 
@@ -241,8 +262,8 @@ class TestArtifactSetSourceMethodSelection:
     ) -> None:
         p1 = tmp_path / "liba.so"
         p2 = tmp_path / "libb.so"
-        p1.write_bytes(b"\x7fELF" + b"\0" * 12)
-        p2.write_bytes(b"\x7fELF" + b"\0" * 12)
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
         captured = self._capture_req(monkeypatch)
 
         result = runner.invoke(main, ["scan", "--artifact-set", f"{p1},{p2}"])
@@ -254,8 +275,8 @@ class TestArtifactSetSourceMethodSelection:
     ) -> None:
         p1 = tmp_path / "liba.so"
         p2 = tmp_path / "libb.so"
-        p1.write_bytes(b"\x7fELF" + b"\0" * 12)
-        p2.write_bytes(b"\x7fELF" + b"\0" * 12)
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
         captured = self._capture_req(monkeypatch)
 
         result = runner.invoke(

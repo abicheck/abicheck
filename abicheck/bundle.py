@@ -190,15 +190,27 @@ def discover_artifact_set(
         resolved_by_real.setdefault(real, path)
 
     if explicit:
+        # A full ET_DYN-vs-PIE shared-object check (package.py's
+        # _is_elf_shared_object), not just the cheap 4-byte magic sniff
+        # _path_looks_like_elf uses elsewhere in this module: an explicitly
+        # named ELF executable, relocatable object, or core file has the
+        # right magic bytes but is not a library, and directory discovery
+        # (package.discover_shared_libraries) already restricts its own
+        # members to real shared objects -- the explicit-list form must not
+        # be laxer just because the caller typed the path out (Codex review).
+        from .package import _is_elf_shared_object
+
         unsupported = [
-            p for p in resolved_by_real.values() if not _path_looks_like_elf(p)
+            p for p in resolved_by_real.values() if not _is_elf_shared_object(p)
         ]
         if unsupported:
             names = ", ".join(str(p) for p in unsupported)
             raise ArtifactSetError(
-                f"--artifact-set names unsupported (non-ELF) member(s): {names}. "
-                "Every explicitly-named path must be a real library; "
-                "for a mixed directory, pass the directory instead."
+                f"--artifact-set names unsupported (non-ELF-shared-object) "
+                f"member(s): {names}. Every explicitly-named path must be a "
+                "real shared library (not an executable, relocatable "
+                "object, or core file); for a mixed directory, pass the "
+                "directory instead."
             )
 
     buckets: dict[str, list[Path]] = {}
