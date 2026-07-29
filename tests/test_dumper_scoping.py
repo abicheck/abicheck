@@ -1166,6 +1166,34 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert scoped.types == []
 
+    def test_globally_qualified_signature_spelling_still_matches(self):
+        """Codex review (twenty-sixth round): direct-clang preserves a
+        signature's explicit global-scope qualifier in its printed
+        `qualType` -- `void f(::dep::Thing *)` keeps the leading `::`.
+        The boundary-aware matcher's negative lookbehind treats `:` as a
+        non-boundary character (so it can't accidentally match a partial
+        scope like bare `Thing` inside `ns::Thing`), which also means the
+        plain `dep::Thing` spelling fails to match when immediately
+        preceded by the extra `:` of a leading `::` -- silently dropping
+        a directly-referenced dependency type whose only signature
+        mention happens to be globally qualified."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("::dep::Thing *",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
         two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle
