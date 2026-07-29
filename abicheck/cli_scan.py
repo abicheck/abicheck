@@ -83,7 +83,7 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
     BREAKING_KINDS,
 )
 from .cli import _safe_write_output, _setup_verbosity, main
-from .cli_compare_helpers import _warn_force_public_ignored
+from .cli_compare_helpers import _cli_flag, _warn_force_public_ignored
 from .cli_helpers_compare import _collect_force_public_symbols
 from .cli_options import (
     compile_context_options,
@@ -537,7 +537,10 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
     help="Trusted project .abicheck.yml (enables build.query with "
-    "--allow-build-query).",
+    "--allow-build-query). Also supplies scope/suppression settings "
+    "(scope.public, scope.public_symbols, suppression.strict) the same way "
+    "`compare --config` does (CLI flags override); auto-discovered upward "
+    "from the current directory when omitted.",
 )
 @click.option(
     "--against",
@@ -825,6 +828,40 @@ def scan_cmd(
                 f"configure the baseline comparison); drop {'this' if len(explicit) == 1 else 'these'} "
                 f"{noun} or pass --against."
             )
+
+    # ADR-049 Phase 5 review (Codex, PR #657): resolve scope/suppression
+    # settings through the project's `.abicheck.yml` the same way `compare`
+    # does (CLI > config > default, ADR-037 D4) -- reusing `compare`'s own
+    # `resolve_compare_config`/`discover_project_config` rather than reading
+    # raw CLI values only. Without this, a project config's
+    # `suppression.strict`/`scope.public`/`scope.public_symbols` applied to
+    # `compare` but silently had no effect on `scan --against`. Severity/
+    # debug/exit-code-scheme config keys are also resolved here (required
+    # positional args of the shared function) but deliberately discarded --
+    # `scan` has no equivalent flags for them.
+    from .buildsource.inline import load_build_config
+    from .cli_helpers_compare import discover_project_config, resolve_compare_config
+
+    cfg_path = build_config if build_config is not None else discover_project_config()
+    try:
+        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    resolved_cfg = resolve_compare_config(
+        project_cfg,
+        cli_severity_preset=None,
+        cli_severity_abi_breaking=None,
+        cli_severity_potential_breaking=None,
+        cli_severity_quality_issues=None,
+        cli_severity_addition=None,
+        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
+        cli_collapse_versioned_symbols=None,
+        cli_public_symbols=public_symbols,
+        cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
+    )
+    scope_public_headers = resolved_cfg.scope_public
+    strict_suppressions = resolved_cfg.strict_suppressions
+    public_symbols = tuple(resolved_cfg.public_symbols)
 
     # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
     # loader (`_load_suppression_and_policy`) so a scan baseline comparison

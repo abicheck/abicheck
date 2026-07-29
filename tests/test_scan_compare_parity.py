@@ -224,3 +224,62 @@ def test_scan_against_exposes_suppression_ledger_like_compare(
         diff["suppressed"][0]["suppression_rule"]
         == "intentionally removed, see MIGRATION.md"
     )
+
+
+def test_scan_against_honors_config_suppression_strict_like_compare(
+    runner: CliRunner,
+    old_snap: Path,
+    new_snap_breaking: Path,
+    tmp_path: Path,
+) -> None:
+    # Codex review on PR #657: scan --against read its --strict-suppressions/
+    # --scope-public-headers/--public-symbol CLI values raw, never resolving
+    # them through the project's .abicheck.yml the way `compare` does (CLI >
+    # config > default, ADR-037 D4) -- so suppression.strict: true in a
+    # shared project config gated `compare` but silently had no effect on
+    # `scan --against`. An EXPIRED suppression rule under a config-declared
+    # strict mode must reject both commands identically.
+    expired_supp = tmp_path / "suppress.yml"
+    expired_supp.write_text(
+        "version: 1\nsuppressions:\n"
+        "  - symbol: '_Z3barv'\n"
+        "    change_kind: func_removed\n"
+        "    reason: 'no longer needed'\n"
+        '    expires: "2000-01-01"\n',
+        encoding="utf-8",
+    )
+    project_config = tmp_path / ".abicheck.yml"
+    project_config.write_text("suppression:\n  strict: true\n", encoding="utf-8")
+
+    compare_res = runner.invoke(
+        main,
+        [
+            "compare",
+            str(old_snap),
+            str(new_snap_breaking),
+            "--suppress",
+            str(expired_supp),
+            "--config",
+            str(project_config),
+        ],
+    )
+    scan_res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(old_snap),
+            "--suppress",
+            str(expired_supp),
+            "--config",
+            str(project_config),
+        ],
+    )
+    # Neither --strict-suppressions was passed on the CLI for either command
+    # -- only the config's suppression.strict: true -- so both must still
+    # reject the expired rule identically (exit 1, not the expired rule
+    # silently accepted).
+    assert compare_res.exit_code == 1, compare_res.output
+    assert scan_res.exit_code == 1, scan_res.output
+    assert "expired" in scan_res.output.lower()

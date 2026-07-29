@@ -1325,6 +1325,32 @@ new tests in `test_service_unit.py` cover: rejection with no baseline,
 rejection with a baseline but `mode="audit"`, and that a real baseline
 comparison using the config surface is unaffected.
 
+**Updated (2026-07-29, same PR): the CLI-flag-only reading was itself
+incomplete -- project-config resolution was still missing entirely.**
+`scan --against` read `--scope-public-headers`/`--public-symbol`/
+`--strict-suppressions` from raw CLI values only, never resolving them
+through the project's `.abicheck.yml` the way `compare` does (CLI flag >
+config > built-in default, ADR-037 D4, `cli_helpers_compare.
+resolve_compare_config`). Concretely: a project config declaring
+`suppression.strict: true` (already honored by `compare`) silently had no
+effect on `scan --against` -- an expired `--suppress` rule that `compare`
+rejects would pass through `scan --against` unnoticed. Fixed by resolving
+`scan`'s existing `--config`/`build_config` option (previously only used
+for the `build.query` gate) through the *same* `resolve_compare_config`/
+`discover_project_config` functions `compare` uses -- `scan_cmd` now loads
+the project config once (auto-discovered upward from cwd when `--config`
+is omitted, matching `compare`) and overwrites its local
+`scope_public_headers`/`strict_suppressions`/`public_symbols` with the
+resolved (CLI-explicit-beats-config-beats-default) values before loading
+suppression/collecting the force-public overlay. Severity/debug/exit-code-
+scheme config keys are resolved too (required positional args of the
+shared function) but deliberately discarded -- `scan` has no equivalent
+flags for them. New test
+`test_scan_against_honors_config_suppression_strict_like_compare` runs
+`compare` and `scan --against` against the same expired-suppression-rule
+fixture with only a config-declared `suppression.strict: true` (no CLI
+flag on either side) and asserts both reject it identically (exit 1).
+
 Still not yet done, deliberately out of scope for these four slices (each
 is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is

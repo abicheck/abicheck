@@ -406,7 +406,7 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--sources` | no | — | Source tree (compile DB auto-discovered within it). |
 | `--build-info` | no | — | Out-of-tree build dir / compile\_commands.json / pack supplying build context. |
 | `--compile-db` | no | — | Explicit compile\_commands.json (use when not under --sources). |
-| `--config` | no | — | Trusted project .abicheck.yml (enables build.query with --allow-build-query). |
+| `--config` | no | — | Trusted project .abicheck.yml (enables build.query with --allow-build-query). Also supplies scope/suppression settings (scope.public, scope.public\_symbols, suppression.strict) the same way `compare --config` does (CLI flags override); auto-discovered upward from the current directory when omitted. |
 | `--against` | no | — | Previous native library or saved ABI dump to compare ARTIFACT against (a single file -- not a directory or package; for those use `abicheck compare OLD\_PACKAGE NEW\_PACKAGE`). Without --against, scan runs a one-build audit/hygiene/source consistency scan only; with it, scan also compares ARTIFACT against this (the two modes are not separate flags -- --against alone selects between them). |
 | `--depth` | no | — | Evidence depth to collect -- the single dial, named by what you get: binary (symbols only), headers (+header AST), build (+build context), source (+source replay & call graph). Omit for 'auto' (risk-driven when a --since/--changed-path seed is present, else a sensible default). --depth source uses changed-path scope when --since/--changed-path is given, else the current library target -- never a zero-TU no-op. |
 | `--since` | no | — | Focus the scan on files changed vs a git ref (e.g. origin/main). |
