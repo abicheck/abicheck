@@ -142,6 +142,17 @@ class TestTypeGraphSnapshot:
         assert g.edges == (("a", "b"),)
         assert isinstance(g.edges[0], tuple)
 
+    def test_nodes_and_edges_canonicalized_by_sort(self):
+        # Regression (Codex review, fresh evidence): nodes/edges are an
+        # unordered graph, not a sequence where discovery order carries
+        # meaning -- two collectors visiting the same graph in a different
+        # order must produce an equal snapshot.
+        g_a = TypeGraphSnapshot(nodes=["b", "a"], edges=[("y", "z"), ("a", "b")])
+        g_b = TypeGraphSnapshot(nodes=["a", "b"], edges=[("a", "b"), ("y", "z")])
+        assert g_a == g_b
+        assert g_a.nodes == ("a", "b")
+        assert g_a.edges == (("a", "b"), ("y", "z"))
+
     def test_edge_list_with_wrong_length_rejected(self):
         with pytest.raises(TypeError):
             TypeGraphSnapshot(edges=[["a"]])
@@ -189,6 +200,17 @@ class TestEvidenceSearchRecord:
         assert rec.requested_scope == ("include/",)
         assert rec.searched_scope == ("include/",)
 
+    def test_requested_and_searched_scope_canonicalized_by_sort(self):
+        # Regression (Codex review, fresh evidence): these are unordered
+        # sets of scope paths, not sequences where discovery order carries
+        # meaning -- two collectors visiting the same scope in a different
+        # order must produce an equal record.
+        rec_a = _record(requested_scope=["b/", "a/"], searched_scope=["y/", "x/"])
+        rec_b = _record(requested_scope=["a/", "b/"], searched_scope=["x/", "y/"])
+        assert rec_a == rec_b
+        assert rec_a.requested_scope == ("a/", "b/")
+        assert rec_a.searched_scope == ("x/", "y/")
+
     def test_optional_str_fields_accept_none(self):
         rec = _record(
             entity_class=None, entity_scope=None, domain_identity=None, reason_code=None
@@ -226,6 +248,20 @@ class TestProviderEvidenceEntry:
         )
         assert entry.declarations == ("decl1",)
         assert entry.manifests == ("man1",)
+
+    def test_declarations_and_manifests_canonicalized_by_sort(self):
+        # Regression (Codex review, fresh evidence): declarations/manifests
+        # are unordered sets discovered during evidence collection, not
+        # order-significant sequences.
+        entry_a = ProviderEvidenceEntry(
+            record=_record(), declarations=["b", "a"], manifests=["y", "x"]
+        )
+        entry_b = ProviderEvidenceEntry(
+            record=_record(), declarations=["a", "b"], manifests=["x", "y"]
+        )
+        assert entry_a == entry_b
+        assert entry_a.declarations == ("a", "b")
+        assert entry_a.manifests == ("x", "y")
 
     def test_type_graph_type_checked(self):
         with pytest.raises(TypeError):
@@ -328,6 +364,20 @@ class TestDecisionReceiptBlock:
         )
         assert receipt.evaluated_contract_roots == ("a",)
         assert receipt.evaluated_type_closure == ("b",)
+
+    def test_roots_and_closure_canonicalized_by_sort(self):
+        # Regression (Codex review, fresh evidence): roots/closure are
+        # unordered sets, not sequences where discovery order carries
+        # meaning.
+        receipt_a = DecisionReceiptBlock(
+            evaluated_contract_roots=["b", "a"], evaluated_type_closure=["y", "x"]
+        )
+        receipt_b = DecisionReceiptBlock(
+            evaluated_contract_roots=["a", "b"], evaluated_type_closure=["x", "y"]
+        )
+        assert receipt_a == receipt_b
+        assert receipt_a.evaluated_contract_roots == ("a", "b")
+        assert receipt_a.evaluated_type_closure == ("x", "y")
 
     def test_relevance_by_finding_coerces_raw_values(self):
         receipt = DecisionReceiptBlock(relevance_by_finding={"f1": "IN_CONTRACT"})

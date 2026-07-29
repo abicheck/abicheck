@@ -124,6 +124,23 @@ def _frozen_mapping(m: Mapping[str, object]) -> MappingProxyType[str, object]:
     return MappingProxyType(dict(m))
 
 
+def _frozen_sorted_tuple(s: Sequence[str]) -> tuple[str, ...]:
+    """Freeze *s* into a ``str``-sorted tuple.
+
+    For a collection that is semantically a *set* observed during evidence
+    collection (declarations found, manifests found, scope paths searched,
+    type-graph node identifiers) -- not a sequence where discovery order
+    carries meaning -- two independent collectors visiting the same items
+    in a different order must still produce an equal, identically-
+    serialized result (this phase's own order-independent round-trip
+    gate). Sorting by string value, not insertion order, is what makes
+    that hold (Codex review, fresh evidence: the same order-preservation
+    gap already fixed for ``ContractEvidenceBlock.providers`` applies
+    here too).
+    """
+    return tuple(sorted(_frozen_tuple(s, element_type=str)))
+
+
 def _require_version_int(value: object, *, owner: str, field_name: str) -> None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise TypeError(f"{owner}.{field_name} must be an int, not {value!r}.")
@@ -194,7 +211,7 @@ class TypeGraphSnapshot:
     edges: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "nodes", _frozen_tuple(self.nodes, element_type=str))
+        object.__setattr__(self, "nodes", _frozen_sorted_tuple(self.nodes))
         if isinstance(self.edges, (str, bytes)):
             raise TypeError(
                 f"TypeGraphSnapshot.edges must be a sequence of (str, str) "
@@ -221,7 +238,11 @@ class TypeGraphSnapshot:
             # and pushing a bespoke inner-list conversion onto every future
             # reader (Codex review, fresh evidence).
             edges.append((edge[0], edge[1]))
-        object.__setattr__(self, "edges", tuple(edges))
+        # Edges are an unordered set of graph relationships (same reasoning
+        # as ``nodes`` above) -- sort by (from, to) tuple comparison so
+        # discovery order doesn't affect equality/serialization (Codex
+        # review, fresh evidence).
+        object.__setattr__(self, "edges", tuple(sorted(edges)))
 
 
 # --------------------------------------------------------------------------
@@ -308,12 +329,10 @@ class EvidenceSearchRecord:
                     f"valid EvidenceCompleteness, not {value!r}."
                 ) from exc
         object.__setattr__(
-            self,
-            "requested_scope",
-            _frozen_tuple(self.requested_scope, element_type=str),
+            self, "requested_scope", _frozen_sorted_tuple(self.requested_scope)
         )
         object.__setattr__(
-            self, "searched_scope", _frozen_tuple(self.searched_scope, element_type=str)
+            self, "searched_scope", _frozen_sorted_tuple(self.searched_scope)
         )
         if self.input_identity is not None and not isinstance(
             self.input_identity, InputIdentity
@@ -341,11 +360,9 @@ class ProviderEvidenceEntry:
                 f"not {self.record!r}."
             )
         object.__setattr__(
-            self, "declarations", _frozen_tuple(self.declarations, element_type=str)
+            self, "declarations", _frozen_sorted_tuple(self.declarations)
         )
-        object.__setattr__(
-            self, "manifests", _frozen_tuple(self.manifests, element_type=str)
-        )
+        object.__setattr__(self, "manifests", _frozen_sorted_tuple(self.manifests))
         if not isinstance(self.type_graph, TypeGraphSnapshot):
             raise TypeError(
                 "ProviderEvidenceEntry.type_graph must be a TypeGraphSnapshot, "
@@ -467,12 +484,12 @@ class DecisionReceiptBlock:
         object.__setattr__(
             self,
             "evaluated_contract_roots",
-            _frozen_tuple(self.evaluated_contract_roots, element_type=str),
+            _frozen_sorted_tuple(self.evaluated_contract_roots),
         )
         object.__setattr__(
             self,
             "evaluated_type_closure",
-            _frozen_tuple(self.evaluated_type_closure, element_type=str),
+            _frozen_sorted_tuple(self.evaluated_type_closure),
         )
         if not isinstance(self.relevance_by_finding, Mapping):
             raise TypeError(
