@@ -1589,6 +1589,66 @@ class TestAbiCompare:
         assert data["summary"]["total_changes"] == len(data["changes"])
         assert data["summary"]["breaking"] == 1
 
+    def test_used_by_finding_already_in_result_changes_gets_explicit_evidence_too(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): a finding relevant to
+        # used_by scoping that is ALSO already in result.changes (the
+        # ordinary case -- a plain FUNC_REMOVED) never appears in
+        # scoped_only_changes, since that collection is deliberately built
+        # excluding anything already in result.changes. Without stamping
+        # result.changes entries too (via scoped_relevant_finding_ids), this
+        # finding stayed under whatever the header-surface shadow evaluator
+        # computed for it (unknown_unresolved on these header-less JSON
+        # snapshots), even though its presence in breaking_for_app proves it
+        # is authoritative in-contract evidence.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"foo"}, required_symbol_count=1,
+            breaking_for_app=[
+                # A fresh object, not the real result.changes one -- but with
+                # identical identity fields (kind/symbol/old_value/new_value/
+                # description), so _finding_id matches the real FUNC_REMOVED
+                # Change compare() itself produces for this snapshot pair,
+                # exercising the "already present in result.changes" path
+                # rather than the scoped-only-fresh-object path.
+                Change(
+                    ChangeKind.FUNC_REMOVED, "foo", "Public function removed: foo",
+                    old_value="foo", new_value=None,
+                )
+            ],
+            verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        func_removed_entries = [c for c in data["changes"] if c["kind"] == "func_removed"]
+        assert len(func_removed_entries) == 1
+        assert func_removed_entries
+        assert all(c["contract_relevance"] == "IN_CONTRACT" for c in func_removed_entries)
+        assert all(
+            c["contract_reason_code"] == "explicit_consumer_or_required_symbol_evidence"
+            for c in func_removed_entries
+        )
+        # And the embedded report (same mutated Change objects) agrees too.
+        report_entries = [
+            c for c in data["report"]["changes"] if c["kind"] == "func_removed"
+        ]
+        assert report_entries
+        assert all(c["contract_relevance"] == "IN_CONTRACT" for c in report_entries)
+
     def test_used_by_missing_symbol_covered_by_change_not_double_counted(
         self, tmp_path: Path, monkeypatch
     ):

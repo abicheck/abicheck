@@ -563,24 +563,28 @@ def _stamp_explicit_scope_contract_evaluation(c: Any) -> None:
     stronger than, and independent of, header-derived public root
     membership. A binary-only ``used_by`` snapshot has no resolvable header
     surface at all, so running these through the header-surface path would
-    misclassify authoritative in-contract evidence as ``unknown_unresolved``
+    misclassify authoritative in-contract evidence as ``UNKNOWN_UNRESOLVED``
     (Codex review, fresh evidence).
 
     Accepts either a ``Change`` (attribute-set) or a plain ``dict`` (the
-    missing-label shape) via duck typing; a value that already carries a
-    relevance (a ``Change`` reused verbatim from ``result.changes``, already
-    stamped by ``compare()`` itself) is left untouched.
+    missing-label shape) via duck typing. Unconditionally overwrites any
+    existing decision -- including one ``compare()``'s own
+    ``_apply_contract_evaluation_shadow`` already stamped onto a ``Change``
+    that is *also* present in ``result.changes`` (the ordinary case:
+    ``used_by``/``required_symbols`` scoping's own relevance set,
+    ``scoped_relevant_finding_ids``, is not limited to *fresh* findings).
+    That header-surface-derived decision can be a real, weaker
+    misclassification (e.g. ``UNKNOWN_UNRESOLVED`` on a binary-only
+    snapshot with no resolvable header surface at all) that this call's own
+    stronger, authoritative evidence must override, not merely fill in when
+    absent (Codex review, fresh evidence: skip-if-already-stamped left
+    exactly this case -- a relevant finding reused from ``result.changes``
+    rather than freshly synthesized -- permanently under its weaker,
+    already-computed decision).
     """
     from .contract_relevance_types import ContractAssurance, ContractRelevance
 
     is_dict = isinstance(c, dict)
-    existing = (
-        c.get("contract_relevance")
-        if is_dict
-        else getattr(c, "contract_relevance", None)
-    )
-    if existing is not None:
-        return
     if is_dict:
         c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
         c["contract_reason_code"] = "explicit_consumer_or_required_symbol_evidence"
@@ -801,8 +805,8 @@ def abi_compare(
         contract_evaluation: ADR-049 Phase 3's shadow contract evaluator
             (non-authoritative). When True, each finding in the response's
             ``changes``/``out_of_surface_changes`` lists gains a
-            ``contract_relevance`` (``in_contract``/``proven_out_of_contract``/
-            ``unknown_unproven``/``unknown_unresolved``/``not_applicable``),
+            ``contract_relevance`` (``IN_CONTRACT``/``PROVEN_OUT_OF_CONTRACT``/
+            ``UNKNOWN_UNPROVEN``/``UNKNOWN_UNRESOLVED``/``NOT_APPLICABLE``),
             ``contract_reason_code``, and — when resolved — ``contract_assurance``
             field, reflecting whether the finding falls inside the library's
             declared public contract. This is advisory only: it never
@@ -1201,6 +1205,25 @@ def abi_compare(
                 )
                 result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
                 result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+
+        # A finding relevant to used_by/required_symbols scoping that is
+        # ALSO already in result.changes (the ordinary case, e.g. a plain
+        # FUNC_REMOVED) never appears in scoped_only_changes -- that
+        # collection is deliberately built excluding anything already in
+        # result.changes (see the `not in _existing_ids` filters above) --
+        # so without this, only a freshly-synthesized scoped-only finding
+        # ever got the explicit-evidence override below; a reused one stayed
+        # under whatever (possibly weaker, e.g. unknown_unresolved on a
+        # binary-only snapshot) decision _apply_contract_evaluation_shadow
+        # already computed for it from header surfaces alone (Codex review,
+        # fresh evidence). Must run before the "changes" list comprehension
+        # below, which serializes result.changes as-is.
+        if contract_evaluation:
+            relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
+            if relevant_ids:
+                for c in result.changes:
+                    if _finding_id(c) in relevant_ids:
+                        _stamp_explicit_scope_contract_evaluation(c)
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):
