@@ -1107,6 +1107,58 @@ unknown-future handling.
 **Gate:** byte/order-independent round-trip decisions and explicit mixed-version
 failure behavior.
 
+**Updated (2026-07-29):** landed the block *shapes* this phase's Section 5.1
+describes, matching the "land the shape first, wire it later" precedent
+already established for Phase 0 (`contract_relevance_types.py`) and Phase 1
+slice 1 (`compatibility_evaluation_config.py`) — a new leaf module,
+`abicheck/contract_evidence.py`, with no other first-party module depending
+on it yet:
+
+- `ContractEvidenceBlock` (policy-independent: `providers` — a tuple of
+  `ProviderEvidenceEntry`, each wrapping an `EvidenceSearchRecord` plus
+  `declarations`/`manifests`/a `TypeGraphSnapshot` — `schema_version`,
+  `identity_algorithm_version`);
+- `EvaluationContextBlock` (policy-dependent: wraps a
+  `CompatibilityEvaluationConfig`, `schema_version`, `evaluator_version`,
+  `identity_algorithm_version`; its `field_provenance` property aliases
+  `resolved_config.provenance` rather than duplicating it, since Phase 1
+  already made that the single source of truth for field-level provenance);
+- `DecisionReceiptBlock` (the actual per-finding relevance decisions:
+  `evaluated_contract_roots`, `evaluated_type_closure`,
+  `relevance_by_finding`);
+- `PersistedContractContext`, bundling all three;
+- `check_persisted_context_versions_supported()` / `UnsupportedSchemaVersionError`,
+  implementing D6 ("unknown future versions fail closed") for each of the
+  five independent version fields this phase's gate requires
+  (`contract_evidence.schema_version`,
+  `contract_evidence.identity_algorithm_version`,
+  `evaluation_context.schema_version`, `evaluation_context.evaluator_version`,
+  `evaluation_context.identity_algorithm_version`)
+  — checked independently, so a mixed-version context (older
+  `contract_evidence` replayed against a current `evaluation_context`, the
+  ordinary re-evaluation-against-newer-policy case this phase's gate names)
+  is explicitly *not* an error; only an individual counter exceeding its own
+  current ceiling is. All four version constants reuse Phase 0's
+  already-reserved `contract_relevance_types.py` values
+  (`CONTRACT_EVIDENCE_SCHEMA_VERSION`/`EVALUATION_CONTEXT_SCHEMA_VERSION`/
+  `EVALUATOR_VERSION`/`IDENTITY_ALGORITHM_VERSION`) rather than inventing new
+  ones.
+
+All dataclasses are frozen with `__post_init__` validation and tuple/mapping
+freezing, matching `compatibility_evaluation_config.py`'s established
+pattern — construction order never affects equality (this phase's
+"order-independent round-trip" half of the gate), verified directly in
+`tests/test_contract_evidence.py::TestRoundTripEquality`.
+
+Not yet done, deliberately out of scope for this slice (same reasoning as
+Phase 0/1's own "shape only" landings): wiring into
+`dumper.py`/`serialization.py`/`checker.py` so a real snapshot actually
+persists these blocks; the original-replay and new-policy-re-evaluation
+*procedures* themselves (only their version-compatibility precondition is
+implemented); and populating `TypeGraphSnapshot`'s nodes/edges with real
+type-graph content (they are deliberately opaque strings for now, mirroring
+`ContractEvidenceBlock`'s own "land the shape, not the producer" scope).
+
 ### Phase 5 — shared authoritative comparison
 
 Route both direct compare and scan baseline compare through the same core and
