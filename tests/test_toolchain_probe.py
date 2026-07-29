@@ -204,6 +204,9 @@ class TestEnvFamily:
             ("arm-linux-gnueabi", "gnueabi"),
             ("x86_64-linux-gnux32", "gnux32"),
             ("x86_64-pc-windows-msvc", "msvc"),
+            ("mips64el-linux-gnuabi64", "gnuabi64"),
+            ("mips64el-linux-gnuabin32", "gnuabin32"),
+            ("aarch64-linux-gnu_ilp32", "gnu_ilp32"),
         ],
     )
     def test_recognized_markers(self, triple: str, expected: str) -> None:
@@ -226,6 +229,23 @@ class TestEnvFamily:
 
     def test_unrecognized_triple_returns_none(self) -> None:
         assert tp._env_family("arm-none-eabi") is None
+
+    def test_mips_n64_and_n32_abis_are_distinct(self) -> None:
+        # Regression: mips64el-linux-gnuabi64 (N64) vs
+        # mips64el-linux-gnuabin32 (N32) both contain "gnu" as a substring
+        # and previously collapsed to the same generic "gnu" family, hiding
+        # an incompatible MIPS data model (Codex review, fresh evidence,
+        # a third round beyond the gnueabi*/gnux32 fix).
+        assert tp._env_family("mips64el-linux-gnuabi64") != tp._env_family(
+            "mips64el-linux-gnuabin32"
+        )
+
+    def test_gnu_and_gnu_ilp32_are_distinct(self) -> None:
+        # Regression: aarch64-linux-gnu vs aarch64-linux-gnu_ilp32 (the
+        # AArch64 ILP32 data model) previously both reduced to "gnu".
+        assert tp._env_family("aarch64-linux-gnu") != tp._env_family(
+            "aarch64-linux-gnu_ilp32"
+        )
 
 
 class TestClangAcceptsTarget:
@@ -734,6 +754,38 @@ class TestCheckProfileToolchainIdentity:
         assert len(errors) == 1
         assert "environment" in errors[0]
         assert "musl" in errors[0]
+
+    def test_mips_n64_vs_n32_environment_mismatch_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: mips64el-linux-gnuabi64 (N64) vs
+        # mips64el-linux-gnuabin32 (N32) both contain "gnu" and previously
+        # collapsed to the same generic environment, silently passing an
+        # incompatible MIPS data model (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/mips-gcc": {
+                    "selected": "/opt/mips-gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "mips64el-linux-gnuabi64",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"mips14": "/opt/mips-gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc",
+                    target="mips64el-linux-gnuabin32",
+                    binding="mips14",
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "environment" in errors[0]
 
     def test_unrecognized_declared_os_against_a_recognized_probed_os_is_an_error(
         self, monkeypatch: pytest.MonkeyPatch

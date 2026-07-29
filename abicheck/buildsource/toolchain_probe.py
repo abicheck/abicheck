@@ -151,18 +151,25 @@ def _os_family(triple: str) -> str | None:
 #: architecture and OS while targeting an incompatible ABI environment
 #: (``x86_64-linux-musl`` vs. ``x86_64-linux-gnu`` both reduce to OS family
 #: ``"linux"`` — Codex review, fresh evidence). Checked most-specific-first:
-#: ``gnueabihf``/``gnueabi``/``gnux32`` are each incompatible ABI *variants*
-#: of glibc (hard-float EABI, soft-float EABI, x32 ILP32-on-x86_64) that
-#: would otherwise all collapse into the same generic ``"gnu"`` bucket,
+#: ``gnueabihf``/``gnueabi``/``gnux32``/``gnuabi64``/``gnuabin32``/
+#: ``gnu_ilp32`` are each incompatible ABI *variants* of glibc (hard-float
+#: EABI, soft-float EABI, x32 ILP32-on-x86_64, MIPS N64/N32, AArch64 ILP32)
+#: that would otherwise all collapse into the same generic ``"gnu"`` bucket,
 #: since each is a superstring containing "gnu" (a second review round,
 #: fresh evidence: ``arm-linux-gnueabi`` vs. ``arm-linux-gnueabihf`` and
 #: ``x86_64-linux-gnu`` vs. ``x86_64-linux-gnux32`` both compared as one
-#: family before this).
+#: family before this; a third review round, fresh evidence:
+#: ``mips64el-linux-gnuabi64`` vs. ``mips64el-linux-gnuabin32`` and
+#: ``aarch64-linux-gnu`` vs. ``aarch64-linux-gnu_ilp32`` still collapsed to
+#: the same generic ``"gnu"`` bucket after the second round's fix).
 _ENV_FAMILY_MARKERS: tuple[tuple[str, str], ...] = (
     ("musl", "musl"),
     ("gnueabihf", "gnueabihf"),
     ("gnueabi", "gnueabi"),
     ("gnux32", "gnux32"),
+    ("gnuabi64", "gnuabi64"),
+    ("gnuabin32", "gnuabin32"),
+    ("gnu_ilp32", "gnu_ilp32"),
     ("gnu", "gnu"),
     ("msvc", "msvc"),
 )
