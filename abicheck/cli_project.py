@@ -67,6 +67,7 @@ from .buildsource.toolchain_bindings import (
     check_profile_bindings_resolve,
     load_bindings_file,
 )
+from .buildsource.toolchain_probe import check_profile_toolchain_identity
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import output_options, verbose_option
 
@@ -111,9 +112,12 @@ def project_group() -> None:
     help=(
         "Path to a trusted toolchain-bindings file (schema "
         "abicheck.toolchain-bindings/v1) to additionally check every "
-        "declared profiles.<id>.compile.binding against. Loaded only from "
-        "this explicit path — never auto-discovered, per the untrusted-"
-        "config trust boundary ProfileCompileSpec.binding documents."
+        "declared profiles.<id>.compile.binding (and consumer_compile.binding) "
+        "resolves, and — when compiler_family/compiler_version is also "
+        "declared — that the resolved executable's probed identity actually "
+        "matches. Loaded only from this explicit path — never auto-"
+        "discovered, per the untrusted-config trust boundary "
+        "ProfileCompileSpec.binding documents."
     ),
 )
 @verbose_option
@@ -136,7 +140,11 @@ def project_validate_cmd(
     valid; every ``checks[].profiles`` entry resolves to a declared profile;
     every id is a valid, ``check_id``-embeddable identifier. With
     ``--toolchain-bindings``, also checks every declared
-    ``profiles.<id>.compile.binding`` resolves against that file.
+    ``profiles.<id>.compile.binding``/``consumer_compile.binding`` resolves
+    against that file, and that a resolved binding's probed compiler
+    identity matches any declared ``compiler_family``/``compiler_version``
+    (G34 Phase A; MSVC bindings are skipped — see
+    ``abicheck.buildsource.toolchain_probe``'s module docstring).
 
     Structural/type errors in the YAML itself (unknown key, wrong type) fail
     immediately as a usage error; this command's own validation report only
@@ -160,6 +168,9 @@ def project_validate_cmd(
             raise click.UsageError(str(exc)) from exc
         report.errors.extend(
             check_profile_bindings_resolve(parsed.profiles, bindings_file)
+        )
+        report.errors.extend(
+            check_profile_toolchain_identity(parsed.profiles, bindings_file)
         )
 
     if fmt == "json":

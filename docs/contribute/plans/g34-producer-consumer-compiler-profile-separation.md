@@ -144,24 +144,50 @@ confirmed by reading the workflow, not asserted from a design doc):
 
 ### Phase A — toolchain-identity enforcement (L, risk: medium-high)
 
-- [ ] A real probe step resolves `compile.binding` (and, once Phase 0
-      lands, `consumer_compile.binding`) to its actual executable, runs a
-      cheap identity check (`--version`-equivalent per family, reusing the
-      existing raw-`--version`-capture plumbing already in snapshot
-      provenance — see `AbiSnapshot.ast_toolchain`/`ast_fallback_reason`)
-      and compares the result against the profile's declared
-      `compiler_family`/`compiler_version` constraint.
-- [ ] A mismatch is a **hard usage error** before any header/binary
-      extraction runs (fail fast, matching the existing "usage error ≠ ABI
-      finding" exit-code convention, `cli._EXIT_USAGE_ERROR`) — not a
-      silent snapshot annotation a caller has to notice after the fact.
-- [ ] The probe result is cached per resolved executable path + mtime/hash
-      (mirroring `snapshot_cache.py`'s existing content-hash caching
-      approach) so a repeated `check-project.yml` matrix run doesn't add a
-      subprocess invocation per cell beyond the first.
-- [ ] Unit tests stub the probe subprocess (no real compiler dependency in
-      the fast test lane); one `integration`-marked test exercises it
-      against a real installed compiler.
+- [x] A real probe step (`abicheck/buildsource/toolchain_probe.py`) resolves
+      a profile's `compile.binding`/`consumer_compile.binding` (via a
+      trusted `BindingsFile`, both overlays checked independently) to its
+      actual executable, runs a cheap identity check reusing the existing
+      raw-`--version`-capture plumbing (`dumper_toolchain._tool_identity_metadata`/
+      `_compiler_family_from_toolchain` — no new subprocess-handling code),
+      parses the profile's declared `compiler_version` as a comma-separated
+      constraint spec (`==`/`!=`/`>=`/`<=`/`>`/`<`, e.g. `">=14.2,<15"`) and
+      compares both `compiler_family` (reconciling the schema spelling
+      `"gcc"` with the internal `"gnu"` label) and `compiler_version`
+      against the probed executable. MSVC (`compiler_family: msvc`, or a
+      `cl`/`cl.exe` binding) is deliberately skipped — `cl.exe` has no
+      `--version` flag and the reused probe always runs exactly that flag,
+      so this is a documented limitation, not an oversight (see the
+      module's docstring).
+- [x] Wired into `project validate --toolchain-bindings`
+      (`cli_project.py`), alongside the existing `check_profile_bindings_resolve`
+      call, so a mismatch surfaces as a validation error (exit 1) the same
+      way an unresolved binding already does.
+- [ ] **Still open:** a hard-fail *before extraction* on `dump`/`compare`
+      themselves, as originally scoped above. Investigated and found not
+      wireable as a drive-by extension: neither `service.py`'s `run_dump`/
+      `resolve_input` nor the `abi_dump` MCP tool accept a `binding`/profile
+      parameter at all today — there is no dump/compare call path that
+      resolves a `.abicheck.yml` profile's toolchain binding to begin with,
+      so there is nothing for this check to hook before. That gap belongs
+      to a separate, already-tracked line of work (see `AGENTS.md`'s "Known
+      gaps" entry on depth-contract/CLI-vs-API parity for the same class of
+      "no such call path exists yet" finding) — closing it needs a real
+      dump/compare-time binding-resolution feature first, not an extension
+      of this validation-report check.
+- [x] The probe result is cached per resolved executable path + mtime/hash
+      — inherited for free from `dumper_toolchain._tool_version_output`'s/
+      `_executable_sha256`'s existing `@lru_cache`, since this phase reuses
+      that plumbing directly rather than re-implementing its own subprocess
+      call. Process-lifetime only (not persisted across separate
+      `check-project.yml` matrix cells the way `snapshot_cache.py` persists
+      to disk) — good enough for the current single-process `project
+      validate` invocation this phase wires into; a cross-process cache
+      would only matter once Phase C's matrix scheduling is the caller.
+- [x] Unit tests (`tests/test_toolchain_probe.py`) stub the probe
+      (`_tool_identity_metadata`) so the fast lane has no real compiler
+      dependency; one `integration`-marked test class exercises it against
+      a real installed `gcc`.
 
 ### Phase B — per-profile AST frontend (M)
 
