@@ -1286,6 +1286,35 @@ Once a root command genuinely clears the bar above, pick the right home:
   unwired and carry the identical bare-name gap — each needs its own
   individually-verified follow-up (FP-rate/mutation-score gates), not a
   drive-by extension of this pass's RecordType-scoped fix.
+- **L4 SYCL replay via a resolved `--gcc-path icpx`/`dpcpp` override — flag
+  vocabulary fixed, real host/device multi-pass replay not implemented.**
+  Fixing L4 clang_bin resolution to honor `--gcc-path` (this same PR) meant
+  L4 could for the first time actually invoke a SYCL-capable compiler
+  (`icpx`/`dpcpp`) instead of always a bare `clang`, which surfaced a
+  narrower, real gap: `-fsycl`/`-fsycl-*` wasn't in
+  `adapters.base.ABI_RELEVANT_FLAG_PREFIXES`, so it never reached the
+  reconstructed L4 replay command even when the real build recorded it
+  (Codex review) — fixed, since the existing `abi_relevant_flags`
+  carry-through (`replay_extra_flags`) already handles this class of flag
+  correctly for every other case (`-std=`, `-fvisibility`, …), so this was
+  a one-line vocabulary gap, not a design gap. **Not implemented**, and
+  explicitly out of scope for that narrow fix: reconstructing the real
+  build's own host/device multi-pass invocation. `sycl_context.py` already
+  has real knowledge that a DPC++ driver invocation is internally two
+  `-cc1` passes (`-fsycl-is-host`/`-fsycl-is-device`) for a different
+  purpose (binary-level SYCL detection); L4 replay's single
+  `clang -ast-dump=json` + `json.load()` pipeline has no equivalent
+  awareness. Two specific consequences flagged but not verified against a
+  real `icpx`/`dpcpp` install (no such toolchain available to test
+  against): (1) whether replaying without an explicit `-fsycl-host-only`
+  pin causes `icpx` to attempt a device pass this pipeline can't consume
+  (unconfirmed — the real build's own recorded argv may already pin one
+  case-by-case); (2) whether legacy `dpcpp` specifically emits multi-
+  document (host+device) AST output that would need a structural change to
+  `ClangSourceExtractor`'s single-document `json.load()`. Both need
+  verification against a real oneAPI toolchain before a confident fix, not
+  a guess — a wrong guess here is worse than the pre-existing gap (same
+  principle as the toolchain-profile compiler-family entry above).
 
 ## What NOT to do
 

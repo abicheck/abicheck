@@ -663,6 +663,20 @@ def test_build_command_carries_abi_flags_and_unwraps_launcher() -> None:
     assert "ccache" not in cmd
 
 
+def test_build_command_carries_sycl_language_mode() -> None:
+    """-fsycl must reach the reconstructed L4 replay command via
+    abi_relevant_flags -- a resolved --gcc-path override can now actually
+    invoke icpx/dpcpp for L4 replay (previously always a bare "clang"), so
+    without this a SYCL TU would replay as plain C++, silently missing
+    built-in SYCL state (Codex review)."""
+    cu = _cu(
+        argv=["icpx", "-fsycl", "-c", "foo.cpp"],
+        abi_relevant_flags=["-fsycl"],
+    )
+    cmd = build_clang_command(cu, Path("foo.cpp"), clang_bin="icpx")
+    assert "-fsycl" in cmd
+
+
 # -- source_abi_from_clang_ast (pure, D4) ------------------------------------
 
 

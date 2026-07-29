@@ -679,6 +679,20 @@ def test_broadened_abi_flag_vocabulary_is_captured(flag):
     assert extract_abi_relevant_flags(["clang", flag, "-c", "foo.cpp"]) == [flag]
 
 
+@pytest.mark.parametrize("flag", [
+    "-fsycl",
+    "-fsycl-host-only",
+    "-fsycl-device-only",
+    "-fsycl-targets=nvptx64-nvidia-cuda",
+])
+def test_sycl_language_mode_flag_is_captured(flag):
+    """A resolved --gcc-path override can now actually invoke icpx/dpcpp for
+    L4 replay (previously always a bare "clang"), so -fsycl and its variants
+    must be captured as ABI-relevant -- otherwise a SYCL TU replays as plain
+    C++, silently missing built-in SYCL state (Codex review)."""
+    assert extract_abi_relevant_flags(["icpx", flag, "-c", "foo.cpp"]) == [flag]
+
+
 def test_stdlib_flip_surfaces_as_abi_build_flag_drift(tmp_path):
     # B2 acceptance: a libstdc++ -> libc++ swap is a hard C++ ABI change and must
     # surface as build-flag drift (the artifact diff proves any concrete break).
