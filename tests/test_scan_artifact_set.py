@@ -498,6 +498,37 @@ class TestRunScanSetDiscoveryArtifactSetError:
         with pytest.raises(ArtifactSetError, match="colliding library identities"):
             run_scan_set(ScanRequest(binaries=[snap_a, snap_b], mode="audit"))
 
+    def test_validates_before_scanning_any_member(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # P2 regression (Codex review, x2): discovery must run *before* the
+        # per-member scan loop -- besides running needless work for an
+        # invalid request, scanning first meant a member could exhaust the
+        # budget and return BUDGET_OVERFLOW before discovery ever ran,
+        # masking the real ArtifactSetError behind a budget error instead.
+        import abicheck.bundle as bundle_mod
+        import abicheck.service_scan as service_scan_mod
+        from abicheck.bundle import ArtifactSetError
+        from abicheck.service import ScanRequest, run_scan_set
+
+        def _fake_discover(paths, *, explicit):
+            raise ArtifactSetError("colliding library identities")
+
+        member_scan_called = []
+
+        def _fake_run_scan_one_member(*args, **kwargs):
+            member_scan_called.append(True)
+            raise AssertionError("member scan must not run before discovery")
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(
+            service_scan_mod, "_run_scan_one_member", _fake_run_scan_one_member
+        )
+
+        with pytest.raises(ArtifactSetError):
+            run_scan_set(ScanRequest(binaries=[snap_a, snap_b], mode="audit"))
+        assert member_scan_called == []
+
 
 class TestRunScanSetBundleSnapshotCompleteness:
     """P2 regression (Codex review): discover_artifact_set only validates

@@ -1599,11 +1599,27 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     if req.baseline is not None:
         raise ValueError("run_scan_set does not accept req.baseline (audit-only)")
 
+    # Validate/canonicalize the whole set *before* scanning any member
+    # (Codex review): run_scan_set is a public, re-exported service entry
+    # point (ADR-056) -- a direct Python API caller can reach it without
+    # ever going through cli_scan._run_artifact_set's own
+    # discover_artifact_set prevalidation, so an unsupported member or a
+    # canonical-identity collision here is not necessarily anomalous the
+    # way it would be for a CLI-originated request. Discovering first
+    # avoids two real problems with discovering after the per-member
+    # loop: (1) needlessly running potentially expensive member scans
+    # (compiler/build queries) for a request that was never valid to
+    # begin with, and (2) a member scan exhausting the budget and
+    # returning BUDGET_OVERFLOW *before* discovery ever runs, which would
+    # report budget exhaustion instead of the real, underlying
+    # ArtifactSetError.
+    libraries = discover_artifact_set(list(binaries), explicit=True)
+
     start = _time.monotonic()
     budget_s = req.budget.total_timeout
 
     per_artifact: list[ScanArtifactResult] = []
-    for binary in binaries:
+    for binary in libraries.values():
         result = _run_scan_one_member(
             req, binary, start=start, budget_s=budget_s, changed_src=req.changed_src
         )
@@ -1612,17 +1628,6 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
             # The failure-guard contract: never keep scanning past overflow.
             return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5,
                                   per_artifact=per_artifact)
-
-    # run_scan_set is a public, re-exported service entry point (ADR-056) --
-    # a direct Python API caller can reach it without ever going through
-    # cli_scan._run_artifact_set's own discover_artifact_set prevalidation,
-    # so a collision/unsupported-member error here is not necessarily
-    # anomalous the way it would be for a CLI-originated request. Letting
-    # it propagate (rather than degrading to bundle_incomplete=True, which
-    # could report a misleading exit-0 "success" for a set that was never
-    # actually auditable) mirrors the audit_bundle() ArtifactSetError fix
-    # just below (Codex review).
-    libraries = discover_artifact_set(list(binaries), explicit=True)
 
     remaining = (
         None if budget_s is None else budget_s - (_time.monotonic() - start)
