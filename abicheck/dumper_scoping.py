@@ -234,8 +234,15 @@ def _directly_referenced_dependency_names(
     underlying, ABI-tag-qualified ``std::__cxx11::basic_string<...>`` and
     the typedef target is itself already namespace/ABI-tag-stripped
     (``basic_string<...>``, DWARF's own convention) -- matched via each
-    candidate's stripped form too, not only its exact identity. An alias
-    chain (``using Handle = Thing; using Thing = std::Thing;``) is
+    candidate's stripped form too, not only its exact identity, and via
+    each candidate's own namespace-suffix spellings as well (Codex review,
+    fresh evidence): castxml's own ``_underlying_type_name()`` stores a
+    namespaced typedef target *bare* (``Thing`` for an underlying,
+    non-stdlib ``dep::Thing``) -- a producer-side convention distinct from
+    (and not covered by) the stdlib-only stripping above, requiring the
+    same suffix spellings a kept signature's own spelling of a candidate
+    already goes through. An alias chain (``using Handle = Thing; using
+    Thing = std::Thing;``) is
     followed via :func:`_resolve_typedef_chains` before matching, and a
     *decorated* target (``using Handle = std::Thing *;`` -- the target
     string is not equal to the candidate identity, only references it as a
@@ -312,20 +319,30 @@ def _directly_referenced_dependency_names(
     }
 
     identity_of: dict[int, str] = {}
-    stripped_of: dict[int, str | None] = {}
-    # matching key (a candidate's own identity or stripped form) -> every
-    # identity it could belong to -- built once so resolved typedef targets
-    # are scanned once in total (below), not once per dependency candidate
-    # (Codex review, fresh evidence: the naive per-candidate scan over every
-    # resolved target is O(dep_candidates x typedefs), confirmed empirically
-    # at ~5.6s for 3,000 candidates x 3,000 typedefs).
+    own_spellings_of: dict[int, set[str]] = {}
+    # matching key (any of a candidate's own spellings -- full identity,
+    # namespace suffix, or stdlib-stripped form) -> every identity it could
+    # belong to -- built once so resolved typedef targets are scanned once
+    # in total (below), not once per dependency candidate (Codex review,
+    # fresh evidence: the naive per-candidate scan over every resolved
+    # target is O(dep_candidates x typedefs), confirmed empirically at
+    # ~5.6s for 3,000 candidates x 3,000 typedefs). Namespace-suffix
+    # spellings are included here, not just the full identity/stdlib-
+    # stripped form (Codex review, fresh evidence): castxml's own
+    # ``_underlying_type_name()`` stores a namespaced typedef target bare
+    # (``Thing`` for an underlying ``dep::Thing``), which only a suffix key
+    # can match -- the same bare-vs-qualified split already applied to a
+    # kept signature's own spelling of a candidate.
     key_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = _candidate_identity(candidate)
-        stripped = _stripped_signature_spelling(identity)
         identity_of[id(candidate)] = identity
-        stripped_of[id(candidate)] = stripped
-        for key in filter(None, (identity, stripped)):
+        stripped = _stripped_signature_spelling(identity)
+        spellings = {identity, *_namespace_suffix_spellings(identity)}
+        if stripped:
+            spellings.add(stripped)
+        own_spellings_of[id(candidate)] = spellings
+        for key in spellings:
             key_owners.setdefault(key, set()).add(identity)
 
     identity_aliases: dict[str, set[str]] = {}
@@ -339,10 +356,7 @@ def _directly_referenced_dependency_names(
     candidate_spellings: dict[int, set[str]] = {}
     for candidate in dep_candidates:
         identity = identity_of[id(candidate)]
-        stripped = stripped_of[id(candidate)]
-        spellings = {identity, *_namespace_suffix_spellings(identity)}
-        if stripped:
-            spellings.add(stripped)
+        spellings = set(own_spellings_of[id(candidate)])
         for alias in identity_aliases.get(identity, ()):
             spellings.add(alias)
             spellings.update(_namespace_suffix_spellings(alias)[1:])

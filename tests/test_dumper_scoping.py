@@ -783,6 +783,31 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.name for t in scoped.types] == ["basic_string"]
 
+    def test_typedef_target_namespace_suffix_resolves_non_stdlib_dependency(self):
+        """Codex review (seventh round): castxml's own
+        `_underlying_type_name()` stores a namespaced typedef target
+        *bare* (`Thing` for an underlying `dep::Thing`) -- a non-stdlib
+        producer convention distinct from the stdlib-only stripped-form
+        matching, requiring the same namespace-suffix spellings a kept
+        signature's own spelling of a candidate already goes through."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
     def test_kept_enum_collision_guards_bare_dependency_spelling(self):
         """Codex review (P2, fourth round): a kept enum's bare spelling
         (`api::Status` spelled bare `Status`) must guard against an
