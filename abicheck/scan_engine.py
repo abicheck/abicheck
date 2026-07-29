@@ -359,12 +359,22 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     (not a full ``resolve_input``/dump) so this never triggers expensive
     work merely to decide a default; any failure to read/parse falls back to
     the filtered default.
+
+    Deliberately does NOT pre-filter on :func:`cli_scan_baseline.
+    _baseline_is_native_library` before attempting the JSON parse (Codex
+    review, fresh evidence): that helper's own filename-suffix fallback
+    (``".so" in name``, ...) only applies once magic-byte sniffing finds no
+    recognized binary format -- exactly the case for a real JSON snapshot
+    saved under a library-like name (e.g. a baseline written to
+    ``libfoo.so.json`` and then renamed, or just handed a ``libfoo.so``
+    path by a caller's own naming convention). Calling it first would skip
+    the peek entirely for that baseline, silently keeping the candidate
+    filtered against a "full"-tagged snapshot. Attempting the JSON parse
+    directly is just as safe for an actual native binary: its raw bytes
+    essentially never decode as UTF-8 text, let alone parse as JSON, so the
+    ``except`` below still degrades to the filtered default there too.
     """
     if baseline is None:
-        return False
-    from .cli_scan_baseline import _baseline_is_native_library
-
-    if _baseline_is_native_library(baseline):
         return False
     try:
         with open(baseline, encoding="utf-8") as f:

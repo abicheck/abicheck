@@ -215,6 +215,20 @@ class TestScanCandidateIncludeDependencies:
         baseline.write_text("{}", encoding="utf-8")
         assert _scan_candidate_include_dependencies(baseline) is False
 
+    def test_json_baseline_with_library_like_name_still_read(self, tmp_path):
+        """Codex review, fresh evidence: a real JSON snapshot saved under a
+        library-like filename (no recognized binary magic bytes, so
+        cli_scan_baseline._baseline_is_native_library falls back to its
+        ".so" in name filename heuristic and would call this native) must
+        still have its dependency_scope tag read -- pre-filtering on that
+        helper before attempting the JSON parse would silently skip the
+        peek for exactly this baseline shape."""
+        from abicheck.scan_engine import _scan_candidate_include_dependencies
+
+        baseline = tmp_path / "libfoo.so"
+        baseline.write_text('{"dependency_scope": "full"}', encoding="utf-8")
+        assert _scan_candidate_include_dependencies(baseline) is True
+
     def test_unreadable_json_baseline_falls_back_to_filtered(self, tmp_path):
         from abicheck.scan_engine import _scan_candidate_include_dependencies
 
