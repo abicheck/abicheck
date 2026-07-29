@@ -3366,3 +3366,22 @@ class TestTryAttachNumpyCapiSurface:
             _try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
         assert snap.numpy_capi is consuming
         assert "NumPy C-API consumption detected" in caplog.text
+
+
+class TestRunDumpTagsLiveDependencyScope:
+    """``run_dump`` never applies ``dumper_scoping``'s exclusion filter --
+    its wrapper tags the (unwrapped) result via
+    ``dumper_scoping.tag_live_dump_dependency_scope`` so the comparability
+    gate can tell "genuinely never filtered" apart from "predates the
+    dependency_scope field entirely" (see
+    comparability._check_dependency_scope_comparable's docstring). See
+    tests/test_dumper_scoping.py for direct coverage of that tagging
+    function itself."""
+
+    def test_run_dump_wrapper_tags_result(self, tmp_path):
+        elf_path = tmp_path / "lib.so"
+        elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+        with patch("abicheck.service._run_dump_uncached", return_value=fake_snap):
+            result = run_dump(elf_path, "elf")
+        assert result.dependency_scope == "full"

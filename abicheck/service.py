@@ -25,6 +25,7 @@ Provides framework-agnostic functions for the core abicheck operations:
 from __future__ import annotations
 
 import concurrent.futures
+import functools
 import hashlib
 import importlib as _importlib
 import logging
@@ -496,7 +497,7 @@ def resolve_input(
 # ── Binary dumping ──────────────────────────────────────────────────────────
 
 
-def run_dump(
+def _run_dump_uncached(
     path: Path,
     binary_fmt: str,
     headers: list[Path] | None = None,
@@ -814,6 +815,12 @@ def run_dump(
             snap, _headers, _includes, lang=lang, compile=compile
         )
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
+
+
+@functools.wraps(_run_dump_uncached)
+def run_dump(*args: Any, **kwargs: Any) -> AbiSnapshot:
+    from .dumper_scoping import tag_live_dump_dependency_scope
+    return tag_live_dump_dependency_scope(_run_dump_uncached(*args, **kwargs))
 
 
 def _apply_native_provenance(

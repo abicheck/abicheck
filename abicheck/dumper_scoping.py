@@ -845,6 +845,18 @@ def resolve_dependency_scope(
     return dataclasses.replace(snap, dependency_scope="full")
 
 
+def tag_live_dump_dependency_scope(snap: AbiSnapshot) -> AbiSnapshot:
+    """``service.run_dump`` (compare's live-binary dumping) never applies
+    :func:`scope_snapshot_excluding_dependencies` — tag an untagged,
+    header-derived result ``"full"`` so
+    ``comparability._check_dependency_scope_comparable`` can tell that
+    apart from a snapshot merely predating the ``dependency_scope`` field
+    (see its own docstring for why the distinction matters)."""
+    if snap.dependency_scope is not None or not snap.from_headers:
+        return snap
+    return resolve_dependency_scope(snap, include_dependencies=True)
+
+
 def scope_snapshot_excluding_dependencies(
     snap: AbiSnapshot,
     header_roots: Sequence[Path | str] | None = None,

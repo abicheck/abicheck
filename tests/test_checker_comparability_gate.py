@@ -164,7 +164,9 @@ def test_compare_contract_coverage_none_when_both_sides_comparable(tmp_path):
     assert result.assurance is None
 
 
-def _scoped_snap(version: str, from_headers: bool, dependency_scope) -> AbiSnapshot:
+def _scoped_snap(
+    version: str, from_headers: bool, dependency_scope: str | None
+) -> AbiSnapshot:
     return AbiSnapshot(
         library="libtest.so.1",
         version=version,
@@ -193,14 +195,22 @@ class TestDependencyScopeComparabilityGate:
         with pytest.raises(ScopeMismatchError):
             compare(old, new)
 
-    def test_filtered_vs_legacy_none_baseline_raises_scope_mismatch(self):
-        # A pre-v18 (or pre-dumper_scoping) baseline never went through
-        # filtering at all -- None must be treated as "full", not "unknown
-        # and therefore waived".
+    def test_filtered_vs_legacy_none_baseline_is_not_flagged(self):
+        # A pre-v18 baseline predates this field but NOT dumper_scoping.py's
+        # default filtering (which already shipped as `dump`'s default) --
+        # its None is genuinely ambiguous (it's usually already-filtered
+        # content that simply predates the tag), so it must NOT be assumed
+        # to mean "full": doing so would spuriously flag the single most
+        # common workflow (compare a cached baseline against a fresh dump)
+        # as not comparable (Codex review, PR #651 follow-up).
         old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
         new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
-        with pytest.raises(ScopeMismatchError):
-            compare(old, new)
+        assert compare(old, new) is not None  # must not raise
+
+    def test_full_vs_legacy_none_baseline_is_not_flagged(self):
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
+        assert compare(old, new) is not None  # must not raise
 
     def test_both_filtered_is_comparable(self):
         old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
@@ -226,6 +236,14 @@ class TestDependencyScopeComparabilityGate:
         old = _scoped_snap("1.0", from_headers=False, dependency_scope="filtered")
         new = _scoped_snap("2.0", from_headers=False, dependency_scope="full")
         assert compare(old, new) is not None  # must not raise
+
+    def test_one_sided_from_headers_with_differing_scope_still_raises(self):
+        # The gate's guard is `old.from_headers or new.from_headers` -- only
+        # ONE side needs to be header-derived for the axis to be meaningful.
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=False, dependency_scope="full")
+        with pytest.raises(ScopeMismatchError):
+            compare(old, new)
 
     def test_diagnostic_mode_returns_reason_instead_of_raising(self):
         from abicheck.comparability import check_contracts_comparable

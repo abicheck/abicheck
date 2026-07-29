@@ -803,18 +803,22 @@ class AbiSnapshot:
     # declarations were excluded from this snapshot's flat lists/DWARF
     # collections by ``dumper_scoping.scope_snapshot_excluding_dependencies``
     # ("filtered", the ``dump`` command's default) or deliberately kept
-    # ("full", ``dump --include-dependencies``). ``None`` means "not
-    # recorded" — every snapshot predating this field (dumper_scoping.py
-    # postdates this snapshot's production, so it was never filtered) and
-    # every snapshot with no header-derived declarations at all
-    # (``from_headers`` False), where the concept does not apply.
-    # ``comparability.check_contracts_comparable`` treats a missing value as
-    # equivalent to ``"full"`` (the only behavior that existed before
-    # dumper_scoping.py) when deciding whether two snapshots' dependency
-    # scope is comparable — this is what turns a scoped ``dump`` baseline
-    # compared against an unscoped live ``compare`` dump (or a pre-existing
-    # baseline) into an explicit ``ScopeMismatchError`` instead of a silent,
-    # possibly-wrong verdict.
+    # ("full", ``dump --include-dependencies``, or any live-binary snapshot
+    # from ``service.run_dump``, which never applies this filter at all).
+    # ``None`` means "not recorded" — every snapshot predating this field.
+    # Deliberately NOT treated as equivalent to ``"full"`` anywhere: since
+    # ``dumper_scoping.py``'s filtering already shipped as the ``dump``
+    # default before this field existed, an ordinary pre-v18 baseline is
+    # usually already-filtered content that simply predates the tag —
+    # assuming ``"full"`` for it would spuriously flag the single most
+    # common workflow (compare a cached baseline against a fresh dump) as
+    # not comparable. ``comparability.check_contracts_comparable`` only
+    # raises ``ScopeMismatchError`` when BOTH sides carry an explicit,
+    # non-``None`` value and they differ — which still catches the
+    # originally-reported danger (a filtered ``dump`` baseline compared
+    # against compare's own always-unfiltered live dump) once both sides
+    # come from a current abicheck build, without touching the irrecoverable
+    # ambiguity of an old, untagged snapshot.
     dependency_scope: str | None = field(default=None, kw_only=True)
 
     # Runtime-only provenance qualifier (not serialized — popped in

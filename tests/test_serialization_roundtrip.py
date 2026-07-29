@@ -319,6 +319,21 @@ class TestDependencyScopeRoundtrip:
         assert "dependency_scope" not in d
         assert snapshot_from_dict(d).dependency_scope is None
 
+    def test_unrecognized_string_value_loads_as_none(self) -> None:
+        # Not a value this codebase's own producers ever write -- treated
+        # the same as "not recorded" rather than trusted at face value for
+        # a comparability decision (Codex/CodeRabbit review).
+        d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope="bogus")
+        assert snapshot_from_dict(d).dependency_scope is None
+
+    def test_non_string_value_loads_as_none(self) -> None:
+        d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope=123)
+        assert snapshot_from_dict(d).dependency_scope is None
+
+    def test_explicit_null_loads_as_none(self) -> None:
+        d = _minimal_dict(schema_version=18, from_headers=True, dependency_scope=None)
+        assert snapshot_from_dict(d).dependency_scope is None
+
 
 # ── constants ─────────────────────────────────────────────────────────────
 

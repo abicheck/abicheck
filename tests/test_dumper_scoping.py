@@ -10,7 +10,11 @@
 
 from __future__ import annotations
 
-from abicheck.dumper_scoping import scope_snapshot_excluding_dependencies
+from abicheck.dumper_scoping import (
+    resolve_dependency_scope,
+    scope_snapshot_excluding_dependencies,
+    tag_live_dump_dependency_scope,
+)
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
 from abicheck.model import (
@@ -250,6 +254,50 @@ class TestDependencyScopeTagging:
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert scoped.dependency_scope is None
+
+
+class TestResolveDependencyScope:
+    """`resolve_dependency_scope` is the single choke point `dump`'s own
+    ``cli._write_snapshot_output`` calls -- it determines the serialized
+    ``dependency_scope`` for every dump command invocation."""
+
+    def test_default_mode_filters_and_tags_filtered(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[
+                _fn("run"),
+                _fn("sys", mangled="_Z3sys", source_header=_SYSTEM_HEADER),
+            ],
+        )
+        resolved = resolve_dependency_scope(snap, include_dependencies=False)
+        assert resolved.dependency_scope == "filtered"
+        assert [f.name for f in resolved.functions] == ["run"]
+
+    def test_include_dependencies_tags_full_without_filtering(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[
+                _fn("run"),
+                _fn("sys", mangled="_Z3sys", source_header=_SYSTEM_HEADER),
+            ],
+        )
+        resolved = resolve_dependency_scope(snap, include_dependencies=True)
+        assert resolved.dependency_scope == "full"
+        assert {f.name for f in resolved.functions} == {"run", "sys"}
+
+    def test_include_dependencies_on_non_header_snapshot_stays_untagged(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=False,
+            functions=[_fn("run", vis=Visibility.ELF_ONLY, source_header=None)],
+        )
+        resolved = resolve_dependency_scope(snap, include_dependencies=True)
+        assert resolved.dependency_scope is None
 
 
 class TestDwarfScoping:
@@ -2015,3 +2063,27 @@ class TestEndToEndCompareAfterScoping:
         result = compare(old_scoped, new_scoped)
         assert result.verdict != Verdict.NO_CHANGE
         assert any(c.symbol == "std::string" for c in result.changes)
+
+
+class TestTagLiveDumpDependencyScope:
+    """``service.run_dump`` (compare's live-binary dumping) never applies
+    ``scope_snapshot_excluding_dependencies`` -- its wrapper tags the result
+    via this function so the comparability gate can tell "genuinely never
+    filtered" apart from "predates the dependency_scope field entirely"."""
+
+    def test_header_derived_snapshot_tagged_full(self):
+        snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+        assert tag_live_dump_dependency_scope(snap).dependency_scope == "full"
+
+    def test_non_header_snapshot_stays_untagged(self):
+        snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=False)
+        assert tag_live_dump_dependency_scope(snap).dependency_scope is None
+
+    def test_already_tagged_snapshot_is_not_overwritten(self):
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            from_headers=True,
+            dependency_scope="filtered",
+        )
+        assert tag_live_dump_dependency_scope(snap).dependency_scope == "filtered"

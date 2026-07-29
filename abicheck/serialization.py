@@ -1032,11 +1032,17 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     )
     # Schema v18 — dependency-scoping mode. Missing key (every pre-v18
     # snapshot) loads as None, same as every other additive optional field;
-    # see AbiSnapshot.dependency_scope's own docstring for why None is NOT
-    # treated as "unknown" by the comparability gate.
+    # see AbiSnapshot.dependency_scope's own docstring for why the
+    # comparability gate does NOT treat None as either mode. Only the two
+    # values a producer can actually write are accepted (Codex review) — any
+    # other string (or non-string) is not a value this codebase's own
+    # producers ever write, so it's treated the same as "not recorded"
+    # rather than trusted at face value for a comparability decision.
     raw_dependency_scope = d.get("dependency_scope")
     dependency_scope = (
-        raw_dependency_scope if isinstance(raw_dependency_scope, str) else None
+        raw_dependency_scope
+        if raw_dependency_scope in ("filtered", "full")
+        else None
     )
 
     snap = AbiSnapshot(
