@@ -1183,6 +1183,68 @@ class TestCheckProfileToolchainIdentity:
         assert len(errors) == 1
         assert "unrecognized target suffix" in errors[0]
 
+    def test_explicit_unknown_vendor_is_equivalent_to_an_omitted_vendor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: arm-none-eabi (vendor omitted: arch-os-env) and
+        # arm-unknown-none-eabi (vendor explicit: arch-vendor-os-env) name
+        # the same real target -- Clang's own triple parser normalizes both
+        # to the same canonical form -- but the raw suffix-comparison
+        # fallback previously compared "none-eabi" against
+        # "unknown-none-eabi" verbatim and rejected the equivalent spelling
+        # as a mismatch (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "arm-unknown-none-eabi",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc", target="arm-none-eabi", binding="gcc14"
+                ),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_unknown_vendor_normalization_does_not_mask_a_real_suffix_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The generic-vendor normalization only drops a leading "unknown"
+        # placeholder -- it must not accidentally make an otherwise-genuine
+        # suffix mismatch disappear once that placeholder is stripped.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "arm-unknown-none-elf",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc", target="arm-none-eabi", binding="gcc14"
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "unrecognized target suffix" in errors[0]
+        assert "'none-eabi'" in errors[0]
+        assert "'none-elf'" in errors[0]
+
     def test_clang_bogus_target_is_rejected_via_real_probe(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

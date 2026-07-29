@@ -562,7 +562,10 @@ def abi_project_validate(
                         check_profile_bindings_resolve(parsed.profiles, bindings_file)
                     )
                     report.errors.extend(
-                        check_profile_toolchain_identity(parsed.profiles, bindings_file)
+                        _redact_paths(err, *bindings_file.bindings.values())
+                        for err in check_profile_toolchain_identity(
+                            parsed.profiles, bindings_file
+                        )
                     )
                 return report
             except (click.UsageError, BindingsFileError) as exc:
@@ -774,7 +777,10 @@ def abi_project_plan(
                         if profile_id in used_profile_ids
                     }
                     binding_errors.extend(
-                        check_profile_toolchain_identity(used_profiles, bindings_file)
+                        _redact_paths(err, *bindings_file.bindings.values())
+                        for err in check_profile_toolchain_identity(
+                            used_profiles, bindings_file
+                        )
                     )
                 report.errors.extend(binding_errors)
                 if not plan.checks and not allow_empty:

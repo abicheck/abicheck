@@ -868,6 +868,49 @@ class TestAbiProjectValidate:
         assert payload["result"]["ok"] is False
         assert any("compiler_family" in e for e in payload["result"]["errors"])
 
+    def test_toolchain_identity_error_redacts_the_probed_binding_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # check_profile_toolchain_identity()'s own error strings embed the
+        # bindings file's exact resolved executable path -- e.g.
+        # "/opt/toolchains/gcc13/bin/gcc" -- which bypasses this module's
+        # path-redaction boundary unless explicitly redacted before joining
+        # the report (Codex review, fresh evidence): every other domain
+        # error this tool returns has its local paths redacted to just a
+        # basename, but this one previously reached the caller unredacted.
+        from abicheck.buildsource import toolchain_probe as tp
+
+        binding_path = str(tmp_path / "opt" / "toolchains" / "clang18")
+        monkeypatch.setattr(
+            tp,
+            "_tool_identity_metadata",
+            lambda path: {"selected": path, "version": "clang version 18.0.0"},
+        )
+        raw_cfg = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))
+        raw_cfg["profiles"]["linux"]["compile"] = {
+            "binding": "gcc14",
+            "compiler_family": "gcc",
+        }
+        config = _write_config(tmp_path, raw_cfg)
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text(
+            yaml.safe_dump(
+                {
+                    "schema": "abicheck.toolchain-bindings/v1",
+                    "bindings": {"gcc14": binding_path},
+                }
+            ),
+            encoding="utf-8",
+        )
+        raw = abi_project_validate(str(config), toolchain_bindings=str(bindings))
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["result"]["ok"] is False
+        errors = payload["result"]["errors"]
+        assert any("compiler_family" in e for e in errors)
+        assert not any(binding_path in e for e in errors)
+        assert any("clang18" in e for e in errors)
+
     def test_malformed_toolchain_bindings_is_an_error(self, tmp_path: Path):
         config = _write_config(tmp_path, _SINGLE_PROFILE_LIBRARY_RAW)
         bindings = tmp_path / "bindings.yml"
@@ -1027,6 +1070,50 @@ class TestAbiProjectPlan:
         assert payload["status"] == "ok"
         assert payload["report"]["ok"] is False
         assert any("compiler_family" in e for e in payload["report"]["errors"])
+
+    def test_toolchain_identity_error_redacts_the_probed_binding_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Mirrors the identical abi_project_validate regression test: the
+        # plan report must redact check_profile_toolchain_identity()'s own
+        # embedded binding path too (Codex review, fresh evidence).
+        from abicheck.buildsource import toolchain_probe as tp
+
+        binding_path = str(tmp_path / "opt" / "toolchains" / "clang18")
+        monkeypatch.setattr(
+            tp,
+            "_tool_identity_metadata",
+            lambda path: {"selected": path, "version": "clang version 18.0.0"},
+        )
+        raw_cfg = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))
+        raw_cfg["profiles"]["linux"]["compile"] = {
+            "binding": "gcc14",
+            "compiler_family": "gcc",
+        }
+        config = _write_config(tmp_path, raw_cfg)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text(
+            yaml.safe_dump(
+                {
+                    "schema": "abicheck.toolchain-bindings/v1",
+                    "bindings": {"gcc14": binding_path},
+                }
+            ),
+            encoding="utf-8",
+        )
+        raw = abi_project_plan(
+            str(config),
+            build_outputs=[f"linux={build_dir}"],
+            toolchain_bindings=str(bindings),
+        )
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["report"]["ok"] is False
+        errors = payload["report"]["errors"]
+        assert any("compiler_family" in e for e in errors)
+        assert not any(binding_path in e for e in errors)
+        assert any("clang18" in e for e in errors)
 
     def test_unused_profiles_mismatch_does_not_abort_an_otherwise_valid_plan(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

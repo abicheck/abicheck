@@ -171,6 +171,28 @@ _ENV_BASE_MARKERS: tuple[str, ...] = ("gnu", "musl", "msvc")
 _MINGW_ENV_ALIASES: frozenset[str] = frozenset({"mingw32", "mingw"})
 
 
+#: Generic vendor-field placeholders. A target triple's vendor component is
+#: optional -- ``arm-none-eabi`` (vendor omitted: arch-os-env) and
+#: ``arm-unknown-none-eabi`` (vendor explicit: arch-vendor-os-env) name the
+#: same real target, and Clang's own triple parser normalizes both to the
+#: same canonical form -- but a raw, position-blind component comparison
+#: sees an extra leading ``"unknown"`` component on one side and reports a
+#: spurious mismatch (Codex review, fresh evidence). Restricted to this one
+#: placeholder spelling (the only generic "no vendor" marker in common use)
+#: rather than a real vendor name (``pc``/``apple``/``ibm``/...), since a
+#: real vendor component is significant and must still be compared.
+_GENERIC_VENDOR_MARKERS: frozenset[str] = frozenset({"unknown"})
+
+
+def _strip_generic_vendor(parts: list[str]) -> list[str]:
+    """Drop a leading generic vendor placeholder from *parts* (the target
+    triple's components after its architecture), so an explicit-vendor
+    spelling compares equal to the equivalent vendor-omitted spelling."""
+    if parts and parts[0].lower() in _GENERIC_VENDOR_MARKERS:
+        return parts[1:]
+    return parts
+
+
 def _env_family(triple: str) -> str | None:
     """Coarse ABI-environment label for a target triple's trailing
     component, e.g. ``"gnu"``, ``"gnueabihf"``, ``"musl"``.
@@ -702,12 +724,21 @@ def _check_one_overlay(
                 # bare-metal EABI vs ELF object-format spellings, neither
                 # matching any OS/env marker) previously still passed
                 # silently as long as architecture agreed (Codex review,
-                # fresh evidence). Compares everything after the first
-                # `-`-separated component verbatim (case-insensitive) --
-                # deliberately not attempting to interpret it, since
-                # neither marker table recognizes it.
-                declared_rest = declared_target.split("-", 1)[1:]
-                probed_rest = probed_triple.split("-", 1)[1:]
+                # fresh evidence). Compares every remaining `-`-separated
+                # component (case-insensitive) after normalizing away an
+                # optional, generic vendor placeholder on either side
+                # (`_strip_generic_vendor`) -- `arm-none-eabi` (vendor
+                # omitted) and `arm-unknown-none-eabi` (vendor explicitly
+                # `unknown`) name the same real target, and comparing the
+                # raw component lists without that normalization rejected
+                # the equivalent spelling as a mismatch (Codex review,
+                # fresh evidence).
+                declared_rest = _strip_generic_vendor(
+                    [p for p in declared_target.split("-")[1:] if p]
+                )
+                probed_rest = _strip_generic_vendor(
+                    [p for p in probed_triple.split("-")[1:] if p]
+                )
                 suffix_mismatch = bool(
                     declared_os is None
                     and probed_os is None
@@ -715,7 +746,8 @@ def _check_one_overlay(
                     and probed_env is None
                     and declared_rest
                     and probed_rest
-                    and declared_rest[0].lower() != probed_rest[0].lower()
+                    and [p.lower() for p in declared_rest]
+                    != [p.lower() for p in probed_rest]
                 )
                 if arch_mismatch or os_mismatch or env_mismatch or suffix_mismatch:
                     mismatches = []
@@ -731,8 +763,9 @@ def _check_one_overlay(
                         )
                     if suffix_mismatch:
                         mismatches.append(
-                            f"unrecognized target suffix {declared_rest[0]!r} vs "
-                            f"{probed_rest[0]!r}"
+                            "unrecognized target suffix "
+                            f"{'-'.join(declared_rest)!r} vs "
+                            f"{'-'.join(probed_rest)!r}"
                         )
                     errors.append(
                         f"{where}.target declares {declared_target!r} but "
