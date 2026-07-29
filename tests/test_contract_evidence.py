@@ -341,6 +341,24 @@ class TestContractEvidenceBlock:
         assert block1.providers == (entry_x, entry_y)
         assert block2.providers == (entry_x, entry_y)
 
+    def test_providers_rejects_colliding_side_provider_id_identity(self):
+        # Regression (Codex review, fresh evidence): two entries sharing
+        # the full (side, provider, id) identity still tie under the sort
+        # key, so Python's stable sort falls back to input position and
+        # reintroduces order-dependence for that case. (side, provider, id)
+        # is documented to identify exactly one evidence search, so a
+        # collision -- whether the two entries are identical or
+        # contradictory -- is rejected outright rather than silently
+        # tie-broken.
+        entry_a = ProviderEvidenceEntry(
+            record=_record(id="rec-1", side="old", provider="x"), declarations=["a"]
+        )
+        entry_b = ProviderEvidenceEntry(
+            record=_record(id="rec-1", side="old", provider="x"), declarations=["b"]
+        )
+        with pytest.raises(ValueError):
+            ContractEvidenceBlock(providers=[entry_a, entry_b])
+
     def test_schema_version_must_be_positive_int(self):
         with pytest.raises(ValueError):
             ContractEvidenceBlock(schema_version=0)

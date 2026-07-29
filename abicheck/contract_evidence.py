@@ -409,6 +409,28 @@ class ContractEvidenceBlock:
                 ),
             )
         )
+        # (side, provider, id) is documented (EvidenceSearchRecord's own
+        # docstring) as identifying exactly one evidence search -- two
+        # entries sharing that identity are never a legitimate "same
+        # search observed twice" case (an identical duplicate should
+        # simply not be constructed twice; a *differing* one is
+        # contradictory evidence). Left unchecked, a sort key that ties
+        # falls back to Python's stable-sort tie-break on input position,
+        # silently reintroducing the exact order-dependence this
+        # canonicalization exists to remove (Codex review, fresh
+        # evidence) -- so a collision is rejected outright rather than
+        # given an arbitrary deterministic tie-breaker that would still
+        # let two contradictory records for "the same search" coexist.
+        for prev, cur in zip(providers, providers[1:]):
+            prev_key = (prev.record.side, prev.record.provider, prev.record.id)
+            cur_key = (cur.record.side, cur.record.provider, cur.record.id)
+            if prev_key == cur_key:
+                raise ValueError(
+                    "ContractEvidenceBlock.providers has more than one entry "
+                    f"for the same (side, provider, id) identity {cur_key!r} "
+                    "-- that combination must identify exactly one evidence "
+                    "search (EvidenceSearchRecord's own contract)."
+                )
         object.__setattr__(self, "providers", providers)
         _require_version_int(
             self.schema_version,
