@@ -266,11 +266,22 @@ def _directly_referenced_dependency_names(
     rather than requiring exact equality (Codex review, fresh evidence).
     Mirrors :func:`abicheck.type_reachability`'s own typedef-following. A
     typedef alias that transitively reaches a *kept* type's/enum's own
-    spelling is folded into *kept_spellings* itself (Codex review, fresh
-    evidence): a kept signature spelling that alias is semantically naming
-    the kept type it resolves to, so an unrelated dependency candidate
-    sharing that same alias spelling as its own bare suffix must not be
-    retained through it. A resolved
+    spelling is tracked as *kept-touched* -- kept **separate** from the
+    shared *kept_spellings* set, not folded into it (Codex review, fresh
+    evidence): a *compound* alias (``using Alias = Pair<api::Own,
+    dep::Thing>;``) can reach both a kept type and a genuinely distinct
+    dependency candidate in the same target -- that is not ambiguous (the
+    alias names both simultaneously, not "one or the other"), so blanket
+    kept-touch exclusion would incorrectly also erase the alias's
+    legitimate use as ``dep::Thing``'s own spelling. Kept-touch is instead
+    used narrowly to prevent a *different*, genuinely ambiguous
+    coincidence: an unrelated dependency candidate's own bare-suffix
+    spelling happening to collide with a kept-touched alias's *name*
+    (``dep::Handle`` deriving the same bare ``Handle`` as an unrelated
+    ``Handle -> api::Own`` typedef) -- only a candidate's own spellings are
+    excluded on this basis, never an alias's legitimate
+    reachability-derived contribution to a genuinely-referenced candidate. A
+    resolved
     typedef alias also contributes its own namespace-suffix spellings (not
     just its exact key) as candidate spellings (Codex review, fresh
     evidence): a real backend can spell the alias itself bare in a
@@ -355,7 +366,7 @@ def _directly_referenced_dependency_names(
     }
 
     identity_of: dict[int, str] = {}
-    own_spellings_of: dict[int, set[str]] = {}
+    raw_own_spellings_of: dict[int, set[str]] = {}
     # matching key (any of a candidate's own spellings -- full identity,
     # namespace suffix, or stdlib-stripped form) -> every identity it could
     # belong to -- built once so resolved typedef targets are scanned once
@@ -368,17 +379,12 @@ def _directly_referenced_dependency_names(
     # ``_underlying_type_name()`` stores a namespaced typedef target bare
     # (``Thing`` for an underlying ``dep::Thing``), which only a suffix key
     # can match -- the same bare-vs-qualified split already applied to a
-    # kept signature's own spelling of a candidate. A key colliding with a
-    # *kept_spellings* entry is excluded from *key_owners* entirely (Codex
-    # review, fresh evidence), not just checked later against the
-    # *candidate*'s own final spellings: a resolved typedef target spelled
-    # with the ambiguous bare suffix itself (``Thing``, shared by a kept
-    # ``api::Thing`` and this dependency's ``dep::Thing``) must not
-    # attribute that target to the dependency candidate merely because the
-    # candidate's *alias* string happens not to collide -- the earlier
-    # per-candidate guard only ever checked the alias spelling, never the
-    # ambiguous key that produced the attribution in the first place.
-    key_owners: dict[str, set[str]] = {}
+    # kept signature's own spelling of a candidate. This first pass excludes
+    # only keys colliding with the base *kept_spellings*; a second pass
+    # below additionally excludes keys colliding with a *kept-touched
+    # typedef alias name* once that's known (this preliminary key_owners
+    # only feeds the reachability computation).
+    prelim_key_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = _candidate_identity(candidate)
         identity_of[id(candidate)] = identity
@@ -386,35 +392,57 @@ def _directly_referenced_dependency_names(
         spellings = {identity, *_namespace_suffix_spellings(identity)}
         if stripped:
             spellings.add(stripped)
-        own_spellings_of[id(candidate)] = spellings
+        raw_own_spellings_of[id(candidate)] = spellings
         for key in spellings:
             if key in kept_spellings:
                 continue
-            key_owners.setdefault(key, set()).add(identity)
+            prelim_key_owners.setdefault(key, set()).add(identity)
 
     # Which of each typedef alias's transitively-reachable keys are
     # dependency-candidate keys vs. kept-type/enum spellings -- computed by
     # reachability (see _typedef_alias_reachability), never by
     # materializing expanded text.
     reachable_by_alias = _typedef_alias_reachability(
-        typedefs, set(key_owners) | kept_spellings
+        typedefs, set(prelim_key_owners) | kept_spellings
     )
+    # An alias whose reachable set touches any kept spelling is recorded
+    # here (not folded into the shared *kept_spellings* set -- Codex
+    # review, fresh evidence: a compound alias like ``using Alias =
+    # Pair<api::Own, dep::Thing>;`` reaches *both* a kept type and a real,
+    # distinct dependency candidate in the same target; blanket-excluding
+    # the alias's own name via *kept_spellings* -- which the final guard
+    # below checks unconditionally for every spelling -- would also erase
+    # the alias's legitimate use as ``dep::Thing``'s own spelling, not just
+    # protect against a coincidental collision). *kept_touched_aliases* is
+    # instead used narrowly: only to keep a candidate's *own* bare-suffix
+    # spelling from coincidentally matching an unrelated kept-pointing
+    # alias's name (the actual bug this guard exists for -- an unrelated
+    # ``dep::Handle`` deriving the same bare ``Handle`` as a typedef alias
+    # that points at a kept ``api::Own``) -- an alias's legitimate
+    # reachability-derived contribution to a genuinely-referenced
+    # candidate's spellings, below, is never subject to this exclusion.
+    kept_touched_aliases = {
+        alias
+        for alias, reached in reachable_by_alias.items()
+        if reached & kept_spellings
+    }
+
+    key_owners: dict[str, set[str]] = {}
+    own_spellings_of: dict[int, set[str]] = {}
+    for candidate in dep_candidates:
+        identity = identity_of[id(candidate)]
+        kept_spellings_and_aliases = kept_spellings | kept_touched_aliases
+        spellings = {
+            s
+            for s in raw_own_spellings_of[id(candidate)]
+            if s not in kept_spellings_and_aliases
+        }
+        own_spellings_of[id(candidate)] = spellings
+        for key in spellings:
+            key_owners.setdefault(key, set()).add(identity)
+
     identity_aliases: dict[str, set[str]] = {}
     for alias, reached in reachable_by_alias.items():
-        # An alias that transitively touches a kept type's/enum's own
-        # spelling is itself treated as belonging to the kept surface
-        # (Codex review, fresh evidence): a kept signature spelling this
-        # alias is semantically naming the *kept* type it resolves to, so
-        # an unrelated dependency candidate sharing that same alias
-        # spelling as its own bare suffix must not be retained through it
-        # -- the same collision guard every other spelling in this
-        # function already goes through, just extended to cover typedef
-        # aliases pointing at a kept type, not only kept types' own
-        # spellings.
-        if reached & kept_spellings:
-            kept_spellings.add(alias)
-            kept_spellings.update(_namespace_suffix_spellings(alias)[1:])
-            continue
         for key in reached & key_owners.keys():
             for identity in key_owners[key]:
                 identity_aliases.setdefault(identity, set()).add(alias)

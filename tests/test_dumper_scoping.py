@@ -832,6 +832,41 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["api::Own"]
 
+    def test_compound_typedef_alias_retains_both_kept_and_dependency_components(self):
+        """Codex review (eleventh round): `using Alias = Pair<api::Own,
+        dep::Thing>;` reaches *both* a kept type and a genuinely distinct
+        dependency candidate in the same compound target. Unlike the pure
+        `Handle -> api::Own` case above, this is not ambiguous -- the
+        alias names both simultaneously -- so treating the kept touch as
+        blanket proof the alias belongs only to the kept surface would
+        incorrectly erase `dep::Thing`'s retention too."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="Own",
+                    kind="struct",
+                    qualified_name="api::Own",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Pair<api::Own, dep::Thing>"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert sorted(t.qualified_name for t in scoped.types) == [
+            "api::Own",
+            "dep::Thing",
+        ]
+
     def test_typedef_matching_stays_fast_with_many_candidates_and_typedefs(self):
         """Codex review (sixth round): matching resolved typedef targets
         against dependency candidates one-by-one was
