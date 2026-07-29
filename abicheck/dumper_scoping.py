@@ -92,8 +92,10 @@ project.
 from __future__ import annotations
 
 import dataclasses
+import functools
+import inspect
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .dwarf_advanced import AdvancedDwarfMetadata
@@ -832,12 +834,16 @@ def resolve_dependency_scope(
     include_dependencies: bool,
     header_roots: Sequence[Path | str] | None = None,
 ) -> AbiSnapshot:
-    """The single choke point ``dump`` calls right before serialization:
+    """The single choke point both ``dump``'s serialization step and
+    ``service.run_dump`` (compare's live-binary dumping, scan, MCP, ...) call:
     apply :func:`scope_snapshot_excluding_dependencies` (``dependency_scope``
     ``"filtered"``) unless *include_dependencies* opts out, in which case
     just record the user's actual intent as ``"full"`` (a no-op when there
     are no header-derived declarations to tag at all — see
-    ``AbiSnapshot.dependency_scope``'s own docstring)."""
+    ``AbiSnapshot.dependency_scope``'s own docstring). Applying the same
+    function at both choke points is what makes ``dump`` and ``compare``'s
+    live-binary dumping filter consistently instead of only ``dump``
+    filtering by default while ``compare`` silently never does."""
     if not include_dependencies:
         return scope_snapshot_excluding_dependencies(snap, header_roots)
     if not snap.from_headers:
@@ -845,16 +851,47 @@ def resolve_dependency_scope(
     return dataclasses.replace(snap, dependency_scope="full")
 
 
-def tag_live_dump_dependency_scope(snap: AbiSnapshot) -> AbiSnapshot:
-    """``service.run_dump`` (compare's live-binary dumping) never applies
-    :func:`scope_snapshot_excluding_dependencies` — tag an untagged,
-    header-derived result ``"full"`` so
-    ``comparability._check_dependency_scope_comparable`` can tell that
-    apart from a snapshot merely predating the ``dependency_scope`` field
-    (see its own docstring for why the distinction matters)."""
-    if snap.dependency_scope is not None or not snap.from_headers:
-        return snap
-    return resolve_dependency_scope(snap, include_dependencies=True)
+def apply_dependency_scope_to_run_dump_result(
+    snap: AbiSnapshot,
+    include_dependencies: bool,
+    bound_args: inspect.BoundArguments,
+) -> AbiSnapshot:
+    """``service.run_dump``'s own choke point: *include_dependencies*
+    defaults to ``True`` there (preserving every existing caller — scan,
+    MCP, ``dump``'s own inline calls — that doesn't pass it explicitly);
+    only ``compare`` opts into ``False`` to filter its live-binary dumping
+    the same way ``dump`` filters by default. *bound_args* is
+    ``inspect.Signature.bind_partial(*args, **kwargs)`` against the real
+    dumping function's signature — used to recover the caller's ``headers``
+    regardless of whether it was passed positionally or by keyword, the
+    same ``-H``/``--header`` root set :func:`resolve_dependency_scope` needs
+    to avoid misclassifying an installed library's own system-prefixed path
+    as a dependency."""
+    return resolve_dependency_scope(
+        snap, include_dependencies, bound_args.arguments.get("headers")
+    )
+
+
+def wrap_run_dump_with_dependency_scope(
+    uncached_fn: Callable[..., AbiSnapshot],
+) -> Callable[..., AbiSnapshot]:
+    """Build ``service.run_dump`` from ``service._run_dump_uncached``: a
+    thin wrapper adding an *include_dependencies* keyword (default ``True``)
+    and applying :func:`apply_dependency_scope_to_run_dump_result` to the
+    result — see that function's own docstring."""
+    sig = inspect.signature(uncached_fn)
+
+    @functools.wraps(uncached_fn)
+    def run_dump(
+        *args: object, include_dependencies: bool = True, **kwargs: object
+    ) -> AbiSnapshot:
+        return apply_dependency_scope_to_run_dump_result(
+            uncached_fn(*args, **kwargs),
+            include_dependencies,
+            sig.bind_partial(*args, **kwargs),
+        )
+
+    return run_dump
 
 
 def scope_snapshot_excluding_dependencies(

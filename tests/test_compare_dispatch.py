@@ -76,6 +76,65 @@ class TestCompareHeaderMarksProvenance:
         assert new_call["public_headers"] == new_h
 
 
+class TestResolveCompareSnapshotsDependencyScope:
+    """``_resolve_compare_snapshots`` defaults to filtering both sides the
+    same way ``dump`` filters by default (dumper_scoping.py) -- this is
+    what makes ``dump old.so -o base.json`` then ``compare base.json new.so``
+    compare consistently instead of the historical asymmetry."""
+
+    def test_defaults_to_filtered_on_both_sides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from abicheck import cli_resolve
+
+        calls: list[dict] = []
+
+        def fake_resolve_input(path, headers, includes, version, lang, **kwargs):
+            calls.append(kwargs)
+            return _snap(version=version)
+
+        monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+
+        cli_resolve._resolve_compare_snapshots(
+            tmp_path / "old.so", tmp_path / "new.so",
+            "elf", "elf",
+            [], [], [], [],
+            "old", "new",
+            "c++",
+            None, None, None,
+            False, None, False, (), "",
+        )
+        assert len(calls) == 2
+        assert calls[0]["include_dependencies"] is False
+        assert calls[1]["include_dependencies"] is False
+
+    def test_include_dependencies_true_reaches_both_sides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from abicheck import cli_resolve
+
+        calls: list[dict] = []
+
+        def fake_resolve_input(path, headers, includes, version, lang, **kwargs):
+            calls.append(kwargs)
+            return _snap(version=version)
+
+        monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+
+        cli_resolve._resolve_compare_snapshots(
+            tmp_path / "old.so", tmp_path / "new.so",
+            "elf", "elf",
+            [], [], [], [],
+            "old", "new",
+            "c++",
+            None, None, None,
+            False, None, False, (), "",
+            include_dependencies=True,
+        )
+        assert calls[0]["include_dependencies"] is True
+        assert calls[1]["include_dependencies"] is True
+
+
 def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

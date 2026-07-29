@@ -76,6 +76,7 @@ from .cli_options import (
     env_matrix_option,
     evidence_options,
     header_graph_options,
+    include_dependencies_option,
     lang_option,
     normalize_sided_options,
     output_options,
@@ -520,24 +521,7 @@ def main() -> None:
               type=click.Path(exists=True, file_okay=False, path_type=Path),
               help="Directory whose headers are treated as public for provenance "
                    "classification (repeat for multiple).")
-@click.option("--include-dependencies", "include_dependencies", is_flag=True, default=False,
-              help="Include toolchain/system-header declarations (std::/SYCL/etc. pulled "
-                   "in transitively by #include) in the written snapshot. By default "
-                   "these are excluded -- every declaration whose own defining header is "
-                   "a toolchain/system header (/usr/include, MSVC VC/Tools, the Xcode/"
-                   "macOS SDK, ...) is dropped, which can dominate the file size for a "
-                   "library with a large dependency stack. This is a header-origin "
-                   "filter, not a public-API-surface one: the library's own private/"
-                   "internal declarations are always kept, exactly like its public ones "
-                   "-- pass this flag to get the old, unfiltered full dump instead. A "
-                   "no-op when the snapshot has no header-derived declarations at all "
-                   "(a binary-only/DWARF-only dump). A scoped snapshot is a lossy "
-                   "artifact: compare both sides of a `compare` the same way, don't mix "
-                   "a scoped and an --include-dependencies snapshot. Filters the flat "
-                   "function/variable/type/enum lists (typedefs are always kept) and the "
-                   "DWARF/DWARF-advanced collections keyed off them; an embedded "
-                   "header-only semantic graph (always attached by default) is not "
-                   "filtered and may still carry excluded-dependency nodes/edges.")
+@include_dependencies_option
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
 @lang_option
@@ -1415,6 +1399,7 @@ def _embed_inline_source_side(
     debuginfod: bool = False,
     debuginfod_url: str | None = None,
     include_labels: dict[Path, str] | None = None,
+    include_dependencies: bool = False,
 ) -> tuple[Path, Path | None, Path | None]:
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
@@ -1593,17 +1578,14 @@ def _embed_inline_source_side(
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
         _resolved_include_labels=include_labels,
-        # dump_cmd's own default now excludes toolchain/system-header
-        # declarations (dump --include-dependencies opts out). The sibling
-        # path that reaches this same binary without a raw --old/new-sources
-        # tree goes through service.run_dump directly and never applies that
-        # filter -- so without forcing it off here too, merely adding deeper
-        # L3-L5 evidence to an otherwise-identical compare would silently
-        # scope this side's snapshot and could drop real findings depending
-        # only on which evidence flags happened to be passed (Codex review).
-        # Force it off so this inline dump preserves compare's existing
-        # (unscoped) behavior, consistent with the non-inline path.
-        include_dependencies=True,
+        # Thread compare's own --include-dependencies flag through, rather
+        # than hardcoding it, so this inline `--old/new-sources` embed path
+        # scopes the same way the sibling path (a side reaching
+        # service.run_dump directly, with no raw source tree) now does --
+        # merely adding deeper L3-L5 evidence to an otherwise-identical
+        # compare must not silently change this side's dependency scope
+        # depending only on which evidence flags happened to be passed.
+        include_dependencies=include_dependencies,
     )
     # The raw sources/build-info are now embedded in the snapshot; pack-shaped
     # inputs (kept_*) ride through to the later prepare_embedded_build_source so
@@ -1731,6 +1713,7 @@ def _embed_inline_source_side(
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive dependencies for both old and new, compute symbol "
                    "bindings, and include a dependency-change section in the report. ELF only.")
+@include_dependencies_option
 @click.option("--search-path", "search_paths", multiple=True,
               type=click.Path(exists=True, path_type=Path),
               help="Additional directory to search for shared libraries (with --follow-deps).")

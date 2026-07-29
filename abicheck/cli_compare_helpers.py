@@ -1106,6 +1106,7 @@ def run_compare(
     config: Path | None,
     exit_code_scheme: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
+    include_dependencies: bool,
     show_redundant: bool, show_only: str | None, stat: bool,
     scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
     public_symbols: tuple[str, ...], public_symbols_list: Path | None,
@@ -1484,6 +1485,7 @@ def run_compare(
             debuginfod=debuginfod, debuginfod_url=debuginfod_url,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
             depth=depth, include_labels=include_labels,
+            include_dependencies=include_dependencies,
         )
         new_input, new_sources, new_build_info = _embed_inline_source_side(
             ctx, input_path=new_input, sources=new_sources,
@@ -1501,6 +1503,7 @@ def run_compare(
             pdb_path=new_pdb_path or pdb_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
             depth=depth, include_labels=include_labels,
+            include_dependencies=include_dependencies,
         )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
@@ -1558,6 +1561,7 @@ def run_compare(
         include_labels=include_labels,
         old_dump_manifest=old_manifest_obj,
         new_dump_manifest=new_manifest_obj,
+        include_dependencies=include_dependencies,
     )
 
     suppression, pf = _load_suppression_and_policy(

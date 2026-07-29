@@ -148,15 +148,23 @@ Core pipeline (in order of data flow):
      surface behind `dumper._header_ast_parser`.
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
    - `snapshot_cache.py` — caching layer
-   - `dumper_scoping.py` — dependency exclusion, on by default (`dump
-     --include-dependencies` opts out): drops declarations whose own
-     defining header is a toolchain/system header (`/usr/include`, MSVC
-     `VC/Tools`, the Xcode/macOS SDK, ...) so a full header-AST dump's
-     transitive dependency surface (e.g. SYCL/libstdc++ declarations pulled
-     in by `#include`) doesn't dominate snapshot size for a library with a
-     large dependency stack. A header-*origin* filter, not an ABI-visibility
-     one — the library's own private/internal declarations are always kept,
-     same as its public ones
+   - `dumper_scoping.py` — dependency exclusion, on by default (`dump`/
+     `compare --include-dependencies` opts out, both sharing one
+     `cli_options.include_dependencies_option` decorator): drops
+     declarations whose own defining header is a toolchain/system header
+     (`/usr/include`, MSVC `VC/Tools`, the Xcode/macOS SDK, ...) so a full
+     header-AST dump's transitive dependency surface (e.g. SYCL/libstdc++
+     declarations pulled in by `#include`) doesn't dominate snapshot size
+     for a library with a large dependency stack. A header-*origin* filter,
+     not an ABI-visibility one — the library's own private/internal
+     declarations are always kept, same as its public ones. `AbiSnapshot.
+     dependency_scope` (schema v18) records which mode a snapshot was
+     produced under; `comparability.check_contracts_comparable` refuses
+     (`ScopeMismatchError`) to compare two sides with a differing explicit
+     value, and `service.run_dump`'s `include_dependencies` parameter
+     (default `True`, folded into the whole-snapshot disk cache key) is
+     what lets `compare`'s own live-binary dumping filter consistently with
+     a `dump` baseline instead of always producing the unfiltered surface
 3. **Diffing** — compare two snapshots
    - `diff_symbols.py` — function/variable/parameter changes
    - `diff_types.py` — struct/enum/union/typedef changes

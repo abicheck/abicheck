@@ -441,6 +441,7 @@ def cached_run_dump(
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: object | None = None,
+    include_dependencies: bool = True,
 ) -> AbiSnapshot:
     """``run_dump(...)``, transparently served from the whole-snapshot cache
     when the call shape is cacheable (:func:`_dump_is_cacheable`) — avoiding a
@@ -451,6 +452,12 @@ def cached_run_dump(
     ``run_dump`` is passed in by the caller (``service.py``) rather than
     imported here, so this module never needs to import ``service`` itself
     (which would be a cycle: ``service.py`` calls this function).
+
+    ``include_dependencies`` is folded into the cache key (see
+    ``_build_extra`` below): a filtered and an unfiltered dump of the
+    identical binary/headers are genuinely different snapshot content
+    (``dumper_scoping.resolve_dependency_scope``), so they must never share
+    a cache entry.
     """
     _headers = headers or []
     _includes = includes or []
@@ -489,6 +496,7 @@ def cached_run_dump(
             notify=notify,
             include_labels=include_labels,
             dump_manifest=dump_manifest,
+            include_dependencies=include_dependencies,
         )
 
     from . import snapshot_cache
@@ -559,8 +567,12 @@ def cached_run_dump(
         # NUL-joined (see _dump_cache_extra_key's own docstring on why NUL,
         # not a printable delimiter, is the only collision-safe choice here
         # too): _manifest_extra is "" for a non-manifest dump, so this is a
-        # no-op split for the legacy path.
-        return f"{base}\x00{_manifest_extra}" if _manifest_extra else base
+        # no-op split for the legacy path. The dependency-scope mode is
+        # appended unconditionally (never a no-op split) -- a filtered and
+        # an unfiltered dump of the same binary/headers are genuinely
+        # different content and must never share a cache entry.
+        scope_extra = "filtered" if not include_dependencies else "full"
+        return f"{base}\x00{_manifest_extra}\x00{scope_extra}"
 
     extra = _build_extra()
     initial_key = snapshot_cache._cache_key(
@@ -591,6 +603,7 @@ def cached_run_dump(
         notify=notify,
         include_labels=include_labels,
         dump_manifest=dump_manifest,
+        include_dependencies=include_dependencies,
     )
     final_extra = _build_extra()
     final_key = snapshot_cache._cache_key(

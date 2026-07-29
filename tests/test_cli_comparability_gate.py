@@ -79,6 +79,34 @@ class TestNotComparableExitCode:
         result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 16
 
+    def test_dependency_scope_mismatch_exits_16_end_to_end(self, tmp_path):
+        """Real JSON snapshots, no mocking of load_snapshot/compare_snapshots
+        -- exercises the actual dependency-scope comparability check added
+        for the dump/compare filtering asymmetry (dumper_scoping.py), the
+        exact "compare a filtered dump baseline against an unfiltered one"
+        scenario this axis exists to catch."""
+        old_snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            from_headers=True,
+            dependency_scope="filtered",
+        )
+        new_snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            from_headers=True,
+            dependency_scope="full",
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old_snap), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new_snap), encoding="utf-8")
+
+        result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
+        assert result.exit_code == 16
+        assert "not comparable" in result.output
+        assert "dependency-scoping" in result.output
+
     def test_json_format_emits_verdict_null_with_reason(self, tmp_path, monkeypatch):
         old_p, new_p = _write_placeholder_inputs(tmp_path)
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")

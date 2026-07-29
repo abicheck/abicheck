@@ -159,6 +159,22 @@ class TestResolveInput:
         assert result is snap
         mock.assert_called_once()
 
+    def test_include_dependencies_threads_to_run_dump(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+            resolve_input(p, is_elf=True, include_dependencies=False)
+        assert mock.call_args.kwargs["include_dependencies"] is False
+
+    def test_include_dependencies_defaults_true(self, tmp_path):
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        snap = AbiSnapshot(library="test", version="1.0")
+        with patch("abicheck.service.run_dump", return_value=snap) as mock:
+            resolve_input(p, is_elf=True)
+        assert mock.call_args.kwargs["include_dependencies"] is True
+
     def test_resolve_input_no_longer_accepts_header_graph_kwargs(self, tmp_path):
         # G29 Phase A: header_graph/header_graph_includes are no longer
         # public parameters of resolve_input at all — the L2 graph attach is
@@ -3368,20 +3384,28 @@ class TestTryAttachNumpyCapiSurface:
         assert "NumPy C-API consumption detected" in caplog.text
 
 
-class TestRunDumpTagsLiveDependencyScope:
-    """``run_dump`` never applies ``dumper_scoping``'s exclusion filter --
-    its wrapper tags the (unwrapped) result via
-    ``dumper_scoping.tag_live_dump_dependency_scope`` so the comparability
-    gate can tell "genuinely never filtered" apart from "predates the
-    dependency_scope field entirely" (see
-    comparability._check_dependency_scope_comparable's docstring). See
-    tests/test_dumper_scoping.py for direct coverage of that tagging
-    function itself."""
+class TestRunDumpDependencyScope:
+    """``run_dump`` is built from ``_run_dump_uncached`` via
+    ``dumper_scoping.wrap_run_dump_with_dependency_scope`` -- default
+    ``include_dependencies=True`` preserves every existing caller's
+    (scan/MCP/dump's own inline calls) unfiltered behavior, tagged
+    explicitly "full"; passing ``include_dependencies=False`` (what
+    ``compare`` now defaults to) filters the same way ``dump`` does by
+    default. See tests/test_dumper_scoping.py for direct coverage of the
+    wrapping function itself."""
 
-    def test_run_dump_wrapper_tags_result(self, tmp_path):
+    def test_run_dump_defaults_to_full(self, tmp_path):
         elf_path = tmp_path / "lib.so"
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
         with patch("abicheck.service._run_dump_uncached", return_value=fake_snap):
             result = run_dump(elf_path, "elf")
         assert result.dependency_scope == "full"
+
+    def test_run_dump_include_dependencies_false_filters(self, tmp_path):
+        elf_path = tmp_path / "lib.so"
+        elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
+        with patch("abicheck.service._run_dump_uncached", return_value=fake_snap):
+            result = run_dump(elf_path, "elf", include_dependencies=False)
+        assert result.dependency_scope == "filtered"

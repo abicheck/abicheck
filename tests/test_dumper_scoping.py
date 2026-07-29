@@ -10,10 +10,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from abicheck.dumper_scoping import (
     resolve_dependency_scope,
     scope_snapshot_excluding_dependencies,
-    tag_live_dump_dependency_scope,
+    wrap_run_dump_with_dependency_scope,
 )
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
@@ -2065,25 +2067,63 @@ class TestEndToEndCompareAfterScoping:
         assert any(c.symbol == "std::string" for c in result.changes)
 
 
-class TestTagLiveDumpDependencyScope:
-    """``service.run_dump`` (compare's live-binary dumping) never applies
-    ``scope_snapshot_excluding_dependencies`` -- its wrapper tags the result
-    via this function so the comparability gate can tell "genuinely never
-    filtered" apart from "predates the dependency_scope field entirely"."""
+class TestWrapRunDumpWithDependencyScope:
+    """``service.run_dump`` is built from ``_run_dump_uncached`` via
+    :func:`wrap_run_dump_with_dependency_scope` -- the wrapper that lets
+    ``compare``'s live-binary dumping filter consistently with a ``dump``
+    baseline instead of always producing the unfiltered surface."""
 
-    def test_header_derived_snapshot_tagged_full(self):
+    def _uncached(self, tagged_snap):
+        def _fn(path, binary_fmt, headers=None, includes=None, version="", lang="c++", **_kw):
+            return tagged_snap
+
+        return _fn
+
+    def test_default_include_dependencies_true_tags_full(self):
         snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
-        assert tag_live_dump_dependency_scope(snap).dependency_scope == "full"
+        run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
+        result = run_dump(Path("/lib.so"), "elf")
+        assert result.dependency_scope == "full"
 
-    def test_non_header_snapshot_stays_untagged(self):
-        snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=False)
-        assert tag_live_dump_dependency_scope(snap).dependency_scope is None
-
-    def test_already_tagged_snapshot_is_not_overwritten(self):
+    def test_include_dependencies_false_filters(self):
         snap = AbiSnapshot(
             library="lib.so",
             version="1.0",
             from_headers=True,
-            dependency_scope="filtered",
+            functions=[
+                _fn("run"),
+                _fn("sys", mangled="_Z3sys", source_header=_SYSTEM_HEADER),
+            ],
         )
-        assert tag_live_dump_dependency_scope(snap).dependency_scope == "filtered"
+        run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
+        result = run_dump(Path("/lib.so"), "elf", include_dependencies=False)
+        assert result.dependency_scope == "filtered"
+        assert [f.name for f in result.functions] == ["run"]
+
+    def test_non_header_snapshot_stays_untagged(self):
+        snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=False)
+        run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
+        result = run_dump(Path("/lib.so"), "elf")
+        assert result.dependency_scope is None
+
+    def test_headers_recovered_regardless_of_positional_or_keyword(self):
+        """`headers` (the -H root set) must reach resolve_dependency_scope's
+        header_roots the same way whether the underlying dump function was
+        invoked positionally or by keyword."""
+        root = "/usr/include/mylib/api.h"
+        snap = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("mylib_run", source_header=root)],
+        )
+        run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
+
+        by_positional = run_dump(
+            Path("/lib.so"), "elf", [root], [], include_dependencies=False
+        )
+        by_keyword = run_dump(
+            Path("/lib.so"), "elf", headers=[root], include_dependencies=False
+        )
+        assert [f.name for f in by_positional.functions] == ["mylib_run"]
+        assert [f.name for f in by_keyword.functions] == ["mylib_run"]

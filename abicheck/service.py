@@ -37,6 +37,7 @@ from .api_types import CompareRequest, InputSpec, OutputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
+from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
     deferred_token_dirs,
@@ -288,6 +289,7 @@ def resolve_input(
     notify: Callable[[str], None] | None = None,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
+    include_dependencies: bool = True,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
 
@@ -362,6 +364,7 @@ def resolve_input(
             notify=notify,
             include_labels=include_labels,
             dump_manifest=dump_manifest,
+            include_dependencies=include_dependencies,
         )
 
     # Detect binary format from magic bytes
@@ -390,6 +393,7 @@ def resolve_input(
             notify=notify,
             include_labels=include_labels,
             dump_manifest=dump_manifest,
+            include_dependencies=include_dependencies,
         )
 
     # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
@@ -817,10 +821,10 @@ def _run_dump_uncached(
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
 
-@functools.wraps(_run_dump_uncached)
-def run_dump(*args: Any, **kwargs: Any) -> AbiSnapshot:
-    from .dumper_scoping import tag_live_dump_dependency_scope
-    return tag_live_dump_dependency_scope(_run_dump_uncached(*args, **kwargs))
+@functools.wraps(_run_dump_uncached)  # name lookup below so patching sticks
+def _call_run_dump_uncached(*args: Any, **kwargs: Any) -> AbiSnapshot:
+    return _run_dump_uncached(*args, **kwargs)
+run_dump = wrap_run_dump_with_dependency_scope(_call_run_dump_uncached)
 
 
 def _apply_native_provenance(

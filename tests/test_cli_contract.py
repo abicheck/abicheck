@@ -565,6 +565,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--help",
         "--help-all",
         "--include",
+        "--include-dependencies",
         "--include-private-dso",
         "--jobs",
         "--keep-extracted",
