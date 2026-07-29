@@ -341,6 +341,10 @@ class CompareRequest:
         for label, side in (("old", self.old), ("new", self.new)):
             if side.compile is not None and side.compile.frontend_context.lower() not in ("host", "device"):
                 errors.append(f"unsupported {label} frontend context {side.compile.frontend_context!r}: choose from device, host")
+        # CodeRabbit review: dump_manifest replaces headers for the primary AST; forwarding both mixes two declared surfaces into one snapshot's provenance/dialect detection. Belongs in this Tier-2 pre-flight validate() (mirrors the CLI's --dump-manifest/-H UsageError), not only checked at runtime in run_compare_request -- moved here so a caller using validation_errors()/validate() alone also catches it.
+        for label, side in (("old", self.old), ("new", self.new)):
+            if side.dump_manifest is not None and side.headers:
+                errors.append(f"dump_manifest and a header for the {label} side (InputSpec.headers) are mutually exclusive -- declare the {label} side's public surface in the manifest's own base profile instead.")
         return errors
 
     def validate(self) -> CompareRequest:

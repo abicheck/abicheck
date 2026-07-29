@@ -824,6 +824,9 @@ def _run_dump_uncached(
 def _call_run_dump_uncached(*args: Any, **kwargs: Any) -> AbiSnapshot:
     return _run_dump_uncached(*args, **kwargs)
 run_dump = wrap_run_dump_with_dependency_scope(_call_run_dump_uncached)
+# CodeRabbit: both functools.wraps() above copy __name__ down the chain from _run_dump_uncached, so run_dump.__name__ read as "_run_dump_uncached" -- wrong for any introspecting caller. __signature__ is unaffected.
+run_dump.__name__ = "run_dump"
+run_dump.__qualname__ = "run_dump"
 
 
 def _apply_native_provenance(
@@ -1689,10 +1692,7 @@ def run_compare_request(
     request.validate()
     # validate() accepts lang case-insensitively; the ELF dump path does case-sensitive lang == "c" checks, so normalise here. android (no header-AST path) falls back to "auto" for the binary dump.
     lang = request.lang.lower()
-    # Codex: dump_manifest replaces headers for the primary AST; forwarding both mixes two declared surfaces into one snapshot's provenance/dialect detection. Mirrors the CLI's --dump-manifest/-H UsageError.
-    for label, side in (("old", request.old), ("new", request.new)):
-        if side.dump_manifest is not None and side.headers:
-            raise ValidationError(f"dump_manifest and a header for the {label} side (InputSpec.headers) are mutually exclusive -- declare the {label} side's public surface in the manifest's own base profile instead.")
+    # CodeRabbit review: this check moved into api_types.py's validation_errors() (Tier-2 pre-flight), reached via request.validate() above -- no longer duplicated here.
     from .api_types import HEADER_AST_FRONTENDS
     frontend_lower = request.frontend.lower()
     header_backend = frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"

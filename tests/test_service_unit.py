@@ -2531,7 +2531,12 @@ class TestCompareRequestAdr055Evidence:
 
     def test_dump_manifest_alone_is_not_rejected(self, tmp_path, monkeypatch):
         """A dump_manifest with no ordinary headers on that side must not be
-        caught by the new mutual-exclusivity guard above."""
+        caught by the new mutual-exclusivity guard above.
+
+        CodeRabbit review: the previous try/except let this test pass while
+        asserting nothing if run_compare_request raised no exception at all
+        -- capture any ValidationError message unconditionally instead, so
+        the guard-specific claim is always actually checked."""
         from abicheck.dump_manifest import DumpManifest, TranslationUnit
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2548,10 +2553,12 @@ class TestCompareRequestAdr055Evidence:
         # No ValidationError raised for the mutual-exclusivity guard itself;
         # it may still fail later trying to actually resolve the manifest's
         # (nonexistent) header, which is unrelated to this guard.
+        messages: list[str] = []
         try:
             run_compare_request(request)
         except ValidationError as exc:
-            assert "mutually exclusive" not in str(exc)
+            messages.append(str(exc))
+        assert all("mutually exclusive" not in m for m in messages)
 
     def test_per_side_frontend_context_case_is_normalized(self, tmp_path, monkeypatch):
         """Codex review: request.frontend_context is normalized to lowercase,
@@ -4385,3 +4392,18 @@ class TestRunDumpDependencyScope:
         with patch("abicheck.service._run_dump_uncached", return_value=fake_snap):
             result = run_dump(elf_path, "elf", include_dependencies=False)
         assert result.dependency_scope == "filtered"
+
+    def test_run_dump_preserves_own_name_and_signature(self):
+        """CodeRabbit review: the double functools.wraps() chain
+        (_call_run_dump_uncached wraps _run_dump_uncached, then
+        wrap_run_dump_with_dependency_scope wraps that) copied __name__ all
+        the way down to "_run_dump_uncached" instead of "run_dump" -- wrong
+        for any caller that introspects it. The extended __signature__
+        (include_dependencies added) must stay correct too."""
+        import inspect
+
+        assert run_dump.__name__ == "run_dump"
+        assert run_dump.__qualname__ == "run_dump"
+        sig = inspect.signature(run_dump)
+        assert "include_dependencies" in sig.parameters
+        assert sig.parameters["include_dependencies"].default is True

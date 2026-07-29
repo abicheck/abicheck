@@ -135,3 +135,23 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   suppress them; all three now accept a `quiet` keyword (default `False`,
   preserving the CLI's and `scan`'s existing behavior unchanged) that
   `run_compare_request` passes as `True`.
+- **`InputSpec.headers`/`dump_manifest` mutual-exclusivity check moved into
+  `CompareRequest.validation_errors()`** (CodeRabbit review): previously
+  only enforced at runtime inside `run_compare_request` — a caller using
+  `validation_errors()`/`validate()` alone (the Tier-2 D9 pre-flight
+  contract every other rule here follows) never saw it.
+- **`service.run_dump`'s `__name__`/`__qualname__` read as
+  `"_run_dump_uncached"`** instead of `"run_dump"` (CodeRabbit review): the
+  two nested `functools.wraps()` calls building the public `run_dump`
+  facade each copy `__name__` down from the wrapped function, so it
+  silently overwrote the outer function's real name — misleading for any
+  caller that introspects it (logging, error messages, doc generation).
+  Reset explicitly after construction; the extended `__signature__`
+  (`include_dependencies`) was already correct and is unaffected.
+- **A `--dump-manifest` TU's `forced_includes` weren't protected from
+  dependency-scope filtering** (Codex review): a translation unit may
+  force-include a private support header alongside a public one without
+  it being listed in `roots` or marked `project_owned` on an `includes`
+  entry — that header's declarations were misclassified as toolchain
+  dependencies and filtered out. `dump_manifest_header_roots` now also
+  folds in each TU's `forced_includes`.

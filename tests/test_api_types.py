@@ -290,6 +290,43 @@ class TestCompareRequestValidate:
         with pytest.raises(ValidationError, match="DEVICE2"):
             req.validate()
 
+    def test_headers_alongside_dump_manifest_rejected(self, tmp_path):
+        """CodeRabbit review: dump_manifest replaces headers for the primary
+        AST -- forwarding both mixes two declared surfaces into one
+        snapshot's provenance/dialect detection (mirrors the CLI's own
+        --dump-manifest/-H UsageError). Previously only checked at runtime in
+        service.run_compare_request; moved into this Tier-2 pre-flight
+        validate() so a caller using validation_errors()/validate() alone
+        also catches it, not only one that goes on to call
+        run_compare_request."""
+        from abicheck.dump_manifest import DumpManifest, TranslationUnit
+
+        dm = DumpManifest(
+            base_dir=tmp_path, translation_units=(TranslationUnit(name="old.h"),)
+        )
+        req = CompareRequest(
+            old=InputSpec.of("a", headers=["old.h"], dump_manifest=dm),
+            new=InputSpec.of("b"),
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "mutually exclusive" in errors[0] and "old" in errors[0]
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            req.validate()
+
+    def test_dump_manifest_alone_is_not_rejected_by_validate(self, tmp_path):
+        """A dump_manifest with no ordinary headers on that side must not be
+        caught by the mutual-exclusivity guard above."""
+        from abicheck.dump_manifest import DumpManifest, TranslationUnit
+
+        dm = DumpManifest(
+            base_dir=tmp_path, translation_units=(TranslationUnit(name="old.h"),)
+        )
+        req = CompareRequest(
+            old=InputSpec.of("a", dump_manifest=dm), new=InputSpec.of("b")
+        )
+        assert req.validation_errors() == []
+
 
 class TestCompareRequestReplace:
     def test_replace_round_trips_fields(self):

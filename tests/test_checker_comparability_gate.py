@@ -186,8 +186,15 @@ def _scoped_snap(
 class TestDependencyScopeComparabilityGate:
     """The asymmetry PR #649/dumper_scoping.py introduced: `dump`'s default
     output is dependency-filtered, but `compare`'s own live-binary dumping
-    never applies that filter -- comparing one of each must not silently
-    produce an ordinary (possibly wrong) verdict."""
+    didn't apply that filter -- comparing one of each could silently
+    produce an ordinary (possibly wrong) verdict. `compare`'s live-binary
+    dumping has since been made to filter by default too (matching `dump`,
+    a later follow-up in this same PR -- see
+    changelog.d/20260729_claude_compare_default_dependency_filtering.md),
+    so the mismatch this gate guards against now arises mainly from an
+    *explicit* `--include-dependencies` override on only one side, or a
+    pre-v18/legacy snapshot mixed with a current-build one -- not from
+    ordinary live-binary compare defaults disagreeing with each other."""
 
     def test_filtered_vs_full_raises_scope_mismatch(self):
         old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
@@ -223,8 +230,16 @@ class TestDependencyScopeComparabilityGate:
         assert compare(old, new) is not None  # must not raise
 
     def test_both_none_is_comparable(self):
-        # Two ordinary live-binary compare() snapshots today: neither side
-        # ever ran dumper_scoping, both implicitly "full".
+        # A pair of legacy/untagged snapshots (pre-v18, or an in-memory one
+        # built without going through run_dump's tagging wrapper) -- not the
+        # normal live-binary compare() result any more, since that path is
+        # now tagged "filtered"/"full" by default (CodeRabbit review: this
+        # comment previously described dependency_scope=None as the ordinary
+        # live-compare case, which stopped being true once compare's own
+        # live-binary dumping started filtering -- and tagging -- by
+        # default). Untagged sides are deliberately never compared on this
+        # axis regardless of why they're untagged; see the gate's own
+        # docstring.
         old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
         new = _scoped_snap("2.0", from_headers=True, dependency_scope=None)
         assert compare(old, new) is not None  # must not raise

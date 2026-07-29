@@ -253,6 +253,13 @@ def dump_manifest_header_roots(dump_manifest: Any) -> tuple[Path, ...]:
         *dump_manifest.public_header_dirs,
     ]
     for tu in dump_manifest.translation_units:
+        # Codex review: forced_includes is "what this TU actually compiles"
+        # (dump_manifest.py's own docstring: "a TU may force-include a
+        # private support header alongside a public one") -- not required to
+        # already be in roots/project_owned includes, so a private support
+        # header force-included from a system-prefixed install path was
+        # otherwise misclassified as a toolchain dependency and filtered out.
+        roots.extend(tu.forced_includes)
         roots.extend(inc.path for inc in tu.includes if inc.project_owned)
     return tuple(roots)
 
