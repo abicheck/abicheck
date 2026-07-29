@@ -100,9 +100,10 @@ from .dwarf_metadata import DwarfMetadata
 from .model import AbiSnapshot, EnumType, Function, RecordType, Variable
 from .provenance import is_dependency_header
 from .type_reachability import (
+    _compile_spelling_pattern,
+    _finditer_allow_nested,
     _namespace_suffix_spellings,
     _stripped_signature_spelling,
-    type_string_references_name,
 )
 
 
@@ -148,28 +149,40 @@ def _directly_referenced_dependency_names(
     re-admit the other's unrelated layout (Codex review).
 
     A candidate's own full identity is always trusted (never ambiguous by
-    construction). A *derived* spelling -- a namespace-suffix spelling from
-    :func:`abicheck.type_reachability._namespace_suffix_spellings` (e.g. a
-    direct-clang backend's partially-qualified ``Outer::Inner`` for a
-    nested ``vendor::Outer::Inner``, or the fully bare leaf), or a
+    construction). Every *derived* spelling -- a namespace-suffix spelling
+    from :func:`abicheck.type_reachability._namespace_suffix_spellings`
+    (e.g. a direct-clang backend's partially-qualified ``Outer::Inner`` for
+    a nested ``vendor::Outer::Inner``, or the fully bare leaf), a
     stdlib-stripped spelling from
-    :func:`abicheck.type_reachability._stripped_signature_spelling` -- is
-    only trusted when it does not collide with another *dep_candidates*
-    entry's own suffix spelling, nor with any *kept_types* spelling: an
-    ambiguous derived spelling is not trusted to mean any one of them
-    (Codex review; mirrors ``type_reachability._spelling_index``'s own
-    collision guards).
+    :func:`abicheck.type_reachability._stripped_signature_spelling`, or a
+    ``typedefs``-resolved alias pointing at either -- goes through the
+    *same* two collision guards before being trusted (Codex review: an
+    earlier version applied these guards to suffixes only, letting a
+    stripped or typedef-derived spelling silently bypass them and
+    re-admit an unrelated candidate/kept type): it is dropped if it
+    collides with any *kept_types* spelling, and dropped if two or more
+    *dep_candidates* entries could derive it (mirrors
+    ``type_reachability._spelling_index``'s own collision guards, applied
+    uniformly across all three derivation kinds rather than one).
 
     *typedefs* (``AbiSnapshot.typedefs``, alias -> underlying-type spelling)
     is consulted so a dependency type only reachable through a typedef
-    alias in the kept signatures is still recognized (Codex review) --
-    e.g. a signature spells ``std::string`` while the record's own identity
-    is the underlying, ABI-tag-qualified ``std::__cxx11::basic_string<...>``
-    and the typedef target is itself already namespace/ABI-tag-stripped
+    alias in the kept signatures is still recognized -- e.g. a signature
+    spells ``std::string`` while the record's own identity is the
+    underlying, ABI-tag-qualified ``std::__cxx11::basic_string<...>`` and
+    the typedef target is itself already namespace/ABI-tag-stripped
     (``basic_string<...>``, DWARF's own convention) -- matched via each
-    candidate's :func:`abicheck.type_reachability._stripped_signature_spelling`
-    form, not only its exact identity. Mirrors
+    candidate's stripped form too, not only its exact identity. Mirrors
     :func:`abicheck.type_reachability`'s own typedef-following.
+
+    Scans the joined signature text with one compiled multi-spelling
+    pattern (:func:`abicheck.type_reachability._compile_spelling_pattern`)
+    rather than re-scanning it once per candidate spelling (Codex review:
+    the naive per-spelling scan is O(candidate count x signature size),
+    which becomes seconds-to-minutes on the large transitive dependency
+    surfaces -- SYCL/heavily-templated C++ headers -- this filter exists to
+    make manageable in the first place), turning the scan into one
+    O(signature size) pass regardless of candidate count.
     """
     signature_texts: list[str] = []
     for fn in kept_functions:
@@ -193,36 +206,46 @@ def _directly_referenced_dependency_names(
         for suffix in _namespace_suffix_spellings(_candidate_identity(rec))
     }
 
-    suffix_owners: dict[str, set[str]] = {}
-    identity_by_id: dict[int, str] = {}
+    identity_of: dict[int, str] = {}
+    stripped_of: dict[int, str | None] = {}
+    derived_of: dict[int, set[str]] = {}
     for candidate in dep_candidates:
         identity = _candidate_identity(candidate)
-        identity_by_id[id(candidate)] = identity
-        for suffix in _namespace_suffix_spellings(identity):
-            suffix_owners.setdefault(suffix, set()).add(identity)
-
-    referenced: set[str] = set()
-    for candidate in dep_candidates:
-        identity = identity_by_id[id(candidate)]
-        spellings: set[str] = {identity}
-        for suffix in _namespace_suffix_spellings(identity)[1:]:
-            if suffix in kept_spellings:
-                continue
-            if len(suffix_owners.get(suffix, ())) == 1:
-                spellings.add(suffix)
         stripped = _stripped_signature_spelling(identity)
-        if stripped and stripped not in kept_spellings:
-            spellings.add(stripped)
+        identity_of[id(candidate)] = identity
+        stripped_of[id(candidate)] = stripped
+        derived = set(_namespace_suffix_spellings(identity)[1:])
+        if stripped:
+            derived.add(stripped)
         for key in filter(None, (identity, stripped)):
-            spellings.update(aliases_by_target.get(key, ()))
+            derived.update(aliases_by_target.get(key, ()))
+        derived_of[id(candidate)] = derived
 
-        for spelling in spellings:
-            # Cheap substring pre-check (fast C-level scan) before paying
-            # for the boundary-aware regex-equivalent match -- most
-            # candidates never appear in the haystack at all.
-            if spelling in haystack and type_string_references_name(haystack, spelling):
-                referenced.add(identity)
-                break
+    derived_owners: dict[str, set[str]] = {}
+    for candidate in dep_candidates:
+        identity = identity_of[id(candidate)]
+        for spelling in derived_of[id(candidate)]:
+            derived_owners.setdefault(spelling, set()).add(identity)
+
+    # spelling -> {identity, ...}: the full identity is always trusted; a
+    # derived spelling only when unambiguous among dep_candidates and not
+    # colliding with a kept type's own spelling.
+    spelling_index: dict[str, set[str]] = {}
+    for candidate in dep_candidates:
+        identity = identity_of[id(candidate)]
+        spelling_index.setdefault(identity, set()).add(identity)
+        for spelling in derived_of[id(candidate)]:
+            if spelling in kept_spellings:
+                continue
+            if len(derived_owners.get(spelling, ())) == 1:
+                spelling_index.setdefault(spelling, set()).add(identity)
+
+    pattern = _compile_spelling_pattern(spelling_index)
+    if pattern is None:
+        return set()
+    referenced: set[str] = set()
+    for match in _finditer_allow_nested(pattern, haystack):
+        referenced.update(spelling_index[match.group()])
     return referenced
 
 

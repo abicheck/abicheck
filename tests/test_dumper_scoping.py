@@ -638,6 +638,54 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["vendor::Outer::Inner"]
 
+    def test_typedef_derived_spelling_colliding_with_kept_type_not_trusted(self):
+        """Codex review (P2, third round): a scope-losing typedef entry
+        (`"Alias" -> "std::Thing"`) derives the spelling `"Alias"` for the
+        dependency record -- but a kept type is *also* named `Alias`. A
+        signature naming the kept `Alias` must not incorrectly retain the
+        unrelated `std::Thing` dependency record through this collision."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                _rec("Alias"),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "std::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Alias"]
+
+    def test_stripped_spelling_colliding_with_kept_type_not_trusted(self):
+        """Codex review (P2, third round): a stdlib-stripped spelling
+        (`"basic_string<...>"`, stripped from `"std::__cxx11::basic_string<...>"`)
+        must not be trusted when a kept, unrelated type happens to be named
+        that same bare spelling."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("basic_string<char>",))],
+            types=[
+                _rec("basic_string<char>"),
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    qualified_name="std::__cxx11::basic_string<char>",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["basic_string<char>"]
+
     def test_unreferenced_dependency_type_still_excluded(self):
         snap = AbiSnapshot(
             library="libfoo.so",
