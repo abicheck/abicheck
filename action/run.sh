@@ -588,6 +588,16 @@ elif [[ "$MODE" == "scan" ]]; then
       echo "::error::mode: scan cannot take both new-library and new-library-set — new-library-set audits a *set* of libraries with no old side (ADR-056), new-library scans exactly one artifact. Set only one."
       exit 1
     fi
+    if [[ -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ]]; then
+      # Without this, the later "omit --against for new-library-set" logic
+      # (below) would silently downgrade an explicitly-requested baseline
+      # compare into an audit-only run instead of rejecting it -- a direct
+      # run.sh caller (bypassing validate-inputs.sh's own copy of this
+      # check) would get a successful result for a different operation
+      # than requested (Codex review).
+      echo "::error::mode: scan with new-library-set does not support against/abi-baseline — new-library-set is audit-only (no old side to compare a set against, ADR-056). Remove against/abi-baseline, or use new-library (a single artifact) for a baseline comparison instead."
+      exit 1
+    fi
     CMD+=(--artifact-set "$SCAN_ARTIFACT_SET")
     add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
   else

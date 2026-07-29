@@ -90,6 +90,27 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     return [item for item in result.stdout.split("\x1f") if item]
 
 
+def _run_raw(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Source the real mode-branch region with *env_extra* set, returning
+    the raw completed process (exit code + stdout/stderr) instead of
+    asserting success -- for cases expected to reject the input."""
+    script = _mode_branches_region()
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    env = dict(os.environ)
+    env.update(env_extra)
+    try:
+        return subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True, text=True, encoding="utf-8", env=env,
+        )
+    finally:
+        os.unlink(script_path)
+
+
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanArtifactSetForwarding:
     def test_new_library_set_maps_to_artifact_set_flag(self) -> None:
@@ -119,18 +140,21 @@ class TestScanArtifactSetForwarding:
         assert "new.so" in cmd
         assert "--artifact-set" not in cmd
 
-    def test_new_library_set_omits_against_even_if_set(self) -> None:
-        # validate-inputs.sh already rejects this combination before run.sh
-        # ever executes in the composite Action; run.sh re-checks it too
-        # (defense in depth for anyone invoking run.sh directly).
-        cmd = _run_cmd(
+    def test_new_library_set_rejects_against(self) -> None:
+        # P2 regression (Codex review): validate-inputs.sh already rejects
+        # this combination before run.sh ever executes in the composite
+        # Action, but a direct run.sh invocation (bypassing that step) must
+        # reject it too, loudly -- not silently downgrade to an audit-only
+        # scan by dropping --against.
+        result = _run_raw(
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
                 "INPUT_AGAINST": "old.so",
             }
         )
-        assert "--against" not in cmd
+        assert result.returncode != 0
+        assert "against" in result.stdout
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
