@@ -104,7 +104,33 @@ from .type_reachability import (
     _finditer_allow_nested,
     _namespace_suffix_spellings,
     _stripped_signature_spelling,
+    type_string_references_name,
 )
+
+
+def _resolve_typedef_chain(
+    alias: str, typedefs: dict[str, str], max_hops: int = 8
+) -> str:
+    """Follow *alias* through ``typedefs`` (alias -> target) until the target
+    is no longer itself a typedef key, cycle-safe and bounded to *max_hops*.
+
+    A real header backend can chain aliases (``using Handle = Thing;
+    using Thing = std::Thing;``) or wrap a dependency identity in a
+    decorated form (``using Handle = std::Thing *;``) -- a single dict
+    lookup only resolves one hop and only an exact-string target, missing
+    both (Codex review, fresh evidence). This resolves the chain; the
+    caller still matches the *decorated* final target against a candidate
+    identity via :func:`abicheck.type_reachability.type_string_references_name`
+    rather than requiring exact equality.
+    """
+    target = typedefs.get(alias, alias)
+    seen = {alias}
+    hops = 0
+    while target in typedefs and target not in seen and hops < max_hops:
+        seen.add(target)
+        target = typedefs[target]
+        hops += 1
+    return target
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
@@ -172,7 +198,14 @@ def _directly_referenced_dependency_names(
     underlying, ABI-tag-qualified ``std::__cxx11::basic_string<...>`` and
     the typedef target is itself already namespace/ABI-tag-stripped
     (``basic_string<...>``, DWARF's own convention) -- matched via each
-    candidate's stripped form too, not only its exact identity. Mirrors
+    candidate's stripped form too, not only its exact identity. An alias
+    chain (``using Handle = Thing; using Thing = std::Thing;``) is
+    followed via :func:`_resolve_typedef_chain` before matching, and a
+    *decorated* target (``using Handle = std::Thing *;`` -- the target
+    string is not equal to the candidate identity, only references it as a
+    substring token) is recognized via
+    :func:`abicheck.type_reachability.type_string_references_name` rather
+    than requiring exact equality (Codex review, fresh evidence). Mirrors
     :func:`abicheck.type_reachability`'s own typedef-following.
 
     Scans the joined signature text with one compiled multi-spelling
@@ -196,9 +229,10 @@ def _directly_referenced_dependency_names(
         signature_texts.extend(rec.virtual_bases)
     haystack = "\n".join(t for t in signature_texts if t)
 
-    aliases_by_target: dict[str, list[str]] = {}
-    for alias, target in (typedefs or {}).items():
-        aliases_by_target.setdefault(target, []).append(alias)
+    resolved_targets = {
+        alias: _resolve_typedef_chain(alias, typedefs or {})
+        for alias in (typedefs or {})
+    }
 
     kept_spellings = {
         suffix
@@ -217,8 +251,11 @@ def _directly_referenced_dependency_names(
         derived = set(_namespace_suffix_spellings(identity)[1:])
         if stripped:
             derived.add(stripped)
-        for key in filter(None, (identity, stripped)):
-            derived.update(aliases_by_target.get(key, ()))
+        for alias, resolved in resolved_targets.items():
+            for key in filter(None, (identity, stripped)):
+                if resolved == key or type_string_references_name(resolved, key):
+                    derived.add(alias)
+                    break
         derived_of[id(candidate)] = derived
 
     derived_owners: dict[str, set[str]] = {}

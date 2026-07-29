@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # G34 — Producer/consumer compiler-profile separation and compiler-matrix hardening
 
 **Origin:** a status-review of the toolchain-profile/compiler-matrix surface

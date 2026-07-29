@@ -615,6 +615,51 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.name for t in scoped.types] == ["basic_string"]
 
+    def test_chained_typedef_alias_resolves_dependency_target(self):
+        """Codex review (P1, third round): `using Handle = Thing; using
+        Thing = std::Thing;` -- a signature spelling the outermost alias
+        must still resolve through the chain to the dependency record."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "Thing", "Thing": "std::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
+    def test_decorated_typedef_target_resolves_dependency_record(self):
+        """Codex review (P1, third round): `using Handle = std::Thing *;` --
+        the typedef target is a *decorated* form (pointer), not an exact
+        match for the candidate's own identity, and must still resolve via
+        a substring/token match rather than requiring exact equality."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "std::Thing *"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
     def test_partially_qualified_nested_dependency_type_is_kept(self):
         """Codex review (P2, second round): a direct-clang-style backend
         spells a nested dependency type with the enclosing namespace
