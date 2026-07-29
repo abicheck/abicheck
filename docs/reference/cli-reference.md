@@ -416,6 +416,10 @@ Deterministic source-intelligence scan (classify → always-on tier → level).
 | `--dry-run` | no | `False` | Resolve and validate the invocation -- classify inputs, resolve changed paths, show the audit checks and (if --against) the comparison that would run, and print projected per-layer cost -- without scanning. Writes nothing; incompatible with -o/--output. |
 | `--crosscheck` | no | — | Per-check level KEY=LEVEL (off\|info\|warning\|error); repeatable. |
 | `--risk-rules` | no | — | Override the risk\_rules profile (YAML). |
+| `--policy` | no | `strict_abi` | Built-in policy profile for verdict classification. Ignored when --policy-file is given. Choices: `strict_abi`, `sdk_vendor`, `plugin_abi`. |
+| `--policy-file` | no | — | YAML policy file with per-kind verdict overrides, or a built-in name (e.g. 'security'). Overrides --policy. |
+| `--suppress` | no | — | Suppression file (YAML) to filter known/intentional changes. |
+| `--scope-public-headers`, `--no-scope-public-headers` | no | `True` | Restrict findings to the public-header ABI surface (ADR-024): changes to symbols/types not reachable from public-header-declared exported API are recorded as filtered, not reported. Internal-type leaks are never hidden. On by default; use --no-scope-public-headers to report every finding regardless of surface. |
 | `--lang` | no | `c++` | Language mode for the header backend. Choices: `c++`, `c`. |
 | `--format` | no | `text` | Output format. Choices: `text`, `json`. |
 | `--output`, `-o` | no | — | Write output to this path (default: stdout). |
