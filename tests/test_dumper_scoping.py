@@ -941,6 +941,74 @@ class TestDirectlyReferencedDependencyRetention:
             "dep::B",
         ]
 
+    def test_two_separate_aliases_colliding_on_bare_suffix_stay_ambiguous(self):
+        """Codex review (nineteenth round): unlike the compound-alias test
+        above -- one alias reaching two candidates in the same target,
+        which is genuinely unambiguous -- this is *two separate,
+        independently-qualified* aliases (`api::Handle -> dep::A`,
+        `vendor::Handle -> dep::B`) that merely happen to reduce to the
+        identical bare suffix `Handle` via ordinary namespace-dropping.
+        A signature spelling bare `Handle` cannot tell which alias it
+        means, so neither `dep::A` nor `dep::B` may be retained through
+        it -- this is the same class of coincidental collision as two
+        unrelated candidates sharing a bare suffix, just one level
+        removed through the alias layer."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="B",
+                    kind="struct",
+                    qualified_name="dep::B",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"api::Handle": "dep::A", "vendor::Handle": "dep::B"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
+    def test_two_separate_aliases_still_resolve_via_their_own_qualified_spelling(
+        self,
+    ):
+        """Companion to the test above: when a signature spells the fully
+        qualified alias name directly (`api::Handle`, not the ambiguous
+        bare-dropped `Handle`), that spelling is unique to one alias and
+        must still resolve -- the fix for coincidental bare-suffix
+        collision must not also break the unambiguous qualified case."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("api::Handle",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="B",
+                    kind="struct",
+                    qualified_name="dep::B",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"api::Handle": "dep::A", "vendor::Handle": "dep::B"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::A"]
+
     def test_resolved_typedef_owner_takes_precedence_over_coincidental_suffix(
         self,
     ):

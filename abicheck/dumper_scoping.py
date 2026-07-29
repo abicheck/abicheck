@@ -464,15 +464,6 @@ def _directly_referenced_dependency_names(
             for identity in key_owners[key]:
                 identity_aliases.setdefault(identity, set()).add(alias)
 
-    candidate_spellings: dict[int, set[str]] = {}
-    for candidate in dep_candidates:
-        identity = identity_of[id(candidate)]
-        spellings = set(own_spellings_of[id(candidate)])
-        for alias in identity_aliases.get(identity, ()):
-            spellings.add(alias)
-            spellings.update(_namespace_suffix_spellings(alias)[1:])
-        candidate_spellings[id(candidate)] = spellings
-
     # Two separate ownership tallies, kept apart deliberately (Codex review,
     # fresh evidence): a spelling that is some candidate's own identity/
     # namespace-suffix/stdlib-stripped spelling (*own_spelling_owners*) is
@@ -480,17 +471,50 @@ def _directly_referenced_dependency_names(
     # touches it -- that's the "two unrelated candidates coincidentally
     # share a bare suffix" case the single-owner guard exists for. A
     # spelling that is only ever reached via a typedef alias's own
-    # reachability (*alias_spelling_owners*, never any candidate's own
-    # spelling) is different: a single compound alias like ``using Alias =
-    # Pair<dep::A, dep::B>;`` legitimately, unambiguously names *both*
-    # dep::A and dep::B in the same target -- multiple owners there isn't
-    # ambiguity, it's the alias structurally referencing more than one
-    # type at once, and dropping it entirely (the old ``len(...) == 1``
-    # check, applied uniformly to both categories) silently hid a real
-    # layout change to either type.
+    # reachability (*alias_spelling_owners*) is different in kind: a
+    # single compound alias like ``using Alias = Pair<dep::A, dep::B>;``
+    # legitimately, unambiguously names *both* dep::A and dep::B in the
+    # same target -- multiple owners there isn't ambiguity, it's the
+    # alias structurally referencing more than one type at once.
+    #
+    # That distinction only holds when *one* alias is doing the naming,
+    # though (Codex review, further fresh evidence): two *separate*,
+    # independently-qualified aliases -- ``api::Handle -> dep::A`` and
+    # ``vendor::Handle -> dep::B`` -- can each reduce to the identical
+    # bare suffix ``Handle`` purely by coincidence, the same
+    # namespace-dropping mechanism that produces any other coincidental
+    # suffix collision. Building *alias_spelling_owners* per-candidate
+    # (as an earlier revision did, merging every alias's contribution
+    # into one flat per-identity set) couldn't tell "one alias reaching
+    # two candidates" apart from "two unrelated aliases each reaching one
+    # candidate, coincidentally sharing a spelling" -- both looked like
+    # "multiple owners, no own-spelling conflict" and were retained
+    # unconditionally. Tracking spellings *by originating alias* first
+    # (via *alias_to_identities* below) and only trusting a spelling when
+    # exactly one alias produced it distinguishes the two: a single
+    # alias's own multi-identity reach stays legitimate, while two
+    # different aliases colliding on the same derived suffix is
+    # genuine ambiguity and the spelling contributes no owners at all.
+    alias_to_identities: dict[str, set[str]] = {}
+    for identity, aliases in identity_aliases.items():
+        for alias in aliases:
+            alias_to_identities.setdefault(alias, set()).add(identity)
+
+    alias_spelling_sources: dict[str, set[str]] = {}
+    for alias in alias_to_identities:
+        for spelling in {alias, *_namespace_suffix_spellings(alias)[1:]}:
+            alias_spelling_sources.setdefault(spelling, set()).add(alias)
+
+    alias_spelling_owners: dict[str, set[str]] = {}
+    for spelling, aliases in alias_spelling_sources.items():
+        if len(aliases) == 1:
+            (single_alias,) = aliases
+            alias_spelling_owners[spelling] = set(alias_to_identities[single_alias])
+        # else: two or more distinct aliases collide on this derived
+        # spelling -- genuinely ambiguous, contributes no owner at all.
+
     own_spelling_owners: dict[str, set[str]] = {}
     own_exact_owners: dict[str, set[str]] = {}
-    alias_spelling_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = identity_of[id(candidate)]
         own = own_spellings_of[id(candidate)]
@@ -498,8 +522,6 @@ def _directly_referenced_dependency_names(
             own_spelling_owners.setdefault(spelling, set()).add(identity)
             if spelling == identity:
                 own_exact_owners.setdefault(spelling, set()).add(identity)
-        for spelling in candidate_spellings[id(candidate)] - own:
-            alias_spelling_owners.setdefault(spelling, set()).add(identity)
 
     # spelling -> {identity, ...}: a spelling that is some candidate's own
     # identity/suffix is trusted only when unambiguous among ALL owners
