@@ -1412,6 +1412,18 @@ class TestAbiCompare:
         ]
         assert missing_entries
         assert all(c["contract_relevance"] == "IN_CONTRACT" for c in missing_entries)
+        # Regression (Codex review, fresh evidence): _fold_scoped_compat_into_text
+        # builds its own, separate missing-label dicts for response["report"]
+        # -- independent of the top-level array's already-stamped copy above
+        # -- so without a dedicated fix the embedded report's copy of this
+        # same finding disagreed with the top-level one.
+        report_missing_entries = [
+            c for c in data["report"]["changes"] if c["kind"] == "used_by_missing_symbol"
+        ]
+        assert report_missing_entries
+        assert all(
+            c["contract_relevance"] == "IN_CONTRACT" for c in report_missing_entries
+        )
 
     def test_used_by_missing_symbol_omits_contract_fields_by_default(
         self, tmp_path: Path, monkeypatch

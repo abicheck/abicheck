@@ -1346,6 +1346,27 @@ def abi_compare(
             )
         if output_format == "json":
             response["report"] = json.loads(rendered)
+            if contract_evaluation and scoped_key is not None:
+                # _fold_scoped_compat_into_text (cli_compare_fold.py, shared
+                # with the CLI, which has no contract_evaluation concept at
+                # all) reuses the same already-stamped result.scoped_only_changes
+                # Change objects for its own scoped-only entries -- those
+                # pick up the stamp for free via _change_to_dict's own
+                # _add_contract_evaluation_fields call. Its missing-contract
+                # labels, though, are freshly-built plain dicts independent
+                # of the top-level response["changes"] missing_entry above,
+                # so the two documented findings arrays disagreed: the
+                # top-level array carried contract fields on a missing-label
+                # entry, the embedded report's own copy of that same finding
+                # did not (Codex review, fresh evidence).
+                report_changes = response["report"].get("changes")
+                if isinstance(report_changes, list):
+                    for entry in report_changes:
+                        if (
+                            isinstance(entry, dict)
+                            and entry.get("kind") == missing_kind
+                        ):
+                            _stamp_explicit_scope_contract_evaluation(entry)
         else:
             response["report"] = rendered
 
