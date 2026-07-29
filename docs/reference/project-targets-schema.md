@@ -246,6 +246,34 @@ config axis into `run-plan.json`; see
 [`docs/contribute/plans/g34-producer-consumer-compiler-profile-separation.md`](../contribute/plans/g34-producer-consumer-compiler-profile-separation.md)'s
 Phase 0 for the remaining extraction/merge integration.
 
+### `compile.frontend` / `consumer_compile.frontend` — per-profile AST frontend (G34 Phase B)
+
+Either overlay may set `frontend:` to one of the same four values the
+global `--ast-frontend` flag accepts (`auto`/`castxml`/`clang`/`hybrid`),
+overriding the global default for that profile's cell only:
+
+```yaml
+profiles:
+  linux-gcc14-build-clang20-client:
+    contract: true
+    compile:
+      binding: gcc14
+      frontend: castxml
+    consumer_compile:
+      binding: clang20
+      frontend: clang
+```
+
+Reaches `abicheck project plan` as
+[`compile_ast_frontend`/`consumer_compile_ast_frontend`](run-plan-schema.md#runplancheck-fields),
+resolved independently for each overlay (a profile with no `frontend:` set
+on an overlay leaves that field empty, deferring to a caller's own global
+`--ast-frontend`/default — it never falls back to the *other* overlay's
+`frontend:` value). Like `consumer_compile:` itself, this is schema/
+projection only — no run-plan consumer resolves a per-cell `RunPlanCell`
+that actually threads this field into a real `dump`/`compare` invocation
+yet; see the G34 plan doc's Phase B for what remains.
+
 ### `compile.binding` — resolving a logical toolchain id
 
 `binding` is a *logical* identifier (e.g. `"gcc14"`), never a raw

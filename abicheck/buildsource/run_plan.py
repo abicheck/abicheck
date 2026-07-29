@@ -120,6 +120,15 @@ fields to a separate header-AST (L2) extraction pass, merged with the
 producer-toolchain binary facts, is not yet wired here -- this module only
 projects the config-schema axis; the extraction/merge integration is
 G34 Phase 0's remaining, larger piece.
+
+**``compile.frontend``/``consumer_compile.frontend`` (G34 Phase B) project
+the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
+:attr:`RunPlanCheck.consumer_compile_ast_frontend` -- one of the same four
+values the global ``--ast-frontend`` flag accepts, resolved independently
+per overlay, with no fallback from one overlay's field to the other's.
+Like ``consumer_compile:`` itself, no run-plan consumer yet threads this
+field into a real ``dump``/``compare`` invocation's own ``--ast-frontend``
+-- this is config-schema projection only.
 """
 
 from __future__ import annotations
@@ -272,6 +281,17 @@ class RunPlanCheck:
     #: ``consumer_compile:`` overlay, or the overlay sets none of
     #: ``standard``/``stdlib``/``target``/``abi_macros``/``args``.
     consumer_compile_gcc_options: str = ""
+    #: This cell's profile's ``compile.frontend`` (G34 Phase B) -- one of
+    #: ``auto``/``castxml``/``clang``/``hybrid``, overriding the global
+    #: ``--ast-frontend`` default for this profile's cell only. Empty when
+    #: the profile's ``compile:`` overlay sets no ``frontend`` (a caller
+    #: then falls back to its own global ``--ast-frontend``/default).
+    compile_ast_frontend: str = ""
+    #: This cell's profile's ``consumer_compile.frontend`` (G34 Phase B),
+    #: resolved the same way :attr:`compile_ast_frontend` is, from the
+    #: separate consumer-toolchain overlay (G34 Phase 0) -- never falls
+    #: back to :attr:`compile_ast_frontend` when absent.
+    consumer_compile_ast_frontend: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -306,6 +326,10 @@ class RunPlanCheck:
             d["consumer_compile_gcc_path"] = self.consumer_compile_gcc_path
         if self.consumer_compile_gcc_options:
             d["consumer_compile_gcc_options"] = self.consumer_compile_gcc_options
+        if self.compile_ast_frontend:
+            d["compile_ast_frontend"] = self.compile_ast_frontend
+        if self.consumer_compile_ast_frontend:
+            d["consumer_compile_ast_frontend"] = self.consumer_compile_ast_frontend
         return d
 
     @classmethod
@@ -339,6 +363,10 @@ class RunPlanCheck:
             consumer_compile_gcc_path=_opt_str(d.get("consumer_compile_gcc_path")),
             consumer_compile_gcc_options=_opt_str(
                 d.get("consumer_compile_gcc_options")
+            ),
+            compile_ast_frontend=_opt_str(d.get("compile_ast_frontend")),
+            consumer_compile_ast_frontend=_opt_str(
+                d.get("consumer_compile_ast_frontend")
             ),
         )
 
@@ -460,6 +488,28 @@ def _consumer_compile_fields_for_profile(
     return _resolved_compile_fields(consumer_compile_spec, resolved_bindings)
 
 
+def _compile_ast_frontend_for_profile(
+    config: ProjectTargetsConfig, profile_id: str
+) -> str:
+    """Returns *profile_id*'s ``compile.frontend`` (G34 Phase B) -- ``""``
+    when the profile has no ``compile:`` overlay, is unknown, or sets no
+    ``frontend``."""
+    profile = config.profiles.get(profile_id)
+    compile_spec = profile.compile if profile is not None else None
+    return compile_spec.frontend if compile_spec is not None else ""
+
+
+def _consumer_compile_ast_frontend_for_profile(
+    config: ProjectTargetsConfig, profile_id: str
+) -> str:
+    """Returns *profile_id*'s ``consumer_compile.frontend`` (G34 Phase B),
+    resolved the same way :func:`_compile_ast_frontend_for_profile` is, from
+    the profile's separate consumer-toolchain overlay (G34 Phase 0)."""
+    profile = config.profiles.get(profile_id)
+    consumer_compile_spec = profile.consumer_compile if profile is not None else None
+    return consumer_compile_spec.frontend if consumer_compile_spec is not None else ""
+
+
 def _library_lookup_and_pattern(
     config: ProjectTargetsConfig, target: TargetSpec
 ) -> tuple[str, str]:
@@ -558,6 +608,12 @@ def _generate_target_checks(
                     compile_gcc_options=compile_gcc_options,
                     consumer_compile_gcc_path=consumer_compile_gcc_path,
                     consumer_compile_gcc_options=consumer_compile_gcc_options,
+                    compile_ast_frontend=_compile_ast_frontend_for_profile(
+                        config, profile_id
+                    ),
+                    consumer_compile_ast_frontend=(
+                        _consumer_compile_ast_frontend_for_profile(config, profile_id)
+                    ),
                 )
             )
     return out
@@ -648,6 +704,12 @@ def _generate_bundle_checks(
                     compile_gcc_options=compile_gcc_options,
                     consumer_compile_gcc_path=consumer_compile_gcc_path,
                     consumer_compile_gcc_options=consumer_compile_gcc_options,
+                    compile_ast_frontend=_compile_ast_frontend_for_profile(
+                        config, profile_id
+                    ),
+                    consumer_compile_ast_frontend=(
+                        _consumer_compile_ast_frontend_for_profile(config, profile_id)
+                    ),
                 )
             )
     return out

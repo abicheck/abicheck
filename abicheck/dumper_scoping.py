@@ -228,6 +228,26 @@ def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
     return names | qualified_names
 
 
+def _elaborated_tag_keywords(record_or_enum: RecordType | EnumType) -> frozenset[str]:
+    """Which elaborated-type-specifier keyword(s) (Codex review, fresh
+    evidence) may legally precede a reference to *record_or_enum*'s own
+    name. A ``union`` and an ``enum`` each have exactly one legal keyword,
+    but C++ permits ``class`` and ``struct`` to refer to the identical
+    non-union record type interchangeably (``class Foo`` and ``struct
+    Foo`` are the same elaborated-type-specifier for the same ``Foo``) --
+    a record declared with one keyword can legally be *referenced* with
+    the other, so both spellings are collision-relevant regardless of
+    which keyword the declaration itself used.
+    """
+    if isinstance(record_or_enum, RecordType):
+        return (
+            frozenset({"struct", "class"})
+            if record_or_enum.kind in ("struct", "class")
+            else frozenset({record_or_enum.kind})
+        )
+    return frozenset({"enum"})
+
+
 def _candidate_identity(candidate: RecordType | EnumType) -> str:
     """The most specific spelling identifying *candidate*: its fully-qualified
     name when the producer populated one, else its bare ``name``."""
@@ -417,7 +437,8 @@ def _directly_referenced_dependency_names(
     for rec in kept_types:
         suffixes = _namespace_suffix_spellings(_candidate_identity(rec))
         kept_spellings.update(suffixes)
-        kept_spellings.update(f"{rec.kind} {s}" for s in suffixes)
+        for keyword in _elaborated_tag_keywords(rec):
+            kept_spellings.update(f"{keyword} {s}" for s in suffixes)
     for enum in kept_enums:
         suffixes = _namespace_suffix_spellings(_candidate_identity(enum))
         kept_spellings.update(suffixes)
@@ -480,8 +501,10 @@ def _directly_referenced_dependency_names(
         # could ever match), so they naturally fall outside every
         # typedef-alias veto below without needing any special-casing
         # there.
-        tag_keyword = candidate.kind if isinstance(candidate, RecordType) else "enum"
-        spellings.update({f"{tag_keyword} {s}" for s in set(spellings)})
+        tag_keywords = _elaborated_tag_keywords(candidate)
+        spellings.update(
+            f"{keyword} {s}" for keyword in tag_keywords for s in set(spellings)
+        )
         raw_own_spellings_of[id(candidate)] = spellings
         for key in spellings:
             if key in kept_spellings:

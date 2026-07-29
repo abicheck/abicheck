@@ -165,20 +165,35 @@ confirmed by reading the workflow, not asserted from a design doc):
 
 ### Phase B — per-profile AST frontend (M)
 
-- [ ] `profiles.<id>.compile.frontend` (or `consumer_compile.frontend` once
-      Phase 0 lands) accepts the same values as the global `--ast-frontend`
-      (`auto`/`castxml`/`clang`/`hybrid`), overriding the global default for
-      that profile's cell only — same precedence pattern already
-      established for `compile_gcc_path`/`compile_gcc_options` (profile
-      overlay wins over the global input, per the P1 toolchain-profile
-      audit's own comment in `check-project.yml`).
-- [ ] `run_plan.py`'s per-cell `RunPlanCell` (or equivalent) gains a
-      resolved `ast_frontend` field threaded the same way
-      `compile_gcc_path`/`compile_gcc_options` already are.
-- [ ] A fixture project with one GCC profile (castxml) and one Clang/DPC++
-      profile (direct-clang `icpx`) in the same `.abicheck.yml` produces
-      two cells that actually invoke different frontends — asserted via
-      each cell's own `run-plan.json` output, not just schema validation.
+- [x] `profiles.<id>.compile.frontend`/`consumer_compile.frontend` (both
+      overlays, sharing `ProfileCompileSpec`) accept the same values as the
+      global `--ast-frontend` (`auto`/`castxml`/`clang`/`hybrid`,
+      shape-validated against `api_types.HEADER_AST_FRONTENDS` — the same
+      canonical fact source the CLI flag itself resolves against, not a
+      hand-duplicated list), overriding the global default for that
+      profile's cell only — same precedence pattern already established for
+      `compile_gcc_path`/`compile_gcc_options` (profile overlay wins over
+      the global input, per the P1 toolchain-profile audit's own comment in
+      `check-project.yml`).
+- [x] `run_plan.py`'s `RunPlanCheck` gains a resolved
+      `compile_ast_frontend`/`consumer_compile_ast_frontend` pair, threaded
+      the same way `compile_gcc_path`/`compile_gcc_options` already are
+      (`_compile_ast_frontend_for_profile`/
+      `_consumer_compile_ast_frontend_for_profile`), for both target and
+      bundle checks.
+- [ ] **Still open:** no run-plan consumer yet threads this resolved field
+      into a real `dump`/`compare` invocation's own `--ast-frontend` — a
+      fixture project with one GCC profile (castxml) and one Clang/DPC++
+      profile (direct-clang `icpx`) in the same `.abicheck.yml` producing
+      two cells that actually *invoke* different frontends needs that
+      wiring first; this slice lands the config schema + `run-plan.json`
+      projection only, same "schema first, extraction/merge integration
+      later" split as Phase 0.
+- [x] `tests/test_project_targets_compile_frontend.py` (shape validation,
+      round-trip, both overlays independent) and `test_run_plan.py`'s
+      `TestCompileFrontendOverlayProjection` (target checks, bundle checks,
+      independent resolution, no-override case) cover the schema/projection
+      slice landed here.
 
 ### Phase C — Actions-matrix native-OS scheduling + per-cell dependency source (L)
 

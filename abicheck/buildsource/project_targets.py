@@ -94,6 +94,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..api_types import HEADER_AST_FRONTENDS
 from .inline import KNOWN_TOP_LEVEL_KEYS
 from .scan_levels import USER_DEPTHS, EvidenceDepth
 
@@ -679,6 +680,15 @@ class ProfileCompileSpec:
 
     All fields are optional and additive; an empty ``ProfileCompileSpec`` is
     indistinguishable from an absent ``compile:`` block.
+
+    ``frontend`` (G34 Phase B) overrides the global ``--ast-frontend``
+    default for this profile's cell only -- one of the same four values
+    the CLI flag accepts (``auto``/``castxml``/``clang``/``hybrid``,
+    shape-validated the same way; empty means "no override, inherit the
+    global default"). Applies identically whichever overlay it's set on
+    (``compile:`` for the producer/artifact toolchain, ``consumer_compile:``
+    for the client toolchain, G34 Phase 0) since both share this same
+    dataclass.
     """
 
     compiler_family: str = ""
@@ -687,6 +697,7 @@ class ProfileCompileSpec:
     standard: str = ""
     stdlib: str = ""
     binding: str = ""
+    frontend: str = ""
     abi_macros: dict[str, str] = field(default_factory=dict)
     args: list[str] = field(default_factory=list)
 
@@ -708,6 +719,8 @@ class ProfileCompileSpec:
             d["stdlib"] = self.stdlib
         if self.binding:
             d["binding"] = self.binding
+        if self.frontend:
+            d["frontend"] = self.frontend
         if self.abi_macros:
             d["abi_macros"] = dict(self.abi_macros)
         if self.args:
@@ -727,6 +740,7 @@ class ProfileCompileSpec:
             "standard",
             "stdlib",
             "binding",
+            "frontend",
             "abi_macros",
             "args",
         }
@@ -749,6 +763,18 @@ class ProfileCompileSpec:
             if not isinstance(value, str):
                 raise ValueError(f"{where}.{key} must be a string, got {value!r}")
             str_fields[key] = _safe_profile_atom(where, key, value)
+
+        frontend = ""
+        if "frontend" in d:
+            value = d["frontend"]
+            if not isinstance(value, str):
+                raise ValueError(f"{where}.frontend must be a string, got {value!r}")
+            if value not in HEADER_AST_FRONTENDS:
+                allowed = ", ".join(sorted(HEADER_AST_FRONTENDS))
+                raise ValueError(
+                    f"{where}.frontend must be one of {{{allowed}}}, got {value!r}"
+                )
+            frontend = value
 
         abi_macros_raw = d.get("abi_macros", {})
         if not isinstance(abi_macros_raw, dict):
@@ -782,6 +808,7 @@ class ProfileCompileSpec:
             standard=str_fields.get("standard", ""),
             stdlib=str_fields.get("stdlib", ""),
             binding=str_fields.get("binding", ""),
+            frontend=frontend,
             abi_macros=abi_macros,
             args=args,
         )

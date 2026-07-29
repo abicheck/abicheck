@@ -602,6 +602,35 @@ class TestRunPlanRoundTrip:
         assert "consumer_compile_gcc_path" not in d
         assert "consumer_compile_gcc_options" not in d
 
+    def test_compile_frontend_fields_round_trip(self) -> None:
+        """G34 Phase B: compile_ast_frontend/consumer_compile_ast_frontend
+        both serialize/deserialize, independently of each other and of the
+        gcc_path/gcc_options fields."""
+        check = RunPlanCheck(
+            check_id="libfoo@gcc14-clang20#release@headers",
+            kind=RUN_PLAN_KIND_TARGET,
+            target_kind="library",
+            name="libfoo",
+            profile_id="gcc14-clang20",
+            baseline_channel="release",
+            requested_depth="headers",
+            binary_pattern="build/libfoo*.so",
+            compile_ast_frontend="castxml",
+            consumer_compile_ast_frontend="clang",
+        )
+        plan = RunPlan(checks=[check])
+        d = check.to_dict()
+        assert d["compile_ast_frontend"] == "castxml"
+        assert d["consumer_compile_ast_frontend"] == "clang"
+        restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+        assert restored == plan
+
+    def test_compile_frontend_fields_omitted_from_dict_when_empty(self) -> None:
+        check = RunPlanCheck(check_id="libfoo@linux#release@headers")
+        d = check.to_dict()
+        assert "compile_ast_frontend" not in d
+        assert "consumer_compile_ast_frontend" not in d
+
 
 class TestToAggregateManifest:
     def test_uses_check_id_not_bare_name(self) -> None:
@@ -912,6 +941,106 @@ class TestConsumerCompileOverlayProjection:
         [check] = plan.checks
         assert check.consumer_compile_gcc_path == "/opt/llvm-20/bin/clang++"
         assert check.consumer_compile_gcc_options == "-std=gnu++20"
+
+
+class TestCompileFrontendOverlayProjection:
+    """G34 Phase B: profiles.<id>.compile.frontend/consumer_compile.frontend
+    reach the generated cell as compile_ast_frontend/
+    consumer_compile_ast_frontend, resolved independently of each other and
+    of binding-based gcc_path/gcc_options resolution."""
+
+    _RAW = {
+        "targets": {
+            "libfoo": {
+                "kind": "library",
+                "binary_pattern": "build/libfoo*.so",
+                "checks": [
+                    {"channel": "release", "depth": "headers", "required": True},
+                ],
+            },
+        },
+        "profiles": {
+            "gcc14-build-clang20-client": {
+                "contract": True,
+                "compile": {"frontend": "castxml"},
+                "consumer_compile": {"frontend": "clang"},
+            },
+            "plain": {"contract": True},
+        },
+        "baseline": {
+            "channels": {
+                "release": {"source": "github-release", "asset_pattern": "libfoo-*"},
+            },
+        },
+    }
+
+    def test_no_frontend_override_leaves_both_fields_empty(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+        )
+        assert report.ok
+        [check] = [c for c in plan.checks if c.profile_id == "plain"]
+        assert check.compile_ast_frontend == ""
+        assert check.consumer_compile_ast_frontend == ""
+        assert "compile_ast_frontend" not in check.to_dict()
+        assert "consumer_compile_ast_frontend" not in check.to_dict()
+
+    def test_frontend_overrides_project_independently(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+        )
+        assert report.ok
+        [check] = [
+            c for c in plan.checks if c.profile_id == "gcc14-build-clang20-client"
+        ]
+        assert check.compile_ast_frontend == "castxml"
+        assert check.consumer_compile_ast_frontend == "clang"
+
+    def test_bundle_check_also_gets_frontend_fields(self) -> None:
+        raw = {
+            "targets": {
+                "libpvxs": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libpvxs.so*",
+                    "bundle": "pvxs-release",
+                },
+            },
+            "bundles": {
+                "pvxs-release": {
+                    "targets": ["libpvxs"],
+                    "checks": [
+                        {"channel": "release", "depth": "binary", "required": True},
+                    ],
+                },
+            },
+            "profiles": {
+                "gcc14-build-clang20-client": {
+                    "contract": True,
+                    "compile": {"frontend": "castxml"},
+                    "consumer_compile": {"frontend": "hybrid"},
+                },
+            },
+            "baseline": {
+                "channels": {
+                    "release": {
+                        "source": "github-release",
+                        "asset_pattern": "pvxs-*",
+                    },
+                },
+            },
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(
+            config, {"gcc14-build-clang20-client": _bo("libpvxs")}
+        )
+        assert report.ok
+        [check] = plan.checks
+        assert check.compile_ast_frontend == "castxml"
+        assert check.consumer_compile_ast_frontend == "hybrid"
 
 
 class TestComposeGccOptionsNotFamilyAware:

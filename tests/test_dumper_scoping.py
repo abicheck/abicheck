@@ -1207,6 +1207,37 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
 
+    def test_elaborated_spelling_guards_both_class_and_struct_keyword(self):
+        """Codex review (thirty-third round, P2): a kept type declared as
+        `class api::Foo` but referenced in a kept signature via the valid
+        elaborated form `struct Foo *` -- C++ permits `class` and `struct`
+        to refer to the same non-union type interchangeably, so the kept-
+        type collision guard must claim both elaborated spellings, not
+        just the one matching the declaration's own keyword. An unrelated
+        dependency-header `struct Foo` must not be retained through the
+        keyword mismatch."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("struct Foo *",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    qualified_name="api::Foo",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+
     def test_elaborated_reference_does_not_also_resolve_nested_typedef_alias(
         self,
     ):
