@@ -1194,6 +1194,32 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
 
+    def test_globally_qualified_unnamespaced_signature_spelling_matches(self):
+        """Codex review (twenty-seventh round): the previous fix only
+        added the ``::``-prefixed spelling when the candidate's own
+        identity already contained ``::`` -- but direct-clang preserves
+        an explicit global-scope qualifier for an *unnamespaced* type
+        just the same, e.g. `void f(::Foo *)` for a plain `struct Foo`
+        with no namespace at all. That case was still excluded (the
+        guard only ran when `"::" in identity`), so a directly-
+        referenced unnamespaced dependency type whose only signature
+        mention is globally qualified was silently dropped."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("::Foo *",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Foo"]
+
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
         two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle

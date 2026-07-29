@@ -427,23 +427,24 @@ def _directly_referenced_dependency_names(
         spellings = {identity, *_namespace_suffix_spellings(identity)}
         if stripped:
             spellings.add(stripped)
-        if "::" in identity:
-            # direct-clang preserves a signature's explicit global-scope
-            # qualifier in its printed ``qualType`` (``void f(::dep::Thing
-            # *)`` keeps the leading ``::``) -- but the boundary-aware
-            # matcher's negative lookbehind treats ``:`` as a non-boundary
-            # character (so a spelling can't accidentally match a *partial*
-            # scope, e.g. matching ``Thing`` inside ``ns::Thing``), which
-            # also means it rejects the bare-qualified spelling
-            # ``dep::Thing`` when it's immediately preceded by the extra
-            # ``:`` of a leading ``::`` (Codex review, fresh evidence).
-            # Registering the fully global-qualified spelling explicitly
-            # lets it match on its own, without weakening the boundary
-            # check itself. Namespace-suffix spellings are never
-            # meaningfully global-qualified this way (``::Thing`` alone
-            # isn't how a backend spells a qualifier-dropped reference),
-            # so only the full identity gets this treatment.
-            spellings.add(f"::{identity}")
+        # direct-clang preserves a signature's explicit global-scope
+        # qualifier in its printed ``qualType`` (``void f(::dep::Thing *)``
+        # keeps the leading ``::``, and this applies just as much to an
+        # unnamespaced type -- ``void f(::Foo *)`` -- as to a namespaced
+        # one; an earlier revision of this fix only handled the namespaced
+        # case, Codex review, fresh evidence) -- but the boundary-aware
+        # matcher's negative lookbehind treats ``:`` as a non-boundary
+        # character (so a spelling can't accidentally match a *partial*
+        # scope, e.g. matching ``Thing`` inside ``ns::Thing``), which also
+        # means it rejects the bare-qualified spelling (``dep::Thing`` or
+        # bare ``Foo``) when it's immediately preceded by the extra ``:``
+        # of a leading ``::``. Registering the fully global-qualified
+        # spelling explicitly lets it match on its own, without weakening
+        # the boundary check itself. Namespace-suffix spellings are never
+        # meaningfully global-qualified this way (``::Thing`` alone isn't
+        # how a backend spells a qualifier-dropped reference), so only the
+        # full identity gets this treatment.
+        spellings.add(f"::{identity}")
         # An elaborated-type-specifier spelling (``struct Handle``,
         # ``union Handle``, ``enum Handle``) is unambiguous in both C and
         # C++ regardless of any colliding typedef alias of the same bare
