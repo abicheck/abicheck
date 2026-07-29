@@ -253,6 +253,12 @@ CONTRACT_REASON_CODES: MappingProxyType[str, str] = MappingProxyType(
             "--scope-public-headers selected contract=public as an "
             "intentionally stricter migration alias."
         ),
+        "explicit_consumer_or_required_symbol_evidence": (
+            "Section 4.3 item 1's strongest public evidence: the entity is "
+            "an explicit required symbol/entrypoint contract, or was "
+            "reached via a concrete consumer's actual import/relocation, "
+            "not merely inferred from header-derived public roots."
+        ),
     }
 )
 
