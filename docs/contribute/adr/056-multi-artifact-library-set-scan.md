@@ -108,6 +108,20 @@ easy for an implementer to add the flag without touching the positional's
 `required=` behavior and ship a command that can never actually reach the
 new code path.
 
+**`--against` must also be rejected with `--artifact-set`.** `scan --against
+OLD` stores a single baseline path in `ScanRequest.baseline`
+(`abicheck/cli_scan.py`); nothing about that shape extends to a *set* of
+artifacts each needing their own, distinct old-side baseline — running
+every member of `--artifact-set` against the same single `--against` value
+would silently compare unrelated libraries against one shared file. D2
+below scopes `--artifact-set` to **audit-only** (no old side, no
+`--against`) specifically to avoid designing that set-to-set baseline
+question here; `cli_scan.py` must therefore reject `--artifact-set
+--against` together as a `click.UsageError`, the same way it rejects
+`ARTIFACT --artifact-set` together. A future ADR can revisit a genuine
+set-vs-set comparison form if there's real demand — not silently allowed
+through by omission in this one.
+
 Rationale against silently overloading the positional `ARTIFACT` the way
 `compare` overloads its positional operands (auto-detecting file vs.
 directory vs. package): `compare`'s auto-detection is exactly the ambiguity
@@ -143,14 +157,33 @@ library-set `scan` composes N ordinary single-library `dump`s internally
 A library-set `scan` produces `list[AbiSnapshot]` — one full snapshot per
 artifact, at whatever `--depth` was requested, completely unchanged from
 today's single-artifact `scan` pipeline run N times. On top of that list, it
-runs the *same* `BundleSnapshot`/`ResolutionGraph`/`compare_bundle`-shaped
-machinery `compare`'s directory path already uses (generalized to take a
-`list[AbiSnapshot]` + paths instead of being reachable only from
-`compare-release`'s directory-matching code), producing the same class of
-cross-DSO findings (`bundle_intra_dep_removed`, `bundle_provider_changed`,
-etc.) against an **audit baseline** (no old side) the way `scan`'s existing
-one-build audit mode already reports single-library findings with no
-`--against`.
+builds the *same* `BundleSnapshot`/`ResolutionGraph` machinery `compare`'s
+directory path already uses (generalized to take a `list[AbiSnapshot]` +
+paths instead of being reachable only from `compare-release`'s
+directory-matching code) for the current set alone.
+
+**This is deliberately a narrower finding set than `compare`'s bundle layer,
+not the same one.** Re-reading ADR-023's own detection steps: 7 of its 9
+`bundle_*` kinds are constructed by reading a *per-library diff's* changes
+(`func_removed`, `func_params_changed`, `type_*_changed`, ...) against the
+new-side resolution graph — `bundle_intra_dep_removed`,
+`bundle_intra_dep_signature_changed`, `bundle_intra_type_changed`,
+`bundle_provider_changed`, both manifest-instantiation kinds, and both
+library-added/-removed kinds all require an old side to diff against. A
+library-set `scan` audit has no old side by construction, so none of those
+apply. What *does* carry over directly is the resolution graph's own
+`unresolved: list[UnresolvedImport]` field (ADR-023's "Resolution graph"
+section) computed from the current set alone: a sibling importing a symbol
+nothing in today's bundle provides (and not covered by the system
+allow-list) is a real, single-snapshot-computable finding — reported as a
+new, audit-scoped kind (e.g. `bundle_unresolved_intra_dependency`, exact
+name TBD at implementation time) rather than reusing
+`bundle_intra_dep_removed`'s name, since that kind's own registry
+description is specifically "no longer provides" (a removal, which implies
+a diff) and reusing it for a no-diff audit would misdescribe the finding.
+`bundle_intra_dep_resolved_to_different_version` is also diff-shaped (old
+`gnu.version` vs. new) and does not apply. See G34 Phase 2 for the
+audit-mode entry point this implies.
 
 Explicitly **not** in this ADR's scope:
 
@@ -200,16 +233,19 @@ Explicitly **not** in this ADR's scope:
 
 **Positive**
 
-- Closes the audit-mode gap ADR-023 left open: a user with no "old" snapshot
-  (the common case for a first-time scan of a newly vendored multi-.so
-  dependency, e.g. oneDAL) gets the same class of cross-DSO findings
-  `compare` already gives a user who has two release directories.
+- Closes part of the audit-mode gap ADR-023 left open: a user with no "old"
+  snapshot (the common case for a first-time scan of a newly vendored
+  multi-.so dependency, e.g. oneDAL) gets at least the unresolved-import
+  subset of cross-DSO findings `compare` already gives a user who has two
+  release directories — not the full diff-driven 9-kind set, which
+  structurally needs an old side (see D2).
 - Finishes `ScanRequest.binaries`'s already-plural typing instead of leaving
   it as dead-end scaffolding — the cost estimator's existing
   `len(req.binaries)`-aware code becomes correct rather than unreachable.
 - Reuses `bundle.py`'s existing types (`BundleSnapshot`, `ResolutionGraph`,
-  `BundleFinding`, the 9 `bundle_*` `ChangeKind`s) rather than inventing a
-  parallel set for `scan`.
+  `BundleFinding`) rather than inventing parallel ones for `scan`; only one
+  new, narrower audit-scoped `ChangeKind` is added (D2), not a duplicate of
+  the 9 `compare`-side ones.
 - Keeps the harder cross-DSO type-merging problem explicitly deferred rather
   than attempted half-way, consistent with how the rest of this codebase's
   AGENTS.md "Known gaps" section treats similar cross-reference resolution

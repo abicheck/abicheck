@@ -95,9 +95,11 @@ started.**
   (service, `run_scan_subprocess`, MCP `abi_scan`) are unaffected; only
   `--artifact-set`/`artifact_set` callers route through `run_scan_set`.
 - `tests/test_scan_estimate.py::test_run_scan_rejects_multiple_binaries` —
-  update to reflect the new accepting behavior; add a companion test
-  confirming a single-item `binaries` list still behaves identically to
-  today's singular path (regression guard).
+  **keep unchanged, unmodified.** `run_scan` itself still rejects a
+  multi-item `binaries` list (Phase 1's bullet above); this test is the
+  regression guard for that preserved singular contract, not something to
+  relax. Add a **new**, separate acceptance test exercising
+  `run_scan_set` with a multi-item `binaries` list instead.
 - **Not started.**
 
 ### Phase 2 — `bundle.py`: audit-mode entry point (no old side)
@@ -119,16 +121,32 @@ started.**
 - `abicheck/cli_scan.py` (the module `scan` is actually registered from —
   not `cli.py`): make the existing required `ARTIFACT` `@click.argument`
   optional, add `--artifact-set` (directory or comma-separated explicit
-  paths), and enforce exactly one of `ARTIFACT`/`--artifact-set` via
-  `click.UsageError` (exit 64) before wiring to `ScanRequest.binaries`/
-  `run_scan_set`.
+  paths), and enforce, as `click.UsageError` (exit 64):
+  - exactly one of `ARTIFACT`/`--artifact-set` is given;
+  - `--against` is rejected together with `--artifact-set` (ADR-056 D2
+    scopes `--artifact-set` to audit-only — no old side; `--against`
+    stores one baseline path in `ScanRequest.baseline`, which does not
+    extend to a set of artifacts each needing its own baseline).
+  Wire the accepted form to `ScanRequest.binaries`/`run_scan_set`.
 - `abicheck/mcp_server.py`: add `artifact_set` param to `abi_scan`, same
   validation shape as CLI (ADR-043 D10 parity — land together, not as a
   follow-up PR).
-- `action/validate-inputs.sh`: the existing single-artifact rejection for
-  `mode: scan` needs a carve-out once `--artifact-set` exists as a
-  supported multi-file form — otherwise the Action's own pre-flight
-  validator would block the newly-supported case.
+- `action/action.yml` + `action/run.sh` + `action/validate-inputs.sh`: the
+  Action has no path to this feature at all today, not just a rejection to
+  carve out. `run.sh`'s `scan` branch hard-requires a single
+  `INPUT_NEW_LIBRARY` (`SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?...}"`) and
+  explicitly errors on a directory/package value
+  (`"scan does not accept a directory or package... scan analyses exactly
+  one artifact"`, `run.sh` around the `scan` mode branch). Landing
+  `--artifact-set` end-to-end for Action users needs: a new Action input
+  (e.g. `new-library-set`), `run.sh` forwarding it to `--artifact-set`
+  instead of the positional artifact when set, and *then* narrowing
+  `validate-inputs.sh`'s rejection to still block a bare directory/package
+  passed as `new-library` while allowing the new dedicated input. Carving
+  the rejection out of `validate-inputs.sh` alone, without the input +
+  `run.sh` wiring, would let a `mode: scan` Action run pass preflight and
+  then fail deeper in the pipeline — worse than today's clear, early
+  rejection.
 - **Not started.**
 
 ### Phase 4 — Reporting
@@ -157,7 +175,9 @@ abicheck/service_scan.py     # Phase 1 — ScanRequest.binaries plural path
 abicheck/bundle.py           # Phase 0 (drift fix) + Phase 2 (audit-mode entry point)
 abicheck/cli_scan.py         # Phase 3 — scan --artifact-set, ARTIFACT made optional
 abicheck/mcp_server.py       # Phase 3 — abi_scan artifact_set param
-action/validate-inputs.sh    # Phase 3 — carve-out for the new supported form
+action/action.yml            # Phase 3 — new new-library-set input
+action/run.sh                # Phase 3 — forward new-library-set to --artifact-set
+action/validate-inputs.sh    # Phase 3 — narrow rejection once run.sh/action.yml support the new input
 reporter.py / report_summary.py  # Phase 4 — bundle section on scan reports
 ```
 
