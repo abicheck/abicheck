@@ -583,6 +583,20 @@ started.**
   `cli_scan.py`'s CLI flags enforce (Phase 3's CLI bullet above), mirrored
   on the MCP side rather than assumed to follow from "same validation
   shape as CLI" alone.
+  **Every discovered member needs the same per-file MCP guards as the
+  scalar path, not just the top-level `artifact_set` argument.** The live
+  `abi_scan`/`abi_estimate` call `_safe_read_path(...)` and
+  `_check_file_size(...)` (`abicheck/mcp_server.py`) on `binary_path`
+  specifically to enforce `MCP_MAX_FILE_SIZE` before any parsing happens —
+  a resource-exhaustion guard, not incidental validation. When
+  `artifact_set` names a directory or a comma-separated list, discovering
+  its members and handing them straight to `run_scan_set_subprocess`
+  without running the same two checks on *each* discovered path would let
+  a single oversized member (or a path escaping the expected root) bypass
+  the guard entirely and consume unbounded parser memory/CPU inside the
+  subprocess. Run `_safe_read_path`/`_check_file_size` over every
+  discovered member before starting `run_scan_set_subprocess`, and add a
+  regression test with one oversized member in an otherwise-valid set.
 - **`abi_estimate` needs the same `artifact_set` treatment as `abi_scan`,
   not a follow-up.** `abi_estimate(binary_path: str, ...)`
   (`abicheck/mcp_server.py`) is `abi_scan`'s dry-run/cost-estimate
