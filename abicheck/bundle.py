@@ -295,6 +295,56 @@ class BundleAuditResult:
         return compute_verdict(changes)
 
 
+def check_artifact_set_soname_collisions(libraries: dict[str, Path]) -> None:
+    """Reject an ambiguous duplicate-``DT_SONAME`` artifact set up front.
+
+    P2 regression (Codex review): :func:`audit_bundle` only discovers this
+    ambiguity *after* building the full resolution graph — for
+    ``scan --artifact-set``, that means only after every member has already
+    been individually scanned (:func:`~abicheck.service_scan.run_scan_set`
+    runs :func:`discover_artifact_set` → per-member scans →
+    :func:`audit_bundle`, in that order). If an earlier member scan then
+    exhausted ``--budget``, this genuine usage error was masked as an
+    ordinary ``BUDGET_OVERFLOW``, and every member's own (potentially
+    expensive, e.g. a build/compiler query) scan already ran for a request
+    that was always going to be rejected. ``discover_artifact_set``'s own
+    prevalidation is filesystem-identity-only and cannot see this — a
+    ``DT_SONAME`` collision is only visible after parsing each member's ELF
+    dynamic section.
+
+    Deliberately re-parses each member (the same per-library
+    :func:`~abicheck.elf_metadata.parse_elf_metadata` cost
+    :func:`build_bundle_snapshot` already pays) rather than building the
+    full snapshot's resolution graph here — the collision check only needs
+    each member's ``DT_SONAME``, not the (comparatively more expensive)
+    intra-set dependency edges ``build_bundle_snapshot`` also computes.
+    """
+    from . import deadline
+
+    metadata: dict[str, ElfMetadata] = {}
+    for name, path in libraries.items():
+        deadline.check()
+        if not _path_looks_like_elf(path):
+            continue
+        try:
+            meta = parse_elf_metadata(path)
+        except Exception as exc:  # pragma: no cover — parse_elf_metadata already swallows most
+            log.warning("bundle: failed to parse %s: %s", path, exc)
+            continue
+        if meta is not None:
+            metadata[name] = meta
+    duplicate_sonames = _find_duplicate_sonames(metadata)
+    if duplicate_sonames:
+        detail = "; ".join(
+            f"'{soname}': {names}" for soname, names in duplicate_sonames.items()
+        )
+        raise ArtifactSetError(
+            f"--artifact-set has ambiguous duplicate SONAME provider(s): "
+            f"{detail}. Each library in an artifact set must advertise a "
+            "distinct DT_SONAME; rename or drop the duplicate(s)."
+        )
+
+
 def audit_bundle(
     libraries: dict[str, Path],
     *,

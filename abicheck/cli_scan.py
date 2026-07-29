@@ -562,6 +562,14 @@ def _render_artifact_set_text(result: Any) -> str:
     lines.append("")
     if result.bundle_incomplete:
         lines.append("Bundle analysis: incomplete (artifact-set discovery failed)")
+    elif result.verdict == "BUDGET_OVERFLOW":
+        # CodeRabbit review: run_scan_set() returns BUDGET_OVERFLOW before
+        # ever calling audit_bundle() -- bundle_incomplete/bundle_verdict
+        # stay at their ScanSetResult defaults (False/None), so without
+        # this branch the report fell through to the else below and
+        # printed the misleading "Bundle analysis: None (0 finding(s))"
+        # instead of stating the bundle audit never ran.
+        lines.append("Bundle analysis: not run (budget overflow)")
     else:
         lines.append(
             f"Bundle analysis: {result.bundle_verdict} "

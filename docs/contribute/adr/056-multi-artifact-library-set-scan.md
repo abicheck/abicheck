@@ -1,19 +1,9 @@
----
-doc_type: contributor
-level: advanced
-lifecycle: active
----
-
 # ADR-056: Multi-Artifact / Library-Set `scan`
 
 **Date:** 2026-07-29
-**Status:** Proposed — formal decision-maker sign-off still pending, but the
-core scope (Phases 1-4's engine/detector/CLI slice, plus the GitHub Action
-wiring) has already shipped ahead of that sign-off, in the same PR that
-proposed this ADR (see [G35](../plans/g35-multi-artifact-scan.md)'s
-"Implementation status" note for exactly what shipped vs. what remains
-deferred — MCP wiring, the full example-catalog obligation, and the
-dry-run/estimator's per-member scaling).
+**Status:** Proposed — partially implemented (see
+[G35](../plans/g35-multi-artifact-scan.md)'s "Implementation status" note
+for what shipped ahead of formal sign-off vs. what remains deferred).
 **Decision maker:** (pending)
 
 ---
@@ -344,7 +334,8 @@ Explicitly **not** in this ADR's scope:
 
 ## Implementation plan
 
-**Not started.** [G35](../plans/g35-multi-artifact-scan.md) is the single,
+**Partially implemented** (see the Status header above).
+[G35](../plans/g35-multi-artifact-scan.md) is the single,
 tracked source of truth for the phased implementation breakdown — module
 list, task-by-task detail, and status per phase. Earlier drafts of this
 ADR duplicated that breakdown inline here as a second numbered list; it

@@ -381,7 +381,7 @@ class TestRunScanSetBundleAuditDeadline:
             return {"liba.so": snap_a, "libb.so": snap_b}
 
         class _FakeAudit:
-            findings: list = []
+            findings = []
             verdict = Verdict.COMPATIBLE
 
         def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
@@ -569,6 +569,48 @@ class TestRunScanSetDiscoveryArtifactSetError:
         assert member_scan_called == []
 
 
+class TestRunScanSetSonameCollisionEarlyCheck:
+    """P2 regression (Codex review): an ambiguous duplicate-DT_SONAME set
+    was previously only discovered inside audit_bundle(), which runs after
+    every member's own scan. If an earlier member scan then exhausted
+    --budget, the real ArtifactSetError was masked as an ordinary
+    BUDGET_OVERFLOW, and every member's own (potentially expensive) scan
+    already ran for a request that was always going to be rejected.
+    check_artifact_set_soname_collisions() now runs right after discovery,
+    before any member is scanned.
+    """
+
+    def test_collision_propagates_before_scanning_any_member(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        import abicheck.service_scan as service_scan_mod
+        from abicheck.bundle import ArtifactSetError
+        from abicheck.service import ScanRequest, run_scan_set
+
+        _bypass_discovery_validation(monkeypatch, snap_a, snap_b)
+
+        def _fake_soname_check(libraries):
+            raise ArtifactSetError("ambiguous duplicate SONAME provider(s)")
+
+        member_scan_called = []
+
+        def _fake_run_scan_one_member(*args, **kwargs):
+            member_scan_called.append(True)
+            raise AssertionError("member scan must not run before the SONAME check")
+
+        monkeypatch.setattr(
+            bundle_mod, "check_artifact_set_soname_collisions", _fake_soname_check
+        )
+        monkeypatch.setattr(
+            service_scan_mod, "_run_scan_one_member", _fake_run_scan_one_member
+        )
+
+        with pytest.raises(ArtifactSetError, match="ambiguous duplicate SONAME"):
+            run_scan_set(ScanRequest(binaries=[snap_a, snap_b], mode="audit"))
+        assert member_scan_called == []
+
+
 class TestRunScanSetBundleSnapshotCompleteness:
     """P2 regression (Codex review): discover_artifact_set only validates
     that every member *looks like* ELF -- build_bundle_snapshot() can still
@@ -596,7 +638,7 @@ class TestRunScanSetBundleSnapshotCompleteness:
                 root=snap_a.parent, libraries={"liba.so": snap_a},
                 metadata={}, resolution=None,
             )
-            findings: list = []
+            findings = []
             verdict = Verdict.COMPATIBLE_WITH_RISK
 
         def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
@@ -637,7 +679,7 @@ class TestRunScanSetBundleSnapshotCompleteness:
                 root=snap_a.parent, libraries={"liba.so": snap_a},
                 metadata={}, resolution=None,
             )
-            findings: list = []
+            findings = []
             verdict = Verdict.COMPATIBLE_WITH_RISK
 
         def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
@@ -721,6 +763,29 @@ class TestRunScanSet:
         with pytest.raises(ValueError):
             run_scan_set(
                 ScanRequest(binaries=[snap_a, snap_b], baseline=str(snap_a))
+            )
+
+    def test_rejects_comparison_only_field_without_baseline(
+        self, snap_a: Path, snap_b: Path
+    ) -> None:
+        """P2 regression (Codex review): run_scan_set() only ever validated
+        req.baseline itself -- a direct Python API caller passing a
+        comparison-only field like env_matrix/policy_file/suppression to
+        this public, re-exported entry point got it silently accepted and
+        discarded under default audit classification, unlike an equivalent
+        run_scan() call (which already rejects the same fields when there's
+        no baseline).
+        """
+        from abicheck.environment_matrix import EnvironmentMatrix
+        from abicheck.errors import ValidationError
+        from abicheck.service import ScanRequest, run_scan_set
+
+        with pytest.raises(ValidationError, match="env_matrix"):
+            run_scan_set(
+                ScanRequest(
+                    binaries=[snap_a, snap_b],
+                    env_matrix=EnvironmentMatrix(),
+                )
             )
 
     def test_scans_every_member_and_marks_bundle_incomplete(
@@ -1098,3 +1163,28 @@ class TestRenderArtifactSetTextFindings:
             },
         )
         assert _render_member_findings_lines(clean) == []
+
+    def test_budget_overflow_renders_bundle_as_not_run(self) -> None:
+        """CodeRabbit review: run_scan_set() returns BUDGET_OVERFLOW before
+        ever calling audit_bundle() -- bundle_incomplete/bundle_verdict stay
+        at their ScanSetResult defaults (False/None), so without a dedicated
+        branch the report fell through to the else clause and printed the
+        misleading "Bundle analysis: None (0 finding(s))" instead of stating
+        the bundle audit never ran.
+        """
+        from abicheck.cli_scan import _render_artifact_set_text
+        from abicheck.service_scan import ScanArtifactResult, ScanResult, ScanSetResult
+
+        result = ScanSetResult(
+            verdict="BUDGET_OVERFLOW",
+            exit_code=5,
+            per_artifact=[
+                ScanArtifactResult(
+                    artifact=Path("liba.so"),
+                    result=ScanResult(verdict="COMPATIBLE", exit_code=0),
+                )
+            ],
+        )
+        text = _render_artifact_set_text(result)
+        assert "Bundle analysis: not run (budget overflow)" in text
+        assert "None" not in text

@@ -1015,6 +1015,44 @@ def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
         raise ValueError(str(exc.format_message())) from exc
 
 
+def _reject_comparison_only_fields(req: ScanRequest) -> None:
+    """Raise :class:`ValidationError` if a baseline-comparison-only
+    ``ScanRequest`` field is set with no baseline for it to apply to.
+
+    Shared by :func:`run_scan` (called only when ``req.baseline`` is
+    ``None`` or ``req.mode`` is audit) and :func:`run_scan_set` (always
+    audit-only by definition, ADR-056 D2, so this always applies there).
+    Extracted so both entry points enforce the identical contract instead
+    of each hand-rolling its own field list (P2 regression, Codex review:
+    ``run_scan_set()``, once made public/re-exported, only ever validated
+    ``req.baseline`` itself -- a direct Python API caller passing e.g.
+    ``policy_file``/``env_matrix``/``suppression`` to it got them silently
+    accepted and discarded under default audit classification, instead of
+    rejected the way an equivalent ``run_scan()`` call already is).
+    """
+    _non_default = [
+        name
+        for name, is_set in (
+            ("suppression", req.suppression is not None),
+            ("policy", req.policy != "strict_abi"),
+            ("policy_file", req.policy_file is not None),
+            ("scope_to_public_surface", req.scope_to_public_surface is not True),
+            ("force_public_symbols", bool(req.force_public_symbols)),
+            ("pattern_verdicts", req.pattern_verdicts),
+            ("env_matrix", req.env_matrix is not None),
+            ("collapse_versioned_symbols", req.collapse_versioned_symbols),
+        )
+        if is_set
+    ]
+    if _non_default:
+        raise ValidationError(
+            f"ScanRequest field(s) {', '.join(_non_default)} only take "
+            "effect with a baseline comparison (req.baseline set, and "
+            "req.mode not 'audit'); they configure compare_snapshots and "
+            "have no effect otherwise."
+        )
+
+
 def run_scan(req: ScanRequest) -> ScanResult:
     """Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
 
@@ -1056,27 +1094,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # discarded, which could hide a `policy_file` requiring evidence the
     # caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
-        _non_default = [
-            name
-            for name, is_set in (
-                ("suppression", req.suppression is not None),
-                ("policy", req.policy != "strict_abi"),
-                ("policy_file", req.policy_file is not None),
-                ("scope_to_public_surface", req.scope_to_public_surface is not True),
-                ("force_public_symbols", bool(req.force_public_symbols)),
-                ("pattern_verdicts", req.pattern_verdicts),
-                ("env_matrix", req.env_matrix is not None),
-                ("collapse_versioned_symbols", req.collapse_versioned_symbols),
-            )
-            if is_set
-        ]
-        if _non_default:
-            raise ValidationError(
-                f"ScanRequest field(s) {', '.join(_non_default)} only take "
-                "effect with a baseline comparison (req.baseline set, and "
-                "req.mode not 'audit'); they configure compare_snapshots and "
-                "have no effect otherwise."
-            )
+        _reject_comparison_only_fields(req)
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
 
@@ -1571,7 +1589,12 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     import time as _time
     from dataclasses import replace
 
-    from .bundle import audit_bundle, discover_artifact_set
+    from . import deadline as _deadline
+    from .bundle import (
+        audit_bundle,
+        check_artifact_set_soname_collisions,
+        discover_artifact_set,
+    )
 
     # run_scan_set is audit-only by definition (ADR-056 D2) -- normalize
     # mode here rather than trust every caller to set it. Without this, the
@@ -1614,6 +1637,13 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         )
     if req.baseline is not None:
         raise ValueError("run_scan_set does not accept req.baseline (audit-only)")
+    # P2 regression (Codex review): run_scan_set is a public, re-exported
+    # service entry point (ADR-056) that a direct Python API caller can
+    # reach without going through cli_scan._run_artifact_set's own
+    # click-level "these flags only mean anything with --against" guard --
+    # req.mode is already forced to "audit" above, so this always applies
+    # here (unlike run_scan, where it's conditional on baseline/mode).
+    _reject_comparison_only_fields(req)
 
     # Start the shared budget clock *before* set discovery/validation, not
     # after (Codex review): discover_artifact_set() stats every candidate
@@ -1641,6 +1671,24 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # ArtifactSetError.
     libraries = discover_artifact_set(list(binaries), explicit=True)
 
+    # P2 regression (Codex review): validate cross-member DT_SONAME
+    # uniqueness before scanning any member, not only inside audit_bundle()
+    # after every member has already been individually scanned -- an
+    # earlier member scan exhausting --budget would otherwise mask this
+    # genuine usage error as an ordinary BUDGET_OVERFLOW, and every
+    # member's own (potentially expensive) scan would already have run for
+    # a request that was always going to be rejected.
+    remaining_for_soname_check = (
+        None if budget_s is None else budget_s - (_time.monotonic() - start)
+    )
+    if remaining_for_soname_check is not None and remaining_for_soname_check <= 0:
+        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
+    try:
+        with _deadline.deadline_scope(remaining_for_soname_check):
+            check_artifact_set_soname_collisions(libraries)
+    except _deadline.DeadlineExceeded:
+        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
+
     per_artifact: list[ScanArtifactResult] = []
     for binary in libraries.values():
         result = _run_scan_one_member(
@@ -1659,8 +1707,6 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         return ScanSetResult(
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
         )
-
-    from . import deadline as _deadline
 
     try:
         # P2 regression (Codex review): the post-audit elapsed-time check

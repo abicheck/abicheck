@@ -1,8 +1,8 @@
 # ADR-023: Bundle-aware multi-binary ABI analysis
 
 **Date:** 2026-05-20
-**Status:** Accepted — implemented, one documented claim found stale.
-**Amendment:** as ADR-002's amendment
+**Status:** Accepted — implemented.
+**Amendment:** see the 2026-07-29 amendment below
 notes, `compare-release` is no longer a registered top-level command
 (`python -m abicheck --help` lists `compare` only; `compare-release` lives on
 as the unregistered engine `compare` dispatches directory/package operands
