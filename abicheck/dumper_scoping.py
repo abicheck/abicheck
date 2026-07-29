@@ -99,7 +99,11 @@ from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
 from .model import AbiSnapshot, EnumType, Function, RecordType, Variable
 from .provenance import is_dependency_header
-from .type_reachability import type_string_references_name
+from .type_reachability import (
+    _namespace_suffix_spellings,
+    _stripped_signature_spelling,
+    type_string_references_name,
+)
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
@@ -141,17 +145,31 @@ def _directly_referenced_dependency_names(
     bare ``name``): two dependency candidates can share the same bare name
     under different fully-qualified identities (``std::Thing`` vs.
     ``vendor::Thing``), and returning bare names would let one's match
-    re-admit the other's unrelated layout (Codex review). For the same
-    reason, a candidate's bare ``name`` is only used as a matching spelling
-    when it is unique among *dep_candidates* -- an ambiguous bare name is
-    not trusted to mean any one of them.
+    re-admit the other's unrelated layout (Codex review).
+
+    A candidate's own full identity is always trusted (never ambiguous by
+    construction). A *derived* spelling -- a namespace-suffix spelling from
+    :func:`abicheck.type_reachability._namespace_suffix_spellings` (e.g. a
+    direct-clang backend's partially-qualified ``Outer::Inner`` for a
+    nested ``vendor::Outer::Inner``, or the fully bare leaf), or a
+    stdlib-stripped spelling from
+    :func:`abicheck.type_reachability._stripped_signature_spelling` -- is
+    only trusted when it does not collide with another *dep_candidates*
+    entry's own suffix spelling, nor with any *kept_types* spelling: an
+    ambiguous derived spelling is not trusted to mean any one of them
+    (Codex review; mirrors ``type_reachability._spelling_index``'s own
+    collision guards).
 
     *typedefs* (``AbiSnapshot.typedefs``, alias -> underlying-type spelling)
     is consulted so a dependency type only reachable through a typedef
-    alias in the kept signatures (e.g. a signature spells ``std::string``
-    while the record's own identity is the underlying
-    ``std::__cxx11::basic_string<...>``) is still recognized (Codex review)
-    -- mirrors :func:`abicheck.type_reachability`'s own typedef-following.
+    alias in the kept signatures is still recognized (Codex review) --
+    e.g. a signature spells ``std::string`` while the record's own identity
+    is the underlying, ABI-tag-qualified ``std::__cxx11::basic_string<...>``
+    and the typedef target is itself already namespace/ABI-tag-stripped
+    (``basic_string<...>``, DWARF's own convention) -- matched via each
+    candidate's :func:`abicheck.type_reachability._stripped_signature_spelling`
+    form, not only its exact identity. Mirrors
+    :func:`abicheck.type_reachability`'s own typedef-following.
     """
     signature_texts: list[str] = []
     for fn in kept_functions:
@@ -169,22 +187,33 @@ def _directly_referenced_dependency_names(
     for alias, target in (typedefs or {}).items():
         aliases_by_target.setdefault(target, []).append(alias)
 
-    bare_name_identities: dict[str, set[str]] = {}
+    kept_spellings = {
+        suffix
+        for rec in kept_types
+        for suffix in _namespace_suffix_spellings(_candidate_identity(rec))
+    }
+
+    suffix_owners: dict[str, set[str]] = {}
+    identity_by_id: dict[int, str] = {}
     for candidate in dep_candidates:
-        bare_name_identities.setdefault(candidate.name, set()).add(
-            _candidate_identity(candidate)
-        )
+        identity = _candidate_identity(candidate)
+        identity_by_id[id(candidate)] = identity
+        for suffix in _namespace_suffix_spellings(identity):
+            suffix_owners.setdefault(suffix, set()).add(identity)
 
     referenced: set[str] = set()
     for candidate in dep_candidates:
-        identity = _candidate_identity(candidate)
-        qualified_name = getattr(candidate, "qualified_name", None)
-        spellings: set[str] = set()
-        if qualified_name:
-            spellings.add(qualified_name)
-        if len(bare_name_identities[candidate.name]) == 1:
-            spellings.add(candidate.name)
-        for key in (identity, candidate.name):
+        identity = identity_by_id[id(candidate)]
+        spellings: set[str] = {identity}
+        for suffix in _namespace_suffix_spellings(identity)[1:]:
+            if suffix in kept_spellings:
+                continue
+            if len(suffix_owners.get(suffix, ())) == 1:
+                spellings.add(suffix)
+        stripped = _stripped_signature_spelling(identity)
+        if stripped and stripped not in kept_spellings:
+            spellings.add(stripped)
+        for key in filter(None, (identity, stripped)):
             spellings.update(aliases_by_target.get(key, ()))
 
         for spelling in spellings:

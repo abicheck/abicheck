@@ -584,6 +584,60 @@ class TestDirectlyReferencedDependencyRetention:
             "std::__cxx11::basic_string<char>"
         ]
 
+    def test_typedef_target_normalized_before_matching(self):
+        """Codex review (P1, second round): a real DWARF typedef target is
+        stored already namespace/ABI-tag-stripped (`basic_string<...>`),
+        while the record's own identity is the full, qualified spelling
+        (`std::__cxx11::basic_string<...>`) -- these must still resolve via
+        `_stripped_signature_spelling`, not just exact string equality."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("std::string",))],
+            types=[
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    qualified_name=(
+                        "std::__cxx11::basic_string<char, std::char_traits<char>, "
+                        "std::allocator<char> >"
+                    ),
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={
+                "std::string": (
+                    "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+                )
+            },
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["basic_string"]
+
+    def test_partially_qualified_nested_dependency_type_is_kept(self):
+        """Codex review (P2, second round): a direct-clang-style backend
+        spells a nested dependency type with the enclosing namespace
+        elided but the class-nesting qualifier kept (`Outer::Inner` for
+        `vendor::Outer::Inner`) -- a partial qualification distinct from
+        both the full identity and the fully bare leaf."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Outer::Inner *",))],
+            types=[
+                RecordType(
+                    name="Inner",
+                    kind="struct",
+                    qualified_name="vendor::Outer::Inner",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["vendor::Outer::Inner"]
+
     def test_unreferenced_dependency_type_still_excluded(self):
         snap = AbiSnapshot(
             library="libfoo.so",
