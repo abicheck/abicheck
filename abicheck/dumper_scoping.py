@@ -332,7 +332,16 @@ def _directly_referenced_dependency_names(
     # ``_underlying_type_name()`` stores a namespaced typedef target bare
     # (``Thing`` for an underlying ``dep::Thing``), which only a suffix key
     # can match -- the same bare-vs-qualified split already applied to a
-    # kept signature's own spelling of a candidate.
+    # kept signature's own spelling of a candidate. A key colliding with a
+    # *kept_spellings* entry is excluded from *key_owners* entirely (Codex
+    # review, fresh evidence), not just checked later against the
+    # *candidate*'s own final spellings: a resolved typedef target spelled
+    # with the ambiguous bare suffix itself (``Thing``, shared by a kept
+    # ``api::Thing`` and this dependency's ``dep::Thing``) must not
+    # attribute that target to the dependency candidate merely because the
+    # candidate's *alias* string happens not to collide -- the earlier
+    # per-candidate guard only ever checked the alias spelling, never the
+    # ambiguous key that produced the attribution in the first place.
     key_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = _candidate_identity(candidate)
@@ -343,6 +352,8 @@ def _directly_referenced_dependency_names(
             spellings.add(stripped)
         own_spellings_of[id(candidate)] = spellings
         for key in spellings:
+            if key in kept_spellings:
+                continue
             key_owners.setdefault(key, set()).add(identity)
 
     identity_aliases: dict[str, set[str]] = {}

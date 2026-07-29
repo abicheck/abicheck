@@ -808,6 +808,37 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
 
+    def test_ambiguous_typedef_target_kept_type_collision_not_trusted(self):
+        """Codex review (eighth round): a resolved typedef target spelled
+        with a bare suffix that's ambiguous between a kept type
+        (`api::Thing`) and an unrelated dependency (`dep::Thing`) must not
+        attribute the alias to the dependency -- the earlier guard only
+        checked the alias's own spelling for a kept-type collision, never
+        the ambiguous key that produced the attribution."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="api::Thing",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Thing"]
+
     def test_kept_enum_collision_guards_bare_dependency_spelling(self):
         """Codex review (P2, fourth round): a kept enum's bare spelling
         (`api::Status` spelled bare `Status`) must guard against an
