@@ -66,7 +66,19 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   `dump_manifest`'s `project_owned` per-TU include directories (private
   sibling/support roots used only for dependency-scope filtering) are no
   longer forwarded into L4 source replay's public-header set, which
-  previously could false-flag private-header churn as a source break.
+  previously could false-flag private-header churn as a source break;
+  `InputSpec.dump_manifest` and `InputSpec.headers` on the same side are now
+  rejected as mutually exclusive (mirroring the CLI's own
+  `--dump-manifest`/`-H` `UsageError`) — a manifest replaces the primary AST's
+  header list entirely, so forwarding both previously mixed two different
+  declared surfaces into one snapshot's public-header provenance and
+  pair-wide dialect detection; and a per-side
+  `InputSpec.compile.frontend_context` is now validated the same way the
+  request-level `frontend_context` already is, and normalized to lowercase
+  before use, since an accepted case-insensitive spelling (e.g. `"DEVICE"`)
+  previously bypassed validation entirely and then compared unequal to the
+  lowercase literal every real consumer (the DPC++/SYCL AST-context selector)
+  checks against.
   `CompileContext` itself moved to a new leaf module
   (`abicheck.compile_context`, re-exported from `service_scan` for
   back-compat) so `api_types.py` can type against it without joining the

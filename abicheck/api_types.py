@@ -327,6 +327,10 @@ class CompareRequest:
                 f"unsupported frontend context {self.frontend_context!r}: "
                 "choose from device, host"
             )
+        # Codex: a per-side InputSpec.compile.frontend_context bypassed this enum check entirely -- validate it here too, same message shape.
+        for label, side in (("old", self.old), ("new", self.new)):
+            if side.compile is not None and side.compile.frontend_context.lower() not in ("host", "device"):
+                errors.append(f"unsupported {label} frontend context {side.compile.frontend_context!r}: choose from device, host")
         return errors
 
     def validate(self) -> CompareRequest:

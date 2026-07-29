@@ -1686,10 +1686,8 @@ def run_compare_request(
     a ``CompareRequest`` and calls this, so defaults cannot diverge between
     invocation paths. The legacy keyword-argument :func:`run_compare` is a thin
     shim that builds the request and delegates here.
-
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
-
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`.
         SnapshotError: If either input cannot be loaded.
@@ -1697,6 +1695,10 @@ def run_compare_request(
     request.validate()
     # validate() accepts lang case-insensitively; the ELF dump path does case-sensitive lang == "c" checks, so normalise here. android (no header-AST path) falls back to "auto" for the binary dump.
     lang = request.lang.lower()
+    # Codex: dump_manifest replaces headers for the primary AST; forwarding both mixes two declared surfaces into one snapshot's provenance/dialect detection. Mirrors the CLI's --dump-manifest/-H UsageError.
+    for label, side in (("old", request.old), ("new", request.new)):
+        if side.dump_manifest is not None and side.headers:
+            raise ValidationError(f"dump_manifest and a header for the {label} side (InputSpec.headers) are mutually exclusive -- declare the {label} side's public surface in the manifest's own base profile instead.")
     from .api_types import HEADER_AST_FRONTENDS
     frontend_lower = request.frontend.lower()
     header_backend = frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"
@@ -1709,7 +1711,6 @@ def run_compare_request(
     override = pair_wide_cxx20_std_override(lang, list(request.old.headers) + _manifest_forced_includes(request.old.dump_manifest), list(request.new.headers) + _manifest_forced_includes(request.new.dump_manifest), None, ())
     if override is not None:
         pair_compile = CompileContext(gcc_option_tokens=override)
-
     # request.{old,new}.headers double as the public-header set for provenance tagging. Split into files/directories before tagging: an unsplit directory entry corrupts scope_fingerprint. InputSpec.public_header_dirs is unioned in afterward.
     old_public_headers, old_public_header_dirs = split_public_header_inputs(request.old.headers)
     new_public_headers, new_public_header_dirs = split_public_header_inputs(request.new.headers)
@@ -1733,7 +1734,6 @@ def run_compare_request(
         for side, evidence in ((request.old, old_evidence), (request.new, new_evidence)):
             if _is_raw_source_tree(side.sources) and _sce.effective_frontend(evidence.compile, header_backend) == "hybrid":
                 raise ValidationError("depth='source' is incompatible with the 'hybrid' AST frontend: L4 source-ABI replay has no dual-backend hybrid extractor. Use 'castxml' or 'clang' for a depth='source' request.")
-
     def _resolve_side(
         side: InputSpec,
         evidence: SideEvidence,

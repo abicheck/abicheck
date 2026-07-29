@@ -156,6 +156,15 @@ def _compile_context(
     # alone; it must instead pin the *other* side to "device" explicitly and
     # leave the request-level `frontend_context` at "host".
     base = side_compile
+    # Codex review: request.frontend_context is normalized to lowercase above
+    # (resolve_compare_request_evidence), but a per-side InputSpec.compile.
+    # frontend_context passed straight through unchanged -- an accepted
+    # case-insensitive spelling like "DEVICE" then compared unequal to the
+    # lowercase literal every real consumer (e.g. sycl_context.py) checks
+    # against. api_types.py's validation_errors() now rejects anything that
+    # doesn't lowercase to "host"/"device", so normalizing here is safe.
+    if base is not None and base.frontend_context != base.frontend_context.lower():
+        base = dataclasses.replace(base, frontend_context=base.frontend_context.lower())
     if pair_compile is not None and pair_compile.gcc_option_tokens:
         # Codex review (P2): an unrelated side_compile override (e.g. only a
         # sysroot) must not silently discard the pair-wide C++20 dialect

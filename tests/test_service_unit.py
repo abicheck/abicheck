@@ -2499,6 +2499,92 @@ class TestCompareRequestAdr055Evidence:
         assert old_compile.sysroot == Path("/sysroot")
         assert "-std=gnu++20" in old_compile.gcc_option_tokens
 
+    def test_headers_alongside_dump_manifest_rejected(self, tmp_path):
+        """Codex review: dump_manifest replaces `headers` for the primary
+        AST -- dumper_manifest.resolve_header_ast_result ignores `headers`
+        entirely once a manifest is given -- but this method still forwarded
+        a non-empty `headers` into provenance tagging and dialect detection
+        alongside it, mixing two declared surfaces. Mirrors the CLI's own
+        --dump-manifest/-H UsageError (cli_compare_helpers.py)."""
+        from abicheck.dump_manifest import DumpManifest, TranslationUnit
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        old_h = tmp_path / "old.h"
+        old_h.write_text("void f();\n")
+        dm = DumpManifest(
+            base_dir=tmp_path, translation_units=(TranslationUnit(name="old.h"),)
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, headers=[old_h], dump_manifest=dm),
+            new=InputSpec.of(new_p),
+        )
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            run_compare_request(request)
+
+    def test_dump_manifest_alone_is_not_rejected(self, tmp_path, monkeypatch):
+        """A dump_manifest with no ordinary headers on that side must not be
+        caught by the new mutual-exclusivity guard above."""
+        from abicheck.dump_manifest import DumpManifest, TranslationUnit
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        dm = DumpManifest(
+            base_dir=tmp_path, translation_units=(TranslationUnit(name="old.h"),)
+        )
+        self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, dump_manifest=dm),
+            new=InputSpec.of(new_p),
+        )
+        # No ValidationError raised for the mutual-exclusivity guard itself;
+        # it may still fail later trying to actually resolve the manifest's
+        # (nonexistent) header, which is unrelated to this guard.
+        try:
+            run_compare_request(request)
+        except ValidationError as exc:
+            assert "mutually exclusive" not in str(exc)
+
+    def test_per_side_frontend_context_case_is_normalized(self, tmp_path, monkeypatch):
+        """Codex review: request.frontend_context is normalized to lowercase,
+        but a per-side InputSpec.compile.frontend_context passed straight
+        through unchanged -- an accepted case-insensitive spelling like
+        "DEVICE" then compared unequal to the lowercase literal every real
+        consumer (e.g. sycl_context.py) checks against."""
+        from abicheck.compile_context import CompileContext
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        calls = self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, compile=CompileContext(frontend_context="DEVICE")),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["compile"].frontend_context == "device"
+
+    def test_per_side_invalid_frontend_context_rejected(self, tmp_path):
+        """A per-side compile.frontend_context bypassed api_types.py's enum
+        check entirely (only the request-level default was validated) --
+        validate() must now catch it too."""
+        from abicheck.compile_context import CompileContext
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, compile=CompileContext(frontend_context="bogus")),
+            new=InputSpec.of(new_p),
+        )
+        errors = request.validation_errors()
+        assert any("bogus" in e and "old" in e for e in errors)
+        with pytest.raises(ValidationError, match="bogus"):
+            run_compare_request(request)
+
 
 class TestDiagnosticComparisonThreading:
     """ADR-050 D2's escape hatch, threaded through every service.py
