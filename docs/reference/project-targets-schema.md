@@ -167,7 +167,7 @@ time.
 
 ## `profiles:`
 
-A mapping of profile id → `{contract, os, arch, compile}`. `contract`
+A mapping of profile id → `{contract, os, arch, compile, consumer_compile}`. `contract`
 (default `true`) decides whether this build lane is an ABI contract (gets a
 baseline, gates CI) or a test-only CI lane that never gets one — "not every
 CI lane gets a baseline" is the whole point of this field (S17). The map
@@ -206,6 +206,73 @@ profiles:
       stdlib: libstdc++
       binding: gcc14
 ```
+
+### `consumer_compile:` — a separate client-toolchain overlay (G34 Phase 0)
+
+The optional `consumer_compile:` sub-block accepts the identical shape as
+`compile:` (same fields, same validation), but declares a **different**
+axis: `compile:` is the *producer/artifact* toolchain the library binary
+was actually built with (mangling, layout, vtables, calling convention,
+linked standard-library ABI); `consumer_compile:` is a *client* toolchain a
+user of the library compiles their own code with against the public
+headers, when it differs from the producer (which `#ifdef __GNUC__`/
+`__clang__`/`_MSC_VER` branch, which standard-library ABI, which template
+instantiation the client actually sees). A profile with no
+`consumer_compile:` behaves exactly as today — its `compile:` block doubles
+as the consumer's, so existing single-toolchain projects need no edits:
+
+```yaml
+profiles:
+  linux-gcc14-build-clang20-client:
+    contract: true
+    os: linux
+    compile:
+      binding: gcc14
+      standard: gnu++17
+    consumer_compile:
+      binding: clang20
+      standard: gnu++20
+      stdlib: libc++
+```
+
+`consumer_compile:`'s fields reach `abicheck project plan` the same way
+`compile:`'s do, into their own separate pair —
+[`consumer_compile_gcc_path`/`consumer_compile_gcc_options`](run-plan-schema.md#runplancheck-fields)
+— never falling back to the producer overlay's own resolved values when
+absent. **Not yet wired:** actually applying `consumer_compile:` to a
+separate header-AST (L2) extraction pass and merging it with the producer
+toolchain's binary (L0/L1) facts — this schema slice only projects the
+config axis into `run-plan.json`; see
+[`docs/contribute/plans/g34-producer-consumer-compiler-profile-separation.md`](../contribute/plans/g34-producer-consumer-compiler-profile-separation.md)'s
+Phase 0 for the remaining extraction/merge integration.
+
+### `compile.frontend` / `consumer_compile.frontend` — per-profile AST frontend (G34 Phase B)
+
+Either overlay may set `frontend:` to one of the same four values the
+global `--ast-frontend` flag accepts (`auto`/`castxml`/`clang`/`hybrid`),
+overriding the global default for that profile's cell only:
+
+```yaml
+profiles:
+  linux-gcc14-build-clang20-client:
+    contract: true
+    compile:
+      binding: gcc14
+      frontend: castxml
+    consumer_compile:
+      binding: clang20
+      frontend: clang
+```
+
+Reaches `abicheck project plan` as
+[`compile_ast_frontend`/`consumer_compile_ast_frontend`](run-plan-schema.md#runplancheck-fields),
+resolved independently for each overlay (a profile with no `frontend:` set
+on an overlay leaves that field empty, deferring to a caller's own global
+`--ast-frontend`/default — it never falls back to the *other* overlay's
+`frontend:` value). Like `consumer_compile:` itself, this is schema/
+projection only — no run-plan consumer resolves a per-cell `RunPlanCell`
+that actually threads this field into a real `dump`/`compare` invocation
+yet; see the G34 plan doc's Phase B for what remains.
 
 ### `compile.binding` — resolving a logical toolchain id
 

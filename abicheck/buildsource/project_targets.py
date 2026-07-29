@@ -94,6 +94,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..api_types import HEADER_AST_FRONTENDS
 from .inline import KNOWN_TOP_LEVEL_KEYS
 from .scan_levels import USER_DEPTHS, EvidenceDepth
 
@@ -679,6 +680,15 @@ class ProfileCompileSpec:
 
     All fields are optional and additive; an empty ``ProfileCompileSpec`` is
     indistinguishable from an absent ``compile:`` block.
+
+    ``frontend`` (G34 Phase B) overrides the global ``--ast-frontend``
+    default for this profile's cell only -- one of the same four values
+    the CLI flag accepts (``auto``/``castxml``/``clang``/``hybrid``,
+    shape-validated the same way; empty means "no override, inherit the
+    global default"). Applies identically whichever overlay it's set on
+    (``compile:`` for the producer/artifact toolchain, ``consumer_compile:``
+    for the client toolchain, G34 Phase 0) since both share this same
+    dataclass.
     """
 
     compiler_family: str = ""
@@ -687,6 +697,7 @@ class ProfileCompileSpec:
     standard: str = ""
     stdlib: str = ""
     binding: str = ""
+    frontend: str = ""
     abi_macros: dict[str, str] = field(default_factory=dict)
     args: list[str] = field(default_factory=list)
 
@@ -708,6 +719,8 @@ class ProfileCompileSpec:
             d["stdlib"] = self.stdlib
         if self.binding:
             d["binding"] = self.binding
+        if self.frontend:
+            d["frontend"] = self.frontend
         if self.abi_macros:
             d["abi_macros"] = dict(self.abi_macros)
         if self.args:
@@ -727,6 +740,7 @@ class ProfileCompileSpec:
             "standard",
             "stdlib",
             "binding",
+            "frontend",
             "abi_macros",
             "args",
         }
@@ -749,6 +763,18 @@ class ProfileCompileSpec:
             if not isinstance(value, str):
                 raise ValueError(f"{where}.{key} must be a string, got {value!r}")
             str_fields[key] = _safe_profile_atom(where, key, value)
+
+        frontend = ""
+        if "frontend" in d:
+            value = d["frontend"]
+            if not isinstance(value, str):
+                raise ValueError(f"{where}.frontend must be a string, got {value!r}")
+            if value not in HEADER_AST_FRONTENDS:
+                allowed = ", ".join(sorted(HEADER_AST_FRONTENDS))
+                raise ValueError(
+                    f"{where}.frontend must be one of {{{allowed}}}, got {value!r}"
+                )
+            frontend = value
 
         abi_macros_raw = d.get("abi_macros", {})
         if not isinstance(abi_macros_raw, dict):
@@ -782,6 +808,7 @@ class ProfileCompileSpec:
             standard=str_fields.get("standard", ""),
             stdlib=str_fields.get("stdlib", ""),
             binding=str_fields.get("binding", ""),
+            frontend=frontend,
             abi_macros=abi_macros,
             args=args,
         )
@@ -799,6 +826,21 @@ class ProfileSpec:
     root ``compile:`` block (:class:`~abicheck.buildsource.inline.BuildConfig`);
     a run-plan consumer is expected to merge root-then-profile, same
     precedence as every other config layer in this project.
+
+    The optional ``consumer_compile:`` overlay (G34 Phase 0, same
+    :class:`ProfileCompileSpec` shape) separates the two axes ``compile:``
+    otherwise conflates: ``compile:`` is the *producer/artifact* toolchain
+    the library binary was actually built with; ``consumer_compile:`` is a
+    *client* toolchain a user of the library compiles their own code with
+    against the public headers, when it differs from the producer (e.g. a
+    ``.so`` built once with GCC 14 but contractually supporting a Clang 20
+    client under a different standard/standard-library). A profile with no
+    ``consumer_compile:`` behaves exactly as today — its ``compile:`` block
+    doubles as the consumer's, so existing single-toolchain projects need no
+    edits. Shape-validated identically to ``compile:``; a run-plan/dumper
+    consumer applying it to the header-AST (L2) extraction step only is not
+    yet wired (see ``docs/contribute/plans/
+    g34-producer-consumer-compiler-profile-separation.md``'s Phase 0).
     """
 
     id: str = ""
@@ -806,6 +848,7 @@ class ProfileSpec:
     os: str = ""
     arch: str = ""
     compile: ProfileCompileSpec | None = None
+    consumer_compile: ProfileCompileSpec | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"contract": self.contract}
@@ -815,6 +858,8 @@ class ProfileSpec:
             d["arch"] = self.arch
         if self.compile is not None and not self.compile.is_empty:
             d["compile"] = self.compile.to_dict()
+        if self.consumer_compile is not None and not self.consumer_compile.is_empty:
+            d["consumer_compile"] = self.consumer_compile.to_dict()
         return d
 
     @classmethod
@@ -824,7 +869,9 @@ class ProfileSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = _unknown_keys(d, {"contract", "os", "arch", "compile"})
+        unknown = _unknown_keys(
+            d, {"contract", "os", "arch", "compile", "consumer_compile"}
+        )
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         contract = d.get("contract", True)
@@ -838,12 +885,18 @@ class ProfileSpec:
             compile_spec = ProfileCompileSpec.from_dict(
                 f"{where}.compile", d["compile"]
             )
+        consumer_compile_spec: ProfileCompileSpec | None = None
+        if "consumer_compile" in d:
+            consumer_compile_spec = ProfileCompileSpec.from_dict(
+                f"{where}.consumer_compile", d["consumer_compile"]
+            )
         return cls(
             id=name,
             contract=contract,
             os=str(d.get("os", "") or ""),
             arch=str(d.get("arch", "") or ""),
             compile=compile_spec,
+            consumer_compile=consumer_compile_spec,
         )
 
 

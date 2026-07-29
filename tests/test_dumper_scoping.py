@@ -18,6 +18,7 @@ from abicheck.model import (
     Function,
     Param,
     RecordType,
+    ScopeOrigin,
     TypeField,
     Variable,
     Visibility,
@@ -51,6 +52,7 @@ def _rec(
     fields: tuple[tuple[str, str], ...] = (),
     bases: tuple[str, ...] = (),
     source_header: str | None = _OWN_HEADER,
+    origin: ScopeOrigin = ScopeOrigin.UNKNOWN,
 ) -> RecordType:
     return RecordType(
         name=name,
@@ -59,6 +61,7 @@ def _rec(
         fields=[TypeField(name=n, type=t) for n, t in fields],
         bases=list(bases),
         source_header=source_header,
+        origin=origin,
     )
 
 
@@ -440,12 +443,1473 @@ class TestQualifiedNameCollision:
         assert set(scoped.dwarf.structs) == {"mine::Thing"}
 
 
+class TestDirectlyReferencedDependencyRetention:
+    """Status-review follow-up (P0 against PR #649): a dependency-header
+    type directly named in a kept public signature must survive scoping,
+    while its own purely-transitive internals stay excluded."""
+
+    def test_stdlib_type_directly_referenced_by_public_param_is_kept(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("std::string",))],
+            types=[
+                RecordType(
+                    name="string",
+                    kind="struct",
+                    qualified_name="std::string",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="_Alloc_hider",
+                    kind="struct",
+                    qualified_name="std::string::_Alloc_hider",
+                    source_header=_SYSTEM_HEADER,
+                    fields=[TypeField(name="ptr", type="char *")],
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        kept_names = {t.name for t in scoped.types}
+        assert "string" in kept_names, (
+            "std::string is directly named in run()'s own signature -- "
+            "the library's ABI genuinely depends on its layout"
+        )
+        assert "_Alloc_hider" not in kept_names, (
+            "only reachable transitively through std::string's own "
+            "internals -- must still be excluded"
+        )
+
+    def test_non_public_libc_type_directly_referenced_is_kept(self):
+        """The review's own example: `struct tm` from <time.h> used
+        directly in a public function's signature."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("public_fn", params=("struct Internal *", "struct tm *"))],
+            types=[
+                _rec("Internal"),
+                _rec("tm", source_header="/usr/include/time.h"),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"Internal", "tm"}
+
+    def test_hidden_function_does_not_retain_a_dependency_type_it_names(self):
+        # Regression: a hidden/private function naming a dependency type in
+        # its own signature must not itself make that type a retention
+        # root -- otherwise removing that private function later silently
+        # drops the type from the NEXT scoped snapshot, and `compare`
+        # reports a spurious TYPE_REMOVED even though nothing on the
+        # public surface changed (Codex review, fresh evidence).
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[
+                _fn(
+                    "internal_helper",
+                    params=("struct tm *",),
+                    vis=Visibility.HIDDEN,
+                )
+            ],
+            types=[_rec("tm", source_header="/usr/include/time.h")],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == set(), (
+            "a hidden function is never a direct-reference retention root"
+        )
+
+    def test_public_function_still_retains_a_dependency_type_it_names(self):
+        # Same scenario, but the referencing function is public -- the
+        # existing retention behaviour must be unaffected.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("public_helper", params=("struct tm *",))],
+            types=[_rec("tm", source_header="/usr/include/time.h")],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"tm"}
+
+    def test_private_origin_kept_record_does_not_retain_a_dependency_type_it_names(
+        self,
+    ):
+        # Regression: a kept RecordType/EnumType whose own header is
+        # private/generated/system (but which the header-origin-only
+        # scoping contract still retains) must not itself act as a
+        # direct-reference retention root for a dependency type its own
+        # fields name -- mirroring the hidden-function case above.
+        # RecordType/EnumType have no `visibility` field, but both do carry
+        # `origin` (Codex review, fresh evidence: an earlier fix's own
+        # comment incorrectly claimed neither field existed at all).
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[
+                _rec(
+                    "Internal",
+                    fields=(("t", "struct tm"),),
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+                _rec("tm", source_header="/usr/include/time.h"),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"Internal"}, (
+            "a private-origin kept record is never a direct-reference retention root"
+        )
+
+    def test_public_origin_kept_record_still_retains_a_dependency_type_it_names(
+        self,
+    ):
+        # Same scenario, but the referencing record's origin is public --
+        # the existing retention behaviour must be unaffected.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[
+                _rec(
+                    "Own",
+                    fields=(("t", "struct tm"),),
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                _rec("tm", source_header="/usr/include/time.h"),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"Own", "tm"}
+
+    def test_dependency_type_referenced_only_via_field_of_kept_type_is_kept(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[
+                _rec("Wrapper", fields=(("value", "std::string"),)),
+                RecordType(
+                    name="string",
+                    kind="struct",
+                    qualified_name="std::string",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"Wrapper", "string"}
+
+    def test_dependency_enum_directly_referenced_is_kept(self):
+        from abicheck.model import EnumMember, EnumType
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", ret="errc")],
+            enums=[
+                EnumType(
+                    name="errc",
+                    members=[EnumMember(name="A", value=0)],
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [e.name for e in scoped.enums] == ["errc"]
+
+    def test_ambiguous_bare_name_does_not_cross_admit_unrelated_type(self):
+        """Codex review (P2): two dependency records sharing a bare `name`
+        under different `qualified_name`s -- only the one actually named in
+        a kept signature must be retained, not both via the shared bare
+        spelling."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("std::Thing *",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="vendor::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
+    def test_typedef_alias_resolves_dependency_target_record(self):
+        """Codex review (P1): a signature spells a dependency type through a
+        typedef alias (`std::string`) while the record's own identity is the
+        underlying spelling (`std::__cxx11::basic_string<...>`) -- the link
+        lives only in `snapshot.typedefs` and must still be followed."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("std::string",))],
+            types=[
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    qualified_name="std::__cxx11::basic_string<char>",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"std::string": "std::__cxx11::basic_string<char>"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == [
+            "std::__cxx11::basic_string<char>"
+        ]
+
+    def test_typedef_target_normalized_before_matching(self):
+        """Codex review (P1, second round): a real DWARF typedef target is
+        stored already namespace/ABI-tag-stripped (`basic_string<...>`),
+        while the record's own identity is the full, qualified spelling
+        (`std::__cxx11::basic_string<...>`) -- these must still resolve via
+        `_stripped_signature_spelling`, not just exact string equality."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("std::string",))],
+            types=[
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    qualified_name=(
+                        "std::__cxx11::basic_string<char, std::char_traits<char>, "
+                        "std::allocator<char> >"
+                    ),
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={
+                "std::string": (
+                    "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+                )
+            },
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["basic_string"]
+
+    def test_chained_typedef_alias_resolves_dependency_target(self):
+        """Codex review (P1, third round): `using Handle = Thing; using
+        Thing = std::Thing;` -- a signature spelling the outermost alias
+        must still resolve through the chain to the dependency record."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "Thing", "Thing": "std::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
+    def test_decorated_typedef_target_resolves_dependency_record(self):
+        """Codex review (P1, third round): `using Handle = std::Thing *;` --
+        the typedef target is a *decorated* form (pointer), not an exact
+        match for the candidate's own identity, and must still resolve via
+        a substring/token match rather than requiring exact equality."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "std::Thing *"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
+    def test_chained_decorated_typedef_target_resolves_dependency_record(self):
+        """Codex review (P1, fourth round): `using Ptr = Handle *; using
+        Handle = std::Thing;` -- `"Handle *"` is not itself a typedef key
+        (only the embedded `"Handle"` token is), so a whole-string chain
+        follower stops there. The token must be expanded within the
+        decorated intermediate target too."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Ptr",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Ptr": "Handle *", "Handle": "std::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
+    def test_long_typedef_chain_resolves_beyond_a_fixed_hop_count(self):
+        """Codex review (P2, fifth/sixth rounds): a chain of fifty distinct
+        alias hops must still resolve to the real dependency identity --
+        two successive earlier versions capped expansion at a fixed round
+        count (8, then 32), each truncating a legitimate longer chain
+        before it ever reached the target. Resolution is now via the
+        graph-reachability worklist (`_typedef_alias_reachability`), which
+        has no fixed hop cap at all -- see that function's own docstring
+        for how propagation converges."""
+        typedefs = {f"A{i}": f"A{i + 1}" for i in range(50)}
+        typedefs["A50"] = "std::Thing"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("A0",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs=typedefs,
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
+    def test_typedef_resolution_stays_fast_with_many_typedefs(self):
+        """Self-review follow-up: an earlier version recompiled the
+        typedef-key spelling pattern once per alias (O(typedef count^2)
+        before any signature is even scanned) -- confirmed empirically at
+        ~30s for 3,000 typedefs. Must stay well under a second now that the
+        pattern is compiled once and reused."""
+        import time
+
+        typedefs = {f"Alias{i}": f"Alias{i + 1}" for i in range(2000)}
+        typedefs["Alias2000"] = "int"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run")],
+            types=[_rec("Own")],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"typedef resolution took {elapsed:.2f}s, expected < 5s"
+
+    def test_long_typedef_chain_reachability_stays_fast(self):
+        """Codex review (eighteenth round, P2): the previous full-table
+        relaxation rescanned every alias's entire edge set on each of up to
+        `len(typedefs)` rounds, advancing a long outer-to-inner chain
+        (`A0 -> A1 -> ... -> dep::Thing`) only one hop per round --
+        confirmed empirically at ~4.9s for 4,000 chained aliases and
+        ~20.4s for 8,000 (quadratic in chain length). A reverse-edge
+        worklist must resolve a much longer chain well under a second."""
+        import time
+
+        n = 8000
+        typedefs = {f"A{i}": f"A{i + 1}" for i in range(n)}
+        typedefs[f"A{n}"] = "dep::Thing"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("A0",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"long typedef chain reachability took {elapsed:.2f}s"
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_self_referential_typedefs_do_not_blow_up(self):
+        """Codex review (ninth round): `typedef struct Foo Foo;` -- a
+        common, real C/C++ idiom -- creates a direct self-reference
+        (`typedefs["Foo"] == "struct Foo"`). Naive pointer-doubling
+        substitutes the embedded `Foo` token with its own current
+        (already-grown) expansion every round, doubling the string length
+        indefinitely rather than converging -- confirmed empirically at
+        ~74MB of aggregate resolved text for 2,000 such entries. Must stay
+        fast and must not grow the text at all."""
+        import time
+
+        typedefs = {f"Foo{i}": f"struct Foo{i}" for i in range(2000)}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Foo0",))],
+            types=[
+                RecordType(
+                    name="Foo0",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"self-referential typedefs took {elapsed:.2f}s"
+        assert [t.name for t in scoped.types] == ["Foo0"]
+
+    def test_branching_typedef_chain_does_not_blow_up(self):
+        """Codex review (tenth round): `using A0 = Pair<A1, A1>; using A1 =
+        Pair<A2, A2>; ...` -- a branching (not merely linear) alias chain.
+        Materializing the full expansion doubles the string length at
+        every level (exponential in nesting depth, confirmed empirically
+        at ~38MB of resolved text for just 20 such levels). Resolution is
+        now via set-based reachability (`_typedef_alias_reachability`),
+        where a branching reference costs nothing extra since set union is
+        idempotent -- must stay fast and still resolve correctly."""
+        import time
+
+        typedefs = {f"A{i}": f"Pair<A{i + 1}, A{i + 1}>" for i in range(20)}
+        typedefs["A20"] = "dep::Thing"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("A0",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"branching typedef chain took {elapsed:.2f}s"
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_typedef_alias_pointing_at_kept_type_excludes_ambiguous_dependency(self):
+        """Codex review (tenth round): an own typedef `Handle -> api::Own`
+        means a kept signature spelling `Handle` is semantically naming
+        the kept type -- but an unrelated dependency record `dep::Handle`
+        derives the same bare suffix `Handle`. The dependency must not be
+        retained through this collision; a real signature meaning the
+        typedef alias must not be misattributed to it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Own",
+                    kind="struct",
+                    qualified_name="api::Own",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    qualified_name="dep::Handle",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "api::Own"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Own"]
+
+    def test_compound_typedef_alias_retains_both_kept_and_dependency_components(self):
+        """Codex review (eleventh round): `using Alias = Pair<api::Own,
+        dep::Thing>;` reaches *both* a kept type and a genuinely distinct
+        dependency candidate in the same compound target. Unlike the pure
+        `Handle -> api::Own` case above, this is not ambiguous -- the
+        alias names both simultaneously -- so treating the kept touch as
+        blanket proof the alias belongs only to the kept surface would
+        incorrectly erase `dep::Thing`'s retention too."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="Own",
+                    kind="struct",
+                    qualified_name="api::Own",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Pair<api::Own, dep::Thing>"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert sorted(t.qualified_name for t in scoped.types) == [
+            "api::Own",
+            "dep::Thing",
+        ]
+
+    def test_compound_typedef_alias_retains_both_dependency_components(self):
+        """Codex review (seventeenth round): `using Alias = Pair<dep::A,
+        dep::B>;` reaches *two distinct dependency candidates* (not one
+        kept + one dependency, as in the eleventh-round test above) in the
+        same compound target. The single-owner ambiguity check previously
+        applied uniformly to every spelling, including a purely
+        alias-derived one -- so both identities becoming "owners" of the
+        `Alias` spelling made it look like a coincidental collision between
+        unrelated candidates and dropped it entirely, even though the
+        alias unambiguously, structurally names both at once. Neither
+        `dep::A` nor `dep::B` has its own bare name collide with anything
+        else here -- the only reason both appear as owners is the shared
+        alias -- so both must be retained."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="B",
+                    kind="struct",
+                    qualified_name="dep::B",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Pair<dep::A, dep::B>"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert sorted(t.qualified_name for t in scoped.types) == [
+            "dep::A",
+            "dep::B",
+        ]
+
+    def test_two_separate_aliases_colliding_on_bare_suffix_stay_ambiguous(self):
+        """Codex review (nineteenth round): unlike the compound-alias test
+        above -- one alias reaching two candidates in the same target,
+        which is genuinely unambiguous -- this is *two separate,
+        independently-qualified* aliases (`api::Handle -> dep::A`,
+        `vendor::Handle -> dep::B`) that merely happen to reduce to the
+        identical bare suffix `Handle` via ordinary namespace-dropping.
+        A signature spelling bare `Handle` cannot tell which alias it
+        means, so neither `dep::A` nor `dep::B` may be retained through
+        it -- this is the same class of coincidental collision as two
+        unrelated candidates sharing a bare suffix, just one level
+        removed through the alias layer."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="B",
+                    kind="struct",
+                    qualified_name="dep::B",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"api::Handle": "dep::A", "vendor::Handle": "dep::B"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
+    def test_two_separate_aliases_still_resolve_via_their_own_qualified_spelling(
+        self,
+    ):
+        """Companion to the test above: when a signature spells the fully
+        qualified alias name directly (`api::Handle`, not the ambiguous
+        bare-dropped `Handle`), that spelling is unique to one alias and
+        must still resolve -- the fix for coincidental bare-suffix
+        collision must not also break the unambiguous qualified case."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("api::Handle",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="B",
+                    kind="struct",
+                    qualified_name="dep::B",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"api::Handle": "dep::A", "vendor::Handle": "dep::B"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::A"]
+
+    def test_kept_touched_alias_suffix_guards_coincidental_dependency_suffix(
+        self,
+    ):
+        """Codex review (twenty-first round): `kept_touched_aliases` (the
+        guard that keeps a candidate's own bare-suffix spelling from
+        coincidentally matching an unrelated kept-pointing alias's name)
+        previously excluded only the literal alias key (`api::Handle`),
+        never its namespace-suffix expansion (`Handle`). A signature
+        spelling the backend's bare-dropped `Handle` -- exactly the
+        convention this module already accounts for everywhere else --
+        slipped past the guard entirely, letting an unrelated
+        `dep::Handle` retain through the coincidental collision even
+        though the alias unambiguously pointed at the kept `api::Own`."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Own",
+                    kind="struct",
+                    qualified_name="api::Own",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    qualified_name="dep::Handle",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"api::Handle": "api::Own"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Own"]
+
+    def test_primitive_typedef_alias_shadows_coincidental_dependency_suffix(
+        self,
+    ):
+        """Codex review (twenty-second round): `typedefs["Handle"] =
+        "int"` -- an alias to a primitive, not to any modeled record or
+        enum -- reaches neither a kept spelling nor any dependency
+        candidate's key, so it was never recorded by
+        `kept_touched_aliases` (which only tracks an alias whose target
+        resolves to something). An unrelated `dep::Handle` deriving the
+        identical bare suffix `Handle` was therefore retained as if the
+        signature's `Handle` genuinely named it, even though it
+        unambiguously names the primitive alias instead. A typedef alias
+        existing under a name at all is a collision claim on that name,
+        regardless of what it resolves to."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    qualified_name="dep::Handle",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "int"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
+    def test_primitive_typedef_alias_shadows_exact_tag_identity_too(self):
+        """Codex review (twenty-third round): unlike the previous test's
+        `dep::Handle` (a *derived*, namespace-suffix match against
+        `Handle`), this dependency candidate's own identity is *exactly*
+        bare `Handle` -- a plain C-style struct tag with no namespace,
+        never assigned a `qualified_name`. In C, tag names (`struct
+        Handle`) and typedef names occupy separate namespaces, so a
+        signature spelling the bare, unqualified `Handle` can only mean
+        `typedefs["Handle"] = "int"`'s typedef -- the tag is never
+        reachable that way, exact-identity match or not. The previous
+        round's veto only covered a *derived* suffix owner; an *exact*
+        identity owner bypassed it entirely and was retained regardless
+        of the colliding primitive alias."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "int"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
+    def test_resolved_alias_takes_precedence_over_colliding_exact_tag(self):
+        """Codex review (twenty-eighth round): `typedef struct Actual
+        Handle;` alongside an unrelated `struct Handle` (a plain C-style
+        tag, its own identity exactly `Handle`, not merely a derived
+        suffix). The round-eighteen precedence fix only ever deferred a
+        candidate's *derived* own-spelling claim to a resolved alias; an
+        *exact*-identity claim still merged with the alias owner and
+        required a single combined owner, so this collision dropped both
+        `Actual` and `Handle` instead of retaining `Actual` -- the same
+        separate-namespaces reasoning as the primitive-alias tests above,
+        but now for an exact tag collision instead of a derived one."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Actual",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "struct Actual"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Actual"]
+
+    def test_elaborated_tag_reference_survives_colliding_primitive_typedef(
+        self,
+    ):
+        """Codex review (twenty-fourth round): unlike the previous two
+        tests' *bare* `Handle` (correctly deferring to
+        `typedefs["Handle"] = "int"`), this signature explicitly writes
+        the elaborated-type-specifier form `struct Handle *`. In both C
+        and C++, tag names and typedef names occupy separate namespaces,
+        and the `struct` keyword is exactly what disambiguates a
+        signature naming the tag directly, even when a same-named
+        typedef alias also exists -- the unconditional bare-name veto
+        must not also swallow this unambiguous elaborated reference."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("struct Handle *",))],
+            types=[
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "int"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Handle"]
+
+    def test_elaborated_spelling_still_collision_guards_against_kept_type(
+        self,
+    ):
+        """Codex review (thirty-first round, P1): a kept `api::Foo` and an
+        unrelated dependency-header global `struct Foo` share the bare
+        tag name `Foo`. A declaration inside `api::` can spell a
+        reference to the kept type as bare `struct Foo *` (the same
+        namespace-dropping convention this module already accounts for
+        elsewhere) -- but `kept_spellings` only ever added the bare `Foo`
+        suffix, never its elaborated form, so `struct Foo` slipped past
+        the kept-type collision guard and retained the unrelated
+        dependency `Foo` as if the signature's elaborated reference
+        named it. Only `api::Foo` (the kept type) may be retained;
+        the dependency `Foo` must not be."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("struct Foo *",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    qualified_name="api::Foo",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+
+    def test_elaborated_spelling_guards_both_class_and_struct_keyword(self):
+        """Codex review (thirty-third round, P2): a kept type declared as
+        `class api::Foo` but referenced in a kept signature via the valid
+        elaborated form `struct Foo *` -- C++ permits `class` and `struct`
+        to refer to the same non-union type interchangeably, so the kept-
+        type collision guard must claim both elaborated spellings, not
+        just the one matching the declaration's own keyword. An unrelated
+        dependency-header `struct Foo` must not be retained through the
+        keyword mismatch."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("struct Foo *",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="class",
+                    qualified_name="api::Foo",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+
+    def test_elaborated_reference_does_not_also_resolve_nested_typedef_alias(
+        self,
+    ):
+        """Codex review (thirty-second round, P2): `typedef struct Other
+        Foo;` alongside a kept signature explicitly spelling `struct Foo
+        *`. Both the complete elaborated spelling `struct Foo` and the
+        nested bare `Foo` (the typedef alias's own spelling) can match
+        the identical text at once via nested matching -- but in C/C++,
+        an elaborated-type-specifier resolves exclusively through the
+        tag namespace, so the compiler never even considers a same-named
+        typedef there. Only the tag `Foo` may be retained; the unrelated
+        typedef target `Other` must not be, even though `Foo` the
+        typedef alias legitimately resolves to it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("struct Foo *",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Other",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Foo": "struct Other"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Foo"]
+
+    def test_typedef_chain_through_a_shadowing_key_does_not_reach_dependency(
+        self,
+    ):
+        """Codex review (twenty-fifth round): `typedef int Handle; typedef
+        Handle B;` alongside an unrelated dependency `struct Handle` means
+        the token `Handle` inside `B`'s own target is *simultaneously* a
+        typedef key (resolving through to `int`, an uninteresting
+        terminal) and the struct's own interesting key. `B` never
+        actually names the struct -- only the *typedef* named `Handle`,
+        which happens to resolve to a primitive -- so a kept signature
+        using `B` must not retain `struct Handle` through this shadowing
+        coincidence."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("B",))],
+            types=[
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "int", "B": "Handle"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
+    def test_globally_qualified_signature_spelling_still_matches(self):
+        """Codex review (twenty-sixth round): direct-clang preserves a
+        signature's explicit global-scope qualifier in its printed
+        `qualType` -- `void f(::dep::Thing *)` keeps the leading `::`.
+        The boundary-aware matcher's negative lookbehind treats `:` as a
+        non-boundary character (so it can't accidentally match a partial
+        scope like bare `Thing` inside `ns::Thing`), which also means the
+        plain `dep::Thing` spelling fails to match when immediately
+        preceded by the extra `:` of a leading `::` -- silently dropping
+        a directly-referenced dependency type whose only signature
+        mention happens to be globally qualified."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("::dep::Thing *",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_globally_qualified_unnamespaced_signature_spelling_matches(self):
+        """Codex review (twenty-seventh round): the previous fix only
+        added the ``::``-prefixed spelling when the candidate's own
+        identity already contained ``::`` -- but direct-clang preserves
+        an explicit global-scope qualifier for an *unnamespaced* type
+        just the same, e.g. `void f(::Foo *)` for a plain `struct Foo`
+        with no namespace at all. That case was still excluded (the
+        guard only ran when `"::" in identity`), so a directly-
+        referenced unnamespaced dependency type whose only signature
+        mention is globally qualified was silently dropped."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("::Foo *",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Foo"]
+
+    def test_globally_qualified_typedef_alias_reference_matches(self):
+        """Codex review (twenty-ninth round): direct-clang preserves an
+        explicit global-scope qualifier on a typedef alias reference the
+        same way it does on a direct type reference (rounds 26/27) --
+        `using Handle = dep::Thing; void f(::Handle);` keeps the leading
+        `::` on the alias, not just on a record/enum's own qualified
+        name. The alias-spelling index only ever registered the bare
+        alias name and its namespace suffixes, so a signature spelling
+        `::Handle` failed to resolve through the alias to the directly-
+        referenced `dep::Thing` at all."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("::Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "dep::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_alias_colliding_with_a_non_resolving_alias_stays_ambiguous(self):
+        """Codex review (thirtieth round, P2): `api::Handle -> dep::A` and
+        `vendor::Handle -> int` share the bare suffix `Handle`, but the
+        second alias resolves to a primitive, not to any dep_candidate.
+        An earlier revision only tracked spelling collisions among
+        aliases *already known* to reach a dep_candidate -- so the
+        non-resolving `vendor::Handle` was invisible to the ambiguity
+        check, and `dep::A` was incorrectly retained as if `api::Handle`
+        were the spelling's only possible source. `dep::A` must not be
+        retained: the bare `Handle` genuinely could mean either alias."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"api::Handle": "dep::A", "vendor::Handle": "int"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
+    def test_partially_agreeing_aliases_retain_their_common_owner(self):
+        """Codex review (thirtieth round, P1): `api::Handle -> Pair<dep::A,
+        dep::B>` and `vendor::Handle -> dep::A` share the bare suffix
+        `Handle` and *partially* agree -- both, unambiguously, could mean
+        `dep::A` regardless of which alias the spelling denotes, even
+        though only one of them also reaches `dep::B`. An earlier
+        revision required every colliding alias's reach to be the
+        *identical* set, which dropped this partial agreement entirely;
+        only the genuinely disputed `dep::B` should be excluded, not the
+        common `dep::A`."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="B",
+                    kind="struct",
+                    qualified_name="dep::B",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={
+                "api::Handle": "Pair<dep::A, dep::B>",
+                "vendor::Handle": "dep::A",
+            },
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::A"]
+
+    def test_agreeing_colliding_aliases_retain_their_shared_target(self):
+        """Codex review (twentieth round, P1): unlike the previous test's
+        two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle
+        -> dep::B`), this is two aliases -- `Handle -> dep::Thing` and
+        `api::Handle -> dep::Thing` -- that both reduce to the same bare
+        `Handle` spelling AND both resolve to the identical dependency
+        type. There is nothing to disambiguate here: every alias that
+        could produce this spelling names the same referent, so requiring
+        a single originating alias (the fix for the disagreeing case)
+        must not also drop this spelling -- `dep::Thing` must still be
+        retained."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "dep::Thing", "api::Handle": "dep::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_alias_reaching_an_already_ambiguous_target_key_retains_neither(
+        self,
+    ):
+        """Codex review (twentieth round, P2): an alias's target
+        namespace-strips to a bare `Thing`, but that bare key is itself
+        already ambiguous among dep_candidates (`dep1::Thing` and
+        `dep2::Thing` both derive it). Unlike a genuine compound alias
+        (`Pair<dep::A, dep::B>`, whose target contains two *distinct*,
+        individually-unambiguous tokens), this alias's target contains
+        exactly one *already-ambiguous* token -- there is no way to tell
+        which of the two candidates it names, so the alias must not be
+        treated as reaching either one. Neither `dep1::Thing` nor
+        `dep2::Thing` may be retained through it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep1::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep2::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
+    def test_resolved_typedef_owner_takes_precedence_over_coincidental_suffix(
+        self,
+    ):
+        """Codex review (eighteenth round): a public signature spells
+        `Handle`, and `typedefs["Handle"]` resolves to `dep::Actual` --
+        but an unrelated dependency record `dep::Handle` also derives the
+        bare suffix `Handle`. The resolved alias's own name is a literal,
+        exact-name match (the same strength as a candidate's own exact
+        identity), while `dep::Handle`'s claim on the same spelling is
+        only a namespace-stripped guess, never its literal identity.
+        Treating them as equally-strong competing owners (dropping both)
+        hid a real layout change to the directly-referenced `dep::Actual`;
+        the resolved alias must win and `dep::Actual` alone is retained."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Actual",
+                    kind="struct",
+                    qualified_name="dep::Actual",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    qualified_name="dep::Handle",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "dep::Actual"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Actual"]
+
+    def test_typedef_matching_stays_fast_with_many_candidates_and_typedefs(self):
+        """Codex review (sixth round): matching resolved typedef targets
+        against dependency candidates one-by-one was
+        O(dep_candidates x typedefs) -- confirmed empirically at ~5.6s for
+        3,000 candidates x 3,000 typedefs. Must stay well under that now
+        that resolved targets are scanned once via a shared reverse
+        index."""
+        import time
+
+        typedefs = {f"Alias{i}": f"target{i}" for i in range(1500)}
+        types = [_rec(f"Dep{i}", source_header=_SYSTEM_HEADER) for i in range(1500)]
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run")],
+            types=types,
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"typedef matching took {elapsed:.2f}s, expected < 5s"
+
+    def test_typedef_alias_bare_suffix_spelling_resolves_dependency_record(self):
+        """Self-review follow-up: a real backend can spell a typedef alias
+        itself bare in a signature (`string` for a `typedefs["std::string"]`
+        entry, DWARF's own convention) -- indexing only the literal alias
+        key missed this, the same bare-vs-qualified split already handled
+        for candidate identities."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("string",))],
+            types=[
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    qualified_name="std::__cxx11::basic_string<char>",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"std::string": "std::__cxx11::basic_string<char>"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["basic_string"]
+
+    def test_typedef_target_namespace_suffix_resolves_non_stdlib_dependency(self):
+        """Codex review (seventh round): castxml's own
+        `_underlying_type_name()` stores a namespaced typedef target
+        *bare* (`Thing` for an underlying `dep::Thing`) -- a non-stdlib
+        producer convention distinct from the stdlib-only stripped-form
+        matching, requiring the same namespace-suffix spellings a kept
+        signature's own spelling of a candidate already goes through."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_ambiguous_typedef_target_kept_type_collision_not_trusted(self):
+        """Codex review (eighth round): a resolved typedef target spelled
+        with a bare suffix that's ambiguous between a kept type
+        (`api::Thing`) and an unrelated dependency (`dep::Thing`) must not
+        attribute the alias to the dependency -- the earlier guard only
+        checked the alias's own spelling for a kept-type collision, never
+        the ambiguous key that produced the attribution."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="api::Thing",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Thing"]
+
+    def test_kept_enum_collision_guards_bare_dependency_spelling(self):
+        """Codex review (P2, fourth round): a kept enum's bare spelling
+        (`api::Status` spelled bare `Status`) must guard against an
+        unrelated dependency record sharing that same bare identity
+        (`vendor::Status`), the same way a kept *type*'s spelling already
+        did -- an earlier version checked kept_types only."""
+        from abicheck.model import EnumMember, EnumType
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", ret="Status")],
+            enums=[
+                EnumType(
+                    name="Status",
+                    qualified_name="api::Status",
+                    members=[EnumMember(name="A", value=0)],
+                    source_header=_OWN_HEADER,
+                ),
+            ],
+            types=[
+                RecordType(
+                    name="Status",
+                    kind="struct",
+                    qualified_name="vendor::Status",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+        assert [e.qualified_name for e in scoped.enums] == ["api::Status"]
+
+    def test_bare_dependency_identity_guarded_against_kept_type_collision(self):
+        """Codex review (P2, fourth round): a dependency candidate's own
+        full identity is not automatically trusted -- when a kept type's
+        own bare-suffix spelling (`api::Foo` spelled bare `Foo`) collides
+        with an unrelated dependency candidate's bare identity (`Foo`, no
+        namespace of its own), the dependency candidate must not be
+        retained through that collision."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Foo",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    qualified_name="api::Foo",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+
+    def test_partially_qualified_nested_dependency_type_is_kept(self):
+        """Codex review (P2, second round): a direct-clang-style backend
+        spells a nested dependency type with the enclosing namespace
+        elided but the class-nesting qualifier kept (`Outer::Inner` for
+        `vendor::Outer::Inner`) -- a partial qualification distinct from
+        both the full identity and the fully bare leaf."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Outer::Inner *",))],
+            types=[
+                RecordType(
+                    name="Inner",
+                    kind="struct",
+                    qualified_name="vendor::Outer::Inner",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["vendor::Outer::Inner"]
+
+    def test_typedef_derived_spelling_colliding_with_kept_type_not_trusted(self):
+        """Codex review (P2, third round): a scope-losing typedef entry
+        (`"Alias" -> "std::Thing"`) derives the spelling `"Alias"` for the
+        dependency record -- but a kept type is *also* named `Alias`. A
+        signature naming the kept `Alias` must not incorrectly retain the
+        unrelated `std::Thing` dependency record through this collision."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                _rec("Alias"),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "std::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Alias"]
+
+    def test_stripped_spelling_colliding_with_kept_type_not_trusted(self):
+        """Codex review (P2, third round): a stdlib-stripped spelling
+        (`"basic_string<...>"`, stripped from `"std::__cxx11::basic_string<...>"`)
+        must not be trusted when a kept, unrelated type happens to be named
+        that same bare spelling."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("basic_string<char>",))],
+            types=[
+                _rec("basic_string<char>"),
+                RecordType(
+                    name="basic_string",
+                    kind="struct",
+                    qualified_name="std::__cxx11::basic_string<char>",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["basic_string<char>"]
+
+    def test_unreferenced_dependency_type_still_excluded(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run")],
+            types=[
+                _rec("Own"),
+                RecordType(
+                    name="unused_dep",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Own"]
+
+
 class TestEndToEndCompareAfterScoping:
     """Proves the actual point of this feature through the real compare()
     pipeline, not just the filter in isolation: a real ABI break in the
     library's own code must still be caught after default scoping, while a
-    change confined to an excluded dependency type must not surface at all
-    (both sides dropped it identically)."""
+    change confined to a purely-transitive (never directly referenced)
+    dependency type must not surface at all (both sides dropped it
+    identically). A dependency type that *is* directly referenced by a kept
+    public signature (e.g. ``std::string`` taken by a public function) is
+    retained precisely so a real layout drift on it is not silently lost --
+    see ``_directly_referenced_dependency_names``."""
 
     def test_own_library_break_detected_dependency_noise_excluded(self):
         from abicheck.change_registry_types import Verdict
@@ -457,7 +1921,11 @@ class TestEndToEndCompareAfterScoping:
                 library="libfoo.so",
                 version="1.0",
                 from_headers=True,
-                functions=[_fn("run", params=("Own *", "std::string *"))],
+                # "helper *" is not std::string itself, so std::string here
+                # is only transitively reachable (through Own's own
+                # internals, which this test doesn't model) -- never
+                # directly named by a kept signature -- and stays excluded.
+                functions=[_fn("run", params=("Own *", "helper *"))],
                 types=[
                     _rec("Own", fields=tuple(own_fields), source_header=_OWN_HEADER),
                     RecordType(
@@ -488,3 +1956,37 @@ class TestEndToEndCompareAfterScoping:
         assert any(
             c.symbol == "Own" or c.caused_by_type == "Own" for c in result.changes
         )
+
+    def test_directly_referenced_dependency_break_is_caught(self):
+        """The status-review P0: a layout change on a dependency type that
+        IS directly named in a kept public signature (std::string taken by
+        value/pointer by a public function) must survive scoping and be
+        detected, not silently dropped from both sides."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker import compare
+
+        def _snap(dep_size):
+            return AbiSnapshot(
+                library="libfoo.so",
+                version="1.0",
+                from_headers=True,
+                functions=[_fn("run", params=("std::string *",))],
+                types=[
+                    RecordType(
+                        name="std::string",
+                        kind="struct",
+                        size_bits=dep_size,
+                        source_header=_SYSTEM_HEADER,
+                    ),
+                ],
+            )
+
+        old_scoped = scope_snapshot_excluding_dependencies(_snap(256))
+        new_scoped = scope_snapshot_excluding_dependencies(_snap(512))
+
+        assert "std::string" in {t.name for t in old_scoped.types}
+        assert "std::string" in {t.name for t in new_scoped.types}
+
+        result = compare(old_scoped, new_scoped)
+        assert result.verdict != Verdict.NO_CHANGE
+        assert any(c.symbol == "std::string" for c in result.changes)

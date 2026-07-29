@@ -569,6 +569,68 @@ class TestRunPlanRoundTrip:
         assert "compile_gcc_path" not in d
         assert "compile_gcc_options" not in d
 
+    def test_consumer_compile_overlay_fields_round_trip(self) -> None:
+        """G34 Phase 0: consumer_compile_gcc_path/consumer_compile_gcc_options
+        both serialize/deserialize, independently of the producer compile
+        overlay's own pair."""
+        check = RunPlanCheck(
+            check_id="libfoo@gcc14-clang20#release@headers",
+            kind=RUN_PLAN_KIND_TARGET,
+            target_kind="library",
+            name="libfoo",
+            profile_id="gcc14-clang20",
+            baseline_channel="release",
+            requested_depth="headers",
+            binary_pattern="build/libfoo*.so",
+            compile_gcc_path="/opt/gcc14/bin/g++",
+            compile_gcc_options="-std=gnu++17",
+            consumer_compile_gcc_path="/opt/llvm-20/bin/clang++",
+            consumer_compile_gcc_options="-std=gnu++20 -stdlib=libc++",
+        )
+        plan = RunPlan(checks=[check])
+        d = check.to_dict()
+        assert d["consumer_compile_gcc_path"] == "/opt/llvm-20/bin/clang++"
+        assert d["consumer_compile_gcc_options"] == "-std=gnu++20 -stdlib=libc++"
+        restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+        assert restored == plan
+
+    def test_consumer_compile_overlay_fields_omitted_from_dict_when_empty(
+        self,
+    ) -> None:
+        check = RunPlanCheck(check_id="libfoo@linux#release@headers")
+        d = check.to_dict()
+        assert "consumer_compile_gcc_path" not in d
+        assert "consumer_compile_gcc_options" not in d
+
+    def test_compile_frontend_fields_round_trip(self) -> None:
+        """G34 Phase B: compile_ast_frontend/consumer_compile_ast_frontend
+        both serialize/deserialize, independently of each other and of the
+        gcc_path/gcc_options fields."""
+        check = RunPlanCheck(
+            check_id="libfoo@gcc14-clang20#release@headers",
+            kind=RUN_PLAN_KIND_TARGET,
+            target_kind="library",
+            name="libfoo",
+            profile_id="gcc14-clang20",
+            baseline_channel="release",
+            requested_depth="headers",
+            binary_pattern="build/libfoo*.so",
+            compile_ast_frontend="castxml",
+            consumer_compile_ast_frontend="clang",
+        )
+        plan = RunPlan(checks=[check])
+        d = check.to_dict()
+        assert d["compile_ast_frontend"] == "castxml"
+        assert d["consumer_compile_ast_frontend"] == "clang"
+        restored = RunPlan.from_dict(json.loads(json.dumps(plan.to_dict())))
+        assert restored == plan
+
+    def test_compile_frontend_fields_omitted_from_dict_when_empty(self) -> None:
+        check = RunPlanCheck(check_id="libfoo@linux#release@headers")
+        d = check.to_dict()
+        assert "compile_ast_frontend" not in d
+        assert "consumer_compile_ast_frontend" not in d
+
 
 class TestToAggregateManifest:
     def test_uses_check_id_not_bare_name(self) -> None:
@@ -747,6 +809,240 @@ class TestProfileCompileOverlayProjection:
         assert check.compile_gcc_options == "-std=gnu++20"
 
 
+class TestConsumerCompileOverlayProjection:
+    """G34 Phase 0: profiles.<id>.consumer_compile reaches the generated
+    cell as consumer_compile_gcc_path/consumer_compile_gcc_options,
+    independently of (and identically resolved to) the producer compile:
+    overlay's own pair."""
+
+    _RAW = {
+        "targets": {
+            "libfoo": {
+                "kind": "library",
+                "binary_pattern": "build/libfoo*.so",
+                "checks": [
+                    {"channel": "release", "depth": "headers", "required": True},
+                ],
+            },
+        },
+        "profiles": {
+            "gcc14-build-clang20-client": {
+                "contract": True,
+                "compile": {"binding": "gcc14", "standard": "gnu++17"},
+                "consumer_compile": {
+                    "binding": "clang20",
+                    "standard": "gnu++20",
+                    "stdlib": "libc++",
+                },
+            },
+            "plain": {"contract": True},
+        },
+        "baseline": {
+            "channels": {
+                "release": {"source": "github-release", "asset_pattern": "libfoo-*"},
+            },
+        },
+    }
+
+    def test_no_consumer_compile_overlay_leaves_both_fields_empty(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+        )
+        assert report.ok
+        [check] = [c for c in plan.checks if c.profile_id == "plain"]
+        assert check.consumer_compile_gcc_path == ""
+        assert check.consumer_compile_gcc_options == ""
+        assert "consumer_compile_gcc_path" not in check.to_dict()
+        assert "consumer_compile_gcc_options" not in check.to_dict()
+
+    def test_consumer_compile_overlay_projects_independently_of_producer(
+        self,
+    ) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+            resolved_bindings={
+                "gcc14": "/opt/gcc14/bin/g++",
+                "clang20": "/opt/llvm-20/bin/clang++",
+            },
+        )
+        assert report.ok
+        [check] = [
+            c for c in plan.checks if c.profile_id == "gcc14-build-clang20-client"
+        ]
+        # Producer compile: overlay resolves to its own pair, unaffected.
+        assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
+        assert check.compile_gcc_options == "-std=gnu++17"
+        # consumer_compile: resolves independently to its own pair.
+        assert check.consumer_compile_gcc_path == "/opt/llvm-20/bin/clang++"
+        assert check.consumer_compile_gcc_options == "-std=gnu++20 -stdlib=libc++"
+
+    def test_consumer_binding_absent_from_resolved_bindings_leaves_path_empty(
+        self,
+    ) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+            resolved_bindings={"gcc14": "/opt/gcc14/bin/g++"},
+        )
+        assert report.ok
+        [check] = [
+            c for c in plan.checks if c.profile_id == "gcc14-build-clang20-client"
+        ]
+        assert check.compile_gcc_path == "/opt/gcc14/bin/g++"
+        assert check.consumer_compile_gcc_path == ""
+        # Options still compose regardless of binding resolution.
+        assert check.consumer_compile_gcc_options == "-std=gnu++20 -stdlib=libc++"
+
+    def test_bundle_check_also_gets_consumer_compile_fields(self) -> None:
+        raw = {
+            "targets": {
+                "libpvxs": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libpvxs.so*",
+                    "bundle": "pvxs-release",
+                },
+            },
+            "bundles": {
+                "pvxs-release": {
+                    "targets": ["libpvxs"],
+                    "checks": [
+                        {"channel": "release", "depth": "binary", "required": True},
+                    ],
+                },
+            },
+            "profiles": {
+                "gcc14-build-clang20-client": {
+                    "contract": True,
+                    "compile": {"binding": "gcc14"},
+                    "consumer_compile": {"binding": "clang20", "standard": "gnu++20"},
+                },
+            },
+            "baseline": {
+                "channels": {
+                    "release": {
+                        "source": "github-release",
+                        "asset_pattern": "pvxs-*",
+                    },
+                },
+            },
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libpvxs")},
+            resolved_bindings={"clang20": "/opt/llvm-20/bin/clang++"},
+        )
+        assert report.ok
+        [check] = plan.checks
+        assert check.consumer_compile_gcc_path == "/opt/llvm-20/bin/clang++"
+        assert check.consumer_compile_gcc_options == "-std=gnu++20"
+
+
+class TestCompileFrontendOverlayProjection:
+    """G34 Phase B: profiles.<id>.compile.frontend/consumer_compile.frontend
+    reach the generated cell as compile_ast_frontend/
+    consumer_compile_ast_frontend, resolved independently of each other and
+    of binding-based gcc_path/gcc_options resolution."""
+
+    _RAW = {
+        "targets": {
+            "libfoo": {
+                "kind": "library",
+                "binary_pattern": "build/libfoo*.so",
+                "checks": [
+                    {"channel": "release", "depth": "headers", "required": True},
+                ],
+            },
+        },
+        "profiles": {
+            "gcc14-build-clang20-client": {
+                "contract": True,
+                "compile": {"frontend": "castxml"},
+                "consumer_compile": {"frontend": "clang"},
+            },
+            "plain": {"contract": True},
+        },
+        "baseline": {
+            "channels": {
+                "release": {"source": "github-release", "asset_pattern": "libfoo-*"},
+            },
+        },
+    }
+
+    def test_no_frontend_override_leaves_both_fields_empty(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+        )
+        assert report.ok
+        [check] = [c for c in plan.checks if c.profile_id == "plain"]
+        assert check.compile_ast_frontend == ""
+        assert check.consumer_compile_ast_frontend == ""
+        assert "compile_ast_frontend" not in check.to_dict()
+        assert "consumer_compile_ast_frontend" not in check.to_dict()
+
+    def test_frontend_overrides_project_independently(self) -> None:
+        config = _parsed(self._RAW)
+        plan, report = generate_run_plan(
+            config,
+            {"gcc14-build-clang20-client": _bo("libfoo"), "plain": _bo("libfoo")},
+        )
+        assert report.ok
+        [check] = [
+            c for c in plan.checks if c.profile_id == "gcc14-build-clang20-client"
+        ]
+        assert check.compile_ast_frontend == "castxml"
+        assert check.consumer_compile_ast_frontend == "clang"
+
+    def test_bundle_check_also_gets_frontend_fields(self) -> None:
+        raw = {
+            "targets": {
+                "libpvxs": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libpvxs.so*",
+                    "bundle": "pvxs-release",
+                },
+            },
+            "bundles": {
+                "pvxs-release": {
+                    "targets": ["libpvxs"],
+                    "checks": [
+                        {"channel": "release", "depth": "binary", "required": True},
+                    ],
+                },
+            },
+            "profiles": {
+                "gcc14-build-clang20-client": {
+                    "contract": True,
+                    "compile": {"frontend": "castxml"},
+                    "consumer_compile": {"frontend": "hybrid"},
+                },
+            },
+            "baseline": {
+                "channels": {
+                    "release": {
+                        "source": "github-release",
+                        "asset_pattern": "pvxs-*",
+                    },
+                },
+            },
+        }
+        config = _parsed(raw)
+        plan, report = generate_run_plan(
+            config, {"gcc14-build-clang20-client": _bo("libpvxs")}
+        )
+        assert report.ok
+        [check] = plan.checks
+        assert check.compile_ast_frontend == "castxml"
+        assert check.consumer_compile_ast_frontend == "hybrid"
+
+
 class TestComposeGccOptionsNotFamilyAware:
     """Regression guard for the revert documented in `_compose_gcc_options`'s
     own docstring: a P0 audit round briefly dropped `-stdlib=`/`--target=`
@@ -866,9 +1162,25 @@ class TestToolchainMatrixFixtureExample:
             "-std=gnu++20 -stdlib=libc++ -DMATRIXDEMO_ABI_V2=1 -fno-rtti"
         )
 
-    def test_cli_end_to_end_matches_readme(self, tmp_path: Path) -> None:
+    def test_cli_end_to_end_matches_readme(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The exact CLI invocation README.md's "Reproduce it yourself"
         section documents, run against the committed fixture files."""
+        # The fixture's toolchain-bindings.yml deliberately names illustrative
+        # paths ("/opt/gcc-14.2.0/bin/g++") that don't exist on any real
+        # machine -- G34 Phase A's toolchain-identity check now probes a
+        # resolved binding for real, so this stubs that probe to report an
+        # identity consistent with what the fixture's own compiler_family/
+        # compiler_version declare, the same way a real installation would.
+        from abicheck.buildsource import toolchain_probe as tp
+
+        def _fake_metadata(path: str) -> dict[str, str]:
+            if "gcc" in path:
+                return {"selected": path, "version": "gcc (Debian 14.2.0) 14.2.0"}
+            return {"selected": path, "version": "clang version 20.0.0"}
+
+        monkeypatch.setattr(tp, "_tool_identity_metadata", _fake_metadata)
         bo_gcc14 = _write_build_output(tmp_path, "linux-gcc14", ["libmatrixdemo"])
         bo_clang20 = _write_build_output(tmp_path, "linux-clang20", ["libmatrixdemo"])
         result = CliRunner().invoke(
@@ -1220,6 +1532,40 @@ class TestRunPlanGenerateCliToolchainBindings:
         assert result.exit_code == 1
         assert "gcc14" in result.output
 
+    def test_family_mismatch_exits_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # G34 Phase A parity: project plan must run the same
+        # toolchain-identity check project validate runs, not just binding
+        # resolution -- a run-plan that silently emits the wrong compiler's
+        # path is worse than one that fails to generate at all.
+        from abicheck.buildsource import toolchain_probe as tp
+
+        monkeypatch.setattr(
+            tp,
+            "_tool_identity_metadata",
+            lambda path: {"selected": path, "version": "clang version 18.0.0"},
+        )
+        raw = json.loads(json.dumps(self._RAW))
+        raw["profiles"]["gcc14"]["compile"]["compiler_family"] = "gcc"
+        config = _write_config(tmp_path, raw)
+        build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
+        bindings = _write_bindings_file(tmp_path, {"gcc14": "/opt/clang/bin/clang++"})
+        result = CliRunner().invoke(
+            main,
+            [
+                "project",
+                "plan",
+                str(config),
+                "--build-output",
+                f"gcc14={build_dir}",
+                "--toolchain-bindings",
+                str(bindings),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "compiler_family" in result.output
+
     def test_malformed_bindings_file_exits_64(self, tmp_path: Path) -> None:
         config = _write_config(tmp_path, self._RAW)
         build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
@@ -1238,6 +1584,60 @@ class TestRunPlanGenerateCliToolchainBindings:
             ],
         )
         assert result.exit_code == 64
+
+    def test_unused_profiles_mismatch_does_not_abort_an_otherwise_valid_plan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: check_profile_toolchain_identity previously probed
+        # EVERY declared profile, not just the ones the generated plan
+        # actually resolved a check for. A bindings file may legitimately be
+        # shared across runners (e.g. one committed file naming both a Linux
+        # and a macOS toolchain); a non-contract, unreferenced profile's
+        # binding can name a platform-specific compiler that's simply
+        # unavailable/mismatched on the current host, and that must not
+        # abort an otherwise-valid plan that never uses it (Codex review,
+        # fresh evidence).
+        from abicheck.buildsource import toolchain_probe as tp
+
+        def _fake_metadata(path: str) -> dict[str, str]:
+            if path == "/opt/clang/bin/clang++":
+                return {"selected": path, "version": "clang version 18.0.0"}
+            return {"selected": path, "version": "gcc (GCC) 14.2.0"}
+
+        monkeypatch.setattr(tp, "_tool_identity_metadata", _fake_metadata)
+        raw = json.loads(json.dumps(self._RAW))
+        raw["profiles"]["gcc14"]["compile"]["compiler_family"] = "gcc"
+        # A non-contract, unreferenced profile (contract: false): never
+        # selected by the implicit "every contract profile" sweep, so the
+        # generated plan never resolves a check for it --
+        # its declared compiler_family (gcc) disagrees with the resolved
+        # binding's real family (clang) via _fake_metadata above.
+        raw["profiles"]["macclang"] = {
+            "contract": False,
+            "compile": {"binding": "macclang", "compiler_family": "gcc"},
+        }
+        config = _write_config(tmp_path, raw)
+        build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
+        bindings = _write_bindings_file(
+            tmp_path,
+            {"gcc14": "/opt/gcc/bin/gcc", "macclang": "/opt/clang/bin/clang++"},
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "project",
+                "plan",
+                str(config),
+                "--build-output",
+                f"gcc14={build_dir}",
+                "--toolchain-bindings",
+                str(bindings),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert len(data["checks"]) == 1
+        assert data["checks"][0]["profile_id"] == "gcc14"
 
 
 # NB: `abicheck run-plan to-aggregate-manifest` (the standalone CLI command)

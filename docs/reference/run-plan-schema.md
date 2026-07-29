@@ -98,6 +98,10 @@ dicts can forward each field through with no renaming.
 | `member_binary_patterns` | `kind: bundle` | Member target id → that member's own `binary_pattern`, so a caller can stage a member-binaries directory without re-reading `.abicheck.yml`. |
 | `compile_gcc_path` | this cell's profile declares `compile.binding` *and* `--toolchain-bindings` was given | That binding, resolved to an exact executable path — forwarded as `check-target`'s `gcc-path` input. Empty (field omitted) when the profile has no `compile:` overlay, declares no `binding`, or `--toolchain-bindings` was omitted/the binding wasn't found in it — a caller then falls back to its own global `gcc-path`. |
 | `compile_gcc_options` | this cell's profile's `compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Those axes composed into one space-joined extra-flags string (`-std=<standard> -stdlib=<stdlib> --target=<target> -D<macro>[=<value>] ... <args...>`, macros sorted by name, `args` appended verbatim last) — forwarded as `check-target`'s `gcc-options` input. Not filtered by `compile.compiler_family`: the composed string is always consumed by a Clang-based frontend in this pipeline (castxml's internal bundled Clang, or the direct-clang backend), never a literal GCC binary, so `-stdlib=`/`--target=` are emitted regardless of the declared family — see `_compose_gcc_options`'s own docstring for why an earlier attempt to drop them for `compiler_family: gcc` was reverted. |
+| `consumer_compile_gcc_path` | this cell's profile declares `consumer_compile.binding` *and* `--toolchain-bindings` was given | Same resolution as `compile_gcc_path`, but from the profile's separate `consumer_compile:` overlay (G34 Phase 0) — never falls back to `compile_gcc_path`'s own resolved value when the profile has no `consumer_compile:`. |
+| `consumer_compile_gcc_options` | this cell's profile's `consumer_compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Same composition as `compile_gcc_options`, from the `consumer_compile:` overlay. |
+| `compile_ast_frontend` | this cell's profile's `compile` overlay sets `frontend` | One of `auto`/`castxml`/`clang`/`hybrid` (G34 Phase B), overriding the global `--ast-frontend` default for this profile's cell only. Empty (field omitted) when the profile has no `compile:` overlay or sets no `frontend`. |
+| `consumer_compile_ast_frontend` | this cell's profile's `consumer_compile` overlay sets `frontend` | Same resolution as `compile_ast_frontend`, from the profile's separate `consumer_compile:` overlay (G34 Phase 0) — never falls back to `compile_ast_frontend`'s own value when the profile has no `consumer_compile:`. |
 
 **`profiles.<id>.compile` reaches the cell (P1 toolchain-profile audit).**
 [`project-targets-schema.md`'s `profiles:`](project-targets-schema.md#profiles)
@@ -113,6 +117,26 @@ gate there), and `compiler_version` is a *constraint* (e.g. `">=14.0,<15"`),
 not a value; verifying a resolved binding's actual version against it needs
 a real toolchain-identity probe, which stays out of this pure, no-subprocess
 module by design.
+
+**`profiles.<id>.consumer_compile` reaches the cell the same way (G34 Phase
+0).** [`project-targets-schema.md`'s `consumer_compile:`
+section](project-targets-schema.md#consumer_compile-a-separate-client-toolchain-overlay-g34-phase-0)
+documents the config-schema side; this generator projects it into its own
+separate `consumer_compile_gcc_path`/`consumer_compile_gcc_options` pair,
+resolved identically to (but independently of) `compile:`'s own fields.
+Actually applying these fields to a distinct header-AST (L2) extraction
+pass, merged with the producer toolchain's binary facts, is not yet wired
+anywhere in this pipeline — this is config-schema projection only.
+
+**`compile.frontend`/`consumer_compile.frontend` reach the cell the same
+way (G34 Phase B).** [`project-targets-schema.md`'s `compile.frontend`
+section](project-targets-schema.md#compilefrontend--consumer_compilefrontend--per-profile-ast-frontend-g34-phase-b)
+documents the config-schema side; this generator projects each overlay's
+`frontend:` into its own field (`compile_ast_frontend`/
+`consumer_compile_ast_frontend`), resolved independently. No run-plan
+consumer yet threads this field into a real `dump`/`compare` invocation's
+`--ast-frontend` — this is config-schema projection only, same caveat as
+`consumer_compile:` above.
 
 **No build-output paths are carried through.** `build-output.json` is used
 purely as an existence/membership oracle here — the candidate artifact a

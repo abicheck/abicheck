@@ -188,6 +188,7 @@ class _FakeCompileSpec:
 class _FakeProfile:
     id: str
     compile: _FakeCompileSpec | None = None
+    consumer_compile: _FakeCompileSpec | None = None
 
 
 class TestCheckProfileBindingsResolve:
@@ -231,3 +232,53 @@ class TestCheckProfileBindingsResolve:
         errors = check_profile_bindings_resolve(profiles, bf)
         assert len(errors) == 1
         assert "bad" in errors[0]
+
+    def test_profile_with_no_consumer_compile_overlay_is_skipped(self) -> None:
+        """G34 Phase 0: a profile with no consumer_compile: overlay at all
+        is skipped for that overlay, same as an absent compile: overlay."""
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(binding=""),
+                consumer_compile=None,
+            )
+        }
+        assert check_profile_bindings_resolve(profiles, bf) == []
+
+    def test_unresolved_consumer_compile_binding_yields_an_error(self) -> None:
+        """Codex review (P2): an unresolved consumer_compile.binding is
+        exactly as much a caller error as an unresolved compile.binding --
+        check_profile_bindings_resolve() must catch it too, not silently
+        let project plan emit consumer options without the requested
+        compiler executable."""
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/usr/bin/g++-14"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(binding="gcc14"),
+                consumer_compile=_FakeCompileSpec(binding="clang20"),
+            )
+        }
+        errors = check_profile_bindings_resolve(profiles, bf)
+        assert len(errors) == 1
+        assert "p1" in errors[0]
+        assert "consumer_compile.binding" in errors[0]
+        assert "clang20" in errors[0]
+
+    def test_both_compile_and_consumer_compile_unresolved_yield_two_errors(
+        self,
+    ) -> None:
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(binding="gcc14"),
+                consumer_compile=_FakeCompileSpec(binding="clang20"),
+            )
+        }
+        errors = check_profile_bindings_resolve(profiles, bf)
+        assert len(errors) == 2
+        joined = " ".join(errors)
+        assert "compile.binding" in joined
+        assert "consumer_compile.binding" in joined

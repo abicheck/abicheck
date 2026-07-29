@@ -506,8 +506,13 @@ def abi_project_validate(
     Args:
         config: Path to the project config (default ``.abicheck.yml``).
         toolchain_bindings: Optional trusted toolchain-bindings file path
-            (schema ``abicheck.toolchain-bindings/v1``) to additionally check
-            every declared ``profiles.<id>.compile.binding`` against.
+            (schema ``abicheck.toolchain-bindings/v1``) to additionally
+            check every declared ``profiles.<id>.compile``/``consumer_compile``
+            ``binding`` resolves, and — when ``compiler_family``,
+            ``compiler_version``, or ``target`` is also declared — that the
+            resolved executable's probed identity actually matches (G34
+            Phase A; MSVC bindings are skipped, see
+            ``abicheck.buildsource.toolchain_probe``).
     """
     t0 = _time.monotonic()
     try:
@@ -522,6 +527,7 @@ def abi_project_validate(
             check_profile_bindings_resolve,
             load_bindings_file,
         )
+        from .buildsource.toolchain_probe import check_profile_toolchain_identity
         from .cli_project import _load_project_targets_config
 
         def _do_validate() -> ProjectTargetsValidationReport:
@@ -554,6 +560,12 @@ def abi_project_validate(
                 if bindings_file is not None:
                     report.errors.extend(
                         check_profile_bindings_resolve(parsed.profiles, bindings_file)
+                    )
+                    report.errors.extend(
+                        _redact_paths(err, *bindings_file.bindings.values())
+                        for err in check_profile_toolchain_identity(
+                            parsed.profiles, bindings_file
+                        )
                     )
                 return report
             except (click.UsageError, BindingsFileError) as exc:
@@ -651,8 +663,16 @@ def abi_project_plan(
         project: Project identifier recorded in the run-plan, e.g. ``owner/repo``.
         head_sha: Candidate commit SHA recorded in the run-plan.
         toolchain_bindings: Optional trusted toolchain-bindings file path; each
-            resolved cell's profile ``compile.binding`` (if declared) is
-            checked against it and resolved into that cell's ``compile_gcc_path``.
+            resolved cell's profile ``compile.binding`` (if declared;
+            ``consumer_compile.binding`` is resolved independently the same
+            way) is checked against it and resolved into that cell's
+            ``compile_gcc_path``, and any declared ``compiler_family``/``compiler_version``/``target``
+            is checked against the resolved binding's real identity (G34
+            Phase A) — a mismatch is a generation error, the same severity
+            as an unresolvable binding. This identity probing only covers
+            the profiles the generated plan actually resolves a check for,
+            not every profile declared in ``config`` — unlike
+            ``abi_project_validate``, which checks every declared profile.
         allow_empty: Accept a run-plan that resolves to zero checks (else that
             is reported as a generation error).
     """
@@ -671,6 +691,7 @@ def abi_project_plan(
             check_profile_bindings_resolve,
             load_bindings_file,
         )
+        from .buildsource.toolchain_probe import check_profile_toolchain_identity
         from .cli_project import _load_project_targets_config, _parse_build_output_specs
 
         # _parse_build_output_specs reads each PROFILE=DIR's build-output.json
@@ -735,6 +756,32 @@ def abi_project_plan(
                     head_sha=head_sha,
                     resolved_bindings=resolved_bindings,
                 )
+                if bindings_file is not None:
+                    # Probe only profiles the generated plan actually
+                    # resolved a check for, not every profile declared in
+                    # the config -- a bindings file may legitimately be
+                    # shared across runners, and an unselected/non-contract
+                    # profile's binding can name a platform-specific
+                    # executable that doesn't exist on this host. Probing it
+                    # anyway would abort an otherwise-valid plan over a
+                    # profile the plan never uses (Codex review, fresh
+                    # evidence, mirroring the same fix in cli_project.py's
+                    # ``project plan``). ``abi_project_validate`` intentionally
+                    # keeps checking every declared profile.
+                    used_profile_ids = {
+                        c.profile_id for c in plan.checks if c.profile_id
+                    }
+                    used_profiles = {
+                        profile_id: profile
+                        for profile_id, profile in parsed.profiles.items()
+                        if profile_id in used_profile_ids
+                    }
+                    binding_errors.extend(
+                        _redact_paths(err, *bindings_file.bindings.values())
+                        for err in check_profile_toolchain_identity(
+                            used_profiles, bindings_file
+                        )
+                    )
                 report.errors.extend(binding_errors)
                 if not plan.checks and not allow_empty:
                     report.errors.append(

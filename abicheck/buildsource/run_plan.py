@@ -105,6 +105,30 @@ direct-clang backend (the composed string is never actually fed to a
 literal GCC binary anywhere in this pipeline, only ever to Clang -- see
 that function's own docstring), so it was reverted -- a documented gap,
 not an oversight.
+
+**The ``profiles.<id>.consumer_compile`` overlay (G34 Phase 0) projects the
+same way, into its own separate fields:** :attr:`RunPlanCheck.
+consumer_compile_gcc_path`/:attr:`RunPlanCheck.consumer_compile_gcc_options`,
+resolved identically to ``compile:``'s own pair but from the profile's
+separate consumer-toolchain overlay (see :class:`~.project_targets.
+ProfileSpec`'s docstring for the producer/consumer distinction). A profile
+with no ``consumer_compile:`` simply leaves both fields empty -- this
+module does not fall back to the producer ``compile:`` overlay's own
+fields for them, since "no consumer overlay" and "an actual empty overlay"
+are meant to look the same to a caller either way. Actually applying these
+fields to a separate header-AST (L2) extraction pass, merged with the
+producer-toolchain binary facts, is not yet wired here -- this module only
+projects the config-schema axis; the extraction/merge integration is
+G34 Phase 0's remaining, larger piece.
+
+**``compile.frontend``/``consumer_compile.frontend`` (G34 Phase B) project
+the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
+:attr:`RunPlanCheck.consumer_compile_ast_frontend` -- one of the same four
+values the global ``--ast-frontend`` flag accepts, resolved independently
+per overlay, with no fallback from one overlay's field to the other's.
+Like ``consumer_compile:`` itself, no run-plan consumer yet threads this
+field into a real ``dump``/``compare`` invocation's own ``--ast-frontend``
+-- this is config-schema projection only.
 """
 
 from __future__ import annotations
@@ -246,6 +270,28 @@ class RunPlanCheck:
     #: no ``compile:`` overlay, or the overlay sets none of
     #: ``standard``/``stdlib``/``target``/``abi_macros``/``args``.
     compile_gcc_options: str = ""
+    #: This cell's profile's ``consumer_compile.binding`` (G34 Phase 0),
+    #: resolved the same way :attr:`compile_gcc_path` is. Empty unless the
+    #: profile declares a ``consumer_compile:`` overlay with a ``binding``
+    #: AND :func:`generate_run_plan` was given a *resolved_bindings* mapping
+    #: that contains it.
+    consumer_compile_gcc_path: str = ""
+    #: This cell's profile's ``consumer_compile`` overlay, composed the same
+    #: way :attr:`compile_gcc_options` is. Empty when the profile has no
+    #: ``consumer_compile:`` overlay, or the overlay sets none of
+    #: ``standard``/``stdlib``/``target``/``abi_macros``/``args``.
+    consumer_compile_gcc_options: str = ""
+    #: This cell's profile's ``compile.frontend`` (G34 Phase B) -- one of
+    #: ``auto``/``castxml``/``clang``/``hybrid``, overriding the global
+    #: ``--ast-frontend`` default for this profile's cell only. Empty when
+    #: the profile's ``compile:`` overlay sets no ``frontend`` (a caller
+    #: then falls back to its own global ``--ast-frontend``/default).
+    compile_ast_frontend: str = ""
+    #: This cell's profile's ``consumer_compile.frontend`` (G34 Phase B),
+    #: resolved the same way :attr:`compile_ast_frontend` is, from the
+    #: separate consumer-toolchain overlay (G34 Phase 0) -- never falls
+    #: back to :attr:`compile_ast_frontend` when absent.
+    consumer_compile_ast_frontend: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -276,6 +322,14 @@ class RunPlanCheck:
             d["compile_gcc_path"] = self.compile_gcc_path
         if self.compile_gcc_options:
             d["compile_gcc_options"] = self.compile_gcc_options
+        if self.consumer_compile_gcc_path:
+            d["consumer_compile_gcc_path"] = self.consumer_compile_gcc_path
+        if self.consumer_compile_gcc_options:
+            d["consumer_compile_gcc_options"] = self.consumer_compile_gcc_options
+        if self.compile_ast_frontend:
+            d["compile_ast_frontend"] = self.compile_ast_frontend
+        if self.consumer_compile_ast_frontend:
+            d["consumer_compile_ast_frontend"] = self.consumer_compile_ast_frontend
         return d
 
     @classmethod
@@ -306,6 +360,14 @@ class RunPlanCheck:
             member_binary_patterns=member_patterns,
             compile_gcc_path=_opt_str(d.get("compile_gcc_path")),
             compile_gcc_options=_opt_str(d.get("compile_gcc_options")),
+            consumer_compile_gcc_path=_opt_str(d.get("consumer_compile_gcc_path")),
+            consumer_compile_gcc_options=_opt_str(
+                d.get("consumer_compile_gcc_options")
+            ),
+            compile_ast_frontend=_opt_str(d.get("compile_ast_frontend")),
+            consumer_compile_ast_frontend=_opt_str(
+                d.get("consumer_compile_ast_frontend")
+            ),
         )
 
 
@@ -380,6 +442,22 @@ def _resolve_profile_ids(
     return [p.id for p in config.profiles.values() if p.contract], False
 
 
+def _resolved_compile_fields(
+    compile_spec: ProfileCompileSpec | None,
+    resolved_bindings: Mapping[str, str] | None,
+) -> tuple[str, str]:
+    """Returns ``(gcc_path, gcc_options)`` for one already-resolved
+    :class:`ProfileCompileSpec` (either a profile's ``compile:`` or its
+    ``consumer_compile:`` overlay, G34 Phase 0) -- ``("", "")`` when
+    *compile_spec* is ``None``."""
+    if compile_spec is None:
+        return "", ""
+    gcc_path = ""
+    if compile_spec.binding and resolved_bindings is not None:
+        gcc_path = resolved_bindings.get(compile_spec.binding, "")
+    return gcc_path, _compose_gcc_options(compile_spec)
+
+
 def _compile_fields_for_profile(
     config: ProjectTargetsConfig,
     profile_id: str,
@@ -391,12 +469,45 @@ def _compile_fields_for_profile(
     resolvable-flags fields."""
     profile = config.profiles.get(profile_id)
     compile_spec = profile.compile if profile is not None else None
-    if compile_spec is None:
-        return "", ""
-    gcc_path = ""
-    if compile_spec.binding and resolved_bindings is not None:
-        gcc_path = resolved_bindings.get(compile_spec.binding, "")
-    return gcc_path, _compose_gcc_options(compile_spec)
+    return _resolved_compile_fields(compile_spec, resolved_bindings)
+
+
+def _consumer_compile_fields_for_profile(
+    config: ProjectTargetsConfig,
+    profile_id: str,
+    resolved_bindings: Mapping[str, str] | None,
+) -> tuple[str, str]:
+    """Returns ``(consumer_compile_gcc_path, consumer_compile_gcc_options)``
+    for *profile_id* (G34 Phase 0) -- ``("", "")`` when the profile has no
+    ``consumer_compile:`` overlay, is unknown, or declares no ``binding``/no
+    resolvable-flags fields. Mirrors :func:`_compile_fields_for_profile`
+    exactly, resolved from the profile's separate consumer-toolchain overlay
+    instead of its producer ``compile:`` block."""
+    profile = config.profiles.get(profile_id)
+    consumer_compile_spec = profile.consumer_compile if profile is not None else None
+    return _resolved_compile_fields(consumer_compile_spec, resolved_bindings)
+
+
+def _compile_ast_frontend_for_profile(
+    config: ProjectTargetsConfig, profile_id: str
+) -> str:
+    """Returns *profile_id*'s ``compile.frontend`` (G34 Phase B) -- ``""``
+    when the profile has no ``compile:`` overlay, is unknown, or sets no
+    ``frontend``."""
+    profile = config.profiles.get(profile_id)
+    compile_spec = profile.compile if profile is not None else None
+    return compile_spec.frontend if compile_spec is not None else ""
+
+
+def _consumer_compile_ast_frontend_for_profile(
+    config: ProjectTargetsConfig, profile_id: str
+) -> str:
+    """Returns *profile_id*'s ``consumer_compile.frontend`` (G34 Phase B),
+    resolved the same way :func:`_compile_ast_frontend_for_profile` is, from
+    the profile's separate consumer-toolchain overlay (G34 Phase 0)."""
+    profile = config.profiles.get(profile_id)
+    consumer_compile_spec = profile.consumer_compile if profile is not None else None
+    return consumer_compile_spec.frontend if consumer_compile_spec is not None else ""
 
 
 def _library_lookup_and_pattern(
@@ -465,6 +576,11 @@ def _generate_target_checks(
             compile_gcc_path, compile_gcc_options = _compile_fields_for_profile(
                 config, profile_id, resolved_bindings
             )
+            consumer_compile_gcc_path, consumer_compile_gcc_options = (
+                _consumer_compile_fields_for_profile(
+                    config, profile_id, resolved_bindings
+                )
+            )
             out.append(
                 RunPlanCheck(
                     check_id=check_id,
@@ -490,6 +606,14 @@ def _generate_target_checks(
                     ),
                     compile_gcc_path=compile_gcc_path,
                     compile_gcc_options=compile_gcc_options,
+                    consumer_compile_gcc_path=consumer_compile_gcc_path,
+                    consumer_compile_gcc_options=consumer_compile_gcc_options,
+                    compile_ast_frontend=_compile_ast_frontend_for_profile(
+                        config, profile_id
+                    ),
+                    consumer_compile_ast_frontend=(
+                        _consumer_compile_ast_frontend_for_profile(config, profile_id)
+                    ),
                 )
             )
     return out
@@ -558,6 +682,11 @@ def _generate_bundle_checks(
             compile_gcc_path, compile_gcc_options = _compile_fields_for_profile(
                 config, profile_id, resolved_bindings
             )
+            consumer_compile_gcc_path, consumer_compile_gcc_options = (
+                _consumer_compile_fields_for_profile(
+                    config, profile_id, resolved_bindings
+                )
+            )
             out.append(
                 RunPlanCheck(
                     check_id=check_id,
@@ -573,6 +702,14 @@ def _generate_bundle_checks(
                     member_binary_patterns=member_patterns,
                     compile_gcc_path=compile_gcc_path,
                     compile_gcc_options=compile_gcc_options,
+                    consumer_compile_gcc_path=consumer_compile_gcc_path,
+                    consumer_compile_gcc_options=consumer_compile_gcc_options,
+                    compile_ast_frontend=_compile_ast_frontend_for_profile(
+                        config, profile_id
+                    ),
+                    consumer_compile_ast_frontend=(
+                        _consumer_compile_ast_frontend_for_profile(config, profile_id)
+                    ),
                 )
             )
     return out

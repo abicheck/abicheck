@@ -74,7 +74,13 @@ def _compile_so(tmp: Path) -> Path:
 
 
 @pytest.mark.integration
-def test_real_system_header_type_excluded_by_default(tmp_path: Path) -> None:
+def test_real_system_header_type_directly_referenced_is_kept(tmp_path: Path) -> None:
+    """``public_fn`` takes ``struct tm *`` directly -- the library's ABI
+    genuinely depends on its layout, so it must survive default scoping
+    (direct-reference retention, status-review follow-up against PR #649).
+    This mirrors ``test_dumper_scoping.py``'s
+    ``test_non_public_libc_type_directly_referenced_is_kept`` against a real
+    castxml-reported ``source_location`` rather than a hand-written path."""
     from abicheck.dumper import dump
     from abicheck.dumper_scoping import scope_snapshot_excluding_dependencies
 
@@ -93,8 +99,9 @@ def test_real_system_header_type_excluded_by_default(tmp_path: Path) -> None:
 
     scoped = scope_snapshot_excluding_dependencies(snap)
     scoped_type_names = {t.name for t in scoped.types}
-    assert "tm" not in scoped_type_names, (
-        "struct tm (from a real <time.h> system header) must be excluded by default"
+    assert "tm" in scoped_type_names, (
+        "struct tm (from a real <time.h> system header) is directly named "
+        "in public_fn's own signature, so it must survive default scoping"
     )
     assert "Internal" in scoped_type_names, (
         "the library's own private struct must be kept -- this is a "

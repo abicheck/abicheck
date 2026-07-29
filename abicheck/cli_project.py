@@ -63,10 +63,12 @@ from .buildsource.project_targets import (
 )
 from .buildsource.run_plan import generate_run_plan
 from .buildsource.toolchain_bindings import (
+    BindingsFile,
     BindingsFileError,
     check_profile_bindings_resolve,
     load_bindings_file,
 )
+from .buildsource.toolchain_probe import check_profile_toolchain_identity
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import output_options, verbose_option
 
@@ -111,9 +113,12 @@ def project_group() -> None:
     help=(
         "Path to a trusted toolchain-bindings file (schema "
         "abicheck.toolchain-bindings/v1) to additionally check every "
-        "declared profiles.<id>.compile.binding against. Loaded only from "
-        "this explicit path — never auto-discovered, per the untrusted-"
-        "config trust boundary ProfileCompileSpec.binding documents."
+        "declared profiles.<id>.compile.binding (and consumer_compile.binding) "
+        "resolves, and — when compiler_family/compiler_version/target is also "
+        "declared — that the resolved executable's probed identity actually "
+        "matches. Loaded only from this explicit path — never auto-"
+        "discovered, per the untrusted-config trust boundary "
+        "ProfileCompileSpec.binding documents."
     ),
 )
 @verbose_option
@@ -136,7 +141,12 @@ def project_validate_cmd(
     valid; every ``checks[].profiles`` entry resolves to a declared profile;
     every id is a valid, ``check_id``-embeddable identifier. With
     ``--toolchain-bindings``, also checks every declared
-    ``profiles.<id>.compile.binding`` resolves against that file.
+    ``profiles.<id>.compile.binding``/``consumer_compile.binding`` resolves
+    against that file, and that a resolved binding's probed compiler
+    identity matches any declared
+    ``compiler_family``/``compiler_version``/``target``
+    (G34 Phase A; MSVC bindings are skipped — see
+    ``abicheck.buildsource.toolchain_probe``'s module docstring).
 
     Structural/type errors in the YAML itself (unknown key, wrong type) fail
     immediately as a usage error; this command's own validation report only
@@ -160,6 +170,9 @@ def project_validate_cmd(
             raise click.UsageError(str(exc)) from exc
         report.errors.extend(
             check_profile_bindings_resolve(parsed.profiles, bindings_file)
+        )
+        report.errors.extend(
+            check_profile_toolchain_identity(parsed.profiles, bindings_file)
         )
 
     if fmt == "json":
@@ -341,13 +354,18 @@ def _parse_build_output_specs(
     help=(
         "Path to a trusted toolchain-bindings file (schema "
         "abicheck.toolchain-bindings/v1). Every declared "
-        "profiles.<id>.compile.binding is checked against it (an "
-        "unresolvable binding is a generation error, same severity as an "
-        "unresolvable build-output target); each resolved cell's "
-        "compile_gcc_path is populated from it. Omitting this flag skips "
-        "the check entirely and leaves compile_gcc_path empty on every "
-        "cell — backward compatible, matching `project validate "
-        "--toolchain-bindings`."
+        "profiles.<id>.compile.binding (and consumer_compile.binding) is "
+        "checked against it (an unresolvable binding, or a resolved "
+        "binding whose probed identity disagrees with a declared "
+        "compiler_family/compiler_version/target, is a generation error, "
+        "same severity as an unresolvable build-output target) -- "
+        "identity probing only covers the profiles the generated plan "
+        "actually resolves a check for, not every profile declared in "
+        "CONFIG (unlike `project validate`, which checks every declared "
+        "profile); each resolved cell's compile_gcc_path is "
+        "populated from it. Omitting this flag skips the check entirely "
+        "and leaves compile_gcc_path empty on every cell — backward "
+        "compatible, matching `project validate --toolchain-bindings`."
     ),
 )
 @click.option(
@@ -392,13 +410,23 @@ def project_plan_cmd(
     ``target@profile#baseline_channel@requested_depth`` (ADR-047 §7).
 
     With ``--toolchain-bindings``, each resolved cell's profile
-    ``compile.binding`` (if declared) additionally resolves into that
+    ``compile.binding`` (if declared; ``consumer_compile.binding`` is
+    resolved independently the same way) additionally resolves into that
     cell's ``compile_gcc_path`` — an unresolvable declared binding is a
     generation error, the same severity as an unresolvable build-output
-    target. Every cell's profile ``compile`` overlay (``standard``/
-    ``stdlib``/``target``/``abi_macros``/``args``) is always composed into
-    ``compile_gcc_options`` regardless of ``--toolchain-bindings`` (P1
-    toolchain-profile audit).
+    target. Any declared ``compiler_family``/``compiler_version``/``target``
+    is also checked against the resolved binding's real identity (G34 Phase
+    A) — a mismatch here is exactly as much a generation error as an
+    unresolvable binding, since a run-plan that silently emits the wrong
+    compiler's path is worse than one that fails to generate at all. This
+    identity probing only covers the profiles the generated plan actually
+    resolves a check for, not every profile declared in CONFIG — unlike
+    ``project validate``, which checks every declared profile regardless of
+    whether the current ``--build-output`` set resolves a check for it.
+    Every cell's profile ``compile`` overlay
+    (``standard``/``stdlib``/``target``/``abi_macros``/``args``) is always
+    composed into ``compile_gcc_options`` regardless of
+    ``--toolchain-bindings`` (P1 toolchain-profile audit).
 
     \b
     Exit codes:
@@ -407,7 +435,9 @@ def project_plan_cmd(
       1   A required/explicit check could not be resolved against the
           supplied --build-output directories, (with --toolchain-bindings) a
           declared profiles.<id>.compile.binding does not resolve against
-          it, or the run-plan resolved to zero checks without --allow-empty.
+          it or its probed identity disagrees with the declared
+          compiler_family/compiler_version/target, or the run-plan resolved
+          to zero checks without --allow-empty.
       64  Usage error (CONFIG, a --build-output value, or
           --toolchain-bindings is unreadable, or CONFIG fails
           project validation).
@@ -428,6 +458,7 @@ def project_plan_cmd(
     build_outputs = _parse_build_output_specs(build_output_specs)
 
     resolved_bindings: dict[str, str] | None = None
+    bindings_file_for_identity: BindingsFile | None = None
     binding_errors: list[str] = []
     if toolchain_bindings is not None:
         try:
@@ -435,6 +466,7 @@ def project_plan_cmd(
         except BindingsFileError as exc:
             raise click.UsageError(str(exc)) from exc
         resolved_bindings = bindings_file.bindings
+        bindings_file_for_identity = bindings_file
         binding_errors = check_profile_bindings_resolve(parsed.profiles, bindings_file)
 
     plan, report = generate_run_plan(
@@ -444,6 +476,29 @@ def project_plan_cmd(
         head_sha=head_sha,
         resolved_bindings=resolved_bindings,
     )
+
+    if bindings_file_for_identity is not None:
+        # Probe only profiles the generated plan actually resolved a check
+        # for, not every profile declared in the config. A bindings file may
+        # legitimately be shared across runners (e.g. one committed file
+        # naming both a Linux and a macOS toolchain), and an unselected or
+        # non-contract profile's binding can name a platform-specific
+        # executable that simply doesn't exist on the current host. Probing
+        # it anyway would abort an otherwise-valid plan over a profile the
+        # plan never uses (Codex review, fresh evidence: an unused macOS
+        # profile aborted a Linux-only plan on ubuntu-latest CI). `project
+        # validate` intentionally keeps checking every declared profile,
+        # since it validates the *config*, not one runner's resolved plan.
+        used_profile_ids = {c.profile_id for c in plan.checks if c.profile_id}
+        used_profiles = {
+            profile_id: profile
+            for profile_id, profile in parsed.profiles.items()
+            if profile_id in used_profile_ids
+        }
+        binding_errors.extend(
+            check_profile_toolchain_identity(used_profiles, bindings_file_for_identity)
+        )
+
     report.errors.extend(binding_errors)
 
     if not plan.checks and not allow_empty:
