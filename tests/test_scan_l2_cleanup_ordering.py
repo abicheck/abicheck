@@ -194,6 +194,25 @@ class TestScanCandidateIncludeDependencies:
         native.write_bytes(b"\x7fELF" + b"\x00" * 100)
         assert _scan_candidate_include_dependencies(native) is False
 
+    def test_native_baseline_short_circuits_before_reading_as_text(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review, fresh evidence: a recognized magic number must
+        short-circuit to the filtered default without ever opening the file
+        as UTF-8 text -- json.load()'s fp.read() would otherwise decode the
+        entire file merely to fail parsing it, a real, avoidable memory/I/O
+        cost for a large native baseline."""
+        from abicheck import scan_engine
+
+        native = tmp_path / "libfoo.so"
+        native.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        def fail_if_opened(*args, **kwargs):
+            raise AssertionError("must not open the native binary as text")
+
+        monkeypatch.setattr(scan_engine, "open", fail_if_opened, raising=False)
+        assert scan_engine._scan_candidate_include_dependencies(native) is False
+
     def test_json_baseline_tagged_full_matches_full(self, tmp_path):
         from abicheck.scan_engine import _scan_candidate_include_dependencies
 

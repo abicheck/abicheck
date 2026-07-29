@@ -369,12 +369,23 @@ def _scan_candidate_include_dependencies(baseline: Path | None) -> bool:
     ``libfoo.so.json`` and then renamed, or just handed a ``libfoo.so``
     path by a caller's own naming convention). Calling it first would skip
     the peek entirely for that baseline, silently keeping the candidate
-    filtered against a "full"-tagged snapshot. Attempting the JSON parse
-    directly is just as safe for an actual native binary: its raw bytes
-    essentially never decode as UTF-8 text, let alone parse as JSON, so the
-    ``except`` below still degrades to the filtered default there too.
+    filtered against a "full"-tagged snapshot.
+
+    Content-sniffs the first 4 bytes via :func:`binary_utils.
+    detect_binary_format` first, though (a real magic-byte check, not the
+    filename-fallback heuristic above) -- a real native binary's raw bytes
+    would still fail to decode/parse as JSON either way, but only after
+    ``json.load`` reads and decodes the *entire* file first; for a large
+    native baseline that's a real, avoidable memory/I/O cost merely to
+    choose a default (Codex review, fresh evidence). A recognized magic
+    number short-circuits straight to the filtered default without ever
+    opening the file as text.
     """
     if baseline is None:
+        return False
+    from .binary_utils import detect_binary_format
+
+    if detect_binary_format(baseline) is not None:
         return False
     try:
         with open(baseline, encoding="utf-8") as f:
