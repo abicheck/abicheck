@@ -8,12 +8,13 @@
   now an error, since a hard validation gate that silently accepts
   whatever it can't identify defeats its own purpose. Separately, a
   declared `target` is now only compared against a **GCC-family**
-  binding's probed `-dumpmachine` triple: a single Clang binary is
-  inherently multi-target via its own `--target=` flag (which the
-  profile's compose logic already passes explicitly), so comparing its
-  bare, host-default `-dumpmachine` output against a declared
-  cross-compilation target previously rejected valid Clang
-  cross-compiler profiles. A GCC-family binding with no probed triple at
+  binding's probed `-dumpmachine` triple: a single Clang (or Intel
+  oneAPI `icx`/`icpx`, which is clang-based) binary is inherently
+  multi-target via its own `--target=` flag (which the profile's compose
+  logic already passes explicitly and this module validates directly via
+  a real invocation), so comparing its bare, host-default `-dumpmachine`
+  output against a declared cross-compilation target previously rejected
+  valid Clang cross-compiler profiles. A GCC-family binding with no probed triple at
   all is now an error too (an unverifiable claim), and the comparison
   additionally checks a coarse libc/environment marker (e.g. `musl` vs.
   `gnu`), so `target: x86_64-linux-gnu` bound to an Alpine `musl` GCC no

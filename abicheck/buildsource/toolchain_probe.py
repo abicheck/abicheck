@@ -149,39 +149,43 @@ def _os_family(triple: str) -> str | None:
     return None
 
 
-#: Coarse libc/environment markers, since two triples can share the same
+#: Base libc/environment markers, since two triples can share the same
 #: architecture and OS while targeting an incompatible ABI environment
 #: (``x86_64-linux-musl`` vs. ``x86_64-linux-gnu`` both reduce to OS family
-#: ``"linux"`` — Codex review, fresh evidence). Checked most-specific-first:
-#: ``gnueabihf``/``gnueabi``/``gnux32``/``gnuabi64``/``gnuabin32``/
-#: ``gnu_ilp32`` are each incompatible ABI *variants* of glibc (hard-float
-#: EABI, soft-float EABI, x32 ILP32-on-x86_64, MIPS N64/N32, AArch64 ILP32)
-#: that would otherwise all collapse into the same generic ``"gnu"`` bucket,
-#: since each is a superstring containing "gnu" (a second review round,
-#: fresh evidence: ``arm-linux-gnueabi`` vs. ``arm-linux-gnueabihf`` and
-#: ``x86_64-linux-gnu`` vs. ``x86_64-linux-gnux32`` both compared as one
-#: family before this; a third review round, fresh evidence:
-#: ``mips64el-linux-gnuabi64`` vs. ``mips64el-linux-gnuabin32`` and
-#: ``aarch64-linux-gnu`` vs. ``aarch64-linux-gnu_ilp32`` still collapsed to
-#: the same generic ``"gnu"`` bucket after the second round's fix).
-_ENV_FAMILY_MARKERS: tuple[tuple[str, str], ...] = (
-    ("musl", "musl"),
-    ("gnueabihf", "gnueabihf"),
-    ("gnueabi", "gnueabi"),
-    ("gnux32", "gnux32"),
-    ("gnuabi64", "gnuabi64"),
-    ("gnuabin32", "gnuabin32"),
-    ("gnu_ilp32", "gnu_ilp32"),
-    ("gnu", "gnu"),
-    ("msvc", "msvc"),
-)
+#: ``"linux"`` — Codex review, fresh evidence).
+_ENV_BASE_MARKERS: tuple[str, ...] = ("gnu", "musl", "msvc")
 
 
 def _env_family(triple: str) -> str | None:
-    lowered = triple.lower()
-    for marker, family in _ENV_FAMILY_MARKERS:
-        if marker in lowered:
-            return family
+    """Coarse ABI-environment label for a target triple's trailing
+    component, e.g. ``"gnu"``, ``"gnueabihf"``, ``"musl"``.
+
+    Returns the triple's last ``-``-separated component **verbatim**
+    (lowercased) whenever it contains one of the base libc/environment
+    markers above -- not just the bare marker itself. Earlier revisions
+    enumerated each known ABI-variant suffix as its own marker
+    (``gnueabihf``/``gnueabi``/``gnux32``/``gnuabi64``/``gnuabin32``/
+    ``gnu_ilp32``, each added in its own review round after the previous
+    enumeration was shown incomplete: ``arm-linux-gnueabi`` vs.
+    ``arm-linux-gnueabihf``; ``x86_64-linux-gnu`` vs.
+    ``x86_64-linux-gnux32``; ``mips64el-linux-gnuabi64`` vs.
+    ``mips64el-linux-gnuabin32``; ``aarch64-linux-gnu`` vs.
+    ``aarch64-linux-gnu_ilp32``) -- but that whack-a-mole approach can
+    never enumerate every real GNU ABI suffix in existence, confirmed by a
+    yet further review round finding ``powerpc-linux-gnuspe`` (PowerPC SPE)
+    still collapsing to the same generic ``"gnu"`` bucket as
+    ``powerpc-linux-gnu``. Returning the whole trailing component instead
+    of a fixed marker preserves any suffix automatically -- known or not
+    -- while still returning ``None`` (unverifiable, not a match) for a
+    component that names no recognized libc/environment family at all
+    (e.g. ``arm-none-eabi``).
+    """
+    parts = [p for p in triple.strip().split("-") if p]
+    if not parts:
+        return None
+    last = parts[-1].lower()
+    if any(marker in last for marker in _ENV_BASE_MARKERS):
+        return last
     return None
 
 
@@ -482,6 +486,16 @@ def _check_one_overlay(
     path = bindings_file.bindings.get(binding_id)
     if path is None:
         # Already reported by check_profile_bindings_resolve; avoid duplicating.
+        return []
+    if Path(path).stem.lower() in _UNPROBED_FAMILIES:
+        # Same documented MSVC exemption as the declared_family check above,
+        # but keyed on the *resolved* binding path instead: a profile that
+        # declares only target:/compiler_version: (no compiler_family:) but
+        # whose binding resolves to a real cl.exe still reached the probe
+        # below, which fails outright since cl.exe has no --version flag --
+        # reported as "could not be probed", contradicting this module's own
+        # documented "a declared MSVC family/binding is silently skipped"
+        # (CodeRabbit review, fresh evidence).
         return []
 
     where = f"profiles.{profile_id}.{overlay_key}"

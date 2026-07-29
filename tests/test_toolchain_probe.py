@@ -248,10 +248,14 @@ class TestEnvFamily:
             ("mips64el-linux-gnuabi64", "gnuabi64"),
             ("mips64el-linux-gnuabin32", "gnuabin32"),
             ("aarch64-linux-gnu_ilp32", "gnu_ilp32"),
+            ("powerpc-linux-gnuspe", "gnuspe"),
         ],
     )
     def test_recognized_markers(self, triple: str, expected: str) -> None:
         assert tp._env_family(triple) == expected
+
+    def test_empty_triple_returns_none(self) -> None:
+        assert tp._env_family("") is None
 
     def test_gnueabihf_and_gnueabi_are_distinct(self) -> None:
         # Regression: both contain "gnu" as a substring and previously
@@ -286,6 +290,27 @@ class TestEnvFamily:
         # AArch64 ILP32 data model) previously both reduced to "gnu".
         assert tp._env_family("aarch64-linux-gnu") != tp._env_family(
             "aarch64-linux-gnu_ilp32"
+        )
+
+    def test_gnu_and_gnuspe_are_distinct(self) -> None:
+        # Regression: powerpc-linux-gnuspe (PowerPC SPE) vs
+        # powerpc-linux-gnu previously both reduced to "gnu" too --
+        # closed by generalizing to the whole trailing triple component
+        # instead of enumerating yet another individual ABI-suffix marker
+        # (Codex review, fresh evidence: enumeration is inherently
+        # incomplete, confirmed by this being the fourth distinct GNU ABI
+        # suffix pair found across four separate review rounds).
+        assert tp._env_family("powerpc-linux-gnu") != tp._env_family(
+            "powerpc-linux-gnuspe"
+        )
+
+    def test_any_gnu_suffix_is_preserved_without_enumeration(self) -> None:
+        # The general mechanism itself: an entirely made-up ABI suffix
+        # nobody has enumerated is still preserved verbatim, rather than
+        # collapsing to the generic "gnu" bucket.
+        assert tp._env_family("arm-linux-gnu_made_up_suffix") == "gnu_made_up_suffix"
+        assert tp._env_family("arm-linux-gnu") != tp._env_family(
+            "arm-linux-gnu_made_up_suffix"
         )
 
 
@@ -440,6 +465,33 @@ class TestCheckProfileToolchainIdentity:
                 id="p1",
                 compile=_FakeCompileSpec(
                     compiler_family="msvc", compiler_version="19.30", binding="msvc14"
+                ),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_msvc_binding_is_never_probed_even_without_a_declared_family(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: the MSVC skip only checked the *declared*
+        # compiler_family. A profile declaring just target:/compiler_version:
+        # (no compiler_family:) whose binding resolves to a real cl.exe was
+        # still probed with --version, which cl.exe doesn't support --
+        # reported as a probe error, contradicting this module's own
+        # documented "a declared MSVC family/binding is silently skipped"
+        # (CodeRabbit review, fresh evidence).
+        def _boom(path: str) -> dict[str, str]:
+            raise AssertionError("cl.exe must not be probed")
+
+        monkeypatch.setattr(tp, "_tool_identity_metadata", _boom)
+        bf = BindingsFile(
+            schema=BINDINGS_SCHEMA, bindings={"msvc14": "C:/VC/bin/cl.exe"}
+        )
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    target="x86_64-pc-windows-msvc", binding="msvc14"
                 ),
             )
         }

@@ -31,12 +31,12 @@ import pytest
 from abicheck.buildsource.project_targets import ProfileSpec, ProjectTargetsConfig
 
 
-def test_compile_frontend_accepts_each_documented_value() -> None:
-    for value in ("auto", "castxml", "clang", "hybrid"):
-        config = ProjectTargetsConfig.from_dict(
-            {"profiles": {"linux": {"compile": {"frontend": value}}}}
-        )
-        assert config.profiles["linux"].compile.frontend == value
+@pytest.mark.parametrize("value", ("auto", "castxml", "clang", "hybrid"))
+def test_compile_frontend_accepts_each_documented_value(value: str) -> None:
+    config = ProjectTargetsConfig.from_dict(
+        {"profiles": {"linux": {"compile": {"frontend": value}}}}
+    )
+    assert config.profiles["linux"].compile.frontend == value
 
 
 def test_compile_frontend_rejects_unknown_value() -> None:

@@ -508,10 +508,10 @@ def abi_project_validate(
         toolchain_bindings: Optional trusted toolchain-bindings file path
             (schema ``abicheck.toolchain-bindings/v1``) to additionally
             check every declared ``profiles.<id>.compile``/``consumer_compile``
-            ``binding`` resolves, and — when ``compiler_family`` or
-            ``compiler_version`` is also declared — that the resolved
-            executable's probed identity actually matches (G34 Phase A;
-            MSVC bindings are skipped, see
+            ``binding`` resolves, and — when ``compiler_family``,
+            ``compiler_version``, or ``target`` is also declared — that the
+            resolved executable's probed identity actually matches (G34
+            Phase A; MSVC bindings are skipped, see
             ``abicheck.buildsource.toolchain_probe``).
     """
     t0 = _time.monotonic()
@@ -660,12 +660,16 @@ def abi_project_plan(
         project: Project identifier recorded in the run-plan, e.g. ``owner/repo``.
         head_sha: Candidate commit SHA recorded in the run-plan.
         toolchain_bindings: Optional trusted toolchain-bindings file path; each
-            resolved cell's profile ``compile.binding`` (if declared) is
-            checked against it and resolved into that cell's
+            resolved cell's profile ``compile.binding`` (if declared;
+            ``consumer_compile.binding`` is resolved independently the same
+            way) is checked against it and resolved into that cell's
             ``compile_gcc_path``, and any declared ``compiler_family``/``compiler_version``/``target``
             is checked against the resolved binding's real identity (G34
             Phase A) — a mismatch is a generation error, the same severity
-            as an unresolvable binding.
+            as an unresolvable binding. This identity probing only covers
+            the profiles the generated plan actually resolves a check for,
+            not every profile declared in ``config`` — unlike
+            ``abi_project_validate``, which checks every declared profile.
         allow_empty: Accept a run-plan that resolves to zero checks (else that
             is reported as a generation error).
     """
