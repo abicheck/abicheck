@@ -91,6 +91,8 @@ _FAMILY_ALIASES: dict[str, str] = {
     "gnu": "gnu",
     "clang": "clang",
     "clang++": "clang",
+    "icx": "icx",
+    "icpx": "icx",
 }
 
 #: Family spellings this module deliberately never probes — see module
@@ -246,6 +248,20 @@ _BARE_VERSION_RE = re.compile(r"\d+")
 _CONSTRAINT_CLAUSE_RE = re.compile(r"^(==|!=|>=|<=|>|<)?\s*(\d+(?:\.\d+){0,3})$")
 
 
+def _paren_spans(text: str) -> list[tuple[int, int]]:
+    """Return ``(start, end)`` spans of every ``(...)`` region in *text*
+    (end exclusive, non-nested -- a banner never nests parentheses in the
+    shapes this module handles)."""
+    spans = []
+    stack: list[int] = []
+    for i, ch in enumerate(text):
+        if ch == "(":
+            stack.append(i)
+        elif ch == ")" and stack:
+            spans.append((stack.pop(), i + 1))
+    return spans
+
+
 def _extract_version_token(text: str) -> str | None:
     """Extract the real compiler version from a raw ``--version`` banner.
 
@@ -253,7 +269,7 @@ def _extract_version_token(text: str) -> str | None:
     actual version there, and every line after it is copyright/warranty
     boilerplate that could otherwise contribute a spurious digit match.
 
-    Tries three strategies, most-specific first:
+    Tries four strategies, most-specific first:
 
     1. The dotted number immediately following the literal word
        ``"version"`` (case-insensitive) -- both plain Clang
@@ -263,28 +279,64 @@ def _extract_version_token(text: str) -> str | None:
        parenthetical build identifier that a bare "last dotted token"
        search would wrongly prefer (``"1600.0.26.4"`` instead of
        ``"16.0.0"``, rejecting a valid ``>=16,<17`` constraint -- Codex
-       review, fresh evidence, following the earlier last-token fix below).
-    2. Failing that (GCC's own banner has no ``"version"`` keyword), the
-       *last* dotted match on the line: a cross-compiler binding's own
-       invoked name can itself embed a dotted number ahead of the real
-       version -- not just the bare target-triple digits (``86``, ``64``)
-       the first fix already accounted for, but a genuinely dotted one,
-       e.g. a target-triple OS version (``x86_64-pc-solaris2.11-gcc (GCC)
-       13.2.0`` previously extracted ``"2.11"`` instead of the real
-       ``"13.2.0"`` -- Codex review, fresh evidence). The real version is
-       conventionally the last token on the line, after any invoked-name
-       prefix and parenthetical package/build descriptor.
-    3. Failing that, the last bare digit run on the line.
+       review, fresh evidence).
+    2. Failing that (GCC's and Intel's own banners have no ``"version"``
+       keyword), the *last* dotted match on the line that falls **outside**
+       any ``(...)`` span: a build/package descriptor's own dotted digits,
+       wherever they fall relative to the real version, are always
+       parenthesized in every banner shape this module has seen -- GCC's
+       "(Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0" parenthesizes the package
+       descriptor *before* the real version, while Intel's oneAPI banner
+       "2026.1.0 (2026.1.0.20260617)" parenthesizes the build identifier
+       *after* it (Codex review, fresh evidence: the real Intel banner in
+       ``tests/fixtures/g32/dpcpp/compiler_invocation.log`` made the
+       unfiltered last-dotted-match heuristic pick the build identifier
+       ``"2026.1.0.20260617"`` over the real ``"2026.1.0"``, rejecting a
+       valid ``==2026.1.0``/``<=2026.1.0`` constraint) -- excluding
+       parenthesized matches handles both directions uniformly.
+    3. Failing that (no dotted match outside parentheses either), the last
+       dotted match anywhere on the line, mirroring the earlier
+       cross-compiler-prefix fix (``x86_64-pc-solaris2.11-gcc (GCC)
+       13.2.0``, where the OS-version digits happen to fall outside
+       parentheses too, but a hypothetical banner with no unparenthesized
+       version at all should still extract something rather than nothing).
+    4. Failing that, the last bare digit run on the line.
     """
     first_line = text.splitlines()[0] if text else ""
     keyword_match = _VERSION_KEYWORD_RE.search(first_line)
     if keyword_match is not None:
         return keyword_match.group(1)
-    dotted_matches: list[str] = _DOTTED_VERSION_RE.findall(first_line)
-    if dotted_matches:
-        return dotted_matches[-1]
+    paren_spans = _paren_spans(first_line)
+    dotted_iter = list(_DOTTED_VERSION_RE.finditer(first_line))
+    outside_paren = [
+        m.group()
+        for m in dotted_iter
+        if not any(ps <= m.start() < pe for ps, pe in paren_spans)
+    ]
+    if outside_paren:
+        return outside_paren[-1]
+    if dotted_iter:
+        return dotted_iter[-1].group()
     bare_matches: list[str] = _BARE_VERSION_RE.findall(first_line)
     return bare_matches[-1] if bare_matches else None
+
+
+#: Intel's oneAPI DPC++/C++ compiler is a clang-based driver under a
+#: different name (``icx``/``icpx``, and its older ``dpcpp``/``dpcpp-cl``
+#: aliases) -- the same alias set :mod:`abicheck.dumper_clang`'s
+#: ``_CLANG_FAMILY_ALIAS_NAMES`` already models for AST-parsing purposes.
+#: Checked via the resolved path's *stem* (not the substring-matched
+#: ``name`` used for plain Clang below), since none of these names contain
+#: "clang" and an exact-name check needs the extension stripped first
+#: (``icpx.exe`` on Windows). Its ``--version`` banner
+#: ("Intel(R) oneAPI DPC++/C++ Compiler ...") also never contains the
+#: literal phrase "clang version", so without this the driver was
+#: previously either indeterminate or (on the rare path where a symlink's
+#: basename happened to mention "clang") misclassified as plain Clang --
+#: CompilerFamily.ICX is already a recognized, distinct family in
+#: :mod:`abicheck.build_mode` (Codex review, fresh evidence: a declared
+#: ``compiler_family: icx`` profile was rejected unconditionally).
+_INTEL_ONEAPI_ALIAS_NAMES = frozenset({"icx", "icpx", "dpcpp", "dpcpp-cl"})
 
 
 def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
@@ -302,6 +354,11 @@ def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
     prints "clang version"). Returns ``None`` — skip the comparison,
     never guess — when nothing here is conclusive.
     """
+    stems = [
+        Path(candidate).stem.lower()
+        for candidate in (metadata.get("selected", ""), metadata.get("realpath", ""))
+        if candidate
+    ]
     names = [
         Path(candidate).name.lower()
         for candidate in (metadata.get("selected", ""), metadata.get("realpath", ""))
@@ -309,6 +366,11 @@ def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
     ]
     version_text = metadata.get("version", "").lower()
 
+    if (
+        any(stem in _INTEL_ONEAPI_ALIAS_NAMES for stem in stems)
+        or "oneapi" in version_text
+    ):
+        return "icx"
     if any("clang" in name for name in names) or "clang version" in version_text:
         return "clang"
     if any(name in ("cl", "cl.exe") for name in names):
@@ -491,7 +553,7 @@ def _check_one_overlay(
                 f"family of toolchain binding {binding_id!r} ({path!r}) could "
                 f"not be determined, so its target cannot be verified"
             )
-        elif actual_family == "clang":
+        elif actual_family in ("clang", "icx"):
             # Clang is inherently multi-target: -dumpmachine (what
             # target_triple comes from) reports only its host default, not
             # a constraint -- the profile's own compose logic passes the
@@ -505,6 +567,11 @@ def _check_one_overlay(
             # Clang directly with the declared --target= instead (a
             # second review round, fresh evidence: target:
             # not-a-real-target previously passed unconditionally).
+            # Intel's oneAPI icx/icpx driver shares this same branch: it is
+            # a clang-based binary accepting the identical --target= flag
+            # (abicheck.dumper_clang already treats it as clang-family for
+            # AST-parsing purposes), so the same multi-target exemption and
+            # real-probe validation apply.
             digest = metadata.get("sha256")
             if digest:
                 accepted = _clang_accepts_target(path, digest, declared_target)

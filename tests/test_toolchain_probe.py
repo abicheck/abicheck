@@ -121,6 +121,28 @@ class TestVersionSatisfies:
         banner = "x86_64-pc-solaris2.11-gcc (GCC) 13.2.0"
         assert tp.version_satisfies(banner, ">=13,<14") is True
 
+    def test_intel_oneapi_build_identifier_does_not_shadow_real_version(self) -> None:
+        # Regression: Intel's oneAPI DPC++/C++ compiler banner has no
+        # "version" keyword and puts its real version BEFORE a parenthesized
+        # build identifier (the opposite arrangement from GCC's package
+        # descriptor, which comes before the real version) -- an unfiltered
+        # last-dotted-match search picked the build identifier
+        # "2026.1.0.20260617" instead of the real "2026.1.0" (Codex review,
+        # fresh evidence, using the real banner from
+        # tests/fixtures/g32/dpcpp/compiler_invocation.log).
+        banner = "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.0 (2026.1.0.20260617)"
+        assert tp._extract_version_token(banner) == "2026.1.0"
+        assert tp.version_satisfies(banner, "==2026.1.0") is True
+        assert tp.version_satisfies(banner, "<=2026.1.0") is True
+
+    def test_dotted_match_only_inside_parentheses_still_extracts_something(
+        self,
+    ) -> None:
+        # No banner shape this module has actually seen has its ONLY dotted
+        # number fully parenthesized, but the extractor must still return
+        # something rather than nothing in that hypothetical case.
+        assert tp._extract_version_token("gcc (13.2.0)") == "13.2.0"
+
     def test_no_version_number_raises(self) -> None:
         with pytest.raises(tp.ToolchainProbeError, match="no version number"):
             tp.version_satisfies("unavailable: no such tool", ">=1")
@@ -171,6 +193,25 @@ class TestProbeCompilerFamily:
     def test_cl_exe_name_resolves_to_msvc(self) -> None:
         metadata = {"selected": "C:/VC/bin/cl.exe", "version": ""}
         assert tp._probe_compiler_family(metadata) == "msvc"
+
+    def test_icpx_binary_name_resolves_to_icx(self) -> None:
+        # Regression: Intel's oneAPI DPC++/C++ compiler is a clang-based
+        # driver under a non-"clang"-spelled name; without recognizing it
+        # explicitly it was indeterminate (Codex review, fresh evidence).
+        metadata = {
+            "selected": "/opt/intel/oneapi/compiler/2026.1/bin/compiler/icpx",
+            "version": "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.0 (2026.1.0.20260617)",
+        }
+        assert tp._probe_compiler_family(metadata) == "icx"
+
+    def test_oneapi_banner_alone_resolves_to_icx(self) -> None:
+        # A resolved path that doesn't itself carry an icx/icpx/dpcpp name
+        # (e.g. an unusual symlink) still resolves via the banner text.
+        metadata = {
+            "selected": "/usr/local/bin/mycompiler",
+            "version": "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.0 (2026.1.0.20260617)",
+        }
+        assert tp._probe_compiler_family(metadata) == "icx"
 
 
 class TestOsFamily:
@@ -417,6 +458,40 @@ class TestCheckProfileToolchainIdentity:
                 id="p1",
                 compile=_FakeCompileSpec(
                     compiler_family="gcc", compiler_version=">=13,<14", binding="gcc14"
+                ),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_declared_icx_family_and_version_against_a_real_intel_binding_yields_no_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a declared compiler_family: icx profile was
+        # unconditionally rejected -- Intel's oneAPI DPC++/C++ compiler
+        # (icx/icpx) was previously either indeterminate or misclassified,
+        # even though CompilerFamily.ICX is already a recognized, distinct
+        # family elsewhere in the codebase (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/intel/icpx": {
+                    "selected": "/opt/intel/icpx",
+                    "version": (
+                        "Intel(R) oneAPI DPC++/C++ Compiler 2026.1.0 "
+                        "(2026.1.0.20260617)"
+                    ),
+                    "target_triple": "x86_64-unknown-linux-gnu",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"icx26": "/opt/intel/icpx"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="icx",
+                    compiler_version="==2026.1.0",
+                    binding="icx26",
                 ),
             )
         }
