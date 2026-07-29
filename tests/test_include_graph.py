@@ -285,6 +285,27 @@ def test_depfile_args_expands_response_file_with_redacted_home_directory(
     ) == ["foo.cpp", "-Iinclude/foo"]
 
 
+def test_depfile_args_expands_response_file_with_redacted_absolute_token(
+    tmp_path, monkeypatch
+) -> None:
+    """The response-file *argument itself* (not just ``directory``) may carry
+    RedactionPolicy's ``~`` placeholder, e.g. ``@~/build/args.rsp`` -- an
+    absolute-looking path that ``Path.is_absolute()`` does NOT recognize as
+    absolute while ``~`` is still literal, so it would otherwise be wrongly
+    joined onto the compile unit's directory instead of resolved on its own.
+    The argument tokens must be unredacted too, not just the directory."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    rsp = build_dir / "args.rsp"
+    rsp.write_text("-Iinclude/foo\n")
+    assert depfile_args_from_argv(
+        ["clang++", "-c", "foo.cpp", "@~/build/args.rsp"],
+        directory="~/build",
+    ) == ["foo.cpp", "-Iinclude/foo"]
+
+
 def test_parse_depfile_line_continuations() -> None:
     text = "foo.o: foo.cpp \\\n  inc/a.h \\\n  inc/b.h\n"
     assert parse_depfile(text) == ["foo.cpp", "inc/a.h", "inc/b.h"]

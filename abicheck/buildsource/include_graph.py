@@ -175,13 +175,18 @@ def depfile_args_from_argv(argv: list[str], directory: str | None = None) -> lis
         # separate "compile database location" is available at this call
         # site) -- an untrusted CompileUnit must not be able to smuggle an
         # absolute/traversal path to read arbitrary filesystem content.
-        # unredact_home() first: a persisted CompileUnit.directory may carry
-        # RedactionPolicy's "~" home-dir placeholder (e.g. "~/build"), which
-        # bare Path() would treat as a literal, non-existent relative
-        # component (Path("~/build") stays under the process cwd, it does
-        # not expand "~") -- silently failing every response-file expansion
-        # for a redacted compile unit (Codex review).
+        # unredact_home() first: a persisted CompileUnit.directory (and any
+        # individual @response-file argument, e.g. "@~/build/args.rsp") may
+        # carry RedactionPolicy's "~" home-dir placeholder, which bare
+        # Path() would treat as a literal, non-existent relative component
+        # (Path("~/build") stays under the process cwd and is never
+        # is_absolute(), so an absolute redacted @file token would even be
+        # wrongly joined onto cu_dir instead of resolved on its own) --
+        # silently failing every response-file expansion for a redacted
+        # compile unit otherwise (Codex review, two rounds). Unredacting an
+        # already-real (non-redacted) token is a harmless no-op.
         cu_dir = Path(unredact_home(directory))
+        args = [unredact_home(a) for a in args]
         args = _expand_response_files(args, cu_dir, _safe_resolve(cu_dir) or cu_dir)
     out: list[str] = []
     skip_next = False
