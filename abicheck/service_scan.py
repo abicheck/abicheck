@@ -1583,9 +1583,22 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
         )
 
-    audit = audit_bundle(
-        libraries, bundle_system_providers=req.bundle_system_providers
-    )
+    try:
+        audit = audit_bundle(
+            libraries, bundle_system_providers=req.bundle_system_providers
+        )
+    except ArtifactSetError:
+        # Ambiguous duplicate-SONAME rejection (Codex review) surfaces here
+        # the same way a discovery failure does above -- degrade to an
+        # incomplete bundle section rather than raising out of an
+        # already-executed multi-member scan.
+        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
+        return ScanSetResult(
+            verdict=verdict,
+            exit_code=exit_code,
+            per_artifact=per_artifact,
+            bundle_incomplete=True,
+        )
     # The pre-audit check above only guards against starting the audit with
     # no budget left; audit_bundle() itself has no internal deadline, so a
     # pathological ELF set's resolution-graph construction can still run

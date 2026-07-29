@@ -1728,6 +1728,64 @@ class TestUnresolvedIntraDependency:
         assert self._detect(new) == []
 
 
+class TestAuditBundleDuplicateSoname:
+    """P2 regression (Codex review): two distinct set members sharing the
+    same DT_SONAME make provider resolution ambiguous --
+    provider_library_for_soname() (first-metadata-match) and
+    _compute_resolution_graph()'s reverse-soname map (last-match-wins)
+    disagreed on which library a shared soname resolves to, so the same
+    DT_NEEDED edge could be classified against the wrong provider and
+    produce a false bundle_unresolved_intra_dependency finding.
+    audit_bundle() now rejects the ambiguity outright instead of guessing.
+    """
+
+    def test_rejects_duplicate_soname(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle import ArtifactSetError, audit_bundle
+
+        libraries = {
+            "liba.so": Path("liba.so"),
+            "libb.so": Path("libb.so"),
+        }
+
+        def _fake_snapshot(libs):
+            return _snapshot(
+                {
+                    "liba.so": _meta(soname="libshared.so.1"),
+                    "libb.so": _meta(soname="libshared.so.1", exports=["foo"]),
+                }
+            )
+
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", _fake_snapshot)
+        with pytest.raises(ArtifactSetError, match="ambiguous duplicate SONAME"):
+            audit_bundle(libraries)
+
+    def test_distinct_sonames_not_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle import audit_bundle
+
+        libraries = {
+            "liba.so": Path("liba.so"),
+            "libb.so": Path("libb.so"),
+        }
+
+        def _fake_snapshot(libs):
+            return _snapshot(
+                {
+                    "liba.so": _meta(soname="liba.so.1"),
+                    "libb.so": _meta(soname="libb.so.1"),
+                }
+            )
+
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", _fake_snapshot)
+        result = audit_bundle(libraries)
+        assert result.findings == []
+
+
 class TestArtifactSetDiscovery:
     def test_rejects_colliding_explicit_paths(self, tmp_path: Path) -> None:
         from abicheck.bundle import ArtifactSetError, discover_artifact_set

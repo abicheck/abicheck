@@ -341,6 +341,39 @@ class TestRunScanSetBundleAuditDeadline:
         assert result.exit_code == 5
 
 
+class TestRunScanSetAmbiguousSoname:
+    """P2 regression (Codex review): audit_bundle() rejects an ambiguous
+    duplicate-SONAME set (ArtifactSetError) -- run_scan_set must degrade to
+    an incomplete bundle section, the same as a discover_artifact_set
+    failure, rather than letting the error propagate out of an
+    already-executed multi-member scan.
+    """
+
+    def test_ambiguous_soname_marks_bundle_incomplete(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle import ArtifactSetError
+        from abicheck.service import ScanRequest, ScanSetResult, run_scan_set
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+            raise ArtifactSetError("ambiguous duplicate SONAME provider(s)")
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(bundle_mod, "audit_bundle", _fake_audit_bundle)
+
+        result = run_scan_set(
+            ScanRequest(binaries=[snap_a, snap_b], mode="audit")
+        )
+        assert isinstance(result, ScanSetResult)
+        assert result.bundle_incomplete is True
+        assert result.bundle_findings == []
+        assert len(result.per_artifact) == 2
+
+
 class TestRunScanSetBundleSnapshotCompleteness:
     """P2 regression (Codex review): discover_artifact_set only validates
     that every member *looks like* ELF -- build_bundle_snapshot() can still

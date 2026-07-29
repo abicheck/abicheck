@@ -265,9 +265,42 @@ def audit_bundle(
     that, it only builds the snapshot and runs the audit-mode detector.
     """
     snapshot = build_bundle_snapshot(libraries)
+    # P2 regression (Codex review): two distinct set members advertising the
+    # same DT_SONAME make provider resolution genuinely ambiguous --
+    # provider_library_for_soname() (bundle_models.py) returns the first
+    # metadata match, while _compute_resolution_graph()'s reverse-soname map
+    # keeps the *last* match, so the same DT_NEEDED edge is classified
+    # against two different candidate providers by two different call
+    # sites. Rather than silently guessing (either a false "unresolved"
+    # finding when the picked provider doesn't actually export the symbol,
+    # or a false negative if it happens to), reject the ambiguity outright
+    # -- mirroring discover_artifact_set()'s own collision rejection for
+    # duplicate canonical names.
+    duplicate_sonames = _find_duplicate_sonames(snapshot.metadata)
+    if duplicate_sonames:
+        detail = "; ".join(
+            f"'{soname}': {names}" for soname, names in duplicate_sonames.items()
+        )
+        raise ArtifactSetError(
+            f"--artifact-set has ambiguous duplicate SONAME provider(s): "
+            f"{detail}. Each library in an artifact set must advertise a "
+            "distinct DT_SONAME; rename or drop the duplicate(s)."
+        )
     sys_providers = set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)
     findings = _detect_unresolved_intra_dependency(snapshot, sys_providers)
     return BundleAuditResult(snapshot=snapshot, findings=findings)
+
+
+def _find_duplicate_sonames(
+    metadata: dict[str, ElfMetadata],
+) -> dict[str, list[str]]:
+    """Return ``{soname: [library_names]}`` for every non-empty DT_SONAME
+    shared by 2+ distinct libraries in *metadata* (empty dict if none)."""
+    by_soname: dict[str, list[str]] = {}
+    for name, meta in metadata.items():
+        if meta.soname:
+            by_soname.setdefault(meta.soname, []).append(name)
+    return {soname: names for soname, names in by_soname.items() if len(names) > 1}
 
 
 def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
