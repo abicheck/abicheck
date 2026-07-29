@@ -109,28 +109,38 @@ from .type_reachability import (
 
 
 def _resolve_typedef_chain(
-    alias: str, typedefs: dict[str, str], max_hops: int = 8
+    alias: str, typedefs: dict[str, str], max_rounds: int = 8
 ) -> str:
-    """Follow *alias* through ``typedefs`` (alias -> target) until the target
-    is no longer itself a typedef key, cycle-safe and bounded to *max_hops*.
-
-    A real header backend can chain aliases (``using Handle = Thing;
-    using Thing = std::Thing;``) or wrap a dependency identity in a
-    decorated form (``using Handle = std::Thing *;``) -- a single dict
-    lookup only resolves one hop and only an exact-string target, missing
-    both (Codex review, fresh evidence). This resolves the chain; the
-    caller still matches the *decorated* final target against a candidate
-    identity via :func:`abicheck.type_reachability.type_string_references_name`
-    rather than requiring exact equality.
+    """Expand every typedef-key token embedded anywhere in *alias*'s target,
+    repeatedly, cycle-safe and bounded to *max_rounds* -- not just a
+    whole-string chain (``using Handle = Thing; using Thing =
+    std::Thing;``) but a typedef key embedded *inside* a decorated
+    intermediate target (``using Ptr = Handle *; using Handle =
+    std::Thing;`` -- ``"Handle *"`` is not itself a typedef key, only the
+    ``"Handle"`` token within it is) (Codex review, fresh evidence: an
+    earlier version only followed a chain when the *entire* target string
+    was itself a key, missing this combination of chaining and
+    decoration). Each round substitutes every whole-token typedef-key
+    occurrence in the current text with its target via one compiled
+    boundary-aware pattern (:func:`abicheck.type_reachability._compile_spelling_pattern`,
+    reused for substitution rather than detection); stops when a round
+    produces no change or repeats an already-seen string (self-referential
+    or mutually-cyclic aliases).
     """
-    target = typedefs.get(alias, alias)
-    seen = {alias}
-    hops = 0
-    while target in typedefs and target not in seen and hops < max_hops:
-        seen.add(target)
-        target = typedefs[target]
-        hops += 1
-    return target
+    text = typedefs.get(alias, alias)
+    if not typedefs:
+        return text
+    pattern = _compile_spelling_pattern(typedefs.keys())
+    if pattern is None:
+        return text
+    seen = {text}
+    for _ in range(max_rounds):
+        expanded = pattern.sub(lambda m: typedefs.get(m.group(), m.group()), text)
+        if expanded == text or expanded in seen:
+            break
+        text = expanded
+        seen.add(text)
+    return text
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
@@ -147,6 +157,7 @@ def _directly_referenced_dependency_names(
     kept_functions: Sequence[Function],
     kept_variables: Sequence[Variable],
     kept_types: Sequence[RecordType],
+    kept_enums: Sequence[EnumType],
     dep_candidates: Sequence[RecordType | EnumType],
     typedefs: dict[str, str] | None = None,
 ) -> set[str]:
@@ -174,22 +185,27 @@ def _directly_referenced_dependency_names(
     ``vendor::Thing``), and returning bare names would let one's match
     re-admit the other's unrelated layout (Codex review).
 
-    A candidate's own full identity is always trusted (never ambiguous by
-    construction). Every *derived* spelling -- a namespace-suffix spelling
-    from :func:`abicheck.type_reachability._namespace_suffix_spellings`
-    (e.g. a direct-clang backend's partially-qualified ``Outer::Inner`` for
-    a nested ``vendor::Outer::Inner``, or the fully bare leaf), a
+    Every spelling that could name a candidate -- **including its own full
+    identity**, a namespace-suffix spelling from
+    :func:`abicheck.type_reachability._namespace_suffix_spellings` (e.g. a
+    direct-clang backend's partially-qualified ``Outer::Inner`` for a
+    nested ``vendor::Outer::Inner``, or the fully bare leaf), a
     stdlib-stripped spelling from
-    :func:`abicheck.type_reachability._stripped_signature_spelling`, or a
-    ``typedefs``-resolved alias pointing at either -- goes through the
-    *same* two collision guards before being trusted (Codex review: an
-    earlier version applied these guards to suffixes only, letting a
-    stripped or typedef-derived spelling silently bypass them and
-    re-admit an unrelated candidate/kept type): it is dropped if it
-    collides with any *kept_types* spelling, and dropped if two or more
-    *dep_candidates* entries could derive it (mirrors
-    ``type_reachability._spelling_index``'s own collision guards, applied
-    uniformly across all three derivation kinds rather than one).
+    :func:`abicheck.type_reachability._stripped_signature_spelling``, or a
+    ``typedefs``-resolved alias pointing at any of those -- goes through
+    the *same* two collision guards before being trusted: it is dropped if
+    it collides with any *kept_types*/*kept_enums* spelling, and dropped if
+    two or more *dep_candidates* entries could derive it (mirrors
+    ``type_reachability._spelling_index``'s own collision guards). A
+    candidate's own full identity is **not** exempt from this (Codex
+    review, fresh evidence): when a backend emits a kept type's own
+    signature bare (e.g. a kept ``api::Foo`` spelled ``Foo``) and an
+    unrelated dependency candidate's identity happens to be that same bare
+    ``Foo`` (no namespace of its own), trusting the dependency candidate's
+    identity unconditionally would misattribute the kept type's own
+    layout. Earlier versions of this guard also missed *kept enum*
+    spellings (checked only ``kept_types``, not ``kept_enums``) -- both
+    are now included in the same *kept_spellings* set.
 
     *typedefs* (``AbiSnapshot.typedefs``, alias -> underlying-type spelling)
     is consulted so a dependency type only reachable through a typedef
@@ -238,43 +254,45 @@ def _directly_referenced_dependency_names(
         suffix
         for rec in kept_types
         for suffix in _namespace_suffix_spellings(_candidate_identity(rec))
+    } | {
+        suffix
+        for enum in kept_enums
+        for suffix in _namespace_suffix_spellings(_candidate_identity(enum))
     }
 
     identity_of: dict[int, str] = {}
-    stripped_of: dict[int, str | None] = {}
-    derived_of: dict[int, set[str]] = {}
+    candidate_spellings: dict[int, set[str]] = {}
     for candidate in dep_candidates:
         identity = _candidate_identity(candidate)
         stripped = _stripped_signature_spelling(identity)
         identity_of[id(candidate)] = identity
-        stripped_of[id(candidate)] = stripped
-        derived = set(_namespace_suffix_spellings(identity)[1:])
+        spellings = {identity, *_namespace_suffix_spellings(identity)}
         if stripped:
-            derived.add(stripped)
+            spellings.add(stripped)
         for alias, resolved in resolved_targets.items():
             for key in filter(None, (identity, stripped)):
                 if resolved == key or type_string_references_name(resolved, key):
-                    derived.add(alias)
+                    spellings.add(alias)
                     break
-        derived_of[id(candidate)] = derived
+        candidate_spellings[id(candidate)] = spellings
 
-    derived_owners: dict[str, set[str]] = {}
+    spelling_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = identity_of[id(candidate)]
-        for spelling in derived_of[id(candidate)]:
-            derived_owners.setdefault(spelling, set()).add(identity)
+        for spelling in candidate_spellings[id(candidate)]:
+            spelling_owners.setdefault(spelling, set()).add(identity)
 
-    # spelling -> {identity, ...}: the full identity is always trusted; a
-    # derived spelling only when unambiguous among dep_candidates and not
-    # colliding with a kept type's own spelling.
+    # spelling -> {identity, ...}: every spelling -- including a candidate's
+    # own full identity -- is trusted only when unambiguous among
+    # dep_candidates and not colliding with a kept type's/enum's own
+    # spelling (Codex review: no spelling is exempt from either guard).
     spelling_index: dict[str, set[str]] = {}
     for candidate in dep_candidates:
         identity = identity_of[id(candidate)]
-        spelling_index.setdefault(identity, set()).add(identity)
-        for spelling in derived_of[id(candidate)]:
+        for spelling in candidate_spellings[id(candidate)]:
             if spelling in kept_spellings:
                 continue
-            if len(derived_owners.get(spelling, ())) == 1:
+            if len(spelling_owners.get(spelling, ())) == 1:
                 spelling_index.setdefault(spelling, set()).add(identity)
 
     pattern = _compile_spelling_pattern(spelling_index)
@@ -419,6 +437,7 @@ def scope_snapshot_excluding_dependencies(
             kept_functions,
             kept_variables,
             kept_types,
+            kept_enums,
             [*dep_types, *dep_enums],
             snap.typedefs,
         )

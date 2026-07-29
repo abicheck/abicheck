@@ -660,6 +660,93 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
 
+    def test_chained_decorated_typedef_target_resolves_dependency_record(self):
+        """Codex review (P1, fourth round): `using Ptr = Handle *; using
+        Handle = std::Thing;` -- `"Handle *"` is not itself a typedef key
+        (only the embedded `"Handle"` token is), so a whole-string chain
+        follower stops there. The token must be expanded within the
+        decorated intermediate target too."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Ptr",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="std::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Ptr": "Handle *", "Handle": "std::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+
+    def test_kept_enum_collision_guards_bare_dependency_spelling(self):
+        """Codex review (P2, fourth round): a kept enum's bare spelling
+        (`api::Status` spelled bare `Status`) must guard against an
+        unrelated dependency record sharing that same bare identity
+        (`vendor::Status`), the same way a kept *type*'s spelling already
+        did -- an earlier version checked kept_types only."""
+        from abicheck.model import EnumMember, EnumType
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", ret="Status")],
+            enums=[
+                EnumType(
+                    name="Status",
+                    qualified_name="api::Status",
+                    members=[EnumMember(name="A", value=0)],
+                    source_header=_OWN_HEADER,
+                ),
+            ],
+            types=[
+                RecordType(
+                    name="Status",
+                    kind="struct",
+                    qualified_name="vendor::Status",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+        assert [e.qualified_name for e in scoped.enums] == ["api::Status"]
+
+    def test_bare_dependency_identity_guarded_against_kept_type_collision(self):
+        """Codex review (P2, fourth round): a dependency candidate's own
+        full identity is not automatically trusted -- when a kept type's
+        own bare-suffix spelling (`api::Foo` spelled bare `Foo`) collides
+        with an unrelated dependency candidate's bare identity (`Foo`, no
+        namespace of its own), the dependency candidate must not be
+        retained through that collision."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Foo",))],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    qualified_name="api::Foo",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+
     def test_partially_qualified_nested_dependency_type_is_kept(self):
         """Codex review (P2, second round): a direct-clang-style backend
         spells a nested dependency type with the enclosing namespace
