@@ -149,6 +149,7 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `force_public_symbols` | `set[str] \| None` | `None` |
 | `pattern_verdicts` | `bool` | `False` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
+| `collapse_versioned_symbols` | `bool` | `False` |
 
 ## `ScanResult`
 

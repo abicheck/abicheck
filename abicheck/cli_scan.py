@@ -832,42 +832,81 @@ def scan_cmd(
     # ADR-049 Phase 5 review (Codex, PR #657): resolve scope/suppression
     # settings through the project's `.abicheck.yml` the same way `compare`
     # does (CLI > config > default, ADR-037 D4) -- reusing `compare`'s own
-    # `resolve_compare_config`/`discover_project_config` rather than reading
-    # raw CLI values only. Without this, a project config's
-    # `suppression.strict`/`scope.public`/`scope.public_symbols` applied to
-    # `compare` but silently had no effect on `scan --against`. Severity/
-    # debug/exit-code-scheme config keys are also resolved here (required
-    # positional args of the shared function) but deliberately discarded --
-    # `scan` has no equivalent flags for them.
-    from .buildsource.inline import load_build_config
-    from .cli_helpers_compare import discover_project_config, resolve_compare_config
+    # `resolve_compare_config` rather than reading raw CLI values only.
+    # Without this, a project config's `suppression.strict`/`scope.public`/
+    # `scope.public_symbols`/`scope.collapse_versioned_symbols`/
+    # `suppression.require_justification` applied to `compare` but silently
+    # had no effect on `scan --against`. Severity/debug/exit-code-scheme
+    # config keys are also resolved here (required positional args of the
+    # shared function) but deliberately discarded -- `scan` has no
+    # equivalent flags for them.
+    #
+    # Gated on `against is not None`: every field this resolves only means
+    # anything for a baseline comparison (mirrors the "reject comparison-only
+    # flags without --against" guard above) -- skipping it for a plain
+    # one-build audit means a malformed *auto-discovered* config the user
+    # never asked `scan` to bind to can't fail an otherwise-unrelated audit
+    # (Codex review).
+    collapse_versioned_symbols = False
+    require_justification = False
+    if against is not None:
+        from .buildsource.inline import discover_build_config, load_build_config
+        from .cli_helpers_compare import discover_project_config, resolve_compare_config
 
-    cfg_path = build_config if build_config is not None else discover_project_config()
-    try:
-        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
-    except ValueError as exc:
-        raise click.UsageError(str(exc)) from exc
-    resolved_cfg = resolve_compare_config(
-        project_cfg,
-        cli_severity_preset=None,
-        cli_severity_abi_breaking=None,
-        cli_severity_potential_breaking=None,
-        cli_severity_quality_issues=None,
-        cli_severity_addition=None,
-        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-        cli_collapse_versioned_symbols=None,
-        cli_public_symbols=public_symbols,
-        cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
-    )
-    scope_public_headers = resolved_cfg.scope_public
-    strict_suppressions = resolved_cfg.strict_suppressions
-    public_symbols = tuple(resolved_cfg.public_symbols)
-    # `scan` has no --collapse-versioned-symbols/--require-justification
-    # flags of its own (config-only for scan, same as compare's hidden/
-    # demoted equivalents), so these are purely `resolved_cfg`'s config >
-    # default resolution with no CLI override to consider.
-    collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
-    require_justification = resolved_cfg.require_justification
+        # Same precedence `merge_compile_config` already uses for the
+        # `compile:` block (explicit --config > --sources-root > cwd-upward)
+        # -- otherwise the same `scan --against --sources DIR` invocation
+        # could resolve its `compile:` settings from one .abicheck.yml and
+        # its scope/suppression settings from a different one (Codex review).
+        explicit_config = build_config is not None
+        cfg_path = (
+            build_config
+            if explicit_config
+            else (discover_build_config(sources) or discover_project_config())
+        )
+        project_cfg = None
+        if cfg_path is not None:
+            try:
+                project_cfg = load_build_config(cfg_path)
+            except ValueError as exc:
+                # A malformed *explicit* --config, or one auto-discovered at
+                # the --sources root, already failed loud above inside
+                # `resolve_compile_context`'s own `merge_compile_config`
+                # (which attempts the identical load first, unconditionally)
+                # -- so reaching here with a parse failure only happens for
+                # the cwd-upward `discover_project_config()` fallback, a file
+                # `merge_compile_config` never looked at. Best-effort warn,
+                # matching `merge_compile_config`'s own auto-discovered
+                # convention -- a config the user never explicitly bound to
+                # shouldn't fail a run it wasn't asked to affect.
+                click.echo(
+                    f"warning: could not parse auto-discovered {cfg_path}; "
+                    f"using CLI comparison settings only ({exc}).",
+                    err=True,
+                )
+        resolved_cfg = resolve_compare_config(
+            project_cfg,
+            cli_severity_preset=None,
+            cli_severity_abi_breaking=None,
+            cli_severity_potential_breaking=None,
+            cli_severity_quality_issues=None,
+            cli_severity_addition=None,
+            cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
+            cli_collapse_versioned_symbols=None,
+            cli_public_symbols=public_symbols,
+            cli_strict_suppressions=_cli_flag(
+                "strict_suppressions", strict_suppressions
+            ),
+        )
+        scope_public_headers = resolved_cfg.scope_public
+        strict_suppressions = resolved_cfg.strict_suppressions
+        public_symbols = tuple(resolved_cfg.public_symbols)
+        # `scan` has no --collapse-versioned-symbols/--require-justification
+        # flags of its own (config-only for scan, same as compare's hidden/
+        # demoted equivalents), so these are purely `resolved_cfg`'s config >
+        # default resolution with no CLI override to consider.
+        collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
+        require_justification = resolved_cfg.require_justification
 
     # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
     # loader (`_load_suppression_and_policy`) so a scan baseline comparison

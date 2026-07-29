@@ -308,18 +308,18 @@ def test_scan_against_malformed_config_is_usage_error(
     assert scan_res.exception is None or isinstance(scan_res.exception, SystemExit)
 
 
-def test_scan_against_malformed_autodiscovered_config_is_usage_error(
+def test_scan_against_malformed_autodiscovered_config_warns_and_falls_back(
     runner: CliRunner,
     old_snap: Path,
     new_snap_breaking: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Same contract as the explicit --config case above, but for the
-    # auto-discovered path (no --config/--sources given at all, so
-    # cli_options.merge_compile_config's own --sources-scoped auto-discovery
-    # never engages -- only cli_scan's own scope/suppression config
-    # resolution reaches discover_project_config here).
+    # Codex review: an *auto-discovered* config (the user never bound to it
+    # via explicit --config) must be best-effort, matching
+    # merge_compile_config's own identical convention for the compile:
+    # block -- warn and fall back to CLI-only settings, not fail the run.
+    # Only an *explicit* --config (the case above) is fail-loud.
     import abicheck.cli_helpers_compare as _cch
 
     bad_config = tmp_path / ".abicheck.yml"
@@ -329,7 +329,8 @@ def test_scan_against_malformed_autodiscovered_config_is_usage_error(
     scan_res = runner.invoke(
         main, ["scan", str(new_snap_breaking), "--against", str(old_snap)]
     )
-    assert scan_res.exit_code == 64, scan_res.output
+    assert scan_res.exit_code == 4, scan_res.output  # the real BREAKING verdict
+    assert "warning: could not parse auto-discovered" in scan_res.output
 
 
 def test_scan_against_honors_config_require_justification_like_compare(
@@ -448,3 +449,81 @@ def test_run_baseline_compare_forwards_collapse_versioned_symbols(
     )
 
     assert captured["collapse_versioned_symbols"] is True
+
+
+def test_scan_audit_mode_skips_comparison_config_resolution(
+    runner: CliRunner,
+    new_snap_breaking: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Codex review: a plain one-build audit (no --against) must not even
+    # attempt to load a project config for scope/suppression settings --
+    # every field that config resolves is comparison-only and never
+    # consumed by an audit-only run, so a malformed *auto-discovered*
+    # config must not fail an otherwise-unrelated audit scan.
+    import abicheck.cli_helpers_compare as _cch
+
+    bad_config = tmp_path / ".abicheck.yml"
+    bad_config.write_text("scope: [unclosed\n  public: true", encoding="utf-8")
+    discovered: list[object] = []
+
+    def _tracking_discover(start=None):  # type: ignore[no-untyped-def]
+        discovered.append(start)
+        return bad_config
+
+    monkeypatch.setattr(_cch, "discover_project_config", _tracking_discover)
+
+    result = runner.invoke(main, ["scan", str(new_snap_breaking)])
+
+    assert result.exit_code == 0, result.output
+    # The comparison-config resolution block (the only caller of
+    # discover_project_config in cli_scan.py) must never even run for a
+    # plain audit -- not just tolerate a bad result from it.
+    assert discovered == []
+
+
+def test_scan_against_prefers_sources_root_config_over_cwd(
+    runner: CliRunner,
+    old_snap: Path,
+    new_snap_breaking: Path,
+    tmp_path: Path,
+) -> None:
+    # Codex review: `resolve_compile_context`'s own compile: block
+    # discovery already prefers the `--sources` tree root over a cwd-upward
+    # walk (`discover_build_config`); the comparison-config resolution must
+    # use the identical precedence so one `scan --against --sources DIR`
+    # invocation can't resolve its compile: settings from one .abicheck.yml
+    # and its scope/suppression settings from a different one.
+    sources_root = tmp_path / "project"
+    sources_root.mkdir()
+    (sources_root / ".abicheck.yml").write_text(
+        "suppression:\n  strict: true\n", encoding="utf-8"
+    )
+    suppress = tmp_path / "suppress.yml"
+    suppress.write_text(
+        "version: 1\nsuppressions:\n"
+        "  - symbol: '_Z3barv'\n"
+        "    change_kind: func_removed\n"
+        "    reason: 'no longer needed'\n"
+        '    expires: "2000-01-01"\n',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(old_snap),
+            "--sources",
+            str(sources_root),
+            "--suppress",
+            str(suppress),
+        ],
+    )
+    # No --strict-suppressions on the CLI -- only the sources-root config's
+    # suppression.strict: true -- so the expired rule must still be
+    # rejected (exit 1), proving the sources-root config was actually found.
+    assert result.exit_code == 1, result.output

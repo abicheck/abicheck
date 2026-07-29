@@ -3266,6 +3266,57 @@ def test_run_scan_allows_comparison_fields_with_a_real_baseline(monkeypatch):
     assert res.verdict == "COMPATIBLE"
 
 
+def test_run_scan_rejects_collapse_versioned_symbols_without_baseline():
+    # Codex review on PR #657: ScanRequest gained collapse_versioned_symbols
+    # (an ICU-style version-suffix transition needs it to demote a rename to
+    # COMPATIBLE_WITH_RISK the same way `compare`'s config-resolved
+    # equivalent does) -- it must be rejected without a baseline like every
+    # other comparison-only field.
+    from abicheck.errors import ValidationError
+    from abicheck.service_scan import ScanRequest, run_scan
+
+    req = ScanRequest(
+        binaries=[Path("libfoo.so")], depth="binary", collapse_versioned_symbols=True
+    )
+    with pytest.raises(ValidationError, match="only take effect with a baseline"):
+        run_scan(req)
+
+
+def test_run_scan_forwards_collapse_versioned_symbols_to_core(monkeypatch):
+    # And, with a real baseline, the value must actually reach
+    # run_scan_core (the Python API's own config-surface parity gap Codex
+    # found -- the CLI threads this but ScanRequest never exposed it).
+    from types import SimpleNamespace
+
+    from abicheck import service_scan as _ss
+
+    captured = {}
+
+    def fake_core(**kw):
+        captured["collapse_versioned_symbols"] = kw.get("collapse_versioned_symbols")
+        outcome = SimpleNamespace(
+            verdict="COMPATIBLE",
+            exit_code=0,
+            coverage=[],
+            crosscheck={},
+            to_dict=lambda: {},
+        )
+        return SimpleNamespace(outcome=outcome, findings=[])
+
+    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
+    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
+
+    req = _ss.ScanRequest(
+        binaries=[Path("libfoo.so")],
+        depth="binary",
+        baseline=Path("old.abi.json"),
+        collapse_versioned_symbols=True,
+    )
+    _ss.run_scan(req)
+
+    assert captured["collapse_versioned_symbols"] is True
+
+
 # ── _try_attach_numpy_capi_surface() ────────────────────────────────────────
 
 

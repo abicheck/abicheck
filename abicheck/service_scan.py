@@ -255,6 +255,7 @@ class ScanRequest:
     force_public_symbols: set[str] | None = None
     pattern_verdicts: bool = False
     env_matrix: EnvironmentMatrix | None = None
+    collapse_versioned_symbols: bool = False
 
 
 @dataclass(frozen=True)
@@ -914,6 +915,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
                 ("force_public_symbols", bool(req.force_public_symbols)),
                 ("pattern_verdicts", req.pattern_verdicts),
                 ("env_matrix", req.env_matrix is not None),
+                ("collapse_versioned_symbols", req.collapse_versioned_symbols),
             )
             if is_set
         ]
@@ -1012,6 +1014,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             force_public_symbols=req.force_public_symbols,
             pattern_verdicts=req.pattern_verdicts,
             env_matrix=req.env_matrix,
+            collapse_versioned_symbols=req.collapse_versioned_symbols,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

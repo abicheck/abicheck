@@ -1377,6 +1377,49 @@ real ICU-style versioned-rename fixture end-to-end was judged not worth
 the added fixture complexity when the kwarg-threading is what was actually
 missing, not the underlying detector logic itself).
 
+**Updated (2026-07-29, same PR): three more Codex-caught gaps in the same
+config-resolution fix, all fixed together.** (1) The new comparison-config
+resolution only ever searched cwd upward (`discover_project_config()`),
+while `resolve_compile_context`'s own `compile:` block resolution already
+prefers the `--sources` tree root (`discover_build_config(sources)`) --
+`scan --against --sources DIR` run from outside `DIR` could resolve its
+`compile:` settings from one `.abicheck.yml` and its scope/suppression
+settings from a different one. Fixed by adopting the identical precedence
+(`explicit --config` > `--sources` root > cwd-upward). (2) The whole
+resolution block ran even for a plain one-build audit (no `--against`),
+where every field it resolves is comparison-only -- a malformed
+*auto-discovered* config could fail an otherwise-unrelated audit outright.
+Fixed by gating the entire block on `against is not None`, with
+`collapse_versioned_symbols`/`require_justification` defaulting to `False`
+outside it (mirrors the "reject comparison-only flags without `--against`"
+guard's own reasoning). (3) Even inside that gate, any config parse
+failure reaching this code unconditionally raised `click.UsageError` --
+but `merge_compile_config` already attempts the *identical* load first
+(unconditionally, for an explicit `--config` or one found at the
+`--sources` root) and is deliberately best-effort there (warn + fallback)
+for anything not explicitly bound to. Reaching this code's own parse
+failure can therefore only happen for the cwd-upward fallback
+`merge_compile_config` never attempts -- so fail-loud here was both
+inconsistent with the established convention and, for the explicit/
+sources-root cases, literally unreachable dead code (confirmed via
+coverage: the `if explicit_config: raise` branch was never hit by any real
+scenario, since `merge_compile_config` always fails first for those two
+cases). Simplified to always warn + fall back, matching
+`merge_compile_config` exactly. New/updated tests: a sources-root-discovery
+end-to-end test (config found via `--sources`, no CLI flag, still rejects
+an expired suppression), an audit-mode test asserting
+`discover_project_config` is never even called without `--against`, and
+the earlier malformed-auto-discovered-config test updated from "must be a
+usage error" to "must warn and fall back" (it had encoded the exact
+behavior this round's fixes corrected).
+
+Separately, `ScanRequest` (Python API) gained a `collapse_versioned_symbols`
+field -- the CLI threads a config-resolved value through `run_scan_core`,
+but the typed request object had no equivalent, so a library caller could
+not request the same ICU-style version-suffix handling. Wired into the
+existing "reject comparison-only fields without a baseline" guard and
+`run_scan`'s `run_scan_core` call the same way the other fields are.
+
 Still not yet done, deliberately out of scope for these four slices (each
 is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is
