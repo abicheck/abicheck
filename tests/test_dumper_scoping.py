@@ -440,12 +440,126 @@ class TestQualifiedNameCollision:
         assert set(scoped.dwarf.structs) == {"mine::Thing"}
 
 
+class TestDirectlyReferencedDependencyRetention:
+    """Status-review follow-up (P0 against PR #649): a dependency-header
+    type directly named in a kept public signature must survive scoping,
+    while its own purely-transitive internals stay excluded."""
+
+    def test_stdlib_type_directly_referenced_by_public_param_is_kept(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("std::string",))],
+            types=[
+                RecordType(
+                    name="string",
+                    kind="struct",
+                    qualified_name="std::string",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="_Alloc_hider",
+                    kind="struct",
+                    qualified_name="std::string::_Alloc_hider",
+                    source_header=_SYSTEM_HEADER,
+                    fields=[TypeField(name="ptr", type="char *")],
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        kept_names = {t.name for t in scoped.types}
+        assert "string" in kept_names, (
+            "std::string is directly named in run()'s own signature -- "
+            "the library's ABI genuinely depends on its layout"
+        )
+        assert "_Alloc_hider" not in kept_names, (
+            "only reachable transitively through std::string's own "
+            "internals -- must still be excluded"
+        )
+
+    def test_non_public_libc_type_directly_referenced_is_kept(self):
+        """The review's own example: `struct tm` from <time.h> used
+        directly in a public function's signature."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("public_fn", params=("struct Internal *", "struct tm *"))],
+            types=[
+                _rec("Internal"),
+                _rec("tm", source_header="/usr/include/time.h"),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"Internal", "tm"}
+
+    def test_dependency_type_referenced_only_via_field_of_kept_type_is_kept(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[
+                _rec("Wrapper", fields=(("value", "std::string"),)),
+                RecordType(
+                    name="string",
+                    kind="struct",
+                    qualified_name="std::string",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"Wrapper", "string"}
+
+    def test_dependency_enum_directly_referenced_is_kept(self):
+        from abicheck.model import EnumMember, EnumType
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", ret="errc")],
+            enums=[
+                EnumType(
+                    name="errc",
+                    members=[EnumMember(name="A", value=0)],
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [e.name for e in scoped.enums] == ["errc"]
+
+    def test_unreferenced_dependency_type_still_excluded(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run")],
+            types=[
+                _rec("Own"),
+                RecordType(
+                    name="unused_dep",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Own"]
+
+
 class TestEndToEndCompareAfterScoping:
     """Proves the actual point of this feature through the real compare()
     pipeline, not just the filter in isolation: a real ABI break in the
     library's own code must still be caught after default scoping, while a
-    change confined to an excluded dependency type must not surface at all
-    (both sides dropped it identically)."""
+    change confined to a purely-transitive (never directly referenced)
+    dependency type must not surface at all (both sides dropped it
+    identically). A dependency type that *is* directly referenced by a kept
+    public signature (e.g. ``std::string`` taken by a public function) is
+    retained precisely so a real layout drift on it is not silently lost --
+    see ``_directly_referenced_dependency_names``."""
 
     def test_own_library_break_detected_dependency_noise_excluded(self):
         from abicheck.change_registry_types import Verdict
@@ -457,7 +571,11 @@ class TestEndToEndCompareAfterScoping:
                 library="libfoo.so",
                 version="1.0",
                 from_headers=True,
-                functions=[_fn("run", params=("Own *", "std::string *"))],
+                # "helper *" is not std::string itself, so std::string here
+                # is only transitively reachable (through Own's own
+                # internals, which this test doesn't model) -- never
+                # directly named by a kept signature -- and stays excluded.
+                functions=[_fn("run", params=("Own *", "helper *"))],
                 types=[
                     _rec("Own", fields=tuple(own_fields), source_header=_OWN_HEADER),
                     RecordType(
@@ -488,3 +606,37 @@ class TestEndToEndCompareAfterScoping:
         assert any(
             c.symbol == "Own" or c.caused_by_type == "Own" for c in result.changes
         )
+
+    def test_directly_referenced_dependency_break_is_caught(self):
+        """The status-review P0: a layout change on a dependency type that
+        IS directly named in a kept public signature (std::string taken by
+        value/pointer by a public function) must survive scoping and be
+        detected, not silently dropped from both sides."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker import compare
+
+        def _snap(dep_size):
+            return AbiSnapshot(
+                library="libfoo.so",
+                version="1.0",
+                from_headers=True,
+                functions=[_fn("run", params=("std::string *",))],
+                types=[
+                    RecordType(
+                        name="std::string",
+                        kind="struct",
+                        size_bits=dep_size,
+                        source_header=_SYSTEM_HEADER,
+                    ),
+                ],
+            )
+
+        old_scoped = scope_snapshot_excluding_dependencies(_snap(256))
+        new_scoped = scope_snapshot_excluding_dependencies(_snap(512))
+
+        assert "std::string" in {t.name for t in old_scoped.types}
+        assert "std::string" in {t.name for t in new_scoped.types}
+
+        result = compare(old_scoped, new_scoped)
+        assert result.verdict != Verdict.NO_CHANGE
+        assert any(c.symbol == "std::string" for c in result.changes)

@@ -37,14 +37,34 @@ declarations at all (a binary-only/DWARF-only dump) -- unlike an opt-in
 flag, default-on behavior must never fail a plain ``dump`` invocation that
 has nothing for it to act on.
 
-**Trade-off, by design (CodeRabbit review):** a genuine ABI-relevant layout
-change confined entirely to an excluded dependency type (e.g. a toolchain
-libstdc++ upgrade changing ``std::string``'s layout) becomes invisible to a
-later ``compare`` once *both* snapshots are scoped -- the type is absent
-from both sides symmetrically, not merely demoted. That is the intended
-effect of "we don't want a dump of the standard dependency", not a bug, but
-it does mean `dump`'s default output alone is no longer a toolchain/stdlib
-ABI-drift detector across compiler or C++ standard library upgrades; pass
+**Direct-reference retention (status-review follow-up, closes the P0 flagged
+against PR #649):** a dependency-header type/enum that is *directly* named
+by a kept (non-dependency) declaration's own signature -- a public
+function's return/parameter type, a public variable's type, or a kept
+type's own field/base -- is retained even though its own ``source_header``
+is a toolchain/system header. This is the dump-time half of the same
+direct-vs-transitive distinction :mod:`abicheck.type_reachability` already
+draws at diff time: ``void foo(std::string value)`` means the library's ABI
+genuinely depends on ``std::string``'s layout, so a scoped dump must not
+throw that fact away before ``compare`` ever gets to see it -- unlike
+``std::string::_Alloc_hider``, which is reachable only through
+``std::string``'s own internals and is dropped exactly as before. Retention
+is single-hop only: a directly-referenced dependency type's *own* fields
+are not chased for further dependency references, so its private internals
+(``_Alloc_hider`` and the like) stay excluded even though the type that
+embeds them is kept. See :func:`_directly_referenced_dependency_names`.
+
+**Remaining trade-off, by design (CodeRabbit review):** a genuine
+ABI-relevant layout change confined entirely to a dependency type that is
+*not* directly referenced anywhere in the kept surface (e.g. an internal
+allocator/iterator helper type only reachable through another dependency
+type's own internals) still becomes invisible to a later ``compare`` once
+both snapshots are scoped -- the type is absent from both sides
+symmetrically, not merely demoted. That is the intended effect of "we
+don't want a dump of the standard dependency"'s implementation internals,
+not a bug, but it does mean `dump`'s default output alone is still not a
+toolchain/stdlib ABI-drift detector for *transitively*-reached dependency
+internals across compiler or C++ standard library upgrades; pass
 ``--include-dependencies`` on both sides of a comparison if that detection
 is needed.
 
@@ -77,12 +97,62 @@ from pathlib import Path
 
 from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_metadata import DwarfMetadata
-from .model import AbiSnapshot
+from .model import AbiSnapshot, EnumType, Function, RecordType, Variable
 from .provenance import is_dependency_header
+from .type_reachability import type_string_references_name
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
     return names | qualified_names
+
+
+def _directly_referenced_dependency_names(
+    kept_functions: Sequence[Function],
+    kept_variables: Sequence[Variable],
+    kept_types: Sequence[RecordType],
+    dep_candidates: Sequence[RecordType | EnumType],
+) -> set[str]:
+    """Which *dep_candidates* (dependency-header types/enums about to be
+    dropped) are directly named by a kept, non-dependency declaration's own
+    signature -- i.e. reachable at distance one from what
+    :func:`scope_snapshot_excluding_dependencies` is keeping anyway, as
+    opposed to only reachable transitively through another dependency
+    type's own internals. Mirrors
+    :func:`abicheck.type_reachability.directly_referenced_stdlib_types`'s
+    direct-vs-transitive distinction, but generalized to any dependency
+    header (not stdlib-namespace-prefixed only -- e.g. ``struct tm`` from
+    ``<time.h>``) since dump-time scoping excludes by header origin, not by
+    namespace.
+
+    Deliberately single-hop: only the kept, already-retained declarations'
+    own signatures are searched, never a *dependency* candidate's own
+    fields/bases -- chasing further would re-admit the transitive
+    implementation closure (e.g. ``std::string``'s own
+    ``_Alloc_hider`` field) this scoping exists to drop.
+    """
+    signature_texts: list[str] = []
+    for fn in kept_functions:
+        signature_texts.append(fn.return_type)
+        signature_texts.extend(p.type for p in fn.params)
+    for var in kept_variables:
+        signature_texts.append(var.type)
+    for rec in kept_types:
+        signature_texts.extend(f.type for f in rec.fields)
+        signature_texts.extend(rec.bases)
+        signature_texts.extend(rec.virtual_bases)
+    haystack = "\n".join(t for t in signature_texts if t)
+
+    referenced: set[str] = set()
+    for candidate in dep_candidates:
+        qualified_name = getattr(candidate, "qualified_name", None)
+        for spelling in filter(None, (qualified_name, candidate.name)):
+            # Cheap substring pre-check (fast C-level scan) before paying
+            # for the boundary-aware regex-equivalent match -- most
+            # candidates never appear in the haystack at all.
+            if spelling in haystack and type_string_references_name(haystack, spelling):
+                referenced.add(candidate.name)
+                break
+    return referenced
 
 
 def _name_matches(name: str, kept_identifiers: set[str]) -> bool:
@@ -210,6 +280,21 @@ def scope_snapshot_excluding_dependencies(
     kept_variables = [v for v in snap.variables if not _is_dep(v.source_header)]
     kept_types = [t for t in snap.types if not _is_dep(t.source_header)]
     kept_enums = [e for e in snap.enums if not _is_dep(e.source_header)]
+
+    dep_types = [t for t in snap.types if _is_dep(t.source_header)]
+    dep_enums = [e for e in snap.enums if _is_dep(e.source_header)]
+    if dep_types or dep_enums:
+        directly_referenced = _directly_referenced_dependency_names(
+            kept_functions, kept_variables, kept_types, [*dep_types, *dep_enums]
+        )
+        if directly_referenced:
+            kept_types = kept_types + [
+                t for t in dep_types if t.name in directly_referenced
+            ]
+            kept_enums = kept_enums + [
+                e for e in dep_enums if e.name in directly_referenced
+            ]
+
     kept_identifiers = _kept_identifiers(
         {t.name for t in kept_types} | {e.name for e in kept_enums},
         {t.qualified_name for t in kept_types if t.qualified_name}

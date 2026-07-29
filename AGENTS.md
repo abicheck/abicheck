@@ -474,6 +474,40 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 ## Known gaps — acknowledged remaining work
 
+- **Default dependency scoping (PR #649) vs. contextual reachability
+  (`type_reachability.py`) — the direct-reference conflict is fixed; the
+  comparability-contract gap is not.** A status-review follow-up flagged
+  that `dump`'s default header-origin scoping (`dumper_scoping.py`) and the
+  same-pass contextual-reachability work were pulling in opposite
+  directions: reachability says a dependency type directly named in a
+  public signature (`std::string` taken by a public function, or a
+  platform type like `struct tm`) is genuinely part of the library's ABI
+  contract, while scoping unconditionally dropped every declaration whose
+  own header was a toolchain/system header, regardless of whether anything
+  referenced it directly. Fixed: `scope_snapshot_excluding_dependencies`
+  now retains a dependency-header type/enum that is directly named by a
+  kept declaration's own return/parameter/variable type or by a kept
+  type's own field/base (`_directly_referenced_dependency_names`), while
+  still dropping what's only reachable transitively through that type's
+  own internals (`std::string::_Alloc_hider` and the like stay excluded).
+  **Still open, deliberately not attempted in the same change:** the
+  chosen dependency-scoping mode (scoped vs. `--include-dependencies`) is
+  not part of the `ExtractionContract` `scope_fingerprint`
+  (`comparability.py`'s `SCOPE_FIELD_KEYS`), so two snapshots extracted
+  under different scoping modes can still compare as "comparable" even
+  though they don't share the same fact universe — and `cli.py`'s inline
+  (non-persisted) `compare old.so new.so` path still hardcodes
+  `include_dependencies=True` regardless of what a persisted baseline JSON
+  on the other side of the same comparison was scoped with. Closing that
+  gap needs its own scoped design (a new `SCOPE_FIELD_KEYS` entry plus a
+  `comparability.py`-level compatibility rule, verified against
+  `test_comparability_gate.py`'s existing superset-growth assertions), not
+  a drive-by extension of the direct-reference fix above. Until then, the
+  safe authoritative flow for a compiler/stdlib-sensitive comparison is
+  either `--include-dependencies` on both `dump` invocations, or comparing
+  two default-scoped persisted snapshots against each other rather than
+  mixing a persisted baseline JSON with a live-binary operand.
+
 - **Depth contract, CLI vs. API/MCP — re-investigated for G30, closed as
   stale, not implemented (CLAUDE.md "M1-6").** This entry previously said PR
   #601 (which adds a hard-fail `DumpDepthNotSatisfiedError` when an explicit
