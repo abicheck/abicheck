@@ -216,6 +216,55 @@ class TestArtifactSetCompileContextForwarding:
         assert req.compile.nostdinc is True
 
 
+class TestArtifactSetSourceMethodSelection:
+    """P2 regression (Codex review): omitting --depth must opt an
+    --artifact-set scan into risk-driven auto method selection, the same
+    as the single-binary path -- source_method was hard-coded to None,
+    silently disabling --since/--changed-path risk-driven selection.
+    """
+
+    def _capture_req(self, monkeypatch: pytest.MonkeyPatch) -> dict:
+        import abicheck.service_scan as service_scan_mod
+        from abicheck.service_scan import ScanSetResult
+
+        captured: dict[str, object] = {}
+
+        def _fake_run_scan_set(req):
+            captured["req"] = req
+            return ScanSetResult(verdict="COMPATIBLE", exit_code=0)
+
+        monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
+        return captured
+
+    def test_no_depth_opts_into_auto(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        p1 = tmp_path / "liba.so"
+        p2 = tmp_path / "libb.so"
+        p1.write_bytes(b"\x7fELF" + b"\0" * 12)
+        p2.write_bytes(b"\x7fELF" + b"\0" * 12)
+        captured = self._capture_req(monkeypatch)
+
+        result = runner.invoke(main, ["scan", "--artifact-set", f"{p1},{p2}"])
+        assert result.exit_code == 0, result.output
+        assert captured["req"].source_method == "auto"
+
+    def test_explicit_depth_stays_pinned(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        p1 = tmp_path / "liba.so"
+        p2 = tmp_path / "libb.so"
+        p1.write_bytes(b"\x7fELF" + b"\0" * 12)
+        p2.write_bytes(b"\x7fELF" + b"\0" * 12)
+        captured = self._capture_req(monkeypatch)
+
+        result = runner.invoke(
+            main, ["scan", "--artifact-set", f"{p1},{p2}", "--depth", "binary"]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured["req"].source_method is None
+
+
 # ---------------------------------------------------------------------------
 # Service layer: run_scan_set acceptance (JSON-snapshot members — no ELF
 # parsing needed for the per-member scans; the bundle-audit step's own
@@ -223,6 +272,81 @@ class TestArtifactSetCompileContextForwarding:
 # which run_scan_set degrades to `bundle_incomplete=True` rather than
 # raising — see run_scan_set's own docstring).
 # ---------------------------------------------------------------------------
+
+
+class TestRunScanSetBundleAuditDeadline:
+    """P1 regression (Codex review): audit_bundle() has no internal
+    deadline, so a slow bundle-audit phase must be caught by re-checking
+    elapsed time after it returns -- else run_scan_set could report a
+    normal verdict despite having run well past --budget.
+    """
+
+    def test_slow_bundle_audit_reports_budget_overflow(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import time as time_mod
+
+        import abicheck.bundle as bundle_mod
+        from abicheck.change_registry_types import Verdict
+        from abicheck.service import Budget, ScanRequest, run_scan_set
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(time_mod, "monotonic", lambda: clock["t"])
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        class _FakeAudit:
+            findings: list = []
+            verdict = Verdict.COMPATIBLE
+
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+            # Simulate a pathologically slow resolution-graph build that
+            # blows through the budget while audit_bundle is running.
+            clock["t"] += 1000.0
+            return _FakeAudit()
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(bundle_mod, "audit_bundle", _fake_audit_bundle)
+
+        result = run_scan_set(
+            ScanRequest(
+                binaries=[snap_a, snap_b],
+                mode="audit",
+                budget=Budget(total_timeout=5.0),
+            )
+        )
+        assert result.verdict == "BUDGET_OVERFLOW"
+        assert result.exit_code == 5
+
+
+class TestRunScanSetLevelExplicit:
+    """P2 regression (Codex review): an explicit --depth with no
+    source_method must set level_explicit=True on the run_scan_core call
+    for each member -- otherwise a trusted --config's build.query never
+    auto-runs for --artifact-set despite the caller explicitly requesting
+    a deep depth, unlike the single-binary CLI path.
+    """
+
+    def test_explicit_depth_forwards_level_explicit(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.scan_engine as scan_engine_mod
+        from abicheck.service import ScanRequest, run_scan_set
+
+        captured: dict[str, object] = {}
+        real_run_scan_core = scan_engine_mod.run_scan_core
+
+        def _spy(*args, **kwargs):
+            captured["level_explicit"] = kwargs.get("level_explicit")
+            return real_run_scan_core(*args, **kwargs)
+
+        monkeypatch.setattr(scan_engine_mod, "run_scan_core", _spy)
+
+        run_scan_set(
+            ScanRequest(binaries=[snap_a, snap_b], mode="audit", depth="binary")
+        )
+        assert captured["level_explicit"] is True
 
 
 class TestRunScanSet:

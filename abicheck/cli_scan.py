@@ -642,7 +642,12 @@ def _run_artifact_set(
         build_info=build_info,
         baseline=None,
         mode="audit",
-        source_method=None,
+        # The unset dial means 'auto' (ADR-037 D5), same as the single-binary
+        # path: only when --depth was omitted entirely does a member opt into
+        # risk-driven method selection -- a pinned --depth stays deterministic
+        # (Codex review: this was hard-coded to None, silently disabling
+        # --since/--changed-path risk-driven selection for every member).
+        source_method=SourceMethod.AUTO.value if depth is None else None,
         depth=depth,
         changed_paths=changed,
         seeded=seeded,

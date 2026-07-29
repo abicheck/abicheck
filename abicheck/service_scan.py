@@ -1414,9 +1414,14 @@ def _run_scan_one_member(
     risk = score_changed_paths(changed, risk_rules)
 
     scan_mode = ScanMode(req.mode)
-    pinned_explicit = (dp is not None) or (
-        sm is not None and sm is not SourceMethod.AUTO
-    )
+    sm_pin = sm is not None and sm is not SourceMethod.AUTO
+    pinned_explicit = (dp is not None) or sm_pin
+    # Mirrors cli_scan._scan_explicit_flags' level_explicit: consent to
+    # auto-running build.query (a non-auto source_method, or an explicit
+    # depth with no source_method pinned) -- without this, a trusted
+    # --config's build.query never auto-runs for a member even when the
+    # caller explicitly requested a deep depth (Codex review).
+    level_explicit = sm_pin or (sm is None and dp is not None)
     is_auto = sm is SourceMethod.AUTO
     auto_method = risk.recommended_method if (is_auto and seeded) else None
     resolved, eff_depth = resolve_level(
@@ -1466,6 +1471,7 @@ def _run_scan_one_member(
             severities=dict(req.severities),
             budget=budget_str,
             budget_s=budget_s,
+            level_explicit=level_explicit,
             pinned_explicit=pinned_explicit,
             compile_context=None if req.compile.is_default else req.compile,
             defer_cleanup=build_dir_cleanups,
@@ -1554,6 +1560,16 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     audit = audit_bundle(
         libraries, bundle_system_providers=req.bundle_system_providers
     )
+    # The pre-audit check above only guards against starting the audit with
+    # no budget left; audit_bundle() itself has no internal deadline, so a
+    # pathological ELF set's resolution-graph construction can still run
+    # past --budget while it's in progress. Re-check afterward so a real
+    # overflow is reported as BUDGET_OVERFLOW (the failure-guard contract)
+    # rather than a normal verdict that quietly ran over time (Codex review).
+    if budget_s is not None and (_time.monotonic() - start) > budget_s:
+        return ScanSetResult(
+            verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
+        )
     bundle_verdict = audit.verdict.value
     verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, bundle_verdict)
     return ScanSetResult(
