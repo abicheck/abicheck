@@ -1793,7 +1793,14 @@ def run_compare_request(
             new_future = pool.submit(_resolve_new_side)
             old = old_future.result()
             new = new_future.result()
-
+    # Codex: an explicitly requested depth (e.g. "source") that a raw input actually failed to reach (no usable compile database/extractor/linkable declarations) previously diffed whatever weaker evidence embed_build_source produced with no signal -- mirrors dump's own check_requested_depth_satisfied hard-fail, but raises ValidationError (a Tier-2 API has no ClickException concept) instead of reusing that CLI-only exception type.
+    if request.depth is not None:
+        from .cli_dump_helpers import _DEPTH_RANK, _gated_source_label
+        requested_rank = _DEPTH_RANK.get(request.depth.lower(), 0)  # validate() already restricts depth to USER_DEPTHS
+        for side_label, snap in (("old", old), ("new", new)):
+            effective = _gated_source_label(snap.build_source, snap)
+            if _DEPTH_RANK.get(effective, 0) < requested_rank:
+                raise ValidationError(f"depth={request.depth!r} was requested for the {side_label} side but the resolved snapshot only reached {effective!r} evidence depth. Supply the evidence this rung needs (headers, a build/compile database, or --sources with linkable declarations) or lower depth to match what is actually available.")
     suppression, pf = load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
@@ -1803,7 +1810,6 @@ def run_compare_request(
     # reusing the raw sources/build_info paths would make _resolve_side_pack
     # try (and fail) to reload them as packs; None uses embedded facts.
     from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
-
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = prepare_embedded_build_source(
         old, new, old_evidence.collect_mode, None, None, None, None, None, policy_file=pf,
     )
@@ -1865,16 +1871,13 @@ def run_compare(
     :class:`CompareRequest` from loose arguments and delegates, so existing
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
-
     Trailing keyword-only params (``debuginfod_url`` onward) are appended
     after every pre-existing one, never alongside a thematically-closer
     neighbor, so a positional caller keeps binding each argument to the same
     parameter it always did (Codex review, PR #551). ``include_dependencies``
     applies to *both* sides — build a ``CompareRequest`` for a per-side override.
-
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
-
     Raises:
         SnapshotError: If either input cannot be loaded.
         ValidationError: If inputs have unrecognised formats.
@@ -1919,9 +1922,6 @@ def run_compare(
         contract_evaluation=contract_evaluation,
     )
     return run_compare_request(request)
-
-
-# ── Output rendering ────────────────────────────────────────────────────────
 
 
 # ── Output rendering (extracted to a leaf module) ────────────────────────────

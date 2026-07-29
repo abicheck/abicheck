@@ -2455,12 +2455,19 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert embed_calls[0]["extractor"] == "castxml"
 
-    def test_depth_is_case_insensitive_end_to_end(self, tmp_path):
+    def test_depth_is_case_insensitive_end_to_end(self, tmp_path, monkeypatch):
         """Codex review (P2): CompareRequest.validate() accepts a case-
         insensitive depth (e.g. "BUILD"), so the internal EvidenceDepth
-        construction must not raise ValueError for it."""
+        construction must not raise ValueError for it. The depth-satisfaction
+        gate (a later Codex review) is mocked to "satisfied" here so this
+        test stays scoped to its own original concern (case handling), not
+        the separate depth-reached check covered by
+        TestCompareRequestDepthSatisfaction below."""
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        monkeypatch.setattr(
+            "abicheck.cli_dump_helpers._gated_source_label", lambda *a, **k: "build"
+        )
 
         request = CompareRequest(
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="BUILD"
@@ -2583,6 +2590,98 @@ class TestCompareRequestAdr055Evidence:
         assert any("bogus" in e and "old" in e for e in errors)
         with pytest.raises(ValidationError, match="bogus"):
             run_compare_request(request)
+
+
+class TestCompareRequestDepthSatisfaction:
+    """Codex review, P1: an explicitly requested `depth` (e.g. "source")
+    that a raw input actually failed to reach (no usable compile database/
+    extractor/linkable declarations) previously diffed whatever weaker
+    evidence embed_build_source produced with no signal that the requested
+    depth wasn't met -- mirrors dump's own check_requested_depth_satisfied
+    hard-fail, monkeypatching `_gated_source_label` (the shared "what depth
+    did this snapshot actually reach" recompute) to simulate reached vs.
+    not-reached without needing a real compile database/source tree."""
+
+    def _make_snap_file(self, tmp_path, name, version):
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import save_snapshot
+
+        path = tmp_path / f"{name}_{version}.json"
+        save_snapshot(AbiSnapshot(library=name, version=version), path)
+        return path
+
+    def test_depth_not_reached_rejected(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        monkeypatch.setattr(
+            "abicheck.cli_dump_helpers._gated_source_label",
+            lambda *a, **k: "build",
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="source"
+        )
+        with pytest.raises(ValidationError, match="only reached 'build'"):
+            run_compare_request(request)
+
+    def test_depth_reached_passes(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        monkeypatch.setattr(
+            "abicheck.cli_dump_helpers._gated_source_label",
+            lambda *a, **k: "source",
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="source"
+        )
+        result, _, _ = run_compare_request(request)
+        assert isinstance(result, DiffResult)
+
+    def test_reports_the_failing_side(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+
+        def _by_version(build_source, snap):
+            # The old side's snapshot loads with version "1.0" -- distinguish
+            # by that so only the new side fails the gate.
+            return "source" if snap.version == "1.0" else "binary"
+
+        monkeypatch.setattr(
+            "abicheck.cli_dump_helpers._gated_source_label", _by_version
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="source"
+        )
+        with pytest.raises(ValidationError, match="new side"):
+            run_compare_request(request)
+
+    def test_depth_binary_always_satisfied(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        monkeypatch.setattr(
+            "abicheck.cli_dump_helpers._gated_source_label",
+            lambda *a, **k: "binary",
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="binary"
+        )
+        result, _, _ = run_compare_request(request)
+        assert isinstance(result, DiffResult)
+
+    def test_no_depth_skips_the_gate(self, tmp_path, monkeypatch):
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        monkeypatch.setattr(
+            "abicheck.cli_dump_helpers._gated_source_label",
+            lambda *a, **k: "binary",
+        )
+
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        result, _, _ = run_compare_request(request)
+        assert isinstance(result, DiffResult)
 
 
 class TestDiagnosticComparisonThreading:

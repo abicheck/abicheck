@@ -111,3 +111,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   the same way let a corrupt current-schema snapshot exploit that same
   leniency and bypass a real mismatch. Only a genuinely absent key or an
   explicit `null` still load as `None`.
+- **`run_compare_request` now enforces an explicitly requested
+  `CompareRequest.depth`** the same way `dump`'s own
+  `check_requested_depth_satisfied` hard-fails: previously a `depth="source"`
+  request whose raw source tree failed to actually produce L4 evidence (no
+  usable compile database, extractor, or linkable declarations) still diffed
+  whatever weaker evidence `embed_build_source` produced, silently returning
+  an artifact-only verdict with no signal that the requested depth was never
+  reached. Each side's resolved snapshot is now checked against the
+  requested depth after resolution, raising `ValidationError` naming the
+  side and the depth actually reached if it falls short.
