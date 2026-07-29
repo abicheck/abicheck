@@ -532,6 +532,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--bundle-system-providers",
         "--collapse-versioned-symbols",
         "--config",
+        "--contract-evaluation",
         "--ctf",
         "--debug-format",
         "--debug-root",

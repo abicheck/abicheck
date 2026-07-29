@@ -196,6 +196,7 @@ def _reject_set_input_flags(
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
     diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
     include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
@@ -248,6 +249,13 @@ def _reject_set_input_flags(
             "(release) comparisons yet: the per-library fan-out does not "
             "wire the ADR-050 D2 comparability gate's diagnostic escape "
             "hatch (a mismatch there still raises unhandled). Compare the "
+            "specific library individually to use it."
+        )
+    if contract_evaluation:
+        raise click.UsageError(
+            "--contract-evaluation is not supported for directory/package "
+            "(release) comparisons yet: the per-library fan-out does not "
+            "wire ADR-049 Phase 3's shadow contract evaluator. Compare the "
             "specific library individually to use it."
         )
     if include_labels:
@@ -1141,6 +1149,7 @@ def run_compare(
     required_symbols_file: Path | None = None,
     verify_runtime: bool = False,
     diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
@@ -1254,6 +1263,7 @@ def run_compare(
             exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
+            contract_evaluation=contract_evaluation,
             include_labels=include_labels,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
@@ -1625,6 +1635,7 @@ def run_compare(
             public_surface_allowlist=post_manifest_allowlist,
             reconcile_build_context=reconcile_build_context,
             diagnostic_comparison=diagnostic_comparison,
+            contract_evaluation=contract_evaluation,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)

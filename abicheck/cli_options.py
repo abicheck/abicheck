@@ -1246,6 +1246,64 @@ def adr027_compare_options(func: F) -> F:
     return func
 
 
+def app_usage_scope_options(func: F) -> F:
+    """Add the ADR-043 app-usage/required-symbol scoping options to ``compare``.
+
+    ``--used-by``/``--verify-runtime`` and ``--required-symbol``/
+    ``--required-symbols`` are mutually exclusive scoping mechanisms folding
+    the former standalone ``appcompat``/``plugin-check`` commands into
+    ``compare``. Decorators apply bottom-up, so they are listed here in
+    reverse of their displayed order.
+    """
+    func = click.option(
+        "--required-symbols",
+        "required_symbols_file",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        default=None,
+        help="File of required symbols, one per line (blank lines and '#' "
+        "comments ignored). Combined with any --required-symbol values.",
+    )(func)
+    func = click.option(
+        "--required-symbol",
+        "required_symbols_opt",
+        multiple=True,
+        help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
+        "and requires (repeatable; folds `plugin-check`). Scopes the "
+        "comparison to this explicit entrypoint contract instead of the "
+        "full diff. Mutually exclusive with --used-by.",
+    )(func)
+    func = click.option(
+        "--verify-runtime",
+        "verify_runtime",
+        is_flag=True,
+        default=False,
+        help="With --used-by: actually run each consumer binary once against "
+        "the OLD library and once against the NEW one (LD_BIND_NOW=1), "
+        "recording a consumer_runtime_load_failed RISK finding when the "
+        "dynamic linker itself reports an undefined symbol against the "
+        "new library after loading cleanly against the old one (ADR-044 "
+        "P2 item 2). A dynamic corroborating signal alongside the static "
+        "scanner, never a replacement for it. Requires OLD/NEW to be real "
+        "library binaries (not JSON snapshots) and is Linux-only; a "
+        "no-op elsewhere. Ignored without --used-by.",
+    )(func)
+    func = click.option(
+        "--used-by",
+        "used_by_apps",
+        multiple=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Application binary whose actual imports/required symbol versions "
+        "scope the comparison (repeatable; folds `appcompat`). The full "
+        "library comparison still runs once; the worst app-scoped result "
+        "becomes the primary verdict/exit code, with the full verdict and "
+        "unrelated changes kept as informational context. OLD/NEW may be "
+        "real library binaries or JSON snapshots carrying binary evidence "
+        "(a `dump` of a real library, not headers-only). Mutually "
+        "exclusive with --required-symbol/--required-symbols.",
+    )(func)
+    return func
+
+
 def build_source_dump_options(func: F) -> F:
     """Add the ``--build-info`` / ``--sources`` embed options to ``dump``.
 

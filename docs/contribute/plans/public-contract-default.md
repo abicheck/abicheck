@@ -1084,8 +1084,35 @@ public-evidence tier, stronger than and independent of header-derived
 public root membership, so evaluating it against a possibly-unresolved
 header surface (routine for a binary-only `used_by` snapshot) would
 misclassify authoritative evidence as merely `unknown_unresolved`. Still
-missing, unchanged from above: the `compare` CLI flag (blocked on `cli.py`'s
-line-count cap), the provider-evidence ledger, and `EXPORTS` mode.
+missing, unchanged from above: the provider-evidence ledger and `EXPORTS`
+mode.
+
+**Updated (2026-07-29): the `compare` CLI flag landed, unblocking the
+line-count cap noted above.** `cli.py` was at exactly the 2000-line hard
+cap, so no new `@click.option` could land there directly. Rather than
+extending `IMPORT_CYCLE_ALLOWLIST` or growing the file past the cap, the
+ADR-043 app-usage/required-symbol scoping option family
+(`--used-by`/`--verify-runtime`/`--required-symbol`/`--required-symbols`,
+previously four separate inline `@click.option` stacks on `compare_cmd`)
+was extracted into a single `cli_options.app_usage_scope_options` decorator
+— the same "shared utility flags go through a decorator" pattern this file
+already documents for `scope_options`/`severity_options`, just applied to a
+family that happened to have only one call site rather than several. That
+freed 27 lines (`cli.py`: 2000 → 1973), enough headroom for `--contract-
+evaluation` (`is_flag=True, default=False`) to be added directly. It threads
+through `cli_compare_helpers.run_compare` into `service.compare_snapshots`
+exactly the way the MCP tool's own `contract_evaluation` parameter does —
+same shadow-evaluator fields, same advisory-only guarantee. Mirroring
+`--diagnostic-comparison`'s own precedent, `--contract-evaluation` is
+explicitly rejected (`click.UsageError`) on a directory/package (release)
+compare via `_reject_set_input_flags`, since that per-library fan-out
+doesn't wire the shadow evaluator either. New tests:
+`tests/test_cli_compare_contract_evaluation.py` covers keyword forwarding,
+the off-by-default case, a real end-to-end JSON report with actual stamped
+`contract_relevance`/`contract_reason_code` fields (not a mock), the
+`--help-all` text, and the directory/package rejection — plus the frozen
+`compare` option-set snapshot in `tests/test_cli_contract.py` and the
+generated `docs/reference/cli-reference.md` were updated accordingly.
 
 Measure:
 
