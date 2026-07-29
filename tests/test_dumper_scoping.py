@@ -689,9 +689,10 @@ class TestDirectlyReferencedDependencyRetention:
         alias hops must still resolve to the real dependency identity --
         two successive earlier versions capped expansion at a fixed round
         count (8, then 32), each truncating a legitimate longer chain
-        before it ever reached the target. Resolution is now via
-        pointer-doubling (`_resolve_typedef_chains`), which has no fixed
-        cap at all -- convergence is O(log(chain depth))."""
+        before it ever reached the target. Resolution is now via the
+        graph-reachability worklist (`_typedef_alias_reachability`), which
+        has no fixed hop cap at all -- see that function's own docstring
+        for how propagation converges."""
         typedefs = {f"A{i}": f"A{i + 1}" for i in range(50)}
         typedefs["A50"] = "std::Thing"
         snap = AbiSnapshot(
@@ -1280,6 +1281,71 @@ class TestDirectlyReferencedDependencyRetention:
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_alias_colliding_with_a_non_resolving_alias_stays_ambiguous(self):
+        """Codex review (thirtieth round, P2): `api::Handle -> dep::A` and
+        `vendor::Handle -> int` share the bare suffix `Handle`, but the
+        second alias resolves to a primitive, not to any dep_candidate.
+        An earlier revision only tracked spelling collisions among
+        aliases *already known* to reach a dep_candidate -- so the
+        non-resolving `vendor::Handle` was invisible to the ambiguity
+        check, and `dep::A` was incorrectly retained as if `api::Handle`
+        were the spelling's only possible source. `dep::A` must not be
+        retained: the bare `Handle` genuinely could mean either alias."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"api::Handle": "dep::A", "vendor::Handle": "int"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
+    def test_partially_agreeing_aliases_retain_their_common_owner(self):
+        """Codex review (thirtieth round, P1): `api::Handle -> Pair<dep::A,
+        dep::B>` and `vendor::Handle -> dep::A` share the bare suffix
+        `Handle` and *partially* agree -- both, unambiguously, could mean
+        `dep::A` regardless of which alias the spelling denotes, even
+        though only one of them also reaches `dep::B`. An earlier
+        revision required every colliding alias's reach to be the
+        *identical* set, which dropped this partial agreement entirely;
+        only the genuinely disputed `dep::B` should be excluded, not the
+        common `dep::A`."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    qualified_name="dep::A",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="B",
+                    kind="struct",
+                    qualified_name="dep::B",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={
+                "api::Handle": "Pair<dep::A, dep::B>",
+                "vendor::Handle": "dep::A",
+            },
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::A"]
 
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's

@@ -130,11 +130,13 @@ def _typedef_alias_reachability(
     bounded by the number of distinct interesting keys, never by how many
     times or how deeply they're nested in the source text.
 
-    Propagation is a monotone fixed-point relaxation over the alias
-    reference graph (a typedef key embedded in another alias's own
-    immediate target is an edge), bounded to ``len(typedefs) + 1`` rounds
-    -- sufficient for information to propagate along the longest possible
-    acyclic path through every alias once. A direct self-reference
+    Propagation is a monotone fixed-point over the alias reference graph
+    (a typedef key embedded in another alias's own immediate target is an
+    edge), driven by a reverse-edge worklist so an alias is only
+    re-examined when one of its targets gains a new reachable key (see the
+    worklist below for why -- a full-table relaxation over a fixed round
+    bound was the original approach here and was replaced for being
+    quadratic in chain length). A direct self-reference
     (``typedef struct Foo Foo;``) or indirect cycle is never propagated
     through itself (an alias's own name is excluded from its own edge
     set), so it can only ever contribute what's directly present in its
@@ -523,13 +525,13 @@ def _directly_referenced_dependency_names(
     # below -- not folded into *own_spellings_of*/*key_owners* above the
     # way *kept_touched_aliases* is: a self-referential alias (``typedefs
     # = {"Foo0": "struct Foo0"}``) legitimately reaches its own matching
-    # candidate via *identity_aliases*, but that reachability lookup keys
-    # off ``key_owners`` -- blanket-stripping every typedef-alias-named
-    # spelling from ``own_spellings_of`` upstream would remove the very
-    # key ``identity_aliases`` needs to rediscover that legitimate
-    # self-reference, silently losing the candidate entirely (confirmed
-    # empirically: doing so broke the existing self-referential-typedef
-    # regression test).
+    # candidate via *alias_reach*/*alias_spelling_owners* below, but that
+    # reachability lookup keys off ``key_owners`` -- blanket-stripping
+    # every typedef-alias-named spelling from ``own_spellings_of``
+    # upstream would remove the very key that lookup needs to rediscover
+    # that legitimate self-reference, silently losing the candidate
+    # entirely (confirmed empirically: doing so broke the existing
+    # self-referential-typedef regression test).
     all_typedef_alias_names: set[str] = set()
     for alias in typedefs:
         all_typedef_alias_names.add(alias)
@@ -550,94 +552,68 @@ def _directly_referenced_dependency_names(
         for key in spellings:
             key_owners.setdefault(key, set()).add(identity)
 
-    # A reached key that is itself already ambiguous among dep_candidates
-    # (``key_owners[key]`` has more than one owner -- e.g. a namespace-
-    # stripped target token ``Thing`` shared by both ``dep1::Thing`` and
-    # ``dep2::Thing``) must not be treated as the alias "reaching" either
-    # of them (Codex review, fresh evidence): the alias's target contained
-    # one ambiguous token, not two distinct ones the way a genuine
-    # compound alias (``Pair<dep::A, dep::B>``) does, so there is no way
-    # to tell which candidate it actually names. Skipping a multi-owner
-    # key here is the alias-reachability analogue of the same guard
-    # ``own_spellings_of``'s construction already applies to a
-    # candidate's own spellings.
-    identity_aliases: dict[str, set[str]] = {}
+    # Every dependency-candidate identity a typedef alias's own
+    # reachability resolves to, computed directly per alias -- for *every*
+    # alias in ``typedefs``, not only ones already known to reach
+    # something (Codex review, fresh evidence: an earlier revision built
+    # this per-identity, from only the aliases that already resolved to
+    # one, which made a *different*, colliding alias of the same spelling
+    # that reaches nothing retainable at all -- an alias to a primitive,
+    # or one whose only reached key is itself already ambiguous among
+    # dep_candidates -- invisible to the ambiguity check below; a
+    # genuinely ambiguous spelling was then retained as if only the
+    # resolving alias existed). A reached key that is itself already
+    # ambiguous among dep_candidates (``key_owners[key]`` has more than
+    # one owner -- e.g. a namespace-stripped target token ``Thing``
+    # shared by both ``dep1::Thing`` and ``dep2::Thing``) is excluded the
+    # same way ``own_spellings_of``'s own construction already excludes a
+    # colliding key -- the alias's target contained one ambiguous token,
+    # not two distinct ones the way a genuine compound alias
+    # (``Pair<dep::A, dep::B>``) does.
+    alias_reach: dict[str, set[str]] = {}
     for alias, reached in reachable_by_alias.items():
+        identities: set[str] = set()
         for key in reached & key_owners.keys():
             owners = key_owners[key]
-            if len(owners) != 1:
-                continue
-            for identity in owners:
-                identity_aliases.setdefault(identity, set()).add(alias)
+            if len(owners) == 1:
+                identities |= owners
+        alias_reach[alias] = identities
 
-    # Two separate ownership tallies, kept apart deliberately (Codex review,
-    # fresh evidence): a spelling that is some candidate's own identity/
-    # namespace-suffix/stdlib-stripped spelling (*own_spelling_owners*) is
-    # genuinely ambiguous the moment more than one distinct dependency
-    # touches it -- that's the "two unrelated candidates coincidentally
-    # share a bare suffix" case the single-owner guard exists for. A
-    # spelling that is only ever reached via a typedef alias's own
-    # reachability (*alias_spelling_owners*) is different in kind: a
-    # single compound alias like ``using Alias = Pair<dep::A, dep::B>;``
-    # legitimately, unambiguously names *both* dep::A and dep::B in the
-    # same target -- multiple owners there isn't ambiguity, it's the
-    # alias structurally referencing more than one type at once.
-    #
-    # That distinction only holds when *one* alias is doing the naming,
-    # though (Codex review, further fresh evidence): two *separate*,
-    # independently-qualified aliases -- ``api::Handle -> dep::A`` and
-    # ``vendor::Handle -> dep::B`` -- can each reduce to the identical
-    # bare suffix ``Handle`` purely by coincidence, the same
-    # namespace-dropping mechanism that produces any other coincidental
-    # suffix collision. Building *alias_spelling_owners* per-candidate
-    # (as an earlier revision did, merging every alias's contribution
-    # into one flat per-identity set) couldn't tell "one alias reaching
-    # two candidates" apart from "two unrelated aliases each reaching one
-    # candidate, coincidentally sharing a spelling" -- both looked like
-    # "multiple owners, no own-spelling conflict" and were retained
-    # unconditionally. Tracking spellings *by originating alias* first
-    # (via *alias_to_identities* below) and only trusting a spelling when
-    # exactly one alias produced it distinguishes the two: a single
-    # alias's own multi-identity reach stays legitimate, while two
-    # different aliases colliding on the same derived suffix is
-    # genuine ambiguity and the spelling contributes no owners at all --
-    # UNLESS every colliding alias actually agrees on the identical
-    # identity set (Codex review, further fresh evidence: ``Handle ->
-    # dep::Thing`` and ``api::Handle -> dep::Thing`` are two different
-    # spellings of the very same referent, not two competing candidates
-    # for a bare ``Handle`` -- there is nothing to disambiguate when
-    # every alias that could have produced the spelling names the exact
-    # same dependency type). Only a genuine disagreement between aliases
-    # (different identity sets) is dropped as ambiguous.
-    alias_to_identities: dict[str, set[str]] = {}
-    for identity, aliases in identity_aliases.items():
-        for alias in aliases:
-            alias_to_identities.setdefault(alias, set()).add(identity)
-
+    # Every spelling a typedef alias could be known by -- literal name,
+    # namespace suffix, or globally-qualified form (direct-clang preserves
+    # an explicit global-scope qualifier, ``void f(::Handle);``, the same
+    # way it does for a direct type reference) -- mapped back to *every*
+    # alias in ``typedefs`` that could produce it, regardless of whether
+    # that alias resolves to anything (built from ``typedefs`` directly,
+    # same universe as *alias_reach* above, so a non-resolving alias's
+    # collision is never invisible here).
     alias_spelling_sources: dict[str, set[str]] = {}
-    for alias in alias_to_identities:
-        # A globally-qualified reference (``::Handle``) is exactly as
-        # possible for a typedef alias as it is for a dependency
-        # candidate's own identity (Codex review, fresh evidence,
-        # generalizing the same fix already applied to
-        # raw_own_spellings_of above): direct-clang preserves an explicit
-        # global-scope qualifier in its printed ``qualType`` regardless of
-        # whether the qualified name belongs to a record/enum or a
-        # typedef, so ``using Handle = dep::Thing; void f(::Handle);``
-        # keeps the leading ``::`` on the alias reference the same way it
-        # does on a direct type reference.
+    for alias in typedefs:
         spellings = {alias, f"::{alias}", *_namespace_suffix_spellings(alias)[1:]}
         for spelling in spellings:
             alias_spelling_sources.setdefault(spelling, set()).add(alias)
 
+    # spelling -> identities every contributing alias agrees the spelling
+    # could mean -- the *intersection* of each contributing alias's own
+    # reach (Codex review, fresh evidence: an earlier revision required
+    # every contributing alias's reach to be the *identical* set, which
+    # incorrectly dropped a merely *partial* agreement -- ``api::Handle ->
+    # Pair<dep::A, dep::B>`` and ``vendor::Handle -> dep::A`` both,
+    # unambiguously, could mean ``dep::A`` regardless of which alias
+    # ``Handle`` denotes, even though only one of them also reaches
+    # ``dep::B``). Intersecting also subsumes the single-alias case
+    # (nothing to intersect against, so the alias's own reach passes
+    # through unchanged -- this is exactly how a genuine compound alias
+    # like ``Pair<dep::A, dep::B>`` still retains both) and naturally
+    # empties out whenever any contributing alias reaches nothing at all
+    # (a primitive, or an alias whose only reached key was itself
+    # ambiguous) -- the same conservative outcome a separate
+    # non-resolving-alias veto previously existed to enforce, now free.
     alias_spelling_owners: dict[str, set[str]] = {}
     for spelling, aliases in alias_spelling_sources.items():
-        identity_sets = {frozenset(alias_to_identities[a]) for a in aliases}
-        if len(identity_sets) == 1:
-            (shared_identities,) = identity_sets
-            alias_spelling_owners[spelling] = set(shared_identities)
-        # else: colliding aliases disagree on what this spelling names --
-        # genuinely ambiguous, contributes no owner at all.
+        common = set.intersection(*(alias_reach[a] for a in aliases))
+        if common:
+            alias_spelling_owners[spelling] = common
 
     own_spelling_owners: dict[str, set[str]] = {}
     for candidate in dep_candidates:

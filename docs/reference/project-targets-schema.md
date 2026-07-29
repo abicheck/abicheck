@@ -167,7 +167,7 @@ time.
 
 ## `profiles:`
 
-A mapping of profile id → `{contract, os, arch, compile}`. `contract`
+A mapping of profile id → `{contract, os, arch, compile, consumer_compile}`. `contract`
 (default `true`) decides whether this build lane is an ABI contract (gets a
 baseline, gates CI) or a test-only CI lane that never gets one — "not every
 CI lane gets a baseline" is the whole point of this field (S17). The map
