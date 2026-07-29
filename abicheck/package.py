@@ -1395,12 +1395,29 @@ def _is_elf_shared_object(path: Path) -> bool:
                 return False
             if has_interp:
                 # A few distro runtime DSOs are ET_DYN, named like libraries,
-                # and intentionally carry PT_INTERP so they can be invoked
-                # directly (for example Ubuntu's libcap.so.2.66).  Keep the
-                # PIE-executable guard for app-like filenames, but do not drop
-                # real versioned .so files from package discovery.
+                # and intentionally carry PT_INTERP (and a nonzero entry
+                # point, since they're meant to be directly invocable) so
+                # they can be run directly (for example Ubuntu's
+                # libcap.so.2.66). Keep the PIE-executable guard for
+                # app-like filenames, but do not drop real versioned .so
+                # files from package discovery.
                 return _has_shared_object_name(path)
-            return True
+
+            # No PT_INTERP alone isn't sufficient: a `gcc -static-pie`
+            # executable is also ET_DYN with no PT_INTERP (a statically
+            # linked binary needs no dynamic linker), so it would otherwise
+            # be misclassified as a shared object here (Codex review;
+            # verified against a real -static-pie-built binary). A real
+            # shared object has no process entry point -- e_entry (offset
+            # 24, same offset for both ELF classes) is 0, since it's loaded
+            # via dlopen()/the dynamic linker into another process rather
+            # than executed directly; any kind of executable (static or
+            # dynamic PIE) always has a nonzero one.
+            f.seek(24)
+            e_entry_size = 4 if ei_class == 1 else 8
+            e_entry_fmt = "I" if ei_class == 1 else "Q"
+            e_entry = struct.unpack(f"{byte_order}{e_entry_fmt}", f.read(e_entry_size))[0]
+            return bool(e_entry == 0)
     except (OSError, struct.error):
         return False
 

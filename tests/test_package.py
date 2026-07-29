@@ -99,6 +99,30 @@ def _make_minimal_elf_dso_with_interp(path: Path) -> None:
     path.write_bytes(bytes(elf) + bytes(phdr))
 
 
+def _make_minimal_elf_static_pie_exec(path: Path) -> None:
+    """Write a minimal ET_DYN ELF with no PT_INTERP but a nonzero e_entry
+    (models a real ``gcc -static-pie`` executable, which needs no dynamic
+    linker segment but is still directly executable, unlike a real .so)."""
+    elf = bytearray(64)
+    elf[0:4] = b"\x7fELF"
+    elf[4] = 2  # EI_CLASS = ELFCLASS64
+    elf[5] = 1  # EI_DATA = ELFDATA2LSB
+    elf[6] = 1  # EI_VERSION = EV_CURRENT
+    struct.pack_into("<H", elf, 16, 3)  # e_type = ET_DYN
+    struct.pack_into("<H", elf, 18, 0x3E)  # e_machine = EM_X86_64
+    struct.pack_into("<I", elf, 20, 1)  # e_version
+    struct.pack_into("<Q", elf, 24, 0x1000)  # e_entry (nonzero)
+    struct.pack_into("<Q", elf, 32, 64)  # e_phoff
+    struct.pack_into("<H", elf, 54, 56)  # e_phentsize
+    struct.pack_into("<H", elf, 56, 1)  # e_phnum
+
+    phdr = bytearray(56)
+    struct.pack_into("<I", phdr, 0, 1)  # p_type = PT_LOAD (not PT_INTERP)
+    struct.pack_into("<I", phdr, 4, 5)  # p_flags = PF_R | PF_X
+    struct.pack_into("<Q", phdr, 48, 0x1000)  # p_align
+    path.write_bytes(bytes(elf) + bytes(phdr))
+
+
 def _make_malformed_elf_dso_with_missing_phdr(path: Path) -> None:
     """Write ET_DYN ELF header that advertises a missing program header."""
     elf = bytearray(64)
@@ -487,6 +511,19 @@ class TestIsElfSharedObject:
             f = tmp_path / name
             _make_minimal_elf_dso_with_interp(f)
             assert _is_elf_shared_object(f) is False
+
+    def test_static_pie_executable_is_rejected(self, tmp_path: Path) -> None:
+        # P2 regression (Codex review): a `gcc -static-pie` executable is
+        # ET_DYN with no PT_INTERP (no dynamic linker needed for a static
+        # binary), so the PT_INTERP-absence check alone misclassified it as
+        # a shared object. A real shared object has no process entry point
+        # (e_entry == 0, since it's loaded via dlopen()/the dynamic linker
+        # rather than executed directly); any executable, static or
+        # dynamic, always has a nonzero one -- verified against a real
+        # -static-pie-built binary during review.
+        f = tmp_path / "libfoo.so"
+        _make_minimal_elf_static_pie_exec(f)
+        assert _is_elf_shared_object(f) is False
 
     def test_malformed_program_header_table_is_rejected(self, tmp_path: Path) -> None:
         f = tmp_path / "libbad.so"
