@@ -1718,6 +1718,20 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # path above already uses.
     if set(audit.snapshot.libraries) != set(libraries):
         verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
+        # P2 regression (Codex review): bundle_incomplete previously left the
+        # exit code purely a function of the per-member verdicts -- the
+        # cross-library audit itself never ran, but a set where every member
+        # scanned clean (COMPATIBLE/NO_CHANGE/COMPATIBLE_WITH_RISK) still
+        # exited 0, so a CI gate that only checks the exit code silently
+        # accepted a skipped audit as a full pass. Floor the exit code at 1
+        # (mirroring the per-member EVIDENCE_CONTRACT_ERROR contract in
+        # ``_aggregate_scan_set_verdict`` above) and surface a dedicated
+        # BUNDLE_INCOMPLETE verdict when no worse, already-dominant member
+        # problem (API_BREAK/BREAKING/EVIDENCE_CONTRACT_ERROR/BUDGET_OVERFLOW)
+        # is already being reported.
+        exit_code = max(exit_code, 1)
+        if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
+            verdict = "BUNDLE_INCOMPLETE"
         return ScanSetResult(
             verdict=verdict,
             exit_code=exit_code,

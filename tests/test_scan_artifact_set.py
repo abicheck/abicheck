@@ -612,6 +612,53 @@ class TestRunScanSetBundleSnapshotCompleteness:
         assert result.bundle_findings == []
         assert result.bundle_verdict is None
 
+    def test_dropped_member_with_clean_scans_sets_nonzero_exit(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P2 regression (Codex review): bundle_incomplete previously left
+        the set-level exit code purely a function of the per-member
+        verdicts -- the cross-library audit itself never ran, but a set
+        whose every member scanned clean (COMPATIBLE here) still exited 0,
+        so a CI gate that only checks the exit code silently accepted a
+        skipped cross-library audit as a full pass.
+        """
+        import abicheck.bundle as bundle_mod
+        import abicheck.service_scan as service_scan_mod
+        from abicheck.bundle import BundleSnapshot
+        from abicheck.change_registry_types import Verdict
+        from abicheck.service import ScanRequest, run_scan_set
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        class _FakeAudit:
+            # Only liba.so survived parsing -- libb.so silently dropped.
+            snapshot = BundleSnapshot(
+                root=snap_a.parent, libraries={"liba.so": snap_a},
+                metadata={}, resolution=None,
+            )
+            findings: list = []
+            verdict = Verdict.COMPATIBLE_WITH_RISK
+
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+            return _FakeAudit()
+
+        def _fake_run_one_member(req, binary, *, start, budget_s, changed_src):
+            return ScanResult(verdict="COMPATIBLE", exit_code=0)
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(bundle_mod, "audit_bundle", _fake_audit_bundle)
+        monkeypatch.setattr(
+            service_scan_mod, "_run_scan_one_member", _fake_run_one_member
+        )
+
+        result = run_scan_set(
+            ScanRequest(binaries=[snap_a, snap_b], mode="audit")
+        )
+        assert result.bundle_incomplete is True
+        assert result.verdict == "BUNDLE_INCOMPLETE"
+        assert result.exit_code == 1
+
 
 class TestRunScanSetLevelExplicit:
     """P2 regression (Codex review): an explicit --depth with no
@@ -994,3 +1041,60 @@ class TestArtifactSetMalformedRiskRules:
         assert result.exit_code != 0
         assert result.exception is None or isinstance(result.exception, SystemExit)
         assert "cannot read --risk-rules" in result.output
+
+
+class TestRenderArtifactSetTextFindings:
+    """P2 regression (Codex review): the artifact-set text report's
+    per-artifact loop previously printed only ``path: verdict`` -- unlike
+    the single-binary scan's own richly-rendered report and the aggregate
+    JSON's nested ``report``, it gave no finding descriptions or evidence
+    for *why* a member was flagged, leaving CLI/Action-summary users unable
+    to act on the result.
+    """
+
+    def test_member_crosscheck_and_pattern_findings_are_rendered(self) -> None:
+        from abicheck.cli_scan import _render_artifact_set_text
+        from abicheck.service_scan import ScanArtifactResult, ScanResult, ScanSetResult
+
+        member_report = {
+            "mode": "audit",
+            "crosscheck": {"counts_by_check": {"symbol_binding_weakened": 2}},
+            "crosscheck_severities": {"symbol_binding_weakened": "warning"},
+            "pattern_scan": {"counts_by_kind": {"header_only_macro_leak": 1}},
+            "preprocessor_scan": {},
+        }
+        result = ScanSetResult(
+            verdict="COMPATIBLE_WITH_RISK",
+            exit_code=0,
+            per_artifact=[
+                ScanArtifactResult(
+                    artifact=Path("liba.so"),
+                    result=ScanResult(
+                        verdict="COMPATIBLE_WITH_RISK",
+                        exit_code=0,
+                        report=member_report,
+                    ),
+                )
+            ],
+            bundle_incomplete=True,
+        )
+        text = _render_artifact_set_text(result)
+        assert "symbol_binding_weakened: 2" in text
+        assert "header_only_macro_leak: 1" in text
+
+    def test_member_with_no_findings_renders_no_extra_lines(self) -> None:
+        from abicheck.cli_scan import _render_member_findings_lines
+        from abicheck.service_scan import ScanResult
+
+        clean = ScanResult(
+            verdict="COMPATIBLE",
+            exit_code=0,
+            report={
+                "mode": "audit",
+                "crosscheck": {},
+                "crosscheck_severities": {},
+                "pattern_scan": {},
+                "preprocessor_scan": {},
+            },
+        )
+        assert _render_member_findings_lines(clean) == []

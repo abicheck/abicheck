@@ -52,6 +52,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import click
@@ -506,6 +507,39 @@ def _resolve_artifact_set_paths(spec: str) -> tuple[list[Path], bool]:
     return paths, True
 
 
+def _render_member_findings_lines(result: Any) -> list[str]:
+    """Render one artifact-set member's cross-check/pattern/preprocessor
+    findings for text output (P2, Codex review): the artifact-set text
+    report previously showed only ``path: verdict`` per member -- unlike the
+    single-binary ``scan``'s richly-rendered report and the aggregate JSON's
+    nested ``report``, it gave no finding descriptions or evidence
+    explaining *why* a member was flagged, leaving CLI/Action-summary users
+    unable to act on the result.
+
+    Reuses the same section renderers the single-binary path uses
+    (:func:`render_crosscheck_lines`/:func:`render_pattern_lines`/
+    :func:`render_preprocessor_lines`) via a minimal attribute shim, since
+    those renderers only ever read the report's already-plain-dict
+    ``crosscheck``/``pattern_scan``/``preprocessor_scan`` keys -- not any
+    behavior specific to the full :class:`~abicheck.scan_engine.ScanOutcome`
+    object ``ScanArtifactResult.result.report`` was flattened from.
+    """
+    report = result.report or {}
+    if not report:
+        return []
+    shim = SimpleNamespace(
+        crosscheck=report.get("crosscheck") or {},
+        crosscheck_severities=report.get("crosscheck_severities") or {},
+        pattern=report.get("pattern_scan") or {},
+        preprocessor=report.get("preprocessor_scan") or {},
+        audit=report.get("mode") == "audit",
+    )
+    lines = render_crosscheck_lines(shim)
+    lines += render_pattern_lines(shim)
+    lines += render_preprocessor_lines(shim)
+    return [f"  {ln}" if ln else "" for ln in lines]
+
+
 def _render_artifact_set_text(result: Any) -> str:
     """Human-facing render of a :class:`ScanSetResult` (ADR-056).
 
@@ -524,6 +558,7 @@ def _render_artifact_set_text(result: Any) -> str:
     ]
     for member in result.per_artifact:
         lines.append(f"  {member.artifact}: {member.result.verdict}")
+        lines.extend(_render_member_findings_lines(member.result))
     lines.append("")
     if result.bundle_incomplete:
         lines.append("Bundle analysis: incomplete (artifact-set discovery failed)")
