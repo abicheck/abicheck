@@ -266,6 +266,14 @@ def _read_response_file(path: Path, root: Path) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
+#: Cache of a single response file's own (non-recursive) tokenization,
+#: keyed by ``(str(resolved_path), cl_style)`` -- see the *_file_cache*
+#: parameter of :func:`_expand_response_files`. ``None`` records "this file
+#: is unreadable/oversized/out-of-tree/unparsable" so a repeated reference
+#: doesn't re-run those checks either.
+_ResponseFileCache = dict[tuple[str, bool], "list[str] | None"]
+
+
 def _expand_response_files(
     arguments: list[str],
     directory: Path,
@@ -275,6 +283,7 @@ def _expand_response_files(
     _output_budget: list[int] | None = None,
     *,
     cl_style: bool = False,
+    _file_cache: _ResponseFileCache | None = None,
 ) -> list[str]:
     """Inline GNU-style ``@response-file`` arguments in a compiler argv.
 
@@ -318,6 +327,19 @@ def _expand_response_files(
     selects response-file body quoting per :func:`_split_command_line` —
     pass the caller's own :func:`_is_cl_style_driver` result for the
     compiler actually being invoked, not the host OS (Codex review).
+
+    *_file_cache* (internal, optionally shared across many *separate*
+    top-level calls by a caller like :func:`load_compile_db`) memoizes a
+    single response file's own read + tokenization by resolved path. An
+    untrusted ``compile_commands.json`` with thousands of entries that all
+    reference the *same* response file would otherwise re-read and
+    re-tokenize it from scratch on every entry's own fresh *_budget*/
+    *_output_budget* — amplifying a few MB of attacker-controlled JSON into
+    orders of magnitude more I/O and parsing work (Codex review, fourth
+    round). A cache hit skips the read/tokenize entirely (and does not
+    consume *_budget*, since no file is actually read) but still goes
+    through the same recursive expansion, output-budget accounting, and
+    depth limit as a miss, so nested ``@file`` handling is unaffected.
     """
     if _depth > _MAX_RESPONSE_FILE_DEPTH:
         return arguments
@@ -325,24 +347,38 @@ def _expand_response_files(
         _budget = [_MAX_RESPONSE_FILE_EXPANSIONS]
     if _output_budget is None:
         _output_budget = [_MAX_RESPONSE_FILE_OUTPUT_TOKENS]
+    if _file_cache is None:
+        _file_cache = {}
     expanded: list[str] = []
     for arg in arguments:
         if not arg.startswith("@") or len(arg) == 1:
             expanded.append(arg)
             continue
-        if _budget[0] <= 0 or _output_budget[0] <= 0:
+        if _output_budget[0] <= 0:
             expanded.append(arg)
             continue
         raw_path = Path(arg[1:])
         path = raw_path if raw_path.is_absolute() else directory / raw_path
-        text = _read_response_file(path, root)
-        if text is None:
-            expanded.append(arg)
-            continue
-        _budget[0] -= 1
-        try:
-            tokens = _split_command_line(text, cl_style=cl_style)
-        except ValueError:
+        resolved = _safe_resolve(path)
+        cache_key = (str(resolved), cl_style) if resolved is not None else None
+        if cache_key is not None and cache_key in _file_cache:
+            tokens = _file_cache[cache_key]
+        else:
+            if _budget[0] <= 0:
+                expanded.append(arg)
+                continue
+            text = _read_response_file(path, root)
+            if text is None:
+                tokens = None
+            else:
+                _budget[0] -= 1
+                try:
+                    tokens = _split_command_line(text, cl_style=cl_style)
+                except ValueError:
+                    tokens = None
+            if cache_key is not None:
+                _file_cache[cache_key] = tokens
+        if tokens is None:
             expanded.append(arg)
             continue
         if len(tokens) > _output_budget[0]:
@@ -367,6 +403,7 @@ def _expand_response_files(
                 _budget,
                 _output_budget,
                 cl_style=cl_style,
+                _file_cache=_file_cache,
             )
         )
     return expanded
@@ -381,7 +418,12 @@ class CompileEntry:
     arguments: list[str]
 
     @classmethod
-    def from_dict(cls, raw: dict[str, object], db_dir: Path) -> CompileEntry:
+    def from_dict(
+        cls,
+        raw: dict[str, object],
+        db_dir: Path,
+        _file_cache: _ResponseFileCache | None = None,
+    ) -> CompileEntry:
         """Parse a single compile_commands.json entry.
 
         Handles both ``arguments`` (JSON array) and ``command`` (shell string)
@@ -390,7 +432,10 @@ class CompileEntry:
         *db_dir* (see :func:`_expand_response_files`) so every downstream
         consumer of ``arguments`` sees the real flags, not an opaque
         ``@file`` token — without reading outside the compilation
-        database's own trusted directory.
+        database's own trusted directory. *_file_cache*, when supplied by
+        :func:`load_compile_db`, is shared across every entry in the same
+        compile database so a response file referenced by many entries is
+        only actually read/tokenized once (see :func:`_expand_response_files`).
         """
         directory = Path(str(raw.get("directory", db_dir)))
         file_str = str(raw.get("file", ""))
@@ -409,12 +454,21 @@ class CompileEntry:
         else:
             arguments = []
 
-        cl_style = bool(arguments) and _is_cl_style_driver(arguments[0])
+        # Unwrap a compiler-launcher prefix (ccache/sccache/…) before reading
+        # the driver token -- otherwise a launcher-wrapped CL-style action
+        # (e.g. "sccache clang-cl @args.rsp") tests the launcher name
+        # instead of the real driver and picks the wrong quoting convention
+        # (Codex review).
+        from .buildsource.source_extractors._argv import strip_launchers
+
+        unwrapped = strip_launchers(arguments)
+        cl_style = bool(unwrapped) and _is_cl_style_driver(unwrapped[0])
         arguments = _expand_response_files(
             arguments,
             directory,
             _safe_resolve(db_dir) or db_dir,
             cl_style=cl_style,
+            _file_cache=_file_cache,
         )
 
         return cls(file=file_path.resolve(), directory=directory, arguments=arguments)
@@ -543,12 +597,17 @@ def load_compile_db(path: Path) -> list[CompileEntry]:
 
     db_dir = path.parent
     entries: list[CompileEntry] = []
+    # Shared across every entry in this database so a response file
+    # referenced by many entries (a common pattern, and an amplification
+    # vector for an untrusted database) is only actually read/tokenized
+    # once (Codex review) -- see _expand_response_files's _file_cache.
+    file_cache: _ResponseFileCache = {}
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             _logger.warning("Skipping non-object entry at index %d", i)
             continue
         try:
-            entries.append(CompileEntry.from_dict(item, db_dir))
+            entries.append(CompileEntry.from_dict(item, db_dir, file_cache))
         except (KeyError, TypeError, ValueError, OSError) as exc:
             _logger.warning("Skipping malformed entry at index %d: %s", i, exc)
 

@@ -138,6 +138,44 @@ class TestLoadCompileDb:
         entries = load_compile_db(f)
         assert len(entries) == 1
 
+    def test_shared_response_file_read_once_across_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Many entries referencing the *same* ``@response-file`` must only
+        actually read/tokenize it once across the whole ``load_compile_db()``
+        call -- otherwise an untrusted database with thousands of entries
+        repeating one large response file amplifies a few MB of JSON into
+        orders of magnitude more I/O and parsing work (Codex review, fourth
+        round, P1)."""
+        import abicheck.build_context as build_context_module
+
+        rsp = tmp_path / "shared.rsp"
+        rsp.write_text("-Iinclude/foo -DBAR=1\n")
+        db = [
+            {
+                "directory": str(tmp_path),
+                "file": f"src/tu{i}.cpp",
+                "arguments": ["c++", f"@{rsp.name}", "-c", f"src/tu{i}.cpp"],
+            }
+            for i in range(50)
+        ]
+        f = tmp_path / "compile_commands.json"
+        f.write_text(json.dumps(db))
+
+        read_calls = []
+        real_read = build_context_module._read_response_file
+
+        def counting_read(path: Path, root: Path) -> str | None:
+            read_calls.append(path)
+            return real_read(path, root)
+
+        monkeypatch.setattr(build_context_module, "_read_response_file", counting_read)
+
+        entries = load_compile_db(f)
+        assert len(entries) == 50
+        assert all("-Iinclude/foo" in e.arguments for e in entries)
+        assert len(read_calls) == 1
+
 
 # ---------------------------------------------------------------------------
 # Tests: CompileEntry
@@ -239,6 +277,32 @@ class TestCompileEntry:
                 "directory": str(tmp_path),
                 "file": "src/foo.cpp",
                 "arguments": ["clang-cl", f"@{rsp.name}", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert "-Iinclude\\\\foo bar" in entry.arguments
+
+    def test_response_file_launcher_wrapped_cl_driver_uses_windows_quoting(
+        self, tmp_path: Path
+    ) -> None:
+        """A launcher-wrapped CL-style action (``sccache clang-cl @args.rsp``)
+        must select quoting from the real driver *after* the launcher
+        (``sccache``/``ccache``/…), not from the launcher token itself --
+        the launcher name is not a compiler and would otherwise be
+        misclassified as GNU-style (Codex review, fourth round)."""
+        rsp = tmp_path / "inc_folders.txt"
+        rsp.write_text('-I"include\\\\foo bar"\n')
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": [
+                    "sccache",
+                    "clang-cl",
+                    f"@{rsp.name}",
+                    "-c",
+                    "src/foo.cpp",
+                ],
             },
             tmp_path,
         )
