@@ -1319,6 +1319,7 @@ def run_compare(
             bundle_system_providers=bundle_system_providers,
             bundle_cohorts=bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
             scope_public_headers=scope_public_headers,
+            include_dependencies=include_dependencies,
             severity_preset=resolved_cfg.merged_severity_preset,
             severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
             severity_potential_breaking=resolved_cfg.merged_severity_potential_breaking,

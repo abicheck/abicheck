@@ -89,6 +89,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `version` | `str` | `''` |
 | `pdb` | `Path \| None` | `None` |
 | `debug_roots` | `tuple[Path, ...]` | `()` |
+| `include_dependencies` | `bool` | `True` |
 
 ## `LayerResult`
 
@@ -298,6 +299,7 @@ Auto-detect input type and return an ABI snapshot.
 | `notify` | `Callable[[str], None] \| None` | `None` |
 | `include_labels` | `dict[Path, str] \| None` | `None` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
+| `include_dependencies` | `bool` | `True` |
 
 **Returns:** `AbiSnapshot`
 
@@ -342,6 +344,7 @@ Compare two ABI inputs and return the classified diff result.
 | `debuginfod_url` | `str \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
+| `include_dependencies` | `bool` | `True` |
 
 **Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
 

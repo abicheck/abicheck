@@ -295,8 +295,8 @@ def resolve_input(
 
     This is the single source of truth for turning a path into an
     :class:`AbiSnapshot`; the CLI (:func:`abicheck.cli_resolve._resolve_input`)
-    and the MCP server are thin wrappers that translate the framework-free
-    errors raised here into their own contracts.
+    and the MCP server are thin wrappers translating the framework-free errors
+    raised here into their own contracts.
 
     Detection order:
 
@@ -307,9 +307,8 @@ def resolve_input(
     5. GNU ld linker script (``INPUT()``/``GROUP()``) → follow to its target
 
     For binary inputs (ELF/PE/Mach-O), the L2 header-only semantic graph
-    (:func:`run_dump`'s ``_attach_header_graph`` step) is always attempted
-    when headers are parsed — no flag required (G29 Phase A); it is a no-op
-    for non-binary inputs (BTF/CTF, snapshots, ABICC dumps).
+    (:func:`run_dump`'s ``_attach_header_graph`` step) is always attempted when
+    headers are parsed (G29 Phase A); a no-op for non-binary inputs.
 
     Args:
         debug_format: Force the ELF debug format ("dwarf", "btf", "ctf") or
@@ -326,12 +325,10 @@ def resolve_input(
             a real multi-TU dump instead of a single header list. ELF only;
             forces the whole-snapshot cache off when set.
         follow_linker_scripts: When True (default), a GNU ld linker script is
-            followed to the shared library named in its ``INPUT()``/``GROUP()``
-            directive.
+            followed to the shared library named in its ``INPUT()``/``GROUP()`` directive.
         notify: Optional callback for user-facing progress notes (e.g. "following
-            a linker script", "no headers provided"). When *None*, such notes go
-            to the module logger. The CLI passes a ``click.echo(..., err=True)``
-            wrapper so its stderr output is unchanged.
+            a linker script", "no headers provided"); *None* logs to the module
+            logger. The CLI passes a ``click.echo(..., err=True)`` wrapper.
 
     Raises:
         SnapshotError: If the snapshot cannot be loaded from the input.
@@ -1758,6 +1755,7 @@ def run_compare_request(
             compile=pair_compile,
             public_headers=old_public_headers,
             public_header_dirs=old_public_header_dirs,
+            include_dependencies=request.old.include_dependencies,
         )
 
     def _resolve_new_side() -> AbiSnapshot:
@@ -1776,6 +1774,7 @@ def run_compare_request(
             compile=pair_compile,
             public_headers=new_public_headers,
             public_header_dirs=new_public_header_dirs,
+            include_dependencies=request.new.include_dependencies,
         )
 
     # Old/new resolution has no data dependency on each other until they're
@@ -1857,6 +1856,7 @@ def run_compare(
     debuginfod_url: str | None = None,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
+    include_dependencies: bool = True,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1865,13 +1865,11 @@ def run_compare(
     callers keep working while the typed request is the real chokepoint
     (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
 
-    ``debuginfod_url``, ``diagnostic_comparison``, and ``contract_evaluation``
-    are appended after every pre-existing parameter (not inserted alongside
-    their thematically-closer neighbors) so a caller invoking this
-    positionally keeps binding every argument after them to the same
-    parameter it always did (Codex review, PR #551; same rule applied again
-    for ADR-050 D2's escape hatch, and once more for ADR-049 Phase 3's shadow
-    evaluator).
+    Trailing keyword-only params (``debuginfod_url`` onward) are appended
+    after every pre-existing one, never alongside a thematically-closer
+    neighbor, so a positional caller keeps binding each argument to the same
+    parameter it always did (Codex review, PR #551). ``include_dependencies``
+    applies to *both* sides — build a ``CompareRequest`` for a per-side override.
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
@@ -1888,6 +1886,7 @@ def run_compare(
             version=old_version,
             pdb=old_pdb_path,
             debug_roots=tuple(old_debug_roots or ()),
+            include_dependencies=include_dependencies,
         ),
         new=InputSpec(
             path=new_input,
@@ -1896,6 +1895,7 @@ def run_compare(
             version=new_version,
             pdb=new_pdb_path,
             debug_roots=tuple(new_debug_roots or ()),
+            include_dependencies=include_dependencies,
         ),
         lang=lang,
         frontend=frontend,

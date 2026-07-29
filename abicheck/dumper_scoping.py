@@ -789,30 +789,58 @@ def _scoped_dwarf(
     )
 
 
+def _looks_like_real_mangled_name(mangled: str, name: str) -> bool:
+    """Whether *mangled* is confidently a genuine linker-mangled symbol.
+
+    A header-AST backend's ``Function.mangled`` falls back to the bare
+    ``name`` whenever the real mangled form isn't available -- not just for
+    genuine C/``extern "C"`` linkage, but also (empirically confirmed, see
+    ``tu_merge.py``'s own documented limitation) for an auto-detected-as-C
+    header parse of what is actually a C++ TU, or an uninstantiated C++
+    template. ``mangled == name`` is therefore not proof the symbol is
+    genuinely unmangled -- treating it as such would make
+    :func:`_scoped_dwarf_advanced` drop a real DWARF-derived finding (e.g.
+    ``value_abi_trait_changed``) for a perfectly ordinary, non-dependency
+    C++ function whose header-AST spelling merely couldn't be mangled. Only
+    a name carrying a recognizable Itanium (``_Z``/``__Z``) or MSVC (``?``)
+    mangling marker is trusted here -- everything else is treated as
+    "unknown, not confidently a dependency symbol" (the same
+    false-negative-over-false-positive bias this module uses throughout).
+    """
+    if mangled != name:
+        return True
+    return mangled.startswith(("_Z", "__Z", "?"))
+
+
 def _scoped_dwarf_advanced(
     adv: AdvancedDwarfMetadata | None,
     kept_identifiers: set[str],
-    kept_symbols: set[str],
+    excluded_symbols: set[str],
 ) -> AdvancedDwarfMetadata | None:
     """Filter Sprint-4 advanced DWARF metadata the same way: type-keyed
     collections (``packed_structs``/``all_struct_names``) via
     :func:`_name_matches`, function-keyed collections (keyed by mangled
-    ``linkage_name``) via *kept_symbols*."""
+    ``linkage_name``) by dropping only *excluded_symbols* -- confidently
+    dependency-header functions -- rather than requiring a match against
+    the kept set. A DWARF-only symbol with no header-AST counterpart at all
+    (or one whose header-AST mangled spelling could not be recovered, see
+    :func:`_looks_like_real_mangled_name`) is therefore kept by default
+    instead of being silently dropped for lacking a confident match."""
     if adv is None or not adv.has_dwarf:
         return adv
     return dataclasses.replace(
         adv,
         calling_conventions={
-            k: v for k, v in adv.calling_conventions.items() if k in kept_symbols
+            k: v for k, v in adv.calling_conventions.items() if k not in excluded_symbols
         },
         value_abi_traits={
-            k: v for k, v in adv.value_abi_traits.items() if k in kept_symbols
+            k: v for k, v in adv.value_abi_traits.items() if k not in excluded_symbols
         },
         return_value_sizes={
-            k: v for k, v in adv.return_value_sizes.items() if k in kept_symbols
+            k: v for k, v in adv.return_value_sizes.items() if k not in excluded_symbols
         },
         return_memory_classified={
-            k for k in adv.return_memory_classified if k in kept_symbols
+            k for k in adv.return_memory_classified if k not in excluded_symbols
         },
         packed_structs={
             k for k in adv.packed_structs if _name_matches(k, kept_identifiers)
@@ -821,10 +849,10 @@ def _scoped_dwarf_advanced(
             k for k in adv.all_struct_names if _name_matches(k, kept_identifiers)
         },
         frame_registers={
-            k: v for k, v in adv.frame_registers.items() if k in kept_symbols
+            k: v for k, v in adv.frame_registers.items() if k not in excluded_symbols
         },
         callee_saved_regs={
-            k: v for k, v in adv.callee_saved_regs.items() if k in kept_symbols
+            k: v for k, v in adv.callee_saved_regs.items() if k not in excluded_symbols
         },
     )
 
@@ -1006,7 +1034,12 @@ def scope_snapshot_excluding_dependencies(
         {t.qualified_name for t in kept_types if t.qualified_name}
         | {e.qualified_name for e in kept_enums if e.qualified_name},
     )
-    kept_symbols = {f.mangled for f in kept_functions if f.mangled}
+    excluded_functions = [f for f in snap.functions if _is_dep(f.source_header)]
+    excluded_symbols = {
+        f.mangled
+        for f in excluded_functions
+        if f.mangled and _looks_like_real_mangled_name(f.mangled, f.name)
+    }
     return dataclasses.replace(
         snap,
         functions=kept_functions,
@@ -1015,7 +1048,7 @@ def scope_snapshot_excluding_dependencies(
         enums=kept_enums,
         dwarf=_scoped_dwarf(snap.dwarf, kept_identifiers),
         dwarf_advanced=_scoped_dwarf_advanced(
-            snap.dwarf_advanced, kept_identifiers, kept_symbols
+            snap.dwarf_advanced, kept_identifiers, excluded_symbols
         ),
         # Records that this snapshot went through dependency-exclusion —
         # comparability.check_contracts_comparable uses this to refuse to

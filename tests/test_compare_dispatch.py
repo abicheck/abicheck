@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from abicheck import cli_compare_release
 from abicheck.cli import main
 from abicheck.cli_resolve import _looks_like_application, classify_compare_operand
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -832,6 +833,37 @@ class TestCompareDispatch:
         code, out, _ = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4
         assert "BREAKING" in out
+
+    @pytest.mark.parametrize("flag, expected", [("--include-dependencies", True), (None, False)])
+    def test_include_dependencies_reaches_set_comparison(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str | None, expected: bool,
+    ) -> None:
+        """Codex review: a directory/package ``compare`` used to drop
+        ``--include-dependencies`` entirely on its way through
+        ``_dispatch_release_compare`` -> ``_compare_release_libraries`` ->
+        ``_run_compare_pair``, so set comparisons stayed unfiltered
+        regardless of the flag. Assert it now reaches the per-library engine
+        with the same value a single-pair ``compare`` would use."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+
+        seen: list[bool] = []
+        real_run_compare_pair = cli_compare_release._run_compare_pair
+
+        def _capture(*args: object, **kwargs: object) -> object:
+            seen.append(bool(kwargs.get("include_dependencies")))
+            return real_run_compare_pair(*args, **kwargs)
+
+        monkeypatch.setattr("abicheck.cli_compare_release._run_compare_pair", _capture)
+
+        extra = [flag] if flag else []
+        code, _, _ = _invoke("compare", str(old_dir), str(new_dir), *extra)
+        assert code == 0
+        assert seen == [expected]
 
     def test_dir_input_dispatches_even_when_only_one_side_is_a_set(
         self, tmp_path: Path

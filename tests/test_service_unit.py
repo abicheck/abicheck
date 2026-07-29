@@ -1936,12 +1936,14 @@ class TestContractEvaluationThreading:
         # Same rule as debuginfod_url/diagnostic_comparison (Codex review,
         # PR #551 and ADR-050 D2 follow-up): appended after every
         # pre-existing parameter so a positional caller's existing bindings
-        # don't shift.
+        # don't shift. include_dependencies (dependency-scope default-
+        # filtering parity fix) was appended after this one in turn.
         import inspect
 
         params = list(inspect.signature(run_compare).parameters)
-        assert params[-1] == "contract_evaluation"
-        assert params[-2] == "diagnostic_comparison"
+        assert params[-1] == "include_dependencies"
+        assert params[-2] == "contract_evaluation"
+        assert params[-3] == "diagnostic_comparison"
 
 
 class TestParallelOldNewExtraction:

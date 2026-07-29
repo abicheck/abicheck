@@ -481,7 +481,7 @@ def include_dependencies_option(func: F) -> F:
     semantic graph (always attached by default) is not filtered. A filtered
     and an unfiltered snapshot are not comparable -- mixing them raises
     ScopeMismatchError."""
-    return click.option(
+    func = click.option(
         "--include-dependencies",
         "include_dependencies",
         is_flag=True,
@@ -493,6 +493,7 @@ def include_dependencies_option(func: F) -> F:
         "Mixing a filtered and an unfiltered snapshot across a "
         "comparison raises ScopeMismatchError (dumper_scoping.py).",
     )(func)
+    return func
 
 
 def scope_options(func: F) -> F:
@@ -1656,6 +1657,13 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "target (host, or a future device/DPC++ selector). A per-run "
         "extraction-target choice, not a stable project setting -- like "
         "--ast-frontend."
+    ),
+    "--include-dependencies": (
+        "Shared with dump (cli_options.include_dependencies_option): whether "
+        "to include toolchain/system-header declarations in a live-binary "
+        "side's dependency scope for this comparison. Which mode a given "
+        "invocation needs varies per run (matching whatever a baseline was "
+        "dumped with), not a stable project setting."
     ),
 }
 

@@ -346,6 +346,51 @@ class TestDwarfAdvancedScoping:
         assert adv.all_struct_names == {"Own"}
         assert set(adv.calling_conventions) == {"_Z3run"}
 
+    def test_kept_function_with_unmangled_bare_name_keeps_dwarf_advanced_entry(self):
+        """A header-AST backend can't always produce a real mangled name
+        (e.g. a header auto-detected as C, or an uninstantiated C++
+        template -- ``tu_merge.py``'s own documented limitation) --
+        ``Function.mangled`` then falls back to the bare ``name``. A
+        non-dependency function in this shape must not lose its real
+        DWARF-derived ``value_abi_traits`` entry (keyed by the *true*
+        linker-mangled symbol) just because the header-AST spelling
+        couldn't be confidently matched against it (regression: this
+        previously required an exact match against the unreliable bare
+        name, silently dropping the finding)."""
+        own_fn = _fn("distance", mangled="distance", source_header=_OWN_HEADER)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[own_fn],
+            dwarf_advanced=AdvancedDwarfMetadata(
+                has_dwarf=True,
+                value_abi_traits={"_Z8distance5PointS_": "p0:nontrivial"},
+            ),
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.dwarf_advanced is not None
+        assert set(scoped.dwarf_advanced.value_abi_traits) == {"_Z8distance5PointS_"}
+
+    def test_dependency_function_with_genuine_mangled_name_still_dropped(self):
+        """The flip side: a dependency-header function whose mangled name
+        *is* confidently a real symbol (Itanium ``_Z`` prefix) is still
+        excluded, same as before."""
+        sys_fn = _fn("sys_fn", mangled="_Z6sys_fn", source_header=_SYSTEM_HEADER)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[sys_fn],
+            dwarf_advanced=AdvancedDwarfMetadata(
+                has_dwarf=True,
+                value_abi_traits={"_Z6sys_fn": "p0:nontrivial"},
+            ),
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.dwarf_advanced is not None
+        assert set(scoped.dwarf_advanced.value_abi_traits) == set()
+
 
 class TestCrossPlatformSystemHeaderPaths:
     """_SYSTEM_HEADER_DIRS covers more than /usr/include -- exercise each

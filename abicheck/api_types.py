@@ -85,6 +85,11 @@ class InputSpec:
     version: str = ""
     pdb: Path | None = None
     debug_roots: tuple[Path, ...] = ()
+    # Mirrors `dump --include-dependencies`/`compare --include-dependencies`
+    # (dumper_scoping.py): default True preserves the historical unfiltered
+    # behavior for any caller that doesn't opt in; `run_compare` (and the
+    # CLI's `--include-dependencies` default False) sets it explicitly.
+    include_dependencies: bool = True
 
     @classmethod
     def of(
@@ -96,6 +101,7 @@ class InputSpec:
         version: str = "",
         pdb: Path | str | None = None,
         debug_roots: Iterable[Path | str] | None = None,
+        include_dependencies: bool = True,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -105,6 +111,7 @@ class InputSpec:
             version=version,
             pdb=Path(pdb) if pdb is not None else None,
             debug_roots=_path_tuple(debug_roots),
+            include_dependencies=include_dependencies,
         )
 
 
