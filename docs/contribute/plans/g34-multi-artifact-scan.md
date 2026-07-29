@@ -286,6 +286,21 @@ implementation that shipped.
   Phase 2's audit-mode detector — this is the closed-world escape hatch
   ADR-056 D2 requires; without it there is no way for a `scan
   --artifact-set` caller to declare a legitimate external dependency.
+- **`run_scan_set` must reject `req.baseline is not None` itself, not
+  rely on `cli_scan.py`/MCP front-end validation alone.** Phase 1's
+  service.py re-export (above) makes `run_scan_set` a public, directly
+  callable Tier-2 entry point — a Python API caller building
+  `ScanRequest(binaries=[a, b], baseline=old)` by hand and calling
+  `run_scan_set` directly bypasses `cli_scan.py`'s `--against`/
+  `--artifact-set` mutual-exclusion check entirely (that check lives in
+  the CLI layer, not the service layer). Without an internal guard,
+  `run_scan_set` would silently compare every member against the same
+  single `old` baseline — exactly the "unrelated libraries compared
+  against one shared file" failure mode ADR-056 D2 scopes
+  `--artifact-set` to audit-only specifically to avoid. Raise (or set an
+  equivalent usage-error result) from `run_scan_set` itself when
+  `req.baseline is not None`, so the audit-only contract holds for every
+  caller, not just the CLI/MCP front doors.
 - **MCP timeout parity:** `abi_scan` calls `run_scan_subprocess`
   (`abicheck/service_scan.py`), a killable-child-process wrapper around
   `run_scan` that the MCP server relies on to terminate a hung scan (and
@@ -361,6 +376,32 @@ implementation that shipped.
   specifically, so this kind is not silently exempt from any check; it
   simply isn't gated on that particular decorator, the same as its 9
   `bundle_*` siblings.
+- **The "does anyone in the bundle provide it" check itself must be
+  version-aware, not name-only (P1 — inherited from the live detector,
+  worth fixing here since this is a new function, not a call into the
+  old one).** `ResolutionGraph.providers_for(symbol)`
+  (`abicheck/bundle_models.py`) is keyed purely by symbol name — it
+  returns every provider of that name regardless of which `gnu.version_d`
+  each one exports, and `_detect_intra_dep_removed`'s own `if providers:
+  continue` (short-circuiting "someone provides it, not a finding") never
+  cross-checks that against the consumer's required `gnu.version_r`
+  (`ConsumerEntry.version`). Both fields already exist in the graph
+  (`ProviderEntry.version`, `ConsumerEntry.version`) — they're just not
+  consulted at this step. Consequence for a set-audit with no old side to
+  compare against: a consumer requiring `foo@V2` where the only intra-set
+  provider exports `foo@V1` (a real, load-time-unresolvable mismatch) is
+  currently indistinguishable from a consumer whose `foo` import is
+  correctly satisfied, since `providers_for("foo")` returns non-empty
+  either way. The new audit detector's provider check must confirm
+  **version compatibility, not just name match**: for a *versioned*
+  consumer import, only count a provider whose `version` matches (or, for
+  an unversioned consumer import, any provider name-matches, unchanged
+  from today); when no version-compatible provider exists, treat the
+  symbol as unresolved-in-set the same as a name-level miss, subject to
+  the same weak-import/suppression-path handling below. Cover with a
+  version-mismatch audit test (consumer requires `foo@V2`, set only
+  provides `foo@V1`) confirming this now produces a finding instead of a
+  clean `bundle_verdict`.
 - New audit-mode detector — **do not call `_detect_intra_dep_removed`
   directly, and do not assume extending its `system_providers` set alone is
   enough.** In the live detector, an allow-listed `extra_needed` edge only
