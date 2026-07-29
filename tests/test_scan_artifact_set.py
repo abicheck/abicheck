@@ -320,6 +320,50 @@ class TestRunScanSetBundleAuditDeadline:
         assert result.exit_code == 5
 
 
+class TestRunScanSetBundleSnapshotCompleteness:
+    """P2 regression (Codex review): discover_artifact_set only validates
+    that every member *looks like* ELF -- build_bundle_snapshot() can still
+    silently drop one whose actual parse failed or came back empty. A
+    reduced resolution graph missing a real provider can invent a false
+    unresolved-import finding, so a declared member missing from the
+    returned snapshot must mark the audit incomplete rather than publish
+    findings computed from an incomplete graph.
+    """
+
+    def test_dropped_member_marks_bundle_incomplete(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle import BundleSnapshot
+        from abicheck.change_registry_types import Verdict
+        from abicheck.service import ScanRequest, run_scan_set
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        class _FakeAudit:
+            # Only liba.so survived parsing -- libb.so silently dropped.
+            snapshot = BundleSnapshot(
+                root=snap_a.parent, libraries={"liba.so": snap_a},
+                metadata={}, resolution=None,
+            )
+            findings: list = []
+            verdict = Verdict.COMPATIBLE_WITH_RISK
+
+        def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
+            return _FakeAudit()
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(bundle_mod, "audit_bundle", _fake_audit_bundle)
+
+        result = run_scan_set(
+            ScanRequest(binaries=[snap_a, snap_b], mode="audit")
+        )
+        assert result.bundle_incomplete is True
+        assert result.bundle_findings == []
+        assert result.bundle_verdict is None
+
+
 class TestRunScanSetLevelExplicit:
     """P2 regression (Codex review): an explicit --depth with no
     source_method must set level_explicit=True on the run_scan_core call

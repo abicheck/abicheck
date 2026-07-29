@@ -7,10 +7,13 @@ lifecycle: active
 # ADR-056: Multi-Artifact / Library-Set `scan`
 
 **Date:** 2026-07-29
-**Status:** Proposed — not implemented. This ADR records the decision and
-scope; no code changes accompany it (see
-[G34](../plans/g34-multi-artifact-scan.md) for the phased implementation
-plan once/if this ADR is accepted for execution).
+**Status:** Proposed — formal decision-maker sign-off still pending, but the
+core scope (Phases 1-4's engine/detector/CLI slice, plus the GitHub Action
+wiring) has already shipped ahead of that sign-off, in the same PR that
+proposed this ADR (see [G34](../plans/g34-multi-artifact-scan.md)'s
+"Implementation status" note for exactly what shipped vs. what remains
+deferred — MCP wiring, the full example-catalog obligation, and the
+dry-run/estimator's per-member scaling).
 **Decision maker:** (pending)
 
 ---

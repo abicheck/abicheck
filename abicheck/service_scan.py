@@ -1570,6 +1570,23 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
         return ScanSetResult(
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
         )
+    # discover_artifact_set already validated every member looks like ELF,
+    # but build_bundle_snapshot() can still silently drop one whose actual
+    # parse failed or came back empty (bundle.py's own per-member try/except
+    # + empty-metadata skip). A reduced resolution graph missing a real
+    # provider can then invent an unresolved-import finding for a symbol
+    # that dropped member would have supplied -- mark the audit incomplete
+    # (no findings published) rather than risk a false positive (Codex
+    # review), the same degrade-not-raise contract the discovery-failure
+    # path above already uses.
+    if set(audit.snapshot.libraries) != set(libraries):
+        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
+        return ScanSetResult(
+            verdict=verdict,
+            exit_code=exit_code,
+            per_artifact=per_artifact,
+            bundle_incomplete=True,
+        )
     bundle_verdict = audit.verdict.value
     verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, bundle_verdict)
     return ScanSetResult(

@@ -25,6 +25,7 @@ set -uo pipefail
 MODE="${INPUT_MODE:-compare}"
 FORMAT="${INPUT_FORMAT:-}"
 NEW_LIBRARY="${INPUT_NEW_LIBRARY:-}"
+NEW_LIBRARY_SET="${INPUT_NEW_LIBRARY_SET:-}"
 OLD_LIBRARY="${INPUT_OLD_LIBRARY:-}"
 UPLOAD_SARIF="${INPUT_UPLOAD_SARIF:-false}"
 AST_FRONTEND="${INPUT_AST_FRONTEND:-}"
@@ -77,8 +78,24 @@ case "$MODE" in
     fi
     ;;
   scan)
-    if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
-      _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, or use mode: compare against a directory/package for a multi-library binary comparison."
+    # new-library-set (ADR-056, --artifact-set) is mutually exclusive with
+    # new-library (the single-artifact positional) -- carved out first so
+    # the directory/package rejection just below only ever applies to a
+    # bare new-library value, never to the dedicated set input (which is
+    # allowed to be a directory).
+    if [[ -n "$NEW_LIBRARY" && -n "$NEW_LIBRARY_SET" ]]; then
+      _fail "mode: scan cannot take both new-library and new-library-set -- new-library-set audits a *set* of libraries with no old side (ADR-056), new-library scans exactly one artifact (optionally against/abi-baseline). Set only one."
+    fi
+    if [[ -n "$NEW_LIBRARY_SET" ]]; then
+      # --artifact-set is audit-only at the CLI level too (no old side for
+      # a set) -- fail here, before Python setup/dependency install, rather
+      # than let the CLI's own UsageError surface only after that (same
+      # fail-fast rationale as every other check in this script).
+      if [[ -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ]]; then
+        _fail "mode: scan with new-library-set does not support against/abi-baseline -- new-library-set is audit-only (no old side to compare a set against, ADR-056). Remove against/abi-baseline, or use new-library (a single artifact) for a baseline comparison instead."
+      fi
+    elif [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
+      _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, use new-library-set to audit a set with no old side, or use mode: compare against a directory/package for a multi-library binary comparison."
     fi
     # Allowlist, not a denylist: any value other than scan's two real
     # formats (including a typo like 'xml', not just the known-bad
@@ -228,6 +245,21 @@ done
 _ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
 if [[ -n "$_ABI_BASELINE" && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
   _warn "abi-baseline is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
+fi
+
+# new-library-set: scan mode only (ADR-056). The scan-mode arm above already
+# fails outright on an invalid combination (new-library also set, or
+# against/abi-baseline also set) -- this only covers the inert case (set on
+# a different mode entirely).
+if [[ -n "$NEW_LIBRARY_SET" && "$MODE" != "scan" ]]; then
+  _warn "new-library-set is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
+fi
+
+# bundle-system-providers: the cross-library bundle-analysis layer, reached
+# by mode: compare (directory/package operands) and mode: scan (only with
+# new-library-set) -- inert everywhere else.
+if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
+  _warn "bundle-system-providers is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
 fi
 
 # estimate, audit: deprecated scan-mode-only aliases.
