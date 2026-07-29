@@ -25,8 +25,10 @@ from abicheck.build_context import (
     BuildContext,
     CompileEntry,
     _entry_matches_filter,
+    _expand_response_files,
     _extract_flags,
     _is_cl_style_driver,
+    _safe_resolve,
     _split_windows_command_line,
     _std_sort_key,
     _try_consume_define_undef,
@@ -540,6 +542,31 @@ class TestCompileEntry:
         # rather than expanded once and only capped on the *next* @file
         # (Codex review, third round) -- so this file contributes nothing.
         assert entry.arguments == ["c++", "@loop.rsp", "-c", "src/foo.cpp"]
+
+    def test_oversized_response_file_is_not_retained_in_file_cache(
+        self, tmp_path: Path
+    ) -> None:
+        """A response file whose own token count exceeds
+        ``_MAX_RESPONSE_FILE_OUTPUT_TOKENS`` can never fit *any* entry's
+        fresh per-entry budget -- caching its full (huge) token list anyway
+        would let many distinct oversized files in one untrusted database
+        each retain a never-usable list in ``_file_cache`` indefinitely.
+        The cache entry for such a file must be the rejection sentinel
+        (``None``), not the tokens themselves (Codex review, sixth round)."""
+        db_dir = tmp_path
+        huge = db_dir / "huge.rsp"
+        huge.write_text(" ".join(["-Dx=1"] * 25_000))  # > 20k token cap
+        file_cache: dict[tuple[str, bool], list[str] | None] = {}
+        arguments = _expand_response_files(
+            ["c++", "@huge.rsp", "-c", "src/foo.cpp"],
+            db_dir,
+            _safe_resolve(db_dir) or db_dir,
+            _file_cache=file_cache,
+        )
+        assert "@huge.rsp" in arguments
+        cache_key = (str(_safe_resolve(huge)), False)
+        assert cache_key in file_cache
+        assert file_cache[cache_key] is None
 
     def test_symlink_loop_response_file_degrades_gracefully(
         self, tmp_path: Path

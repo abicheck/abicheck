@@ -685,6 +685,50 @@ def test_cache_key_changes_with_extractor_compiler_override(tmp_path: Path) -> N
     assert key_default and key_overridden and key_default != key_overridden
 
 
+def test_cache_key_uses_compiler_override_for_replay_flag_mode(tmp_path: Path) -> None:
+    """A --gcc-path override that switches a GNU-argv compile unit into CL
+    mode changes which flags replay_extra_flags() recognizes (/FI vs
+    -include), and the cache key must follow that mode -- not the compile
+    unit's own un-overridden argv (Codex review, sixth round)."""
+    src = tmp_path / "a.cpp"
+    src.write_text("int a;\n")
+    # /FI-style tokens: invisible to GNU-mode replay_extra_flags (it only
+    # recognizes -include/-imacros), so without the override both keys
+    # collide -- reproducing the bug this test guards against.
+    cu_a = _cu("cu://x", str(src), argv=["g++", "/FIa.h", "-c", "a.cpp"])
+    cu_b = _cu("cu://x", str(src), argv=["g++", "/FIb.h", "-c", "a.cpp"])
+    k_a_no_override = compute_tu_cache_key(
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu_a,
+        public_header_roots=[],
+    )
+    k_b_no_override = compute_tu_cache_key(
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu_b,
+        public_header_roots=[],
+    )
+    assert k_a_no_override == k_b_no_override  # the pre-fix collision
+
+    k_a_cl = compute_tu_cache_key(
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu_a,
+        public_header_roots=[],
+        compiler_override="dpcpp-cl",
+    )
+    k_b_cl = compute_tu_cache_key(
+        extractor_name="clang-source",
+        extractor_version="0.1",
+        compile_unit=cu_b,
+        public_header_roots=[],
+        compiler_override="dpcpp-cl",
+    )
+    assert k_a_cl and k_b_cl and k_a_cl != k_b_cl
+    assert k_a_cl != k_a_no_override
+
+
 def test_cache_key_changes_with_header_content(tmp_path: Path) -> None:
     src = tmp_path / "foo.cpp"
     src.write_text("int a;\n")

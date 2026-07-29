@@ -402,6 +402,20 @@ def _expand_response_files(
                     tokens = _split_command_line(text, cl_style=cl_style)
                 except ValueError:
                     tokens = None
+                if (
+                    tokens is not None
+                    and len(tokens) > _MAX_RESPONSE_FILE_OUTPUT_TOKENS
+                ):
+                    # No entry's own _output_budget ever starts above this
+                    # constant (a fresh top-level call always defaults to
+                    # it), so a file this dense can never fit any entry
+                    # regardless of how much of that budget is left --
+                    # cache the rejection instead of the full token list,
+                    # or many distinct oversized files in one untrusted
+                    # database would each retain a huge, never-usable
+                    # tokens list in _file_cache indefinitely (Codex
+                    # review, sixth round).
+                    tokens = None
             if cache_key is not None:
                 _file_cache[cache_key] = tokens
         if tokens is None:

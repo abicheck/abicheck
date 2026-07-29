@@ -694,6 +694,7 @@ def compute_tu_cache_key(
     compile_unit: CompileUnit,
     public_header_roots: Sequence[str],
     schema_version: int = SOURCE_ABI_VERSION,
+    compiler_override: str | None = None,
 ) -> str | None:
     """Compute the D8 per-TU cache key, or ``None`` if the TU is uncacheable.
 
@@ -740,7 +741,7 @@ def compute_tu_cache_key(
         # live in argv, not the structured fields, so without them a compile
         # command that swaps `-include old.h` for `-include new.h` would reuse a
         # stale cached dump (Codex review #339, P2).
-        "replay:" + ",".join(_replay_flags_for_key(compile_unit)),
+        "replay:" + ",".join(_replay_flags_for_key(compile_unit, compiler_override)),
         "roots:" + ",".join(sorted(public_header_roots)),
     ]
     for root in sorted(public_header_roots):
@@ -749,14 +750,22 @@ def compute_tu_cache_key(
     return hashlib.sha256(blob).hexdigest()
 
 
-def _replay_flags_for_key(compile_unit: CompileUnit) -> list[str]:
+def _replay_flags_for_key(
+    compile_unit: CompileUnit, compiler_override: str | None = None
+) -> list[str]:
     """The exact replay flags an extractor would carry from argv, for the cache key.
 
     Mirrors :func:`source_extractors._argv.replay_extra_flags` so the key folds in
     forced-include / include-search options that change the parsed TU but are not
     captured by the structured ``CompileUnit`` fields (Codex review #339, P2).
+    *compiler_override* must be the same override the extractor actually resolves
+    mode from (e.g. ``ClangSourceExtractor.compiler_binary``) -- an override that
+    switches a GNU-argv TU into CL mode changes which flags ``replay_extra_flags``
+    carries (``/FI``/``/I`` vs ``-include``/``-iquote``), so keying on the
+    compile unit's own un-overridden argv alone can collide two TUs that replay
+    under genuinely different forced-include flags (Codex review, sixth round).
     """
-    cc_bin = pick_compiler_binary(compile_unit, None)
+    cc_bin = pick_compiler_binary(compile_unit, compiler_override)
     cc_id = "msvc" if is_msvc_mode(cc_bin) else "gnu"
     return replay_extra_flags(compile_unit, [], cc_id)
 
@@ -1035,6 +1044,7 @@ def _replay_cache_lookup(
                 extractor_version=_extractor_version(extractor),
                 compile_unit=cu,
                 public_header_roots=key_roots,
+                compiler_override=getattr(extractor, "compiler_binary", None),
             )
         keys.append(key)
         cached = cache.get(key, digest_memo) if cache is not None else None
