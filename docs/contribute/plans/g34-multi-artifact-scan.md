@@ -99,12 +99,33 @@ started.**
   stay exactly as they are today** — existing single-binary callers
   (service, `run_scan_subprocess`, MCP `abi_scan`) are unaffected; only
   `--artifact-set`/`artifact_set` callers route through `run_scan_set`.
+- **`run_scan_set` cannot simply call `run_scan` in a loop.** `ScanResult`
+  (`abicheck/service_scan.py`) has no snapshot field
+  (`verdict`/`exit_code`/`findings`/`layers`/`confidence`/`estimate`/
+  `report` only) — `run_scan_core` (`abicheck/scan_engine.py`) computes a
+  candidate `AbiSnapshot` internally but `run_scan` discards it before
+  returning. Phase 2's `build_bundle_snapshot(list[AbiSnapshot], paths)`
+  entry point needs the actual snapshots, not just each artifact's
+  `ScanResult`. `run_scan_set` needs its own internal path through
+  `run_scan_core` (or a thin wrapper around it) that retains each
+  artifact's `AbiSnapshot` alongside its `ScanResult`, rather than
+  re-deriving snapshots by re-parsing the same binaries a second time.
 - `run_scan_set` takes a `bundle_system_providers: list[str]` parameter
   (same shape as `compare-release`'s `--bundle-system-providers`,
   `abicheck/cli_options.py`/`cli_compare_release.py`) and threads it into
   Phase 2's audit-mode detector — this is the closed-world escape hatch
   ADR-056 D2 requires; without it there is no way for a `scan
   --artifact-set` caller to declare a legitimate external dependency.
+- **MCP timeout parity:** `abi_scan` calls `run_scan_subprocess`
+  (`abicheck/service_scan.py`), a killable-child-process wrapper around
+  `run_scan` that the MCP server relies on to terminate a hung scan (and
+  its compiler descendants) at the tool timeout rather than orphaning it
+  (`abicheck/mcp_server.py`). That wrapper is singular-`run_scan`-only.
+  `run_scan_set` needs the equivalent — a `run_scan_set_subprocess`
+  wrapping `run_scan_set` the same way — so an `artifact_set`-mode
+  `abi_scan` call (potentially N expensive scans) gets the same
+  timeout/process-tree cleanup instead of either being rejected by the
+  singular wrapper or running unbounded in the MCP server's own process.
 - `tests/test_scan_estimate.py::test_run_scan_rejects_multiple_binaries` —
   **keep unchanged, unmodified.** `run_scan` itself still rejects a
   multi-item `binaries` list (Phase 1's bullet above); this test is the
@@ -125,26 +146,46 @@ started.**
   This is a **new** kind, not a reuse of `bundle_intra_dep_removed` — see
   ADR-056 D2's correction for why reuse is unsafe.
 - New audit-mode detector — **do not call `_detect_intra_dep_removed`
-  directly.** Write a separate, more conservative function: given only a
-  "new" side's `list[AbiSnapshot]` + `ResolutionGraph` + the caller-supplied
-  `bundle_system_providers` allow-list (Phase 1), find symbols with
-  consumers but no intra-set provider, apply the same
-  `_import_is_external`/system-symbol-allow-list filtering
-  `_detect_intra_dep_removed` already does (extended with the caller's
-  allow-list, not just the built-in `DEFAULT_SYSTEM_PROVIDERS`), but
-  additionally treat any
-  *unversioned* import with no intra-set provider as **not automatically
-  intra-set** — `_import_is_external`'s existing unversioned-import
-  behavior (`return False`) is correct for the diff-driven case (ADR-023)
-  and unsafe for the no-diff audit case (ADR-056 D2), so the audit
-  detector needs its own classification step here rather than inheriting
-  the diff-tuned one. Emit `BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` with
-  `COMPATIBLE_WITH_RISK` severity and a description that says "no provider
-  found in this artifact set" (not "removed").
-- Unit tests: a case with a genuinely external, unversioned dependency
-  correctly does **not** produce a finding (or produces the risk-level one
-  reviewable rather than a false `BREAKING`) — this is the regression test
-  for the P1 false-positive the ADR-056 correction was written to close.
+  directly, and do not assume extending its `system_providers` set alone is
+  enough.** In the live detector, an allow-listed `extra_needed` edge only
+  suppresses a finding when the *symbol itself* also matches
+  `DEFAULT_SYSTEM_SYMBOLS`/`_looks_system_symbol` (`abicheck/bundle.py`) —
+  it never unconditionally trusts a caller-declared external provider. That
+  is correct for `compare`'s built-in system allow-list (glibc/libstdc++
+  exports are inherently well-known-shaped), but wrong for
+  `--bundle-system-providers`' actual purpose here: a user declaring
+  `libvendor.so` as external is asserting "trust every symbol this DSO
+  provides," including an arbitrary custom export like `vendor_init` that
+  will never match a system-symbol heuristic. The audit-mode detector
+  therefore needs **two independent suppression paths**, not one extended
+  set:
+  1. reuse `_import_is_external`'s version/provider-soname evidence as-is
+     (unaffected by this issue — it already trusts a resolved verneed
+     provider outside the bundle unconditionally); and
+  2. for a consumer's *unversioned* import with no intra-set provider,
+     check the import against the caller-supplied
+     `bundle_system_providers` **DSO allow-list directly** (i.e. "is this
+     consumer's only non-intra DT_NEEDED edge for this symbol a declared
+     external provider?") and suppress unconditionally when so — no
+     system-symbol-shape check gating it, since the whole point of the
+     explicit allow-list is to cover exactly the non-system-shaped case.
+  Document the **ambiguous case** explicitly: a symbol with no verneed
+  provider info, satisfiable in principle by more than one declared
+  external provider (or by both a declared provider and something
+  unresolvable) — resolve it conservatively per this module's existing
+  false-negative-over-false-positive default (AGENTS.md "Known gaps"):
+  suppress rather than flag, and note in the finding's `evidence` that
+  attribution to a specific external provider was not confirmed. Emit
+  `BUNDLE_UNRESOLVED_INTRA_DEPENDENCY` with `COMPATIBLE_WITH_RISK` severity
+  and a description that says "no provider found in this artifact set"
+  (not "removed") only when neither suppression path applies.
+- Unit tests: (a) a case with a genuinely external, unversioned dependency
+  from a DSO **not** on the allow-list correctly still produces the
+  risk-level finding (the earlier-round P1 false-positive this design
+  closes); (b) the same case with the DSO **added** via
+  `--bundle-system-providers`/`bundle_system_providers` correctly
+  suppresses it, including for a non-system-shaped custom symbol name —
+  the regression test for this round's escape-hatch correctness.
 - **Not started.**
 
 ### Phase 3 — CLI + MCP surface
@@ -168,7 +209,11 @@ started.**
   (`bundle_system_providers` param, Phase 1).
 - `abicheck/mcp_server.py`: add `artifact_set` **and**
   `bundle_system_providers` params to `abi_scan`, same validation shape as
-  CLI (ADR-043 D10 parity — land together, not as a follow-up PR).
+  CLI (ADR-043 D10 parity — land together, not as a follow-up PR). Route an
+  `artifact_set`-mode call through the new `run_scan_set_subprocess`
+  (Phase 1) instead of the existing singular `run_scan_subprocess`, so the
+  MCP tool timeout still terminates the process tree for a hung
+  multi-artifact scan.
 - `action.yml` (repo-root composite Action manifest — not under `action/`;
   `action/` holds the shell implementation only) + `action/run.sh` +
   `action/validate-inputs.sh`: the
@@ -266,8 +311,21 @@ docs/reference/cli-reference.md            # Phase 3 — generated, gen_cli_refe
 New:
 ```text
 tests/test_scan_artifact_set.py   # Phase 1-2, mirrors tests/test_bundle.py's shape
-examples/caseNNN_scan_artifact_set_audit/   # Phase 4 — two-library audit-mode example
+examples/caseNNN_scan_artifact_set_audit/   # Phase 4 — two-library audit-mode example, incl. its own README.md
 ```
+
+Adding the example fixture is not just the `caseNNN_*` directory. Per
+`AGENTS.md`'s example-catalog obligations (the `examples-ground-truth`/
+`examples-readme-sync` AI-readiness checks, `tests/test_examples_docs.py`)
+a new case requires, in the same PR:
+- the case directory with its own `README.md`;
+- an entry in `examples/ground_truth.json`;
+- `examples/README.md`'s catalog (verdict distribution, case-index row)
+  kept in sync with `ground_truth.json`;
+- `python scripts/gen_examples_docs.py` re-run, committing the resulting
+  `docs/reference/examples/*.md` page for the new case.
+Omitting any of these fails the PR gate, not just leaves documentation
+stale — this is a hard requirement, not optional polish.
 
 ## Tests
 
