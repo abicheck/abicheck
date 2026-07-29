@@ -116,13 +116,25 @@ def _compile_context(
     frontend_context: str,
 ) -> CompileContext | None:
     # Merge a side's explicit compile override, the pair-wide C++20 dialect
-    # override, and the request-level frontend_context default -- a per-side
-    # compile.frontend_context always wins over the request-level default,
-    # *including* an explicit "host" (Codex review: "host" is also
-    # CompileContext's own default, so an unconditional overwrite couldn't
-    # distinguish an explicitly-pinned host side from an unset one -- only
-    # apply the request-level default when this side supplied no compile
-    # override at all).
+    # override, and the request-level frontend_context default.
+    #
+    # frontend_context specifically has a known, accepted limitation (Codex
+    # review, two rounds): CompileContext.frontend_context is a plain
+    # ``str = "host"`` field with no way to represent "unset" -- so a bare
+    # equality check can never distinguish a side that explicitly pinned
+    # "host" from one that just happens to carry the untouched default
+    # because it set some unrelated field (e.g. only `sysroot`). Giving
+    # CompileContext a real sentinel would fix this properly, but that field
+    # is read/constructed in ~20 other modules (service.py's own
+    # `cc.frontend_context == "host"` branch included), so a wider type
+    # change is out of scope for this fix. Resolved by always applying the
+    # request-level default whenever a side's frontend_context reads as the
+    # class default ("host") -- i.e. treating an unrelated override the same
+    # as no override at all for this one field. The accepted cost: a side
+    # that deliberately wants "host" while the request otherwise defaults to
+    # "device" cannot express that through `InputSpec.compile.frontend_context`
+    # alone; it must instead pin the *other* side to "device" explicitly and
+    # leave the request-level `frontend_context` at "host".
     base = side_compile
     if pair_compile is not None and pair_compile.gcc_option_tokens:
         # Codex review (P2): an unrelated side_compile override (e.g. only a
@@ -138,15 +150,15 @@ def _compile_context(
                 base,
                 gcc_option_tokens=base.gcc_option_tokens + pair_compile.gcc_option_tokens,
             )
-    if side_compile is not None:
-        return base
-    if frontend_context == "host":
-        return base
-    return (
-        dataclasses.replace(base, frontend_context=frontend_context)
-        if base is not None
-        else CompileContext(frontend_context=frontend_context)
-    )
+    if base is None:
+        return (
+            CompileContext(frontend_context=frontend_context)
+            if frontend_context != "host"
+            else None
+        )
+    if frontend_context != "host" and base.frontend_context == "host":
+        return dataclasses.replace(base, frontend_context=frontend_context)
+    return base
 
 
 def resolve_compare_request_evidence(

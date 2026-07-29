@@ -248,9 +248,13 @@ class CompareRequest:
     # otherwise silently keep running L2.
     depth: str | None = None
     # ADR-055 D1 / ADR-050: request-level default for `CompileContext.
-    # frontend_context` (`--frontend-context`, host|device) when a side's own
-    # `InputSpec.compile` doesn't already set one explicitly -- a per-side
-    # `compile.frontend_context` always wins over this request-level default.
+    # frontend_context` (`--frontend-context`, host|device), applied to a
+    # side whose own `InputSpec.compile.frontend_context` reads as the class
+    # default ("host") -- `CompileContext.frontend_context` has no "unset"
+    # representation, so this can't distinguish a side that explicitly wants
+    # "host" from one that just never touched the field; see
+    # `service_compare_evidence._compile_context`'s own docstring for the
+    # accepted limitation and how to work around it.
     frontend_context: str = "host"
 
     def validation_errors(self) -> list[str]:

@@ -1878,14 +1878,15 @@ class TestCompareRequestAdr055Evidence:
         assert calls_by_path[old_p]["compile"].frontend_context == "device"
         assert calls_by_path[new_p]["compile"].frontend_context == "device"
 
-    def test_explicit_side_host_context_survives_device_default(
+    def test_unrelated_side_override_still_picks_up_device_default(
         self, tmp_path, monkeypatch
     ):
-        """Codex review (P2): "host" is also CompileContext's own default, so
-        a side that explicitly pins compile.frontend_context="host" must not
-        be silently overwritten to "device" by the request-level default --
-        only a side with no compile override at all should pick up the
-        request-level frontend_context."""
+        """Codex review (P2, second round): CompileContext.frontend_context
+        has no "unset" representation, so an unrelated per-side override
+        (e.g. only a sysroot) that never touches frontend_context must still
+        pick up the request-level frontend_context default -- it must not be
+        silently mistaken for an explicit "host" pin just because "host" is
+        also the field's own default value."""
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -1893,13 +1894,14 @@ class TestCompareRequestAdr055Evidence:
         calls = self._spy_resolve_input(monkeypatch)
 
         request = CompareRequest(
-            old=InputSpec.of(old_p, compile=CompileContext(frontend_context="host")),
+            old=InputSpec.of(old_p, compile=CompileContext(sysroot=Path("/sysroot"))),
             new=InputSpec.of(new_p),
             frontend_context="device",
         )
         run_compare_request(request)
         calls_by_path = {c["path"]: c for c in calls}
-        assert calls_by_path[old_p]["compile"].frontend_context == "host"
+        assert calls_by_path[old_p]["compile"].sysroot == Path("/sysroot")
+        assert calls_by_path[old_p]["compile"].frontend_context == "device"
         assert calls_by_path[new_p]["compile"].frontend_context == "device"
 
     def test_sources_triggers_embed_build_source(self, tmp_path, monkeypatch):
@@ -2051,6 +2053,37 @@ class TestCompareRequestAdr055Evidence:
                 old_p, sources=src_dir, compile=CompileContext(frontend="castxml")
             ),
             new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        assert embed_calls[0]["extractor"] == "castxml"
+
+    def test_request_frontend_case_is_normalized_for_extractor(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P2): request.frontend="CASTXML" validates case-
+        insensitively, but the extractor forwarded to source replay must be
+        lowercase -- _make_source_extractor only recognizes lowercase
+        frontend names and silently falls back to Clang otherwise, making L2
+        and L4 use different frontends."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        embed_calls: list[dict] = []
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source",
+            lambda snap, **kwargs: embed_calls.append(kwargs),
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=src_dir),
+            new=InputSpec.of(new_p),
+            frontend="CASTXML",
         )
         run_compare_request(request)
         assert embed_calls[0]["extractor"] == "castxml"

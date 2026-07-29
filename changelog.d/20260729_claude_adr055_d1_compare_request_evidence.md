@@ -26,11 +26,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   path, including the dependency-scope filter (a declared-public file or
   directory is no longer misclassified as a toolchain dependency); the inline
   evidence collection's `extractor` matches whichever L2 frontend actually ran
-  for that side; a per-side `compile.frontend_context` always wins over the
-  request-level default, including an explicit `"host"` on a mixed host/device
-  request; and the `android` frontend's source-evidence check now also
-  accepts either side's own `InputSpec.sources`, not just the legacy
-  `has_sources` flag. `CompileContext` itself moved to a new leaf module
+  for that side, using a normalized-case `--ast-frontend` value so a
+  case-insensitive `frontend="CASTXML"` doesn't silently fall back to a
+  different extractor; a side whose `compile.frontend_context` differs from
+  the class default always wins over the request-level default (an
+  unrelated per-side override, e.g. only a `sysroot`, still picks up the
+  request-level default for this one field, since `CompileContext.
+  frontend_context` has no way to represent "explicitly set to the
+  default" — see `service_compare_evidence._compile_context`'s docstring);
+  and the `android` frontend's source-evidence check now also accepts
+  either side's own `InputSpec.sources`, not just the legacy `has_sources`
+  flag. `CompileContext` itself moved to a new leaf module
   (`abicheck.compile_context`, re-exported from `service_scan` for
   back-compat) so `api_types.py` can type against it without joining the
   CLI/service import-cycle-allowlisted cluster. Does not yet match every

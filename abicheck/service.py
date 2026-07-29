@@ -1699,8 +1699,9 @@ def run_compare_request(
     lang = request.lang.lower()
     # android (source-ABI only, gated to has_sources by validate) has no header-AST path, so it falls back to "auto" for the binary dump.
     from .api_types import HEADER_AST_FRONTENDS
-
-    header_backend = request.frontend if request.frontend.lower() in HEADER_AST_FRONTENDS else "auto"
+    # Normalized here (not just for the containment check) since effective_frontend() forwards this verbatim as embed_build_source's extractor, which source replay only recognizes lowercase (Codex review, P2).
+    frontend_lower = request.frontend.lower()
+    header_backend = frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"
 
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
