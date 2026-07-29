@@ -581,10 +581,34 @@ def _stamp_explicit_scope_contract_evaluation(c: Any) -> None:
     exactly this case -- a relevant finding reused from ``result.changes``
     rather than freshly synthesized -- permanently under its weaker,
     already-computed decision).
+
+    EXCEPTION -- non-entity kinds: ``_is_relevant_to_app``/
+    ``scope_diff_to_required_symbols`` deliberately include a handful of
+    *loader/deployment* findings in the relevant set for reasons that have
+    nothing to do with matching a symbol/entrypoint the consumer actually
+    references -- ``SONAME_CHANGED`` when the consumer records the old
+    SONAME in ``DT_NEEDED``, and ``COMPAT_VERSION_CHANGED`` (Mach-O)
+    unconditionally for every consumer. ``contract_evaluation.py`` already
+    classifies both as ``NOT_APPLICABLE`` (its own curated
+    ``_NOT_APPLICABLE_KINDS``, ADR-049 D2's "non-entity" column) since
+    neither is about a specific function/variable/type a consumer's code
+    references. Overriding those to ``IN_CONTRACT`` here would be a false
+    contract decision, not a stronger one -- so a ``Change`` whose kind is
+    in that non-entity set is left alone (whatever
+    ``_apply_contract_evaluation_shadow`` already computed for it, i.e.
+    ``NOT_APPLICABLE``) instead of being overwritten (Codex review, fresh
+    evidence).
     """
+    from .contract_evaluation import _NOT_APPLICABLE_KIND_SLUGS
     from .contract_relevance_types import ContractAssurance, ContractRelevance
 
     is_dict = isinstance(c, dict)
+    if not is_dict:
+        kind = getattr(c, "kind", None)
+        kind_value = getattr(kind, "value", None)
+        if kind_value in _NOT_APPLICABLE_KIND_SLUGS:
+            return
+
     if is_dict:
         c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
         c["contract_reason_code"] = "explicit_consumer_or_required_symbol_evidence"

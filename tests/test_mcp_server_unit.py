@@ -1701,6 +1701,50 @@ class TestAbiCompare:
         assert report_entries
         assert all(c["contract_relevance"] == "IN_CONTRACT" for c in report_entries)
 
+    def test_used_by_soname_changed_stays_not_applicable(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, P2, fresh evidence): SONAME_CHANGED is
+        # included in breaking_for_app (_is_relevant_to_app) whenever the
+        # consumer records the old SONAME in DT_NEEDED -- a loader-level
+        # fact, not a match against a specific symbol/entrypoint the
+        # consumer's code references. It must NOT be overridden to
+        # IN_CONTRACT by the explicit consumer/required-symbol evidence
+        # tier; contract_evaluation.py's own NOT_APPLICABLE classification
+        # for this non-entity kind must be preserved.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0", functions=[_pub_func("foo", "foo", "int")])
+        new = _make_snapshot("2.0", functions=[_pub_func("foo", "foo", "int")])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        soname_change = Change(
+            ChangeKind.SONAME_CHANGED, "libfoo.so.1", "SONAME changed",
+            old_value="libfoo.so.1", new_value="libfoo.so.2",
+        )
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols=set(), required_symbol_count=0,
+            breaking_for_app=[soname_change],
+            verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        soname_entries = [c for c in data["changes"] if c["kind"] == "soname_changed"]
+        assert soname_entries
+        assert all(c.get("contract_relevance") != "IN_CONTRACT" for c in soname_entries)
+        assert all(
+            c.get("contract_reason_code") != "explicit_consumer_or_required_symbol_evidence"
+            for c in soname_entries
+        )
+
     def test_used_by_missing_symbol_covered_by_change_not_double_counted(
         self, tmp_path: Path, monkeypatch
     ):
