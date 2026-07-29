@@ -1710,20 +1710,12 @@ def _make_source_extractor(
         return CastxmlSourceExtractor(), "castxml"
     from .source_extractors import ClangSourceExtractor
 
-    # ClangSourceExtractor's own MSVC/CL-mode detection
-    # (pick_compiler_binary()) only ever consults its *compiler_binary*
-    # override -- passing clang_bin only as the binary to invoke, and
-    # leaving compiler_binary at its None default, means the extractor still
-    # derives CL-vs-GNU mode from each CompileUnit's own recorded argv[0]
-    # (or a g++/gcc fallback), silently ignoring a resolved --gcc-path
-    # clang-cl/dpcpp-cl override for command construction even though the
-    # right binary is now invoked (Codex review, third round) -- the
-    # override would then feed a GNU-shaped command to a CL-mode driver.
-    # Only forward it when clang_bin is a real, explicit override: the
-    # generic unversioned "clang" default must keep letting
-    # pick_compiler_binary() auto-detect CL mode from a mixed-toolchain
-    # compile database's own per-TU argv, which forcing compiler_binary
-    # here unconditionally would silently break.
+    # pick_compiler_binary() only consults compiler_binary for CL-vs-GNU mode
+    # detection, not clang_bin (the binary to invoke) -- forward an explicit
+    # --gcc-path override (e.g. dpcpp-cl) so mode detection sees it too,
+    # instead of silently falling back to each CompileUnit's own argv[0]
+    # (Codex review). Skip it for the generic "clang" default so
+    # auto-detection from a mixed-toolchain compile database still works.
     compiler_binary = clang_bin if clang_bin != "clang" else None
     return (
         ClangSourceExtractor(clang_bin=clang_bin, compiler_binary=compiler_binary),
