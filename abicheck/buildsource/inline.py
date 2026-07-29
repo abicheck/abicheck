@@ -1710,7 +1710,17 @@ def _make_source_extractor(
         return CastxmlSourceExtractor(), "castxml"
     from .source_extractors import ClangSourceExtractor
 
-    return ClangSourceExtractor(clang_bin=clang_bin), clang_bin
+    # pick_compiler_binary() only consults compiler_binary for CL-vs-GNU mode
+    # detection, not clang_bin (the binary to invoke) -- forward an explicit
+    # --gcc-path override (e.g. dpcpp-cl) so mode detection sees it too,
+    # instead of silently falling back to each CompileUnit's own argv[0]
+    # (Codex review). Skip it for the generic "clang" default so
+    # auto-detection from a mixed-toolchain compile database still works.
+    compiler_binary = clang_bin if clang_bin != "clang" else None
+    return (
+        ClangSourceExtractor(clang_bin=clang_bin, compiler_binary=compiler_binary),
+        clang_bin,
+    )
 
 
 # ── L5: source graph ──────────────────────────────────────────────────────────

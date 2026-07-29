@@ -66,6 +66,26 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-fPIC", "-fpic", "-fPIE", "-fpie",
     "-fno-pic", "-fno-pie", "-fno-PIC", "-fno-PIE",
     "-fomit-frame-pointer", "-fno-omit-frame-pointer",
+    # SYCL language mode (icpx/dpcpp -fsycl/-fsycl-*): enables an entirely
+    # different parse (implicit SYCL builtins/attributes, kernel-lambda
+    # codegen), so its presence/absence is exactly the kind of parse-affecting
+    # signal this list already tracks for -std=/-fvisibility/etc. Without
+    # this, a resolved --gcc-path override that now actually invokes icpx/
+    # dpcpp for L4 replay (previously always a bare "clang") would replay a
+    # SYCL TU as plain C++, silently missing built-in SYCL state (Codex
+    # review). Only the flag's *presence*, carried via replay_extra_flags(),
+    # not a from-scratch reconstruction of the real build's host/device
+    # multi-pass invocation -- see the "Known gaps" entry in AGENTS.md.
+    # "-fno-sycl" is a separate, non-prefix-matching spelling (it does not
+    # start with "-fsycl") that explicitly disables SYCL mode again -- an
+    # "icpx -fsycl -fno-sycl" (last-flag-wins) command recorded only
+    # "-fsycl" without it, so replay reconstructed the wrong (SYCL-enabled)
+    # AST for what the real build actually compiled as plain C++ (Codex
+    # review, second round). Extraction is argv-order-preserving, so
+    # capturing both spellings lets the same last-flag-wins semantics reach
+    # replay unchanged.
+    "-fsycl",
+    "-fno-sycl",
 )
 
 #: Runtime-model flags normalized to a canonical (key, value) so a mode flip is

@@ -38,7 +38,26 @@ from ..build_evidence import CompileUnit
 #: Languages that make the GNU fallback compiler ``g++`` rather than ``gcc``.
 CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
 #: Compiler basenames that mean the extractor should run in MSVC mode.
-MSVC_BINARIES = frozenset({"cl", "cl.exe", "clang-cl", "clang-cl.exe"})
+#: ``dpcpp-cl``/``dpcpp-cl.exe`` is Intel's oneAPI DPC++/C++ CL-compatible
+#: driver (the same CL-mode convention as ``clang-cl``, just Intel-branded);
+#: without it here, ``dumper_clang.resolve_source_frontend_clang_bin``'s
+#: ``exclude_cl_style=False`` (L4 source-ABI replay) resolves ``--gcc-path
+#: dpcpp-cl`` correctly, but this module still built a GNU-shaped command for
+#: it instead of adding ``--driver-mode=cl``, so the CL-mode override never
+#: actually reached the driver (Codex review).
+MSVC_BINARIES = frozenset(
+    {"cl", "cl.exe", "clang-cl", "clang-cl.exe", "dpcpp-cl", "dpcpp-cl.exe"}
+)
+#: The same names with any ``.exe`` suffix stripped, for matching after a
+#: version suffix has also been removed (``is_msvc_mode`` normalizes both).
+_MSVC_STEMS = frozenset(name.removesuffix(".exe") for name in MSVC_BINARIES)
+#: Matches a trailing numeric version suffix LLVM/Debian packaging commonly
+#: appends to an unversioned driver name (``clang-cl-20``, ``clang-20.1``) --
+#: without stripping it, ``is_msvc_mode("clang-cl-20")`` would miss a real
+#: CL-mode driver just because it carries its LLVM major-version suffix
+#: (Codex review): the S2 pre-scan (and, via ``pick_compiler_binary``, L4
+#: replay) would then drive it with GNU-only flags it silently ignores.
+_VERSION_SUFFIX_RE = re.compile(r"-\d+(?:\.\d+)*$")
 #: Compiler-launcher wrappers that prefix the real compiler in a build action
 #: (``ccache clang++ -c foo.cpp``). The extractor must emulate the real compiler,
 #: not the launcher, which would otherwise run without its compiler operand.
@@ -183,8 +202,16 @@ def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str
 
 
 def is_msvc_mode(cc_bin: str) -> bool:
-    """Whether the compiler basename means MSVC (``cl``/``clang-cl``) mode."""
-    return basename(cc_bin).lower() in MSVC_BINARIES
+    """Whether the compiler basename means MSVC (``cl``/``clang-cl``) mode.
+
+    Checks the exact (possibly ``.exe``-suffixed) name first, then falls
+    back to the same check with a trailing version suffix stripped, so a
+    packaged ``clang-cl-20``/``clang-cl-20.exe`` is still recognized.
+    """
+    stem = basename(cc_bin).lower()
+    if stem in MSVC_BINARIES:
+        return True
+    return _VERSION_SUFFIX_RE.sub("", stem.removesuffix(".exe")) in _MSVC_STEMS
 
 
 def _carry_abi_relevant_flags(

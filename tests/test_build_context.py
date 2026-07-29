@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,12 @@ from abicheck.build_context import (
     BuildContext,
     CompileEntry,
     _entry_matches_filter,
+    _expand_response_files,
     _extract_flags,
+    _is_cl_style_driver,
+    _safe_resolve,
+    _split_command_line,
+    _split_windows_command_line,
     _std_sort_key,
     _try_consume_define_undef,
     _try_consume_sysroot,
@@ -136,10 +142,161 @@ class TestLoadCompileDb:
         entries = load_compile_db(f)
         assert len(entries) == 1
 
+    def test_shared_response_file_read_once_across_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Many entries referencing the *same* ``@response-file`` must only
+        actually read/tokenize it once across the whole ``load_compile_db()``
+        call -- otherwise an untrusted database with thousands of entries
+        repeating one large response file amplifies a few MB of JSON into
+        orders of magnitude more I/O and parsing work (Codex review, fourth
+        round, P1)."""
+        import abicheck.build_context as build_context_module
+
+        rsp = tmp_path / "shared.rsp"
+        rsp.write_text("-Iinclude/foo -DBAR=1\n")
+        db = [
+            {
+                "directory": str(tmp_path),
+                "file": f"src/tu{i}.cpp",
+                "arguments": ["c++", f"@{rsp.name}", "-c", f"src/tu{i}.cpp"],
+            }
+            for i in range(50)
+        ]
+        f = tmp_path / "compile_commands.json"
+        f.write_text(json.dumps(db))
+
+        read_calls = []
+        real_read = build_context_module._read_response_file
+
+        def counting_read(path: Path, root: Path) -> str | None:
+            read_calls.append(path)
+            return real_read(path, root)
+
+        monkeypatch.setattr(build_context_module, "_read_response_file", counting_read)
+
+        entries = load_compile_db(f)
+        assert len(entries) == 50
+        assert all("-Iinclude/foo" in e.arguments for e in entries)
+        assert len(read_calls) == 1
+
+    def test_db_wide_output_budget_bounds_aggregate_expansion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even with the response-file *read* deduped by the shared cache,
+        each entry still walks and re-materializes its own expanded argv --
+        so a database-wide *output* budget, independent of the per-entry
+        one, must still bound the aggregate across many entries once that
+        budget is small enough to actually bite (Codex review, fifth
+        round)."""
+        import abicheck.build_context as build_context_module
+
+        monkeypatch.setattr(
+            build_context_module, "_MAX_RESPONSE_FILE_DB_OUTPUT_TOKENS", 5
+        )
+        rsp = tmp_path / "shared.rsp"
+        rsp.write_text("-Ia -Ib -Ic -Id\n")  # 4 tokens
+        db = [
+            {
+                "directory": str(tmp_path),
+                "file": f"src/tu{i}.cpp",
+                "arguments": ["c++", f"@{rsp.name}", "-c", f"src/tu{i}.cpp"],
+            }
+            for i in range(10)
+        ]
+        f = tmp_path / "compile_commands.json"
+        f.write_text(json.dumps(db))
+
+        entries = load_compile_db(f)
+        assert len(entries) == 10
+        expanded_count = sum(1 for e in entries if "-Ia" in e.arguments)
+        unexpanded_count = sum(1 for e in entries if f"@{rsp.name}" in e.arguments)
+        # Budget of 5 allows exactly one 4-token expansion before going
+        # non-positive; every entry after that must keep the literal token.
+        assert expanded_count == 1
+        assert unexpanded_count == 9
+
+    def test_symlinked_compile_commands_json_uses_target_directory_as_jail(
+        self, tmp_path: Path
+    ) -> None:
+        """A ``compile_commands.json`` symlinked into the source tree from an
+        out-of-tree build directory (a common setup) must jail response-file
+        expansion to the *real* (target) directory the entries and their
+        ``@file`` references actually live beside -- using the symlink's own
+        parent instead would treat every response file next to the real
+        database as out-of-tree and never expand it (Codex review, seventh
+        round)."""
+        real_build_dir = tmp_path / "real_build"
+        real_build_dir.mkdir()
+        rsp = real_build_dir / "args.rsp"
+        rsp.write_text("-Iinclude/foo -DBAR=1\n")
+        db = [
+            {
+                "directory": str(real_build_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@args.rsp", "-c", "src/foo.cpp"],
+            }
+        ]
+        (real_build_dir / "compile_commands.json").write_text(json.dumps(db))
+
+        src_tree = tmp_path / "src_tree"
+        src_tree.mkdir()
+        symlink_db = src_tree / "compile_commands.json"
+        symlink_db.symlink_to(real_build_dir / "compile_commands.json")
+
+        entries = load_compile_db(symlink_db)
+        assert len(entries) == 1
+        assert "-Iinclude/foo" in entries[0].arguments
+        assert "-DBAR=1" in entries[0].arguments
+
+    def test_cache_token_budget_bounds_memory_for_distinct_over_budget_files(
+        self, tmp_path: Path
+    ) -> None:
+        """A distinct response file under the fixed per-entry output cap
+        (so not caught by the sixth-round fixed-cap check) but over the
+        shared *_cache_token_budget* must not be retained in ``_file_cache``
+        in full -- many such distinct, never-actually-used files could
+        otherwise accumulate unbounded cached memory without ever charging
+        the DB-wide output budget (Codex review, seventh round)."""
+        db_dir = tmp_path
+        rsp = db_dir / "dense.rsp"
+        rsp.write_text("-Ia -Ib -Ic -Id\n")  # 4 tokens: well under the 20k cap
+        file_cache: dict[tuple[str, bool], list[str] | None] = {}
+        cache_token_budget = [3]  # smaller than this file's 4 tokens
+        arguments = _expand_response_files(
+            ["c++", "@dense.rsp", "-c", "src/foo.cpp"],
+            db_dir,
+            _safe_resolve(db_dir) or db_dir,
+            _file_cache=file_cache,
+            _cache_token_budget=cache_token_budget,
+        )
+        assert "@dense.rsp" in arguments
+        cache_key = (str(_safe_resolve(rsp)), False)
+        assert cache_key in file_cache
+        assert file_cache[cache_key] is None
+
 
 # ---------------------------------------------------------------------------
 # Tests: CompileEntry
 # ---------------------------------------------------------------------------
+
+
+class TestSplitCommandLineTopLevelStaysHostGuessed:
+    def test_gnu_driver_on_windows_style_text_keeps_unquoted_paths_intact(
+        self,
+    ) -> None:
+        """The top-level ``command``/``arguments`` string must NOT be
+        re-tokenized by driver: a driver-aware re-tokenize was tried and
+        reverted because POSIX ``shlex`` (the GNU-driver convention) treats
+        an unquoted backslash as an escape character, corrupting a native
+        Windows path like ``C:\\mingw64\\bin\\g++.exe`` into
+        ``C:mingw64bing++.exe`` for exactly the GNU-driver-on-Windows-style-
+        text case such a "fix" would have targeted (Codex review). Passing
+        ``cl_style=True`` here simulates the Windows-host guess this
+        function makes for the top-level string via ``os.name``."""
+        text = r"C:\mingw64\bin\g++.exe -IC:\sdk"
+        tokens = _split_command_line(text, cl_style=True)
+        assert tokens == ["C:\\mingw64\\bin\\g++.exe", "-IC:\\sdk"]
 
 
 class TestCompileEntry:
@@ -180,6 +337,339 @@ class TestCompileEntry:
             Path("/build"),
         )
         assert entry.arguments == []
+
+    def test_response_file_expanded(self, tmp_path: Path) -> None:
+        """A GNU ``@response-file`` argument (make-based build systems commonly
+        spell a long include-dir list this way) is inlined so its ``-I``/``-D``
+        flags actually reach the caller, instead of vanishing as one opaque
+        ``@file`` token no downstream parser matches."""
+        rsp = tmp_path / "inc_folders.txt"
+        rsp.write_text("-Iinclude/foo -DBAR=1\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", f"@{rsp.name}", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert f"@{rsp.name}" not in entry.arguments
+        assert "-Iinclude/foo" in entry.arguments
+        assert "-DBAR=1" in entry.arguments
+
+    def test_response_file_gnu_driver_uses_gnu_quoting_regardless_of_host_os(
+        self, tmp_path: Path
+    ) -> None:
+        """A GNU-mode driver (clang++/g++, including MinGW GCC running on
+        Windows) uses GNU/shlex response-file quoting -- quoting is chosen
+        from the actual compiler invoked, not the host OS (Codex review). A
+        doubled backslash preceding a space-containing quoted path collapses
+        to a single literal backslash under GNU/shlex quoting, unlike the
+        MSVC rules exercised by the CL-style-driver test below."""
+        rsp = tmp_path / "inc_folders.txt"
+        rsp.write_text('-I"include\\\\foo bar"\n')
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": ["clang++", f"@{rsp.name}", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert "-Iinclude\\foo bar" in entry.arguments
+
+    def test_response_file_cl_style_driver_uses_windows_quoting(
+        self, tmp_path: Path
+    ) -> None:
+        """A CL-style driver (``clang-cl``, ``dpcpp-cl``, ``cl.exe``) uses
+        MSVC/``CommandLineToArgvW`` response-file quoting: the identical
+        doubled backslash the GNU-driver test above collapses to one literal
+        backslash is instead preserved as-is (not immediately before the
+        closing quote, so it is emitted literally, unhalved) -- verifying
+        the driver, not the host OS, selects the quoting convention."""
+        rsp = tmp_path / "inc_folders.txt"
+        rsp.write_text('-I"include\\\\foo bar"\n')
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": ["clang-cl", f"@{rsp.name}", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert "-Iinclude\\\\foo bar" in entry.arguments
+
+    def test_response_file_launcher_wrapped_cl_driver_uses_windows_quoting(
+        self, tmp_path: Path
+    ) -> None:
+        """A launcher-wrapped CL-style action (``sccache clang-cl @args.rsp``)
+        must select quoting from the real driver *after* the launcher
+        (``sccache``/``ccache``/…), not from the launcher token itself --
+        the launcher name is not a compiler and would otherwise be
+        misclassified as GNU-style (Codex review, fourth round)."""
+        rsp = tmp_path / "inc_folders.txt"
+        rsp.write_text('-I"include\\\\foo bar"\n')
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": [
+                    "sccache",
+                    "clang-cl",
+                    f"@{rsp.name}",
+                    "-c",
+                    "src/foo.cpp",
+                ],
+            },
+            tmp_path,
+        )
+        assert "-Iinclude\\\\foo bar" in entry.arguments
+
+    def test_response_file_missing_keeps_token(self, tmp_path: Path) -> None:
+        """An unreadable ``@file`` degrades to keeping the original token
+        rather than raising or silently dropping the rest of the argv."""
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(tmp_path),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@does-not-exist.txt", "-c", "src/foo.cpp"],
+            },
+            tmp_path,
+        )
+        assert "@does-not-exist.txt" in entry.arguments
+        assert "-c" in entry.arguments
+
+    def test_response_file_absolute_path_outside_db_dir_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """A response-file token pointing at an absolute path outside the
+        compile database's own directory must not be read -- an untrusted
+        ``compile_commands.json`` (e.g. scanned from a PR checkout in CI)
+        could otherwise leak arbitrary filesystem content (like
+        ``@/etc/passwd``) into the parsed argv, which ends up persisted in
+        ``CompileUnit.argv`` / the ``.abi.json`` artifact."""
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        secret_dir = tmp_path / "outside"
+        secret_dir.mkdir()
+        secret = secret_dir / "secret.txt"
+        secret.write_text("-Dleaked=1\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", f"@{secret}", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert f"@{secret}" in entry.arguments
+        assert "-Dleaked=1" not in entry.arguments
+
+    def test_response_file_path_traversal_outside_db_dir_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """A relative ``@../../secret``-style traversal is rejected the same
+        way an absolute out-of-tree path is."""
+        db_dir = tmp_path / "db"
+        db_dir.mkdir()
+        secret = tmp_path / "secret.txt"
+        secret.write_text("-Dleaked=1\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@../secret.txt", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "@../secret.txt" in entry.arguments
+        assert "-Dleaked=1" not in entry.arguments
+
+    def test_response_file_within_db_dir_subdirectory_still_expands(
+        self, tmp_path: Path
+    ) -> None:
+        """The trusted-root check is not overly strict: a response file that
+        lives *inside* the compile database's own directory tree (just in a
+        different subdirectory than the entry's ``directory``) still
+        expands normally."""
+        db_dir = tmp_path / "db"
+        (db_dir / "sub").mkdir(parents=True)
+        rsp = db_dir / "inc_folders.txt"
+        rsp.write_text("-Iinclude/foo\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir / "sub"),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@../inc_folders.txt", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "-Iinclude/foo" in entry.arguments
+
+    def test_nested_response_file_resolves_relative_to_original_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """A response file referenced from *inside* another response file
+        (``@sub/a.rsp`` itself containing ``@b.rsp``) resolves relative to
+        the *original* compile-entry directory at every nesting level, not
+        the including file's own directory -- matching GCC/binutils' (and
+        Clang's own command-line ``@file``, as opposed to its separate
+        ``--config`` mechanism) documented CWD-relative behavior for a
+        command-line response file. A ``b.rsp`` living next to ``a.rsp`` in
+        ``sub/`` is NOT what a bare ``@b.rsp`` reference resolves to; a
+        ``db_dir/b.rsp`` is."""
+        db_dir = tmp_path
+        sub = db_dir / "sub"
+        sub.mkdir()
+        (db_dir / "b.rsp").write_text("-Dnested=1\n")
+        (sub / "a.rsp").write_text("-Itop @b.rsp\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@sub/a.rsp", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "-Itop" in entry.arguments
+        assert "-Dnested=1" in entry.arguments
+
+    def test_nested_response_file_does_not_use_including_files_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """The inverse of the above: a ``b.rsp`` placed *beside* the
+        including ``sub/a.rsp`` (not at the original directory) is NOT
+        picked up by a bare nested ``@b.rsp`` reference -- confirming
+        nesting does not switch its base to the including file's directory."""
+        db_dir = tmp_path
+        sub = db_dir / "sub"
+        sub.mkdir()
+        (sub / "b.rsp").write_text("-Dwrong=1\n")
+        (sub / "a.rsp").write_text("-Itop @b.rsp\n")
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@sub/a.rsp", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "-Itop" in entry.arguments
+        assert "-Dwrong=1" not in entry.arguments
+        assert "@b.rsp" in entry.arguments
+
+    def test_self_referential_response_file_does_not_blow_up(
+        self, tmp_path: Path
+    ) -> None:
+        """A response file containing many references to *itself* must not
+        cause combinatorial expansion: the depth cap alone allows roughly
+        ``fan_out ** _MAX_RESPONSE_FILE_DEPTH`` token reads (a 100-token
+        self-reference could reach ~10 billion), so an untrusted compile
+        database (e.g. a PR checkout scanned in CI) could hang or OOM the
+        scan despite the per-file byte cap (Codex review). An aggregate
+        expansion budget must cap total response-file reads regardless of
+        depth or branching factor -- this runs in well under a second."""
+        db_dir = tmp_path
+        loop = db_dir / "loop.rsp"
+        loop.write_text(" ".join(["@loop.rsp"] * 100))
+        import time
+
+        start = time.monotonic()
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@loop.rsp", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0
+        # Some @loop.rsp tokens survive un-expanded once the budget runs out.
+        assert any(a == "@loop.rsp" for a in entry.arguments)
+
+    def test_single_dense_response_file_output_is_bounded(self, tmp_path: Path) -> None:
+        """The file-read cap alone does not bound *output size*: a single
+        response file packed with many short self-reference tokens can
+        still emit a huge amount of output within just one or two reads.
+        A near-1 MiB file packed with ~10-byte ``@loop.rsp `` tokens can
+        contain ~100k of them; with only the read-count cap, 64 reads of a
+        file that dense could still emit millions of tokens (Codex review,
+        second round). A separate cumulative *output-token* budget must cap
+        the total regardless of how few files were actually read."""
+        db_dir = tmp_path
+        loop = db_dir / "loop.rsp"
+        # Well above the ~20k output-token budget, but small enough to write
+        # quickly in a test (proving the budget -- not the byte cap -- is
+        # what stops this).
+        loop.write_text(" ".join(["@loop.rsp"] * 25_000))
+        import time
+
+        start = time.monotonic()
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@loop.rsp", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0
+        # A single file whose own token count exceeds the remaining output
+        # budget is rejected outright (kept as the literal @file token)
+        # rather than expanded once and only capped on the *next* @file
+        # (Codex review, third round) -- so this file contributes nothing.
+        assert entry.arguments == ["c++", "@loop.rsp", "-c", "src/foo.cpp"]
+
+    def test_oversized_response_file_is_not_retained_in_file_cache(
+        self, tmp_path: Path
+    ) -> None:
+        """A response file whose own token count exceeds
+        ``_MAX_RESPONSE_FILE_OUTPUT_TOKENS`` can never fit *any* entry's
+        fresh per-entry budget -- caching its full (huge) token list anyway
+        would let many distinct oversized files in one untrusted database
+        each retain a never-usable list in ``_file_cache`` indefinitely.
+        The cache entry for such a file must be the rejection sentinel
+        (``None``), not the tokens themselves (Codex review, sixth round)."""
+        db_dir = tmp_path
+        huge = db_dir / "huge.rsp"
+        huge.write_text(" ".join(["-Dx=1"] * 25_000))  # > 20k token cap
+        file_cache: dict[tuple[str, bool], list[str] | None] = {}
+        arguments = _expand_response_files(
+            ["c++", "@huge.rsp", "-c", "src/foo.cpp"],
+            db_dir,
+            _safe_resolve(db_dir) or db_dir,
+            _file_cache=file_cache,
+        )
+        assert "@huge.rsp" in arguments
+        cache_key = (str(_safe_resolve(huge)), False)
+        assert cache_key in file_cache
+        assert file_cache[cache_key] is None
+
+    @pytest.mark.skipif(
+        os.name == "nt", reason="symlink creation requires privileges on Windows"
+    )
+    def test_symlink_loop_response_file_degrades_gracefully(
+        self, tmp_path: Path
+    ) -> None:
+        """``Path.resolve()`` raises ``RuntimeError`` (not ``OSError``) for a
+        symlink loop on Python < 3.13 -- an uncaught RuntimeError here would
+        abort loading the *entire* compile database instead of degrading
+        just this one unreadable ``@file`` to its literal token (Codex
+        review)."""
+        db_dir = tmp_path
+        loop_link = db_dir / "loop.link"
+        loop_link.symlink_to(loop_link)
+        entry = CompileEntry.from_dict(
+            {
+                "directory": str(db_dir),
+                "file": "src/foo.cpp",
+                "arguments": ["c++", "@loop.link", "-c", "src/foo.cpp"],
+            },
+            db_dir,
+        )
+        assert "@loop.link" in entry.arguments
 
 
 # ---------------------------------------------------------------------------
@@ -750,3 +1240,74 @@ class TestSplitDefineUndef:
         new_i = _try_consume_define_undef("-std=c++17", ["-std=c++17"], 0, ctx)
         assert new_i == 0
         assert not ctx.defines
+
+
+# ---------------------------------------------------------------------------
+# Tests: _split_windows_command_line
+# ---------------------------------------------------------------------------
+
+
+class TestIsClStyleDriver:
+    @pytest.mark.parametrize(
+        "argv0",
+        ["cl", "cl.exe", "clang-cl", "clang-cl.exe", "dpcpp-cl", "clang-cl-20"],
+    )
+    def test_recognizes_cl_style_drivers(self, argv0: str) -> None:
+        assert _is_cl_style_driver(argv0) is True
+
+    @pytest.mark.parametrize(
+        "argv0", ["clang++", "g++", "gcc", "x86_64-w64-mingw32-g++", "clang"]
+    )
+    def test_rejects_gnu_style_drivers(self, argv0: str) -> None:
+        assert _is_cl_style_driver(argv0) is False
+
+    def test_recognizes_absolute_path_driver(self) -> None:
+        assert _is_cl_style_driver("/usr/bin/clang-cl-17.0") is True
+
+    def test_recognizes_windows_backslash_path_on_any_host(self) -> None:
+        """``Path(argv0).stem`` only splits on ``/`` even on POSIX, so a
+        Windows-style compiler path recorded in a cross-compiled/Windows-
+        generated compile_commands.json (scanned on Linux CI) previously
+        kept the whole backslash path as its "stem" and never matched,
+        silently picking GNU quoting for a real CL-mode driver (found while
+        consolidating this against the equivalent basename-splitting
+        helpers elsewhere in the codebase)."""
+        assert _is_cl_style_driver("C:\\VS\\bin\\clang-cl.exe") is True
+        assert _is_cl_style_driver("C:\\mingw64\\bin\\g++.exe") is False
+
+
+class TestSplitWindowsCommandLine:
+    def test_simple_space_separated(self) -> None:
+        assert _split_windows_command_line("-Ifoo -Dbar=1 -c") == [
+            "-Ifoo",
+            "-Dbar=1",
+            "-c",
+        ]
+
+    def test_quoted_path_with_space_stays_one_token(self) -> None:
+        """The motivating case: a quoted include path containing a space
+        (e.g. an SDK under ``Program Files``) must not split mid-path --
+        shlex's ``posix=False`` mode gets this wrong (Codex review)."""
+        assert _split_windows_command_line('-I"C:\\Program Files\\SDK" -c foo.cpp') == [
+            "-IC:\\Program Files\\SDK",
+            "-c",
+            "foo.cpp",
+        ]
+
+    def test_even_backslashes_before_quote_toggle_quoting(self) -> None:
+        # Two backslashes before the quote -> one literal backslash (the
+        # pair), and the quote toggles quoting (consumed, not emitted).
+        assert _split_windows_command_line('-I\\\\"C:\\SDK"') == ["-I\\C:\\SDK"]
+
+    def test_odd_backslashes_before_quote_escape_it(self) -> None:
+        # One backslash before the quote -> zero literal backslashes (no
+        # complete pair) and the backslash escapes the quote to a literal
+        # `"`; the backslash itself is consumed, not emitted.
+        assert _split_windows_command_line('-Ifoo\\"bar') == ['-Ifoo"bar']
+
+    def test_literal_backslash_not_before_quote(self) -> None:
+        assert _split_windows_command_line("C:\\SDK\\include") == ["C:\\SDK\\include"]
+
+    def test_never_raises_on_unbalanced_quote(self) -> None:
+        # Unlike shlex.split, an unterminated quote has no invalid state.
+        assert _split_windows_command_line('-I"C:\\SDK') == ["-IC:\\SDK"]

@@ -679,6 +679,32 @@ def test_broadened_abi_flag_vocabulary_is_captured(flag):
     assert extract_abi_relevant_flags(["clang", flag, "-c", "foo.cpp"]) == [flag]
 
 
+@pytest.mark.parametrize("flag", [
+    "-fsycl",
+    "-fsycl-host-only",
+    "-fsycl-device-only",
+    "-fsycl-targets=nvptx64-nvidia-cuda",
+])
+def test_sycl_language_mode_flag_is_captured(flag):
+    """A resolved --gcc-path override can now actually invoke icpx/dpcpp for
+    L4 replay (previously always a bare "clang"), so -fsycl and its variants
+    must be captured as ABI-relevant -- otherwise a SYCL TU replays as plain
+    C++, silently missing built-in SYCL state (Codex review)."""
+    assert extract_abi_relevant_flags(["icpx", flag, "-c", "foo.cpp"]) == [flag]
+
+
+def test_sycl_disable_flag_preserves_last_flag_wins_ordering():
+    """"-fno-sycl" does not start with "-fsycl", so it needs its own entry --
+    without it, "icpx -fsycl -fno-sycl" (last-flag-wins) only captured
+    "-fsycl" and replay reconstructed the wrong SYCL-enabled AST for what
+    the real build actually compiled as plain C++ (Codex review, second
+    round). Extraction is argv-order-preserving, so capturing both lets the
+    same last-flag-wins semantics reach replay."""
+    assert extract_abi_relevant_flags(
+        ["icpx", "-fsycl", "-fno-sycl", "-c", "foo.cpp"]
+    ) == ["-fsycl", "-fno-sycl"]
+
+
 def test_stdlib_flip_surfaces_as_abi_build_flag_drift(tmp_path):
     # B2 acceptance: a libstdc++ -> libc++ swap is a hard C++ ABI change and must
     # surface as build-flag drift (the artifact diff proves any concrete break).

@@ -435,7 +435,11 @@ class ClangPreprocessorExtractor:
                 break
             if not cu.source:
                 continue
-            argv = depfile_args_from_argv(cu.argv) if cu.argv else [cu.source]
+            argv = (
+                depfile_args_from_argv(cu.argv, directory=cu.directory)
+                if cu.argv
+                else [cu.source]
+            )
             if not argv:
                 argv = [cu.source]
             cmd = [
@@ -649,4 +653,6 @@ def _depfile_context(compile_unit: Any) -> list[str]:
     argv = getattr(compile_unit, "argv", None)
     if not argv:
         return []
-    return depfile_args_from_argv(list(argv))
+    return depfile_args_from_argv(
+        list(argv), directory=getattr(compile_unit, "directory", None)
+    )

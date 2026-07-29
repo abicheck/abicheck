@@ -340,6 +340,8 @@ def dump_source_only(
     extractor: str = "auto",
     depth: str | None = None,
     include_dependencies: bool = False,
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -354,8 +356,15 @@ def dump_source_only(
     facts get embedded), and ``scope_snapshot_excluding_dependencies`` is a
     no-op on a snapshot with no header-derived declarations
     (``from_headers`` stays ``False``) either way.
+
+    ``gcc_path``/``gcc_prefix`` are the dump's own ``--gcc-path``/
+    ``--gcc-prefix`` (there is no header AST here to have already resolved a
+    ``CompileContext`` from — a source-only dump has no ``-H`` headers
+    either), forwarded to ``_write_snapshot_output`` so L4 source-ABI replay
+    honors the same compiler override a binary dump would.
     """
     from .cli import _stamp_provenance, _write_snapshot_output
+    from .dumper_clang import resolve_source_frontend_clang_bin
     from .model import AbiSnapshot
 
     if sources is None and build_info is None:
@@ -382,6 +391,9 @@ def dump_source_only(
         extractor=extractor,
         depth=depth,
         include_dependencies=include_dependencies,
+        clang_bin=resolve_source_frontend_clang_bin(
+            gcc_path, gcc_prefix, exclude_cl_style=False
+        ),
     )
 
 

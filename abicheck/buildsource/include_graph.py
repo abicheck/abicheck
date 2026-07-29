@@ -118,7 +118,12 @@ _DEPFILE_OUTPUT_PREFIXES = (
 )
 
 
-def depfile_args_from_argv(argv: list[str]) -> list[str]:
+def depfile_args_from_argv(
+    argv: list[str],
+    directory: str | None = None,
+    *,
+    trusted_root: str | None = None,
+) -> list[str]:
     """Strip a recorded compile argv down to the args usable after ``clang -MM``.
 
     A compile database stores the full command — possibly launcher-wrapped, like
@@ -130,6 +135,33 @@ def depfile_args_from_argv(argv: list[str]) -> list[str]:
     token, drop the ``-c`` compile action, the ``-o``/``-MF``/… outputs and any
     pre-existing dependency flags, keeping the source plus the ABI-relevant
     ``-I``/``-D``/``-std`` context that decides what is included.
+
+    A recorded argv may itself still carry an unexpanded GNU
+    ``@response-file`` (make-based build systems commonly spell a long
+    include-dir list that way) — this is normally already expanded upstream
+    by :func:`abicheck.build_context._expand_response_files` when the argv
+    came from a ``compile_commands.json``/make-transcript adapter, but a
+    build-emitted ``abicheck_inputs/`` pack or another future adapter could
+    still hand this function a raw, unexpanded one. When both *directory*
+    (the compile unit's own working directory, e.g. ``CompileUnit.directory``,
+    used to resolve a *relative* ``@file`` token) and *trusted_root* (an
+    independently-sourced, verified-real directory the expansion must stay
+    under) are given, such a token is expanded inline before the filtering
+    loop below — not merely dropped — so its ``-I``/``-D`` flags are not
+    silently lost. Expanding *before* filtering, rather than after, is
+    deliberate: it keeps the loop's existing unsafe-flag denylist
+    (``-Xclang``, ``-load``, ``-cc1``, ``--config``, …) as the single choke
+    point a flag smuggled inside a response file still has to pass, instead
+    of opening a second, unfiltered path to reach ``clang -MM``.
+
+    *trusted_root* must NOT simply be *directory* itself: for a ``CompileUnit``
+    sourced from an untrusted build pack (e.g. a third-party
+    ``abicheck_inputs/`` drop), ``directory`` is attacker-controlled free-form
+    content, not a verified path — jailing an expansion to a root the same
+    untrusted input also chose is not a jail at all (an attacker could set
+    ``directory`` to ``/home/runner`` and reference ``@.ssh/config``). Without
+    an independently-trusted *trusted_root*, the ``@file`` token is dropped as
+    before rather than expanded against a self-chosen root (Codex review).
     """
     if not argv:
         return []
@@ -145,6 +177,49 @@ def depfile_args_from_argv(argv: list[str]) -> list[str]:
         if unwrapped and not unwrapped[0].startswith("-")
         else list(unwrapped)
     )
+    if (
+        directory is not None
+        and trusted_root is not None
+        and any(a.startswith("@") and len(a) > 1 for a in args)
+    ):
+        from pathlib import Path
+
+        from ..build_context import (
+            _expand_response_files,
+            _is_cl_style_driver,
+            _safe_resolve,
+        )
+        from .source_extractors._argv import unredact_home
+
+        # Response-file quoting depends on the driver actually invoked, not
+        # the host OS (Codex review) -- unwrapped[0] is still the compiler
+        # token here (the flags-only branch above hasn't stripped it yet).
+        cl_style = (
+            bool(unwrapped)
+            and not unwrapped[0].startswith("-")
+            and (_is_cl_style_driver(unredact_home(unwrapped[0])))
+        )
+
+        # The compile unit's own working directory is the base a relative
+        # @file resolves against; *trusted_root* (an independently-sourced,
+        # verified-real directory -- NOT `directory` itself, see the
+        # docstring) is the jail it must stay under. unredact_home() first:
+        # a persisted CompileUnit.directory (and any individual
+        # @response-file argument, e.g. "@~/build/args.rsp") may carry
+        # RedactionPolicy's "~" home-dir placeholder, which bare Path()
+        # would treat as a literal, non-existent relative component
+        # (Path("~/build") stays under the process cwd and is never
+        # is_absolute(), so an absolute redacted @file token would even be
+        # wrongly joined onto cu_dir instead of resolved on its own) --
+        # silently failing every response-file expansion for a redacted
+        # compile unit otherwise (Codex review, two rounds). Unredacting an
+        # already-real (non-redacted) token is a harmless no-op.
+        cu_dir = Path(unredact_home(directory))
+        root_dir = Path(unredact_home(trusted_root))
+        args = [unredact_home(a) for a in args]
+        args = _expand_response_files(
+            args, cu_dir, _safe_resolve(root_dir) or root_dir, cl_style=cl_style
+        )
     out: list[str] = []
     skip_next = False
     for tok in args:
@@ -348,7 +423,11 @@ class ClangIncludeExtractor:
                 )
                 break
             attempted += 1
-            argv = depfile_args_from_argv(cu.argv) if cu.argv else [cu.source]
+            argv = (
+                depfile_args_from_argv(cu.argv, directory=cu.directory)
+                if cu.argv
+                else [cu.source]
+            )
             if not argv:
                 argv = [cu.source]
             # `-M` (not `-MM`) so depfiles include *system*-classified headers: a

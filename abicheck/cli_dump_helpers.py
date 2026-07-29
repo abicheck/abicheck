@@ -77,6 +77,7 @@ class _WriteSnapshotOutput(Protocol):
         depth: str | None = ...,
         include_dependencies: bool = ...,
         header_roots: tuple[Path, ...] = ...,
+        clang_bin: str = ...,
     ) -> None: ...
 
 
@@ -1186,11 +1187,18 @@ def handle_non_elf_dump(
     if headers and compile_db_context_matched and snap.from_headers:
         snap.parsed_with_build_context = True
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    from .dumper_clang import resolve_source_frontend_clang_bin
+
     write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
         extractor=header_backend, inputs_pack=inputs_pack, depth=depth,
         include_dependencies=include_dependencies, header_roots=headers,
+        clang_bin=resolve_source_frontend_clang_bin(
+            getattr(compile_context, "gcc_path", None),
+            getattr(compile_context, "gcc_prefix", None),
+            exclude_cl_style=False,
+        ),
     )
 
 
@@ -1726,6 +1734,8 @@ def perform_elf_dump(
         )
 
     stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    from .dumper_clang import resolve_source_frontend_clang_bin
+
     write_snapshot_output(
         snap,
         output,
@@ -1741,4 +1751,7 @@ def perform_elf_dump(
         depth=depth,
         include_dependencies=include_dependencies,
         header_roots=tuple(headers) + _dump_manifest_header_roots(dump_manifest),
+        clang_bin=resolve_source_frontend_clang_bin(
+            gcc_path, gcc_prefix, exclude_cl_style=False
+        ),
     )

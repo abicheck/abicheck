@@ -75,6 +75,451 @@ _SYSROOT_RE = re.compile(r"^--sysroot=(.+)$")
 _VISIBILITY_RE = re.compile(r"^-fvisibility=(.+)$")
 
 
+#: GNU ``@response-file`` expansion depth cap (``ld``/``ar``/make-generated
+#: response files can ``@include`` one another) — bounds the recursion below
+#: against a self-referential or absurdly deep chain rather than assuming
+#: real build systems never nest them.
+_MAX_RESPONSE_FILE_DEPTH = 4
+
+#: Aggregate cap on the number of response files actually *read* across one
+#: top-level expansion call, independent of *_MAX_RESPONSE_FILE_DEPTH*. The
+#: depth cap alone does not bound total work: a response file containing many
+#: ``@self-reference`` tokens re-expands on every occurrence, so a shallow
+#: depth cap still permits combinatorial blowup (a 100-token self-referential
+#: file can produce roughly 100**_MAX_RESPONSE_FILE_DEPTH token reads before
+#: depth stops it) -- exploitable against an untrusted compile database (e.g.
+#: a PR checkout scanned in CI) as a hang/OOM (Codex review). Generous for any
+#: real nested-response-file build (a handful of files, rarely more than one
+#: level deep) while several orders of magnitude below a blowup.
+_MAX_RESPONSE_FILE_EXPANSIONS = 64
+
+#: Aggregate cap on the number of *tokens* actually emitted into the
+#: expanded argv across one top-level expansion call. The file-read cap
+#: above bounds fan-out but not per-file size: a single response file near
+#: the 1 MiB byte cap can itself pack ~95k short whitespace-separated
+#: ``@loop.rsp`` tokens, so 64 reads of a file that dense could still emit
+#: several million tokens before the read budget is exhausted (Codex
+#: review, second round). A generous ceiling for any real build (which
+#: rarely emits more than a few thousand flags total) while bounding
+#: worst-case output size independent of how the file-read budget is spent.
+_MAX_RESPONSE_FILE_OUTPUT_TOKENS = 20000
+
+#: Aggregate cap on the number of tokens emitted across *every* entry in one
+#: ``load_compile_db()`` call, on top of the per-entry cap above and
+#: independent of the *_file_cache* read/parse dedup. Caching a response
+#: file's own tokenization removes redundant I/O when many entries share
+#: one ``@file``, but each entry still walks and re-materializes its own
+#: fully expanded argv list -- an untrusted database with thousands of
+#: entries each pointing at one dense (near-per-entry-cap) response file
+#: can still turn a few MB of JSON into a large aggregate amount of list
+#: allocation/CPU work even with zero extra disk reads (Codex review, fifth
+#: round). Sized generously above any real single project's total expanded
+#: flag volume (thousands of entries at a few hundred flags each) while
+#: still bounding worst-case aggregate output independent of entry count.
+_MAX_RESPONSE_FILE_DB_OUTPUT_TOKENS = 2_000_000
+
+#: Aggregate cap on the number of tokens ever *retained* in the shared
+#: *_file_cache* across one ``load_compile_db()`` call, independent of
+#: *_MAX_RESPONSE_FILE_DB_OUTPUT_TOKENS* above. That budget only charges
+#: tokens actually spliced into some entry's output; a distinct response
+#: file whose own size is under the fixed per-entry cap (so not rejected
+#: outright) but whose tokens never fit any entry's *actual remaining*
+#: budget at the point it was read still gets its full tokens list cached
+#: for possible reuse -- an untrusted database with many such distinct,
+#: near-cap files can accumulate an unbounded amount of cached-but-never-
+#: used memory without ever charging the output budget (Codex review,
+#: seventh round). Charged at cache-population time, regardless of
+#: whether the tokens are ever actually used.
+_MAX_RESPONSE_FILE_CACHE_TOKENS = 2_000_000
+
+#: Response files feeding a single compile action are typically a handful of
+#: KB even for a very long include-dir list (oneDAL's own longest is well
+#: under this); a much larger file is either not a real response file or not
+#: one worth trusting blindly.
+_MAX_RESPONSE_FILE_BYTES = 1024 * 1024
+
+
+def _split_windows_command_line(text: str) -> list[str]:
+    """Tokenize a command line / response-file body using Windows/MSVC argv
+    rules (the same backslash-before-quote escaping ``CommandLineToArgvW``
+    and ``cl.exe`` use), instead of ``shlex.split(text, posix=False)`` —
+    which implements POSIX-shell quoting, not MSVC's, so a quoted path like
+    ``-I"C:\\Program Files\\SDK"`` gets split mid-path on the embedded space
+    (Codex review).
+
+    Rules (Microsoft's documented C runtime argv-parsing convention):
+    whitespace (space/tab/newline) delimits arguments unless inside a
+    double-quoted span; a run of N backslashes immediately followed by a
+    double-quote emits ``N // 2`` literal backslashes, and if N is odd the
+    final backslash escapes the quote (a literal ``"`` is emitted, the
+    quoted-span state is untouched) while an even N instead toggles the
+    quoted-span state; a run of backslashes NOT followed by a double-quote
+    is emitted literally. Never raises — unlike ``shlex.split``, malformed
+    quoting has no invalid state under these rules.
+    """
+    args: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    seen_token = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if not in_quotes and c in " \t\r\n":
+            if seen_token:
+                args.append("".join(current))
+                current = []
+                seen_token = False
+            i += 1
+            continue
+        seen_token = True
+        if c == "\\":
+            j = i
+            while j < n and text[j] == "\\":
+                j += 1
+            num_backslashes = j - i
+            if j < n and text[j] == '"':
+                current.append("\\" * (num_backslashes // 2))
+                if num_backslashes % 2 == 1:
+                    current.append('"')
+                    j += 1
+                else:
+                    in_quotes = not in_quotes
+                    j += 1
+            else:
+                current.append("\\" * num_backslashes)
+            i = j
+            continue
+        if c == '"':
+            in_quotes = not in_quotes
+            i += 1
+            continue
+        current.append(c)
+        i += 1
+    if seen_token:
+        args.append("".join(current))
+    return args
+
+
+#: Compiler-driver stems that use MSVC/``CommandLineToArgvW`` response-file
+#: quoting regardless of host OS -- matched after stripping a trailing
+#: ``-N``/``-N.N`` version suffix (``clang-cl-20``, ``clang-cl-17.0``).
+_CL_STYLE_DRIVER_STEMS = frozenset({"cl", "clang-cl", "dpcpp-cl"})
+_DRIVER_VERSION_SUFFIX_RE = re.compile(r"-\d+(?:\.\d+)*$")
+
+
+def _is_cl_style_driver(argv0: str) -> bool:
+    """Return True if *argv0* names an MSVC-compatible driver (``cl.exe``,
+    ``clang-cl``, ``dpcpp-cl``, including versioned spellings like
+    ``clang-cl-20``), as opposed to a GNU-mode driver (``clang++``, ``g++``,
+    a MinGW-prefixed GCC, ...). Used to pick response-file quoting by the
+    *compiler actually invoked*, not the host OS: a GNU-mode driver
+    (including MinGW GCC or GNU-mode clang++ running on Windows) uses GNU
+    ``@file`` quoting, not MSVC's, so dispatching purely on ``os.name``
+    corrupts a quoted/backslash-escaped argument for that combination
+    (Codex review).
+
+    Uses the shared cross-platform ``basename()`` (not ``Path(argv0).stem``):
+    ``Path().stem`` only splits on ``/`` even on POSIX, so a Windows-style
+    compiler path recorded in a cross-compiled/Windows-generated
+    ``compile_commands.json`` (e.g. ``C:\\VS\\bin\\clang-cl.exe``) scanned on
+    Linux CI kept the whole path as its "stem" and never matched
+    ``_CL_STYLE_DRIVER_STEMS``, silently picking GNU quoting for a real
+    CL-mode driver (found while consolidating this against the equivalent
+    helpers in ``dumper_clang.py``/``source_extractors/_argv.py``)."""
+    from .buildsource.source_extractors._argv import basename
+
+    stem = basename(argv0).lower()
+    if stem.endswith(".exe"):
+        stem = stem[: -len(".exe")]
+    stem = _DRIVER_VERSION_SUFFIX_RE.sub("", stem)
+    return stem in _CL_STYLE_DRIVER_STEMS
+
+
+def _split_command_line(text: str, *, cl_style: bool | None = None) -> list[str]:
+    """Tokenize a compile-db ``command``/``arguments``-string or a
+    response-file body.
+
+    *cl_style* selects the argv-quoting convention explicitly (True for
+    MSVC/``CommandLineToArgvW`` rules via :func:`_split_windows_command_line`,
+    False for POSIX shell quoting via ``shlex``) — used for a
+    ``@response-file`` *body*, since that is genuinely interpreted by
+    whichever compiler reads it (driver-dependent): a GNU-mode driver on
+    Windows still uses GNU response-file quoting.
+
+    The *top-level* ``command``/``arguments`` string is a different case and
+    deliberately stays ``os.name``-guessed (``cl_style=None``, the default):
+    it reflects whatever convention the build system/shell that *wrote* the
+    compile database entry used, which tracks the host that generated the
+    JSON, not the compiler that happens to be invoked -- a MinGW GNU-mode
+    driver invoked on Windows still has its own ``directory``/``command``
+    written with native (unquoted, backslash-containing) Windows paths by a
+    Windows-hosted build system. Re-tokenizing the top-level string by
+    driver instead was tried and reverted: POSIX ``shlex`` treats an
+    unquoted backslash as an escape character, so it silently corrupts an
+    unquoted Windows path like ``C:\\mingw64\\bin\\g++.exe`` into
+    ``C:mingw64bing++.exe`` for exactly the GNU-driver-on-Windows case this
+    would have tried to "fix" (Codex review).
+    """
+    if cl_style is None:
+        cl_style = os.name == "nt"
+    if cl_style:
+        return _split_windows_command_line(text)
+    return shlex.split(text, posix=True)
+
+
+def _safe_resolve(path: Path) -> Path | None:
+    try:
+        return path.resolve()
+    except OSError:
+        return None
+    except RuntimeError:
+        # Path.resolve() raises RuntimeError (not OSError) for a symlink
+        # loop on Python < 3.13 -- OSError only became the documented
+        # behavior in 3.13, and this project supports 3.10+ (Codex review).
+        # An uncaught RuntimeError here would abort the whole compile
+        # database load instead of degrading this one @file to its literal
+        # token, same as any other unreadable response file.
+        return None
+
+
+def _read_response_file(path: Path, root: Path) -> str | None:
+    """Best-effort, bounded read of a GNU ``@response-file``.
+
+    Returns ``None`` (never raises) for anything that isn't a plausible,
+    in-tree response file: missing, not a regular file, oversized, or
+    outside *root* (the trusted compile-database directory) — an
+    ``@/etc/passwd`` or ``@../../secret`` token in an untrusted
+    ``compile_commands.json`` (e.g. a PR checkout scanned in CI) must not
+    read arbitrary filesystem content into the parsed argv, which
+    ``adapters/compile_db.py`` persists into ``CompileUnit.argv`` and
+    ultimately the ``.abi.json`` artifact — mirrors
+    ``adapters.make._read_response_file``'s identical build-tree jail. The
+    caller falls back to keeping the original ``@file`` token untouched
+    instead of losing the rest of the argument list.
+    """
+    resolved = _safe_resolve(path)
+    if resolved is None or not resolved.is_relative_to(root):
+        return None
+    try:
+        st = resolved.stat()
+    except OSError:
+        return None
+    if not resolved.is_file() or st.st_size > _MAX_RESPONSE_FILE_BYTES:
+        return None
+    try:
+        data = resolved.read_bytes()
+    except OSError:
+        return None
+    if len(data) > _MAX_RESPONSE_FILE_BYTES:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+#: Cache of a single response file's own (non-recursive) tokenization,
+#: keyed by ``(str(resolved_path), cl_style)`` -- see the *_file_cache*
+#: parameter of :func:`_expand_response_files`. ``None`` records "this file
+#: is unreadable/oversized/out-of-tree/unparsable" so a repeated reference
+#: doesn't re-run those checks either.
+_ResponseFileCache = dict[tuple[str, bool], "list[str] | None"]
+
+
+def _expand_response_files(
+    arguments: list[str],
+    directory: Path,
+    root: Path,
+    _depth: int = 0,
+    _budget: list[int] | None = None,
+    _output_budget: list[int] | None = None,
+    *,
+    cl_style: bool = False,
+    _file_cache: _ResponseFileCache | None = None,
+    _db_output_budget: list[int] | None = None,
+    _cache_token_budget: list[int] | None = None,
+) -> list[str]:
+    """Inline GNU-style ``@response-file`` arguments in a compiler argv.
+
+    Make-generated ``compile_commands.json`` entries commonly spell a long
+    include-dir list as ``clang++ @build/inc_folders.txt -c foo.cpp`` instead
+    of literal ``-I`` tokens, to stay under the platform argv length limit —
+    this is standard practice for make-based build systems, not a malformed
+    entry. Left unexpanded, every flag the response file carries (almost
+    always ``-I``/``-D``) is invisible to :func:`_extract_flags` and to the
+    L3 ``CompileUnit`` this same argv projects into
+    (``adapters/compile_db.py`` reuses ``entry.arguments`` verbatim) — every
+    ``-I`` is silently dropped long before either parser runs, producing a
+    ``file not found`` on every translation unit regardless of which
+    compiler ends up invoked. A response file's own contents may themselves
+    ``@include`` another one, so expansion recurses, bounded by
+    *_MAX_RESPONSE_FILE_DEPTH*, resolving every nested ``@file`` against the
+    *original* *directory* (the compile action's own working directory) at
+    every recursion level, never the including response file's own
+    directory. This is deliberate, not an oversight: it's GCC/binutils'
+    (and Clang's own command-line ``@file``, as opposed to its separate
+    ``--config`` configuration-file mechanism) documented behavior for a
+    *command-line* response file — only Clang configuration files use
+    includer-relative nesting (via the ``<CFGDIR>`` token), which is a
+    different, unrelated feature this parser never encounters (a
+    ``compile_commands.json`` entry is a verbatim compiler invocation, never
+    a ``--config`` file). *root* is the trusted directory a resolved
+    ``@file`` must stay under (see :func:`_read_response_file`).
+
+    Unreadable/oversized/out-of-tree files, and unparsable file contents,
+    degrade to keeping the original ``@file`` token rather than raising —
+    matching ``_extract_flags``'s existing "skip what we don't understand"
+    contract for any other flag it doesn't recognize. *_budget*/
+    *_output_budget* (internal, shared across the whole recursive call tree
+    via single-element lists) are the remaining count of response files this
+    call may still read (see *_MAX_RESPONSE_FILE_EXPANSIONS*) and the
+    remaining number of tokens it may still emit (see
+    *_MAX_RESPONSE_FILE_OUTPUT_TOKENS*) respectively — two independent caps,
+    since bounding file reads alone still lets one large, token-dense file
+    (near the byte cap, packed with short tokens) emit an outsized amount of
+    output within that read budget (Codex review, second round). *cl_style*
+    selects response-file body quoting per :func:`_split_command_line` —
+    pass the caller's own :func:`_is_cl_style_driver` result for the
+    compiler actually being invoked, not the host OS (Codex review).
+
+    *_file_cache* (internal, optionally shared across many *separate*
+    top-level calls by a caller like :func:`load_compile_db`) memoizes a
+    single response file's own read + tokenization by resolved path. An
+    untrusted ``compile_commands.json`` with thousands of entries that all
+    reference the *same* response file would otherwise re-read and
+    re-tokenize it from scratch on every entry's own fresh *_budget*/
+    *_output_budget* — amplifying a few MB of attacker-controlled JSON into
+    orders of magnitude more I/O and parsing work (Codex review, fourth
+    round). A cache hit skips the read/tokenize entirely (and does not
+    consume *_budget*, since no file is actually read) but still goes
+    through the same recursive expansion, output-budget accounting, and
+    depth limit as a miss, so nested ``@file`` handling is unaffected.
+
+    *_db_output_budget* (internal, shared the same way as *_file_cache*)
+    additionally bounds the aggregate number of tokens emitted across
+    *every* entry in the whole database, on top of the existing per-entry
+    *_output_budget* -- caching removes redundant I/O for a repeated file,
+    but each entry still walks and re-materializes its own expanded argv
+    list, so thousands of entries referencing one dense file can still
+    amplify into a large aggregate amount of list allocation/CPU work with
+    zero extra disk reads (Codex review, fifth round). *_cache_token_budget*
+    is a separate shared budget charged at *cache-population* time (whether
+    or not the tokens end up used by any entry): a distinct response file
+    under the fixed per-entry cap but over a particular entry's own
+    *remaining* budget still gets its full tokens list retained in
+    *_file_cache* for possible reuse, so many such distinct files can
+    accumulate unbounded cached-but-unused memory without ever charging
+    *_db_output_budget* (Codex review, seventh round).
+    """
+    if _depth > _MAX_RESPONSE_FILE_DEPTH:
+        return arguments
+    if _budget is None:
+        _budget = [_MAX_RESPONSE_FILE_EXPANSIONS]
+    if _output_budget is None:
+        _output_budget = [_MAX_RESPONSE_FILE_OUTPUT_TOKENS]
+    if _file_cache is None:
+        _file_cache = {}
+    expanded: list[str] = []
+    for arg in arguments:
+        if not arg.startswith("@") or len(arg) == 1:
+            expanded.append(arg)
+            continue
+        if _output_budget[0] <= 0 or (
+            _db_output_budget is not None and _db_output_budget[0] <= 0
+        ):
+            expanded.append(arg)
+            continue
+        raw_path = Path(arg[1:])
+        path = raw_path if raw_path.is_absolute() else directory / raw_path
+        resolved = _safe_resolve(path)
+        cache_key = (str(resolved), cl_style) if resolved is not None else None
+        if cache_key is not None and cache_key in _file_cache:
+            tokens = _file_cache[cache_key]
+        else:
+            if _budget[0] <= 0:
+                expanded.append(arg)
+                continue
+            text = _read_response_file(path, root)
+            if text is None:
+                tokens = None
+            else:
+                _budget[0] -= 1
+                try:
+                    tokens = _split_command_line(text, cl_style=cl_style)
+                except ValueError:
+                    tokens = None
+                if (
+                    tokens is not None
+                    and len(tokens) > _MAX_RESPONSE_FILE_OUTPUT_TOKENS
+                ):
+                    # No entry's own _output_budget ever starts above this
+                    # constant (a fresh top-level call always defaults to
+                    # it), so a file this dense can never fit any entry
+                    # regardless of how much of that budget is left --
+                    # cache the rejection instead of the full token list,
+                    # or many distinct oversized files in one untrusted
+                    # database would each retain a huge, never-usable
+                    # tokens list in _file_cache indefinitely (Codex
+                    # review, sixth round).
+                    tokens = None
+                if (
+                    tokens is not None
+                    and _cache_token_budget is not None
+                    and len(tokens) > _cache_token_budget[0]
+                ):
+                    # A distinct file under the fixed per-entry cap (so not
+                    # caught above) can still be over THIS entry's own
+                    # remaining budget and be rejected for it -- but its
+                    # full tokens list would still be retained in
+                    # _file_cache for possible reuse by a later entry with
+                    # a fresh budget. Many such distinct, never-actually-
+                    # used files can accumulate unbounded cached memory
+                    # without ever charging _db_output_budget (which is
+                    # only charged when tokens are actually spliced into
+                    # some entry's output). Charge this separate,
+                    # cache-population-time budget instead, regardless of
+                    # whether the tokens end up used (Codex review, seventh
+                    # round).
+                    tokens = None
+                elif tokens is not None and _cache_token_budget is not None:
+                    _cache_token_budget[0] -= len(tokens)
+            if cache_key is not None:
+                _file_cache[cache_key] = tokens
+        if tokens is None:
+            expanded.append(arg)
+            continue
+        if len(tokens) > _output_budget[0] or (
+            _db_output_budget is not None and len(tokens) > _db_output_budget[0]
+        ):
+            # This single file's own token count already exceeds the
+            # remaining output budget -- the pre-loop budget check above
+            # only rejects a *subsequent* @file once the budget has already
+            # gone negative, so a single response file at or near the byte
+            # cap (tokenizable into hundreds of thousands of short tokens)
+            # could otherwise still be expanded whole in one shot before
+            # that check ever fires (Codex review, third round). Reject the
+            # whole file rather than partially truncating it -- a partial
+            # flag list is worse than none.
+            expanded.append(arg)
+            continue
+        _output_budget[0] -= len(tokens)
+        if _db_output_budget is not None:
+            _db_output_budget[0] -= len(tokens)
+        expanded.extend(
+            _expand_response_files(
+                tokens,
+                directory,
+                root,
+                _depth + 1,
+                _budget,
+                _output_budget,
+                cl_style=cl_style,
+                _file_cache=_file_cache,
+                _db_output_budget=_db_output_budget,
+                _cache_token_budget=_cache_token_budget,
+            )
+        )
+    return expanded
+
+
 @dataclass
 class CompileEntry:
     """One entry from compile_commands.json."""
@@ -84,11 +529,29 @@ class CompileEntry:
     arguments: list[str]
 
     @classmethod
-    def from_dict(cls, raw: dict[str, object], db_dir: Path) -> CompileEntry:
+    def from_dict(
+        cls,
+        raw: dict[str, object],
+        db_dir: Path,
+        _file_cache: _ResponseFileCache | None = None,
+        _db_output_budget: list[int] | None = None,
+        _cache_token_budget: list[int] | None = None,
+    ) -> CompileEntry:
         """Parse a single compile_commands.json entry.
 
         Handles both ``arguments`` (JSON array) and ``command`` (shell string)
         forms as specified by the Clang compilation database standard.
+        ``@response-file`` arguments are expanded inline, constrained to
+        *db_dir* (see :func:`_expand_response_files`) so every downstream
+        consumer of ``arguments`` sees the real flags, not an opaque
+        ``@file`` token — without reading outside the compilation
+        database's own trusted directory. *_file_cache*/*_db_output_budget*/
+        *_cache_token_budget*, when supplied by :func:`load_compile_db`, are
+        shared across every entry in the same compile database so a
+        response file referenced by many entries is only actually
+        read/tokenized once, and both the aggregate expansion work and the
+        aggregate cached memory across the whole database stay bounded
+        (see :func:`_expand_response_files`).
         """
         directory = Path(str(raw.get("directory", db_dir)))
         file_str = str(raw.get("file", ""))
@@ -101,11 +564,30 @@ class CompileEntry:
             if isinstance(args_raw, list):
                 arguments = [str(a) for a in args_raw]
             else:
-                arguments = shlex.split(str(args_raw), posix=os.name != "nt")
+                arguments = _split_command_line(str(args_raw))
         elif "command" in raw:
-            arguments = shlex.split(str(raw["command"]), posix=os.name != "nt")
+            arguments = _split_command_line(str(raw["command"]))
         else:
             arguments = []
+
+        # Unwrap a compiler-launcher prefix (ccache/sccache/…) before reading
+        # the driver token -- otherwise a launcher-wrapped CL-style action
+        # (e.g. "sccache clang-cl @args.rsp") tests the launcher name
+        # instead of the real driver and picks the wrong quoting convention
+        # (Codex review).
+        from .buildsource.source_extractors._argv import strip_launchers
+
+        unwrapped = strip_launchers(arguments)
+        cl_style = bool(unwrapped) and _is_cl_style_driver(unwrapped[0])
+        arguments = _expand_response_files(
+            arguments,
+            directory,
+            _safe_resolve(db_dir) or db_dir,
+            cl_style=cl_style,
+            _file_cache=_file_cache,
+            _db_output_budget=_db_output_budget,
+            _cache_token_budget=_cache_token_budget,
+        )
 
         return cls(file=file_path.resolve(), directory=directory, arguments=arguments)
 
@@ -231,14 +713,35 @@ def load_compile_db(path: Path) -> list[CompileEntry]:
             f"compile_commands.json must be a JSON array, got {type(raw).__name__}"
         )
 
-    db_dir = path.parent
+    # Resolve *path* itself (not just db_dir below) before taking its parent:
+    # compile_commands.json is commonly symlinked from the source tree into an
+    # out-of-tree build directory, and the response-file trust jail must be
+    # the real (target) directory the entries' relative paths/@files actually
+    # live beside -- otherwise every @file next to the symlink's *target* is
+    # wrongly treated as outside the (symlink-parent) root and never expanded
+    # (Codex review).
+    resolved_path = _safe_resolve(path)
+    db_dir = (resolved_path or path).parent
     entries: list[CompileEntry] = []
+    # Shared across every entry in this database so a response file
+    # referenced by many entries (a common pattern, and an amplification
+    # vector for an untrusted database) is only actually read/tokenized
+    # once, and so the aggregate expansion output across the whole database
+    # stays bounded even once I/O is deduped (Codex review) -- see
+    # _expand_response_files's _file_cache/_db_output_budget.
+    file_cache: _ResponseFileCache = {}
+    db_output_budget = [_MAX_RESPONSE_FILE_DB_OUTPUT_TOKENS]
+    cache_token_budget = [_MAX_RESPONSE_FILE_CACHE_TOKENS]
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             _logger.warning("Skipping non-object entry at index %d", i)
             continue
         try:
-            entries.append(CompileEntry.from_dict(item, db_dir))
+            entries.append(
+                CompileEntry.from_dict(
+                    item, db_dir, file_cache, db_output_budget, cache_token_budget
+                )
+            )
         except (KeyError, TypeError, ValueError, OSError) as exc:
             _logger.warning("Skipping malformed entry at index %d: %s", i, exc)
 
