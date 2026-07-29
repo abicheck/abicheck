@@ -179,6 +179,21 @@ started.**
   library-name-keyed per ADR-023, so no change needed there) and to
   `ScanSetResult.to_dict()`'s JSON shape, which must key or label each
   member by artifact.
+- **Version the new JSON contract — don't let it ride under the unchanged
+  scalar version.** `abicheck/schemas/__init__.py`'s `SCAN_SCHEMA_VERSION`
+  (currently `"1.3"`) is the explicit, additively-bumped version marker
+  every `ScanResult.to_dict()` embeds (`"scan_schema_version":
+  SCAN_SCHEMA_VERSION`, `abicheck/service_scan.py`) — the mechanism this
+  codebase already uses so a consumer can tell what shape to expect.
+  `ScanSetResult.to_dict()` introduces a genuinely new top-level shape
+  (`per_artifact`, set-level `verdict`/`exit_code`, bundle
+  findings/verdict) that a consumer parsing the unchanged `"1.3"` marker
+  would have no way to distinguish from a single-binary `ScanResult`.
+  Bump `SCAN_SCHEMA_VERSION` (additive minor, matching this constant's
+  existing convention) and add the corresponding schema-version test
+  coverage (mirroring whatever asserts today's `"1.3"` value) so the new
+  aggregate shape is a versioned, detectable contract from its first
+  release rather than an undocumented addition under an unchanged marker.
 - Public re-export: `abicheck/service.py` re-exports the scan engine's
   public API from `service_scan.py` today (`run_scan`, `ScanResult`,
   `run_scan_subprocess`, in its `__all__`) as the Tier-2 service facade —
@@ -370,6 +385,38 @@ started.**
     with no effect" discipline `compare`'s own scoping flags follow).
   Wire the accepted form to `ScanRequest.binaries`/`run_scan_set`
   (`bundle_system_providers` param, Phase 1).
+- **`ScanRequest` doesn't carry every option the single-binary CLI path
+  uses today — this must be closed, not silently dropped.** The live
+  single-binary branch (`cli_scan.py`) passes `abi3_floor`,
+  `enabled_checks`/`severities` (from `--crosscheck`), `build_config`, and
+  `allow_build_query` straight to `run_scan_core`, bypassing
+  `ScanRequest` entirely — none of those five are fields on
+  `ScanRequest` (`abicheck/service_scan.py`). If `--artifact-set` routes
+  only through `ScanRequest`/`run_scan_set` as planned above, an
+  invocation combining `--artifact-set` with `--abi3`/`--crosscheck
+  KEY=off`/`--build-config`/build-query control would silently produce
+  different findings per artifact than the equivalent single-binary `scan`
+  invocation with the same flags — a correctness gap, not a missing nice-
+  to-have. Phase 1's `run_scan_set` must accept and forward all five
+  (either by extending `ScanRequest` with the missing fields — the more
+  durable fix, also closing the same gap for any future `ScanRequest`
+  caller — or by giving `run_scan_set` its own equivalent parameters
+  threaded straight to each member's `run_scan_core` call the way the
+  single-binary CLI path already does). Cover with a test asserting an
+  artifact-set member's findings match what a single-binary `scan` of the
+  same file with the same `--abi3`/`--crosscheck` flags would produce.
+- **`--dry-run` needs its own `--artifact-set`-aware branch, not the
+  existing one.** Making `ARTIFACT` optional means an
+  `--artifact-set ... --dry-run` invocation reaches the live dry-run
+  branch (`cli_scan.py`) with `artifact=None` — it unconditionally passes
+  `artifact=artifact` into `render_scan_dry_run` and constructs
+  `ScanRequest(binaries=[artifact])`, so today's code would describe and
+  cost-estimate one nonexistent pseudo-binary (`None`) instead of
+  discovering and estimating the requested set. Add a set-aware dry-run
+  path (discover the set the same way the real run would, estimate/render
+  per member plus the bundle layer) before `ARTIFACT` is made optional —
+  landing the optional-positional change without this branch would leave
+  `--artifact-set --dry-run` broken from day one.
 - `abicheck/mcp_server.py`: add `artifact_set` **and**
   `bundle_system_providers` params to `abi_scan`, same validation shape as
   CLI (ADR-043 D10 parity — land together, not as a follow-up PR). Route an
