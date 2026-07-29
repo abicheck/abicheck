@@ -121,3 +121,17 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   reached. Each side's resolved snapshot is now checked against the
   requested depth after resolution, raising `ValidationError` naming the
   side and the depth actually reached if it falls short.
+- **`run_compare_request` no longer leaks CLI-framework behavior through the
+  Tier-2 API** when `InputSpec.sources`/`build_info` is set: a malformed
+  evidence pack previously raised `click.ClickException` straight out of
+  `embed_build_source`'s pack loader, bypassing this method's documented
+  `ValidationError`/`SnapshotError` contract — now caught and translated to
+  `SnapshotError`. Separately, `embed_build_source` and
+  `prepare_embedded_build_source`/`attach_evidence_metrics` (the D7
+  coverage table, the D6 timing/metrics summary, and a "no
+  compile_commands.json found" warning) previously wrote CLI-formatted
+  tables to stderr unconditionally whenever any evidence was involved,
+  with no way for a non-CLI caller (embedded application, MCP server) to
+  suppress them; all three now accept a `quiet` keyword (default `False`,
+  preserving the CLI's and `scan`'s existing behavior unchanged) that
+  `run_compare_request` passes as `True`.

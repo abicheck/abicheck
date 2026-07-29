@@ -838,7 +838,6 @@ def _apply_native_provenance(
     origin stays ``UNKNOWN`` and behaviour is unchanged.
     """
     from .provenance import apply_provenance
-
     return apply_provenance(snap, public_headers, public_header_dirs)
 
 
@@ -1095,7 +1094,6 @@ def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
     which is a few ``Path.exists()`` checks — effectively zero overhead.
     """
     from .sycl_metadata import parse_sycl_metadata
-
     lib_dir = lib_path.resolve().parent
     try:
         sycl = parse_sycl_metadata(lib_dir)
@@ -1144,7 +1142,6 @@ def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
     ``numpy_capi`` at ``None`` — no finding, not a false positive.
     """
     from .numpy_capi import extract_numpy_capi_surface
-
     try:
         numpy_capi = extract_numpy_capi_surface(lib_path)
     except Exception as exc:  # noqa: BLE001
@@ -1171,7 +1168,6 @@ def _try_attach_python_api_surface(snap: AbiSnapshot) -> None:
     common case for a plain C/C++ library or a stubless extension.
     """
     from .python_api import detect_python_api
-
     try:
         python_api = detect_python_api(snap)
     except Exception as exc:  # noqa: BLE001
@@ -1346,7 +1342,6 @@ def _extract_pdb_debug(
     try:
         from .pdb_metadata import parse_pdb_debug_info
         from .pdb_utils import locate_pdb
-
         pdb_file = locate_pdb(path, pdb_path_override=pdb_path, allow_network=False)
         if pdb_file is not None:
             meta, adv = parse_pdb_debug_info(pdb_file)
@@ -1603,7 +1598,6 @@ def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
     if path is None:
         return None
     from .environment_matrix import EnvironmentMatrix
-
     try:
         # from_yaml converts malformed YAML to ValueError, so no yaml import
         # is needed here (abicheck.service has no import-untyped override).
@@ -1760,8 +1754,14 @@ def run_compare_request(
         )
         if side.sources or side.build_info:
             # Codex: same roots as resolve_input, plus dump_manifest's declared-public roots only (project_owned TU includes are private, so dump_manifest_public_roots not dump_manifest_header_roots).
+            # Codex: a malformed pack raises click.ClickException deep inside embed_build_source -- no place in this Tier-2 API's ValidationError/SnapshotError contract.
+            import click
+
             from .dumper_scoping import dump_manifest_public_roots
-            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=_sce.effective_frontend(evidence.compile, header_backend), public_headers=tuple(str(p) for p in public_headers), public_header_dirs=tuple(str(p) for p in public_header_dirs) + tuple(str(p) for p in dump_manifest_public_roots(evidence.dump_manifest)))
+            try:
+                embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=_sce.effective_frontend(evidence.compile, header_backend), public_headers=tuple(str(p) for p in public_headers), public_header_dirs=tuple(str(p) for p in public_header_dirs) + tuple(str(p) for p in dump_manifest_public_roots(evidence.dump_manifest)), quiet=True)
+            except click.ClickException as exc:
+                raise SnapshotError(str(exc)) from exc
         return snap
 
     def _resolve_old_side() -> AbiSnapshot:
@@ -1811,7 +1811,7 @@ def run_compare_request(
     # try (and fail) to reload them as packs; None uses embedded facts.
     from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = prepare_embedded_build_source(
-        old, new, old_evidence.collect_mode, None, None, None, None, None, policy_file=pf,
+        old, new, old_evidence.collect_mode, None, None, None, None, None, policy_file=pf, quiet=True,
     )
     result = compare_snapshots(
         old,
@@ -1831,7 +1831,7 @@ def run_compare_request(
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
-    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
+    attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
     result.old_metadata = collect_metadata(request.old.path)
     result.new_metadata = collect_metadata(request.new.path)
     return result, old, new

@@ -2591,6 +2591,56 @@ class TestCompareRequestAdr055Evidence:
         with pytest.raises(ValidationError, match="bogus"):
             run_compare_request(request)
 
+    def test_malformed_evidence_pack_raises_snapshot_error_not_click_exception(
+        self, tmp_path
+    ):
+        """Codex review: a malformed evidence pack (InputSpec.sources/build_info)
+        raised click.ClickException deep inside embed_build_source's
+        _load_pack_or_raise -- a CLI-framework exception this Tier-2 API's
+        documented ValidationError/SnapshotError contract has no place for."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        bad_pack = tmp_path / "bad_pack"
+        bad_pack.mkdir()
+        # is_pack_dir() treats an unparseable manifest.json as a (corrupt) pack
+        # so downstream loading raises loudly instead of silently collecting.
+        (bad_pack / "manifest.json").write_text("{not valid json")
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=bad_pack), new=InputSpec.of(new_p)
+        )
+        with pytest.raises(SnapshotError, match="Invalid evidence pack"):
+            run_compare_request(request)
+
+    def test_embedded_evidence_diffing_is_quiet(self, tmp_path, monkeypatch, capsys):
+        """Codex review: prepare_embedded_build_source's coverage-table echoes
+        and attach_evidence_metrics' timing-summary echo previously printed
+        CLI tables to stderr unconditionally -- polluting a non-CLI caller's
+        stream with output it has no way to suppress. run_compare_request must
+        pass quiet=True through both."""
+        from abicheck import cli_buildsource_helpers
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+
+        def fake_diff_embedded_build_source(*args, **kwargs):
+            assert kwargs.get("quiet") is True
+            return [], [], {"extractor.duration_seconds": 0.01}
+
+        monkeypatch.setattr(
+            cli_buildsource_helpers,
+            "diff_embedded_build_source",
+            fake_diff_embedded_build_source,
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, build_info=tmp_path), new=InputSpec.of(new_p)
+        )
+        run_compare_request(request)
+        captured = capsys.readouterr()
+        assert captured.err == ""
+        assert captured.out == ""
+
 
 class TestCompareRequestDepthSatisfaction:
     """Codex review, P1: an explicitly requested `depth` (e.g. "source")
