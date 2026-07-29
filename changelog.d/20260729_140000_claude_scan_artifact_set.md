@@ -18,3 +18,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`ScanArtifactResult`/`ScanSetResult`). Not yet wired into the MCP tool
   surface or the GitHub Action — see `docs/contribute/plans/g34-*` for what
   remains.
+
+### Changed
+
+- **`SCAN_SCHEMA_VERSION` bumped to `1.5`**: `ScanSetResult.to_dict()`
+  (the new `scan --artifact-set` aggregate payload) carries the same
+  `scan_schema_version` marker as `ScanResult.to_dict()` but is a
+  structurally distinct shape (`per_artifact`/`bundle_findings`/
+  `bundle_verdict`/`bundle_incomplete` instead of `findings`/`layers`/
+  `confidence`/`estimate`/`report`); the version bump makes that a
+  detectable contract rather than an undocumented addition under an
+  unchanged marker. Bumped to `1.5`, not `1.4`, since `1.4` was
+  independently claimed by the ADR-049 Phase 5 suppression-block addition
+  that landed on `main` first.
