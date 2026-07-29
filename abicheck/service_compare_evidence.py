@@ -57,9 +57,18 @@ __all__ = [
 def effective_frontend(compile: CompileContext | None, header_backend: str) -> str:
     """The L2 frontend `resolve_input`/`run_dump` actually use for *compile*
     (an explicit `compile.frontend` wins over the bare `header_backend`
-    default) -- reused so `embed_build_source`'s `extractor` matches instead
-    of silently diverging (Codex review, P2)."""
-    return compile.frontend if (compile is not None and compile.frontend != "auto") else header_backend
+    default), resolved to a concrete backend -- reused so `embed_build_
+    source`'s `extractor` matches instead of silently diverging (Codex
+    review, two rounds: an explicit override wasn't case-normalized in the
+    first pass, and "auto" itself was forwarded unresolved in the second --
+    `_make_source_extractor` doesn't special-case "auto" and falls back to
+    Clang, while L2's own "auto" resolves to castxml by default)."""
+    from .dumper import _resolve_header_backend
+
+    requested = (
+        compile.frontend if (compile is not None and compile.frontend != "auto") else header_backend
+    )
+    return _resolve_header_backend(requested)
 
 
 @dataclasses.dataclass(frozen=True)

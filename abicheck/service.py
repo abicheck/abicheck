@@ -1699,7 +1699,6 @@ def run_compare_request(
     lang = request.lang.lower()
     # android (source-ABI only, gated to has_sources by validate) has no header-AST path, so it falls back to "auto" for the binary dump.
     from .api_types import HEADER_AST_FRONTENDS
-    # Normalized here (not just for the containment check) since effective_frontend() forwards this verbatim as embed_build_source's extractor, which source replay only recognizes lowercase (Codex review, P2).
     frontend_lower = request.frontend.lower()
     header_backend = frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"
 
@@ -1761,7 +1760,8 @@ def run_compare_request(
         )
         if side.sources or side.build_info:
             extractor = _sce.effective_frontend(evidence.compile, header_backend)
-            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=extractor)
+            # Codex review (P1): same public-header roots as resolve_input above -- else source replay's public_headers is empty, hiding source-only breaks.
+            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=extractor, public_headers=tuple(str(p) for p in public_headers), public_header_dirs=tuple(str(p) for p in public_header_dirs))
         return snap
 
     def _resolve_old_side() -> AbiSnapshot:

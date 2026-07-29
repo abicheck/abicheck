@@ -2094,6 +2094,74 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert embed_calls[0]["extractor"] == "castxml"
 
+    def test_default_auto_frontend_resolves_to_castxml_for_extractor(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P2, second round): the default frontend="auto" must
+        not be forwarded to embed_build_source's extractor as the literal
+        string "auto" -- _make_source_extractor doesn't special-case "auto"
+        and falls back to Clang, while L2's own "auto" resolves to castxml by
+        default (dumper._resolve_header_backend), so the common default-
+        frontend case would otherwise silently run L2/L4 through different
+        tools."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        embed_calls: list[dict] = []
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source",
+            lambda snap, **kwargs: embed_calls.append(kwargs),
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=src_dir), new=InputSpec.of(new_p)
+        )
+        run_compare_request(request)
+        assert embed_calls[0]["extractor"] == "castxml"
+
+    def test_public_headers_forwarded_to_embed_build_source(self, tmp_path, monkeypatch):
+        """Codex review (P1): omitting the side's public-header roots from
+        embed_build_source leaves source replay's own public-header set
+        empty, so the L4 extractor can classify every declaration as non-API
+        and emit an empty surface, silently hiding source-only breaks."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        header = tmp_path / "api.h"
+        header.write_text("")
+        header_dir = tmp_path / "include"
+        header_dir.mkdir()
+
+        embed_calls: list[dict] = []
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source",
+            lambda snap, **kwargs: embed_calls.append(kwargs),
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(
+                old_p,
+                sources=src_dir,
+                headers=[header],
+                public_header_dirs=[header_dir],
+            ),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        assert str(header) in embed_calls[0]["public_headers"]
+        assert str(header_dir) in embed_calls[0]["public_header_dirs"]
+
     def test_request_frontend_case_is_normalized_for_extractor(
         self, tmp_path, monkeypatch
     ):

@@ -25,11 +25,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   and `public_header_dirs` are forwarded/unioned into the existing resolution
   path, including the dependency-scope filter (a declared-public file or
   directory is no longer misclassified as a toolchain dependency); `depth ==
-  "binary"` also clears `dump_manifest`, not just `headers`; the inline
-  evidence collection's `extractor` matches whichever L2 frontend actually ran
-  for that side, using a normalized-case `--ast-frontend` value so a
-  case-insensitive `frontend="CASTXML"` doesn't silently fall back to a
-  different extractor; `frontend_context` is validated (case-insensitively,
+  "binary"` also clears `dump_manifest`, not just `headers`; the side's
+  public-header roots are forwarded into the inline evidence collection too,
+  so source replay's own public-header set isn't silently left empty; the
+  inline evidence collection's `extractor` matches whichever L2 frontend
+  actually ran for that side — resolved to a concrete backend (e.g. the
+  default `"auto"` resolves to `castxml`, matching L2's own default), using a
+  normalized-case `--ast-frontend` value so a case-insensitive
+  `frontend="CASTXML"` doesn't silently fall back to a different extractor;
+  `frontend_context` is validated (case-insensitively,
   `host`/`device`) and normalized before use; a side whose
   `compile.frontend_context` differs from the class default always wins over
   the request-level default (an unrelated per-side override, e.g. only a
