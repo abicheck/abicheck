@@ -364,15 +364,28 @@ class ContractEvidenceBlock:
 
     def __post_init__(self) -> None:
         providers = _frozen_tuple(self.providers, element_type=ProviderEvidenceEntry)
-        # Canonicalize by each provider's own stable identity (side, id) --
-        # not the order two independent collectors happened to visit
-        # providers in. Provider traversal order has no defined semantics,
-        # so leaving it order-preserving made two otherwise-identical
-        # blocks compare unequal and serialize differently, contradicting
-        # this phase's own byte/order-independent round-trip gate (Codex
-        # review, fresh evidence).
+        # Canonicalize by each provider's own stable identity (side,
+        # provider, id) -- not the order two independent collectors
+        # happened to visit providers in. Provider traversal order has no
+        # defined semantics, so leaving it order-preserving made two
+        # otherwise-identical blocks compare unequal and serialize
+        # differently, contradicting this phase's own byte/order-independent
+        # round-trip gate (Codex review, fresh evidence). ``record.id`` is
+        # only documented as unique to the record it labels, not globally
+        # unique across providers -- two different providers reusing the
+        # same local id previously sorted equal under (side, id) alone and
+        # fell back to Python's stable-sort tie-break on original position,
+        # silently reintroducing the same order-dependence for that case
+        # (Codex review, fresh evidence); ``record.provider`` closes it.
         providers = tuple(
-            sorted(providers, key=lambda entry: (entry.record.side, entry.record.id))
+            sorted(
+                providers,
+                key=lambda entry: (
+                    entry.record.side,
+                    entry.record.provider,
+                    entry.record.id,
+                ),
+            )
         )
         object.__setattr__(self, "providers", providers)
         _require_version_int(

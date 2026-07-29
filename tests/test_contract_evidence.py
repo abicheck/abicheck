@@ -263,6 +263,25 @@ class TestContractEvidenceBlock:
         assert block1.providers == (entry_a, entry_b)
         assert block2.providers == (entry_a, entry_b)
 
+    def test_providers_sort_key_includes_provider_not_just_side_and_id(self):
+        # Regression (Codex review, fresh evidence): record.id is only
+        # documented as unique to the record it labels, not globally unique
+        # across providers -- two different providers reusing the same
+        # local id previously sorted equal under (side, id) alone and fell
+        # back to Python's stable-sort tie-break on original visit
+        # position, silently reintroducing order-dependence for that case.
+        entry_x = ProviderEvidenceEntry(
+            record=_record(id="rec-1", side="old", provider="x_provider")
+        )
+        entry_y = ProviderEvidenceEntry(
+            record=_record(id="rec-1", side="old", provider="y_provider")
+        )
+        block1 = ContractEvidenceBlock(providers=[entry_x, entry_y])
+        block2 = ContractEvidenceBlock(providers=[entry_y, entry_x])
+        assert block1 == block2
+        assert block1.providers == (entry_x, entry_y)
+        assert block2.providers == (entry_x, entry_y)
+
     def test_schema_version_must_be_positive_int(self):
         with pytest.raises(ValueError):
             ContractEvidenceBlock(schema_version=0)
