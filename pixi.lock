@@ -5933,7 +5933,7 @@ packages:
   - packaging>=21.0
   - pefile>=2023.2.7
   - macholib>=1.16
-  - mcp[cli]>=1.2.0 ; extra == 'mcp'
+  - mcp[cli]>=1.2.0,<2.0.0 ; extra == 'mcp'
   - pytest>=7.0 ; extra == 'dev'
   - pytest-cov ; extra == 'dev'
   - pytest-xdist>=3.0 ; extra == 'dev'
