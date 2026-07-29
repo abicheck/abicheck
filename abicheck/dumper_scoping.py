@@ -458,10 +458,24 @@ def _directly_referenced_dependency_names(
         for key in spellings:
             key_owners.setdefault(key, set()).add(identity)
 
+    # A reached key that is itself already ambiguous among dep_candidates
+    # (``key_owners[key]`` has more than one owner -- e.g. a namespace-
+    # stripped target token ``Thing`` shared by both ``dep1::Thing`` and
+    # ``dep2::Thing``) must not be treated as the alias "reaching" either
+    # of them (Codex review, fresh evidence): the alias's target contained
+    # one ambiguous token, not two distinct ones the way a genuine
+    # compound alias (``Pair<dep::A, dep::B>``) does, so there is no way
+    # to tell which candidate it actually names. Skipping a multi-owner
+    # key here is the alias-reachability analogue of the same guard
+    # ``own_spellings_of``'s construction already applies to a
+    # candidate's own spellings.
     identity_aliases: dict[str, set[str]] = {}
     for alias, reached in reachable_by_alias.items():
         for key in reached & key_owners.keys():
-            for identity in key_owners[key]:
+            owners = key_owners[key]
+            if len(owners) != 1:
+                continue
+            for identity in owners:
                 identity_aliases.setdefault(identity, set()).add(alias)
 
     # Two separate ownership tallies, kept apart deliberately (Codex review,
@@ -494,7 +508,15 @@ def _directly_referenced_dependency_names(
     # exactly one alias produced it distinguishes the two: a single
     # alias's own multi-identity reach stays legitimate, while two
     # different aliases colliding on the same derived suffix is
-    # genuine ambiguity and the spelling contributes no owners at all.
+    # genuine ambiguity and the spelling contributes no owners at all --
+    # UNLESS every colliding alias actually agrees on the identical
+    # identity set (Codex review, further fresh evidence: ``Handle ->
+    # dep::Thing`` and ``api::Handle -> dep::Thing`` are two different
+    # spellings of the very same referent, not two competing candidates
+    # for a bare ``Handle`` -- there is nothing to disambiguate when
+    # every alias that could have produced the spelling names the exact
+    # same dependency type). Only a genuine disagreement between aliases
+    # (different identity sets) is dropped as ambiguous.
     alias_to_identities: dict[str, set[str]] = {}
     for identity, aliases in identity_aliases.items():
         for alias in aliases:
@@ -507,11 +529,12 @@ def _directly_referenced_dependency_names(
 
     alias_spelling_owners: dict[str, set[str]] = {}
     for spelling, aliases in alias_spelling_sources.items():
-        if len(aliases) == 1:
-            (single_alias,) = aliases
-            alias_spelling_owners[spelling] = set(alias_to_identities[single_alias])
-        # else: two or more distinct aliases collide on this derived
-        # spelling -- genuinely ambiguous, contributes no owner at all.
+        identity_sets = {frozenset(alias_to_identities[a]) for a in aliases}
+        if len(identity_sets) == 1:
+            (shared_identities,) = identity_sets
+            alias_spelling_owners[spelling] = set(shared_identities)
+        # else: colliding aliases disagree on what this spelling names --
+        # genuinely ambiguous, contributes no owner at all.
 
     own_spelling_owners: dict[str, set[str]] = {}
     own_exact_owners: dict[str, set[str]] = {}

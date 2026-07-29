@@ -1009,6 +1009,72 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.qualified_name for t in scoped.types] == ["dep::A"]
 
+    def test_agreeing_colliding_aliases_retain_their_shared_target(self):
+        """Codex review (twentieth round, P1): unlike the previous test's
+        two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle
+        -> dep::B`), this is two aliases -- `Handle -> dep::Thing` and
+        `api::Handle -> dep::Thing` -- that both reduce to the same bare
+        `Handle` spelling AND both resolve to the identical dependency
+        type. There is nothing to disambiguate here: every alias that
+        could produce this spelling names the same referent, so requiring
+        a single originating alias (the fix for the disagreeing case)
+        must not also drop this spelling -- `dep::Thing` must still be
+        retained."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "dep::Thing", "api::Handle": "dep::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_alias_reaching_an_already_ambiguous_target_key_retains_neither(
+        self,
+    ):
+        """Codex review (twentieth round, P2): an alias's target
+        namespace-strips to a bare `Thing`, but that bare key is itself
+        already ambiguous among dep_candidates (`dep1::Thing` and
+        `dep2::Thing` both derive it). Unlike a genuine compound alias
+        (`Pair<dep::A, dep::B>`, whose target contains two *distinct*,
+        individually-unambiguous tokens), this alias's target contains
+        exactly one *already-ambiguous* token -- there is no way to tell
+        which of the two candidates it names, so the alias must not be
+        treated as reaching either one. Neither `dep1::Thing` nor
+        `dep2::Thing` may be retained through it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep1::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep2::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Alias": "Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
     def test_resolved_typedef_owner_takes_precedence_over_coincidental_suffix(
         self,
     ):
