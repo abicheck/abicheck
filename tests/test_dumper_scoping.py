@@ -767,6 +767,71 @@ class TestDirectlyReferencedDependencyRetention:
         assert elapsed < 5.0, f"self-referential typedefs took {elapsed:.2f}s"
         assert [t.name for t in scoped.types] == ["Foo0"]
 
+    def test_branching_typedef_chain_does_not_blow_up(self):
+        """Codex review (tenth round): `using A0 = Pair<A1, A1>; using A1 =
+        Pair<A2, A2>; ...` -- a branching (not merely linear) alias chain.
+        Materializing the full expansion doubles the string length at
+        every level (exponential in nesting depth, confirmed empirically
+        at ~38MB of resolved text for just 20 such levels). Resolution is
+        now via set-based reachability (`_typedef_alias_reachability`),
+        where a branching reference costs nothing extra since set union is
+        idempotent -- must stay fast and still resolve correctly."""
+        import time
+
+        typedefs = {f"A{i}": f"Pair<A{i + 1}, A{i + 1}>" for i in range(20)}
+        typedefs["A20"] = "dep::Thing"
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("A0",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"branching typedef chain took {elapsed:.2f}s"
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
+    def test_typedef_alias_pointing_at_kept_type_excludes_ambiguous_dependency(self):
+        """Codex review (tenth round): an own typedef `Handle -> api::Own`
+        means a kept signature spelling `Handle` is semantically naming
+        the kept type -- but an unrelated dependency record `dep::Handle`
+        derives the same bare suffix `Handle`. The dependency must not be
+        retained through this collision; a real signature meaning the
+        typedef alias must not be misattributed to it."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Own",
+                    kind="struct",
+                    qualified_name="api::Own",
+                    source_header=_OWN_HEADER,
+                ),
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    qualified_name="dep::Handle",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "api::Own"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["api::Own"]
+
     def test_typedef_matching_stays_fast_with_many_candidates_and_typedefs(self):
         """Codex review (sixth round): matching resolved typedef targets
         against dependency candidates one-by-one was

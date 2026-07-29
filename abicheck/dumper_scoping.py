@@ -92,7 +92,6 @@ project.
 from __future__ import annotations
 
 import dataclasses
-import re
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -108,80 +107,76 @@ from .type_reachability import (
 )
 
 
-def _resolve_typedef_chains(
-    typedefs: dict[str, str], pattern: re.Pattern[str] | None
-) -> dict[str, str]:
-    """Resolve every ``typedefs`` key's full expansion in one shared pass,
-    via pointer-doubling rather than per-alias chain-walking.
+def _typedef_alias_reachability(
+    typedefs: dict[str, str], interesting_keys: set[str]
+) -> dict[str, frozenset[str]]:
+    """For every ``typedefs`` alias, which of *interesting_keys* it
+    transitively reaches -- whether directly present in its own immediate
+    target, or via an embedded reference to another typedef key whose own
+    reachable set already includes it.
 
-    Each round substitutes every whole-token typedef-key occurrence in
-    every alias's *current* text using every other alias's *current*
-    (already-doubled) resolution -- not just the raw immediate target --
-    so the effective resolved depth doubles each round: after round *k*,
-    every alias reflects up to 2^k hops of chaining. This handles both a
-    whole-string chain (``using Handle = Thing; using Thing =
-    std::Thing;``) and a typedef key embedded *inside* a decorated
-    intermediate target (``using Ptr = Handle *; using Handle =
-    std::Thing;`` -- ``"Handle *"`` is not itself a typedef key, only the
-    embedded ``"Handle"`` token is) uniformly, since substitution always
-    operates on whole tokens anywhere in the text via *pattern* (one
-    compiled boundary-aware alternation over every ``typedefs`` key, from
-    :func:`abicheck.type_reachability._compile_spelling_pattern` --
-    compiled once by the caller and reused here, not recompiled per alias:
-    an earlier version did the latter, making typedef resolution alone
-    O(typedef count^2) before any signature is even scanned, confirmed
-    empirically at ~30s for 3,000 typedefs).
+    Operates on **sets of matched keys**, never on materialized expanded
+    text (Codex review, fresh evidence: an earlier version built the full
+    decorated expansion string per alias via pointer-doubling substitution
+    -- correct for a simple chain, but a *branching* alias, e.g. ``using
+    A0 = Pair<A1, A1>; using A1 = Pair<A2, A2>; ...``, doubles the
+    materialized string's length at every level, making the "one pass"
+    cost actually exponential in nesting depth: confirmed empirically at
+    ~38MB of resolved text for just 20 such levels). Because set union is
+    idempotent, a branching target that references the same typedef key
+    twice (or a hundred times) costs nothing extra here -- the edge is
+    recorded once, and propagating a *set* of reachable keys along it is
+    bounded by the number of distinct interesting keys, never by how many
+    times or how deeply they're nested in the source text.
 
-    An earlier per-alias walker capped expansion at a fixed hop count to
-    avoid the same O(N^2) blowup for a pathologically deep *linear* chain
-    (Codex review, fresh evidence: any fixed cap, however generous,
-    truncates a real chain deeper than it) -- pointer-doubling removes the
-    need for a cap entirely: convergence takes O(log(chain depth)) rounds
-    regardless of how deep the real chain is, and each round is O(typedef
-    count) work (one pattern scan per alias's text), for O(N log N) total
-    instead of O(N^2).
+    Propagation is a monotone fixed-point relaxation over the alias
+    reference graph (a typedef key embedded in another alias's own
+    immediate target is an edge), bounded to ``len(typedefs) + 1`` rounds
+    -- sufficient for information to propagate along the longest possible
+    acyclic path through every alias once. A direct self-reference
+    (``typedef struct Foo Foo;``) or indirect cycle is never propagated
+    through itself (an alias's own name is excluded from its own edge
+    set), so it can only ever contribute what's directly present in its
+    own immediate target -- terminal by construction, not requiring a
+    separate growth guard the way string materialization did.
 
-    A direct self-reference (``typedef struct Foo Foo;`` -> ``typedefs["Foo"]
-    == "struct Foo"``, a common, real C/C++ idiom) or an indirect cycle
-    that eventually reintroduces an alias's own name into its own
-    expanding text is treated as **terminal** for that specific
-    occurrence: substituting a token would otherwise replace it with the
-    alias's own *current* (already-grown) text, doubling the string length
-    every round indefinitely rather than converging (Codex review, fresh
-    evidence: confirmed empirically -- naive pointer-doubling on 2,000
-    synthetic self-referential typedefs like ``typedef struct Foo Foo;``
-    grew the aggregate resolved text to ~74MB before any signature is even
-    scanned). Whenever the token being substituted is literally the same
-    alias whose text is currently being expanded, it is left as a literal
-    token instead of substituted -- this only ever suppresses growth
-    exactly where the alias's own name has reappeared inside its own
-    expansion (whether via direct self-reference or by cycling back
-    through other aliases), never for a genuine acyclic chain, which never
-    reintroduces an earlier name and so is unaffected.
+    *interesting_keys* is deliberately one flat set covering both
+    dependency-candidate matching keys and kept-type/enum spellings: the
+    caller (:func:`_directly_referenced_dependency_names`) tells which
+    category a given reached key belongs to via simple set intersection
+    against its own ``key_owners``/``kept_spellings`` -- this function
+    only computes *reachability*, not what a reached key means.
     """
-    resolved = dict(typedefs)
-    if pattern is None or not typedefs:
-        return resolved
-    max_rounds = len(typedefs).bit_length() + 1
+    if not typedefs:
+        return {}
+
+    typedef_keys = set(typedefs)
+    combined_pattern = _compile_spelling_pattern(typedef_keys | interesting_keys)
+    if combined_pattern is None:
+        return {alias: frozenset() for alias in typedefs}
+
+    embedded_refs: dict[str, set[str]] = {alias: set() for alias in typedefs}
+    reachable: dict[str, set[str]] = {alias: set() for alias in typedefs}
+    for alias, target in typedefs.items():
+        for match in _finditer_allow_nested(combined_pattern, target):
+            token = match.group()
+            if token in typedef_keys and token != alias:
+                embedded_refs[alias].add(token)
+            if token in interesting_keys:
+                reachable[alias].add(token)
+
+    max_rounds = len(typedefs) + 1
     for _ in range(max_rounds):
         changed = False
-        next_resolved: dict[str, str] = {}
-        for alias, text in resolved.items():
-
-            def _substitute(m: re.Match[str], _alias: str = alias) -> str:
-                token = m.group()
-                if token == _alias:
-                    return token
-                return resolved.get(token, token)
-
-            expanded = pattern.sub(_substitute, text)
-            next_resolved[alias] = expanded
-            if expanded != text:
-                changed = True
-        resolved = next_resolved
+        for alias, refs in embedded_refs.items():
+            for ref in refs:
+                added = reachable[ref] - reachable[alias]
+                if added:
+                    reachable[alias] |= added
+                    changed = True
         if not changed:
             break
-    return resolved
+    return {a: frozenset(v) for a, v in reachable.items()}
 
 
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
@@ -263,14 +258,19 @@ def _directly_referenced_dependency_names(
     (and not covered by) the stdlib-only stripping above, requiring the
     same suffix spellings a kept signature's own spelling of a candidate
     already goes through. An alias chain (``using Handle = Thing; using
-    Thing = std::Thing;``) is
-    followed via :func:`_resolve_typedef_chains` before matching, and a
-    *decorated* target (``using Handle = std::Thing *;`` -- the target
-    string is not equal to the candidate identity, only references it as a
-    substring token) is recognized by scanning every resolved target with
-    one compiled pattern over every candidate's own matching keys, rather
-    than requiring exact equality (Codex review, fresh evidence). Mirrors
-    :func:`abicheck.type_reachability`'s own typedef-following. A resolved
+    Thing = std::Thing;``) and a *decorated* target (``using Handle =
+    std::Thing *;`` -- the target references the candidate identity as a
+    substring token, not an exact match) are both resolved via
+    :func:`_typedef_alias_reachability`'s graph-based reachability (not
+    string substitution -- see that function's own docstring for why),
+    rather than requiring exact equality (Codex review, fresh evidence).
+    Mirrors :func:`abicheck.type_reachability`'s own typedef-following. A
+    typedef alias that transitively reaches a *kept* type's/enum's own
+    spelling is folded into *kept_spellings* itself (Codex review, fresh
+    evidence): a kept signature spelling that alias is semantically naming
+    the kept type it resolves to, so an unrelated dependency candidate
+    sharing that same alias spelling as its own bare suffix must not be
+    retained through it. A resolved
     typedef alias also contributes its own namespace-suffix spellings (not
     just its exact key) as candidate spellings (Codex review, fresh
     evidence): a real backend can spell the alias itself bare in a
@@ -343,8 +343,6 @@ def _directly_referenced_dependency_names(
     haystack = "\n".join(t for t in signature_texts if t)
 
     typedefs = typedefs or {}
-    typedef_key_pattern = _compile_spelling_pattern(typedefs.keys())
-    resolved_targets = _resolve_typedef_chains(typedefs, typedef_key_pattern)
 
     kept_spellings = {
         suffix
@@ -394,13 +392,32 @@ def _directly_referenced_dependency_names(
                 continue
             key_owners.setdefault(key, set()).add(identity)
 
+    # Which of each typedef alias's transitively-reachable keys are
+    # dependency-candidate keys vs. kept-type/enum spellings -- computed by
+    # reachability (see _typedef_alias_reachability), never by
+    # materializing expanded text.
+    reachable_by_alias = _typedef_alias_reachability(
+        typedefs, set(key_owners) | kept_spellings
+    )
     identity_aliases: dict[str, set[str]] = {}
-    key_pattern = _compile_spelling_pattern(key_owners.keys())
-    if key_pattern is not None:
-        for alias, resolved in resolved_targets.items():
-            for match in _finditer_allow_nested(key_pattern, resolved):
-                for identity in key_owners[match.group()]:
-                    identity_aliases.setdefault(identity, set()).add(alias)
+    for alias, reached in reachable_by_alias.items():
+        # An alias that transitively touches a kept type's/enum's own
+        # spelling is itself treated as belonging to the kept surface
+        # (Codex review, fresh evidence): a kept signature spelling this
+        # alias is semantically naming the *kept* type it resolves to, so
+        # an unrelated dependency candidate sharing that same alias
+        # spelling as its own bare suffix must not be retained through it
+        # -- the same collision guard every other spelling in this
+        # function already goes through, just extended to cover typedef
+        # aliases pointing at a kept type, not only kept types' own
+        # spellings.
+        if reached & kept_spellings:
+            kept_spellings.add(alias)
+            kept_spellings.update(_namespace_suffix_spellings(alias)[1:])
+            continue
+        for key in reached & key_owners.keys():
+            for identity in key_owners[key]:
+                identity_aliases.setdefault(identity, set()).add(alias)
 
     candidate_spellings: dict[int, set[str]] = {}
     for candidate in dep_candidates:
