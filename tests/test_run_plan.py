@@ -1585,6 +1585,60 @@ class TestRunPlanGenerateCliToolchainBindings:
         )
         assert result.exit_code == 64
 
+    def test_unused_profiles_mismatch_does_not_abort_an_otherwise_valid_plan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: check_profile_toolchain_identity previously probed
+        # EVERY declared profile, not just the ones the generated plan
+        # actually resolved a check for. A bindings file may legitimately be
+        # shared across runners (e.g. one committed file naming both a Linux
+        # and a macOS toolchain); a non-contract, unreferenced profile's
+        # binding can name a platform-specific compiler that's simply
+        # unavailable/mismatched on the current host, and that must not
+        # abort an otherwise-valid plan that never uses it (Codex review,
+        # fresh evidence).
+        from abicheck.buildsource import toolchain_probe as tp
+
+        def _fake_metadata(path: str) -> dict[str, str]:
+            if path == "/opt/clang/bin/clang++":
+                return {"selected": path, "version": "clang version 18.0.0"}
+            return {"selected": path, "version": "gcc (GCC) 14.2.0"}
+
+        monkeypatch.setattr(tp, "_tool_identity_metadata", _fake_metadata)
+        raw = json.loads(json.dumps(self._RAW))
+        raw["profiles"]["gcc14"]["compile"]["compiler_family"] = "gcc"
+        # A non-contract, unreferenced profile (contract: false): never
+        # selected by the implicit "every contract profile" sweep, so the
+        # generated plan never resolves a check for it --
+        # its declared compiler_family (gcc) disagrees with the resolved
+        # binding's real family (clang) via _fake_metadata above.
+        raw["profiles"]["macclang"] = {
+            "contract": False,
+            "compile": {"binding": "macclang", "compiler_family": "gcc"},
+        }
+        config = _write_config(tmp_path, raw)
+        build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
+        bindings = _write_bindings_file(
+            tmp_path,
+            {"gcc14": "/opt/gcc/bin/gcc", "macclang": "/opt/clang/bin/clang++"},
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "project",
+                "plan",
+                str(config),
+                "--build-output",
+                f"gcc14={build_dir}",
+                "--toolchain-bindings",
+                str(bindings),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert len(data["checks"]) == 1
+        assert data["checks"][0]["profile_id"] == "gcc14"
+
 
 # NB: `abicheck run-plan to-aggregate-manifest` (the standalone CLI command)
 # is not public CLI surface anymore (ADR-054): it was a pure intermediate-

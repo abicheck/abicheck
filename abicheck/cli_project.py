@@ -63,6 +63,7 @@ from .buildsource.project_targets import (
 )
 from .buildsource.run_plan import generate_run_plan
 from .buildsource.toolchain_bindings import (
+    BindingsFile,
     BindingsFileError,
     check_profile_bindings_resolve,
     load_bindings_file,
@@ -446,6 +447,7 @@ def project_plan_cmd(
     build_outputs = _parse_build_output_specs(build_output_specs)
 
     resolved_bindings: dict[str, str] | None = None
+    bindings_file_for_identity: BindingsFile | None = None
     binding_errors: list[str] = []
     if toolchain_bindings is not None:
         try:
@@ -453,10 +455,8 @@ def project_plan_cmd(
         except BindingsFileError as exc:
             raise click.UsageError(str(exc)) from exc
         resolved_bindings = bindings_file.bindings
+        bindings_file_for_identity = bindings_file
         binding_errors = check_profile_bindings_resolve(parsed.profiles, bindings_file)
-        binding_errors.extend(
-            check_profile_toolchain_identity(parsed.profiles, bindings_file)
-        )
 
     plan, report = generate_run_plan(
         parsed,
@@ -465,6 +465,29 @@ def project_plan_cmd(
         head_sha=head_sha,
         resolved_bindings=resolved_bindings,
     )
+
+    if bindings_file_for_identity is not None:
+        # Probe only profiles the generated plan actually resolved a check
+        # for, not every profile declared in the config. A bindings file may
+        # legitimately be shared across runners (e.g. one committed file
+        # naming both a Linux and a macOS toolchain), and an unselected or
+        # non-contract profile's binding can name a platform-specific
+        # executable that simply doesn't exist on the current host. Probing
+        # it anyway would abort an otherwise-valid plan over a profile the
+        # plan never uses (Codex review, fresh evidence: an unused macOS
+        # profile aborted a Linux-only plan on ubuntu-latest CI). `project
+        # validate` intentionally keeps checking every declared profile,
+        # since it validates the *config*, not one runner's resolved plan.
+        used_profile_ids = {c.profile_id for c in plan.checks if c.profile_id}
+        used_profiles = {
+            profile_id: profile
+            for profile_id, profile in parsed.profiles.items()
+            if profile_id in used_profile_ids
+        }
+        binding_errors.extend(
+            check_profile_toolchain_identity(used_profiles, bindings_file_for_identity)
+        )
+
     report.errors.extend(binding_errors)
 
     if not plan.checks and not allow_empty:

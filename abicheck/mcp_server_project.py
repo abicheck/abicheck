@@ -739,7 +739,6 @@ def abi_project_plan(
                     raise _ProjectPlanValidationError(validation.errors)
                 binding_errors = (
                     check_profile_bindings_resolve(parsed.profiles, bindings_file)
-                    + check_profile_toolchain_identity(parsed.profiles, bindings_file)
                     if bindings_file is not None
                     else []
                 )
@@ -750,6 +749,29 @@ def abi_project_plan(
                     head_sha=head_sha,
                     resolved_bindings=resolved_bindings,
                 )
+                if bindings_file is not None:
+                    # Probe only profiles the generated plan actually
+                    # resolved a check for, not every profile declared in
+                    # the config -- a bindings file may legitimately be
+                    # shared across runners, and an unselected/non-contract
+                    # profile's binding can name a platform-specific
+                    # executable that doesn't exist on this host. Probing it
+                    # anyway would abort an otherwise-valid plan over a
+                    # profile the plan never uses (Codex review, fresh
+                    # evidence, mirroring the same fix in cli_project.py's
+                    # ``project plan``). ``abi_project_validate`` intentionally
+                    # keeps checking every declared profile.
+                    used_profile_ids = {
+                        c.profile_id for c in plan.checks if c.profile_id
+                    }
+                    used_profiles = {
+                        profile_id: profile
+                        for profile_id, profile in parsed.profiles.items()
+                        if profile_id in used_profile_ids
+                    }
+                    binding_errors.extend(
+                        check_profile_toolchain_identity(used_profiles, bindings_file)
+                    )
                 report.errors.extend(binding_errors)
                 if not plan.checks and not allow_empty:
                     report.errors.append(

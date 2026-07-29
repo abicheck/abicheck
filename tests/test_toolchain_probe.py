@@ -97,6 +97,18 @@ class TestVersionSatisfies:
         banner = "x86_64-linux-gnu-gcc-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
         assert tp.version_satisfies(banner, ">=13,<14") is True
 
+    def test_apple_clang_build_identifier_does_not_shadow_real_version(self) -> None:
+        # Regression: Apple/Xcode clang's banner puts its real version right
+        # after the literal word "version", followed by an unrelated
+        # parenthetical build identifier with MORE dot components than the
+        # real version -- a bare "last dotted token" search previously
+        # picked "1600.0.26.4" (the build ID) instead of "16.0.0" (the real
+        # version), rejecting a valid >=16,<17 constraint (Codex review,
+        # fresh evidence).
+        banner = "Apple clang version 16.0.0 (clang-1600.0.26.4)"
+        assert tp._extract_version_token(banner) == "16.0.0"
+        assert tp.version_satisfies(banner, ">=16,<17") is True
+
     def test_dotted_target_os_version_in_prefix_does_not_shadow_real_version(
         self,
     ) -> None:

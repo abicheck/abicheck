@@ -1028,6 +1028,56 @@ class TestAbiProjectPlan:
         assert payload["report"]["ok"] is False
         assert any("compiler_family" in e for e in payload["report"]["errors"])
 
+    def test_unused_profiles_mismatch_does_not_abort_an_otherwise_valid_plan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: check_profile_toolchain_identity previously probed
+        # EVERY declared profile, not just the ones the generated plan
+        # actually resolved a check for -- a non-contract, unreferenced
+        # profile's binding can name a platform-specific compiler that's
+        # unavailable/mismatched on this host, and that must not abort an
+        # otherwise-valid plan that never uses it (Codex review, fresh
+        # evidence, mirroring the same fix in project_plan_cmd's CLI test).
+        from abicheck.buildsource import toolchain_probe as tp
+
+        def _fake_metadata(path: str) -> dict[str, str]:
+            if path == "/opt/clang":
+                return {"selected": path, "version": "clang version 18.0.0"}
+            return {"selected": path, "version": "gcc (GCC) 14.2.0"}
+
+        monkeypatch.setattr(tp, "_tool_identity_metadata", _fake_metadata)
+        raw_cfg = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))
+        raw_cfg["profiles"]["linux"]["compile"] = {
+            "binding": "gcc14",
+            "compiler_family": "gcc",
+        }
+        raw_cfg["profiles"]["macos"] = {
+            "contract": False,
+            "compile": {"binding": "macclang", "compiler_family": "gcc"},
+        }
+        config = _write_config(tmp_path, raw_cfg)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text(
+            yaml.safe_dump(
+                {
+                    "schema": "abicheck.toolchain-bindings/v1",
+                    "bindings": {"gcc14": "/opt/gcc", "macclang": "/opt/clang"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        raw = abi_project_plan(
+            str(config),
+            build_outputs=[f"linux={build_dir}"],
+            toolchain_bindings=str(bindings),
+        )
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["report"]["ok"] is True
+        assert len(payload["plan"]["checks"]) == 1
+        assert payload["plan"]["checks"][0]["profile_id"] == "linux"
+
     def test_empty_plan_without_allow_empty_is_a_generation_error(self, tmp_path: Path):
         empty_raw = {
             "targets": {},

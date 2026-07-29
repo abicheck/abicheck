@@ -233,6 +233,7 @@ def _clang_accepts_target(selected_path: str, digest: str, target: str) -> bool 
 #: ``--version`` banner echoes back verbatim as its first token — a bare
 #: search would find one of *those* before the actual, always-dotted
 #: version number that follows later in the same banner.
+_VERSION_KEYWORD_RE = re.compile(r"\bversion\s+(\d+(?:\.\d+){1,3})", re.IGNORECASE)
 _DOTTED_VERSION_RE = re.compile(r"\d+\.\d+(?:\.\d+){0,2}")
 _BARE_VERSION_RE = re.compile(r"\d+")
 _CONSTRAINT_CLAUSE_RE = re.compile(r"^(==|!=|>=|<=|>|<)?\s*(\d+(?:\.\d+){0,3})$")
@@ -244,18 +245,34 @@ def _extract_version_token(text: str) -> str | None:
     Restricted to the banner's first line: GCC/Clang always print the
     actual version there, and every line after it is copyright/warranty
     boilerplate that could otherwise contribute a spurious digit match.
-    Within that line, the *last* dotted match is taken, not the first: a
-    cross-compiler binding's own invoked name can itself embed a dotted
-    number ahead of the real version -- not just the bare target-triple
-    digits (``86``, ``64``) the first fix already accounted for, but a
-    genuinely dotted one, e.g. a target-triple OS version
-    (``x86_64-pc-solaris2.11-gcc (GCC) 13.2.0`` previously extracted
-    ``"2.11"`` instead of the real ``"13.2.0"``, rejecting a valid
-    ``>=13,<14`` constraint -- Codex review, fresh evidence). The real
-    version is conventionally the last token on the line, after any
-    invoked-name prefix and parenthetical package/build descriptor.
+
+    Tries three strategies, most-specific first:
+
+    1. The dotted number immediately following the literal word
+       ``"version"`` (case-insensitive) -- both plain Clang
+       (``"clang version 18.1.3"``) and Apple/Xcode Clang
+       (``"Apple clang version 16.0.0 (clang-1600.0.26.4)"``) spell the
+       real version this way, immediately followed by an *unrelated*
+       parenthetical build identifier that a bare "last dotted token"
+       search would wrongly prefer (``"1600.0.26.4"`` instead of
+       ``"16.0.0"``, rejecting a valid ``>=16,<17`` constraint -- Codex
+       review, fresh evidence, following the earlier last-token fix below).
+    2. Failing that (GCC's own banner has no ``"version"`` keyword), the
+       *last* dotted match on the line: a cross-compiler binding's own
+       invoked name can itself embed a dotted number ahead of the real
+       version -- not just the bare target-triple digits (``86``, ``64``)
+       the first fix already accounted for, but a genuinely dotted one,
+       e.g. a target-triple OS version (``x86_64-pc-solaris2.11-gcc (GCC)
+       13.2.0`` previously extracted ``"2.11"`` instead of the real
+       ``"13.2.0"`` -- Codex review, fresh evidence). The real version is
+       conventionally the last token on the line, after any invoked-name
+       prefix and parenthetical package/build descriptor.
+    3. Failing that, the last bare digit run on the line.
     """
     first_line = text.splitlines()[0] if text else ""
+    keyword_match = _VERSION_KEYWORD_RE.search(first_line)
+    if keyword_match is not None:
+        return keyword_match.group(1)
     dotted_matches: list[str] = _DOTTED_VERSION_RE.findall(first_line)
     if dotted_matches:
         return dotted_matches[-1]
