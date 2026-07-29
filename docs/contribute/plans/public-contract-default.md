@@ -1112,7 +1112,32 @@ the off-by-default case, a real end-to-end JSON report with actual stamped
 `contract_relevance`/`contract_reason_code` fields (not a mock), the
 `--help-all` text, and the directory/package rejection — plus the frozen
 `compare` option-set snapshot in `tests/test_cli_contract.py` and the
-generated `docs/reference/cli-reference.md` were updated accordingly.
+generated `docs/reference/cli-reference.md` were updated accordingly. Also
+added a `COMPARE_FLAG_BUDGET_RAISES` ledger entry
+(`cli_options.py`) for the new visible flag, since `--contract-evaluation`
+pushed `compare`'s visible-option count one past the existing budget.
+
+**Codex review on the same PR found a real gap in this slice**:
+`--contract-evaluation` combined with `--used-by`/`--required-symbol`
+stamped nothing for `scoped_only_changes` (fresh `Change` objects
+`scope_diff_to_app`/`scope_diff_to_required_symbols` synthesize, e.g. a PE
+ordinal retarget), for synthetic missing-contract-label entries, or
+override a weaker header-derived decision on an existing `result.changes`
+entry the scoping pass marks relevant — the shadow evaluator runs before
+app-usage/required-symbol scoping applies, and nothing in the CLI path
+re-stamped afterward. The MCP `abi_compare` tool already had this exact
+fix (`_stamp_explicit_scope_contract_evaluation`), but it was private to
+`mcp_server.py`. Fixed by promoting it to a shared, public function,
+`contract_evaluation.stamp_explicit_scope_contract_evaluation` (mcp_server.py
+now imports and aliases it instead of keeping its own copy), and calling it
+from `cli_compare_helpers.run_compare` (for `result.changes`/
+`scoped_only_changes`, right after scoping and before rendering) and
+`cli_compare_fold._fold_scoped_compat_into_text` (for the synthetic
+missing-label dict entries, via a new `contract_evaluation` parameter).
+New tests in `tests/test_cli_compare_contract_evaluation.py`
+(`TestUsedByScopingStampsExplicitEvidence`) mirror
+`tests/test_mcp_server_unit.py`'s existing coverage for the same fix on the
+MCP side.
 
 Measure:
 

@@ -1755,6 +1755,13 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "invocation needs varies per run (matching whatever a baseline was "
         "dumped with), not a stable project setting."
     ),
+    "--contract-evaluation": (
+        "ADR-049 Phase 3: opts one invocation into the shadow contract "
+        "evaluator's advisory per-finding relevance/reason/assurance fields. "
+        "Whether a given comparison run wants that extra detail varies per "
+        "invocation (e.g. an ad hoc audit vs. a routine CI gate), not a "
+        "stable project default -- like --pattern-verdicts/--surface-metrics."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.

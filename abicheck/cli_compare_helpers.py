@@ -72,6 +72,7 @@ from .cli_resolve import (
     _resolve_compare_snapshots,
     classify_compare_operand,
 )
+from .contract_evaluation import stamp_explicit_scope_contract_evaluation
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 
 if TYPE_CHECKING:
@@ -1670,6 +1671,27 @@ def run_compare(
             exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
         )
 
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --used-by/
+    # --required-symbol scoping above can add scoped_only_changes (fresh
+    # Change objects scope_diff_to_app/scope_diff_to_required_symbols
+    # synthesize, e.g. PE_ORDINAL_RETARGETED) and mark existing
+    # result.changes entries as relevant to the scoped contract -- neither
+    # ever passes through checker._apply_contract_evaluation_shadow, so
+    # both stayed permanently unstamped even when --contract-evaluation was
+    # given. This must run before _render_output below serializes
+    # result.changes, and mirrors the identical fix already applied to the
+    # MCP abi_compare tool (mcp_server.py).
+    if contract_evaluation:
+        relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
+        if relevant_ids:
+            from .reporter import _finding_id
+
+            for c in result.changes:
+                if _finding_id(c) in relevant_ids:
+                    stamp_explicit_scope_contract_evaluation(c)
+        for c in getattr(result, "scoped_only_changes", ()) or ():
+            stamp_explicit_scope_contract_evaluation(c)
+
     text = _render_output(
         fmt, result, old, new,
         follow_deps=follow_deps,
@@ -1683,6 +1705,7 @@ def run_compare(
         text, fmt, result,
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
         show_only=show_only, report_mode=report_mode,
+        contract_evaluation=contract_evaluation,
     )
     text = _fold_evidence_depth_into_json(
         text, fmt, old, new,
@@ -1718,6 +1741,7 @@ def run_compare(
         secondary_text = _fold_scoped_compat_into_text(
             secondary_text, secondary_fmt, result,
             severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+            contract_evaluation=contract_evaluation,
         )
         secondary_text = _fold_evidence_depth_into_json(
             secondary_text, secondary_fmt, old, new,

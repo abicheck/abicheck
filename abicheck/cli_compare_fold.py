@@ -51,6 +51,7 @@ def _fold_scoped_compat_into_text(
     severity_config: Any = None,
     show_only: str | None = None,
     report_mode: str = "full",
+    contract_evaluation: bool = False,
 ) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
@@ -82,6 +83,18 @@ def _fold_scoped_compat_into_text(
     ``review`` format ignores ``report_mode`` entirely (no root-cause
     rendering exists for it), so it always gets the appended section
     regardless of this parameter's value.
+
+    *contract_evaluation* (ADR-049 Phase 3), when ``True``, stamps each
+    synthesized missing-contract-label dict entry built below with the
+    explicit-scope ``IN_CONTRACT`` decision via
+    ``contract_evaluation.stamp_explicit_scope_contract_evaluation`` --
+    mirroring the MCP ``abi_compare`` tool's identical stamping of its own
+    missing-label entries. The ``scoped_only`` ``Change`` objects folded in
+    below need no separate stamping here: the caller
+    (``cli_compare_helpers.run_compare``) already stamps them (and any
+    matching ``result.changes`` entry) in place before this function runs,
+    so ``_change_to_dict`` picks up the decision for free the same way it
+    does for any other already-stamped ``Change``.
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -252,6 +265,12 @@ def _fold_scoped_compat_into_text(
                     # either way) is the honest, consistent value here.
                     "reachability_state": ReachabilityState.UNKNOWN.value,
                 }
+                if contract_evaluation:
+                    from .contract_evaluation import (
+                        stamp_explicit_scope_contract_evaluation,
+                    )
+
+                    stamp_explicit_scope_contract_evaluation(entry)
                 changes_list.append(entry)
                 # A missing-contract label has no caused_by_type; its
                 # `symbol` (the label) only becomes a *grouping* key if some

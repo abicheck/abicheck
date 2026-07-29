@@ -58,6 +58,7 @@ its :doc:`implementation plan </contribute/plans/public-contract-default>`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from .checker_policy import ADDITION_KINDS, ChangeKind
 from .checker_types import Change
@@ -1057,3 +1058,85 @@ def evaluate_snapshot_pair_contract_relevance(
         )
         for change in changes
     ]
+
+
+# ADR-049 section 4.3 item 1's strongest public-evidence tier: "explicit
+# required symbol, exact contract/ABI manifest, package symbols metadata,
+# or concrete consumer import/relocation/recorded entrypoint." Every entry
+# in used_by/required_symbols scoping's own relevant/scoped-only/missing-
+# label collections *is*, by construction, one of those -- a
+# consumer-import-derived finding (appcompat.scope_diff_to_app) or an
+# explicit required-symbol/entrypoint finding
+# (appcompat.scope_diff_to_required_symbols) -- so it is authoritative
+# IN_CONTRACT evidence on its own, regardless of what a from-scratch
+# header-surface evaluation would conclude. Shared by mcp_server.py's
+# abi_compare tool and cli_compare_helpers.py/cli_compare_fold.py's
+# compare CLI command -- both apply the identical override to the
+# identical class of finding (Codex review: originally private to
+# mcp_server.py only, leaving the CLI's own --contract-evaluation +
+# --used-by/--required-symbol combination permanently unstamped).
+def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
+    """Stamp *c* (a ``Change`` or a plain dict entry) ``IN_CONTRACT`` using
+    ADR-049's explicit consumer/required-symbol evidence tier.
+
+    ``used_by``/``required_symbols`` scoping
+    (``appcompat.scope_diff_to_app``/``scope_diff_to_required_symbols``) can
+    produce fresh ``Change`` objects (e.g. a synthetic
+    ``consumer_required_symbol_removed`` or a PE ordinal-retarget finding),
+    and a missing-symbol/missing-entrypoint label is a plain dict built
+    directly by the caller -- neither ever passes through
+    ``checker._apply_contract_evaluation_shadow`` (the only place inside
+    ``compare()`` that stamps a shadow decision), so both stay permanently
+    unstamped even when the caller opted into ``contract_evaluation=True``.
+
+    A generic header-surface evaluation (``evaluate_change_contract_relevance``)
+    would be *wrong* here, not merely weaker: these findings are exactly the
+    "explicit required symbol ... or concrete consumer import" evidence
+    ADR-049 section 4.3 ranks as the *strongest* public-contract proof --
+    stronger than, and independent of, header-derived public root
+    membership. A binary-only ``used_by`` snapshot has no resolvable header
+    surface at all, so running these through the header-surface path would
+    misclassify authoritative in-contract evidence as ``UNKNOWN_UNRESOLVED``.
+
+    Accepts either a ``Change`` (attribute-set) or a plain ``dict`` (the
+    missing-label shape) via duck typing. Unconditionally overwrites any
+    existing decision -- including one ``compare()``'s own
+    ``_apply_contract_evaluation_shadow`` already stamped onto a ``Change``
+    that is *also* present in the caller's already-classified finding set
+    (the ordinary case: a scoping pass's own relevance set is not limited to
+    *fresh* findings). That header-surface-derived decision can be a real,
+    weaker misclassification (e.g. ``UNKNOWN_UNRESOLVED`` on a binary-only
+    snapshot with no resolvable header surface at all) that this call's own
+    stronger, authoritative evidence must override, not merely fill in when
+    absent.
+
+    EXCEPTION -- non-entity kinds: ``_is_relevant_to_app``/
+    ``scope_diff_to_required_symbols`` deliberately include a handful of
+    *loader/deployment* findings in the relevant set for reasons that have
+    nothing to do with matching a symbol/entrypoint the consumer actually
+    references -- ``SONAME_CHANGED`` when the consumer records the old
+    SONAME in ``DT_NEEDED``, and ``COMPAT_VERSION_CHANGED`` (Mach-O)
+    unconditionally for every consumer. This module already classifies both
+    as ``NOT_APPLICABLE`` (``_NOT_APPLICABLE_KIND_SLUGS``, ADR-049 D2's
+    "non-entity" column) since neither is about a specific function/
+    variable/type a consumer's code references. Overriding those to
+    ``IN_CONTRACT`` here would be a false contract decision, not a stronger
+    one -- so a ``Change`` whose kind is in that non-entity set is left
+    alone (whatever ``_apply_contract_evaluation_shadow`` already computed
+    for it, i.e. ``NOT_APPLICABLE``) instead of being overwritten.
+    """
+    is_dict = isinstance(c, dict)
+    if not is_dict:
+        kind = getattr(c, "kind", None)
+        kind_value = getattr(kind, "value", None)
+        if kind_value in _NOT_APPLICABLE_KIND_SLUGS:
+            return
+
+    if is_dict:
+        c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
+        c["contract_reason_code"] = "explicit_consumer_or_required_symbol_evidence"
+        c["contract_assurance"] = ContractAssurance.COMPLETE.value
+    else:
+        c.contract_relevance = ContractRelevance.IN_CONTRACT
+        c.contract_reason_code = "explicit_consumer_or_required_symbol_evidence"
+        c.contract_assurance = ContractAssurance.COMPLETE

@@ -40,6 +40,11 @@ from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
+# ADR-049 Phase 3 -- app-usage scoping requires real library binaries (not
+# JSON snapshots), so --used-by tests stub `dumper.dump` the same way
+# tests/test_cov95_cli.py's TestUsedByScoping does, rather than driving a
+# real compiler.
+
 
 def _fn(name: str, mangled: str, ret: str = "int") -> Function:
     return Function(
@@ -200,3 +205,147 @@ class TestRejectedOnSetInputs:
         assert result.exit_code != 0
         assert "not supported for directory/package" in result.output
         assert "--contract-evaluation" in result.output
+
+
+class TestUsedByScopingStampsExplicitEvidence:
+    """Regression (Codex review, PR #658, fresh evidence): --contract-
+    evaluation combined with --used-by/--required-symbol ran the shadow
+    evaluator before ADR-043's app-usage/required-symbol scoping applied --
+    scoped_only_changes (fresh Change objects scope_diff_to_app/
+    scope_diff_to_required_symbols synthesize) and synthetic missing-
+    contract label entries were never stamped, and an existing
+    result.changes entry the scoping pass marks relevant kept whatever
+    weaker header-derived decision the shadow evaluator had already
+    computed. Mirrors tests/test_mcp_server_unit.py's identical coverage
+    for the MCP abi_compare tool, which this fix's shared
+    contract_evaluation.stamp_explicit_scope_contract_evaluation helper is
+    reused from."""
+
+    def _setup(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        new_snap = AbiSnapshot(library="libfoo.so", version="2.0", functions=[])
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+        return app, old, new
+
+    def _patch_scope(self, monkeypatch, result):
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app", lambda *a, **k: result
+        )
+
+    def test_used_by_missing_symbol_gets_contract_evaluation(
+        self, tmp_path, monkeypatch
+    ):
+        from abicheck.appcompat import AppCompatResult
+
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_scope(monkeypatch, scoped)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new),
+                "--used-by", str(app),
+                "--contract-evaluation", "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        missing_entries = [
+            c for c in payload["changes"] if c["kind"] == "used_by_missing_symbol"
+        ]
+        assert missing_entries
+        for c in missing_entries:
+            assert c["contract_relevance"] == "IN_CONTRACT"
+            assert c["contract_reason_code"] == (
+                "explicit_consumer_or_required_symbol_evidence"
+            )
+
+    def test_used_by_missing_symbol_omits_contract_fields_by_default(
+        self, tmp_path, monkeypatch
+    ):
+        from abicheck.appcompat import AppCompatResult
+
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_scope(monkeypatch, scoped)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new),
+                "--used-by", str(app), "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        missing_entries = [
+            c for c in payload["changes"] if c["kind"] == "used_by_missing_symbol"
+        ]
+        assert missing_entries
+        for c in missing_entries:
+            assert "contract_relevance" not in c
+            assert "contract_reason_code" not in c
+
+    def test_used_by_scoped_only_change_gets_contract_evaluation(
+        self, tmp_path, monkeypatch
+    ):
+        # A fresh Change scope_diff_to_app synthesizes (never present in
+        # result.changes) must also be stamped, not just a reused/existing
+        # finding.
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.diff_helpers import make_change
+
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        synthetic = make_change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="_Z5entryv",
+            name=app.name,
+        )
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            breaking_for_app=[synthetic], verdict=Verdict.BREAKING,
+        )
+        self._patch_scope(monkeypatch, scoped)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new),
+                "--used-by", str(app),
+                "--contract-evaluation", "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        matches = [
+            c for c in payload["changes"]
+            if c["kind"] == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED.value
+        ]
+        assert matches
+        for c in matches:
+            assert c["contract_relevance"] == "IN_CONTRACT"
