@@ -1253,6 +1253,34 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.name for t in scoped.types] == ["Foo"]
 
+    def test_globally_qualified_typedef_alias_reference_matches(self):
+        """Codex review (twenty-ninth round): direct-clang preserves an
+        explicit global-scope qualifier on a typedef alias reference the
+        same way it does on a direct type reference (rounds 26/27) --
+        `using Handle = dep::Thing; void f(::Handle);` keeps the leading
+        `::` on the alias, not just on a record/enum's own qualified
+        name. The alias-spelling index only ever registered the bare
+        alias name and its namespace suffixes, so a signature spelling
+        `::Handle` failed to resolve through the alias to the directly-
+        referenced `dep::Thing` at all."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("::Handle",))],
+            types=[
+                RecordType(
+                    name="Thing",
+                    kind="struct",
+                    qualified_name="dep::Thing",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "dep::Thing"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
         two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle

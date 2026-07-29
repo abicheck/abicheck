@@ -533,6 +533,7 @@ def _directly_referenced_dependency_names(
     all_typedef_alias_names: set[str] = set()
     for alias in typedefs:
         all_typedef_alias_names.add(alias)
+        all_typedef_alias_names.add(f"::{alias}")
         all_typedef_alias_names.update(_namespace_suffix_spellings(alias)[1:])
 
     key_owners: dict[str, set[str]] = {}
@@ -615,7 +616,18 @@ def _directly_referenced_dependency_names(
 
     alias_spelling_sources: dict[str, set[str]] = {}
     for alias in alias_to_identities:
-        for spelling in {alias, *_namespace_suffix_spellings(alias)[1:]}:
+        # A globally-qualified reference (``::Handle``) is exactly as
+        # possible for a typedef alias as it is for a dependency
+        # candidate's own identity (Codex review, fresh evidence,
+        # generalizing the same fix already applied to
+        # raw_own_spellings_of above): direct-clang preserves an explicit
+        # global-scope qualifier in its printed ``qualType`` regardless of
+        # whether the qualified name belongs to a record/enum or a
+        # typedef, so ``using Handle = dep::Thing; void f(::Handle);``
+        # keeps the leading ``::`` on the alias reference the same way it
+        # does on a direct type reference.
+        spellings = {alias, f"::{alias}", *_namespace_suffix_spellings(alias)[1:]}
+        for spelling in spellings:
             alias_spelling_sources.setdefault(spelling, set()).add(alias)
 
     alias_spelling_owners: dict[str, set[str]] = {}
