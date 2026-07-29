@@ -1757,7 +1757,7 @@ def run_compare_request(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             include_dependencies=side.include_dependencies,
-            dump_manifest=side.dump_manifest,
+            dump_manifest=evidence.dump_manifest,
         )
         if side.sources or side.build_info:
             extractor = _sce.effective_frontend(evidence.compile, header_backend)

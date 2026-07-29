@@ -1845,6 +1845,25 @@ class TestCompareRequestAdr055Evidence:
         calls_by_path = {c["path"]: c for c in calls}
         assert calls_by_path[old_p]["dump_manifest"] is sentinel
 
+    def test_depth_binary_also_clears_dump_manifest(self, tmp_path, monkeypatch):
+        """Codex review (P2): depth="binary" clears headers but must also
+        clear dump_manifest -- otherwise the manifest still drives its own
+        multi-TU L2 header extraction despite the caller explicitly
+        requesting binary-only evidence."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        calls = self._spy_resolve_input(monkeypatch)
+        sentinel = object()
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, dump_manifest=sentinel),
+            new=InputSpec.of(new_p),
+            depth="binary",
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["dump_manifest"] is None
+
     def test_per_side_compile_override_wins_over_pair_compile(self, tmp_path, monkeypatch):
         from abicheck.compile_context import CompileContext
 
@@ -1877,6 +1896,24 @@ class TestCompareRequestAdr055Evidence:
         calls_by_path = {c["path"]: c for c in calls}
         assert calls_by_path[old_p]["compile"].frontend_context == "device"
         assert calls_by_path[new_p]["compile"].frontend_context == "device"
+
+    def test_frontend_context_case_is_normalized(self, tmp_path, monkeypatch):
+        """Codex review (P2): validate() accepts frontend_context case-
+        insensitively, but every real consumer compares against the
+        lowercase "host"/"device" literals -- an accepted "DEVICE" must
+        still normalize to "device", not silently behave as neither."""
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        calls = self._spy_resolve_input(monkeypatch)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p),
+            new=InputSpec.of(new_p),
+            frontend_context="DEVICE",
+        )
+        run_compare_request(request)
+        calls_by_path = {c["path"]: c for c in calls}
+        assert calls_by_path[old_p]["compile"].frontend_context == "device"
 
     def test_unrelated_side_override_still_picks_up_device_default(
         self, tmp_path, monkeypatch

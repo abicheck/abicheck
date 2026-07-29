@@ -191,15 +191,44 @@ class TestCompareRequestValidate:
         )
         assert req.validation_errors() == []
 
-    def test_android_frontend_with_inputspec_sources_accepted(self, tmp_path):
-        # ADR-055 D1 (Codex review): either side's own InputSpec.sources also
-        # satisfies this -- not just the legacy has_sources flag.
+    def test_android_frontend_with_legacy_has_sources_accepted(self):
+        # ADR-055 D1: has_sources=True (no inline InputSpec.sources/build_info)
+        # is the one combination that's actually reachable -- it reuses a
+        # pre-captured header-abi dump outside run_compare_request's own
+        # inline evidence collection.
+        req = CompareRequest(
+            old=InputSpec.of("a"),
+            new=InputSpec.of("b"),
+            frontend="android",
+            has_sources=True,
+        )
+        assert req.validation_errors() == []
+
+    def test_android_frontend_with_inputspec_sources_rejected(self, tmp_path):
+        """Codex review (P2): InputSpec.sources/build_info drive
+        run_compare_request's inline embed_build_source call, which has no
+        real Android extractor -- silently running Clang instead of the
+        advertised adapter would produce wrong results, so this combination
+        is rejected until Android replay is wired into that path."""
         req = CompareRequest(
             old=InputSpec.of("a", sources=tmp_path),
             new=InputSpec.of("b"),
             frontend="android",
         )
-        assert req.validation_errors() == []
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "android" in errors[0] and "not yet wired" in errors[0]
+
+    def test_android_frontend_with_inputspec_build_info_rejected(self, tmp_path):
+        req = CompareRequest(
+            old=InputSpec.of("a", build_info=tmp_path),
+            new=InputSpec.of("b"),
+            frontend="android",
+            has_sources=True,
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "android" in errors[0] and "not yet wired" in errors[0]
 
     def test_missing_policy_file_rejected(self, tmp_path):
         # D9 pre-flight: a --policy-file path that doesn't exist errors identically
@@ -237,6 +266,25 @@ class TestCompareRequestValidate:
     def test_depth_none_is_not_validated(self):
         req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"), depth=None)
         assert req.validation_errors() == []
+
+    # ── ADR-055 D1: frontend_context validation ───────────────────────────────
+
+    @pytest.mark.parametrize("value", ["host", "device", "HOST", "Device"])
+    def test_supported_frontend_contexts_accepted(self, value):
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), frontend_context=value
+        )
+        assert req.validation_errors() == []
+
+    def test_unsupported_frontend_context_rejected(self):
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), frontend_context="DEVICE2"
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "DEVICE2" in errors[0]
+        with pytest.raises(ValidationError, match="DEVICE2"):
+            req.validate()
 
 
 class TestCompareRequestReplace:

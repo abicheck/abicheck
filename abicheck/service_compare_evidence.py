@@ -45,6 +45,7 @@ from .compile_context import CompileContext
 
 if TYPE_CHECKING:
     from .api_types import CompareRequest, InputSpec
+    from .dump_manifest import DumpManifest
 
 __all__ = [
     "SideEvidence",
@@ -69,6 +70,7 @@ class SideEvidence:
     headers: list[Path]
     compile: CompileContext | None
     collect_mode: str
+    dump_manifest: DumpManifest | None
 
 
 def _resolve_depth_collect_mode(depth: str | None, default_mode: str) -> str:
@@ -108,6 +110,15 @@ def _headers(side: InputSpec, depth: str | None) -> list[Path]:
     if depth is not None and depth.lower() == "binary":
         return []
     return list(side.headers)
+
+
+def _dump_manifest(side: InputSpec, depth: str | None) -> DumpManifest | None:
+    # depth == "binary" also clears dump_manifest (Codex review) -- otherwise
+    # a binary-only depth request still runs the manifest's own multi-TU L2
+    # header extraction, exactly the L2 evidence "binary" is meant to skip.
+    if depth is not None and depth.lower() == "binary":
+        return None
+    return side.dump_manifest
 
 
 def _compile_context(
@@ -174,19 +185,22 @@ def resolve_compare_request_evidence(
     ``InputSpec.compile`` takes precedence over it.
     """
     collect_mode = _collect_mode(request)
+    # Codex review: validate() accepts frontend_context case-insensitively,
+    # but every real consumer compares against the lowercase "host"/"device"
+    # literals -- normalize once here so an accepted "DEVICE" doesn't
+    # silently behave as neither.
+    frontend_context = request.frontend_context.lower()
     return (
         SideEvidence(
             headers=_headers(request.old, request.depth),
-            compile=_compile_context(
-                request.old.compile, pair_compile, request.frontend_context
-            ),
+            compile=_compile_context(request.old.compile, pair_compile, frontend_context),
             collect_mode=collect_mode,
+            dump_manifest=_dump_manifest(request.old, request.depth),
         ),
         SideEvidence(
             headers=_headers(request.new, request.depth),
-            compile=_compile_context(
-                request.new.compile, pair_compile, request.frontend_context
-            ),
+            compile=_compile_context(request.new.compile, pair_compile, frontend_context),
             collect_mode=collect_mode,
+            dump_manifest=_dump_manifest(request.new, request.depth),
         ),
     )
