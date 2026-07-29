@@ -416,26 +416,91 @@ _CLANG_DRIVER_NAME_RE = re.compile(
 )
 
 
+def _family_from_names(stems: list[str]) -> str | None:
+    """Compiler family implied by a resolved binding's own basename(s)
+    alone -- see :func:`_probe_compiler_family` for how this is combined
+    with the banner-derived signal."""
+    if any(stem in _INTEL_ONEAPI_ALIAS_NAMES for stem in stems):
+        return "icx"
+    if any(stem in _CLASSIC_ICC_ALIAS_NAMES for stem in stems):
+        return "icc"
+    if any(_CLANG_DRIVER_NAME_RE.search(stem) for stem in stems):
+        return "clang"
+    if any(stem == "cl" for stem in stems):
+        return "msvc"
+    if any(_GCC_DRIVER_NAME_RE.search(stem) for stem in stems):
+        return "gnu"
+    return None
+
+
+def _family_from_banner(version_text: str) -> str | None:
+    """Compiler family implied by the probed ``--version`` banner text
+    alone (already lowercased) -- see :func:`_probe_compiler_family` for
+    how this is combined with the name-derived signal.
+
+    Checks the banner's own **self-reported invocation name** (the first
+    whitespace-delimited token of its first line) via the same
+    :data:`_GCC_DRIVER_NAME_RE`/:data:`_CLANG_DRIVER_NAME_RE` patterns used
+    for the resolved path's basename first: GCC/Clang always print their
+    own invoked name as the first word of ``--version`` output (confirmed
+    empirically: ``gcc``/``g++``/``clang``/``clang++``/a ``cc`` alias all
+    print exactly that as the leading token) -- so a wrapper script whose
+    *file* is named one thing but internally execs a genuinely different
+    compiler self-identifies correctly here even though its basename
+    doesn't (Codex review, fresh evidence: a binding named ``clang`` whose
+    real ``--version`` banner is ``"gcc (GCC) 14.2.0"`` self-reports as
+    ``gcc`` via this check, surfacing the conflict in
+    :func:`_probe_compiler_family` instead of trusting the file's own
+    name). Falls back to a signature *substring* for banner shapes that
+    don't self-identify via a plain leading token this way (Intel's own
+    banners spell themselves as ``"Intel(R) oneAPI ..."``/``"Intel(R) C++
+    Compiler"``, never a bare ``icx``/``icc`` first word).
+    """
+    first_line = version_text.splitlines()[0] if version_text else ""
+    first_token = first_line.split()[0] if first_line.split() else ""
+    if first_token in _INTEL_ONEAPI_ALIAS_NAMES:
+        return "icx"
+    if first_token in _CLASSIC_ICC_ALIAS_NAMES:
+        return "icc"
+    if _CLANG_DRIVER_NAME_RE.search(first_token):
+        return "clang"
+    if _GCC_DRIVER_NAME_RE.search(first_token):
+        return "gnu"
+    if first_token in ("cl", "cl.exe"):
+        return "msvc"
+    if "oneapi" in version_text:
+        return "icx"
+    if _ICC_BANNER_RE.search(version_text):
+        return "icc"
+    if "clang version" in version_text:
+        return "clang"
+    if "free software foundation" in version_text and "binutils" not in version_text:
+        return "gnu"
+    return None
+
+
 def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
     """Best-effort compiler family for *this* validation gate.
 
     Deliberately more conservative than
     :func:`~abicheck.dumper_toolchain._compiler_family_from_toolchain`
-    (see module docstring for why that helper isn't reused here): checks
-    both the *selected* path's basename and the resolved *realpath*'s
-    basename, since a generic driver alias/symlink (``cc``, ``c++``, or a
-    Windows-style ``gcc`` that is actually Clang under the hood) can name
-    something generic while resolving to the real compiler binary, via
-    :data:`_GCC_DRIVER_NAME_RE`/:data:`_CLANG_DRIVER_NAME_RE` (an exact
-    driver-alias match, not a bare substring check -- see their docstring
-    for why). Falls back to a signature phrase in the probed ``--version``
-    banner text (Clang always prints "clang version"; GCC/cc1 always print
-    "Free Software Foundation, Inc." -- but so does every GNU Binutils
-    component, e.g. ``gcc-ar``'s own "GNU ar (GNU Binutils for ...)"
-    banner, so that fallback is additionally rejected whenever the banner
-    also mentions "binutils", the one phrase real gcc/g++/cc1 banners never
-    contain (Codex review, fresh evidence)). Returns ``None`` — skip the
-    comparison, never guess — when nothing here is conclusive.
+    (see module docstring for why that helper isn't reused here): derives
+    a family independently from the resolved binding's own basename(s)
+    (:func:`_family_from_names`, checking both the *selected* path and the
+    resolved *realpath*, since a generic driver alias/symlink like ``cc``/
+    ``c++`` can name something generic while resolving to the real
+    compiler binary) and from the probed ``--version`` banner text
+    (:func:`_family_from_banner`). When **both** signals are conclusive but
+    *disagree*, the result is treated as indeterminate rather than
+    trusting either one -- a wrapper whose file is named like one compiler
+    but whose banner self-identifies as a genuinely different one is
+    exactly the case neither signal alone can resolve safely (Codex
+    review, fresh evidence: a binding named ``clang`` that actually
+    invokes a real ``gcc`` under the hood previously passed a declared
+    ``compiler_family: clang`` profile with no error at all, since the
+    name-only check short-circuited before the contradictory banner was
+    ever considered). Returns ``None`` — skip the comparison, never guess
+    — whenever nothing here is conclusive, or the two signals conflict.
     """
     stems = [
         Path(candidate).stem.lower()
@@ -444,27 +509,15 @@ def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
     ]
     version_text = metadata.get("version", "").lower()
 
+    name_family = _family_from_names(stems)
+    banner_family = _family_from_banner(version_text)
     if (
-        any(stem in _INTEL_ONEAPI_ALIAS_NAMES for stem in stems)
-        or "oneapi" in version_text
+        name_family is not None
+        and banner_family is not None
+        and name_family != banner_family
     ):
-        return "icx"
-    if any(stem in _CLASSIC_ICC_ALIAS_NAMES for stem in stems) or _ICC_BANNER_RE.search(
-        version_text
-    ):
-        return "icc"
-    if (
-        any(_CLANG_DRIVER_NAME_RE.search(stem) for stem in stems)
-        or "clang version" in version_text
-    ):
-        return "clang"
-    if any(stem == "cl" for stem in stems):
-        return "msvc"
-    if any(_GCC_DRIVER_NAME_RE.search(stem) for stem in stems):
-        return "gnu"
-    if "free software foundation" in version_text and "binutils" not in version_text:
-        return "gnu"
-    return None
+        return None
+    return name_family if name_family is not None else banner_family
 
 
 class ToolchainProbeError(ValueError):
@@ -609,16 +662,20 @@ def _check_one_overlay(
         ]
 
     errors: list[str] = []
-    # Resolved once, needed by both the family check and the target check
-    # (target's own semantics depend on whether the actual compiler is
-    # Clang -- see below). An indeterminate family is itself a failure
-    # whenever family or target is declared: silently passing an
-    # unidentifiable executable defeats the point of a hard validation
-    # gate (Codex review, fresh evidence -- a family-only profile
-    # previously accepted literally any unrecognized binary).
+    # Resolved once, needed by the family check, the version check, and the
+    # target check (target's own semantics depend on whether the actual
+    # compiler is Clang -- see below). An indeterminate family is itself a
+    # failure whenever family, version, or target is declared: silently
+    # passing an unidentifiable executable defeats the point of a hard
+    # validation gate (Codex review, fresh evidence -- a family-only
+    # profile previously accepted literally any unrecognized binary, and a
+    # *version-only* profile skipped family detection entirely, so binding
+    # e.g. compiler_version: ">=3" to a real /usr/bin/cmake -- not a
+    # compiler at all -- passed unconditionally as long as its own
+    # --version banner happened to contain a matching dotted number).
     actual_family = (
         _probe_compiler_family(metadata)
-        if (declared_family or declared_target)
+        if (declared_family or declared_version or declared_target)
         else None
     )
     if declared_family:
@@ -640,6 +697,19 @@ def _check_one_overlay(
                     f"family {actual_family!r}"
                 )
     if declared_version:
+        if not declared_family and not declared_target and actual_family is None:
+            # Only reported here when neither of the other two checks
+            # already covers it (both have their own actual_family-is-None
+            # error above/below) -- a bare compiler_version: constraint is
+            # otherwise the one declaration shape with no family/target
+            # check to ever notice the resolved binding isn't recognizably
+            # a compiler at all (Codex review, fresh evidence).
+            errors.append(
+                f"{where}.compiler_version declares {declared_version!r} but the "
+                f"actual family of toolchain binding {binding_id!r} ({path!r}) "
+                f"could not be determined from its resolved path or --version "
+                f"output, so it cannot be verified to be a compiler at all"
+            )
         try:
             satisfied = version_satisfies(metadata.get("version", ""), declared_version)
         except ToolchainProbeError as exc:

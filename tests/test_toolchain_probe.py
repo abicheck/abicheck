@@ -159,6 +159,35 @@ class TestVersionSatisfies:
 
 
 class TestProbeCompilerFamily:
+    def test_wrapper_named_clang_but_banner_self_reports_as_gcc_is_indeterminate(
+        self,
+    ) -> None:
+        # Regression: a wrapper whose FILE is named "clang" but internally
+        # execs a real gcc self-identifies as "gcc" in its own --version
+        # banner -- trusting the file's own basename over the contradicting
+        # banner previously let a declared compiler_family: clang profile
+        # pass with no error at all (Codex review, fresh evidence).
+        metadata = {"selected": "/usr/bin/clang", "version": "gcc (GCC) 14.2.0"}
+        assert tp._probe_compiler_family(metadata) is None
+
+    def test_banner_self_reported_icx_name_resolves_to_icx(self) -> None:
+        metadata = {
+            "selected": "/usr/local/bin/mycompiler",
+            "version": "icx (Intel) 2026.1.0",
+        }
+        assert tp._probe_compiler_family(metadata) == "icx"
+
+    def test_banner_self_reported_icc_name_resolves_to_icc(self) -> None:
+        metadata = {
+            "selected": "/usr/local/bin/mycompiler",
+            "version": "icc (ICC) 2021.7.1",
+        }
+        assert tp._probe_compiler_family(metadata) == "icc"
+
+    def test_banner_self_reported_cl_name_resolves_to_msvc(self) -> None:
+        metadata = {"selected": "/usr/local/bin/mycompiler", "version": "cl.exe"}
+        assert tp._probe_compiler_family(metadata) == "msvc"
+
     def test_generic_alias_resolves_via_realpath(self) -> None:
         # Regression: a "cc"/"c++" driver alias (or symlink) that resolves to
         # a real gcc binary was classified by its own generic basename.
@@ -652,6 +681,82 @@ class TestCheckProfileToolchainIdentity:
         errors = tp.check_profile_toolchain_identity(profiles, bf)
         assert len(errors) == 1
         assert "could not be determined" in errors[0]
+
+    def test_declared_clang_family_against_a_wrapper_that_self_reports_gcc_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression, end-to-end: a wrapper named "clang" whose real
+        # --version banner self-identifies as gcc must not pass a declared
+        # compiler_family: clang profile -- the conflicting signals must be
+        # rejected as indeterminate, not resolved by trusting the file's
+        # own name (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/usr/bin/clang": {
+                    "selected": "/usr/bin/clang",
+                    "version": "gcc (GCC) 14.2.0",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"clang1": "/usr/bin/clang"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(compiler_family="clang", binding="clang1"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "could not be determined" in errors[0]
+
+    def test_version_only_binding_to_a_non_compiler_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression, end-to-end: a profile declaring ONLY compiler_version
+        # (no compiler_family/target) previously skipped family detection
+        # entirely, so binding e.g. cmake -- not a compiler at all -- with
+        # compiler_version: ">=3" passed unconditionally as long as its own
+        # --version banner happened to contain a matching dotted number
+        # (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/usr/bin/cmake": {
+                    "selected": "/usr/bin/cmake",
+                    "version": "cmake version 3.28.3",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"cm": "/usr/bin/cmake"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(compiler_version=">=3", binding="cm"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "cannot be verified to be a compiler at all" in errors[0]
+
+    def test_version_only_binding_to_a_real_compiler_yields_no_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The new version-only family check must not reject a genuinely
+        # recognizable compiler just because compiler_family/target weren't
+        # separately declared.
+        _stub_metadata(
+            monkeypatch,
+            {"/opt/gcc": {"selected": "/opt/gcc", "version": "gcc 13.2.0"}},
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(compiler_version=">=13", binding="gcc14"),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
 
     def test_matching_family_and_version_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch
