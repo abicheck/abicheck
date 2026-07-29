@@ -1608,6 +1608,16 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     if req.baseline is not None:
         raise ValueError("run_scan_set does not accept req.baseline (audit-only)")
 
+    # Start the shared budget clock *before* set discovery/validation, not
+    # after (Codex review): discover_artifact_set() stats every candidate
+    # path and parses each one's ELF program/dynamic table to classify it,
+    # which is real, potentially non-trivial work on a large set -- if the
+    # clock only started once that finished, a slow discovery phase would
+    # be invisible to `--budget` entirely, so even `--budget 0s` could spend
+    # substantial time discovering before ever reporting overflow.
+    start = _time.monotonic()
+    budget_s = req.budget.total_timeout
+
     # Validate/canonicalize the whole set *before* scanning any member
     # (Codex review): run_scan_set is a public, re-exported service entry
     # point (ADR-056) -- a direct Python API caller can reach it without
@@ -1623,9 +1633,6 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     # report budget exhaustion instead of the real, underlying
     # ArtifactSetError.
     libraries = discover_artifact_set(list(binaries), explicit=True)
-
-    start = _time.monotonic()
-    budget_s = req.budget.total_timeout
 
     per_artifact: list[ScanArtifactResult] = []
     for binary in libraries.values():

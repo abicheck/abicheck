@@ -437,6 +437,44 @@ class TestRunScanSetBundleAuditDeadline:
         assert result.verdict == "BUDGET_OVERFLOW"
         assert result.exit_code == 5
 
+    def test_slow_discovery_counts_against_budget(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # P2 regression (Codex review): run_scan_set started its shared
+        # budget clock *after* discover_artifact_set() already ran, so
+        # discovery's own work (stat + ELF program/dynamic-table parsing
+        # for every candidate) was invisible to --budget -- even
+        # `--budget 0s` could spend real time discovering before ever
+        # reporting overflow. The clock must start before discovery, not
+        # after, so a slow discovery phase is caught the same way a slow
+        # member scan or bundle audit already is.
+        import time as time_mod
+
+        import abicheck.bundle as bundle_mod
+        from abicheck.service import Budget, ScanRequest, ScanSetResult, run_scan_set
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(time_mod, "monotonic", lambda: clock["t"])
+
+        def _fake_discover(paths, *, explicit):
+            # Simulate a pathologically slow discovery phase that blows
+            # through the budget before any member is even scanned.
+            clock["t"] += 1000.0
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+
+        result = run_scan_set(
+            ScanRequest(
+                binaries=[snap_a, snap_b],
+                mode="audit",
+                budget=Budget(total_timeout=5.0),
+            )
+        )
+        assert isinstance(result, ScanSetResult)
+        assert result.verdict == "BUDGET_OVERFLOW"
+        assert result.exit_code == 5
+
 
 class TestRunScanSetAmbiguousSoname:
     """P2 regression (Codex review, x2): audit_bundle() rejects an
