@@ -59,8 +59,9 @@ input to an equal ``CompatibilityEvaluationConfig`` and provenance receipt."
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
 from .compatibility_evaluation_config import (
@@ -265,6 +266,10 @@ _BUILT_IN_DEFAULT_PACKS: tuple[ImmutableIdentity, ...] = ()
 
 def resolve_selected_packs(
     pack_paths: Sequence[str | Path],
+    *,
+    explicit_overrides: Mapping[PackKind, Mapping[str, Hashable]] = MappingProxyType(
+        {}
+    ),
 ) -> dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]]:
     """Resolve a real ``--pack <path>``-style CLI/config input into
     ``contract.packs``/``policy.packs``/``gate.packs`` field values.
@@ -282,6 +287,19 @@ def resolve_selected_packs(
     :class:`~abicheck.compatibility_evaluation_resolver.PackConflictError`
     if two selected packs of the same kind disagree on the same field or
     ``ChangeKind``.
+
+    *explicit_overrides*, keyed by :class:`PackKind`, is forwarded verbatim
+    as ``detect_pack_conflicts``'s own ``explicit_overrides`` for that
+    namespace: D8's composition order is "explicit per-kind override >
+    selected packs > base policy", so a field the effective configuration
+    already explicitly overrides is exempt from pack-vs-pack conflict
+    detection -- two packs may legitimately disagree on a field the caller
+    has already pinned. Without this, two selected packs disagreeing on a
+    field the caller *intends* to override could never be resolved: this
+    function would already have raised before any later composition step
+    got a chance to apply the override (Codex review, fresh evidence).
+    Omitted or a kind absent from the mapping means no override applies for
+    that namespace -- identical to today's unconditional-conflict behavior.
 
     The resolved *value* for each field is a ``tuple[ImmutableIdentity, ...]``
     -- a pack's own resolved field assignments are not part of the effective
@@ -316,7 +334,10 @@ def resolve_selected_packs(
 
     result: dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]] = {}
     for kind, field_name in _PACKS_FIELD_BY_KIND.items():
-        detect_pack_conflicts(grouped[kind])
+        detect_pack_conflicts(
+            grouped[kind],
+            explicit_overrides=explicit_overrides.get(kind, MappingProxyType({})),
+        )
 
         first_path_by_identity: dict[ImmutableIdentity, str] = {}
         for path, pack in by_kind[kind]:

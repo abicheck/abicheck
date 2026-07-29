@@ -23,6 +23,7 @@ import textwrap
 
 import pytest
 
+from abicheck.compatibility_evaluation_packs import PackKind
 from abicheck.compatibility_evaluation_resolver import PackConflictError
 from abicheck.compatibility_evaluation_wiring import (
     resolve_internal_namespaces,
@@ -309,3 +310,91 @@ class TestSelectedPacksInvalidManifest:
         bad.write_text("not: a valid pack manifest\n")
         with pytest.raises(PackManifestError):
             resolve_selected_packs([str(bad)])
+
+
+class TestSelectedPacksExplicitOverrides:
+    # Regression (Codex review, fresh evidence): D8's composition order is
+    # "explicit per-kind override > selected packs > base policy" -- a field
+    # already covered by an explicit override must be exempt from pack-vs-
+    # pack conflict detection, mirroring detect_pack_conflicts's own
+    # explicit_overrides parameter.
+
+    def test_disagreeing_field_covered_by_override_does_not_raise(self, tmp_path):
+        pack_a = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="pack_a",
+            kind="contract",
+            assignments_yaml="contract.mode: exports",
+        )
+        pack_b = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="pack_b",
+            kind="contract",
+            assignments_yaml="contract.mode: public",
+        )
+        result = resolve_selected_packs(
+            [str(pack_a), str(pack_b)],
+            explicit_overrides={PackKind.CONTRACT: {"contract.mode": "all"}},
+        )
+        (ids, _) = result["contract.packs"]
+        assert {i.id for i in ids} == {"pack_a", "pack_b"}
+
+    def test_override_scoped_to_its_own_namespace_only(self, tmp_path):
+        # An override for the gate namespace must not exempt an unrelated
+        # contract-namespace disagreement on a same-named field.
+        pack_a = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="pack_a",
+            kind="contract",
+            assignments_yaml="contract.mode: exports",
+        )
+        pack_b = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="pack_b",
+            kind="contract",
+            assignments_yaml="contract.mode: public",
+        )
+        with pytest.raises(PackConflictError):
+            resolve_selected_packs(
+                [str(pack_a), str(pack_b)],
+                explicit_overrides={PackKind.GATE: {"contract.mode": "all"}},
+            )
+
+    def test_override_for_a_different_field_does_not_exempt_this_one(self, tmp_path):
+        pack_a = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="pack_a",
+            kind="contract",
+            assignments_yaml="contract.mode: exports",
+        )
+        pack_b = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="pack_b",
+            kind="contract",
+            assignments_yaml="contract.mode: public",
+        )
+        with pytest.raises(PackConflictError):
+            resolve_selected_packs(
+                [str(pack_a), str(pack_b)],
+                explicit_overrides={
+                    PackKind.CONTRACT: {"surface.internal_namespaces": ("detail",)}
+                },
+            )
+
+    def test_no_overrides_argument_preserves_todays_unconditional_conflict(
+        self, tmp_path
+    ):
+        pack_a = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="pack_a",
+            kind="contract",
+            assignments_yaml="contract.mode: exports",
+        )
+        pack_b = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="pack_b",
+            kind="contract",
+            assignments_yaml="contract.mode: public",
+        )
+        with pytest.raises(PackConflictError):
+            resolve_selected_packs([str(pack_a), str(pack_b)])
