@@ -1942,6 +1942,53 @@ class TestReachableIntraLibrariesSymlinkAlias:
             for f in findings
         )
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="hard links behave differently on Windows"
+    )
+    def test_hard_link_alias_not_misclassified_as_unresolved(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review, fresh evidence after the prior
+        # hard-link dedup finding): discover_artifact_set() dedupes
+        # candidate paths on filesystem identity and keeps only one
+        # representative path per inode -- so when a provider has multiple
+        # hard-linked names (e.g. "libfoo.so.1" and "libfoo.so.1.0.0") and a
+        # consumer's DT_NEEDED names the alias that was *not* kept as the
+        # representative, _compute_resolution_graph()'s soname_to_name map
+        # previously had no entry for it at all: the provider read as
+        # unreachable and the audit emitted a false
+        # bundle_unresolved_intra_dependency. Inode dedup correctly counts
+        # one binary but must still index every loader-visible alias.
+        from abicheck.bundle import _detect_unresolved_intra_dependency
+
+        representative = tmp_path / "libfoo.so.1"
+        _write_elf_shared_object_stub(representative)
+        alias = tmp_path / "libfoo.so.1.0.0"
+        os.link(representative, alias)
+
+        # The representative path kept by discover_artifact_set's dedup is
+        # "libfoo.so.1" (first-seen); the consumer's DT_NEEDED names the
+        # *other* hard-linked alias, "libfoo.so.1.0.0", which discovery
+        # discarded entirely.
+        libraries = {
+            "libfoo.so.1": representative,
+            "libconsumer.so": tmp_path / "libconsumer.so",
+        }
+        metadata = {
+            "libfoo.so.1": _meta(soname="", exports=["foo"]),
+            "libconsumer.so": _meta(
+                soname="libconsumer.so",
+                needed=["libfoo.so.1.0.0"],
+                imports=["foo"],
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        snapshot = BundleSnapshot(
+            root=tmp_path, libraries=libraries, metadata=metadata, resolution=graph
+        )
+        findings = _detect_unresolved_intra_dependency(snapshot, set())
+        assert findings == []
+
 
 class TestArtifactSetDiscovery:
     def test_rejects_colliding_explicit_paths(self, tmp_path: Path) -> None:

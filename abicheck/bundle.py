@@ -374,6 +374,44 @@ def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
     return lines
 
 
+def _hard_link_alias_basenames(path: Path) -> list[str]:
+    """Basenames of *other* directory entries hard-linked to ``path``.
+
+    ``discover_artifact_set()`` dedupes candidate paths on filesystem
+    identity (``st_dev``/``st_ino``) and keeps only one representative path
+    per inode -- so if a provider library has multiple hard-linked names
+    (e.g. ``libfoo.so.1`` and ``libfoo.so.1.0.0``), any alias basename other
+    than the representative's own is otherwise discarded entirely and never
+    reaches ``soname_to_name``. Recover them by scanning the representative
+    path's own directory for siblings sharing its identity. Best-effort: a
+    permission error or non-existent path/parent yields no aliases rather
+    than raising, matching this module's existing conservative-on-failure
+    behavior for filesystem probes.
+    """
+    try:
+        target_stat = path.stat()
+    except OSError:
+        return []
+    aliases = []
+    try:
+        entries = list(path.parent.iterdir())
+    except OSError:
+        return []
+    for entry in entries:
+        if entry.name == path.name:
+            continue
+        try:
+            entry_stat = entry.stat()
+        except OSError:
+            continue
+        if (entry_stat.st_dev, entry_stat.st_ino) == (
+            target_stat.st_dev,
+            target_stat.st_ino,
+        ):
+            aliases.append(entry.name)
+    return aliases
+
+
 def _compute_resolution_graph(
     libraries: dict[str, Path],
     metadata: dict[str, ElfMetadata],
@@ -421,6 +459,22 @@ def _compute_resolution_graph(
                 resolved_name = libraries[name].name
             soname_to_name.setdefault(resolved_name, name)
             soname_to_name.setdefault(libraries[name].name, name)
+            # A provider can also have *hard-linked* aliases -- distinct
+            # directory entries sharing one inode, common for a
+            # ``libfoo.so.1``/``libfoo.so.1.0.0`` pair. discover_artifact_
+            # set()'s own dedup keeps only one representative path per
+            # inode, so an alias basename a consumer's DT_NEEDED names is
+            # otherwise never indexed here at all -- the provider reads as
+            # unreachable and the audit emits a false
+            # bundle_unresolved_intra_dependency (Codex review, fresh
+            # evidence). Recover the discarded aliases by scanning the
+            # representative path's own directory for siblings sharing its
+            # (st_dev, st_ino) identity and indexing each one's basename
+            # too -- self-contained here, no need to thread alias lists
+            # through discover_artifact_set's public dict[str, Path] return
+            # type.
+            for alias in _hard_link_alias_basenames(libraries[name]):
+                soname_to_name.setdefault(alias, name)
 
     graph.soname_to_name = soname_to_name
 
