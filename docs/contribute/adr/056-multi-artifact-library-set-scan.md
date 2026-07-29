@@ -10,7 +10,7 @@ lifecycle: active
 **Status:** Proposed — formal decision-maker sign-off still pending, but the
 core scope (Phases 1-4's engine/detector/CLI slice, plus the GitHub Action
 wiring) has already shipped ahead of that sign-off, in the same PR that
-proposed this ADR (see [G34](../plans/g34-multi-artifact-scan.md)'s
+proposed this ADR (see [G35](../plans/g35-multi-artifact-scan.md)'s
 "Implementation status" note for exactly what shipped vs. what remains
 deferred — MCP wiring, the full example-catalog obligation, and the
 dry-run/estimator's per-member scaling).
@@ -54,7 +54,7 @@ single-artifact:
   `L3_build`/`L4_graph`/`L5_source` row
   (`_source_layer_estimates`) are computed **once**, independent of
   `len(req.binaries)`. The estimator is not "already plural-aware" as a
-  whole; only its cheapest row is. See G34 Phase 1/3 for what this means
+  whole; only its cheapest row is. See G35 Phase 1/3 for what this means
   for `run_scan_set`'s own cost accounting.
 - The GitHub Action's bash pre-flight validator (`action/validate-inputs.sh`)
   independently enforces the same single-artifact contract for `scan mode`
@@ -239,7 +239,7 @@ conservative than a direct reuse of `_detect_intra_dep_removed`:
 - `bundle_intra_dep_resolved_to_different_version` is also diff-shaped (old
   `gnu.version` vs. new) and does not apply.
 
-See G34 Phase 2 for the audit-mode entry point this implies, including the
+See G35 Phase 2 for the audit-mode entry point this implies, including the
 requirement that it build its own conservative check rather than calling
 `_detect_intra_dep_removed` directly.
 
@@ -258,7 +258,7 @@ Explicitly **not** in this ADR's scope:
   "changes to read" — it would need direct, snapshot-only cross-library type
   reachability, which is new machinery, not a generalization of what
   `bundle.py` does today. Left as explicit future work (see the ADR-056
-  plan's Phase 3+ in G34), not attempted here, for the same reason
+  plan's Phase 3+ in G35), not attempted here, for the same reason
   `type_reachability.py`'s own known-gaps list (AGENTS.md) treats each
   additional layer of cross-reference resolution as its own scoped,
   independently-verified follow-up rather than a drive-by extension.
@@ -300,7 +300,7 @@ Explicitly **not** in this ADR's scope:
 - Finishes `ScanRequest.binaries`'s already-plural typing instead of leaving
   it as dead-end scaffolding — the estimator's existing `L0_binary`
   `len(req.binaries)`-aware row becomes reachable (the other rows still
-  need the fix G34 Phase 1/3 describes to scale correctly too).
+  need the fix G35 Phase 1/3 describes to scale correctly too).
 - Reuses `bundle.py`'s existing types (`BundleSnapshot`, `ResolutionGraph`,
   `BundleFinding`) rather than inventing parallel ones for `scan`; only one
   new, narrower audit-scoped `ChangeKind` is added (D2), not a duplicate of
@@ -344,17 +344,17 @@ Explicitly **not** in this ADR's scope:
 
 ## Implementation plan
 
-**Not started.** [G34](../plans/g34-multi-artifact-scan.md) is the single,
+**Not started.** [G35](../plans/g35-multi-artifact-scan.md) is the single,
 tracked source of truth for the phased implementation breakdown — module
 list, task-by-task detail, and status per phase. Earlier drafts of this
 ADR duplicated that breakdown inline here as a second numbered list; it
-drifted out of sync with G34 more than once as review rounds corrected
+drifted out of sync with G35 more than once as review rounds corrected
 details in one copy but not the other (most notably: whether `run_scan`
 itself keeps rejecting a multi-item `binaries` list — it does, per D1/D2
 above; only the new `run_scan_set` entry point accepts multiple binaries).
 Per this file's own "one fact defined in exactly one place" rule
-(`docs/AGENTS.md`), the phased plan now lives only in G34; this ADR records
-the *decision* (D1/D2 above) and defers to G34 for *how* it gets built.
+(`docs/AGENTS.md`), the phased plan now lives only in G35; this ADR records
+the *decision* (D1/D2 above) and defers to G35 for *how* it gets built.
 
 ---
 

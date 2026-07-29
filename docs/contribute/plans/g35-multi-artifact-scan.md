@@ -4,7 +4,7 @@ level: advanced
 lifecycle: active
 ---
 
-# G34 — Multi-Artifact / Library-Set `scan`
+# G35 — Multi-Artifact / Library-Set `scan`
 
 **Origin:** User request to properly scan cases where one logical
 "product" ships as several binary files (reference case: Intel oneDAL —
@@ -106,12 +106,12 @@ See ADR-056's Context section for the full investigation. Summary:
 
 ## Goal & acceptance criteria
 
-- **G34.1** — `scan --artifact-set DIR|path,path,...` audits a set of
+- **G35.1** — `scan --artifact-set DIR|path,path,...` audits a set of
   libraries with no old side, producing one `AbiSnapshot`-based report per
   artifact plus a `bundle_findings`/`bundle_verdict` section from the same
   `ResolutionGraph`/`BundleFinding` machinery `compare`'s directory path
   already uses (ADR-023), generalized to run without an old-side diff.
-- **G34.2** — `ScanRequest.binaries` accepts more than one path end to end via
+- **G35.2** — `ScanRequest.binaries` accepts more than one path end to end via
   a new `run_scan_set`/`ScanSetResult` entry point; `run_scan`'s existing
   single-binary `ScanResult` return type is untouched, so existing service,
   `run_scan_subprocess`, and MCP callers that consume `.verdict`/
@@ -123,9 +123,9 @@ See ADR-056's Context section for the full investigation. Summary:
   Phase 1's precedence rules; deliberately **not** a reuse of
   `compare-release`'s `_RELEASE_VERDICT_ORDER`, which has no entries for
   either scan-specific failure state), not just the per-artifact list.
-- **G34.3** — `abi_scan` MCP tool gains the equivalent `artifact_set`
+- **G35.3** — `abi_scan` MCP tool gains the equivalent `artifact_set`
   parameter in the same change (ADR-043 D10 parity rule), not a follow-up.
-- **G34.4** — `tests/test_cli_root_surface.py`, `README.md`,
+- **G35.4** — `tests/test_cli_root_surface.py`, `README.md`,
   `docs/reference/cli-reference.md` updated in the same PR as the CLI flag
   (AGENTS.md's root-surface-change discipline, applied here to a flag
   addition on an existing command rather than a new root verb).
@@ -831,7 +831,7 @@ implementation that shipped.
   - `python scripts/gen_action_reference.py` → `docs/reference/github-action-inputs.md`
     for the new `new-library-set` input.
   - `python scripts/gen_cli_reference.py` → `docs/reference/cli-reference.md`
-    for `--artifact-set` (already listed under G34.4 above; grouped here
+    for `--artifact-set` (already listed under G35.4 above; grouped here
     since all three generators run together in practice).
 - **CLI + GitHub Action halves shipped** (this pass's Implementation status
   note, above). **MCP half (`abi_scan`/`abi_estimate` `artifact_set` param,
