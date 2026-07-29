@@ -1844,4 +1844,10 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     "required_symbols": "--required-symbol",
     # ADR-050 D2: the comparability gate's diagnostic escape hatch.
     "diagnostic_comparison": "--diagnostic-comparison",
+    # ADR-049 Phase 3: the shadow contract evaluator has no `compare` CLI
+    # flag yet -- deliberate, not an accidental omission. `cli.py` is at its
+    # 2000-line AI-readiness hard cap, so adding `--contract-evaluation`
+    # needs a prerequisite option-family extraction first (see
+    # docs/contribute/plans/public-contract-default.md's Phase 3 section).
+    "contract_evaluation": None,
 }

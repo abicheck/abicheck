@@ -1041,6 +1041,50 @@ class TestAbiCompare:
         assert data["status"] == "ok"
         assert data["report"]["assurance"] == "none"
 
+    def test_contract_evaluation_off_by_default_omits_field(self, tmp_path: Path):
+        # ADR-049 Phase 3: without contract_evaluation=True, the response is
+        # unchanged from today's shape -- no contract_relevance anywhere.
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        raw = abi_compare(str(old_p), str(new_p))
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        changes = data["report"]["changes"]
+        assert changes
+        assert all("contract_relevance" not in c for c in changes)
+
+    def test_contract_evaluation_stamps_relevance_on_findings(self, tmp_path: Path):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        raw = abi_compare(str(old_p), str(new_p), contract_evaluation=True)
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        changes = data["report"]["changes"]
+        assert changes
+        assert all("contract_relevance" in c for c in changes)
+
+    def test_contract_evaluation_never_changes_verdict_or_exit_code(
+        self, tmp_path: Path
+    ):
+        old_p, new_p = self._make_pair(
+            tmp_path,
+            _make_snapshot("1.0", functions=[_pub_func("f", "_Z1fv")]),
+            _make_snapshot("2.0", functions=[]),
+        )
+        without = json.loads(abi_compare(str(old_p), str(new_p)))
+        with_shadow = json.loads(
+            abi_compare(str(old_p), str(new_p), contract_evaluation=True)
+        )
+        assert without["report"]["verdict"] == with_shadow["report"]["verdict"]
+        assert without["exit_code"] == with_shadow["exit_code"]
+        assert len(without["report"]["changes"]) == len(with_shadow["report"]["changes"])
+
     def test_used_by_and_required_symbols_are_mutually_exclusive(
         self, tmp_path: Path
     ):

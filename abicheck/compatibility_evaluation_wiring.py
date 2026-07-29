@@ -31,12 +31,26 @@ first reaches :func:`~abicheck.compatibility_evaluation_resolver.resolve_field`:
   YAML's ``internal_namespaces`` list (``policy_file.py``'s ``PolicyFile``,
   the only front end that can set this field today -- there is no CLI flag
   for it) and produces a real ``surface.internal_namespaces`` resolution.
+- :func:`resolve_selected_packs` takes a real set of pack-manifest paths (the
+  shape a future ``--pack <path>``-style, repeatable CLI/config option would
+  supply), loads each with
+  :func:`~abicheck.compatibility_evaluation_packs.load_pack_manifest`, runs
+  D8's pack-vs-pack conflict check
+  (:func:`~abicheck.compatibility_evaluation_resolver.detect_pack_conflicts`)
+  once per namespace, and produces the three real ``contract.packs``/
+  ``policy.packs``/``gate.packs`` resolutions. This is the first wiring that
+  composes two previously-separate, previously-uncomposed Phase 1 pieces
+  (the pack-manifest loader and ``detect_pack_conflicts``) into one real
+  front-end path, closing the gap the plan's own Phase 1 progress notes
+  named explicitly: "no front end resolves a ``--pack <name>``-style CLI/
+  config input ... and no call site invokes ``detect_pack_conflicts`` with
+  real packs during config resolution."
 
-Neither function is called from any live command yet. ADR-049's own rollout
-plan puts wiring a resolved value into an authoritative code path behind a
-later phase (Phase 3's shadow contract evaluator validates resolution
-against real traffic before it can affect a gate decision, and the default
-flip is Phase 7) -- see
+None of the three functions is called from any live command yet. ADR-049's
+own rollout plan puts wiring a resolved value into an authoritative code
+path behind a later phase (Phase 3's shadow contract evaluator validates
+resolution against real traffic before it can affect a gate decision, and
+the default flip is Phase 7) -- see
 ``docs/contribute/plans/public-contract-default.md``. Landing each wiring
 function itself, fully tested against its real input's semantics, is what
 Phase 1's gate asks for: "every front end resolves equivalent semantic
@@ -45,10 +59,26 @@ input to an equal ``CompatibilityEvaluationConfig`` and provenance receipt."
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from .compatibility_evaluation_config import SelectedByEntry, ValueProvenance
-from .compatibility_evaluation_resolver import FieldCandidate, resolve_field
+from .compatibility_evaluation_config import (
+    ImmutableIdentity,
+    SelectedByEntry,
+    ValueProvenance,
+)
+from .compatibility_evaluation_packs import (
+    LoadedPack,
+    PackKind,
+    assignments_for_conflict_check,
+    load_pack_manifest,
+)
+from .compatibility_evaluation_resolver import (
+    FieldCandidate,
+    detect_pack_conflicts,
+    resolve_field,
+)
 from .contract_relevance_types import (
     LEGACY_SCOPE_FLAG_CONTRACT_MODE,
     ContractMode,
@@ -216,3 +246,114 @@ def resolve_internal_namespaces(
         _INTERNAL_NAMESPACES_FIELD, candidates, default=default
     )
     return cast("tuple[str, ...]", value), provenance
+
+
+_PACKS_FIELD_BY_KIND: dict[PackKind, str] = {
+    PackKind.CONTRACT: "contract.packs",
+    PackKind.POLICY: "policy.packs",
+    PackKind.GATE: "gate.packs",
+}
+
+#: What each of ``contract.packs``/``policy.packs``/``gate.packs`` resolves
+#: to when no ``--pack`` path names a manifest of that kind -- equal to
+#: ``ContractConfig.packs``/``CompatibilityPolicyConfig.packs``/
+#: ``GateConfig.packs``'s own default (empty tuple), the same "accepting
+#: ADR-049 does not, by itself, change today's real default behavior"
+#: principle the other two wirings in this module already follow.
+_BUILT_IN_DEFAULT_PACKS: tuple[ImmutableIdentity, ...] = ()
+
+
+def resolve_selected_packs(
+    pack_paths: Sequence[str | Path],
+) -> dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]]:
+    """Resolve a real ``--pack <path>``-style CLI/config input into
+    ``contract.packs``/``policy.packs``/``gate.packs`` field values.
+
+    Loads every manifest in *pack_paths* with
+    :func:`~abicheck.compatibility_evaluation_packs.load_pack_manifest`
+    (raising :class:`~abicheck.errors.PackManifestError` for a malformed
+    one), groups the loaded packs by
+    :class:`~abicheck.compatibility_evaluation_packs.PackKind` via
+    :func:`~abicheck.compatibility_evaluation_packs.assignments_for_conflict_check`,
+    and runs
+    :func:`~abicheck.compatibility_evaluation_resolver.detect_pack_conflicts`
+    once per namespace (ADR-049 D8: the conflict rule is scoped *within* one
+    namespace, never across contract/policy/gate) -- raising
+    :class:`~abicheck.compatibility_evaluation_resolver.PackConflictError`
+    if two selected packs of the same kind disagree on the same field or
+    ``ChangeKind``.
+
+    The resolved *value* for each field is a ``tuple[ImmutableIdentity, ...]``
+    -- a pack's own resolved field assignments are not part of the effective
+    config's ``packs`` value itself (``ContractConfig.packs``/
+    ``CompatibilityPolicyConfig.packs``/``GateConfig.packs`` are all typed
+    this way already); folding those assignments into
+    ``CompatibilityPolicyConfig.overrides``/etc. for a real run is later,
+    still-unwired composition work, not this function's job. Two ``--pack``
+    paths naming the identical manifest content (same
+    ``id``/``version``/``sha256``) collapse into one contributor; the
+    resolved tuple is sorted by ``(id, version, sha256)``, since D8 states
+    "file order never resolves conflicts" -- two invocations naming the same
+    pack set in a different order must resolve to an equal value (D7).
+
+    Every returned field is tagged
+    :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`
+    when at least one path selected a pack of that kind (mirroring
+    :func:`resolve_internal_namespaces`'s ``--policy-file`` case: a path the
+    user passed on *this* invocation, not an implicitly-discovered project
+    file), falling through to :data:`_BUILT_IN_DEFAULT_PACKS` otherwise.
+
+    Not called from any live command yet -- see module docstring.
+    """
+    loaded = [(str(path), load_pack_manifest(path)) for path in pack_paths]
+    grouped = assignments_for_conflict_check([pack for _, pack in loaded])
+
+    by_kind: dict[PackKind, list[tuple[str, LoadedPack]]] = {
+        kind: [] for kind in PackKind
+    }
+    for path, pack in loaded:
+        by_kind[pack.kind].append((path, pack))
+
+    result: dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]] = {}
+    for kind, field_name in _PACKS_FIELD_BY_KIND.items():
+        detect_pack_conflicts(grouped[kind])
+
+        first_path_by_identity: dict[ImmutableIdentity, str] = {}
+        for path, pack in by_kind[kind]:
+            first_path_by_identity.setdefault(pack.identity, path)
+        canonical = tuple(
+            sorted(
+                first_path_by_identity,
+                key=lambda identity: (identity.id, identity.version, identity.sha256),
+            )
+        )
+
+        default = FieldCandidate(
+            provenance=ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT),
+            value=_BUILT_IN_DEFAULT_PACKS,
+        )
+        candidates: list[FieldCandidate] = []
+        if canonical:
+            candidates.append(
+                FieldCandidate(
+                    provenance=ValueProvenance(
+                        layer=SelectorLayer.EXPLICIT_CLI,
+                        source_kind="pack_manifest",
+                        selected_by=tuple(
+                            SelectedByEntry(
+                                layer=SelectorLayer.EXPLICIT_CLI,
+                                option="--pack",
+                                path=first_path_by_identity[identity],
+                            )
+                            for identity in canonical
+                        ),
+                    ),
+                    value=canonical,
+                )
+            )
+        value, provenance = resolve_field(field_name, candidates, default=default)
+        result[field_name] = (
+            cast("tuple[ImmutableIdentity, ...]", value),
+            provenance,
+        )
+    return result

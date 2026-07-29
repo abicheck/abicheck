@@ -848,15 +848,34 @@ shape `detect_pack_conflicts` accepts — it does not select which packs apply
 to a run, call `detect_pack_conflicts` itself, or fold a policy pack's
 resolved overrides into `CompatibilityPolicyConfig.overrides`.
 
+**Updated (2026-07-29): pack selection/composition wiring landed.**
+`abicheck/compatibility_evaluation_wiring.py`'s `resolve_selected_packs`
+takes a real `--pack <path>`-style (repeatable) path list, loads each with
+`load_pack_manifest`, groups the result with `assignments_for_conflict_check`,
+and runs `detect_pack_conflicts` once per `PackKind` namespace — closing the
+exact gap this paragraph used to describe. It returns the three real
+`contract.packs`/`policy.packs`/`gate.packs` field resolutions (each a
+`tuple[ImmutableIdentity, ...]`, matching those fields' actual type — pack
+*content* composition into `CompatibilityPolicyConfig.overrides`/etc. is
+still separate, unwired work, see below). Two `--pack` paths naming the
+identical manifest content collapse into one contributor; the resolved
+tuple is sorted by `(id, version, sha256)` so pack order never changes the
+resolved value (D8's "file order never resolves conflicts", extended here
+to selection order too). Not called from any live command yet — same
+"land the wiring function itself, fully tested" pattern as
+`resolve_legacy_contract_mode`/`resolve_internal_namespaces` above; no CLI
+flag exists to supply pack paths, and (per Phase 3's own 2026-07-29 update
+below) `cli.py` is at its 2000-line hard cap, so an actual `--pack` flag
+needs a prerequisite extraction, not a same-PR addition.
+
 Still remaining: wiring any other field (`cli_options.py`'s other shared
 option families beyond `scope_options`, `.abicheck.yml` schema/reference
 docs, service/API request models) to construct real `FieldCandidate`s, and
-selecting/composing loaded
-packs into `ContractConfig.packs`/`CompatibilityPolicyConfig.packs`/
-`GateConfig.packs` for a real run (today a pack's `ImmutableIdentity` can be
-referenced there, but no front end resolves a `--pack <name>`-style CLI/config
-input into one, and no call site invokes `detect_pack_conflicts` with real
-packs during config resolution).
+folding a selected policy pack's resolved `ChangeKind -> Verdict`
+assignments into `CompatibilityPolicyConfig.overrides` (and a contract/gate
+pack's field assignments into their respective configs) for a real run —
+`resolve_selected_packs` resolves *which* packs are selected, not what
+selecting them changes about the rest of the effective config.
 
 ### Phase 2 — canonical identity and fact conservation
 
@@ -1012,6 +1031,41 @@ Not yet done: wiring this into `checker.compare`'s output (even as a
 non-authoritative shadow field), the provider-evidence ledger, the
 delta/unresolved-rate/proven-loss measurement this phase's gate requires,
 and `EXPORTS` mode.
+
+**Updated (2026-07-29): the first bullet above was stale, not still true —
+re-checked against the actual code rather than assumed from this
+paragraph's own prior wording.** `checker.compare(..., contract_evaluation:
+bool = False)` (`checker.py`'s `_apply_contract_evaluation_shadow`) already
+calls `evaluate_snapshot_pair_contract_relevance` and stamps every retained
+`Change` (and, per a later fix, every demoted `out_of_surface` finding too)
+with its shadow `contract_relevance`/`contract_reason_code`/
+`contract_assurance` decision when the caller opts in — this landed in an
+earlier session than this note and the paragraph above was simply never
+corrected afterward. Report surfacing is done too:
+`reporter.py`'s `_add_contract_evaluation_fields` serializes those three
+fields onto both an ordinary `changes` JSON entry and an
+`out_of_surface_changes` entry (covered by `tests/test_report_schema.py`'s
+`TestContractEvaluation*` classes), and the flag threads all the way
+through the Tier-2 service boundary ADR-049 §3.1 names as the resolution
+point — `service.py`'s `compare_snapshots`/`run_compare`/`CompareRequest`
+all accept and forward `contract_evaluation` (`tests/test_service_unit.py`'s
+`TestContractEvaluationThreading`).
+
+What is genuinely still missing, now that the false "not wired at all"
+claim is corrected: **no live front end sets `contract_evaluation=True`.**
+It is reachable only by calling the Python API directly. The obvious next
+front end, the `abi_compare` MCP tool (`mcp_server.py`), does not accept it
+either (confirmed: no `contract_evaluation` mention in that file at all) —
+adding it there is a small, precedented change (mirrors the existing
+`diagnostic_comparison: bool = False` passthrough parameter immediately
+above it) and does not touch `cli.py`. Exposing it on the `compare` CLI
+command itself is a real, separate blocker, not just undone work:
+`abicheck/cli.py` is at exactly 2000 lines, the AI-readiness hard cap — no
+new `@click.option` can land there at all until some existing option family
+is first extracted to a sibling module (the pattern this file's own
+"Adding a new top-level command" section already documents for large
+command groups), which is its own scoped prerequisite, not a drive-by
+alongside this wiring.
 
 Measure:
 

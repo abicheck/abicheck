@@ -632,6 +632,7 @@ def abi_compare(
     used_by: list[str] | None = None,
     required_symbols: list[str] | None = None,
     diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
 ) -> str:
     """Compare two ABI surfaces and report breaking changes.
 
@@ -707,6 +708,17 @@ def abi_compare(
             whose report is stamped ``assurance: "none"``, so the caller can
             still see *a* result but knows not to trust it fully. Not needed,
             and does nothing, on a comparable pair.
+        contract_evaluation: ADR-049 Phase 3's shadow contract evaluator
+            (non-authoritative). When True, each finding in the response's
+            ``changes``/``out_of_surface_changes`` lists gains a
+            ``contract_relevance`` (``in_contract``/``proven_out_of_contract``/
+            ``unknown_unproven``/``unknown_unresolved``/``not_applicable``),
+            ``contract_reason_code``, and — when resolved — ``contract_assurance``
+            field, reflecting whether the finding falls inside the library's
+            declared public contract. This is advisory only: it never
+            changes ``verdict``, ``exit_code``, or which findings appear.
+            Default False; the response is unchanged from today's shape
+            unless this is set.
     """
     t0 = _time.monotonic()
     try:
@@ -839,6 +851,7 @@ def abi_compare(
                     policy=policy,
                     policy_file=pf,
                     diagnostic_comparison=diagnostic_comparison,
+                    contract_evaluation=contract_evaluation,
                 ),
                 pf,
                 suppression,
