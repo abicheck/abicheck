@@ -2202,6 +2202,128 @@ class TestCompareRequestAdr055Evidence:
         assert "/proj/api.h" in embed_calls[0]["public_header_dirs"]
         assert "/proj/include" in embed_calls[0]["public_header_dirs"]
 
+    def test_dump_manifest_project_owned_includes_not_forwarded_to_replay(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P1, third round): a TU's project_owned include
+        directories are private sibling/support roots used only to keep
+        resolve_dependency_scope from misclassifying them as a toolchain
+        dependency -- not declared public API surface. Forwarding them into
+        L4 source replay's own public-header set would make the extractors
+        treat every declaration under a private support dir as API-relevant,
+        false-flagging private-header churn as a source break."""
+        from types import SimpleNamespace
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        private_inc = SimpleNamespace(path="/proj/private_support", project_owned=True)
+        tu = SimpleNamespace(includes=[private_inc], forced_includes=())
+        manifest = SimpleNamespace(
+            roots=[], public_header_paths=[], public_header_dirs=[], translation_units=[tu]
+        )
+
+        embed_calls: list[dict] = []
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source",
+            lambda snap, **kwargs: embed_calls.append(kwargs),
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, sources=src_dir, dump_manifest=manifest),
+            new=InputSpec.of(new_p),
+        )
+        run_compare_request(request)
+        assert "/proj/private_support" not in embed_calls[0]["public_header_dirs"]
+
+    def test_hybrid_frontend_rejected_for_explicit_source_depth(self, tmp_path):
+        """Codex review (P1): mirror cli.py's own --depth source +
+        --ast-frontend hybrid UsageError -- L4 source-ABI replay has no
+        dual-backend hybrid extractor, so this combination must be rejected
+        rather than silently reach an artifact-only verdict."""
+        from abicheck.compile_context import CompileContext
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        request = CompareRequest(
+            old=InputSpec.of(
+                old_p, sources=src_dir, compile=CompileContext(frontend="hybrid")
+            ),
+            new=InputSpec.of(new_p),
+            depth="source",
+        )
+        with pytest.raises(ValidationError, match="hybrid"):
+            run_compare_request(request)
+
+    def test_hybrid_frontend_allowed_without_explicit_source_depth(
+        self, tmp_path, monkeypatch
+    ):
+        """The CLI's own implicit-default case (no explicit --depth) is
+        allowed to honestly degrade -- only an *explicit* depth="source"
+        request is rejected for hybrid."""
+        from abicheck.compile_context import CompileContext
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.embed_build_source", lambda snap, **kwargs: None
+        )
+        monkeypatch.setattr(
+            "abicheck.cli_buildsource.prepare_embedded_build_source",
+            lambda *a, **k: (None, [], {}, []),
+        )
+
+        request = CompareRequest(
+            old=InputSpec.of(
+                old_p, sources=src_dir, compile=CompileContext(frontend="hybrid")
+            ),
+            new=InputSpec.of(new_p),
+        )
+        result, _, _ = run_compare_request(request)
+        assert isinstance(result, DiffResult)
+
+    def test_manifest_forced_includes_feed_pair_wide_cxx20_detection(
+        self, tmp_path, monkeypatch
+    ):
+        """Codex review (P2): a dump_manifest replaces `headers` (empty
+        tuple), so its own translation_units[].forced_includes must feed the
+        same pair-wide C++20 heuristic or a manifest-only side's real C++20
+        signal goes undetected, letting the pair disagree on dialect."""
+        from types import SimpleNamespace
+
+        from abicheck import service as service_mod
+
+        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
+        forced = tmp_path / "concepts.h"
+        tu = SimpleNamespace(forced_includes=(forced,))
+        manifest = SimpleNamespace(translation_units=[tu])
+
+        captured = {}
+
+        def _fake_override(lang, old_headers, new_headers, *a, **k):
+            captured["old_headers"] = list(old_headers)
+            return None
+
+        monkeypatch.setattr(service_mod, "pair_wide_cxx20_std_override", _fake_override)
+
+        request = CompareRequest(
+            old=InputSpec.of(old_p, dump_manifest=manifest), new=InputSpec.of(new_p)
+        )
+        run_compare_request(request)
+        assert forced in captured["old_headers"]
+
     def test_binary_depth_clears_public_headers_for_scope_fingerprint(
         self, tmp_path, monkeypatch
     ):

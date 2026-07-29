@@ -257,6 +257,25 @@ def dump_manifest_header_roots(dump_manifest: Any) -> tuple[Path, ...]:
     return tuple(roots)
 
 
+def dump_manifest_public_roots(dump_manifest: Any) -> tuple[Path, ...]:
+    """The manifest's *declared-public* roots only (``roots``/
+    ``public_header_paths``/``public_header_dirs``) -- unlike
+    :func:`dump_manifest_header_roots`, deliberately excludes each TU's
+    ``project_owned`` include directories (Codex review). Those are
+    sibling/private support roots used only to keep
+    ``resolve_dependency_scope`` from misclassifying a project-owned
+    directory as a toolchain dependency; they are not declared public API
+    surface. Forwarding them into L4 source replay's own public-header set
+    (as :func:`dump_manifest_header_roots` is for) would make the source
+    extractors treat every declaration under a private support directory as
+    API-relevant, false-flagging private-header churn as a source break."""
+    if dump_manifest is None:
+        return ()
+    return tuple(
+        (*dump_manifest.roots, *dump_manifest.public_header_paths, *dump_manifest.public_header_dirs)
+    )
+
+
 def _kept_identifiers(names: set[str], qualified_names: set[str]) -> set[str]:
     return names | qualified_names
 

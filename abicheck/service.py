@@ -1701,28 +1701,20 @@ def run_compare_request(
     from .api_types import HEADER_AST_FRONTENDS
     frontend_lower = request.frontend.lower()
     header_backend = frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"
-
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
 
-    # Pair-wide C++20 dialect resolution (P0 fix); folded into each side's effective CompileContext below alongside ADR-055 D1's per-side compile override (service_compare_evidence.py).
+    # Pair-wide C++20 dialect resolution (P0 fix); folded into each side's effective CompileContext below. A dump_manifest replaces `headers` (empty), so its own forced_includes must feed the same C++20 scan too (Codex review) or a manifest-only side's C++20 signal goes undetected.
+    def _manifest_forced_includes(dm: object) -> list[Path]:
+        return [inc for tu in getattr(dm, "translation_units", ()) for inc in tu.forced_includes]
     pair_compile: CompileContext | None = None
-    override = pair_wide_cxx20_std_override(lang, request.old.headers, request.new.headers, None, ())
+    override = pair_wide_cxx20_std_override(lang, list(request.old.headers) + _manifest_forced_includes(request.old.dump_manifest), list(request.new.headers) + _manifest_forced_includes(request.new.dump_manifest), None, ())
     if override is not None:
         pair_compile = CompileContext(gcc_option_tokens=override)
 
-    # request.{old,new}.headers double as the public-header set for provenance
-    # tagging (same rule as cli_resolve._resolve_compare_snapshots). Split into
-    # files/directories before tagging: an unsplit directory entry corrupts
-    # compute_extraction_contract's scope_fingerprint (split_public_header_
-    # inputs's own docstring). ADR-055 D1's `InputSpec.public_header_dirs` is
-    # unioned in afterward.
-    old_public_headers, old_public_header_dirs = split_public_header_inputs(
-        request.old.headers
-    )
-    new_public_headers, new_public_header_dirs = split_public_header_inputs(
-        request.new.headers
-    )
+    # request.{old,new}.headers double as the public-header set for provenance tagging. Split into files/directories before tagging: an unsplit directory entry corrupts scope_fingerprint. InputSpec.public_header_dirs is unioned in afterward.
+    old_public_headers, old_public_header_dirs = split_public_header_inputs(request.old.headers)
+    new_public_headers, new_public_header_dirs = split_public_header_inputs(request.new.headers)
     old_public_header_dirs += list(request.old.public_header_dirs)
     new_public_header_dirs += list(request.new.public_header_dirs)
     # Codex: binary depth clears evidence.headers, but a headerless dump still fingerprints these -- clear too, else differing lists spuriously ScopeMismatchError.
@@ -1732,6 +1724,15 @@ def run_compare_request(
     from .cli_buildsource import embed_build_source
 
     old_evidence, new_evidence = _sce.resolve_compare_request_evidence(request, pair_compile)
+    # Codex review (P1): mirror cli.py's --depth source + --ast-frontend hybrid UsageError -- L4 source-ABI replay has no dual-backend hybrid extractor, so an explicit depth="source" would otherwise silently reach an artifact-only verdict. Scoped to an explicit depth (implicit-default is allowed to degrade) and a genuine raw source tree (a prebuilt pack is loaded, not extracted -- no extractor runs).
+    if request.depth is not None and request.depth.lower() == "source":
+        from .buildsource.inline import is_pack_dir
+        from .cli_buildsource_helpers import _is_inputs_pack_dir
+        for side, evidence in ((request.old, old_evidence), (request.new, new_evidence)):
+            if side.sources is None or is_pack_dir(side.sources) or _is_inputs_pack_dir(side.sources):
+                continue
+            if _sce.effective_frontend(evidence.compile, header_backend) == "hybrid":
+                raise ValidationError("depth='source' is incompatible with the 'hybrid' AST frontend: L4 source-ABI replay has no dual-backend hybrid extractor. Use 'castxml' or 'clang' for a depth='source' request.")
 
     def _resolve_side(
         side: InputSpec,
@@ -1759,9 +1760,9 @@ def run_compare_request(
             dump_manifest=evidence.dump_manifest,
         )
         if side.sources or side.build_info:
-            # Codex: same public-header roots as resolve_input, plus dump_manifest's own roots (it replaces headers, else public_headers/dirs stay empty) -- else source replay hides source-only breaks.
-            from .dumper_scoping import dump_manifest_header_roots
-            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=_sce.effective_frontend(evidence.compile, header_backend), public_headers=tuple(str(p) for p in public_headers), public_header_dirs=tuple(str(p) for p in public_header_dirs) + tuple(str(p) for p in dump_manifest_header_roots(evidence.dump_manifest)))
+            # Codex: same roots as resolve_input, plus dump_manifest's declared-public roots only (project_owned TU includes are private, so dump_manifest_public_roots not dump_manifest_header_roots).
+            from .dumper_scoping import dump_manifest_public_roots
+            embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=_sce.effective_frontend(evidence.compile, header_backend), public_headers=tuple(str(p) for p in public_headers), public_header_dirs=tuple(str(p) for p in public_header_dirs) + tuple(str(p) for p in dump_manifest_public_roots(evidence.dump_manifest)))
         return snap
 
     def _resolve_old_side() -> AbiSnapshot:

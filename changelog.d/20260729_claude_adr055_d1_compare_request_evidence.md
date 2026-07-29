@@ -53,8 +53,18 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   "android"`, since `run_compare_request`'s inline evidence collection has no
   real Android source extractor and would otherwise silently substitute
   Clang; only the legacy `has_sources=True` (pre-captured dump, no inline
-  path) combination is supported for `android` today. `CompileContext` itself
-  moved to a new leaf module
+  path) combination is supported for `android` today; a `depth="source"`
+  request that would attempt L4 replay with the `hybrid` AST frontend is
+  similarly rejected (mirroring `dump`'s own `--depth source`/`--ast-frontend
+  hybrid` `UsageError` — L4 has no dual-backend hybrid extractor); a
+  `dump_manifest`'s own `translation_units[].forced_includes` feed the
+  pair-wide C++20 dialect heuristic alongside `headers`, since a
+  manifest-driven side has no `headers` for it to see otherwise; and a
+  `dump_manifest`'s `project_owned` per-TU include directories (private
+  sibling/support roots used only for dependency-scope filtering) are no
+  longer forwarded into L4 source replay's public-header set, which
+  previously could false-flag private-header churn as a source break.
+  `CompileContext` itself moved to a new leaf module
   (`abicheck.compile_context`, re-exported from `service_scan` for
   back-compat) so `api_types.py` can type against it without joining the
   CLI/service import-cycle-allowlisted cluster. Does not yet match every
