@@ -125,7 +125,7 @@ Generate a run-plan from a project config's contract profiles.
 | `build_outputs` | `list[str] \| None` | no | `None` | One entry per contract profile referenced by config's checks, each formatted ``PROFILE=DIR`` (a directory containing ``build-output.json``). |
 | `project` | `str` | no | `` | Project identifier recorded in the run-plan, e.g. ``owner/repo``. |
 | `head_sha` | `str` | no | `` | Candidate commit SHA recorded in the run-plan. |
-| `toolchain_bindings` | `str \| None` | no | `None` | Optional trusted toolchain-bindings file path; each resolved cell's profile ``compile.binding`` (if declared) is checked against it and resolved into that cell's ``compile_gcc_path``. |
+| `toolchain_bindings` | `str \| None` | no | `None` | Optional trusted toolchain-bindings file path; each resolved cell's profile ``compile.binding`` (if declared) is checked against it and resolved into that cell's ``compile_gcc_path``, and any declared ``compiler_family``/``compiler_version``/``target`` is checked against the resolved binding's real identity (G34 Phase A) — a mismatch is a generation error, the same severity as an unresolvable binding. |
 | `allow_empty` | `bool` | no | `False` | Accept a run-plan that resolves to zero checks (else that is reported as a generation error). |
 
 ## `abi_project_validate`

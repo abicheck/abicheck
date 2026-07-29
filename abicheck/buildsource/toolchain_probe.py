@@ -96,6 +96,40 @@ def _normalize_arch(arch: str) -> str:
     return _ARCH_ALIASES.get(arch, arch)
 
 
+#: Coarse OS-family markers checked anywhere in a target triple, since a
+#: triple's vendor/OS/environment components are spelled inconsistently
+#: across toolchains (``x86_64-w64-mingw32`` vs. ``x86_64-pc-windows-msvc``)
+#: but a real OS mismatch (Windows vs. Linux, sharing the same architecture)
+#: is exactly the case a leading-architecture-only check misses (Codex
+#: review, fresh evidence: a declared ``x86_64-w64-mingw32`` target bound to
+#: a real ``x86_64-linux-gnu`` gcc passed silently).
+_OS_FAMILY_MARKERS: tuple[tuple[str, str], ...] = (
+    ("mingw", "windows"),
+    ("windows", "windows"),
+    ("win32", "windows"),
+    ("darwin", "darwin"),
+    ("apple", "darwin"),
+    # Checked before the plain "linux" marker: an Android triple is
+    # conventionally spelled "<arch>-linux-android" (e.g.
+    # "aarch64-linux-android"), which contains "linux" as a substring —
+    # Android and desktop/server Linux are different enough ABI
+    # environments to distinguish here.
+    ("android", "android"),
+    ("linux", "linux"),
+    ("freebsd", "freebsd"),
+    ("netbsd", "netbsd"),
+    ("openbsd", "openbsd"),
+)
+
+
+def _os_family(triple: str) -> str | None:
+    lowered = triple.lower()
+    for marker, family in _OS_FAMILY_MARKERS:
+        if marker in lowered:
+            return family
+    return None
+
+
 #: A dotted version number (2-4 components) is preferred over a bare one:
 #: a cross-compiler binding's own name (e.g. ``x86_64-linux-gnu-gcc-13``,
 #: a real, common Debian/Ubuntu naming convention) embeds bare digit groups
@@ -299,12 +333,28 @@ def _check_one_overlay(
         if probed_triple:
             declared_arch = _normalize_arch(declared_target.split("-", 1)[0])
             probed_arch = _normalize_arch(probed_triple.split("-", 1)[0])
-            if declared_arch and probed_arch and declared_arch != probed_arch:
+            arch_mismatch = bool(
+                declared_arch and probed_arch and declared_arch != probed_arch
+            )
+            declared_os = _os_family(declared_target)
+            probed_os = _os_family(probed_triple)
+            os_mismatch = bool(
+                declared_os is not None
+                and probed_os is not None
+                and declared_os != probed_os
+            )
+            if arch_mismatch or os_mismatch:
+                mismatches = []
+                if arch_mismatch:
+                    mismatches.append(
+                        f"architecture {declared_arch!r} vs {probed_arch!r}"
+                    )
+                if os_mismatch:
+                    mismatches.append(f"OS {declared_os!r} vs {probed_os!r}")
                 errors.append(
-                    f"{where}.target declares {declared_target!r} (architecture "
-                    f"{declared_arch!r}) but toolchain binding {binding_id!r} "
-                    f"({path!r}) resolved to target triple {probed_triple!r} "
-                    f"(architecture {probed_arch!r})"
+                    f"{where}.target declares {declared_target!r} but toolchain "
+                    f"binding {binding_id!r} ({path!r}) resolved to target "
+                    f"triple {probed_triple!r} ({'; '.join(mismatches)})"
                 )
     return errors
 

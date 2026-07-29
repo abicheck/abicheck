@@ -661,7 +661,11 @@ def abi_project_plan(
         head_sha: Candidate commit SHA recorded in the run-plan.
         toolchain_bindings: Optional trusted toolchain-bindings file path; each
             resolved cell's profile ``compile.binding`` (if declared) is
-            checked against it and resolved into that cell's ``compile_gcc_path``.
+            checked against it and resolved into that cell's
+            ``compile_gcc_path``, and any declared ``compiler_family``/``compiler_version``/``target``
+            is checked against the resolved binding's real identity (G34
+            Phase A) — a mismatch is a generation error, the same severity
+            as an unresolvable binding.
         allow_empty: Accept a run-plan that resolves to zero checks (else that
             is reported as a generation error).
     """
@@ -680,6 +684,7 @@ def abi_project_plan(
             check_profile_bindings_resolve,
             load_bindings_file,
         )
+        from .buildsource.toolchain_probe import check_profile_toolchain_identity
         from .cli_project import _load_project_targets_config, _parse_build_output_specs
 
         # _parse_build_output_specs reads each PROFILE=DIR's build-output.json
@@ -734,6 +739,7 @@ def abi_project_plan(
                     raise _ProjectPlanValidationError(validation.errors)
                 binding_errors = (
                     check_profile_bindings_resolve(parsed.profiles, bindings_file)
+                    + check_profile_toolchain_identity(parsed.profiles, bindings_file)
                     if bindings_file is not None
                     else []
                 )

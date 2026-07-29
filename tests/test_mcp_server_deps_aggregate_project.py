@@ -987,6 +987,47 @@ class TestAbiProjectPlan:
         ]
         assert payload["plan"]["project"] == "o/r"
 
+    def test_toolchain_identity_mismatch_is_a_generation_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # G34 Phase A parity: abi_project_plan must run the same
+        # toolchain-identity check project_plan_cmd runs, not just binding
+        # resolution -- a run-plan that silently emits the wrong compiler's
+        # path is worse than one that fails to generate at all.
+        from abicheck.buildsource import toolchain_probe as tp
+
+        monkeypatch.setattr(
+            tp,
+            "_tool_identity_metadata",
+            lambda path: {"selected": path, "version": "clang version 18.0.0"},
+        )
+        raw_cfg = json.loads(json.dumps(_SINGLE_PROFILE_LIBRARY_RAW))
+        raw_cfg["profiles"]["linux"]["compile"] = {
+            "binding": "gcc14",
+            "compiler_family": "gcc",
+        }
+        config = _write_config(tmp_path, raw_cfg)
+        build_dir = _write_build_output(tmp_path, "linux", ["libfoo"])
+        bindings = tmp_path / "bindings.yml"
+        bindings.write_text(
+            yaml.safe_dump(
+                {
+                    "schema": "abicheck.toolchain-bindings/v1",
+                    "bindings": {"gcc14": "/opt/clang"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        raw = abi_project_plan(
+            str(config),
+            build_outputs=[f"linux={build_dir}"],
+            toolchain_bindings=str(bindings),
+        )
+        payload = json.loads(raw)
+        assert payload["status"] == "ok"
+        assert payload["report"]["ok"] is False
+        assert any("compiler_family" in e for e in payload["report"]["errors"])
+
     def test_empty_plan_without_allow_empty_is_a_generation_error(self, tmp_path: Path):
         empty_raw = {
             "targets": {},

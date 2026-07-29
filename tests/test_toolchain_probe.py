@@ -148,6 +148,27 @@ class TestProbeCompilerFamily:
         assert tp._probe_compiler_family(metadata) == "msvc"
 
 
+class TestOsFamily:
+    @pytest.mark.parametrize(
+        ("triple", "expected"),
+        [
+            ("x86_64-linux-gnu", "linux"),
+            ("aarch64-linux-android", "android"),
+            ("x86_64-w64-mingw32", "windows"),
+            ("x86_64-pc-windows-msvc", "windows"),
+            ("x86_64-apple-darwin23", "darwin"),
+            ("x86_64-unknown-freebsd14", "freebsd"),
+            ("x86_64-unknown-netbsd", "netbsd"),
+            ("x86_64-unknown-openbsd", "openbsd"),
+        ],
+    )
+    def test_recognized_markers(self, triple: str, expected: str) -> None:
+        assert tp._os_family(triple) == expected
+
+    def test_unrecognized_triple_returns_none(self) -> None:
+        assert tp._os_family("some-made-up-triple") is None
+
+
 @dataclass
 class _FakeCompileSpec:
     compiler_family: str = ""
@@ -423,6 +444,37 @@ class TestCheckProfileToolchainIdentity:
         assert "aarch64" in errors[0]
         assert "x86_64" in errors[0]
 
+    def test_mismatched_target_os_yields_error_despite_matching_arch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: x86_64-w64-mingw32 (Windows) bound to a real
+        # x86_64-linux-gnu gcc shares the same architecture, so an
+        # architecture-only check passed it silently.
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "x86_64-linux-gnu",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc", target="x86_64-w64-mingw32", binding="gcc14"
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "p1.compile.target" in errors[0]
+        assert "windows" in errors[0]
+        assert "linux" in errors[0]
+
     def test_target_only_declared_with_no_probed_triple_is_skipped(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -531,15 +583,30 @@ class TestCheckProfileToolchainIdentity:
 
 @pytest.mark.integration
 class TestCheckProfileToolchainIdentityRealCompiler:
+    @staticmethod
+    def _resolve_real_family(binding_path: str) -> str | None:
+        # Ask the probe itself what family the "gcc" binary on THIS host
+        # actually resolves to, rather than assuming -- on macOS, /usr/bin/gcc
+        # is Apple's Clang-backed alias, not a real GNU compiler (confirmed
+        # via a real CI failure on macos-latest: the probe correctly reported
+        # family "clang" for a test that assumed "gcc").
+        return tp._probe_compiler_family(tp._tool_identity_metadata(binding_path))
+
     def test_real_gcc_binding_matches_its_own_family(self) -> None:
         gcc_path = shutil.which("gcc")
         if gcc_path is None:
             pytest.skip("gcc not available")
+        real_family = self._resolve_real_family(gcc_path)
+        if real_family is None:
+            pytest.skip("could not determine the real family of the gcc binary")
+        declared = {"gnu": "gcc", "clang": "clang"}.get(real_family)
+        if declared is None:
+            pytest.skip(f"unhandled real family {real_family!r} for this test")
         bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc-real": gcc_path})
         profiles = {
             "p1": _FakeProfile(
                 id="p1",
-                compile=_FakeCompileSpec(compiler_family="gcc", binding="gcc-real"),
+                compile=_FakeCompileSpec(compiler_family=declared, binding="gcc-real"),
             )
         }
         assert tp.check_profile_toolchain_identity(profiles, bf) == []
@@ -548,11 +615,18 @@ class TestCheckProfileToolchainIdentityRealCompiler:
         gcc_path = shutil.which("gcc")
         if gcc_path is None:
             pytest.skip("gcc not available")
+        real_family = self._resolve_real_family(gcc_path)
+        if real_family is None:
+            pytest.skip("could not determine the real family of the gcc binary")
+        # Declare the OTHER family from whichever this host's "gcc" really is.
+        wrong_declared = "clang" if real_family == "gnu" else "gcc"
         bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc-real": gcc_path})
         profiles = {
             "p1": _FakeProfile(
                 id="p1",
-                compile=_FakeCompileSpec(compiler_family="clang", binding="gcc-real"),
+                compile=_FakeCompileSpec(
+                    compiler_family=wrong_declared, binding="gcc-real"
+                ),
             )
         }
         errors = tp.check_profile_toolchain_identity(profiles, bf)

@@ -1162,9 +1162,25 @@ class TestToolchainMatrixFixtureExample:
             "-std=gnu++20 -stdlib=libc++ -DMATRIXDEMO_ABI_V2=1 -fno-rtti"
         )
 
-    def test_cli_end_to_end_matches_readme(self, tmp_path: Path) -> None:
+    def test_cli_end_to_end_matches_readme(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The exact CLI invocation README.md's "Reproduce it yourself"
         section documents, run against the committed fixture files."""
+        # The fixture's toolchain-bindings.yml deliberately names illustrative
+        # paths ("/opt/gcc-14.2.0/bin/g++") that don't exist on any real
+        # machine -- G34 Phase A's toolchain-identity check now probes a
+        # resolved binding for real, so this stubs that probe to report an
+        # identity consistent with what the fixture's own compiler_family/
+        # compiler_version declare, the same way a real installation would.
+        from abicheck.buildsource import toolchain_probe as tp
+
+        def _fake_metadata(path: str) -> dict[str, str]:
+            if "gcc" in path:
+                return {"selected": path, "version": "gcc (Debian 14.2.0) 14.2.0"}
+            return {"selected": path, "version": "clang version 20.0.0"}
+
+        monkeypatch.setattr(tp, "_tool_identity_metadata", _fake_metadata)
         bo_gcc14 = _write_build_output(tmp_path, "linux-gcc14", ["libmatrixdemo"])
         bo_clang20 = _write_build_output(tmp_path, "linux-clang20", ["libmatrixdemo"])
         result = CliRunner().invoke(
@@ -1515,6 +1531,40 @@ class TestRunPlanGenerateCliToolchainBindings:
         )
         assert result.exit_code == 1
         assert "gcc14" in result.output
+
+    def test_family_mismatch_exits_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # G34 Phase A parity: project plan must run the same
+        # toolchain-identity check project validate runs, not just binding
+        # resolution -- a run-plan that silently emits the wrong compiler's
+        # path is worse than one that fails to generate at all.
+        from abicheck.buildsource import toolchain_probe as tp
+
+        monkeypatch.setattr(
+            tp,
+            "_tool_identity_metadata",
+            lambda path: {"selected": path, "version": "clang version 18.0.0"},
+        )
+        raw = json.loads(json.dumps(self._RAW))
+        raw["profiles"]["gcc14"]["compile"]["compiler_family"] = "gcc"
+        config = _write_config(tmp_path, raw)
+        build_dir = _write_build_output(tmp_path, "gcc14", ["libfoo"])
+        bindings = _write_bindings_file(tmp_path, {"gcc14": "/opt/clang/bin/clang++"})
+        result = CliRunner().invoke(
+            main,
+            [
+                "project",
+                "plan",
+                str(config),
+                "--build-output",
+                f"gcc14={build_dir}",
+                "--toolchain-bindings",
+                str(bindings),
+            ],
+        )
+        assert result.exit_code == 1
+        assert "compiler_family" in result.output
 
     def test_malformed_bindings_file_exits_64(self, tmp_path: Path) -> None:
         config = _write_config(tmp_path, self._RAW)

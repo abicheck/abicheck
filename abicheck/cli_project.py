@@ -353,12 +353,13 @@ def _parse_build_output_specs(
         "Path to a trusted toolchain-bindings file (schema "
         "abicheck.toolchain-bindings/v1). Every declared "
         "profiles.<id>.compile.binding is checked against it (an "
-        "unresolvable binding is a generation error, same severity as an "
-        "unresolvable build-output target); each resolved cell's "
-        "compile_gcc_path is populated from it. Omitting this flag skips "
-        "the check entirely and leaves compile_gcc_path empty on every "
-        "cell — backward compatible, matching `project validate "
-        "--toolchain-bindings`."
+        "unresolvable binding, or a resolved binding whose probed identity "
+        "disagrees with a declared compiler_family/compiler_version/target, "
+        "is a generation error, same severity as an unresolvable "
+        "build-output target); each resolved cell's compile_gcc_path is "
+        "populated from it. Omitting this flag skips the check entirely "
+        "and leaves compile_gcc_path empty on every cell — backward "
+        "compatible, matching `project validate --toolchain-bindings`."
     ),
 )
 @click.option(
@@ -406,10 +407,14 @@ def project_plan_cmd(
     ``compile.binding`` (if declared) additionally resolves into that
     cell's ``compile_gcc_path`` — an unresolvable declared binding is a
     generation error, the same severity as an unresolvable build-output
-    target. Every cell's profile ``compile`` overlay (``standard``/
-    ``stdlib``/``target``/``abi_macros``/``args``) is always composed into
-    ``compile_gcc_options`` regardless of ``--toolchain-bindings`` (P1
-    toolchain-profile audit).
+    target. Any declared ``compiler_family``/``compiler_version``/``target``
+    is also checked against the resolved binding's real identity (G34 Phase
+    A) — a mismatch here is exactly as much a generation error as an
+    unresolvable binding, since a run-plan that silently emits the wrong
+    compiler's path is worse than one that fails to generate at all. Every
+    cell's profile ``compile`` overlay (``standard``/``stdlib``/``target``/
+    ``abi_macros``/``args``) is always composed into ``compile_gcc_options``
+    regardless of ``--toolchain-bindings`` (P1 toolchain-profile audit).
 
     \b
     Exit codes:
@@ -418,7 +423,9 @@ def project_plan_cmd(
       1   A required/explicit check could not be resolved against the
           supplied --build-output directories, (with --toolchain-bindings) a
           declared profiles.<id>.compile.binding does not resolve against
-          it, or the run-plan resolved to zero checks without --allow-empty.
+          it or its probed identity disagrees with the declared
+          compiler_family/compiler_version/target, or the run-plan resolved
+          to zero checks without --allow-empty.
       64  Usage error (CONFIG, a --build-output value, or
           --toolchain-bindings is unreadable, or CONFIG fails
           project validation).
@@ -447,6 +454,9 @@ def project_plan_cmd(
             raise click.UsageError(str(exc)) from exc
         resolved_bindings = bindings_file.bindings
         binding_errors = check_profile_bindings_resolve(parsed.profiles, bindings_file)
+        binding_errors.extend(
+            check_profile_toolchain_identity(parsed.profiles, bindings_file)
+        )
 
     plan, report = generate_run_plan(
         parsed,
