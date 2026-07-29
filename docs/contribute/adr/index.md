@@ -94,3 +94,4 @@ against the code as unverified, regardless of how confident it reads.
 | [053](053-tu-link-unit-dso-attribution.md) | TU → Link-Unit → DSO Source-Evidence Attribution | Accepted — implemented (core algorithm + validator; CLI/Action pipeline wiring deferred, see D5) |
 | [054](054-cli-project-integration-surface-consolidation.md) | CLI Project-Integration Surface Consolidation | Accepted — implemented |
 | [055](055-typed-request-result-completeness-and-schema-registry.md) | Typed Request/Result Completeness and a Schema-Version Registry | Proposed — D3 (schema registry) implemented; D1/D2/D4 not started |
+| [056](056-multi-artifact-library-set-scan.md) | Multi-Artifact / Library-Set `scan` | Proposed — not implemented; see [G34](../plans/g34-multi-artifact-scan.md) |
