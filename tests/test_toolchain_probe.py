@@ -497,6 +497,37 @@ class TestCheckProfileToolchainIdentity:
         }
         assert tp.check_profile_toolchain_identity(profiles, bf) == []
 
+    def test_declared_gcc_family_against_a_resolved_cl_exe_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: the resolved-path MSVC skip above applied
+        # unconditionally, so a profile explicitly declaring
+        # compiler_family: gcc whose binding resolves to a real cl.exe was
+        # also silently exempted -- a genuinely conflicting declared family
+        # must still be probed and reported, not skipped just because the
+        # resolved binary happens to be MSVC (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "C:/VC/bin/cl.exe": {
+                    "selected": "C:/VC/bin/cl.exe",
+                    "version": "unavailable: cl.exe does not support --version",
+                }
+            },
+        )
+        bf = BindingsFile(
+            schema=BINDINGS_SCHEMA, bindings={"msvc14": "C:/VC/bin/cl.exe"}
+        )
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(compiler_family="gcc", binding="msvc14"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "could not be probed" in errors[0]
+
     def test_matching_family_and_version_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -980,12 +1011,12 @@ class TestCheckProfileToolchainIdentity:
         assert "p1.compile.target" in errors[0]
         assert "environment" in errors[0]
 
-    def test_both_sides_unrecognized_os_and_env_is_not_flagged(
+    def test_both_sides_unrecognized_but_identical_suffix_is_not_flagged(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # When neither side's OS/environment marker is recognized, there is
-        # nothing to compare on either side -- this stays a silent skip
-        # (architecture still matches here), not a manufactured mismatch.
+        # When neither side's OS/environment marker is recognized but the
+        # raw, unrecognized suffix is identical on both sides, there is
+        # nothing to flag -- not a manufactured mismatch.
         _stub_metadata(
             monkeypatch,
             {
@@ -1006,6 +1037,38 @@ class TestCheckProfileToolchainIdentity:
             )
         }
         assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_both_sides_unrecognized_and_differing_suffix_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: arm-none-eabi (bare-metal EABI) vs arm-none-elf
+        # (bare-metal ELF) share the same architecture and neither
+        # normalizes to a recognized OS/environment marker, so the
+        # os_mismatch/env_mismatch checks alone stayed silent -- a genuine
+        # ABI/object-format difference passed unconditionally as long as
+        # architecture agreed (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/gcc": {
+                    "selected": "/opt/gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "arm-none-elf",
+                }
+            },
+        )
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/opt/gcc"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc", target="arm-none-eabi", binding="gcc14"
+                ),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "unrecognized target suffix" in errors[0]
 
     def test_clang_bogus_target_is_rejected_via_real_probe(
         self, monkeypatch: pytest.MonkeyPatch

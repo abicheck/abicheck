@@ -487,7 +487,7 @@ def _check_one_overlay(
     if path is None:
         # Already reported by check_profile_bindings_resolve; avoid duplicating.
         return []
-    if Path(path).stem.lower() in _UNPROBED_FAMILIES:
+    if not declared_family and Path(path).stem.lower() in _UNPROBED_FAMILIES:
         # Same documented MSVC exemption as the declared_family check above,
         # but keyed on the *resolved* binding path instead: a profile that
         # declares only target:/compiler_version: (no compiler_family:) but
@@ -495,7 +495,17 @@ def _check_one_overlay(
         # below, which fails outright since cl.exe has no --version flag --
         # reported as "could not be probed", contradicting this module's own
         # documented "a declared MSVC family/binding is silently skipped"
-        # (CodeRabbit review, fresh evidence).
+        # (CodeRabbit review, fresh evidence). Gated on an EMPTY
+        # declared_family, not merely "not already handled by the
+        # declared_family check above": by this point declared_family is
+        # either empty or some non-MSVC value (gcc/clang/icx/...), since the
+        # in-_UNPROBED_FAMILIES case already returned above -- a profile
+        # that explicitly declares a conflicting family (e.g.
+        # `compiler_family: gcc`) against a binding that resolves to real
+        # cl.exe must still be probed and reported as a mismatch, not
+        # silently exempted just because the resolved binary happens to be
+        # MSVC (Codex review, fresh evidence: `compiler_family: gcc` bound
+        # to cl.exe previously passed unconditionally).
         return []
 
     where = f"profiles.{profile_id}.{overlay_key}"
@@ -648,7 +658,31 @@ def _check_one_overlay(
                     (declared_env is not None or probed_env is not None)
                     and declared_env != probed_env
                 )
-                if arch_mismatch or os_mismatch or env_mismatch:
+                # Fall back to a raw suffix comparison when NEITHER the OS
+                # nor the environment marker table recognized anything on
+                # EITHER side: os_mismatch/env_mismatch above only fail
+                # closed when at least one side is recognized, so two
+                # triples that are both entirely unrecognized after the
+                # architecture (e.g. `arm-none-eabi` vs `arm-none-elf` --
+                # bare-metal EABI vs ELF object-format spellings, neither
+                # matching any OS/env marker) previously still passed
+                # silently as long as architecture agreed (Codex review,
+                # fresh evidence). Compares everything after the first
+                # `-`-separated component verbatim (case-insensitive) --
+                # deliberately not attempting to interpret it, since
+                # neither marker table recognizes it.
+                declared_rest = declared_target.split("-", 1)[1:]
+                probed_rest = probed_triple.split("-", 1)[1:]
+                suffix_mismatch = bool(
+                    declared_os is None
+                    and probed_os is None
+                    and declared_env is None
+                    and probed_env is None
+                    and declared_rest
+                    and probed_rest
+                    and declared_rest[0].lower() != probed_rest[0].lower()
+                )
+                if arch_mismatch or os_mismatch or env_mismatch or suffix_mismatch:
                     mismatches = []
                     if arch_mismatch:
                         mismatches.append(
@@ -659,6 +693,11 @@ def _check_one_overlay(
                     if env_mismatch:
                         mismatches.append(
                             f"environment {declared_env!r} vs {probed_env!r}"
+                        )
+                    if suffix_mismatch:
+                        mismatches.append(
+                            f"unrecognized target suffix {declared_rest[0]!r} vs "
+                            f"{probed_rest[0]!r}"
                         )
                     errors.append(
                         f"{where}.target declares {declared_target!r} but "
