@@ -1067,6 +1067,26 @@ is first extracted to a sibling module (the pattern this file's own
 command groups), which is its own scoped prerequisite, not a drive-by
 alongside this wiring.
 
+**Updated (2026-07-29, same PR as the note above): MCP is now the first
+live front end.** `abi_compare` accepts `contract_evaluation`, forwarded
+through `service.compare_snapshots`, exactly as the paragraph above
+proposed (Codex review caught this note going stale within the same PR
+that shipped the wiring — flagged here explicitly rather than silently
+edited, matching this section's own established practice above). Every
+finding in the response gains the shadow fields when the caller opts in,
+including scoped-only findings synthesized by `--used-by`/
+`--required-symbol` scoping *after* `compare()` already ran — those are
+stamped `IN_CONTRACT` directly under a new `explicit_consumer_or_required_symbol_evidence`
+reason code (`contract_relevance_types.CONTRACT_REASON_CODES`), not run
+through the header-surface evaluator: an explicit required symbol or a
+concrete consumer's actual import is section 4.3 item 1's *strongest*
+public-evidence tier, stronger than and independent of header-derived
+public root membership, so evaluating it against a possibly-unresolved
+header surface (routine for a binary-only `used_by` snapshot) would
+misclassify authoritative evidence as merely `unknown_unresolved`. Still
+missing, unchanged from above: the `compare` CLI flag (blocked on `cli.py`'s
+line-count cap), the provider-evidence ledger, and `EXPORTS` mode.
+
 Measure:
 
 - delta by old/new decision;

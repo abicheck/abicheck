@@ -1379,6 +1379,122 @@ class TestAbiCompare:
         assert data["exit_code"] == 0
         assert data["exit_code_scheme"] == "scoped"
 
+    def test_used_by_missing_symbol_gets_contract_evaluation(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): a missing-symbol/
+        # missing-entrypoint label is a plain dict, not a Change, and is
+        # itself ADR-049 section 4.3 item 1's strongest evidence tier (an
+        # explicit required symbol) -- it must be stamped IN_CONTRACT
+        # directly, not left unstamped or run through the header-surface
+        # evaluator (which would misclassify a binary-only snapshot's
+        # unresolved header surface as unknown_unresolved).
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("entry", "_Z5entryv", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        missing_entries = [
+            c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
+        ]
+        assert missing_entries
+        assert all(c["contract_relevance"] == "IN_CONTRACT" for c in missing_entries)
+
+    def test_used_by_missing_symbol_omits_contract_fields_by_default(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("entry", "_Z5entryv", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(str(old_p), str(new_p), used_by=[str(app)])
+        data = json.loads(raw)
+        missing_entries = [
+            c for c in data["changes"] if c["kind"] == "used_by_missing_symbol"
+        ]
+        assert missing_entries
+        assert all("contract_relevance" not in c for c in missing_entries)
+
+    def test_used_by_scoped_only_change_stamped_in_contract_not_header_evaluated(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): a scoped-only Change is
+        # itself explicit consumer-import evidence -- the strongest ADR-049
+        # public-evidence tier -- so it must be stamped IN_CONTRACT directly
+        # rather than run through the header-surface evaluator (which would
+        # misclassify a binary-only snapshot's unresolved header surface as
+        # unknown_unresolved rather than the authoritative in-contract
+        # evidence this finding actually represents).
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Change
+        from abicheck.checker_policy import ChangeKind
+
+        old = _make_snapshot("1.0")
+        new = _make_snapshot("2.0")
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+
+        scoped_only = Change(
+            kind=ChangeKind.PE_ORDINAL_RETARGETED,
+            symbol="ordinal:5", description="ordinal 5 retargeted",
+            old_value="OldFunc", new_value="NewFunc",
+        )
+
+        def _scoped_for(*_args, **_kwargs):
+            return AppCompatResult(
+                app_path="/app", old_lib_path=str(old_p), new_lib_path=str(new_p),
+                required_symbols={"foo"}, required_symbol_count=1,
+                breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
+            )
+
+        from abicheck import mcp_server
+
+        monkeypatch.setattr(
+            mcp_server, "_resolve_input",
+            MagicMock(side_effect=[old, new]),
+        )
+        import abicheck.appcompat as appcompat_mod
+
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True
+        )
+        data = json.loads(raw)
+        scoped_entries = [
+            c for c in data["changes"] if c["kind"] == "pe_ordinal_retargeted"
+        ]
+        assert scoped_entries
+        assert all(c["contract_relevance"] == "IN_CONTRACT" for c in scoped_entries)
+        assert all(
+            c["contract_reason_code"] == "explicit_consumer_or_required_symbol_evidence"
+            for c in scoped_entries
+        )
+
     def test_used_by_missing_symbol_is_breaking(self, tmp_path: Path, monkeypatch):
         from abicheck.appcompat import AppCompatResult
 

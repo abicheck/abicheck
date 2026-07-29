@@ -31,7 +31,7 @@ import logging
 import platform
 import sys
 import time as _time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -531,51 +531,64 @@ def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
     return entry
 
 
-def _stamp_scoped_only_contract_evaluation(
-    changes: Sequence[Any], old_snap: Any, new_snap: Any
-) -> None:
-    """Stamp ADR-049 Phase 3's shadow contract-relevance decision onto
-    *changes* synthesized *after* ``compare_snapshots`` already ran.
+#: ADR-049 section 4.3 item 1's strongest public-evidence tier: "explicit
+#: required symbol, exact contract/ABI manifest, package symbols metadata,
+#: or concrete consumer import/relocation/recorded entrypoint." Every entry
+#: in ``used_by``/``required_symbols`` scoping's own relevant/scoped-only/
+#: missing-label collections *is*, by construction, one of those -- a
+#: consumer-import-derived finding (``scope_diff_to_app``) or an explicit
+#: required-symbol/entrypoint finding (``scope_diff_to_required_symbols``)
+#: -- so it is authoritative ``IN_CONTRACT`` evidence on its own, regardless
+#: of what a from-scratch header-surface evaluation would conclude.
+def _stamp_explicit_scope_contract_evaluation(c: Any) -> None:
+    """Stamp *c* (a ``Change`` or a plain dict entry) ``IN_CONTRACT`` using
+    ADR-049's explicit consumer/required-symbol evidence tier.
 
     ``used_by``/``required_symbols`` scoping
     (``appcompat.scope_diff_to_app``/``scope_diff_to_required_symbols``) can
     produce fresh ``Change`` objects (e.g. a synthetic
-    ``consumer_required_symbol_removed`` or a PE ordinal-retarget finding)
-    that were never part of ``result.changes``/``pp_ctx.out_of_surface`` --
-    the only two collections ``checker._apply_contract_evaluation_shadow``
-    stamps *inside* ``compare()`` itself. Without this, a scoped-only
-    finding folded into the top-level ``changes`` array (see the
-    ``scoped_only_changes`` loop below) stayed permanently unstamped even
-    when the caller opted into ``contract_evaluation=True`` -- unlike an
-    ordinary ``result.changes`` entry, which ``_mcp_change_entry`` already
-    serializes correctly once stamped (Codex review, fresh evidence: this
-    is a distinct gap from the top-level-array one, since these findings
-    follow an entirely separate, post-comparison path).
+    ``consumer_required_symbol_removed`` or a PE ordinal-retarget finding),
+    and its missing-symbol/missing-entrypoint labels are plain dicts built
+    directly in this module -- neither ever passes through
+    ``checker._apply_contract_evaluation_shadow`` (the only place inside
+    ``compare()`` that stamps a shadow decision), so both stayed permanently
+    unstamped even when the caller opted into ``contract_evaluation=True``
+    (Codex review, fresh evidence, two rounds: the ``Change``-shaped gap and
+    the missing-label-dict gap are each their own distinct finding).
 
-    Mirrors ``_apply_contract_evaluation_shadow``'s own mode selection:
-    ``abi_compare`` never overrides ``scope_to_public_surface`` (always
-    ``compare_snapshots``'s default, ``True``), so this always evaluates
-    under ``ContractMode.PUBLIC``. A change that already carries a
-    ``contract_relevance`` (reused from ``result.changes`` rather than
-    freshly synthesized) is left untouched -- evaluation is idempotent in
-    principle, but skipping is cheaper and avoids relying on that.
+    A generic header-surface evaluation (``evaluate_change_contract_relevance``)
+    would be *wrong* here, not merely weaker: these findings are exactly the
+    "explicit required symbol ... or concrete consumer import" evidence
+    ADR-049 section 4.3 ranks as the *strongest* public-contract proof --
+    stronger than, and independent of, header-derived public root
+    membership. A binary-only ``used_by`` snapshot has no resolvable header
+    surface at all, so running these through the header-surface path would
+    misclassify authoritative in-contract evidence as ``unknown_unresolved``
+    (Codex review, fresh evidence).
+
+    Accepts either a ``Change`` (attribute-set) or a plain ``dict`` (the
+    missing-label shape) via duck typing; a value that already carries a
+    relevance (a ``Change`` reused verbatim from ``result.changes``, already
+    stamped by ``compare()`` itself) is left untouched.
     """
-    from .contract_evaluation import evaluate_change_contract_relevance
-    from .contract_relevance_types import ContractMode
-    from .surface import compute_public_surface
+    from .contract_relevance_types import ContractAssurance, ContractRelevance
 
-    unstamped = [c for c in changes if getattr(c, "contract_relevance", None) is None]
-    if not unstamped:
+    is_dict = isinstance(c, dict)
+    existing = (
+        c.get("contract_relevance")
+        if is_dict
+        else getattr(c, "contract_relevance", None)
+    )
+    if existing is not None:
         return
-    surf_old = compute_public_surface(old_snap)
-    surf_new = compute_public_surface(new_snap)
-    for c in unstamped:
-        decision = evaluate_change_contract_relevance(
-            c, surf_old, surf_new, mode=ContractMode.PUBLIC
-        )
-        c.contract_relevance = decision.relevance
-        c.contract_reason_code = decision.reason_code
-        c.contract_assurance = decision.assurance
+    if is_dict:
+        c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
+        c["contract_reason_code"] = "explicit_consumer_or_required_symbol_evidence"
+        c["contract_assurance"] = ContractAssurance.COMPLETE.value
+    else:
+        c.contract_relevance = ContractRelevance.IN_CONTRACT
+        c.contract_reason_code = "explicit_consumer_or_required_symbol_evidence"
+        c.contract_assurance = ContractAssurance.COMPLETE
 
 
 # ---------------------------------------------------------------------------
@@ -1224,9 +1237,9 @@ def abi_compare(
             # cli_compare_helpers._fold_scoped_compat_into_text).
             existing_ids = {_finding_id(c) for c in result.changes}
             scoped_only = getattr(result, "scoped_only_changes", ()) or ()
-            if contract_evaluation:
-                _stamp_scoped_only_contract_evaluation(scoped_only, old_snap, new_snap)
             for c in scoped_only:
+                if contract_evaluation:
+                    _stamp_explicit_scope_contract_evaluation(c)
                 if _finding_id(c) not in existing_ids:
                     response["changes"].append(_mcp_change_entry(c, active_policy))
             from .severity import missing_contract_exit_code
@@ -1241,28 +1254,29 @@ def abi_compare(
                 or missing_contract_exit_code(severity_config) != 0
             )
             for label in getattr(result, "scoped_missing_labels", ()) or ():
-                response["changes"].append(
-                    {
-                        "kind": missing_kind,
-                        "symbol": label,
-                        "description": (
-                            f"Required symbol/version '{label}' is missing "
-                            "from the new library."
-                        ),
-                        # A missing-contract label has no ChangeKind to run
-                        # through _impact_category, but its severity is known
-                        # (blocks_gate) -- reuse the same "breaking"/
-                        # "compatible" label the CLI text report and severity
-                        # gate already use for this, so the summary tally
-                        # below has something to count it under.
-                        "impact": "breaking" if blocks else "compatible",
-                        "old_value": None,
-                        "new_value": None,
-                        "source_location": None,
-                        "relevant_to_gate": True,
-                        "blocks_gate": blocks,
-                    }
-                )
+                missing_entry: dict[str, object] = {
+                    "kind": missing_kind,
+                    "symbol": label,
+                    "description": (
+                        f"Required symbol/version '{label}' is missing "
+                        "from the new library."
+                    ),
+                    # A missing-contract label has no ChangeKind to run
+                    # through _impact_category, but its severity is known
+                    # (blocks_gate) -- reuse the same "breaking"/
+                    # "compatible" label the CLI text report and severity
+                    # gate already use for this, so the summary tally
+                    # below has something to count it under.
+                    "impact": "breaking" if blocks else "compatible",
+                    "old_value": None,
+                    "new_value": None,
+                    "source_location": None,
+                    "relevant_to_gate": True,
+                    "blocks_gate": blocks,
+                }
+                if contract_evaluation:
+                    _stamp_explicit_scope_contract_evaluation(missing_entry)
+                response["changes"].append(missing_entry)
 
             # Recompute summary now that scoped-only changes/missing-contract
             # labels were folded into "changes" above -- otherwise a run
