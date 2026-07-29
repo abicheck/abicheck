@@ -581,6 +581,23 @@ def _check_one_overlay(
                         f"toolchain binding {binding_id!r} ({path!r}) does not "
                         f"recognize it as a valid --target= triple"
                     )
+                elif accepted is None:
+                    # _clang_accepts_target itself returns None only when
+                    # the probe compile couldn't even run (timeout, OSError)
+                    # -- e.g. a wrapper that answers --version fine but
+                    # hangs or fails on a real invocation. Silently
+                    # accepting that leaves the declared target completely
+                    # unverified, the same "can't verify -> error, not a
+                    # silent pass" principle this module applies to every
+                    # other unprobeable case (Codex review, fresh
+                    # evidence).
+                    errors.append(
+                        f"{where}.target declares {declared_target!r} but "
+                        f"toolchain binding {binding_id!r} ({path!r}) could "
+                        f"not be probed for --target= support (the "
+                        f"validation compile did not complete), so the "
+                        f"declared target cannot be verified"
+                    )
         else:
             probed_triple = metadata.get("target_triple")
             if not probed_triple:

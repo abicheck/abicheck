@@ -1006,6 +1006,38 @@ class TestCheckProfileToolchainIdentity:
         }
         assert tp.check_profile_toolchain_identity(profiles, bf) == []
 
+    def test_clang_target_probe_that_cannot_run_is_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: _clang_accepts_target returns None when the
+        # controlled empty-translation-unit compile itself couldn't run
+        # (timeout, OSError) -- e.g. a wrapper that answers --version fine
+        # but hangs or fails on a real invocation. That was previously
+        # treated as a silent pass, approving a completely unverified
+        # target binding (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/clang": {
+                    "selected": "/opt/clang",
+                    "version": "clang version 18.1.3",
+                    "sha256": "deadbeef",
+                }
+            },
+        )
+        monkeypatch.setattr(tp, "_clang_accepts_target", lambda path, digest, t: None)
+        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"clang18": "/opt/clang"})
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(target="aarch64-linux-gnu", binding="clang18"),
+            )
+        }
+        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        assert len(errors) == 1
+        assert "p1.compile.target" in errors[0]
+        assert "could not be probed" in errors[0]
+
     def test_clang_target_without_sha256_skips_the_probe(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
