@@ -103,6 +103,23 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
         # lets a large/pathological set's parsing loop abort between
         # members instead of only being caught by an elapsed-time check
         # after the whole snapshot finishes building (Codex review).
+        # Deliberately not a bound on the parse_elf_metadata() call itself
+        # (Codex review, fresh finding): a single large/malformed member
+        # can still run past --budget mid-parse before this checkpoint is
+        # reached again on the *next* member, unlike a spawned castxml/
+        # clang subprocess (bounded per-call via deadline.bounded_timeout())
+        # -- parse_elf_metadata is pure in-process struct parsing, not a
+        # killable child process, and threading deadline.check() calls
+        # into its shared, general-purpose ELF-parsing internals (used far
+        # beyond this one audit-mode caller) is out of scope for this
+        # narrow fix. The one place this call path *is* genuinely bounded
+        # by an OS-level killable timeout end to end is
+        # service_scan.run_scan_set_subprocess (what MCP's abi_scan uses);
+        # the CLI path (cli_scan._run_artifact_set) calls run_scan_set()
+        # directly, the same architecture the single-binary scan command
+        # already uses for run_scan_core, so this is a pre-existing CLI-
+        # wide limitation (cooperative checkpoints only, no OS-level kill),
+        # not one specific to bundle auditing.
         deadline.check()
         # Bundle analysis is Linux/ELF-only by design (see ADR-018,
         # ADR-023). Skip JSON snapshots, PE/Mach-O, or other formats up

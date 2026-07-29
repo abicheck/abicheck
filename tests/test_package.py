@@ -100,9 +100,14 @@ def _make_minimal_elf_dso_with_interp(path: Path) -> None:
 
 
 def _make_minimal_elf_static_pie_exec(path: Path) -> None:
-    """Write a minimal ET_DYN ELF with no PT_INTERP but a nonzero e_entry
-    (models a real ``gcc -static-pie`` executable, which needs no dynamic
-    linker segment but is still directly executable, unlike a real .so)."""
+    """Write a minimal ET_DYN ELF with no PT_INTERP but a PT_DYNAMIC segment
+    whose DT_FLAGS_1 carries DF_1_PIE (models a real ``gcc -static-pie``
+    executable, which needs no dynamic linker segment but is still
+    directly executable, unlike a real .so -- this is the actual signal
+    real static-PIE binaries carry, confirmed against one during review)."""
+    _DT_FLAGS_1 = 0x6FFFFFFB
+    _DF_1_PIE = 0x08000000
+
     elf = bytearray(64)
     elf[0:4] = b"\x7fELF"
     elf[4] = 2  # EI_CLASS = ELFCLASS64
@@ -111,16 +116,61 @@ def _make_minimal_elf_static_pie_exec(path: Path) -> None:
     struct.pack_into("<H", elf, 16, 3)  # e_type = ET_DYN
     struct.pack_into("<H", elf, 18, 0x3E)  # e_machine = EM_X86_64
     struct.pack_into("<I", elf, 20, 1)  # e_version
-    struct.pack_into("<Q", elf, 24, 0x1000)  # e_entry (nonzero)
     struct.pack_into("<Q", elf, 32, 64)  # e_phoff
     struct.pack_into("<H", elf, 54, 56)  # e_phentsize
     struct.pack_into("<H", elf, 56, 1)  # e_phnum
 
+    dyn_offset = 64 + 56  # right after the one program header
     phdr = bytearray(56)
-    struct.pack_into("<I", phdr, 0, 1)  # p_type = PT_LOAD (not PT_INTERP)
-    struct.pack_into("<I", phdr, 4, 5)  # p_flags = PF_R | PF_X
-    struct.pack_into("<Q", phdr, 48, 0x1000)  # p_align
-    path.write_bytes(bytes(elf) + bytes(phdr))
+    struct.pack_into("<I", phdr, 0, 2)  # p_type = PT_DYNAMIC
+    struct.pack_into("<I", phdr, 4, 6)  # p_flags = PF_R | PF_W
+    struct.pack_into("<Q", phdr, 8, dyn_offset)  # p_offset
+    struct.pack_into("<Q", phdr, 32, 32)  # p_filesz = 2 entries * 16 bytes
+    struct.pack_into("<Q", phdr, 48, 8)  # p_align
+
+    dyn = bytearray(32)
+    struct.pack_into("<Q", dyn, 0, _DT_FLAGS_1)
+    struct.pack_into("<Q", dyn, 8, _DF_1_PIE)
+    struct.pack_into("<Q", dyn, 16, 0)  # DT_NULL tag
+    struct.pack_into("<Q", dyn, 24, 0)  # DT_NULL val
+    path.write_bytes(bytes(elf) + bytes(phdr) + bytes(dyn))
+
+
+def _make_minimal_elf_so_with_dynamic_no_pie_flag(path: Path) -> None:
+    """Write a minimal ET_DYN ELF with a real PT_DYNAMIC segment (DT_FLAGS_1
+    present but without DF_1_PIE) and no PT_INTERP -- models a real shared
+    object linked with a custom entry point (``-Wl,-e,entry``): it has a
+    nonzero e_entry but never carries the PIE flag, unlike a static/dynamic
+    PIE executable."""
+    _DT_FLAGS_1 = 0x6FFFFFFB
+
+    elf = bytearray(64)
+    elf[0:4] = b"\x7fELF"
+    elf[4] = 2  # EI_CLASS = ELFCLASS64
+    elf[5] = 1  # EI_DATA = ELFDATA2LSB
+    elf[6] = 1  # EI_VERSION = EV_CURRENT
+    struct.pack_into("<H", elf, 16, 3)  # e_type = ET_DYN
+    struct.pack_into("<H", elf, 18, 0x3E)  # e_machine = EM_X86_64
+    struct.pack_into("<I", elf, 20, 1)  # e_version
+    struct.pack_into("<Q", elf, 24, 0x1000)  # e_entry (nonzero -- custom entry)
+    struct.pack_into("<Q", elf, 32, 64)  # e_phoff
+    struct.pack_into("<H", elf, 54, 56)  # e_phentsize
+    struct.pack_into("<H", elf, 56, 1)  # e_phnum
+
+    dyn_offset = 64 + 56
+    phdr = bytearray(56)
+    struct.pack_into("<I", phdr, 0, 2)  # p_type = PT_DYNAMIC
+    struct.pack_into("<I", phdr, 4, 6)  # p_flags = PF_R | PF_W
+    struct.pack_into("<Q", phdr, 8, dyn_offset)  # p_offset
+    struct.pack_into("<Q", phdr, 32, 32)  # p_filesz
+    struct.pack_into("<Q", phdr, 48, 8)  # p_align
+
+    dyn = bytearray(32)
+    struct.pack_into("<Q", dyn, 0, _DT_FLAGS_1)
+    struct.pack_into("<Q", dyn, 8, 0x00000001)  # DF_1_NOW, not DF_1_PIE
+    struct.pack_into("<Q", dyn, 16, 0)  # DT_NULL tag
+    struct.pack_into("<Q", dyn, 24, 0)  # DT_NULL val
+    path.write_bytes(bytes(elf) + bytes(phdr) + bytes(dyn))
 
 
 def _make_malformed_elf_dso_with_missing_phdr(path: Path) -> None:
@@ -513,17 +563,30 @@ class TestIsElfSharedObject:
             assert _is_elf_shared_object(f) is False
 
     def test_static_pie_executable_is_rejected(self, tmp_path: Path) -> None:
-        # P2 regression (Codex review): a `gcc -static-pie` executable is
-        # ET_DYN with no PT_INTERP (no dynamic linker needed for a static
-        # binary), so the PT_INTERP-absence check alone misclassified it as
-        # a shared object. A real shared object has no process entry point
-        # (e_entry == 0, since it's loaded via dlopen()/the dynamic linker
-        # rather than executed directly); any executable, static or
-        # dynamic, always has a nonzero one -- verified against a real
-        # -static-pie-built binary during review.
+        # P2 regression (Codex review, x2): a `gcc -static-pie` executable
+        # is ET_DYN with no PT_INTERP (no dynamic linker needed for a
+        # static binary), so the PT_INTERP-absence check alone
+        # misclassified it as a shared object. An earlier fix rejected any
+        # ET_DYN with a nonzero entry point, but that also false-rejects a
+        # real shared object linked with a custom entry point
+        # (-Wl,-e,entry) -- the correct signal is DT_FLAGS_1's DF_1_PIE
+        # bit, which real static/dynamic PIE executables carry and a real
+        # shared object never does, confirmed against real compiled
+        # binaries in both directions during review.
         f = tmp_path / "libfoo.so"
         _make_minimal_elf_static_pie_exec(f)
         assert _is_elf_shared_object(f) is False
+
+    def test_shared_object_with_custom_entry_point_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        # A real .so linked with -Wl,-e,entry has a nonzero e_entry but no
+        # DT_FLAGS_1 DF_1_PIE bit -- must not be rejected as if it were a
+        # static-PIE executable (CodeRabbit review, verified against a
+        # real -Wl,-e-linked shared object).
+        f = tmp_path / "libfoo.so"
+        _make_minimal_elf_so_with_dynamic_no_pie_flag(f)
+        assert _is_elf_shared_object(f) is True
 
     def test_malformed_program_header_table_is_rejected(self, tmp_path: Path) -> None:
         f = tmp_path / "libbad.so"
