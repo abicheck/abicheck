@@ -1078,6 +1078,36 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert scoped.types == []
 
+    def test_primitive_typedef_alias_shadows_exact_tag_identity_too(self):
+        """Codex review (twenty-third round): unlike the previous test's
+        `dep::Handle` (a *derived*, namespace-suffix match against
+        `Handle`), this dependency candidate's own identity is *exactly*
+        bare `Handle` -- a plain C-style struct tag with no namespace,
+        never assigned a `qualified_name`. In C, tag names (`struct
+        Handle`) and typedef names occupy separate namespaces, so a
+        signature spelling the bare, unqualified `Handle` can only mean
+        `typedefs["Handle"] = "int"`'s typedef -- the tag is never
+        reachable that way, exact-identity match or not. The previous
+        round's veto only covered a *derived* suffix owner; an *exact*
+        identity owner bypassed it entirely and was retained regardless
+        of the colliding primitive alias."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("Handle",))],
+            types=[
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "int"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
         two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle

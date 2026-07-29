@@ -619,6 +619,19 @@ def _directly_referenced_dependency_names(
         if not own_owners:
             if alias_owners:
                 spelling_index[spelling] = set(alias_owners)
+        elif not alias_owners and spelling in all_typedef_alias_names:
+            # A typedef alias exists under this exact name/suffix, but
+            # didn't resolve to anything via *alias_spelling_owners*
+            # above (an alias to a primitive, or one dropped as
+            # genuinely ambiguous). This defers *unconditionally* --
+            # even a candidate's own *exact* identity match, not just a
+            # derived one (Codex review, fresh evidence: in C, tag names
+            # -- ``struct Handle`` -- and typedef names occupy separate
+            # namespaces, so a signature spelling the bare, unqualified
+            # ``Handle`` can only mean the typedef; a same-named tag is
+            # not reachable that way at all, exact-identity match or
+            # not). own_owners contributes nothing for this spelling.
+            pass
         elif exact_owners:
             all_owners = own_owners | alias_owners
             if len(all_owners) == 1:
@@ -627,15 +640,7 @@ def _directly_referenced_dependency_names(
             # own_owners are derived-only (no exact-identity claim) --
             # defer to the resolved alias's stronger, literal-name match.
             spelling_index[spelling] = set(alias_owners)
-        elif len(own_owners) == 1 and spelling not in all_typedef_alias_names:
-            # A typedef alias exists under this exact name/suffix, but
-            # didn't resolve to anything via *alias_spelling_owners*
-            # above (an alias to a primitive, or one dropped as
-            # genuinely ambiguous) -- the spelling still means that
-            # alias first, not this candidate's coincidentally-matching
-            # derived suffix, so this weakest tier defers to it same as
-            # the alias-owners branch above, rather than falling through
-            # to a false single-owner match.
+        elif len(own_owners) == 1:
             spelling_index[spelling] = set(own_owners)
 
     pattern = _compile_spelling_pattern(spelling_index)
