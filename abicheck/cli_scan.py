@@ -536,6 +536,46 @@ def _render_artifact_set_text(result: Any) -> str:
     return "\n".join(lines)
 
 
+_COMPARISON_ONLY_FLAGS = {
+    "suppress": "--suppress",
+    "policy_file_path": "--policy-file",
+    "policy": "--policy",
+    "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
+    "strict_suppressions": "--strict-suppressions",
+    "public_symbols": "--public-symbol",
+    "public_symbols_list": "--public-symbols-list",
+    "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
+    "env_matrix_path": "--env-matrix",
+}
+
+
+def _reject_comparison_only_flags(*, no_baseline_reason: str) -> None:
+    """Reject any flag from :data:`_COMPARISON_ONLY_FLAGS` given explicitly
+    on the command line, for a scan that has no ``--against`` baseline to
+    apply them to.
+
+    Shared by both the ``--against``-less single-binary path and the
+    ``--artifact-set`` path (always audit-only, ADR-056 D2 -- Codex review:
+    the single-binary check alone left this validation reachable only via
+    ``against is None``, which the ``--artifact-set`` branch's early
+    ``return`` never passes through, so these flags were silently parsed,
+    validated, and then discarded for a set instead of erroring).
+    """
+    ctx = click.get_current_context()
+    explicit = [
+        flag
+        for dest, flag in _COMPARISON_ONLY_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    ]
+    if explicit:
+        noun = "flag" if len(explicit) == 1 else "flags"
+        raise click.UsageError(
+            f"{', '.join(explicit)} only take effect with --against (they "
+            f"configure the baseline comparison); drop {'this' if len(explicit) == 1 else 'these'} "
+            f"{noun} or {no_baseline_reason}."
+        )
+
+
 def _run_artifact_set(
     *,
     artifact_set: str,
@@ -670,8 +710,20 @@ def _run_artifact_set(
         # degraded to a "successful" bundle_incomplete result (Codex
         # review), surfaced here the same way discover_artifact_set's own
         # ArtifactSetError already is above.
+        #
+        # ValueError: run_scan_set() loads --risk-rules via
+        # _load_risk_rules_for_service(), which is deliberately click-free
+        # (service_scan.py has no click dependency -- it's also reachable
+        # from the MCP server/Python API) and converts the single-binary
+        # path's own click.ClickException into ValueError instead. The
+        # single-binary path never needs a try/except for this because it
+        # calls the click-raising _load_risk_rules() directly, letting
+        # Click's own top-level handler render it; this service-layer call
+        # must translate that ValueError back into a usage error itself, or
+        # a malformed/unreadable --risk-rules file surfaces as an
+        # unhandled Python traceback and exit 1 instead (Codex review).
         result = run_scan_set(req)
-    except ArtifactSetError as exc:
+    except (ArtifactSetError, ValueError) as exc:
         raise click.UsageError(str(exc)) from exc
 
     text = (
@@ -989,6 +1041,7 @@ def scan_cmd(
             raise click.UsageError(
                 "--dry-run is not yet supported with --artifact-set."
             )
+        _reject_comparison_only_flags(no_baseline_reason="drop --artifact-set")
         _run_artifact_set(
             artifact_set=artifact_set,
             bundle_system_providers=bundle_system_providers,
@@ -1136,30 +1189,7 @@ def scan_cmd(
     # setting the user actually needed. Reject them explicitly rather than
     # accepting no-op configuration.
     if against is None:
-        ctx = click.get_current_context()
-        _comparison_only_flags = {
-            "suppress": "--suppress",
-            "policy_file_path": "--policy-file",
-            "policy": "--policy",
-            "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
-            "strict_suppressions": "--strict-suppressions",
-            "public_symbols": "--public-symbol",
-            "public_symbols_list": "--public-symbols-list",
-            "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
-            "env_matrix_path": "--env-matrix",
-        }
-        explicit = [
-            flag
-            for dest, flag in _comparison_only_flags.items()
-            if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
-        ]
-        if explicit:
-            noun = "flag" if len(explicit) == 1 else "flags"
-            raise click.UsageError(
-                f"{', '.join(explicit)} only take effect with --against (they "
-                f"configure the baseline comparison); drop {'this' if len(explicit) == 1 else 'these'} "
-                f"{noun} or pass --against."
-            )
+        _reject_comparison_only_flags(no_baseline_reason="pass --against")
 
     # ADR-049 Phase 5 review (Codex, PR #657): resolve scope/suppression
     # settings through the project's `.abicheck.yml` the same way `compare`

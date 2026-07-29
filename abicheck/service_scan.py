@@ -850,7 +850,14 @@ class ScanArtifactResult:
 # scan-specific failure verdicts (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`)
 # a ScanResult can carry. See _aggregate_scan_set_verdict's docstring.
 _SCAN_SET_COMPAT_ORDER: dict[str, int] = {
-    "NO_CHANGE": 0,
+    # NO_CHANGE ranks strictly below COMPATIBLE (not tied at 0): the bundle
+    # audit's own verdict is always appended to `candidates` below and often
+    # reads NO_CHANGE when it simply found nothing to flag -- with a tied
+    # rank, the >= tie-break (last-candidate-wins) let that placeholder
+    # silently override a real, positive COMPATIBLE result from every
+    # member scan (Codex review). A genuine "I actually compared this and
+    # it's fine" always outranks "there was nothing to compare here."
+    "NO_CHANGE": -1,
     "COMPATIBLE": 0,
     "COMPATIBLE_WITH_RISK": 1,
     "API_BREAK": 2,
@@ -888,7 +895,7 @@ def _aggregate_scan_set_verdict(
         return "BUDGET_OVERFLOW", 5
 
     worst_verdict = "NO_CHANGE"
-    worst_rank = 0
+    worst_rank = -1
     candidates = [a.result.verdict for a in per_artifact]
     if bundle_verdict is not None:
         candidates.append(bundle_verdict)

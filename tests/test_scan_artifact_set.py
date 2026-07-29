@@ -52,6 +52,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.serialization import snapshot_to_json
+from abicheck.service_scan import ScanArtifactResult, ScanResult
 
 
 def _write_snapshot(path: Path, snap: AbiSnapshot) -> Path:
@@ -868,3 +869,128 @@ class TestArtifactSetCliEndToEnd:
             and f["symbol"] == "core_missing"
             for f in payload["bundle_findings"]
         ), payload
+
+
+class TestAggregateScanSetVerdict:
+    """P2 regression (Codex review): NO_CHANGE and COMPATIBLE previously
+    shared rank 0 in _SCAN_SET_COMPAT_ORDER, and the aggregation loop's
+    ``>=`` tie-break means the *last* rank-0 candidate wins. The bundle
+    audit's own verdict is always appended last to the candidate list and
+    reads NO_CHANGE whenever it simply found nothing to flag -- so a set
+    where every member scanned COMPATIBLE, with an uneventful bundle audit,
+    misreported the whole set as NO_CHANGE instead of COMPATIBLE.
+    """
+
+    def _member(self, verdict: str) -> ScanArtifactResult:
+        return ScanArtifactResult(
+            artifact=Path("lib.so"), result=ScanResult(verdict=verdict, exit_code=0)
+        )
+
+    def test_all_compatible_members_with_no_change_bundle_stays_compatible(
+        self,
+    ) -> None:
+        from abicheck.service_scan import _aggregate_scan_set_verdict
+
+        per_artifact = [self._member("COMPATIBLE"), self._member("COMPATIBLE")]
+        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, "NO_CHANGE")
+        assert verdict == "COMPATIBLE"
+        assert exit_code == 0
+
+    def test_all_no_change_stays_no_change(self) -> None:
+        from abicheck.service_scan import _aggregate_scan_set_verdict
+
+        per_artifact = [self._member("NO_CHANGE"), self._member("NO_CHANGE")]
+        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, "NO_CHANGE")
+        assert verdict == "NO_CHANGE"
+        assert exit_code == 0
+
+    def test_breaking_still_dominates_compatible(self) -> None:
+        from abicheck.service_scan import _aggregate_scan_set_verdict
+
+        per_artifact = [self._member("COMPATIBLE"), self._member("BREAKING")]
+        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, "NO_CHANGE")
+        assert verdict == "BREAKING"
+        assert exit_code == 4
+
+
+class TestArtifactSetComparisonOnlyFlagsRejected:
+    """P2 regression (Codex review): --artifact-set is always audit-only
+    (never has --against), but the "these flags only mean anything with
+    --against" guard only ran on the single-binary path -- the
+    --artifact-set branch's own early ``return`` bypassed it entirely, so
+    e.g. --suppress/--policy-file/--env-matrix were silently parsed and
+    discarded for a set instead of erroring.
+    """
+
+    def test_suppress_without_against_is_rejected(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        suppress_file = tmp_path / "suppress.yml"
+        suppress_file.write_text("suppressions: []\n", encoding="utf-8")
+
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                "--artifact-set",
+                f"{p1},{p2}",
+                "--suppress",
+                str(suppress_file),
+            ],
+        )
+        assert result.exit_code != 0
+        assert "--suppress" in result.output
+        assert "only take effect with --against" in result.output
+
+    def test_env_matrix_without_against_is_rejected(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        matrix_file = tmp_path / "matrix.yml"
+        matrix_file.write_text("environments: []\n", encoding="utf-8")
+
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                "--artifact-set",
+                f"{p1},{p2}",
+                "--env-matrix",
+                str(matrix_file),
+            ],
+        )
+        assert result.exit_code != 0
+        assert "--env-matrix" in result.output
+        assert "only take effect with --against" in result.output
+
+
+class TestArtifactSetMalformedRiskRules:
+    """P2 regression (Codex review): run_scan_set() loads --risk-rules via
+    the click-free _load_risk_rules_for_service(), which converts the
+    single-binary path's click.ClickException into a plain ValueError --
+    _run_artifact_set()'s own try/except only caught ArtifactSetError, so a
+    malformed/unreadable --risk-rules file surfaced as an unhandled Python
+    traceback and exit 1 instead of a clean usage error (exit 64).
+    """
+
+    def test_malformed_risk_rules_yaml_is_usage_error(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        p1, p2 = tmp_path / "liba.so", tmp_path / "libb.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        bad = tmp_path / "rules.yml"
+        bad.write_text("risk_rules: { unclosed: [1, 2", encoding="utf-8")
+
+        result = runner.invoke(
+            main,
+            ["scan", "--artifact-set", f"{p1},{p2}", "--risk-rules", str(bad)],
+        )
+        assert result.exit_code != 0
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        assert "cannot read --risk-rules" in result.output
