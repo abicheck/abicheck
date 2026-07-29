@@ -1108,6 +1108,35 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert scoped.types == []
 
+    def test_elaborated_tag_reference_survives_colliding_primitive_typedef(
+        self,
+    ):
+        """Codex review (twenty-fourth round): unlike the previous two
+        tests' *bare* `Handle` (correctly deferring to
+        `typedefs["Handle"] = "int"`), this signature explicitly writes
+        the elaborated-type-specifier form `struct Handle *`. In both C
+        and C++, tag names and typedef names occupy separate namespaces,
+        and the `struct` keyword is exactly what disambiguates a
+        signature naming the tag directly, even when a same-named
+        typedef alias also exists -- the unconditional bare-name veto
+        must not also swallow this unambiguous elaborated reference."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("struct Handle *",))],
+            types=[
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "int"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert [t.name for t in scoped.types] == ["Handle"]
+
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
         two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle

@@ -409,6 +409,20 @@ def _directly_referenced_dependency_names(
         spellings = {identity, *_namespace_suffix_spellings(identity)}
         if stripped:
             spellings.add(stripped)
+        # An elaborated-type-specifier spelling (``struct Handle``,
+        # ``union Handle``, ``enum Handle``) is unambiguous in both C and
+        # C++ regardless of any colliding typedef alias of the same bare
+        # name (Codex review, fresh evidence): tag names and typedef
+        # names occupy separate namespaces, and the elaborated keyword is
+        # exactly what disambiguates a signature that writes ``struct
+        # Handle *`` even when ``typedefs["Handle"] = "int"`` also
+        # exists. These are added as distinct spellings (never equal to
+        # the bare identity/suffix string a colliding typedef alias name
+        # could ever match), so they naturally fall outside every
+        # typedef-alias veto below without needing any special-casing
+        # there.
+        tag_keyword = candidate.kind if isinstance(candidate, RecordType) else "enum"
+        spellings.update({f"{tag_keyword} {s}" for s in set(spellings)})
         raw_own_spellings_of[id(candidate)] = spellings
         for key in spellings:
             if key in kept_spellings:
