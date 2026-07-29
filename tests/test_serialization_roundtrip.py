@@ -221,7 +221,7 @@ class TestHeaderCvFactsReliableRoundTrip:
 
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 17
+        assert j["schema_version"] == SCHEMA_VERSION == 18
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -290,11 +290,34 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert legacy.header_cv_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 17
+        assert reserialized["schema_version"] == 18
         assert reserialized["header_cv_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
         assert reloaded.header_cv_facts_reliable is False
+
+
+class TestDependencyScopeRoundtrip:
+    """Schema v18 — AbiSnapshot.dependency_scope round-trips like every
+    other purely-additive optional field, and a pre-v18 snapshot with no
+    key at all loads it as None."""
+
+    def test_round_trip_preserves_filtered(self) -> None:
+        snap = _make_snap(from_headers=True, dependency_scope="filtered")
+        j = json.loads(snapshot_to_json(snap))
+        assert j["dependency_scope"] == "filtered"
+        assert snapshot_from_dict(j).dependency_scope == "filtered"
+
+    def test_round_trip_preserves_full(self) -> None:
+        snap = _make_snap(from_headers=True, dependency_scope="full")
+        j = json.loads(snapshot_to_json(snap))
+        restored = snapshot_from_dict(j)
+        assert restored.dependency_scope == "full"
+
+    def test_missing_key_loads_as_none(self) -> None:
+        d = _minimal_dict(schema_version=17, from_headers=True)
+        assert "dependency_scope" not in d
+        assert snapshot_from_dict(d).dependency_scope is None
 
 
 # ── constants ─────────────────────────────────────────────────────────────

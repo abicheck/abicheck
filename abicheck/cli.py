@@ -385,9 +385,8 @@ def _write_snapshot_output(
     # check_requested_depth_satisfied's docstring. Checked last, after every
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
-    if not include_dependencies:
-        from .dumper_scoping import scope_snapshot_excluding_dependencies
-        snap = scope_snapshot_excluding_dependencies(snap, header_roots)
+    from .dumper_scoping import resolve_dependency_scope
+    snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
     result = snapshot_to_json(snap)
     # Audit finding: dump/baseline provenance didn't record requested vs.
     # effective depth anywhere a later reader could inspect -- fold it into

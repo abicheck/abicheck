@@ -163,7 +163,17 @@ from .model import (
 #     usual version-mismatch `UserWarning` instead of silently discarding
 #     this provenance on re-save, matching every other purely-additive bump
 #     from v9 onward (Codex review, PR #636).
-SCHEMA_VERSION: int = 17
+# v18: `AbiSnapshot.dependency_scope` — records whether `dump`'s default
+#     toolchain/system-header exclusion (`dumper_scoping.py`) was applied
+#     ("filtered") or opted out of via `--include-dependencies` ("full").
+#     Purely additive: a pre-v18 reader loads it as its default (`None`),
+#     i.e. "not recorded" — `comparability.check_contracts_comparable`
+#     treats that the same as `"full"` (the only behavior that existed
+#     before dumper_scoping.py), so an old baseline compared against a
+#     freshly filtered dump is still correctly caught as a scope mismatch
+#     rather than silently comparing a filtered snapshot against an
+#     unfiltered one.
+SCHEMA_VERSION: int = 18
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -1020,6 +1030,14 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         if isinstance(raw_frontend_context_kind, str)
         else None
     )
+    # Schema v18 — dependency-scoping mode. Missing key (every pre-v18
+    # snapshot) loads as None, same as every other additive optional field;
+    # see AbiSnapshot.dependency_scope's own docstring for why None is NOT
+    # treated as "unknown" by the comparability gate.
+    raw_dependency_scope = d.get("dependency_scope")
+    dependency_scope = (
+        raw_dependency_scope if isinstance(raw_dependency_scope, str) else None
+    )
 
     snap = AbiSnapshot(
         library=d["library"],
@@ -1058,6 +1076,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         ast_toolchain_supported=ast_toolchain_supported,
         ast_toolchain_unsupported_reasons=ast_toolchain_unsupported_reasons,
         frontend_context_kind=frontend_context_kind,
+        dependency_scope=dependency_scope,
         ast_resolved_standard=ast_resolved_standard,
         ast_cplusplus_macro=ast_cplusplus_macro,
         ast_compile_args=ast_compile_args,

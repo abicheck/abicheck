@@ -827,6 +827,24 @@ def _scoped_dwarf_advanced(
     )
 
 
+def resolve_dependency_scope(
+    snap: AbiSnapshot,
+    include_dependencies: bool,
+    header_roots: Sequence[Path | str] | None = None,
+) -> AbiSnapshot:
+    """The single choke point ``dump`` calls right before serialization:
+    apply :func:`scope_snapshot_excluding_dependencies` (``dependency_scope``
+    ``"filtered"``) unless *include_dependencies* opts out, in which case
+    just record the user's actual intent as ``"full"`` (a no-op when there
+    are no header-derived declarations to tag at all — see
+    ``AbiSnapshot.dependency_scope``'s own docstring)."""
+    if not include_dependencies:
+        return scope_snapshot_excluding_dependencies(snap, header_roots)
+    if not snap.from_headers:
+        return snap
+    return dataclasses.replace(snap, dependency_scope="full")
+
+
 def scope_snapshot_excluding_dependencies(
     snap: AbiSnapshot,
     header_roots: Sequence[Path | str] | None = None,
@@ -950,6 +968,11 @@ def scope_snapshot_excluding_dependencies(
         dwarf_advanced=_scoped_dwarf_advanced(
             snap.dwarf_advanced, kept_identifiers, kept_symbols
         ),
+        # Records that this snapshot went through dependency-exclusion —
+        # comparability.check_contracts_comparable uses this to refuse to
+        # compare a filtered snapshot against an unfiltered one (see
+        # AbiSnapshot.dependency_scope's own docstring).
+        dependency_scope="filtered",
         # dataclasses.replace() otherwise carries these lazy lookup-index
         # caches over from *snap* verbatim: if the input snapshot's index()
         # was already called (e.g. by an earlier pipeline step), the copy

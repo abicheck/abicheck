@@ -799,6 +799,24 @@ class AbiSnapshot:
     # for the same reason as the other optional metadata fields above.
     contract: ExtractionContract | None = field(default=None, kw_only=True)
 
+    # Dependency-scoping mode (schema v18) — whether toolchain/system-header
+    # declarations were excluded from this snapshot's flat lists/DWARF
+    # collections by ``dumper_scoping.scope_snapshot_excluding_dependencies``
+    # ("filtered", the ``dump`` command's default) or deliberately kept
+    # ("full", ``dump --include-dependencies``). ``None`` means "not
+    # recorded" — every snapshot predating this field (dumper_scoping.py
+    # postdates this snapshot's production, so it was never filtered) and
+    # every snapshot with no header-derived declarations at all
+    # (``from_headers`` False), where the concept does not apply.
+    # ``comparability.check_contracts_comparable`` treats a missing value as
+    # equivalent to ``"full"`` (the only behavior that existed before
+    # dumper_scoping.py) when deciding whether two snapshots' dependency
+    # scope is comparable — this is what turns a scoped ``dump`` baseline
+    # compared against an unscoped live ``compare`` dump (or a pre-existing
+    # baseline) into an explicit ``ScopeMismatchError`` instead of a silent,
+    # possibly-wrong verdict.
+    dependency_scope: str | None = field(default=None, kw_only=True)
+
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
     # snapshot that predates the explicit ``from_headers`` key, rather than set

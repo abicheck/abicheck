@@ -227,6 +227,31 @@ class TestExcludesDependencies:
         assert scoped.func_by_mangled(sys_fn.mangled) is None
 
 
+class TestDependencyScopeTagging:
+    def test_scoped_snapshot_tagged_filtered(self):
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run")],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.dependency_scope == "filtered"
+
+    def test_noop_path_does_not_fabricate_a_tag(self):
+        """The from_headers=False no-op path returns the input unchanged --
+        it must not claim "filtered" for a snapshot nothing was actually
+        filtered from."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=False,
+            functions=[_fn("run", vis=Visibility.ELF_ONLY, source_header=None)],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.dependency_scope is None
+
+
 class TestDwarfScoping:
     def test_dwarf_structs_filtered_to_kept_types(self):
         snap = AbiSnapshot(

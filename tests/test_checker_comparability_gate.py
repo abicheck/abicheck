@@ -162,3 +162,76 @@ def test_compare_contract_coverage_none_when_both_sides_comparable(tmp_path):
     result = compare(old, new)
     assert result.contract_coverage is None
     assert result.assurance is None
+
+
+def _scoped_snap(version: str, from_headers: bool, dependency_scope) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libtest.so.1",
+        version=version,
+        from_headers=from_headers,
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fv",
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+        dependency_scope=dependency_scope,
+    )
+
+
+class TestDependencyScopeComparabilityGate:
+    """The asymmetry PR #649/dumper_scoping.py introduced: `dump`'s default
+    output is dependency-filtered, but `compare`'s own live-binary dumping
+    never applies that filter -- comparing one of each must not silently
+    produce an ordinary (possibly wrong) verdict."""
+
+    def test_filtered_vs_full_raises_scope_mismatch(self):
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
+        with pytest.raises(ScopeMismatchError):
+            compare(old, new)
+
+    def test_filtered_vs_legacy_none_baseline_raises_scope_mismatch(self):
+        # A pre-v18 (or pre-dumper_scoping) baseline never went through
+        # filtering at all -- None must be treated as "full", not "unknown
+        # and therefore waived".
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
+        with pytest.raises(ScopeMismatchError):
+            compare(old, new)
+
+    def test_both_filtered_is_comparable(self):
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
+        assert compare(old, new) is not None  # must not raise
+
+    def test_both_full_is_comparable(self):
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="full")
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
+        assert compare(old, new) is not None  # must not raise
+
+    def test_both_none_is_comparable(self):
+        # Two ordinary live-binary compare() snapshots today: neither side
+        # ever ran dumper_scoping, both implicitly "full".
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope=None)
+        assert compare(old, new) is not None  # must not raise
+
+    def test_binary_only_snapshots_are_unaffected(self):
+        # from_headers=False on both sides: the dependency-scope axis is
+        # meaningless for a binary/DWARF-only compare, even if the field
+        # happens to carry a value.
+        old = _scoped_snap("1.0", from_headers=False, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=False, dependency_scope="full")
+        assert compare(old, new) is not None  # must not raise
+
+    def test_diagnostic_mode_returns_reason_instead_of_raising(self):
+        from abicheck.comparability import check_contracts_comparable
+
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
+        mismatch = check_contracts_comparable(old, new, diagnostic=True)
+        assert mismatch is not None
+        assert mismatch.kind == "dependency_scope"
