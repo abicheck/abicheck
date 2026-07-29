@@ -339,9 +339,15 @@ started.**
   `--bundle-system-providers`' actual purpose here: a user declaring
   `libvendor.so` as external is asserting "trust every symbol this DSO
   provides," including an arbitrary custom export like `vendor_init` that
-  will never match a system-symbol heuristic. The audit-mode detector
-  therefore needs **two independent suppression paths**, not one extended
-  set:
+  will never match a system-symbol heuristic. **Before either suppression
+  path, skip a `weak` import outright** — `_detect_intra_dep_removed`
+  itself does this first (`if consumer.weak: continue`), since an
+  unresolved *weak* symbol is valid ELF and resolves to null at load time,
+  not a broken reference; the audit detector must carry the same
+  exclusion, not just inherit it by accident, since it is being
+  specified here as a standalone function rather than a call into the
+  existing one. The audit-mode detector therefore needs, after the weak
+  check, **two independent suppression paths**, not one extended set:
   1. reuse `_import_is_external`'s version/provider-soname evidence as-is
      (unaffected by this issue — it already trusts a resolved verneed
      provider outside the bundle unconditionally); and
@@ -364,10 +370,22 @@ started.**
   scope here). The implementable check is therefore coarser, at DSO-set
   granularity: suppress an unversioned, unresolved-in-set import for a
   consumer **iff that consumer has at least one non-intra `DT_NEEDED`
-  edge, and every one of them is on the caller-supplied
-  `bundle_system_providers` allow-list** — mirroring the shape
-  `_detect_intra_dep_removed`'s existing check uses **exactly**, including
-  its non-empty guard (`if extra_needed and all(...)`, not just
+  edge, and every one of them is either a well-known system soname or on
+  the caller-supplied `bundle_system_providers` allow-list** — mirroring
+  `_detect_intra_dep_removed`'s existing check **exactly**, not a narrower
+  version of it: that check's `e in system_providers or _looks_system(e)`
+  test already unions the built-in `DEFAULT_SYSTEM_PROVIDERS`/
+  `_looks_system` heuristic with the caller-supplied set
+  (`abicheck/bundle.py:220`, `sys_libs = set(DEFAULT_SYSTEM_PROVIDERS) |
+  set(system_providers or ())`), and the audit detector must reuse that
+  same union — checking only the caller-supplied list, as an earlier round
+  of this plan specified, would regress ordinary built-in-system consumers
+  (e.g. a consumer needing both a declared `libvendor.so` and plain
+  `libc.so.6`): requiring the user to redundantly name every built-in
+  system library in `--bundle-system-providers` just to keep today's
+  already-working system-library suppression is not backward compatible
+  with `compare`'s existing behavior on the same graph shape. Also carries
+  over the non-empty guard (`if extra_needed and all(...)`, not just
   `all(...)`): `all()` over an empty list is vacuously `True` in Python, so
   a consumer with *zero* non-intra `DT_NEEDED` edges (e.g. the sibling that
   used to provide the symbol was itself dropped from the set, taking its
@@ -404,7 +422,13 @@ started.**
   (d) a consumer with **zero** non-intra `DT_NEEDED` edges (its would-be
   provider was itself dropped from the set) still produces the finding
   regardless of `--bundle-system-providers` — the vacuous-`all([])` guard
-  regression test.
+  regression test; (e) a consumer needing symbols from both a declared
+  `--bundle-system-providers` entry and an ordinary built-in system DSO
+  (e.g. `libc.so.6`) suppresses without the user having to redundantly
+  name the built-in one — the `DEFAULT_SYSTEM_PROVIDERS`-union regression
+  test; (f) an unresolved *weak* import with a non-system-shaped name
+  produces no finding regardless of allow-list state — the weak-import
+  exclusion regression test.
 - **The set-level deadline (Phase 1) must reach this phase too, not stop
   after the last member scan.** Phase 1's remaining-budget threading only
   covers each artifact's `run_scan_core` call; building the resolution
