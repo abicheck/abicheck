@@ -283,3 +283,50 @@ def test_scan_against_honors_config_suppression_strict_like_compare(
     assert compare_res.exit_code == 1, compare_res.output
     assert scan_res.exit_code == 1, scan_res.output
     assert "expired" in scan_res.output.lower()
+
+
+def test_scan_against_malformed_config_is_usage_error(
+    runner: CliRunner, old_snap: Path, new_snap_breaking: Path, tmp_path: Path
+) -> None:
+    # A malformed .abicheck.yml must surface as a clean usage error, not an
+    # uncaught traceback -- same contract as compare's own --config loading.
+    bad_config = tmp_path / "bad.abicheck.yml"
+    bad_config.write_text("scope: [unclosed\n  public: true", encoding="utf-8")
+
+    scan_res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(old_snap),
+            "--config",
+            str(bad_config),
+        ],
+    )
+    assert scan_res.exit_code == 64, scan_res.output
+    assert scan_res.exception is None or isinstance(scan_res.exception, SystemExit)
+
+
+def test_scan_against_malformed_autodiscovered_config_is_usage_error(
+    runner: CliRunner,
+    old_snap: Path,
+    new_snap_breaking: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Same contract as the explicit --config case above, but for the
+    # auto-discovered path (no --config/--sources given at all, so
+    # cli_options.merge_compile_config's own --sources-scoped auto-discovery
+    # never engages -- only cli_scan's own scope/suppression config
+    # resolution reaches discover_project_config here).
+    import abicheck.cli_helpers_compare as _cch
+
+    bad_config = tmp_path / ".abicheck.yml"
+    bad_config.write_text("scope: [unclosed\n  public: true", encoding="utf-8")
+    monkeypatch.setattr(_cch, "discover_project_config", lambda start=None: bad_config)
+
+    scan_res = runner.invoke(
+        main, ["scan", str(new_snap_breaking), "--against", str(old_snap)]
+    )
+    assert scan_res.exit_code == 64, scan_res.output
