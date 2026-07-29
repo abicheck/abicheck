@@ -1351,6 +1351,32 @@ flags for them. New test
 fixture with only a config-declared `suppression.strict: true` (no CLI
 flag on either side) and asserts both reject it identically (exit 1).
 
+**Updated (2026-07-29, same PR): the config-resolution fix above was
+itself incomplete -- two more `resolved_cfg` fields were computed and then
+discarded.** `resolve_compare_config` also resolves
+`collapse_versioned_symbols` (`scope.collapse_versioned_symbols`) and
+`require_justification` (`suppression.require_justification`), but
+`scan_cmd` only ever read `.scope_public`/`.strict_suppressions`/
+`.public_symbols` off the result. Concretely: an ICU-style version-suffix
+rename (most removed symbols reappearing renamed only by version token)
+reported `BREAKING` under `scan --against --config` while `compare
+--config` correctly demoted it to `COMPATIBLE_WITH_RISK`, and a reason-less
+`--suppress` rule was silently accepted by `scan --against --config` even
+under a config declaring `suppression.require_justification: true`. Fixed
+by reading both fields off `resolved_cfg` (neither has a `scan`-side CLI
+flag of its own -- config-only, same as `compare`'s own hidden/demoted
+`--collapse-versioned-symbols`/`--require-justification`) and threading
+`collapse_versioned_symbols` through `run_scan_core`/
+`_run_baseline_compare`/`compare_snapshots` (which already accepted it as a
+plain kwarg) and `require_justification` into `_load_suppression_and_policy`
+(ditto). New tests: an end-to-end `compare`-vs-`scan --against` parity
+check for `require_justification` (mirroring the `strict_suppressions` one
+above), and a kwarg-capture unit test confirming
+`collapse_versioned_symbols` reaches `compare_snapshots` (constructing a
+real ICU-style versioned-rename fixture end-to-end was judged not worth
+the added fixture complexity when the kwarg-threading is what was actually
+missing, not the underlying detector logic itself).
+
 Still not yet done, deliberately out of scope for these four slices (each
 is real, separately-scoped Phase 5 work): `CompatibilityEvaluationConfig`
 (Phase 1) is still constructed by neither command -- "same typed config" is

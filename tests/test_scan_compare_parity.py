@@ -330,3 +330,121 @@ def test_scan_against_malformed_autodiscovered_config_is_usage_error(
         main, ["scan", str(new_snap_breaking), "--against", str(old_snap)]
     )
     assert scan_res.exit_code == 64, scan_res.output
+
+
+def test_scan_against_honors_config_require_justification_like_compare(
+    runner: CliRunner,
+    old_snap: Path,
+    new_snap_breaking: Path,
+    tmp_path: Path,
+) -> None:
+    # Codex review on PR #657: resolve_compare_config also resolves
+    # require_justification, but cli_scan.py discarded it -- a reason-less
+    # --suppress rule was rejected by `compare --config` (suppression.
+    # require_justification: true) but silently accepted by
+    # `scan --against --config`, letting an unjustified rule suppress a
+    # breaking finding. `scan` has no --require-justification flag of its
+    # own (config-only, same as compare's own hidden/demoted flag).
+    reasonless_supp = tmp_path / "suppress.yml"
+    reasonless_supp.write_text(
+        "version: 1\nsuppressions:\n"
+        "  - symbol: '_Z3barv'\n"
+        "    change_kind: func_removed\n",
+        encoding="utf-8",
+    )
+    project_config = tmp_path / ".abicheck.yml"
+    project_config.write_text(
+        "suppression:\n  require_justification: true\n", encoding="utf-8"
+    )
+
+    compare_res = runner.invoke(
+        main,
+        [
+            "compare",
+            str(old_snap),
+            str(new_snap_breaking),
+            "--suppress",
+            str(reasonless_supp),
+            "--config",
+            str(project_config),
+        ],
+    )
+    scan_res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(old_snap),
+            "--suppress",
+            str(reasonless_supp),
+            "--config",
+            str(project_config),
+        ],
+    )
+    assert compare_res.exit_code != 0, compare_res.output
+    assert scan_res.exit_code != 0, scan_res.output
+    assert "reason" in scan_res.output.lower()
+
+
+def test_run_baseline_compare_forwards_collapse_versioned_symbols(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Codex review on PR #657: resolve_compare_config also resolves
+    # collapse_versioned_symbols (scope.collapse_versioned_symbols in
+    # .abicheck.yml), but cli_scan.py discarded it before calling
+    # compare_snapshots -- an ICU-style version-suffix transition would
+    # report COMPATIBLE_WITH_RISK under `compare --config` but BREAKING
+    # under `scan --against --config`. Assert the kwarg reaches
+    # compare_snapshots (`scan` has no --collapse-versioned-symbols flag of
+    # its own, config-only same as require_justification above).
+    import abicheck.cli_buildsource as cbs
+    import abicheck.service as service
+    from abicheck.cli_scan_baseline import _run_baseline_compare
+
+    captured: dict[str, object] = {}
+
+    class _FakeSnap:
+        build_source = None
+
+    class _FakeVerdict:
+        value = "NO_CHANGE"
+
+    class _FakeDiff:
+        verdict = _FakeVerdict()
+        breaking: list[object] = []
+        source_breaks: list[object] = []
+        risk: list[object] = []
+        compatible: list[object] = []
+
+    def fake_resolve_input(path, headers, includes, **kw):  # type: ignore[no-untyped-def]
+        return _FakeSnap()
+
+    def fake_compare_snapshots(old, new, suppression=None, *, extra_changes, **kw):
+        captured["collapse_versioned_symbols"] = kw.get("collapse_versioned_symbols")
+        return _FakeDiff()
+
+    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
+    monkeypatch.setattr(service, "compare_snapshots", fake_compare_snapshots)
+    monkeypatch.setattr(
+        cbs,
+        "prepare_embedded_build_source",
+        lambda old, new, cm, extra, *rest, **kw: (list(extra), [], {}, None),
+    )
+
+    _run_baseline_compare(
+        Path("old.so"),
+        Path("new.so"),
+        _FakeSnap(),
+        [],
+        "c++",
+        "off",
+        [],
+        [],
+        [],
+        [],
+        scope_to_public_surface=True,
+        collapse_versioned_symbols=True,
+    )
+
+    assert captured["collapse_versioned_symbols"] is True

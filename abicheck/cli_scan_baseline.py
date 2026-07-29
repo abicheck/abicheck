@@ -281,6 +281,7 @@ def _run_baseline_compare(
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
+    collapse_versioned_symbols: bool = False,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -416,6 +417,7 @@ def _run_baseline_compare(
         force_public_symbols=force_public_symbols,
         pattern_verdicts=pattern_verdicts,
         env_matrix=env_matrix,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     summary: dict[str, Any] = {
         "breaking": len(diff.breaking),

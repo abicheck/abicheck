@@ -267,6 +267,7 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
         force_public_symbols=None,
         pattern_verdicts=False,
         env_matrix=None,
+        collapse_versioned_symbols=False,
     ):
         captured["suppression"] = suppression
         captured["policy"] = policy

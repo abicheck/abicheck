@@ -862,6 +862,12 @@ def scan_cmd(
     scope_public_headers = resolved_cfg.scope_public
     strict_suppressions = resolved_cfg.strict_suppressions
     public_symbols = tuple(resolved_cfg.public_symbols)
+    # `scan` has no --collapse-versioned-symbols/--require-justification
+    # flags of its own (config-only for scan, same as compare's hidden/
+    # demoted equivalents), so these are purely `resolved_cfg`'s config >
+    # default resolution with no CLI override to consider.
+    collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
+    require_justification = resolved_cfg.require_justification
 
     # ADR-049 Phase 5: --against reuses `compare`'s own suppression/policy
     # loader (`_load_suppression_and_policy`) so a scan baseline comparison
@@ -872,7 +878,11 @@ def scan_cmd(
     # --against` invocation with none of these flags behaves exactly as
     # before.
     suppression, policy_file = _load_suppression_and_policy(
-        suppress, policy, policy_file_path, strict_suppressions=strict_suppressions
+        suppress,
+        policy,
+        policy_file_path,
+        strict_suppressions=strict_suppressions,
+        require_justification=require_justification,
     )
 
     # ADR-049 Phase 5 §6.4: --against also reuses `compare`'s own force-public
@@ -1025,6 +1035,7 @@ def scan_cmd(
             force_public_symbols=force_public_symbols,
             pattern_verdicts=pattern_verdicts,
             env_matrix=env_matrix,
+            collapse_versioned_symbols=collapse_versioned_symbols,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,
