@@ -1137,6 +1137,35 @@ class TestDirectlyReferencedDependencyRetention:
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert [t.name for t in scoped.types] == ["Handle"]
 
+    def test_typedef_chain_through_a_shadowing_key_does_not_reach_dependency(
+        self,
+    ):
+        """Codex review (twenty-fifth round): `typedef int Handle; typedef
+        Handle B;` alongside an unrelated dependency `struct Handle` means
+        the token `Handle` inside `B`'s own target is *simultaneously* a
+        typedef key (resolving through to `int`, an uninteresting
+        terminal) and the struct's own interesting key. `B` never
+        actually names the struct -- only the *typedef* named `Handle`,
+        which happens to resolve to a primitive -- so a kept signature
+        using `B` must not retain `struct Handle` through this shadowing
+        coincidence."""
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn("run", params=("B",))],
+            types=[
+                RecordType(
+                    name="Handle",
+                    kind="struct",
+                    source_header=_SYSTEM_HEADER,
+                ),
+            ],
+            typedefs={"Handle": "int", "B": "Handle"},
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert scoped.types == []
+
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
         two *disagreeing* aliases (`api::Handle -> dep::A`, `vendor::Handle

@@ -161,8 +161,26 @@ def _typedef_alias_reachability(
     for alias, target in typedefs.items():
         for match in _finditer_allow_nested(combined_pattern, target):
             token = match.group()
+            # A token that is itself a *different* typedef key must be
+            # resolved through that alias first, not also credited as a
+            # direct interesting-key hit (Codex review, fresh evidence):
+            # ``typedef int Handle; typedef Handle B;`` alongside an
+            # unrelated dependency candidate ``struct Handle`` means the
+            # token ``Handle`` inside ``B``'s target is simultaneously a
+            # typedef key (resolving to ``int``, an uninteresting
+            # terminal) and that candidate's own interesting key -- but
+            # ``B`` never actually names the struct, only the *typedef*
+            # named ``Handle``, which happens to resolve elsewhere.
+            # Crediting both interpretations at once let ``B`` reach the
+            # struct regardless of what following the real alias chain
+            # would have found. A self-reference (``token == alias``,
+            # the classic ``typedef struct Foo Foo;`` idiom already
+            # covered by the self-referential-typedef test) is exempt --
+            # embedded_refs already excludes it from chain-following, so
+            # it is the only way that terminal case can ever be credited.
             if token in typedef_keys and token != alias:
                 embedded_refs[alias].add(token)
+                continue
             if token in interesting_keys:
                 reachable[alias].add(token)
 
