@@ -18,6 +18,7 @@ from abicheck.model import (
     Function,
     Param,
     RecordType,
+    ScopeOrigin,
     TypeField,
     Variable,
     Visibility,
@@ -51,6 +52,7 @@ def _rec(
     fields: tuple[tuple[str, str], ...] = (),
     bases: tuple[str, ...] = (),
     source_header: str | None = _OWN_HEADER,
+    origin: ScopeOrigin = ScopeOrigin.UNKNOWN,
 ) -> RecordType:
     return RecordType(
         name=name,
@@ -59,6 +61,7 @@ def _rec(
         fields=[TypeField(name=n, type=t) for n, t in fields],
         bases=list(bases),
         source_header=source_header,
+        origin=origin,
     )
 
 
@@ -531,6 +534,56 @@ class TestDirectlyReferencedDependencyRetention:
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
         assert {t.name for t in scoped.types} == {"tm"}
+
+    def test_private_origin_kept_record_does_not_retain_a_dependency_type_it_names(
+        self,
+    ):
+        # Regression: a kept RecordType/EnumType whose own header is
+        # private/generated/system (but which the header-origin-only
+        # scoping contract still retains) must not itself act as a
+        # direct-reference retention root for a dependency type its own
+        # fields name -- mirroring the hidden-function case above.
+        # RecordType/EnumType have no `visibility` field, but both do carry
+        # `origin` (Codex review, fresh evidence: an earlier fix's own
+        # comment incorrectly claimed neither field existed at all).
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[
+                _rec(
+                    "Internal",
+                    fields=(("t", "struct tm"),),
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+                _rec("tm", source_header="/usr/include/time.h"),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"Internal"}, (
+            "a private-origin kept record is never a direct-reference retention root"
+        )
+
+    def test_public_origin_kept_record_still_retains_a_dependency_type_it_names(
+        self,
+    ):
+        # Same scenario, but the referencing record's origin is public --
+        # the existing retention behaviour must be unaffected.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            types=[
+                _rec(
+                    "Own",
+                    fields=(("t", "struct tm"),),
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                _rec("tm", source_header="/usr/include/time.h"),
+            ],
+        )
+        scoped = scope_snapshot_excluding_dependencies(snap)
+        assert {t.name for t in scoped.types} == {"Own", "tm"}
 
     def test_dependency_type_referenced_only_via_field_of_kept_type_is_kept(self):
         snap = AbiSnapshot(

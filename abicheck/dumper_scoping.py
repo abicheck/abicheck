@@ -891,10 +891,17 @@ def scope_snapshot_excluding_dependencies(
         # dependency on that type has genuinely ended. Reuses
         # type_reachability._NON_PUBLIC_ORIGINS, the same public-surface
         # predicate its own directly_referenced_stdlib_types() already
-        # applies for the identical reason. RecordType has no
-        # visibility/origin field at all (unlike Function/Variable), so
-        # kept_types/kept_enums can't be narrowed the same way and are
-        # passed through unfiltered, same as before.
+        # applies for the identical reason. RecordType/EnumType have no
+        # `visibility` field, but both do carry `origin` (ADR-015, schema
+        # v6) -- a prior version of this comment incorrectly claimed
+        # neither field existed at all and passed kept_types/kept_enums
+        # through unfiltered as retention roots, so a kept type/enum whose
+        # own header is private/generated/system (but which is still, by
+        # this function's header-origin-only contract, retained in the
+        # final snapshot) could keep an unrelated dependency type alive
+        # through its own fields even though no *public* declaration
+        # reaches it (Codex review, fresh evidence). Filtered on `origin`
+        # alone here, since there is no `visibility` to additionally check.
         public_root_functions = [
             f
             for f in kept_functions
@@ -905,11 +912,17 @@ def scope_snapshot_excluding_dependencies(
             for v in kept_variables
             if v.visibility == Visibility.PUBLIC and v.origin not in _NON_PUBLIC_ORIGINS
         ]
+        public_root_types = [
+            t for t in kept_types if t.origin not in _NON_PUBLIC_ORIGINS
+        ]
+        public_root_enums = [
+            e for e in kept_enums if e.origin not in _NON_PUBLIC_ORIGINS
+        ]
         directly_referenced = _directly_referenced_dependency_names(
             public_root_functions,
             public_root_variables,
-            kept_types,
-            kept_enums,
+            public_root_types,
+            public_root_enums,
             [*dep_types, *dep_enums],
             snap.typedefs,
         )

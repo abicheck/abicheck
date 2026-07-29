@@ -213,6 +213,37 @@ class TestProbeCompilerFamily:
         }
         assert tp._probe_compiler_family(metadata) == "icx"
 
+    def test_classic_icc_binary_name_resolves_to_icc(self) -> None:
+        # Regression: classic, pre-oneAPI icc/icpc was previously
+        # unrecognized entirely -- a declared compiler_family: icc profile
+        # was rejected unconditionally, even though CompilerFamily.ICC is
+        # already a recognized, distinct family elsewhere in the codebase
+        # (Codex review, fresh evidence).
+        metadata = {
+            "selected": "/opt/intel/bin/icc",
+            "version": "icc (ICC) 2021.7.1 20221019",
+        }
+        assert tp._probe_compiler_family(metadata) == "icc"
+
+    def test_classic_icpc_banner_alone_resolves_to_icc(self) -> None:
+        metadata = {
+            "selected": "/usr/local/bin/mycompiler",
+            "version": (
+                "Intel(R) C++ Compiler for applications running on Intel(R) "
+                "64, Version 19.1.3.304"
+            ),
+        }
+        assert tp._probe_compiler_family(metadata) == "icc"
+
+    def test_classic_icc_is_not_confused_with_oneapi_icx(self) -> None:
+        # The oneAPI check runs first and must not misfire on a classic
+        # ICC banner (which never mentions "oneAPI"/"DPC++").
+        metadata = {
+            "selected": "/opt/intel/bin/icc",
+            "version": "icc (ICC) 2021.7.1 20221019",
+        }
+        assert tp._probe_compiler_family(metadata) != "icx"
+
 
 class TestOsFamily:
     @pytest.mark.parametrize(
@@ -249,6 +280,9 @@ class TestEnvFamily:
             ("mips64el-linux-gnuabin32", "gnuabin32"),
             ("aarch64-linux-gnu_ilp32", "gnu_ilp32"),
             ("powerpc-linux-gnuspe", "gnuspe"),
+            ("x86_64-w64-mingw32", "gnu"),
+            ("x86_64-pc-windows-gnu", "gnu"),
+            ("x86_64-w64-windows-gnu", "gnu"),
         ],
     )
     def test_recognized_markers(self, triple: str, expected: str) -> None:
@@ -256,6 +290,21 @@ class TestEnvFamily:
 
     def test_empty_triple_returns_none(self) -> None:
         assert tp._env_family("") is None
+
+    def test_gcc_and_clang_mingw_spellings_are_equivalent(self) -> None:
+        # Regression: GCC's own x86_64-w64-mingw32 triple has no separate
+        # env component at all (folded into the OS component), while Clang
+        # spells the identical real environment as an explicit 4th "gnu"
+        # component -- both describe the same MinGW-w64 runtime, but
+        # previously only the Clang spelling normalized to "gnu" (GCC's
+        # normalized to None), rejecting an otherwise-valid MinGW
+        # cross-compiler profile (Codex review, fresh evidence).
+        assert tp._env_family("x86_64-w64-mingw32") == tp._env_family(
+            "x86_64-pc-windows-gnu"
+        )
+        assert tp._env_family("x86_64-w64-mingw32") == tp._env_family(
+            "x86_64-w64-windows-gnu"
+        )
 
     def test_gnueabihf_and_gnueabi_are_distinct(self) -> None:
         # Regression: both contain "gnu" as a substring and previously
@@ -575,6 +624,70 @@ class TestCheckProfileToolchainIdentity:
                     compiler_family="icx",
                     compiler_version="==2026.1.0",
                     binding="icx26",
+                ),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_declared_icc_family_against_a_real_classic_intel_binding_yields_no_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a declared compiler_family: icc profile was
+        # unconditionally rejected -- classic, pre-oneAPI icc/icpc was
+        # previously unrecognized entirely (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/intel/bin/icc": {
+                    "selected": "/opt/intel/bin/icc",
+                    "version": "icc (ICC) 2021.7.1 20221019",
+                }
+            },
+        )
+        bf = BindingsFile(
+            schema=BINDINGS_SCHEMA, bindings={"icc21": "/opt/intel/bin/icc"}
+        )
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="icc",
+                    compiler_version="==2021.7.1",
+                    binding="icc21",
+                ),
+            )
+        }
+        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+
+    def test_gcc_mingw_binding_against_a_clang_style_declared_target_yields_no_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression: a GCC-family MinGW binding's probed target_triple
+        # (x86_64-w64-mingw32, GCC's own 3-component spelling with no
+        # separate env component) previously failed to match a declared
+        # target using Clang's equivalent 4-component spelling
+        # (x86_64-pc-windows-gnu), rejecting an otherwise-valid MinGW
+        # cross-compiler profile (Codex review, fresh evidence).
+        _stub_metadata(
+            monkeypatch,
+            {
+                "/opt/mingw-gcc": {
+                    "selected": "/opt/mingw-gcc",
+                    "version": "gcc 13.2.0",
+                    "target_triple": "x86_64-w64-mingw32",
+                }
+            },
+        )
+        bf = BindingsFile(
+            schema=BINDINGS_SCHEMA, bindings={"mingw14": "/opt/mingw-gcc"}
+        )
+        profiles = {
+            "p1": _FakeProfile(
+                id="p1",
+                compile=_FakeCompileSpec(
+                    compiler_family="gcc",
+                    target="x86_64-pc-windows-gnu",
+                    binding="mingw14",
                 ),
             )
         }

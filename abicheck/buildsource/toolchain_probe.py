@@ -93,6 +93,8 @@ _FAMILY_ALIASES: dict[str, str] = {
     "clang++": "clang",
     "icx": "icx",
     "icpx": "icx",
+    "icc": "icc",
+    "icpc": "icc",
 }
 
 #: Family spellings this module deliberately never probes — see module
@@ -155,6 +157,19 @@ def _os_family(triple: str) -> str | None:
 #: ``"linux"`` — Codex review, fresh evidence).
 _ENV_BASE_MARKERS: tuple[str, ...] = ("gnu", "musl", "msvc")
 
+#: GCC's own MinGW-w64 triple folds OS and environment into one 3-component
+#: spelling (``x86_64-w64-mingw32``, no separate 4th env component at all),
+#: while Clang spells the identical real environment as an explicit 4th
+#: ``gnu`` component (``x86_64-pc-windows-gnu``/``x86_64-w64-windows-gnu``)
+#: -- both describe the same MinGW-w64 runtime, and the profile's composed
+#: ``--target=`` is consumed by Clang even for a GCC-family binding's
+#: cross-compilation check. Without normalizing these to the same label, a
+#: GCC binding's probed ``mingw32`` env (``None`` -- it contains no
+#: ``gnu``/``musl``/``msvc`` substring) never matched a declared Clang-style
+#: ``...-gnu`` spelling, rejecting an otherwise-valid MinGW cross-compiler
+#: profile (Codex review, fresh evidence).
+_MINGW_ENV_ALIASES: frozenset[str] = frozenset({"mingw32", "mingw"})
+
 
 def _env_family(triple: str) -> str | None:
     """Coarse ABI-environment label for a target triple's trailing
@@ -184,6 +199,8 @@ def _env_family(triple: str) -> str | None:
     if not parts:
         return None
     last = parts[-1].lower()
+    if last in _MINGW_ENV_ALIASES:
+        return "gnu"
     if any(marker in last for marker in _ENV_BASE_MARKERS):
         return last
     return None
@@ -342,6 +359,20 @@ def _extract_version_token(text: str) -> str | None:
 #: ``compiler_family: icx`` profile was rejected unconditionally).
 _INTEL_ONEAPI_ALIAS_NAMES = frozenset({"icx", "icpx", "dpcpp", "dpcpp-cl"})
 
+#: Classic, pre-oneAPI Intel C/C++ compiler (``icc``/``icpc``) -- a
+#: genuinely separate, non-clang-based driver from oneAPI's icx/icpx,
+#: already modeled as its own distinct ``CompilerFamily.ICC`` in
+#: :mod:`abicheck.build_mode`. Word-boundary-matched (exact stem, or the
+#: same word-boundary pattern :mod:`abicheck.build_mode`'s
+#: ``detect_compiler_family`` already uses for its banner text) so a bare
+#: ``icc``/``icpc`` substring inside an unrelated name/banner can't
+#: false-match. Without this, a declared ``compiler_family: icc`` profile
+#: was rejected unconditionally, since neither the oneAPI check above nor
+#: the plain-Clang/GCC/MSVC checks below recognize it (Codex review, fresh
+#: evidence).
+_CLASSIC_ICC_ALIAS_NAMES = frozenset({"icc", "icpc"})
+_ICC_BANNER_RE = re.compile(r"intel\(r\)\s+c\+\+\s+compiler|\bicc\b|\bicpc\b")
+
 
 def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
     """Best-effort compiler family for *this* validation gate.
@@ -375,6 +406,10 @@ def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
         or "oneapi" in version_text
     ):
         return "icx"
+    if any(stem in _CLASSIC_ICC_ALIAS_NAMES for stem in stems) or _ICC_BANNER_RE.search(
+        version_text
+    ):
+        return "icc"
     if any("clang" in name for name in names) or "clang version" in version_text:
         return "clang"
     if any(name in ("cl", "cl.exe") for name in names):
