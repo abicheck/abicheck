@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .severity import KindSets, SeverityConfig
@@ -498,6 +498,22 @@ def _build_impact_table(
 # ---------------------------------------------------------------------------
 
 
+def _contract_decision_text(relevance: Any, reason_code: str | None, assurance: Any) -> str:
+    """Core ``<relevance> (<reason_code>), assurance: <level>`` text, shared
+    by every already-stamped-``Change`` rendering site in this module
+    (CodeRabbit review: the same tag-building pattern was duplicated at
+    several call sites). Deliberately excludes any ``Contract:``/``[contract:
+    ...]`` wrapper -- callers render in visibly different shapes (a leading
+    ``"Contract: "``, a bracketed ``"[contract: ...]"``), so each keeps its
+    own exact prefix/suffix and casing."""
+    tag = str(relevance.value)
+    if reason_code:
+        tag += f" ({reason_code})"
+    if assurance is not None:
+        tag += f", assurance: {assurance.value}"
+    return tag
+
+
 def _format_leaf_type_change(c: Change) -> list[str]:
     """Format a single leaf-mode type change entry."""
     lines = [f"### {c.symbol} — {c.description}"]
@@ -509,6 +525,17 @@ def _format_leaf_type_change(c: Change) -> list[str]:
             lines.append(f"- ... ({len(c.affected_symbols) - 10} more)")
     if c.caused_count > 0:
         lines.append(f"\n> {c.caused_count} derived change(s) collapsed")
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --report-mode leaf
+    # routes root TYPE_* changes through this function, never through
+    # _format_change_md -- unlike the full/root-cause views, a leaf-mode
+    # type finding's own contract decision (already stamped when
+    # --contract-evaluation was requested) was silently dropped. Mirrors
+    # _format_change_md's own "no-op unless already stamped" idiom.
+    if c.contract_relevance is not None:
+        text = _contract_decision_text(
+            c.contract_relevance, c.contract_reason_code, c.contract_assurance
+        )
+        lines.append(f"\n> Contract: {text}")
     lines.append("")
     return lines
 
@@ -879,6 +906,7 @@ def _to_markdown_root_cause(
     show_impact: bool = False,
     *,
     severity_config: SeverityConfig | None = None,
+    contract_evaluation: bool = False,
 ) -> str:
     """``--report-mode root-cause`` markdown rendering (G29 Phase 3 slice 4, ADR-052).
 
@@ -981,6 +1009,32 @@ def _to_markdown_root_cause(
                     f"- `{label}` is required but missing from the new "
                     f"library ({severity_tag})"
                 )
+                # ADR-049 Phase 3 (Codex review, fresh evidence): the
+                # non-root-cause markdown/text/review fold-in
+                # (cli_compare_fold._fold_scoped_compat_into_text) already
+                # tags a missing-contract label with its stamped decision;
+                # this root-cause path builds the identical label shape
+                # independently and was missing the same treatment, so
+                # --report-mode root-cause silently dropped the contract
+                # decision for this one finding shape. A missing-contract
+                # label has no Change object of its own to read an
+                # already-stamped decision off of (unlike scoped_only,
+                # rendered via _format_change_md above), so unlike every
+                # other contract-rendering site in this fix, this one
+                # genuinely needs the caller's own --contract-evaluation
+                # intent threaded through explicitly.
+                if contract_evaluation:
+                    from .contract_evaluation import (
+                        stamp_explicit_scope_contract_evaluation,
+                    )
+
+                    label_decision: dict[str, object] = {}
+                    stamp_explicit_scope_contract_evaluation(label_decision)
+                    line += (
+                        f" [contract: {label_decision['contract_relevance']} "
+                        f"({label_decision['contract_reason_code']}), "
+                        f"assurance: {label_decision['contract_assurance']}]"
+                    )
                 if key in finding_lines_by_key:
                     finding_lines_by_key[key].append(line)
                     count_by_key[key] += 1
@@ -1055,7 +1109,13 @@ def _append_suppression_note(lines: list[str], result: DiffResult) -> None:
                 f"> ℹ️ {result.suppressed_count} change(s) suppressed via suppression file"
             )
             for sc in result.suppressed_changes:
-                lines.append(f">   - `{sc.symbol}` — {sc.description}")
+                line = f">   - `{sc.symbol}` — {sc.description}"
+                relevance = getattr(sc, "contract_relevance", None)
+                if relevance is not None:
+                    reason_code = getattr(sc, "contract_reason_code", None)
+                    assurance = getattr(sc, "contract_assurance", None)
+                    line += f" [contract: {_contract_decision_text(relevance, reason_code, assurance)}]"
+                lines.append(line)
 
 
 # ---------------------------------------------------------------------------
@@ -1487,6 +1547,7 @@ def to_markdown(
     severity_config: SeverityConfig | None = None,
     show_recommendation: bool = False,
     demangle: bool = False,
+    contract_evaluation: bool = False,
 ) -> str:
     # Human-facing only: optionally demangle Itanium C++ symbols in the rendered
     # output. Machine formats (JSON/SARIF/JUnit) keep the raw mangled symbols.
@@ -1519,6 +1580,7 @@ def to_markdown(
                 show_recommendation=show_recommendation,
                 show_impact=show_impact,
                 severity_config=severity_config,
+                contract_evaluation=contract_evaluation,
             )
         )
 
@@ -1727,5 +1789,21 @@ def _format_change_md(c: object) -> str:
         names = ", ".join(f"`{s}`" for s in affected[:5])
         suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
         line += f"\n  > Affected symbols: {names}{suffix}"
+
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --contract-evaluation's
+    # own help text promises every finding is stamped with a contract
+    # decision, but only the JSON report (reporter.py's
+    # _add_contract_evaluation_fields) ever rendered it -- an ordinary
+    # `compare --contract-evaluation` run (default markdown format) was
+    # byte-for-byte identical to one without the flag. A no-op when *c* was
+    # never stamped (contract_evaluation not requested), mirroring that
+    # helper's own documented default.
+    contract_relevance = getattr(c, "contract_relevance", None)
+    if contract_relevance is not None:
+        reason_code = getattr(c, "contract_reason_code", None)
+        contract_assurance = getattr(c, "contract_assurance", None)
+        line += (
+            f"\n  > Contract: {_contract_decision_text(contract_relevance, reason_code, contract_assurance)}"
+        )
 
     return line

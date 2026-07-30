@@ -57,7 +57,9 @@ its :doc:`implementation plan </contribute/plans/public-contract-default>`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from .checker_policy import ADDITION_KINDS, ChangeKind
 from .checker_types import Change
@@ -870,6 +872,24 @@ def evaluate_change_contract_relevance(
     if change.kind.value in _NOT_APPLICABLE_KIND_SLUGS:
         return _not_applicable_decision()
 
+    # `--post-manifest`'s own exclusion reason is a mode-independent,
+    # explicit-evidence exclusion (an exact, closed-domain manifest proved
+    # this concrete export was not committed), not a header-origin
+    # classification the way the rest of `_ALL_SURFACE_REASONS` is -- unlike
+    # private-header/system-header provenance (which ALL mode deliberately
+    # treats as in-domain, since that's the whole point of "no header-origin
+    # scoping"), a POST-manifest demotion is authoritative regardless of
+    # which contract mode is selected. Checked before the ALL-mode shortcut
+    # below so a change `FilterNonPublicSurface._run_allowlist` already
+    # demoted to `pp_ctx.out_of_surface` for this reason can't simultaneously
+    # be stamped `IN_CONTRACT` by the shortcut, contradicting its own
+    # presence in `surface_scope.out_of_surface_changes` (Codex review,
+    # fresh evidence: `--post-manifest` + `--no-scope-public-headers`).
+    if change.surface_exclusion_reason == _REASON_POST_MANIFEST_NOT_COMMITTED:
+        return _decision_for_surface_reason(
+            change.surface_exclusion_reason, change, surf_old, surf_new
+        )
+
     if mode is ContractMode.ALL:
         return _all_mode_decision()
 
@@ -1057,3 +1077,137 @@ def evaluate_snapshot_pair_contract_relevance(
         )
         for change in changes
     ]
+
+
+# ADR-049 section 4.3 item 1's strongest public-evidence tier: "explicit
+# required symbol, exact contract/ABI manifest, package symbols metadata,
+# or concrete consumer import/relocation/recorded entrypoint." Every entry
+# in used_by/required_symbols scoping's own relevant/scoped-only/missing-
+# label collections *is*, by construction, one of those -- a
+# consumer-import-derived finding (appcompat.scope_diff_to_app) or an
+# explicit required-symbol/entrypoint finding
+# (appcompat.scope_diff_to_required_symbols) -- so it is authoritative
+# IN_CONTRACT evidence on its own, regardless of what a from-scratch
+# header-surface evaluation would conclude. Shared by mcp_server.py's
+# abi_compare tool and cli_compare_helpers.py/cli_compare_fold.py's
+# compare CLI command -- both apply the identical override to the
+# identical class of finding (Codex review: originally private to
+# mcp_server.py only, leaving the CLI's own --contract-evaluation +
+# --used-by/--required-symbol combination permanently unstamped).
+#: The reason code stamp_explicit_scope_contract_evaluation always uses --
+#: hoisted so the two assignment branches below can't drift apart (CodeRabbit
+#: review), and already a registered key in CONTRACT_REASON_CODES.
+_EXPLICIT_SCOPE_REASON_CODE = "explicit_consumer_or_required_symbol_evidence"
+
+
+def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
+    """Stamp *c* (a ``Change`` or a plain dict entry) ``IN_CONTRACT`` using
+    ADR-049's explicit consumer/required-symbol evidence tier.
+
+    ``used_by``/``required_symbols`` scoping
+    (``appcompat.scope_diff_to_app``/``scope_diff_to_required_symbols``) can
+    produce fresh ``Change`` objects (e.g. a synthetic
+    ``consumer_required_symbol_removed`` or a PE ordinal-retarget finding),
+    and a missing-symbol/missing-entrypoint label is a plain dict built
+    directly by the caller -- neither ever passes through
+    ``checker._apply_contract_evaluation_shadow`` (the only place inside
+    ``compare()`` that stamps a shadow decision), so both stay permanently
+    unstamped even when the caller opted into ``contract_evaluation=True``.
+
+    A generic header-surface evaluation (``evaluate_change_contract_relevance``)
+    would be *wrong* here, not merely weaker: these findings are exactly the
+    "explicit required symbol ... or concrete consumer import" evidence
+    ADR-049 section 4.3 ranks as the *strongest* public-contract proof --
+    stronger than, and independent of, header-derived public root
+    membership. A binary-only ``used_by`` snapshot has no resolvable header
+    surface at all, so running these through the header-surface path would
+    misclassify authoritative in-contract evidence as ``UNKNOWN_UNRESOLVED``.
+
+    Accepts either a ``Change`` (attribute-set) or a plain ``dict`` (the
+    missing-label shape) via duck typing. Unconditionally overwrites any
+    existing decision -- including one ``compare()``'s own
+    ``_apply_contract_evaluation_shadow`` already stamped onto a ``Change``
+    that is *also* present in the caller's already-classified finding set
+    (the ordinary case: a scoping pass's own relevance set is not limited to
+    *fresh* findings). That header-surface-derived decision can be a real,
+    weaker misclassification (e.g. ``UNKNOWN_UNRESOLVED`` on a binary-only
+    snapshot with no resolvable header surface at all) that this call's own
+    stronger, authoritative evidence must override, not merely fill in when
+    absent.
+
+    EXCEPTION -- non-entity kinds: ``_is_relevant_to_app``/
+    ``scope_diff_to_required_symbols`` deliberately include a handful of
+    *loader/deployment* findings in the relevant set for reasons that have
+    nothing to do with matching a symbol/entrypoint the consumer actually
+    references -- ``SONAME_CHANGED`` when the consumer records the old
+    SONAME in ``DT_NEEDED``, and ``COMPAT_VERSION_CHANGED`` (Mach-O)
+    unconditionally for every consumer. This module already classifies both
+    as ``NOT_APPLICABLE`` (``_NOT_APPLICABLE_KIND_SLUGS``, ADR-049 D2's
+    "non-entity" column) since neither is about a specific function/
+    variable/type a consumer's code references. Overriding those to
+    ``IN_CONTRACT`` here would be a false contract decision, not a stronger
+    one -- so a ``Change`` whose kind is in that non-entity set is left
+    alone (whatever ``_apply_contract_evaluation_shadow`` already computed
+    for it, i.e. ``NOT_APPLICABLE``) instead of being overwritten.
+    """
+    is_dict = isinstance(c, dict)
+    if not is_dict:
+        kind = getattr(c, "kind", None)
+        kind_value = getattr(kind, "value", None)
+        if kind_value in _NOT_APPLICABLE_KIND_SLUGS:
+            return
+
+    if is_dict:
+        c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
+        c["contract_reason_code"] = _EXPLICIT_SCOPE_REASON_CODE
+        c["contract_assurance"] = ContractAssurance.COMPLETE.value
+    else:
+        c.contract_relevance = ContractRelevance.IN_CONTRACT
+        c.contract_reason_code = _EXPLICIT_SCOPE_REASON_CODE
+        c.contract_assurance = ContractAssurance.COMPLETE
+
+
+def stamp_scoped_result_findings(
+    result: Any, *, finding_id: Callable[[Any], str]
+) -> None:
+    """Stamp every ``--used-by``/``--required-symbol``-relevant finding on
+    *result* with the explicit-scope ``IN_CONTRACT`` decision
+    (:func:`stamp_explicit_scope_contract_evaluation`).
+
+    Covers both collections a scoping pass (``_apply_used_by_scoping``/
+    ``_apply_required_symbol_scoping`` in ``cli_compare_helpers.py``, or the
+    equivalent inline logic in ``mcp_server.py``'s ``abi_compare``) can
+    populate on *result*: an existing ``result.changes`` entry matched by
+    ``scoped_relevant_finding_ids`` (the ordinary case, e.g. a plain
+    ``FUNC_REMOVED`` both the full diff and the scoped gate already agree
+    on), and every fresh ``Change`` in ``scoped_only_changes`` (synthesized
+    by the scoping pass itself, e.g. a PE ordinal retarget, and never added
+    to ``result.changes``).
+
+    Hoisted here (CodeRabbit review) because the *traversal* over these two
+    collections was independently hand-copied in both
+    ``cli_compare_helpers.py`` and ``mcp_server.py`` -- exactly the kind of
+    duplication that let one of the two call sites go unstamped for a real
+    PR cycle before being caught by review. A no-op when *result* carries
+    neither collection (no scoping was applied) or when calling this
+    without a caller having opted into ``contract_evaluation=True`` in the
+    first place -- callers are expected to gate the call on that flag
+    themselves, mirroring every other function in this module.
+
+    *finding_id* is injected rather than imported here: the real
+    implementation lives in ``reporter_markdown.py``/``reporter.py``, both
+    of which import ``checker.py`` at module level, and ``checker.py``
+    already imports this module (function-locally, in
+    ``_apply_contract_evaluation_shadow``) -- importing it back from here
+    would close a real ``checker -> contract_evaluation -> reporter[...] ->
+    checker`` cycle (caught by the ``import-cycle-growth`` AI-readiness
+    gate). Every caller already has its own ``_finding_id`` import in scope
+    for other reasons.
+    """
+    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
+    if relevant_ids:
+        for c in result.changes:
+            if finding_id(c) in relevant_ids:
+                stamp_explicit_scope_contract_evaluation(c)
+    for c in getattr(result, "scoped_only_changes", ()) or ():
+        stamp_explicit_scope_contract_evaluation(c)

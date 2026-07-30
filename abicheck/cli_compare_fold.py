@@ -51,6 +51,7 @@ def _fold_scoped_compat_into_text(
     severity_config: Any = None,
     show_only: str | None = None,
     report_mode: str = "full",
+    contract_evaluation: bool = False,
 ) -> str:
     """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
 
@@ -82,6 +83,18 @@ def _fold_scoped_compat_into_text(
     ``review`` format ignores ``report_mode`` entirely (no root-cause
     rendering exists for it), so it always gets the appended section
     regardless of this parameter's value.
+
+    *contract_evaluation* (ADR-049 Phase 3), when ``True``, stamps each
+    synthesized missing-contract-label dict entry built below with the
+    explicit-scope ``IN_CONTRACT`` decision via
+    ``contract_evaluation.stamp_explicit_scope_contract_evaluation`` --
+    mirroring the MCP ``abi_compare`` tool's identical stamping of its own
+    missing-label entries. The ``scoped_only`` ``Change`` objects folded in
+    below need no separate stamping here: the caller
+    (``cli_compare_helpers.run_compare``) already stamps them (and any
+    matching ``result.changes`` entry) in place before this function runs,
+    so ``_change_to_dict`` picks up the decision for free the same way it
+    does for any other already-stamped ``Change``.
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -252,6 +265,12 @@ def _fold_scoped_compat_into_text(
                     # either way) is the honest, consistent value here.
                     "reachability_state": ReachabilityState.UNKNOWN.value,
                 }
+                if contract_evaluation:
+                    from .contract_evaluation import (
+                        stamp_explicit_scope_contract_evaluation,
+                    )
+
+                    stamp_explicit_scope_contract_evaluation(entry)
                 changes_list.append(entry)
                 # A missing-contract label has no caused_by_type; its
                 # `symbol` (the label) only becomes a *grouping* key if some
@@ -447,12 +466,182 @@ def _fold_scoped_compat_into_text(
                 lines.append("## Additional scoped-gate findings")
                 severity_tag = "breaking" if blocks else "compatible"
                 for label in missing_labels:
-                    lines.append(
+                    line = (
                         f"- `{label}` is required but missing from the new "
                         f"library ({severity_tag})"
                     )
+                    # ADR-049 Phase 3 (Codex review, fresh evidence): a
+                    # missing-contract label is a bare string here, not the
+                    # stamped dict entry the JSON branch above builds --
+                    # without this, the default markdown/text/review report
+                    # (unlike JSON) silently dropped the contract decision
+                    # for this exact finding shape.
+                    if contract_evaluation:
+                        from .contract_evaluation import (
+                            stamp_explicit_scope_contract_evaluation,
+                        )
+
+                        label_decision: dict[str, object] = {}
+                        stamp_explicit_scope_contract_evaluation(label_decision)
+                        line += (
+                            f" [contract: {label_decision['contract_relevance']} "
+                            f"({label_decision['contract_reason_code']}), "
+                            f"assurance: {label_decision['contract_assurance']}]"
+                        )
+                    lines.append(line)
                 for c in scoped_only:
-                    lines.append(f"- {c.kind.value}: {c.description}")
+                    line = f"- {c.kind.value}: {c.description}"
+                    # scoped_only Change objects are already stamped by
+                    # stamp_scoped_result_findings upstream when
+                    # contract_evaluation was requested -- render what's
+                    # already there instead of re-deriving it.
+                    relevance = getattr(c, "contract_relevance", None)
+                    if relevance is not None:
+                        assurance = getattr(c, "contract_assurance", None)
+                        line += (
+                            f" [contract: {relevance.value} "
+                            f"({getattr(c, 'contract_reason_code', None)})"
+                        )
+                        if assurance is not None:
+                            line += f", assurance: {assurance.value}"
+                        line += "]"
+                    lines.append(line)
+        return "\n".join(lines)
+
+    return text
+
+
+def _suppression_rule_label(rule: Any, index: int) -> str:
+    """A human-readable identifier for a suppression rule with no index of
+    its own (``SuppressionAudit``'s per-bucket lists don't carry the rule's
+    position in the original file, so *index* is only this bucket's own
+    position -- misleading as a rule identifier, e.g. the second rule in
+    the file being the only stale one renders as ``rule#0`` -- Codex/
+    CodeRabbit review, fresh evidence).
+
+    Always appends the rule's own matching selectors (every populated one,
+    not just the first -- ``Suppression`` selectors combine conjunctively)
+    alongside ``label``/``reason`` when either is set, not only as a
+    fallback for an unlabeled rule (Codex review, fresh evidence, third
+    round): a ``label``/``reason`` is a free-form grouping tag with no
+    uniqueness guarantee, so two distinct rules sharing one would otherwise
+    still render as the identical, ambiguous identifier. Falls back to
+    *index* only for a rule with none of label/reason/any selector set at
+    all."""
+    label: str | None = getattr(rule, "label", None) or getattr(rule, "reason", None)
+    parts = [
+        f"{field}={value}"
+        for field in (
+            "symbol", "symbol_pattern", "type_pattern", "member_name",
+            "change_kind", "source_location", "namespace", "entity_namespace",
+            "cause_namespace",
+            # ADR-044 D2 reachability gates (Codex review, fresh evidence):
+            # these affect which findings a rule matches exactly like the
+            # selectors above -- two rules sharing every selector but
+            # differing on reachability (e.g. "public-only" vs.
+            # "unreachable-only") match disjoint findings and must not
+            # render identically. allow_public_break/allow_unknown_reachability
+            # default False, so they're omitted (same "if truthy" convention
+            # as every other field here) unless a rule actually opted in.
+            "reachability", "allow_public_break", "allow_unknown_reachability",
+        )
+        if (value := getattr(rule, field, None))
+    ]
+    # expires (Codex review, fresh evidence) is not a matching selector --
+    # two rules with identical selectors but different expiry dates match
+    # the exact same findings -- but it's exactly what distinguishes them
+    # in the expired_rules/near_expiry_rules buckets themselves, where an
+    # otherwise-identical pair would otherwise render as the same label
+    # with no way to tell which deadline belongs to which rule.
+    expires = getattr(rule, "expires", None)
+    if expires is not None:
+        parts.append(f"expires={expires.isoformat()}")
+    selectors = ", ".join(parts)
+    if label and selectors:
+        return f"{label} ({selectors})"
+    if label:
+        return label
+    if selectors:
+        return selectors
+    return f"rule#{index}"
+
+
+def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
+    """Fold a ``--audit-suppressions`` ``SuppressionAudit`` into the rendered
+    report text.
+
+    JSON gets a ``suppression_audit`` key; markdown/text/review get an
+    appended ``## Suppression Audit`` section. Binary/structured formats
+    (sarif, junit, html) are left untouched -- the same scope boundary
+    :func:`_fold_scoped_compat_into_text` already uses.
+    """
+    if audit is None:
+        return text
+
+    if fmt == "json":
+        import json
+
+        payload = json.loads(text)
+        payload["suppression_audit"] = {
+            "total_rules": audit.total_rules,
+            "stale_rules": [
+                _suppression_rule_label(r, i) for i, r in enumerate(audit.stale_rules)
+            ],
+            "high_risk_matches": [
+                {
+                    "rule": _suppression_rule_label(rule, i),
+                    "kind": change.kind.value,
+                    "symbol": change.symbol,
+                }
+                for i, (rule, change) in enumerate(audit.high_risk_matches)
+            ],
+            "expired_rules": [
+                _suppression_rule_label(r, i) for i, r in enumerate(audit.expired_rules)
+            ],
+            "near_expiry_rules": [
+                _suppression_rule_label(r, i)
+                for i, r in enumerate(audit.near_expiry_rules)
+            ],
+        }
+        return json.dumps(payload, indent=2)
+
+    if fmt in ("markdown", "text", "review"):
+        lines = [text, "", "## Suppression Audit", "", audit.summary()]
+        # audit.summary() only reports the stale-rule count (Codex review,
+        # fresh evidence: its own per-rule detail lines named a rule by only
+        # its first selector, misidentifying two rules that share it but
+        # differ on another, e.g. the same symbol with a different
+        # change_kind) -- render each stale rule explicitly with the fully
+        # disambiguated label, the same as high-risk/expired/near-expiry
+        # below.
+        if audit.stale_rules:
+            lines.append("")
+            lines.append("Stale rules (matched nothing):")
+            for i, rule in enumerate(audit.stale_rules):
+                lines.append(f"- `{_suppression_rule_label(rule, i)}`")
+        if audit.high_risk_matches:
+            lines.append("")
+            lines.append("High-risk matches (suppressed a BREAKING change):")
+            for i, (rule, change) in enumerate(audit.high_risk_matches):
+                lines.append(
+                    f"- `{_suppression_rule_label(rule, i)}` suppressed "
+                    f"{change.kind.value}: {change.symbol}"
+                )
+        # audit.summary() only reports counts for these two buckets (Codex
+        # review, fresh evidence) -- the JSON branch above already names each
+        # rule, so the default markdown/text/review report was the one place
+        # a reader couldn't tell *which* rule needs action without switching
+        # to --format json.
+        if audit.expired_rules:
+            lines.append("")
+            lines.append("Expired rules:")
+            for i, rule in enumerate(audit.expired_rules):
+                lines.append(f"- `{_suppression_rule_label(rule, i)}`")
+        if audit.near_expiry_rules:
+            lines.append("")
+            lines.append("Rules expiring soon:")
+            for i, rule in enumerate(audit.near_expiry_rules):
+                lines.append(f"- `{_suppression_rule_label(rule, i)}`")
         return "\n".join(lines)
 
     return text

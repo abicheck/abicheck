@@ -870,12 +870,29 @@ needs a prerequisite extraction, not a same-PR addition.
 
 Still remaining: wiring any other field (`cli_options.py`'s other shared
 option families beyond `scope_options`, `.abicheck.yml` schema/reference
-docs, service/API request models) to construct real `FieldCandidate`s, and
-folding a selected policy pack's resolved `ChangeKind -> Verdict`
-assignments into `CompatibilityPolicyConfig.overrides` (and a contract/gate
-pack's field assignments into their respective configs) for a real run —
+docs, service/API request models) to construct real `FieldCandidate`s —
 `resolve_selected_packs` resolves *which* packs are selected, not what
 selecting them changes about the rest of the effective config.
+
+**Updated (2026-07-30): the policy-pack half of that gap is closed.**
+`compatibility_evaluation_wiring.resolve_policy_pack_overrides` loads every
+selected pack, runs the identical D8 conflict check
+`resolve_selected_packs` already runs for the `POLICY` namespace (scoped to
+only the policy-kind packs among the given paths), and folds every
+non-conflicting pack's `ChangeKind` slug -> `Verdict` assignments into one
+merged mapping — the exact shape
+`CompatibilityPolicyConfig.overrides` already requires, so the result can
+be passed straight through. An `explicit_overrides` parameter (forwarded to
+the conflict check, same as `resolve_selected_packs`'s own parameter) is
+re-applied after the pack merge so an explicit override always wins, even
+for a `ChangeKind` no two packs actually disagreed on. Still not attempted:
+a contract/gate pack's own field assignments have no equivalent target —
+`ContractConfig`/`GateConfig` are fixed-field dataclasses with no open
+field-name -> value bag the way `CompatibilityPolicyConfig.overrides` is,
+so folding those needs a per-field router this slice does not build (a
+separate, larger piece of work). Not called from any live command yet, same
+"land the wiring function itself, fully tested" pattern as every other
+function in this module.
 
 ### Phase 2 — canonical identity and fact conservation
 
@@ -1084,8 +1101,364 @@ public-evidence tier, stronger than and independent of header-derived
 public root membership, so evaluating it against a possibly-unresolved
 header surface (routine for a binary-only `used_by` snapshot) would
 misclassify authoritative evidence as merely `unknown_unresolved`. Still
-missing, unchanged from above: the `compare` CLI flag (blocked on `cli.py`'s
-line-count cap), the provider-evidence ledger, and `EXPORTS` mode.
+missing, unchanged from above: the provider-evidence ledger and `EXPORTS`
+mode.
+
+**Updated (2026-07-29): the `compare` CLI flag landed, unblocking the
+line-count cap noted above.** `cli.py` was at exactly the 2000-line hard
+cap, so no new `@click.option` could land there directly. Rather than
+extending `IMPORT_CYCLE_ALLOWLIST` or growing the file past the cap, the
+ADR-043 app-usage/required-symbol scoping option family
+(`--used-by`/`--verify-runtime`/`--required-symbol`/`--required-symbols`,
+previously four separate inline `@click.option` stacks on `compare_cmd`)
+was extracted into a single `cli_options.app_usage_scope_options` decorator
+— the same "shared utility flags go through a decorator" pattern this file
+already documents for `scope_options`/`severity_options`, just applied to a
+family that happened to have only one call site rather than several. That
+freed 27 lines (`cli.py`: 2000 → 1973), enough headroom for `--contract-
+evaluation` (`is_flag=True, default=False`) to be added directly. It threads
+through `cli_compare_helpers.run_compare` into `service.compare_snapshots`
+exactly the way the MCP tool's own `contract_evaluation` parameter does —
+same shadow-evaluator fields, same advisory-only guarantee. Mirroring
+`--diagnostic-comparison`'s own precedent, `--contract-evaluation` is
+explicitly rejected (`click.UsageError`) on a directory/package (release)
+compare via `_reject_set_input_flags`, since that per-library fan-out
+doesn't wire the shadow evaluator either. New tests:
+`tests/test_cli_compare_contract_evaluation.py` covers keyword forwarding,
+the off-by-default case, a real end-to-end JSON report with actual stamped
+`contract_relevance`/`contract_reason_code` fields (not a mock), the
+`--help-all` text, and the directory/package rejection — plus the frozen
+`compare` option-set snapshot in `tests/test_cli_contract.py` and the
+generated `docs/reference/cli-reference.md` were updated accordingly. Also
+added a `COMPARE_FLAG_BUDGET_RAISES` ledger entry
+(`cli_options.py`) for the new visible flag, since `--contract-evaluation`
+pushed `compare`'s visible-option count one past the existing budget.
+
+**Codex review on the same PR found a real gap in this slice**:
+`--contract-evaluation` combined with `--used-by`/`--required-symbol`
+stamped nothing for `scoped_only_changes` (fresh `Change` objects
+`scope_diff_to_app`/`scope_diff_to_required_symbols` synthesize, e.g. a PE
+ordinal retarget), for synthetic missing-contract-label entries, or
+override a weaker header-derived decision on an existing `result.changes`
+entry the scoping pass marks relevant — the shadow evaluator runs before
+app-usage/required-symbol scoping applies, and nothing in the CLI path
+re-stamped afterward. The MCP `abi_compare` tool already had this exact
+fix (`_stamp_explicit_scope_contract_evaluation`), but it was private to
+`mcp_server.py`. Fixed by promoting it to a shared, public function,
+`contract_evaluation.stamp_explicit_scope_contract_evaluation` (mcp_server.py
+now imports and aliases it instead of keeping its own copy), and calling it
+from `cli_compare_helpers.run_compare` (for `result.changes`/
+`scoped_only_changes`, right after scoping and before rendering) and
+`cli_compare_fold._fold_scoped_compat_into_text` (for the synthetic
+missing-label dict entries, via a new `contract_evaluation` parameter).
+New tests in `tests/test_cli_compare_contract_evaluation.py`
+(`TestUsedByScopingStampsExplicitEvidence`) mirror
+`tests/test_mcp_server_unit.py`'s existing coverage for the same fix on the
+MCP side.
+
+**A second Codex review round on the same PR found two more real gaps.**
+(1) `cli_options.MCP_CLI_NAME_MAP["contract_evaluation"]` was still `None`
+with a stale comment claiming no `compare` CLI equivalent existed — left
+over from before this PR's own CLI-flag work, silently exempting the new
+flag from the `cli-contract`/parity gate that keeps the MCP tool and native
+`compare` command's vocabularies in sync. Fixed by mapping it to
+`--contract-evaluation` like every other shared option. (2) `--contract-
+evaluation` combined with `--show-redundant`/`scope.show_redundant: true`
+rendered a restored redundant finding (e.g. a `func_params_changed`
+subsumed by a `type_size_changed` root) with none of the promised contract
+fields: `checker._apply_contract_evaluation_shadow` only ever stamped
+`kept` + `pp_ctx.out_of_surface`, but the redundant bucket is re-merged
+into `result.changes` entirely in the CLI layer
+(`cli_helpers_compare._merge_redundant_changes`), long after the shadow
+evaluator already ran. Fixed by threading `DiffResult.redundant_changes`
+(`redundant_for_report` in `checker.compare`) into
+`_apply_contract_evaluation_shadow` as a new `redundant` parameter, stamped
+the same way as any other finding — restoring a redundant change is not a
+different evidence tier, just a display-dedup decision being reversed. New
+test: `tests/test_report_schema.py::TestReportValidatesAgainstSchema::
+test_contract_evaluation_stamps_redundant_bucket` (unit-level, directly
+exercising `_apply_contract_evaluation_shadow`'s new parameter — a natural
+end-to-end fixture that gets a *real* detector to emit a root-type-matching
+`FUNC_PARAMS_CHANGED` redundant relative to its own `TYPE_SIZE_CHANGED` was
+attempted and found fragile/out of scope for this fix: `_match_root_type`
+requires the root type's name to appear verbatim in *both* the old and new
+value text of the derived change, which a real signature-level parameter
+change does not naturally produce without also changing the param's own
+type spelling).
+
+**A third review round (Codex + CodeRabbit) found two more real gaps, plus
+two applied quality nits.** (1) Codex, P1: an ordinary `compare --contract-
+evaluation` run (default markdown format, no `--format json`) was
+byte-for-byte identical to a run without the flag — only the JSON renderer
+(`reporter._add_contract_evaluation_fields`) ever surfaced the stamped
+fields, so the flag's own help text ("Stamps each finding in the report")
+was false for the CLI's default output. Fixed by rendering a `Contract:
+<relevance> (<reason_code>), assurance: <level>` line in
+`reporter_markdown._format_change_md` (a no-op when the `Change` was never
+stamped) — shared by every markdown-based report shape (full, leaf, root-
+cause) since they all route through this one per-finding formatter. (2)
+Codex, P2: a finding a `--suppress` rule matched was moved to
+`DiffResult.suppressed_changes` before `_apply_contract_evaluation_shadow`
+ever ran (which only evaluated `kept` + `out_of_surface` + `redundant`), so
+its audit-trail entry (`reporter._suppressed_change_entry`) silently lost
+its contract decision even though the finding itself stays visible in the
+report. Fixed by threading a new `suppressed` parameter into
+`_apply_contract_evaluation_shadow` the same way as `redundant` above, and
+calling `_add_contract_evaluation_fields` from `_suppressed_change_entry`.
+New tests for both:
+`tests/test_report_schema.py::TestReportValidatesAgainstSchema::
+test_contract_evaluation_renders_in_markdown_report`/
+`test_contract_evaluation_stamps_suppressed_changes`.
+
+The two CodeRabbit nits applied in the same pass: hoisted the
+`"explicit_consumer_or_required_symbol_evidence"` reason-code literal
+(previously duplicated across `stamp_explicit_scope_contract_evaluation`'s
+two assignment branches) into one `_EXPLICIT_SCOPE_REASON_CODE` constant;
+and factored the `scoped_relevant_finding_ids`/`scoped_only_changes`
+traversal — independently hand-copied in both `cli_compare_helpers.py` and
+`mcp_server.py`, which is exactly the class of duplication that let the P1
+finding above go unnoticed in one of the two call sites for a full review
+round — into one shared `contract_evaluation.stamp_scoped_result_findings`.
+That hoist required care: a naive version importing `reporter._finding_id`
+directly closed a real `checker -> contract_evaluation -> reporter[...] ->
+checker` cycle (`checker.py` already imports `contract_evaluation.py`
+function-locally, and `reporter.py`/`reporter_markdown.py` both import
+`checker.py` at module level) — caught immediately by the
+`import-cycle-growth` AI-readiness gate, not discovered later. Fixed by
+having `stamp_scoped_result_findings` accept `finding_id` as an injected
+callable parameter instead of importing it itself; both call sites already
+had their own `_finding_id` import in scope for other reasons, so this
+closes the duplication without adding a new cross-module edge.
+
+**A fourth review round (Codex) found one more audit bucket with the
+identical unstamped-ledger shape as the redundant/suppressed fixes
+above.** A finding `--reconcile-build-context` clears from `kept` (a
+context-free header-parse phantom the build's active defines prove never
+happened, ADR-039) stays visible in its own ledger
+(`reporter._add_reconciled`, `build_context_reconciled.changes`), but
+reconciliation runs *before* `_apply_contract_evaluation_shadow` in
+`checker.compare`'s own pipeline order — the reconciled finding never
+reaches `kept`, so its ledger entry never got a contract decision. Fixed
+the same way as the two buckets before it: `_apply_contract_evaluation_shadow`
+gained a third optional `reconciled` parameter (folded into `all_changes`
+alongside `redundant`/`suppressed`), threaded from `checker.compare`'s own
+already-in-scope `reconciled` local, and `_add_reconciled` now calls
+`_add_contract_evaluation_fields` on each ledger entry. Two new tests:
+`test_contract_evaluation_stamps_reconciled_bucket` (unit-level, mirroring
+the redundant-bucket test's direct-call pattern) and
+`test_contract_evaluation_stamps_reconciled_bucket_end_to_end` (a real
+`--reconcile-build-context` false-positive clear, reusing
+`test_diff_reconcile.py`'s own canonical `_fp_pair()` fixture, through the
+real JSON renderer) — unlike the redundant-bucket fix, a natural real-
+detector fixture *was* readily available here via existing test
+infrastructure, so both a unit and an end-to-end test landed.
+
+At this point, four independent review rounds (two Codex, one CodeRabbit,
+one more Codex) have each found exactly one more unstamped bucket/gap in
+this same feature — `scoped_only_changes`/missing-labels,
+`redundant_changes`+`MCP_CLI_NAME_MAP`, markdown rendering+
+`suppressed_changes`, and now `reconciled_changes`. `Change.contract_relevance`
+is genuinely a **shadow, cross-cutting field**: every place `checker.py`'s
+pipeline can pull a finding out of `kept` into a side ledger before
+`_apply_contract_evaluation_shadow` runs is a place that ledger can go
+unstamped unless it's explicitly threaded through. `kept` +
+`pp_ctx.out_of_surface` + `redundant` + `suppressed` + `reconciled` is
+believed to be the complete set of pre-shadow-evaluator side buckets as of
+this pass (grep for `DiffResult` fields populated from a list separate
+from `changes` turns up no further candidates), but this pattern — a
+*new* opt-in post-processing step landing in the future and creating a
+*sixth* bucket without updating `_apply_contract_evaluation_shadow` to
+match — is a real, structural risk worth naming explicitly for whoever
+adds the next one.
+
+**A fifth review round (Codex, same PR) found the remaining gap in text-
+format rendering: `_fold_scoped_compat_into_text`'s markdown/text/review
+branch (not the JSON branch fixed earlier) still lost the contract
+decision for `--used-by`/`--required-symbol` scoped-only findings and
+missing-contract labels.** The JSON branch (fixed earlier this PR) stamps
+a fresh dict for each missing label and reuses the already-stamped
+`Change` for `scoped_only`; the markdown/text/review branch builds its own
+plain bullet-text lines from the same two collections but never read
+either's contract fields — so the *default* CLI invocation
+(`compare --used-by ... --contract-evaluation`, no `--format`) reported the
+gated finding with zero contract information, the identical shape as the
+earlier markdown-rendering P1 fix but for this one text-append code path
+specifically. Fixed by appending a `[contract: <relevance>
+(<reason_code>)]` tag to each missing-label/scoped-only line, gated on
+the same `contract_evaluation` parameter. New tests:
+`test_used_by_missing_symbol_gets_contract_evaluation_in_markdown` /
+`test_used_by_missing_symbol_omits_contract_tag_in_markdown_by_default`.
+
+Separately, a companion finding named the remaining unaddressed formats —
+`sarif`/`junit`/`html` still never render `Change.contract_*` at all
+(neither the ordinary per-finding fields nor this scoped fold-in),
+contradicting the flag's own help text if read as "every format". Rather
+than build out three more renderer integrations in the same PR, the CLI
+help text was corrected to state precisely which formats render the
+fields today (`json`/`markdown`/`text`/`review`) and which don't yet
+(`sarif`/`junit`/`html`) — the "explicitly restrict" alternative Codex's
+own P1 finding offered, since a truthful, scoped help text is a complete
+fix on its own and extending three more renderers is real, separately-
+scoped follow-up work.
+
+**Updated (2026-07-30):** two more Codex findings on the same
+`--contract-evaluation` + scoped-gate combination, both in
+`cli_compare_fold._fold_scoped_compat_into_text`'s markdown/text/review
+branch: (1) the missing-label and `scoped_only` lines added
+`contract_relevance`/`contract_reason_code` but dropped `contract_assurance`
+even though the JSON branch and `reporter_markdown._format_change_md`
+both already render it — fixed by appending `, assurance: <level>` to
+both lines, verified against the existing
+`TestUsedByScopingStampsExplicitEvidence` markdown tests plus assurance
+assertions. (2) `--report-mode root-cause` never reached this fold-in at
+all — it is deliberately skipped for root-cause markdown (see the
+skip-reason comment above) because `reporter_markdown._to_markdown_root_cause`
+already merges `scoped_only`/missing-label findings into its own
+root-cause groups. That merge covers `scoped_only` for free (grouped
+`Change` objects render via `_format_change_md`, which already reads
+already-stamped `contract_*` fields), but the `missing_labels` loop builds
+its own plain bullet line independently, with no `Change` object to read a
+stamped decision off of — so a missing-contract label's own tag was
+silently dropped in root-cause mode specifically. A first fix attempt
+tried to *derive* whether `--contract-evaluation` was active from data (any
+already-stamped finding in `changes`/`scoped_only`), to avoid growing
+`to_markdown`'s public signature — but that heuristic breaks precisely for
+the common case this bug covers: a run whose *only* finding is the
+missing label itself has nothing else stamped to derive the signal from,
+so the heuristic silently stayed off. Fixed properly instead by threading
+an explicit `contract_evaluation: bool = False` parameter through the full
+call chain — `render_output`/`_render_output` (both the shared
+`service_render.py` version and its `cli.py`/`mcp_server.py`-local
+duplicates) → `reporter_markdown.to_markdown` →
+`_to_markdown_root_cause` — mirroring how `contract_evaluation` was
+already threaded to the non-root-cause fold-in path. New tests:
+`test_used_by_missing_symbol_gets_contract_evaluation_in_root_cause_mode` /
+`test_used_by_missing_symbol_omits_contract_tag_in_root_cause_mode_by_default`.
+
+**Updated (2026-07-30): the `--contract-evaluation` help text itself was
+overclaiming, on two points at once (Codex review, fresh evidence).** (1)
+It listed `--format text` as a rendering surface, but `compare`'s own
+`--format` is a `click.Choice(["json", "markdown", "sarif", "html",
+"junit", "review"])` — there is no `text` format for this command; that
+word only ever meant something inside `_fold_scoped_compat_into_text`'s
+own internal `fmt in ("markdown", "text", "review")` branch condition
+(shared plumbing, not a real CLI choice). (2) `--format review` routes
+through `reporter_markdown.to_review_digest` — a compact,
+reviewer-facing counts-table-plus-top-impacted-symbols digest that never
+reads `Change.contract_*` at all, confirmed by reading it end to end (its
+"top impacted symbols" list is a bare `- {symbol} — {kind}` line, no
+`_format_change_md` call). The only place `--format review` renders
+anything contract-related is the `--used-by`/`--required-symbol`
+scoped-gate appendix (shared with markdown/text via
+`_fold_scoped_compat_into_text`) — so a plain `compare --contract-
+evaluation --format review` run with no scoping flag is, correctly per
+Codex's fresh evidence, byte-for-byte unaffected by the flag. Fixed by
+correcting the help text to state precisely what renders where: per-finding
+in `json`/`markdown`; in `review` only via the scoped-gate appendix, never
+its own top-impacted-symbols list; still not in `sarif`/`junit`/`html`.
+Regenerated `docs/reference/cli-reference.md`; no code path changed, so no
+new test was needed beyond the existing `test_help_all_mentions_flag`.
+
+**Updated (2026-07-30): the identical MCP-side gap the CLI fold-in fix
+already closed (Codex review, fresh evidence).** `abi_compare`'s own
+`_fold_scoped_compat_into_text` call (`mcp_server.py`) never forwarded
+`contract_evaluation` at all -- for `output_format="markdown"`/`"review"`,
+`response["report"]` (the raw rendered text MCP returns for these formats)
+carried no `[contract: ...]` tag on a missing-symbol/missing-entrypoint
+finding, even though the same finding in `output_format="json"` was
+already correctly stamped (that path has its own separate post-`json.loads`
+fix, landed earlier this pass). Fixed by passing
+`contract_evaluation=contract_evaluation` into that call, mirroring the
+CLI's `run_compare` (`cli_compare_helpers.py`), which already threads it
+the same way. New test:
+`test_used_by_missing_symbol_gets_contract_evaluation_in_markdown_report`
+(`tests/test_mcp_server_unit.py`) -- calls `abi_compare` with
+`output_format="markdown"` and asserts the returned `response["report"]`
+text carries the tag.
+
+**Updated (2026-07-30): two more real gaps in the same "thread contract_
+evaluation to every sibling call site" pattern, both caught fresh (Codex/
+CodeRabbit review).** (1) `cli_compare_helpers.run_compare`'s *secondary*
+`_render_output` call (the `--secondary-format`/`--secondary-output`
+side-channel report) never forwarded `contract_evaluation`, unlike the
+primary render call right above it and the secondary
+`_fold_scoped_compat_into_text` call right below it in the same block --
+a `compare --contract-evaluation --secondary-format markdown` run's
+secondary output silently carried no contract fields. Fixed by adding
+`contract_evaluation=contract_evaluation` to that call, matching its two
+siblings. (2) `reporter_markdown._append_suppression_note` (the "N change(s)
+suppressed via suppression file" bullet list, rendered in every markdown
+report shape) built its line from only `sc.symbol`/`sc.description`,
+never reading the `contract_*` fields `_apply_contract_evaluation_shadow`'s
+`suppressed` bucket already stamps (landed earlier this pass) -- so a
+suppressed, contract-stamped finding's *JSON* audit entry carried the
+decision while its *markdown* audit line did not, the identical
+JSON-vs-markdown gap already fixed for `_format_change_md` and the scoped-
+gate fold-in, just in this third, independent rendering site. Fixed by
+appending the same `[contract: <relevance> (<reason_code>), assurance:
+<level>]` tag when `contract_relevance` is present. New tests:
+`test_contract_evaluation_renders_suppressed_changes_in_markdown`
+(`tests/test_report_schema.py`); the secondary-render fix has no
+dedicated new test (no per-call-site regression test existed for any of
+`run_compare`'s other secondary-render kwargs either -- covered
+transitively by the existing primary-render contract-evaluation tests,
+which exercise the identical code path with the identical parameter).
+
+**Updated (2026-07-30): a real logic bug in the evaluator itself, not
+another rendering gap (Codex review, fresh evidence).** `--post-manifest`
+combined with `--no-scope-public-headers` (ALL mode) let
+`evaluate_change_contract_relevance`'s `if mode is ContractMode.ALL:
+return _all_mode_decision()` shortcut run *before* the function ever
+consulted `change.surface_exclusion_reason` -- so a concrete export
+`FilterNonPublicSurface._run_allowlist` already demoted to
+`pp_ctx.out_of_surface` for `_REASON_POST_MANIFEST_NOT_COMMITTED` (and
+therefore listed in the report's own `surface_scope.out_of_surface_changes`)
+was simultaneously stamped `contract_relevance: IN_CONTRACT` with
+`COMPLETE` assurance -- directly contradicting the report's own other
+ledger for the same finding. The existing `surface_exclusion_reason` check
+(`_ALL_SURFACE_REASONS`) only ran on the `ContractMode.PUBLIC` path, one
+branch below the ALL-mode shortcut, so it never got a chance to apply.
+Not fixed by moving the *whole* check earlier, though: `_ALL_SURFACE_REASONS`
+also contains header-origin reasons (`REASON_PRIVATE_HEADER`,
+`REASON_SYSTEM_HEADER`, `REASON_OFF_PYTHON_SURFACE`, ...) that ALL mode
+*deliberately* treats as irrelevant -- that's the entire point of
+`--no-scope-public-headers` (already covered by the pre-existing
+`test_all_mode_ignores_pipeline_surface_exclusion_reason` regression test,
+confirmed still green). `_REASON_POST_MANIFEST_NOT_COMMITTED` is different
+in kind: it's an explicit, exact-manifest fact (ADR-049 D2's own "exact
+manifests" evidence provider), not a header-origin classification, so it is
+authoritative regardless of which contract mode is selected. Fixed with a
+narrow, mode-independent check for specifically that one reason, inserted
+between the `NOT_APPLICABLE`-kind check and the `ContractMode.ALL`
+shortcut -- every other reason in `_ALL_SURFACE_REASONS` still only applies
+on the `PUBLIC` path, unchanged. New test:
+`test_post_manifest_not_committed_reason_is_terminal_under_all_mode_too`
+(`tests/test_contract_evaluation.py`), mirroring the existing PUBLIC-mode
+regression test for the identical reason but asserting the ALL-mode case.
+
+**Updated (2026-07-30): a fourth independent JSON serialization site of the
+same demoted findings never carried the stamp (Codex review, fresh
+evidence).** `result.out_of_surface_changes` is serialized twice in a JSON
+report: once under `surface_scope.out_of_surface_changes` (already stamped,
+per the P1 fix above) and once more, independently, under `reporter.
+_scope_dict`'s own `scope.filtered_internal_changes` ledger (ADR-024/issue 235's
+older, `--scope-public-headers`-only public-surface-scoping block) --
+the *same* `Change` objects, but `_scope_dict` built its own bare
+kind/symbol/description dict from scratch rather than routing through
+`_add_contract_evaluation_fields` (or `_change_to_dict`) the way every
+other serialization site in this fix already does. A `--contract-evaluation`
+consumer reading `scope.filtered_internal_changes` (the older, more
+established ledger) rather than `surface_scope.out_of_surface_changes`
+(newer) therefore missed the decision entirely, even though the sibling
+ledger for the identical finding carried it. Fixed by extracting a small
+`_filtered_internal_entry()` helper that calls
+`_add_contract_evaluation_fields` the same way, keeping `_scope_dict`
+itself a one-line list comprehension over it. New test extends
+`test_contract_evaluation_stamps_demoted_out_of_surface_findings`
+(`tests/test_report_schema.py`) with an assertion against `payload["scope"]
+["filtered_internal_changes"]` alongside its existing `surface_scope`
+assertion, on the same fixture/result -- confirming both ledgers agree,
+not just that each independently contains *a* stamped entry.
 
 Measure:
 
@@ -1457,14 +1830,7 @@ coverage ledger" specifically (as opposed to the ordinary suppression audit
 trail just closed above) remains undesigned -- there is still no concept in
 the codebase for *which* `ChangeKind`s categorically cannot be suppressed
 regardless of policy, nor a ledger proving a given run's suppressions never
-touched one. `SuppressionList.audit()`/`SuppressionAudit`
-(`suppression.py`) is a second, still-orphaned piece of related prior art
-found during this investigation -- stale-rule/high-risk-match/expiry
-analysis over a whole suppression file, exposed by neither `compare` nor
-`scan` today; wiring it in (e.g. a `--audit-suppressions` flag) is a
-separate, real follow-up, not attempted here since it is additive UI on top
-of the file, not part of per-run comparison output the way
-`suppressed_changes` is. The parity test suite above covers one concrete
+touched one. The parity test suite above covers one concrete
 scenario (plus, now, the suppression-ledger scenario), not
 the exhaustive binaries/snapshots/mixed-inputs/policies/packs/suppressions/
 explicit-scope matrix §6.4 names in full. `compare`'s remaining
@@ -1476,6 +1842,293 @@ snapshots, `--post-manifest` POC export-manifest scoping) were deliberately
 not ported to `scan --against` -- each is its own subsystem with its own
 input model that doesn't obviously map onto `scan`'s classify/tier/level
 orchestration, not a plain kwarg `compare_snapshots` already accepts.
+
+**Updated (2026-07-30): `SuppressionList.audit()`/`SuppressionAudit`'s
+"still-orphaned piece of related prior art" gap (immediately above) is
+closed for `compare` -- wired in as `compare --audit-suppressions`.**
+Requires `--suppress` (a `click.UsageError` otherwise, in
+`cli_compare_helpers.run_compare` right after suppression loading, mirroring
+every other "reject without its prerequisite flag" guard in this file).
+When set, `suppression.audit(list(result.changes) + list(
+result.suppressed_changes))` runs after `_finalize_compare_result` (the
+*pre*-suppression change set, not just `result.changes` -- auditing only
+the post-suppression survivors would read every suppression rule that
+actually did its job as "stale," since the changes it matched are exactly
+the ones no longer in `changes`) and is attached as `result.
+suppression_audit`. A new fold function,
+`cli_compare_fold._fold_suppression_audit_into_text` (mirroring
+`_fold_scoped_compat_into_text`'s own JSON-vs-text branch structure), folds
+it into the rendered report: a `suppression_audit` JSON key (`total_rules`,
+`stale_rules`, `high_risk_matches`, `expired_rules`, `near_expiry_rules`,
+each rule identified by its `label`/`reason`, falling back to
+`rule#<index>` only when a rule has neither), or a `## Suppression Audit`
+markdown/text/review section built from `SuppressionAudit.summary()` plus
+an explicit high-risk-match listing. Threaded to both the primary and
+secondary (`--secondary-format`) render/fold call sites from the start,
+having learned from `--contract-evaluation`'s own multi-round "forgot the
+secondary call site" findings earlier in this same PR. Rejected on
+directory/package (release) comparisons, same reasoning and message shape
+as `--contract-evaluation`'s identical restriction (the per-library fan-out
+has no single result to attach one audit to). `--audit-suppressions` added
+to `cli_options.COMPARE_FLAG_BUDGET_RAISES` (a genuine per-run analysis
+input, not a stable project setting -- like `--contract-evaluation`
+itself). New tests: `tests/test_cli_compare_audit_suppressions.py` (usage
+guard, directory/package rejection, JSON stale/high-risk-match rendering,
+markdown rendering, default-off, `--help-all` mention).
+
+**Updated (2026-07-30): two Codex/CodeRabbit review findings on the same
+`--audit-suppressions` slice, both real.** (1) `_suppression_rule_label`'s
+fallback for a rule with neither `label` nor `reason` used the rule's
+position *within the filtered bucket* (stale/high-risk/expired/near-expiry),
+not its real position in the suppression file -- e.g. the second rule in
+the file being the sole stale one rendered as `rule#0`, and two different
+rules could each render as "rule#0" across two different buckets.
+`SuppressionAudit` has no field carrying a rule's original index (`match_
+counts` does, but its own list-typed buckets don't), and threading one
+through would touch `suppression.py`'s public dataclass shape for a
+display-only concern. Fixed instead by falling back through each of the
+rule's own matching selectors (`symbol`/`symbol_pattern`/`type_pattern`/
+`member_name`/`source_location`/`namespace`/`entity_namespace`/
+`cause_namespace`, rendered as `field=value`) before ever reaching the
+`rule#<index>` fallback, which now only fires for a rule with none of
+label/reason/any selector set at all (a real rule, per `Suppression`'s own
+validation, always has at least one selector, so this last-resort path is
+effectively unreachable). New test:
+`test_label_falls_back_to_selector_not_bucket_index` (a second, unlabeled
+rule that's the sole stale one, asserting it renders via its `symbol=`
+selector, not a misleading `rule#0`). (2) The audit was computed *before*
+`_apply_used_by_scoping`/`_apply_required_symbol_scoping` ran, so a rule
+matching only a scoping-synthesized finding (e.g.
+`CONSUMER_REQUIRED_SYMBOL_REMOVED`, never present in `result.changes`) was
+misreported as stale, and its potential high-risk match was invisible.
+Fixed by moving the audit computation to after both scoping calls and
+including `result.scoped_only_changes` in the audited change set. **Not a
+complete fix**, documented in the code itself: `scope_diff_to_app`/
+`scope_diff_to_required_symbols` (`appcompat.py`) apply suppression to
+their own scoping candidates *internally*, before this code ever sees
+them -- a rule matching only a candidate suppression already dropped
+(so it never reaches `scoped_only_changes` at all) is still invisible to
+the audit. Closing that residual gap needs those functions to expose their
+own pre-suppression candidate list back to the caller, a separate, larger
+change to `appcompat.py` (a module this slice otherwise doesn't touch) that
+this fix deliberately does not attempt -- same "real, separately-scoped
+follow-up" reasoning as every other `appcompat.py`-adjacent gap already
+documented in this file. New test:
+`test_rule_matching_scoped_only_change_is_not_reported_stale`
+(`tests/test_cli_compare_audit_suppressions.py`, mirroring
+`TestUsedByScopingStampsExplicitEvidence`'s existing `scope_diff_to_app`
+monkeypatch pattern). Also fixed the MD018 markdownlint warning this same
+review round flagged: an unescaped `#235` (issue reference) at the start of
+a line, misparsed as an invalid ATX heading -- reworded to "issue 235".
+
+**Updated (2026-07-30): two more real findings on the same
+`--audit-suppressions` slice (Codex review, fresh evidence).** (1) The new
+top-level `suppression_audit` JSON key was additive but never bumped
+`REPORT_SCHEMA_VERSION` or declared itself in the packaged
+`compare_report.schema.json` -- `jsonschema.validate` alone wouldn't have
+caught this (the schema's `additionalProperties: true` accepts an
+undeclared key silently), so a version-aware consumer had no way to detect
+this report shape exists. Fixed by bumping `REPORT_SCHEMA_VERSION` to
+`"2.24"` (`abicheck/schemas/__init__.py`, with the same per-version
+docstring convention every prior bump uses), adding the `suppression_audit`
+object schema to `compare_report.schema.json`, and regenerating the
+published docs mirror (`scripts/publish_schemas.py`). New test:
+`test_suppression_audit_validates_against_packaged_schema` -- deliberately
+asserts `"suppression_audit" in schema["properties"]` on top of the plain
+`jsonschema.validate` call, since the latter alone can't distinguish a
+correctly-declared key from an accepted-but-undeclared one. (2)
+`compare --audit-suppressions --dry-run` (no `--suppress`) reported "ok"
+even though the identical non-dry-run invocation is rejected: `emit_dry_run`
+raises `SystemExit` before `run_compare` ever reaches the post-suppression-
+loading guard this fix added earlier. Fixed by moving the validation to
+right after the directory/package rejection block -- the same place, and
+same "validated ahead of the --dry-run emit" reasoning, `_reject_set_input_
+flags` already uses for the identical class of gap. The now-redundant later
+guard (unreachable once the earlier one always fires first) was removed,
+keeping only the `assert suppression is not None` mypy-narrowing hint at
+the actual `.audit()` call site. New test:
+`test_rejected_without_suppress_even_with_dry_run`.
+
+**Updated (2026-07-30): one more real finding on `_suppression_rule_label`,
+and one restatement of an already-documented, deliberately-deferred gap
+(Codex review, fresh evidence).** (1) The selector fallback (added by the
+immediately-preceding round's fix) returned only the *first* populated
+selector field it found -- but `Suppression`'s selectors combine
+conjunctively (e.g. `symbol` + `change_kind` together narrow one rule), so
+two distinct unlabeled rules sharing their first selector (the same
+`symbol`) but differing on a second (`change_kind`) rendered as the
+identical, ambiguous label, defeating the whole point of the earlier fix.
+Fixed by rendering *every* populated selector (comma-joined), not just the
+first, and adding `change_kind` to the checked field list (present in
+`Suppression` but missing from the original fallback's field tuple). New
+test: `test_label_includes_every_conjunctive_selector_not_just_the_first`
+(two rules sharing `symbol` but differing on `change_kind`, asserting
+distinct labels). (2) A second finding restated the residual
+`scope_diff_to_app`/`scope_diff_to_required_symbols`-internal-suppression
+gap the immediately-preceding round's own fix and plan-doc update already
+named explicitly as known and deliberately deferred (a rule that only
+matches a scoping candidate suppression drops *before* `scoped_only_changes`
+is ever populated is still invisible to the audit) -- not a new finding,
+so no additional code change; replied pointing at the existing
+documentation rather than re-fixing the same acknowledged gap twice.
+
+**Updated (2026-07-30): two more real findings, both on the same
+`--audit-suppressions` help text/rendering (Codex review, fresh
+evidence).** (1) The flag's help text repeated the exact `--format text`
+mistake `--contract-evaluation`'s own help text made and already had fixed
+earlier this pass: `compare`'s `--format` choice is
+`json`/`markdown`/`sarif`/`html`/`junit`/`review` -- there is no `text`
+format, so advertising an audit output under it was simply wrong. Fixed by
+dropping `text` from the documented formats (`markdown/review`, matching
+the fold-in's real behavior). (2) `_fold_suppression_audit_into_text`'s
+markdown/text/review branch rendered `audit.summary()` (which only gives
+*counts* for expired/near-expiry rules, e.g. "1 expired rule(s)") plus
+per-rule detail lines for high-risk matches only -- unlike the JSON branch,
+which already names every rule in every bucket, the default report gave no
+way to tell *which* expired or near-expiry rule needs action without
+switching to `--format json`, contrary to the flag's own promise. Fixed by
+adding the identical per-rule detail-line treatment for `expired_rules`/
+`near_expiry_rules`. New test:
+`test_expired_rule_labeled_not_just_counted` (an expired rule with a real
+`reason`, asserting its label appears under an "Expired rules:" heading in
+the markdown report, not just a bare count).
+
+**Updated (2026-07-30): two more real findings, closing out this pass on
+`--audit-suppressions`/`--contract-evaluation` (Codex review, fresh
+evidence).** (1) `--report-mode leaf` routes a root `TYPE_*` finding (e.g.
+`type_size_changed`) through `reporter_markdown._format_leaf_type_change`
+-- a separate code path from `_format_change_md`, which full and root-cause
+mode both already use for every finding, type or not. That separate path
+never read the already-stamped contract fields, so a leaf-mode type
+finding's own decision was silently dropped -- the fourth independent
+markdown rendering site this pass has found and fixed the identical gap
+in (after `_format_change_md`, the scoped-gate fold-in, and the
+suppression-note line). Fixed with the identical `Contract: <relevance>
+(<reason_code>), assurance: <level>` tag, gated on `c.contract_relevance
+is not None` the same "no-op unless already stamped" way every other site
+uses. New test: `test_contract_evaluation_renders_in_leaf_type_findings`
+(a public struct's own size change, `--report-mode leaf`). (2)
+`_suppression_rule_label` disambiguated *unlabeled* rules by rendering
+every populated selector, but a rule *with* a `label`/`reason` returned it
+bare, with no disambiguation at all -- `label`/`reason` is documented as a
+free-form grouping tag with no uniqueness guarantee (`Suppression`'s own
+docstring), so two distinct rules sharing one reason (a common real
+pattern -- rules grouped under the same waiver ticket, say) still rendered
+as the identical, ambiguous identifier this whole line of fixes exists to
+prevent. Fixed by always appending the selector tuple in parentheses
+alongside label/reason when both exist (`"reason (symbol=foo)"`), not only
+as a fallback for the label-less case. Updated the existing high-risk/
+stale/expired-rule tests' exact-string assertions to the new format, and
+added `test_shared_reason_still_disambiguated_by_selectors` (two rules
+sharing one `reason`, differing only by `symbol`, asserting distinct
+rendered labels).
+
+**Updated (2026-07-30): `--audit-suppressions`'s "high risk" classification
+now respects an active `--policy-file` (Codex review, fresh evidence).**
+`SuppressionList.audit()` classified a matched change as high-risk solely
+via the static, imported `BREAKING_KINDS` set, ignoring any
+`--policy-file overrides:` in effect for the same run. A policy that
+promotes a normally-`API_BREAK` kind (e.g. `constant_removed`) to
+`BREAKING` meant a rule suppressing that finding actually prevented a
+BREAKING verdict, but the audit still reported it as not-high-risk;
+conversely a policy that demotes a normally-`BREAKING` kind away from it
+(as this fix's regression test does with `func_removed`) still had the
+audit calling that suppression high-risk even though the run's own
+verdict wouldn't have been BREAKING either way. Fixed by adding an
+optional `breaking_kinds` parameter to `audit()` (default: the existing
+`BREAKING_KINDS`, so every other caller is unaffected), and passing
+`result._effective_kind_sets()[0]` -- the same override-applied breaking
+set `DiffResult.breaking`/`_effective_verdict_for_change` already use --
+from `cli_compare_helpers.run_compare`'s `--audit-suppressions` call site.
+New test: `test_high_risk_respects_policy_file_demotion` (a `--policy-file`
+demoting `func_removed` to `risk`, asserting the suppressed removal is no
+longer reported in `high_risk_matches`).
+
+**Updated (2026-07-30): two more real findings on `--contract-evaluation`
+(Codex review, fresh evidence), closing what looks like the last remaining
+gap in per-finding contract rendering.** (1) `--show-filtered`'s stderr
+audit ledgers (`cli_audit.echo_filtered_surface`/`echo_reconciled`) print
+every out-of-surface/reconciled finding's kind, symbol, location, and
+exclusion reason, but never read the `contract_relevance`/
+`contract_reason_code`/`contract_assurance` fields the same findings are
+already stamped with by the time `_finalize_compare_result` runs (the
+shadow evaluator stamps `out_of_surface_changes`/`reconciled_changes`
+inside `compare()`, which always runs before `_finalize_compare_result`).
+Fixed by threading a `contract_evaluation: bool = False` parameter through
+`_finalize_compare_result` → both `cli_audit` printers, and a shared
+`_contract_tag()` helper in `cli_audit.py` appending a
+`[contract: <relevance> (<reason_code>), assurance: <level>]` suffix
+per line, gated on the finding actually being stamped -- a no-op unless
+both `--contract-evaluation` and `--show-filtered` are given together. New
+tests in `tests/test_cli_compare_contract_evaluation.py`
+(`TestShowFilteredAuditLedger`): one asserting the tag renders for a
+demoted `InternalCache` finding, one asserting it's omitted by default.
+(2) CodeRabbit separately flagged that the `Contract: <relevance>
+(<reason_code>), assurance: <level>` tag-building pattern was duplicated
+across four sites in `reporter_markdown.py`
+(`_format_leaf_type_change`, `_to_markdown_root_cause`'s missing-label
+branch, `_append_suppression_note`, `_format_change_md`) -- a nitpick, not
+a correctness bug, but a real duplication-drift risk (a future field
+addition to the contract tuple would need editing four near-identical
+blocks in sync). Extracted a shared `_contract_decision_text(relevance,
+reason_code, assurance)` core helper covering the three sites that render
+an *already-stamped `Change`* (`_format_leaf_type_change`,
+`_append_suppression_note`, `_format_change_md`) -- deliberately returning
+just the `<relevance> (<reason_code>), assurance: <level>` core text with
+no `Contract:`/`[contract: ...]` wrapper, since the three sites render in
+visibly different shapes (a leading `"Contract: "`, a bracketed
+`"[contract: ...]"`) and each keeps its own exact prefix/suffix/casing
+around the shared core. Left the fourth, dict-based site
+(`_to_markdown_root_cause`'s missing-label branch, which builds a
+`label_decision` dict via `stamp_explicit_scope_contract_evaluation`
+rather than reading an existing `Change`'s attributes) and `cli_audit.py`'s
+own `_contract_tag` unmerged -- genuinely different shapes (dict values
+vs. enum attributes; a different module), not the same duplicate this
+nitpick was about.
+
+**Updated (2026-07-30): two more real findings on `_suppression_rule_label`
+and the stale-rule audit ledger (Codex review, fresh evidence).** (1) The
+selector tuple `_suppression_rule_label` renders omitted `reachability`,
+`allow_public_break`, and `allow_unknown_reachability` -- ADR-044 D2 gates
+that affect which findings a rule matches exactly like `symbol`/
+`change_kind`/etc. Two rules sharing every listed selector but differing
+only by `reachability` (e.g. `public-only` vs. `unreachable-only`) match
+disjoint findings yet rendered identically. Fixed by adding all three to
+the field list (the two booleans use the same "if truthy" convention as
+every other field, since both default `False`). New test:
+`test_label_includes_reachability_gates`. (2) `_fold_suppression_audit_into_text`'s
+markdown/text/review branch included `audit.summary()` wholesale, and
+`SuppressionAudit.summary()`'s own stale-rule section printed up to 5
+per-rule detail lines naming each rule by only its *first* populated
+selector -- the identical ambiguity `_suppression_rule_label` was built to
+fix, just reintroduced by a different code path. Fixed by trimming
+`summary()`'s stale-rule section down to the count only (matching how it
+already reports expired/near-expiry as counts only), and rendering an
+explicit "Stale rules (matched nothing):" list in the fold-in using
+`_suppression_rule_label`, the same as the high-risk/expired/near-expiry
+buckets already do. New tests:
+`test_stale_rules_rendered_with_disambiguated_labels`
+(`tests/test_cli_compare_audit_suppressions.py`); existing
+`test_audit_summary_output` (`tests/test_review_fixes.py`) still passes
+since it only checks for the word "stale"/"matched nothing", not the
+removed per-rule detail.
+
+**Updated (2026-07-30): one more real finding on `_suppression_rule_label`
+(Codex review, fresh evidence) -- `expires` was still missing from the
+identifier.** Two otherwise-identical rules (same symbol, same label)
+differing only by their `expires` date rendered as the identical label in
+`expired_rules`/`near_expiry_rules` -- exactly the two buckets where expiry
+is the one thing distinguishing them, so a reader couldn't tell which
+deadline belonged to which rule. Unlike the earlier `reachability` fix,
+`expires` is deliberately *not* a matching selector (it doesn't affect
+which findings a rule matches, only whether the rule itself is still
+active) -- appended separately after the selector loop, as
+`expires=<ISO date>`, whenever set. Updated
+`test_expired_rule_labeled_not_just_counted`'s exact-label assertion to
+include the now-appended `expires=2000-01-01`, and added
+`test_label_includes_expires_date` (two rules sharing a label, differing
+only by `expires`, asserting distinct `near_expiry_rules` labels each
+containing their own date).
 
 ### Phase 6 — opt-in public mode and corpus validation
 

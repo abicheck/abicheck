@@ -28,10 +28,27 @@ from typing import TYPE_CHECKING
 import click
 
 if TYPE_CHECKING:
-    from .checker_types import DiffResult
+    from .checker_types import Change, DiffResult
 
 
-def echo_filtered_surface(result: DiffResult) -> None:
+def _contract_tag(c: Change, contract_evaluation: bool) -> str:
+    """A ``[contract: ...]`` suffix for an audit-ledger line, matching the
+    tag rendered elsewhere (``reporter_markdown``/``cli_compare_fold``) --
+    a no-op unless ``--contract-evaluation`` was requested and this finding
+    was already stamped (ADR-049 Phase 3; Codex review, fresh evidence: this
+    stderr audit ledger was the one remaining per-finding contract-decision
+    rendering site left unstamped after the JSON/Markdown fixes)."""
+    if not contract_evaluation or c.contract_relevance is None:
+        return ""
+    tag = f" [contract: {c.contract_relevance.value}"
+    if c.contract_reason_code:
+        tag += f" ({c.contract_reason_code})"
+    if c.contract_assurance is not None:
+        tag += f", assurance: {c.contract_assurance.value}"
+    return tag + "]"
+
+
+def echo_filtered_surface(result: DiffResult, *, contract_evaluation: bool = False) -> None:
     """Print the public-surface audit ledger (ADR-024 §D5 traceability)."""
     n = result.out_of_surface_count
     click.echo(
@@ -44,10 +61,11 @@ def echo_filtered_surface(result: DiffResult) -> None:
         reason = (
             f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
         )
-        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}", err=True)
+        tag = _contract_tag(c, contract_evaluation)
+        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}{tag}", err=True)
 
 
-def echo_reconciled(result: DiffResult) -> None:
+def echo_reconciled(result: DiffResult, *, contract_evaluation: bool = False) -> None:
     """Print the build-context reconciliation ledger (ADR-039 --show-filtered).
 
     Findings cleared as context-free header-parse artifacts are recorded here so
@@ -64,7 +82,8 @@ def echo_reconciled(result: DiffResult) -> None:
         reason = (
             f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
         )
-        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}", err=True)
+        tag = _contract_tag(c, contract_evaluation)
+        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}{tag}", err=True)
 
 
 def echo_pattern_modulations(result: DiffResult) -> None:

@@ -275,7 +275,15 @@ from typing import Any
 #:       shadow: absent for every existing caller that doesn't pass
 #:       ``contract_evaluation=True`` (the default), and never affects
 #:       ``verdict``, ``severity``, or any exit code.
-REPORT_SCHEMA_VERSION = "2.23"
+#:   2.24: added the optional top-level ``suppression_audit`` object, present
+#:       only when the caller opts into ``compare --audit-suppressions``
+#:       (``--suppress`` also required). ``total_rules`` (int),
+#:       ``stale_rules``/``expired_rules``/``near_expiry_rules`` (arrays of
+#:       rule-identifier strings), and ``high_risk_matches`` (array of
+#:       ``{"rule": str, "kind": str, "symbol": str | None}``). Purely
+#:       additive: absent for every existing caller, and never affects
+#:       ``verdict``, ``severity``, or any exit code.
+REPORT_SCHEMA_VERSION = "2.24"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

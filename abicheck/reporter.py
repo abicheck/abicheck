@@ -249,18 +249,26 @@ def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
     """
     if not result.reconciled_changes:
         return
+    entries: list[dict[str, object]] = []
+    for c in result.reconciled_changes:
+        entry: dict[str, object] = {
+            "kind": c.kind.value,
+            "symbol": c.symbol,
+            "description": c.description,
+            "source_location": c.source_location,
+            "reason": getattr(c, "surface_exclusion_reason", None),
+        }
+        # ADR-049 Phase 3 (Codex review, fresh evidence): reconciliation runs
+        # before checker._apply_contract_evaluation_shadow (a reconciled
+        # finding never reaches `kept`), so without this call the ledger
+        # entry silently lost the contract decision the finding would
+        # otherwise carry -- a no-op when contract_evaluation was never
+        # requested, mirroring this helper's other callers.
+        _add_contract_evaluation_fields(entry, c)
+        entries.append(entry)
     d["build_context_reconciled"] = {
         "count": result.reconciled_count,
-        "changes": [
-            {
-                "kind": c.kind.value,
-                "symbol": c.symbol,
-                "description": c.description,
-                "source_location": c.source_location,
-                "reason": getattr(c, "surface_exclusion_reason", None),
-            }
-            for c in result.reconciled_changes
-        ],
+        "changes": entries,
     }
 
 
@@ -671,15 +679,25 @@ def _scope_dict(result: DiffResult) -> dict[str, object] | None:
         "manual_review_required": not result.scope_resolved,
         "public_additions": summary.compatible_additions,
         "filtered_internal_count": result.out_of_surface_count,
-        "filtered_internal_changes": [
-            {
-                "kind": c.kind.value,
-                "symbol": c.symbol,
-                "description": c.description,
-            }
-            for c in result.out_of_surface_changes
-        ],
+        "filtered_internal_changes": [_filtered_internal_entry(c) for c in result.out_of_surface_changes],
     }
+
+
+def _filtered_internal_entry(c: Change) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "kind": c.kind.value,
+        "symbol": c.symbol,
+        "description": c.description,
+    }
+    # ADR-049 Phase 3 (Codex review, fresh evidence): result.out_of_surface_changes
+    # is the same list _apply_contract_evaluation_shadow already stamps
+    # (folded into all_changes alongside `kept`) -- this second, independent
+    # serialization of the identical Change objects (scope.filtered_internal_changes,
+    # distinct from surface_scope.out_of_surface_changes above) never read the
+    # fields, so a --contract-evaluation consumer of this established ledger
+    # missed the decision even though the sibling ledger already carried it.
+    _add_contract_evaluation_fields(entry, c)
+    return entry
 
 
 def _add_check_identity(d: dict[str, object], result: DiffResult) -> None:
@@ -814,6 +832,12 @@ def _suppressed_change_entry(
     entry["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         entry["impact_assessment"] = assessment.to_dict()
+    # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
+    # display/gate decision, not a reason to erase the contract-relevance
+    # decision checker._apply_contract_evaluation_shadow already stamped on
+    # this Change -- a no-op when contract_evaluation was never requested,
+    # mirroring this helper's other callers.
+    _add_contract_evaluation_fields(entry, c)
     return entry
 
 

@@ -54,6 +54,10 @@ from .checker_policy import (
     policy_for,
     policy_kind_sets,
 )
+from .contract_evaluation import (
+    stamp_explicit_scope_contract_evaluation,
+    stamp_scoped_result_findings,
+)
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .mcp_shared import (
     _audit_log,
@@ -307,6 +311,7 @@ def _render_output(
     show_impact: bool = False,
     stat: bool = False,
     severity_config: SeverityConfig | None = None,
+    contract_evaluation: bool = False,
 ) -> str:
     """Render comparison result in the requested output format.
 
@@ -363,6 +368,7 @@ def _render_output(
         report_mode=report_mode,
         show_impact=show_impact,
         severity_config=severity_config,
+        contract_evaluation=contract_evaluation,
     )
 
 
@@ -531,92 +537,13 @@ def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
     return entry
 
 
-#: ADR-049 section 4.3 item 1's strongest public-evidence tier: "explicit
-#: required symbol, exact contract/ABI manifest, package symbols metadata,
-#: or concrete consumer import/relocation/recorded entrypoint." Every entry
-#: in ``used_by``/``required_symbols`` scoping's own relevant/scoped-only/
-#: missing-label collections *is*, by construction, one of those -- a
-#: consumer-import-derived finding (``scope_diff_to_app``) or an explicit
-#: required-symbol/entrypoint finding (``scope_diff_to_required_symbols``)
-#: -- so it is authoritative ``IN_CONTRACT`` evidence on its own, regardless
-#: of what a from-scratch header-surface evaluation would conclude.
-def _stamp_explicit_scope_contract_evaluation(c: Any) -> None:
-    """Stamp *c* (a ``Change`` or a plain dict entry) ``IN_CONTRACT`` using
-    ADR-049's explicit consumer/required-symbol evidence tier.
-
-    ``used_by``/``required_symbols`` scoping
-    (``appcompat.scope_diff_to_app``/``scope_diff_to_required_symbols``) can
-    produce fresh ``Change`` objects (e.g. a synthetic
-    ``consumer_required_symbol_removed`` or a PE ordinal-retarget finding),
-    and its missing-symbol/missing-entrypoint labels are plain dicts built
-    directly in this module -- neither ever passes through
-    ``checker._apply_contract_evaluation_shadow`` (the only place inside
-    ``compare()`` that stamps a shadow decision), so both stayed permanently
-    unstamped even when the caller opted into ``contract_evaluation=True``
-    (Codex review, fresh evidence, two rounds: the ``Change``-shaped gap and
-    the missing-label-dict gap are each their own distinct finding).
-
-    A generic header-surface evaluation (``evaluate_change_contract_relevance``)
-    would be *wrong* here, not merely weaker: these findings are exactly the
-    "explicit required symbol ... or concrete consumer import" evidence
-    ADR-049 section 4.3 ranks as the *strongest* public-contract proof --
-    stronger than, and independent of, header-derived public root
-    membership. A binary-only ``used_by`` snapshot has no resolvable header
-    surface at all, so running these through the header-surface path would
-    misclassify authoritative in-contract evidence as ``UNKNOWN_UNRESOLVED``
-    (Codex review, fresh evidence).
-
-    Accepts either a ``Change`` (attribute-set) or a plain ``dict`` (the
-    missing-label shape) via duck typing. Unconditionally overwrites any
-    existing decision -- including one ``compare()``'s own
-    ``_apply_contract_evaluation_shadow`` already stamped onto a ``Change``
-    that is *also* present in ``result.changes`` (the ordinary case:
-    ``used_by``/``required_symbols`` scoping's own relevance set,
-    ``scoped_relevant_finding_ids``, is not limited to *fresh* findings).
-    That header-surface-derived decision can be a real, weaker
-    misclassification (e.g. ``UNKNOWN_UNRESOLVED`` on a binary-only
-    snapshot with no resolvable header surface at all) that this call's own
-    stronger, authoritative evidence must override, not merely fill in when
-    absent (Codex review, fresh evidence: skip-if-already-stamped left
-    exactly this case -- a relevant finding reused from ``result.changes``
-    rather than freshly synthesized -- permanently under its weaker,
-    already-computed decision).
-
-    EXCEPTION -- non-entity kinds: ``_is_relevant_to_app``/
-    ``scope_diff_to_required_symbols`` deliberately include a handful of
-    *loader/deployment* findings in the relevant set for reasons that have
-    nothing to do with matching a symbol/entrypoint the consumer actually
-    references -- ``SONAME_CHANGED`` when the consumer records the old
-    SONAME in ``DT_NEEDED``, and ``COMPAT_VERSION_CHANGED`` (Mach-O)
-    unconditionally for every consumer. ``contract_evaluation.py`` already
-    classifies both as ``NOT_APPLICABLE`` (its own curated
-    ``_NOT_APPLICABLE_KINDS``, ADR-049 D2's "non-entity" column) since
-    neither is about a specific function/variable/type a consumer's code
-    references. Overriding those to ``IN_CONTRACT`` here would be a false
-    contract decision, not a stronger one -- so a ``Change`` whose kind is
-    in that non-entity set is left alone (whatever
-    ``_apply_contract_evaluation_shadow`` already computed for it, i.e.
-    ``NOT_APPLICABLE``) instead of being overwritten (Codex review, fresh
-    evidence).
-    """
-    from .contract_evaluation import _NOT_APPLICABLE_KIND_SLUGS
-    from .contract_relevance_types import ContractAssurance, ContractRelevance
-
-    is_dict = isinstance(c, dict)
-    if not is_dict:
-        kind = getattr(c, "kind", None)
-        kind_value = getattr(kind, "value", None)
-        if kind_value in _NOT_APPLICABLE_KIND_SLUGS:
-            return
-
-    if is_dict:
-        c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
-        c["contract_reason_code"] = "explicit_consumer_or_required_symbol_evidence"
-        c["contract_assurance"] = ContractAssurance.COMPLETE.value
-    else:
-        c.contract_relevance = ContractRelevance.IN_CONTRACT
-        c.contract_reason_code = "explicit_consumer_or_required_symbol_evidence"
-        c.contract_assurance = ContractAssurance.COMPLETE
+#: ADR-049 section 4.3 item 1's strongest public-evidence tier -- moved to
+#: ``contract_evaluation.stamp_explicit_scope_contract_evaluation`` (Codex
+#: review: originally private to this module, leaving the ``compare`` CLI's
+#: own ``--contract-evaluation`` + ``--used-by``/``--required-symbol``
+#: combination unable to reuse it). Aliased here so every existing call
+#: site below keeps working unchanged.
+_stamp_explicit_scope_contract_evaluation = stamp_explicit_scope_contract_evaluation
 
 
 # ---------------------------------------------------------------------------
@@ -1243,11 +1170,7 @@ def abi_compare(
         # fresh evidence). Must run before the "changes" list comprehension
         # below, which serializes result.changes as-is.
         if contract_evaluation:
-            relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
-            if relevant_ids:
-                for c in result.changes:
-                    if _finding_id(c) in relevant_ids:
-                        _stamp_explicit_scope_contract_evaluation(c)
+            stamp_scoped_result_findings(result, finding_id=_finding_id)
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):
@@ -1282,11 +1205,12 @@ def abi_compare(
             # this array with nothing to explain the failure (Codex review,
             # mirrors the identical fold-in in
             # cli_compare_helpers._fold_scoped_compat_into_text).
+            # scoped_only entries are already stamped by
+            # stamp_scoped_result_findings above when contract_evaluation is
+            # set -- no per-item stamp call needed here anymore.
             existing_ids = {_finding_id(c) for c in result.changes}
             scoped_only = getattr(result, "scoped_only_changes", ()) or ()
             for c in scoped_only:
-                if contract_evaluation:
-                    _stamp_explicit_scope_contract_evaluation(c)
                 if _finding_id(c) not in existing_ids:
                     response["changes"].append(_mcp_change_entry(c, active_policy))
             from .severity import missing_contract_exit_code
@@ -1354,6 +1278,7 @@ def abi_compare(
             show_impact=show_impact,
             stat=stat,
             severity_config=severity_config,
+            contract_evaluation=contract_evaluation,
         )
         # When format is json, embed as nested object (not double-encoded string)
         if scoped_key is not None:
@@ -1367,6 +1292,7 @@ def abi_compare(
             rendered = _fold_scoped_compat_into_text(
                 rendered, output_format, result, severity_config=severity_config,
                 show_only=show_only, report_mode=report_mode,
+                contract_evaluation=contract_evaluation,
             )
         if output_format == "json":
             response["report"] = json.loads(rendered)

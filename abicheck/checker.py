@@ -540,11 +540,51 @@ def _apply_contract_evaluation_shadow(
     scope_to_public_surface: bool,
     force_public_symbols: set[str] | None,
     pp_ctx: PipelineContext,
+    redundant: list[Change] | None = None,
+    suppressed: list[Change] | None = None,
+    reconciled: list[Change] | None = None,
 ) -> None:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
     *kept* finding **and** every finding public-surface scoping already
     demoted to ``pp_ctx.out_of_surface``, in place. Called only when
     ``contract_evaluation=True``.
+
+    *redundant* (Codex review, fresh evidence) is ``DiffResult.
+    redundant_changes`` -- display-dedup findings folded into a causing
+    change by default, restored into the rendered report only when the
+    caller passes ``--show-redundant``/``scope.show_redundant: true``. That
+    restore happens entirely in the CLI layer
+    (``cli_helpers_compare._merge_redundant_changes``), long after this
+    function already ran, so without stamping the bucket here too, a
+    restored redundant finding would render with none of the promised
+    contract fields regardless of ``contract_evaluation=True``. Stamped the
+    same way as every other finding -- a redundant change is an ordinary
+    entity finding once restored, not a different evidence tier.
+
+    *suppressed* (Codex review, fresh evidence) is ``DiffResult.
+    suppressed_changes`` -- a finding a ``--suppress`` rule matched and
+    removed from ``kept``, but which stays visible in the ADR-013 audit
+    trail (``reporter._suppressed_change_entry``). Suppression happens
+    throughout the pipeline, both before and after this shadow evaluator
+    would otherwise run, so without stamping this bucket too, a suppressed
+    finding's audit entry silently lost its contract decision even though
+    the finding itself is still rendered -- suppression is a display/gate
+    decision, not a reason to erase what contract relevance was already
+    established (or would be established) for the underlying finding.
+
+    *reconciled* (Codex review, fresh evidence) is ``DiffResult.
+    reconciled_changes`` -- a finding ``--reconcile-build-context`` cleared
+    from ``kept`` because the build's active preprocessor defines prove it
+    a context-free header-parse phantom (a conditional field's phantom
+    add/remove the build proves never actually happened), but which stays
+    visible in its own audit ledger (``reporter._add_reconciled``,
+    ``build_context_reconciled.changes``). Reconciliation runs *before*
+    this shadow evaluator (so a reconciled finding never reaches ``kept``
+    in the first place), so without stamping this bucket too, its audit
+    entry would report none of the promised contract fields even though
+    the finding is still reported -- the same "moved to an audit bucket,
+    not entitled to lose its contract decision" reasoning as *redundant*/
+    *suppressed* above.
 
     Purely additive -- never consulted by verdict computation, policy, or
     exit-code logic (see ``Change.contract_relevance``'s own docstring).
@@ -594,7 +634,13 @@ def _apply_contract_evaluation_shadow(
     # a header-scoping run corresponds to contract=public.
     mode = ContractMode.PUBLIC if scope_to_public_surface else ContractMode.ALL
 
-    all_changes = kept + pp_ctx.out_of_surface
+    all_changes = (
+        kept
+        + pp_ctx.out_of_surface
+        + (redundant or [])
+        + (suppressed or [])
+        + (reconciled or [])
+    )
     decisions = evaluate_snapshot_pair_contract_relevance(
         all_changes,
         surf_old,
@@ -1026,7 +1072,9 @@ def compare(
     # post-processing-stage subset. Never affects `verdict` or any exit code.
     if contract_evaluation:
         _apply_contract_evaluation_shadow(
-            kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx
+            kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx,
+            redundant=redundant_for_report, suppressed=suppressed,
+            reconciled=reconciled,
         )
 
     return DiffResult(

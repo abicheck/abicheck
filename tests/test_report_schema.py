@@ -241,6 +241,93 @@ class TestReportValidatesAgainstSchema:
             assert "contract_reason_code" not in c
             assert "contract_assurance" not in c
 
+    def test_contract_evaluation_renders_in_markdown_report(self):
+        # Regression (Codex review, PR #658, fresh evidence): --contract-
+        # evaluation's own help text promises every finding is stamped, but
+        # only the JSON report (reporter._add_contract_evaluation_fields)
+        # ever rendered the decision -- an ordinary `compare
+        # --contract-evaluation` run (default markdown format) was
+        # byte-for-byte identical to one without the flag.
+        old, new = _breaking_pair()
+        md_with = reporter.to_markdown(compare(old, new, contract_evaluation=True))
+        md_without = reporter.to_markdown(compare(old, new))
+        assert md_with != md_without
+        assert "Contract:" in md_with
+        assert "Contract:" not in md_without
+
+    def test_contract_evaluation_renders_in_leaf_type_findings(self):
+        # Regression (Codex review, PR #658, fresh evidence): --report-mode
+        # leaf routes root TYPE_* changes through
+        # reporter_markdown._format_leaf_type_change, a separate code path
+        # from _format_change_md -- the already-stamped contract decision
+        # was silently dropped for this one finding shape/report-mode
+        # combination, unlike full and root-cause mode (which both use
+        # _format_change_md for every finding, type or not).
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[RecordType(name="Result", kind="struct", size_bits=64)],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[RecordType(name="Result", kind="struct", size_bits=128)],
+        )
+        result = compare(old, new, contract_evaluation=True)
+        type_changes = [c for c in result.changes if c.symbol == "Result"]
+        assert type_changes, "fixture must produce a Result type-size finding"
+        assert any(c.contract_relevance is not None for c in type_changes)
+
+        md = reporter.to_markdown(result, report_mode="leaf")
+        assert "Result" in md
+        assert "Contract:" in md
+
+    def test_contract_evaluation_stamps_suppressed_changes(self):
+        # Regression (Codex review, PR #658, fresh evidence): a suppressed
+        # finding stays visible in the ADR-013 audit trail
+        # (suppression.suppressed_changes), but _apply_contract_evaluation_shadow
+        # only ever evaluated kept + out_of_surface + redundant -- suppression
+        # silently erased the contract decision even though the finding
+        # itself is still rendered.
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old, new = _breaking_pair()
+        suppression = SuppressionList([Suppression(symbol="_Z5api_bv")])
+        result = compare(
+            old, new, suppression=suppression, contract_evaluation=True
+        )
+        assert result.suppressed_changes, "fixture must produce a suppressed finding"
+        for c in result.suppressed_changes:
+            assert c.contract_relevance is not None
+
+        payload = json.loads(reporter.to_json(result))
+        self._validate(payload)
+        suppressed_entries = payload["suppression"]["suppressed_changes"]
+        assert suppressed_entries
+        for e in suppressed_entries:
+            assert "contract_relevance" in e
+            assert "contract_reason_code" in e
+
+    def test_contract_evaluation_renders_suppressed_changes_in_markdown(self):
+        # Regression (Codex review, PR #658, fresh evidence): the JSON audit
+        # trail fix above stamps suppression.suppressed_changes, but
+        # reporter_markdown._append_suppression_note's own bullet line
+        # (rendered in every markdown report shape) never read the stamped
+        # fields -- the suppression-note line for a stamped finding carried
+        # no [contract: ...] tag even though the JSON sibling did.
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old, new = _breaking_pair()
+        suppression = SuppressionList([Suppression(symbol="_Z5api_bv")])
+        result = compare(old, new, suppression=suppression, contract_evaluation=True)
+        assert result.suppressed_changes, "fixture must produce a suppressed finding"
+
+        md = reporter.to_markdown(result)
+        assert "suppressed via suppression file" in md
+        assert "[contract:" in md
+
     def test_contract_evaluation_all_mode_report_validates(self):
         # scope_to_public_surface=False means FilterNonPublicSurface never
         # runs its header-scoping path, so PipelineContext.surf_old/surf_new
@@ -313,6 +400,120 @@ class TestReportValidatesAgainstSchema:
             assert e["contract_relevance"] == "PROVEN_OUT_OF_CONTRACT"
             assert e["contract_reason_code"] == "terminal_authoritative_exclusion"
             assert e["contract_assurance"] == "complete"
+
+        # Regression (Codex review, fresh evidence): the identical
+        # out_of_surface_changes Change objects are also serialized a
+        # second, independent time as scope.filtered_internal_changes
+        # (reporter._scope_dict) -- that ledger's own entries never read
+        # the already-stamped fields, so a consumer of it (rather than
+        # surface_scope.out_of_surface_changes) missed the decision.
+        scope_entries = payload["scope"]["filtered_internal_changes"]
+        scope_stamped = [e for e in scope_entries if e["symbol"] == "InternalCache"]
+        assert scope_stamped
+        for e in scope_stamped:
+            assert e["contract_relevance"] == "PROVEN_OUT_OF_CONTRACT"
+            assert e["contract_reason_code"] == "terminal_authoritative_exclusion"
+            assert e["contract_assurance"] == "complete"
+
+    def test_contract_evaluation_stamps_redundant_bucket(self):
+        # Regression (Codex review, PR #658, fresh evidence): a redundant
+        # (display-dedup) finding is only restored into the rendered report
+        # when the caller passes --show-redundant/scope.show_redundant --
+        # entirely in the CLI layer, via cli_helpers_compare.
+        # _merge_redundant_changes, long after _apply_contract_evaluation_shadow
+        # already ran over `kept` + out_of_surface only. Without stamping the
+        # redundant bucket too, a restored finding rendered with none of the
+        # promised contract fields regardless of contract_evaluation=True.
+        from abicheck.checker import _apply_contract_evaluation_shadow
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.post_processing import PipelineContext
+
+        old = AbiSnapshot(library="lib", version="1")
+        new = AbiSnapshot(library="lib", version="2")
+        kept = [
+            Change(
+                ChangeKind.TYPE_SIZE_CHANGED, "Cfg",
+                "size changed from 64 to 72 bytes",
+            )
+        ]
+        redundant = [
+            Change(
+                ChangeKind.FUNC_PARAMS_CHANGED, "config_init",
+                "parameter type changed in config_init(Cfg*)",
+                old_value="Cfg (64 bytes)", new_value="Cfg (72 bytes)",
+            )
+        ]
+        assert redundant[0].contract_relevance is None
+        _apply_contract_evaluation_shadow(
+            kept, old, new,
+            scope_to_public_surface=True, force_public_symbols=None,
+            pp_ctx=PipelineContext(old=old, new=new),
+            redundant=redundant,
+        )
+        assert redundant[0].contract_relevance is not None
+        assert redundant[0].contract_reason_code is not None
+
+    def test_contract_evaluation_stamps_reconciled_bucket(self):
+        # Regression (Codex review, PR #658, fresh evidence): a finding
+        # --reconcile-build-context clears from `kept` (a context-free
+        # header-parse phantom the build's active defines prove never
+        # happened) stays visible in its own audit ledger
+        # (reporter._add_reconciled, build_context_reconciled.changes) --
+        # but reconciliation runs *before* _apply_contract_evaluation_shadow
+        # (checker.compare's own pipeline order), so the cleared finding
+        # never reached `kept` and its ledger entry silently lost the
+        # contract decision it would otherwise carry.
+        from abicheck.checker import _apply_contract_evaluation_shadow
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.post_processing import PipelineContext
+
+        old = AbiSnapshot(library="lib", version="1")
+        new = AbiSnapshot(library="lib", version="2")
+        kept = [
+            Change(ChangeKind.FUNC_REMOVED, "api", "removed"),
+        ]
+        reconciled = [
+            Change(
+                ChangeKind.TYPE_FIELD_ADDED, "Cfg::flag",
+                "conditional field phantom add cleared by build context",
+            )
+        ]
+        assert reconciled[0].contract_relevance is None
+        _apply_contract_evaluation_shadow(
+            kept, old, new,
+            scope_to_public_surface=True, force_public_symbols=None,
+            pp_ctx=PipelineContext(old=old, new=new),
+            reconciled=reconciled,
+        )
+        assert reconciled[0].contract_relevance is not None
+        assert reconciled[0].contract_reason_code is not None
+
+    def test_contract_evaluation_stamps_reconciled_bucket_end_to_end(self):
+        # Same fix, exercised through a real --reconcile-build-context
+        # false-positive clear (test_diff_reconcile.py's own canonical
+        # fixture) rather than a hand-built Change, and through the real
+        # JSON renderer (reporter._add_reconciled) end to end.
+        from tests.test_diff_reconcile import _fp_pair
+
+        old, new = _fp_pair()
+        result = compare(
+            old, new,
+            scope_to_public_surface=True,
+            reconcile_build_context=True,
+            contract_evaluation=True,
+        )
+        assert result.reconciled_count == 1
+        assert result.reconciled_changes[0].contract_relevance is not None
+
+        payload = json.loads(reporter.to_json(result))
+        self._validate(payload)
+        reconciled_entries = payload["build_context_reconciled"]["changes"]
+        assert reconciled_entries
+        for e in reconciled_entries:
+            assert "contract_relevance" in e
+            assert "contract_reason_code" in e
 
     def test_out_of_surface_findings_omit_contract_fields_by_default(self):
         # Without contract_evaluation=True, out_of_surface_changes entries

@@ -274,6 +274,42 @@
         }
       }
     },
+    "suppression_audit": {
+      "type": "object",
+      "description": "Schema 2.24: present only when the caller opts into `compare --audit-suppressions` (requires --suppress). An audit of the suppression rule file against this run's findings -- stale rules (matched nothing), high-risk matches (matched a BREAKING change), and expired/near-expiry rules. Advisory only; never affects verdict, severity, or any exit code.",
+      "required": ["total_rules", "stale_rules", "high_risk_matches", "expired_rules", "near_expiry_rules"],
+      "additionalProperties": true,
+      "properties": {
+        "total_rules": { "type": "integer", "minimum": 0 },
+        "stale_rules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Identifier (label, reason, or a matching selector like \"symbol=foo\") of each rule that matched zero changes this run."
+        },
+        "high_risk_matches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["rule", "kind", "symbol"],
+            "additionalProperties": true,
+            "properties": {
+              "rule": { "type": "string" },
+              "kind": { "type": "string" },
+              "symbol": { "type": ["string", "null"] }
+            }
+          },
+          "description": "Each suppression rule that matched a BREAKING-kind change this run, with the change it matched."
+        },
+        "expired_rules": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "near_expiry_rules": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "release_recommendation": {
       "type": "object",
       "description": "Recommended next release: a semantic-version bump and a SONAME action derived from the policy-aware verdict and change set. See docs/user-guide/output-formats.md.",

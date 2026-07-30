@@ -55,6 +55,7 @@ from .cli import (
 from .cli_audit import echo_pattern_modulations
 from .cli_compare_fold import (
     _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
+    _fold_suppression_audit_into_text as _fold_suppression_audit_into_text,
 )
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
@@ -72,6 +73,7 @@ from .cli_resolve import (
     _resolve_compare_snapshots,
     classify_compare_operand,
 )
+from .contract_evaluation import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 
 if TYPE_CHECKING:
@@ -196,6 +198,8 @@ def _reject_set_input_flags(
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
     diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
+    audit_suppressions: bool = False,
     include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
@@ -248,6 +252,20 @@ def _reject_set_input_flags(
             "(release) comparisons yet: the per-library fan-out does not "
             "wire the ADR-050 D2 comparability gate's diagnostic escape "
             "hatch (a mismatch there still raises unhandled). Compare the "
+            "specific library individually to use it."
+        )
+    if contract_evaluation:
+        raise click.UsageError(
+            "--contract-evaluation is not supported for directory/package "
+            "(release) comparisons yet: the per-library fan-out does not "
+            "wire ADR-049 Phase 3's shadow contract evaluator. Compare the "
+            "specific library individually to use it."
+        )
+    if audit_suppressions:
+        raise click.UsageError(
+            "--audit-suppressions is not supported for directory/package "
+            "(release) comparisons yet: the per-library fan-out has no "
+            "single suppression-audit result to attach. Compare the "
             "specific library individually to use it."
         )
     if include_labels:
@@ -1141,6 +1159,8 @@ def run_compare(
     required_symbols_file: Path | None = None,
     verify_runtime: bool = False,
     diagnostic_comparison: bool = False,
+    contract_evaluation: bool = False,
+    audit_suppressions: bool = False,
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
@@ -1254,6 +1274,8 @@ def run_compare(
             exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
+            contract_evaluation=contract_evaluation,
+            audit_suppressions=audit_suppressions,
             include_labels=include_labels,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
@@ -1278,6 +1300,16 @@ def run_compare(
                 new_manifest_obj = load_manifest(new_dump_manifest)
         except ManifestValidationError as exc:
             raise click.UsageError(str(exc)) from exc
+
+    if audit_suppressions and suppress is None:
+        # Validated ahead of the --dry-run emit below, same reasoning as the
+        # directory/package rejection above (Codex review, fresh evidence):
+        # a dry run must not report "ok" for `--audit-suppressions` without
+        # `--suppress` when the identical non-dry-run invocation is rejected
+        # by the later (post-suppression-loading) guard in this function.
+        raise click.UsageError(
+            "--audit-suppressions requires --suppress (nothing to audit)."
+        )
 
     if dry_run:
         from .dry_run import emit_dry_run
@@ -1570,6 +1602,10 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
     )
+    # audit_suppressions=True implies suppress is not None (guarded earlier,
+    # before the --dry-run emit above) -- _load_suppression_and_policy only
+    # returns None here when suppress itself was None, so suppression is
+    # guaranteed non-None at this point too.
 
     force_public = _collect_force_public_symbols(
         resolved_cfg.public_symbols, public_symbols_list
@@ -1625,6 +1661,7 @@ def run_compare(
             public_surface_allowlist=post_manifest_allowlist,
             reconcile_build_context=reconcile_build_context,
             diagnostic_comparison=diagnostic_comparison,
+            contract_evaluation=contract_evaluation,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
@@ -1643,6 +1680,7 @@ def run_compare(
         show_redundant=show_redundant, show_filtered=show_filtered,
         annotate=annotate, annotate_additions=annotate_additions,
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        contract_evaluation=contract_evaluation,
     )
 
     scoped_exit_code: int | None = None
@@ -1659,6 +1697,52 @@ def run_compare(
             exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
         )
 
+    if audit_suppressions:
+        # Guarded above: audit_suppressions=True implies suppression is not
+        # None. Audited against the full pre-suppression change set (kept +
+        # suppressed) plus any --used-by/--required-symbol scoped_only_changes
+        # (Codex review, fresh evidence: run *after* scoping, not before, so a
+        # rule matching only a scoping-synthesized finding like
+        # CONSUMER_REQUIRED_SYMBOL_REMOVED isn't misreported as stale). Not a
+        # complete fix: scope_diff_to_app/scope_diff_to_required_symbols apply
+        # suppression internally to their own candidates before this ever
+        # sees them, so a rule matching only a scoping candidate suppression
+        # itself already dropped (never reaching scoped_only_changes at all)
+        # is still invisible here -- closing that needs those functions to
+        # expose their own pre-suppression candidate list, a separate,
+        # larger change to appcompat.py this fix does not attempt.
+        assert suppression is not None
+        # Codex review, fresh evidence: pass the *effective*, policy-override-
+        # applied breaking set (not the static BREAKING_KINDS default) so a
+        # rule's "high risk" classification matches the verdict this run's
+        # own --policy-file would actually produce, e.g. a rule suppressing
+        # a kind the policy promoted to BREAKING is reported as high-risk
+        # even though it isn't in the built-in BREAKING_KINDS.
+        effective_breaking_kinds, _, _, _ = result._effective_kind_sets()
+        result.suppression_audit = suppression.audit(  # type: ignore[attr-defined]
+            list(result.changes)
+            + list(result.suppressed_changes)
+            + list(getattr(result, "scoped_only_changes", ()) or ()),
+            breaking_kinds=effective_breaking_kinds,
+        )
+
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --used-by/
+    # --required-symbol scoping above can add scoped_only_changes (fresh
+    # Change objects scope_diff_to_app/scope_diff_to_required_symbols
+    # synthesize, e.g. PE_ORDINAL_RETARGETED) and mark existing
+    # result.changes entries as relevant to the scoped contract -- neither
+    # ever passes through checker._apply_contract_evaluation_shadow, so
+    # both stayed permanently unstamped even when --contract-evaluation was
+    # given. This must run before _render_output below serializes
+    # result.changes, and mirrors the identical fix already applied to the
+    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal
+    # (CodeRabbit review: hand-copying it here previously let one call site
+    # drift out of sync with the other).
+    if contract_evaluation:
+        from .reporter import _finding_id
+
+        stamp_scoped_result_findings(result, finding_id=_finding_id)
+
     text = _render_output(
         fmt, result, old, new,
         follow_deps=follow_deps,
@@ -1667,11 +1751,16 @@ def run_compare(
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
         show_recommendation=recommend,
         demangle=demangle,
+        contract_evaluation=contract_evaluation,
     )
     text = _fold_scoped_compat_into_text(
         text, fmt, result,
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
         show_only=show_only, report_mode=report_mode,
+        contract_evaluation=contract_evaluation,
+    )
+    text = _fold_suppression_audit_into_text(
+        text, fmt, getattr(result, "suppression_audit", None)
     )
     text = _fold_evidence_depth_into_json(
         text, fmt, old, new,
@@ -1703,10 +1792,15 @@ def run_compare(
             severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
             show_recommendation=recommend,
             demangle=secondary_demangle,
+            contract_evaluation=contract_evaluation,
         )
         secondary_text = _fold_scoped_compat_into_text(
             secondary_text, secondary_fmt, result,
             severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+            contract_evaluation=contract_evaluation,
+        )
+        secondary_text = _fold_suppression_audit_into_text(
+            secondary_text, secondary_fmt, getattr(result, "suppression_audit", None)
         )
         secondary_text = _fold_evidence_depth_into_json(
             secondary_text, secondary_fmt, old, new,

@@ -20,14 +20,17 @@ the --policy-file -> surface.internal_namespaces wiring, and the
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
 import pytest
 
+from abicheck.change_registry_types import Verdict
 from abicheck.compatibility_evaluation_packs import PackKind
 from abicheck.compatibility_evaluation_resolver import PackConflictError
 from abicheck.compatibility_evaluation_wiring import (
     resolve_internal_namespaces,
     resolve_legacy_contract_mode,
+    resolve_policy_pack_overrides,
     resolve_selected_packs,
 )
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
@@ -398,3 +401,134 @@ class TestSelectedPacksExplicitOverrides:
         )
         with pytest.raises(PackConflictError):
             resolve_selected_packs([str(pack_a), str(pack_b)])
+
+
+class TestResolvePolicyPackOverrides:
+    """``resolve_policy_pack_overrides`` -- Phase 1's remaining gap: pack
+    *selection* (``resolve_selected_packs``) resolves which packs apply but
+    never folds their content into ``CompatibilityPolicyConfig.overrides``."""
+
+    def test_no_pack_paths_returns_empty_mapping(self):
+        assert resolve_policy_pack_overrides([]) == {}
+
+    def test_one_policy_pack_folds_its_assignments(self, tmp_path: Path):
+        pack = _write_pack(
+            tmp_path / "p.yml",
+            pack_id="qt_kde_cpp",
+            kind="policy",
+            assignments_yaml="func_removed: break\nvar_removed: risk",
+        )
+        overrides = resolve_policy_pack_overrides([str(pack)])
+        assert overrides == {
+            "func_removed": Verdict.BREAKING,
+            "var_removed": Verdict.COMPATIBLE_WITH_RISK,
+        }
+
+    def test_non_policy_packs_in_the_same_list_are_ignored(self, tmp_path: Path):
+        policy_pack = _write_pack(
+            tmp_path / "policy.yml",
+            pack_id="qt_kde_cpp",
+            kind="policy",
+            assignments_yaml="func_removed: break",
+        )
+        contract_pack = _write_pack(
+            tmp_path / "contract.yml",
+            pack_id="rust_c_ffi",
+            kind="contract",
+            assignments_yaml="contract.mode: exports",
+        )
+        overrides = resolve_policy_pack_overrides(
+            [str(policy_pack), str(contract_pack)]
+        )
+        assert overrides == {"func_removed": Verdict.BREAKING}
+
+    def test_two_packs_agreeing_on_the_same_kind_merge_cleanly(self, tmp_path: Path):
+        pack_a = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="pack_a",
+            kind="policy",
+            assignments_yaml="func_removed: break",
+        )
+        pack_b = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="pack_b",
+            kind="policy",
+            assignments_yaml="func_removed: break\nvar_removed: risk",
+        )
+        overrides = resolve_policy_pack_overrides([str(pack_a), str(pack_b)])
+        assert overrides == {
+            "func_removed": Verdict.BREAKING,
+            "var_removed": Verdict.COMPATIBLE_WITH_RISK,
+        }
+
+    def test_two_packs_disagreeing_on_the_same_kind_raises(self, tmp_path: Path):
+        pack_a = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="pack_a",
+            kind="policy",
+            assignments_yaml="func_removed: break",
+        )
+        pack_b = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="pack_b",
+            kind="policy",
+            assignments_yaml="func_removed: warn",
+        )
+        with pytest.raises(PackConflictError):
+            resolve_policy_pack_overrides([str(pack_a), str(pack_b)])
+
+    def test_explicit_override_resolves_a_disagreement_and_wins(self, tmp_path: Path):
+        pack_a = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="pack_a",
+            kind="policy",
+            assignments_yaml="func_removed: break",
+        )
+        pack_b = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="pack_b",
+            kind="policy",
+            assignments_yaml="func_removed: warn",
+        )
+        overrides = resolve_policy_pack_overrides(
+            [str(pack_a), str(pack_b)],
+            explicit_overrides={"func_removed": Verdict.COMPATIBLE_WITH_RISK},
+        )
+        assert overrides == {"func_removed": Verdict.COMPATIBLE_WITH_RISK}
+
+    def test_explicit_override_wins_even_without_any_pack_disagreement(
+        self, tmp_path: Path
+    ):
+        pack = _write_pack(
+            tmp_path / "p.yml",
+            pack_id="pack_a",
+            kind="policy",
+            assignments_yaml="func_removed: break",
+        )
+        overrides = resolve_policy_pack_overrides(
+            [str(pack)], explicit_overrides={"func_removed": Verdict.COMPATIBLE}
+        )
+        assert overrides == {"func_removed": Verdict.COMPATIBLE}
+
+    def test_pack_order_does_not_affect_the_resolved_value(self, tmp_path: Path):
+        pack_a = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="pack_a",
+            kind="policy",
+            assignments_yaml="func_removed: break",
+        )
+        pack_b = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="pack_b",
+            kind="policy",
+            assignments_yaml="var_removed: risk",
+        )
+        forward = resolve_policy_pack_overrides([str(pack_a), str(pack_b)])
+        backward = resolve_policy_pack_overrides([str(pack_b), str(pack_a)])
+        assert forward == backward
+
+    def test_malformed_manifest_raises_pack_manifest_error(self, tmp_path: Path):
+        bad = tmp_path / "bad.yml"
+        bad.write_text("not: a valid pack manifest\n")
+        with pytest.raises(PackManifestError):
+            resolve_policy_pack_overrides([str(bad)])

@@ -69,6 +69,7 @@ from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli im
 )
 from .cli_options import (
     adr027_compare_options,
+    app_usage_scope_options,
     apply_compare_profile,
     build_source_dump_options,
     compile_context_options,
@@ -1014,6 +1015,7 @@ def _render_output(
     severity_config: SeverityConfig | None = None,
     show_recommendation: bool = False,
     demangle: bool = False,
+    contract_evaluation: bool = False,
 ) -> str:
     """Render comparison result in the requested output format."""
     from .service import render_output
@@ -1024,6 +1026,7 @@ def _render_output(
         stat=stat, severity_config=severity_config,
         show_recommendation=show_recommendation,
         demangle=demangle,
+        contract_evaluation=contract_evaluation,
     )
 
 
@@ -1229,6 +1232,7 @@ def _finalize_compare_result(
     show_redundant: bool, show_filtered: bool,
     annotate: bool, annotate_additions: bool,
     severity_config: SeverityConfig | None = None,
+    contract_evaluation: bool = False,
 ) -> None:
     """Attach metadata and emit redundancy/filter/suppression/annotation output."""
     result.old_metadata = _collect_metadata(old_input)
@@ -1237,9 +1241,9 @@ def _finalize_compare_result(
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     if show_filtered and result.out_of_surface_changes:
-        echo_filtered_surface(result)
+        echo_filtered_surface(result, contract_evaluation=contract_evaluation)
     if show_filtered and result.reconciled_changes:
-        echo_reconciled(result)
+        echo_reconciled(result, contract_evaluation=contract_evaluation)
 
     # The scoping fallback warning goes to stderr so it never corrupts the
     # machine-readable payload on stdout (which carries scope_resolved /
@@ -1663,35 +1667,7 @@ def _embed_inline_source_side(
                    "per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides "
                    "automatic PDB discovery (ADR-040).")
 # ── Scoped comparison (ADR-043): app-usage and required-symbol contracts ─────
-@click.option("--used-by", "used_by_apps", multiple=True,
-              type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              help="Application binary whose actual imports/required symbol versions "
-                   "scope the comparison (repeatable; folds `appcompat`). The full "
-                   "library comparison still runs once; the worst app-scoped result "
-                   "becomes the primary verdict/exit code, with the full verdict and "
-                   "unrelated changes kept as informational context. OLD/NEW may be "
-                   "real library binaries or JSON snapshots carrying binary evidence "
-                   "(a `dump` of a real library, not headers-only). Mutually "
-                   "exclusive with --required-symbol/--required-symbols.")
-@click.option("--verify-runtime", "verify_runtime", is_flag=True, default=False,
-              help="With --used-by: actually run each consumer binary once against "
-                   "the OLD library and once against the NEW one (LD_BIND_NOW=1), "
-                   "recording a consumer_runtime_load_failed RISK finding when the "
-                   "dynamic linker itself reports an undefined symbol against the "
-                   "new library after loading cleanly against the old one (ADR-044 "
-                   "P2 item 2). A dynamic corroborating signal alongside the static "
-                   "scanner, never a replacement for it. Requires OLD/NEW to be real "
-                   "library binaries (not JSON snapshots) and is Linux-only; a "
-                   "no-op elsewhere. Ignored without --used-by.")
-@click.option("--required-symbol", "required_symbols_opt", multiple=True,
-              help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
-                   "and requires (repeatable; folds `plugin-check`). Scopes the "
-                   "comparison to this explicit entrypoint contract instead of the "
-                   "full diff. Mutually exclusive with --used-by.")
-@click.option("--required-symbols", "required_symbols_file",
-              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
-              help="File of required symbols, one per line (blank lines and '#' "
-                   "comments ignored). Combined with any --required-symbol values.")
+@app_usage_scope_options
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
 # ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────
@@ -1825,6 +1801,27 @@ def _embed_inline_source_side(
                    "reader knows not to trust it the way an ordinary comparable "
                    "diff is trusted. Not needed, and does nothing, on a "
                    "comparable pair.")
+@click.option("--contract-evaluation", "contract_evaluation", is_flag=True, default=False,
+              help="ADR-049 Phase 3's shadow contract evaluator (non-authoritative, "
+                   "public|all modes only). Stamps each finding in the report with a "
+                   "contract_relevance (IN_CONTRACT/PROVEN_OUT_OF_CONTRACT/"
+                   "UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/NOT_APPLICABLE), "
+                   "contract_reason_code, and -- when resolved -- contract_assurance "
+                   "field, reflecting whether the finding falls inside the library's "
+                   "declared public contract. Rendered per finding in --format json/"
+                   "markdown; --format review's compact digest does not (its "
+                   "top-impacted-symbols list predates this field), except for the "
+                   "--used-by/--required-symbol scoped-gate appendix, which renders it "
+                   "under json/markdown/review alike. Not yet rendered in sarif/junit/"
+                   "html. Advisory only: it never changes verdict, exit_code, or which "
+                   "findings appear. Default off; the report is unchanged unless this "
+                   "is set.")
+@click.option("--audit-suppressions", "audit_suppressions", is_flag=True, default=False,
+              help="Audit the --suppress rule file against this run's findings: which "
+                   "rules matched nothing (stale), matched a BREAKING change (high "
+                   "risk), are expired, or expire soon. Requires --suppress. Adds a "
+                   "suppression_audit key in --format json, a '## Suppression Audit' "
+                   "section in markdown/review. Advisory only.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
