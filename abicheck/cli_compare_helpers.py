@@ -55,6 +55,7 @@ from .cli import (
 from .cli_audit import echo_pattern_modulations
 from .cli_compare_fold import (
     _fold_scoped_compat_into_text as _fold_scoped_compat_into_text,
+    _fold_suppression_audit_into_text as _fold_suppression_audit_into_text,
 )
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
@@ -198,6 +199,7 @@ def _reject_set_input_flags(
     required_symbols: tuple[str, ...] = (),
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
+    audit_suppressions: bool = False,
     include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
@@ -257,6 +259,13 @@ def _reject_set_input_flags(
             "--contract-evaluation is not supported for directory/package "
             "(release) comparisons yet: the per-library fan-out does not "
             "wire ADR-049 Phase 3's shadow contract evaluator. Compare the "
+            "specific library individually to use it."
+        )
+    if audit_suppressions:
+        raise click.UsageError(
+            "--audit-suppressions is not supported for directory/package "
+            "(release) comparisons yet: the per-library fan-out has no "
+            "single suppression-audit result to attach. Compare the "
             "specific library individually to use it."
         )
     if include_labels:
@@ -1151,6 +1160,7 @@ def run_compare(
     verify_runtime: bool = False,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
+    audit_suppressions: bool = False,
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
@@ -1265,6 +1275,7 @@ def run_compare(
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
+            audit_suppressions=audit_suppressions,
             include_labels=include_labels,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
@@ -1581,6 +1592,10 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
     )
+    if audit_suppressions and suppression is None:
+        raise click.UsageError(
+            "--audit-suppressions requires --suppress (nothing to audit)."
+        )
 
     force_public = _collect_force_public_symbols(
         resolved_cfg.public_symbols, public_symbols_list
@@ -1657,6 +1672,18 @@ def run_compare(
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
     )
 
+    if audit_suppressions:
+        # Guarded above: audit_suppressions=True implies suppression is not
+        # None. Audited against the full pre-suppression change set (kept +
+        # suppressed), not just result.changes: a rule's match_counts would
+        # otherwise read every rule as "stale" purely because the changes it
+        # actually matched are exactly the ones suppression already removed
+        # from `changes`.
+        assert suppression is not None
+        result.suppression_audit = suppression.audit(  # type: ignore[attr-defined]
+            list(result.changes) + list(result.suppressed_changes)
+        )
+
     scoped_exit_code: int | None = None
     if used_by_apps:
         scoped_exit_code = _apply_used_by_scoping(
@@ -1704,6 +1731,9 @@ def run_compare(
         show_only=show_only, report_mode=report_mode,
         contract_evaluation=contract_evaluation,
     )
+    text = _fold_suppression_audit_into_text(
+        text, fmt, getattr(result, "suppression_audit", None)
+    )
     text = _fold_evidence_depth_into_json(
         text, fmt, old, new,
         old_build_info=old_build_info, new_build_info=new_build_info,
@@ -1740,6 +1770,9 @@ def run_compare(
             secondary_text, secondary_fmt, result,
             severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
             contract_evaluation=contract_evaluation,
+        )
+        secondary_text = _fold_suppression_audit_into_text(
+            secondary_text, secondary_fmt, getattr(result, "suppression_audit", None)
         )
         secondary_text = _fold_evidence_depth_into_json(
             secondary_text, secondary_fmt, old, new,

@@ -1815,6 +1815,12 @@ def _embed_inline_source_side(
                    "html. Advisory only: it never changes verdict, exit_code, or which "
                    "findings appear. Default off; the report is unchanged unless this "
                    "is set.")
+@click.option("--audit-suppressions", "audit_suppressions", is_flag=True, default=False,
+              help="Audit the --suppress rule file against this run's findings: which "
+                   "rules matched nothing (stale), matched a BREAKING change (high "
+                   "risk), are expired, or expire soon. Requires --suppress. Adds a "
+                   "suppression_audit key in --format json, a '## Suppression Audit' "
+                   "section in markdown/text/review. Advisory only.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:

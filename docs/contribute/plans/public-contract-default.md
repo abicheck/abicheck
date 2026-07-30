@@ -1830,14 +1830,7 @@ coverage ledger" specifically (as opposed to the ordinary suppression audit
 trail just closed above) remains undesigned -- there is still no concept in
 the codebase for *which* `ChangeKind`s categorically cannot be suppressed
 regardless of policy, nor a ledger proving a given run's suppressions never
-touched one. `SuppressionList.audit()`/`SuppressionAudit`
-(`suppression.py`) is a second, still-orphaned piece of related prior art
-found during this investigation -- stale-rule/high-risk-match/expiry
-analysis over a whole suppression file, exposed by neither `compare` nor
-`scan` today; wiring it in (e.g. a `--audit-suppressions` flag) is a
-separate, real follow-up, not attempted here since it is additive UI on top
-of the file, not part of per-run comparison output the way
-`suppressed_changes` is. The parity test suite above covers one concrete
+touched one. The parity test suite above covers one concrete
 scenario (plus, now, the suppression-ledger scenario), not
 the exhaustive binaries/snapshots/mixed-inputs/policies/packs/suppressions/
 explicit-scope matrix §6.4 names in full. `compare`'s remaining
@@ -1849,6 +1842,39 @@ snapshots, `--post-manifest` POC export-manifest scoping) were deliberately
 not ported to `scan --against` -- each is its own subsystem with its own
 input model that doesn't obviously map onto `scan`'s classify/tier/level
 orchestration, not a plain kwarg `compare_snapshots` already accepts.
+
+**Updated (2026-07-30): `SuppressionList.audit()`/`SuppressionAudit`'s
+"still-orphaned piece of related prior art" gap (immediately above) is
+closed for `compare` -- wired in as `compare --audit-suppressions`.**
+Requires `--suppress` (a `click.UsageError` otherwise, in
+`cli_compare_helpers.run_compare` right after suppression loading, mirroring
+every other "reject without its prerequisite flag" guard in this file).
+When set, `suppression.audit(list(result.changes) + list(
+result.suppressed_changes))` runs after `_finalize_compare_result` (the
+*pre*-suppression change set, not just `result.changes` -- auditing only
+the post-suppression survivors would read every suppression rule that
+actually did its job as "stale," since the changes it matched are exactly
+the ones no longer in `changes`) and is attached as `result.
+suppression_audit`. A new fold function,
+`cli_compare_fold._fold_suppression_audit_into_text` (mirroring
+`_fold_scoped_compat_into_text`'s own JSON-vs-text branch structure), folds
+it into the rendered report: a `suppression_audit` JSON key (`total_rules`,
+`stale_rules`, `high_risk_matches`, `expired_rules`, `near_expiry_rules`,
+each rule identified by its `label`/`reason`, falling back to
+`rule#<index>` only when a rule has neither), or a `## Suppression Audit`
+markdown/text/review section built from `SuppressionAudit.summary()` plus
+an explicit high-risk-match listing. Threaded to both the primary and
+secondary (`--secondary-format`) render/fold call sites from the start,
+having learned from `--contract-evaluation`'s own multi-round "forgot the
+secondary call site" findings earlier in this same PR. Rejected on
+directory/package (release) comparisons, same reasoning and message shape
+as `--contract-evaluation`'s identical restriction (the per-library fan-out
+has no single result to attach one audit to). `--audit-suppressions` added
+to `cli_options.COMPARE_FLAG_BUDGET_RAISES` (a genuine per-run analysis
+input, not a stable project setting -- like `--contract-evaluation`
+itself). New tests: `tests/test_cli_compare_audit_suppressions.py` (usage
+guard, directory/package rejection, JSON stale/high-risk-match rendering,
+markdown rendering, default-off, `--help-all` mention).
 
 ### Phase 6 — opt-in public mode and corpus validation
 

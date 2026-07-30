@@ -527,6 +527,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--allow-ast-frontend-fallback",
         "--allow-unsupported-castxml",
         "--ast-frontend",
+        "--audit-suppressions",
         "--btf",
         "--bundle-cohort",
         "--bundle-system-providers",

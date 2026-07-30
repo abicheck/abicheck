@@ -1762,6 +1762,14 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "invocation (e.g. an ad hoc audit vs. a routine CI gate), not a "
         "stable project default -- like --pattern-verdicts/--surface-metrics."
     ),
+    "--audit-suppressions": (
+        "Opts one invocation into an additional audit of the --suppress "
+        "rule file (stale/high-risk/expired/near-expiry rules) against this "
+        "run's findings. Whether a given run wants that extra hygiene check "
+        "varies per invocation (e.g. a periodic suppression-file review vs. "
+        "a routine CI gate), not a stable project default -- like "
+        "--contract-evaluation above."
+    ),
 }
 
 #: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.

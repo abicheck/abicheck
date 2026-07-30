@@ -509,3 +509,66 @@ def _fold_scoped_compat_into_text(
         return "\n".join(lines)
 
     return text
+
+
+def _suppression_rule_label(rule: Any, index: int) -> str:
+    """A human-readable identifier for a suppression rule with no index of
+    its own (``SuppressionAudit``'s per-bucket lists don't carry the rule's
+    position in the original file) -- falls back to *index* (this bucket's
+    own position) only when the rule has neither a label nor a reason."""
+    label = getattr(rule, "label", None) or getattr(rule, "reason", None)
+    return label or f"rule#{index}"
+
+
+def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
+    """Fold a ``--audit-suppressions`` ``SuppressionAudit`` into the rendered
+    report text.
+
+    JSON gets a ``suppression_audit`` key; markdown/text/review get an
+    appended ``## Suppression Audit`` section. Binary/structured formats
+    (sarif, junit, html) are left untouched -- the same scope boundary
+    :func:`_fold_scoped_compat_into_text` already uses.
+    """
+    if audit is None:
+        return text
+
+    if fmt == "json":
+        import json
+
+        payload = json.loads(text)
+        payload["suppression_audit"] = {
+            "total_rules": audit.total_rules,
+            "stale_rules": [
+                _suppression_rule_label(r, i) for i, r in enumerate(audit.stale_rules)
+            ],
+            "high_risk_matches": [
+                {
+                    "rule": _suppression_rule_label(rule, i),
+                    "kind": change.kind.value,
+                    "symbol": change.symbol,
+                }
+                for i, (rule, change) in enumerate(audit.high_risk_matches)
+            ],
+            "expired_rules": [
+                _suppression_rule_label(r, i) for i, r in enumerate(audit.expired_rules)
+            ],
+            "near_expiry_rules": [
+                _suppression_rule_label(r, i)
+                for i, r in enumerate(audit.near_expiry_rules)
+            ],
+        }
+        return json.dumps(payload, indent=2)
+
+    if fmt in ("markdown", "text", "review"):
+        lines = [text, "", "## Suppression Audit", "", audit.summary()]
+        if audit.high_risk_matches:
+            lines.append("")
+            lines.append("High-risk matches (suppressed a BREAKING change):")
+            for i, (rule, change) in enumerate(audit.high_risk_matches):
+                lines.append(
+                    f"- `{_suppression_rule_label(rule, i)}` suppressed "
+                    f"{change.kind.value}: {change.symbol}"
+                )
+        return "\n".join(lines)
+
+    return text
