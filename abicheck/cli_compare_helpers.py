@@ -1680,6 +1680,7 @@ def run_compare(
         show_redundant=show_redundant, show_filtered=show_filtered,
         annotate=annotate, annotate_additions=annotate_additions,
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
+        contract_evaluation=contract_evaluation,
     )
 
     scoped_exit_code: int | None = None

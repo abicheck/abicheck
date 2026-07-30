@@ -1232,6 +1232,7 @@ def _finalize_compare_result(
     show_redundant: bool, show_filtered: bool,
     annotate: bool, annotate_additions: bool,
     severity_config: SeverityConfig | None = None,
+    contract_evaluation: bool = False,
 ) -> None:
     """Attach metadata and emit redundancy/filter/suppression/annotation output."""
     result.old_metadata = _collect_metadata(old_input)
@@ -1240,9 +1241,9 @@ def _finalize_compare_result(
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     if show_filtered and result.out_of_surface_changes:
-        echo_filtered_surface(result)
+        echo_filtered_surface(result, contract_evaluation=contract_evaluation)
     if show_filtered and result.reconciled_changes:
-        echo_reconciled(result)
+        echo_reconciled(result, contract_evaluation=contract_evaluation)
 
     # The scoping fallback warning goes to stderr so it never corrupts the
     # machine-readable payload on stdout (which carries scope_resolved /

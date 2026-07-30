@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .severity import KindSets, SeverityConfig
@@ -498,6 +498,22 @@ def _build_impact_table(
 # ---------------------------------------------------------------------------
 
 
+def _contract_decision_text(relevance: Any, reason_code: str | None, assurance: Any) -> str:
+    """Core ``<relevance> (<reason_code>), assurance: <level>`` text, shared
+    by every already-stamped-``Change`` rendering site in this module
+    (CodeRabbit review: the same tag-building pattern was duplicated at
+    several call sites). Deliberately excludes any ``Contract:``/``[contract:
+    ...]`` wrapper -- callers render in visibly different shapes (a leading
+    ``"Contract: "``, a bracketed ``"[contract: ...]"``), so each keeps its
+    own exact prefix/suffix and casing."""
+    tag = str(relevance.value)
+    if reason_code:
+        tag += f" ({reason_code})"
+    if assurance is not None:
+        tag += f", assurance: {assurance.value}"
+    return tag
+
+
 def _format_leaf_type_change(c: Change) -> list[str]:
     """Format a single leaf-mode type change entry."""
     lines = [f"### {c.symbol} — {c.description}"]
@@ -516,12 +532,10 @@ def _format_leaf_type_change(c: Change) -> list[str]:
     # --contract-evaluation was requested) was silently dropped. Mirrors
     # _format_change_md's own "no-op unless already stamped" idiom.
     if c.contract_relevance is not None:
-        tag = f"\n> Contract: {c.contract_relevance.value}"
-        if c.contract_reason_code:
-            tag += f" ({c.contract_reason_code})"
-        if c.contract_assurance is not None:
-            tag += f", assurance: {c.contract_assurance.value}"
-        lines.append(tag)
+        text = _contract_decision_text(
+            c.contract_relevance, c.contract_reason_code, c.contract_assurance
+        )
+        lines.append(f"\n> Contract: {text}")
     lines.append("")
     return lines
 
@@ -1100,10 +1114,7 @@ def _append_suppression_note(lines: list[str], result: DiffResult) -> None:
                 if relevance is not None:
                     reason_code = getattr(sc, "contract_reason_code", None)
                     assurance = getattr(sc, "contract_assurance", None)
-                    line += f" [contract: {relevance.value} ({reason_code})"
-                    if assurance is not None:
-                        line += f", assurance: {assurance.value}"
-                    line += "]"
+                    line += f" [contract: {_contract_decision_text(relevance, reason_code, assurance)}]"
                 lines.append(line)
 
 
@@ -1791,10 +1802,8 @@ def _format_change_md(c: object) -> str:
     if contract_relevance is not None:
         reason_code = getattr(c, "contract_reason_code", None)
         contract_assurance = getattr(c, "contract_assurance", None)
-        line += f"\n  > Contract: {contract_relevance.value}"
-        if reason_code:
-            line += f" ({reason_code})"
-        if contract_assurance is not None:
-            line += f", assurance: {contract_assurance.value}"
+        line += (
+            f"\n  > Contract: {_contract_decision_text(contract_relevance, reason_code, contract_assurance)}"
+        )
 
     return line

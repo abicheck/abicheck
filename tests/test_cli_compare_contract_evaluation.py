@@ -179,6 +179,89 @@ class TestEndToEndJsonReport:
         assert "--contract-evaluation" in result.output
 
 
+class TestShowFilteredAuditLedger:
+    def test_renders_contract_tag_in_out_of_surface_ledger(self, tmp_path):
+        # Regression (Codex review, fresh evidence): --show-filtered's stderr
+        # audit ledgers (cli_audit.echo_filtered_surface/echo_reconciled) were
+        # the one remaining per-finding contract-decision rendering site left
+        # unstamped after the JSON/Markdown fixes -- the finding is already
+        # stamped PROVEN_OUT_OF_CONTRACT by the time _finalize_compare_result
+        # runs, but the printer never read it.
+        from abicheck.model import RecordType
+
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=64),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=128),
+            ],
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--scope-public-headers", "--show-filtered",
+                "--contract-evaluation", "--format", "json",
+            ],
+        )
+        assert "Filtered as non-public ABI surface" in result.output
+        assert "InternalCache" in result.output
+        assert "[contract: PROVEN_OUT_OF_CONTRACT" in result.output
+
+    def test_omits_contract_tag_by_default(self, tmp_path):
+        from abicheck.model import RecordType
+
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=64),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[
+                RecordType(name="Result", kind="struct", size_bits=64),
+                RecordType(name="InternalCache", kind="struct", size_bits=128),
+            ],
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--scope-public-headers", "--show-filtered",
+                "--format", "json",
+            ],
+        )
+        assert "InternalCache" in result.output
+        assert "[contract:" not in result.output
+
+
 class TestRejectedOnSetInputs:
     def test_contract_evaluation_rejected_on_directory_inputs(self, tmp_path):
         # The per-library directory/package (release) fan-out doesn't wire

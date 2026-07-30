@@ -2044,6 +2044,48 @@ New test: `test_high_risk_respects_policy_file_demotion` (a `--policy-file`
 demoting `func_removed` to `risk`, asserting the suppressed removal is no
 longer reported in `high_risk_matches`).
 
+**Updated (2026-07-30): two more real findings on `--contract-evaluation`
+(Codex review, fresh evidence), closing what looks like the last remaining
+gap in per-finding contract rendering.** (1) `--show-filtered`'s stderr
+audit ledgers (`cli_audit.echo_filtered_surface`/`echo_reconciled`) print
+every out-of-surface/reconciled finding's kind, symbol, location, and
+exclusion reason, but never read the `contract_relevance`/
+`contract_reason_code`/`contract_assurance` fields the same findings are
+already stamped with by the time `_finalize_compare_result` runs (the
+shadow evaluator stamps `out_of_surface_changes`/`reconciled_changes`
+inside `compare()`, which always runs before `_finalize_compare_result`).
+Fixed by threading a `contract_evaluation: bool = False` parameter through
+`_finalize_compare_result` → both `cli_audit` printers, and a shared
+`_contract_tag()` helper in `cli_audit.py` appending a
+`[contract: <relevance> (<reason_code>), assurance: <level>]` suffix
+per line, gated on the finding actually being stamped -- a no-op unless
+both `--contract-evaluation` and `--show-filtered` are given together. New
+tests in `tests/test_cli_compare_contract_evaluation.py`
+(`TestShowFilteredAuditLedger`): one asserting the tag renders for a
+demoted `InternalCache` finding, one asserting it's omitted by default.
+(2) CodeRabbit separately flagged that the `Contract: <relevance>
+(<reason_code>), assurance: <level>` tag-building pattern was duplicated
+across four sites in `reporter_markdown.py`
+(`_format_leaf_type_change`, `_to_markdown_root_cause`'s missing-label
+branch, `_append_suppression_note`, `_format_change_md`) -- a nitpick, not
+a correctness bug, but a real duplication-drift risk (a future field
+addition to the contract tuple would need editing four near-identical
+blocks in sync). Extracted a shared `_contract_decision_text(relevance,
+reason_code, assurance)` core helper covering the three sites that render
+an *already-stamped `Change`* (`_format_leaf_type_change`,
+`_append_suppression_note`, `_format_change_md`) -- deliberately returning
+just the `<relevance> (<reason_code>), assurance: <level>` core text with
+no `Contract:`/`[contract: ...]` wrapper, since the three sites render in
+visibly different shapes (a leading `"Contract: "`, a bracketed
+`"[contract: ...]"`) and each keeps its own exact prefix/suffix/casing
+around the shared core. Left the fourth, dict-based site
+(`_to_markdown_root_cause`'s missing-label branch, which builds a
+`label_decision` dict via `stamp_explicit_scope_contract_evaluation`
+rather than reading an existing `Change`'s attributes) and `cli_audit.py`'s
+own `_contract_tag` unmerged -- genuinely different shapes (dict values
+vs. enum attributes; a different module), not the same duplicate this
+nitpick was about.
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve
