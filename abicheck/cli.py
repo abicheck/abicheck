@@ -1805,9 +1805,10 @@ def _embed_inline_source_side(
                    "UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/NOT_APPLICABLE), "
                    "contract_reason_code, and -- when resolved -- contract_assurance "
                    "field, reflecting whether the finding falls inside the library's "
-                   "declared public contract. Advisory only: it never changes verdict, "
-                   "exit_code, or which findings appear. Default off; the report is "
-                   "unchanged unless this is set.")
+                   "declared public contract. Rendered in --format json/markdown/text/"
+                   "review; not yet rendered in sarif/junit/html. Advisory only: it "
+                   "never changes verdict, exit_code, or which findings appear. "
+                   "Default off; the report is unchanged unless this is set.")
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:

@@ -1271,6 +1271,36 @@ from `changes` turns up no further candidates), but this pattern — a
 match — is a real, structural risk worth naming explicitly for whoever
 adds the next one.
 
+**A fifth review round (Codex, same PR) found the remaining gap in text-
+format rendering: `_fold_scoped_compat_into_text`'s markdown/text/review
+branch (not the JSON branch fixed earlier) still lost the contract
+decision for `--used-by`/`--required-symbol` scoped-only findings and
+missing-contract labels.** The JSON branch (fixed earlier this PR) stamps
+a fresh dict for each missing label and reuses the already-stamped
+`Change` for `scoped_only`; the markdown/text/review branch builds its own
+plain bullet-text lines from the same two collections but never read
+either's contract fields — so the *default* CLI invocation
+(`compare --used-by ... --contract-evaluation`, no `--format`) reported the
+gated finding with zero contract information, the identical shape as the
+earlier markdown-rendering P1 fix but for this one text-append code path
+specifically. Fixed by appending a `[contract: <relevance>
+(<reason_code>)]` tag to each missing-label/scoped-only line, gated on
+the same `contract_evaluation` parameter. New tests:
+`test_used_by_missing_symbol_gets_contract_evaluation_in_markdown` /
+`test_used_by_missing_symbol_omits_contract_tag_in_markdown_by_default`.
+
+Separately, a companion finding named the remaining unaddressed formats —
+`sarif`/`junit`/`html` still never render `Change.contract_*` at all
+(neither the ordinary per-finding fields nor this scoped fold-in),
+contradicting the flag's own help text if read as "every format". Rather
+than build out three more renderer integrations in the same PR, the CLI
+help text was corrected to state precisely which formats render the
+fields today (`json`/`markdown`/`text`/`review`) and which don't yet
+(`sarif`/`junit`/`html`) — the "explicitly restrict" alternative Codex's
+own P1 finding offered, since a truthful, scoped help text is a complete
+fix on its own and extending three more renderers is real, separately-
+scoped follow-up work.
+
 Measure:
 
 - delta by old/new decision;

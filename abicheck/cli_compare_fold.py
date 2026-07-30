@@ -466,12 +466,41 @@ def _fold_scoped_compat_into_text(
                 lines.append("## Additional scoped-gate findings")
                 severity_tag = "breaking" if blocks else "compatible"
                 for label in missing_labels:
-                    lines.append(
+                    line = (
                         f"- `{label}` is required but missing from the new "
                         f"library ({severity_tag})"
                     )
+                    # ADR-049 Phase 3 (Codex review, fresh evidence): a
+                    # missing-contract label is a bare string here, not the
+                    # stamped dict entry the JSON branch above builds --
+                    # without this, the default markdown/text/review report
+                    # (unlike JSON) silently dropped the contract decision
+                    # for this exact finding shape.
+                    if contract_evaluation:
+                        from .contract_evaluation import (
+                            stamp_explicit_scope_contract_evaluation,
+                        )
+
+                        label_decision: dict[str, object] = {}
+                        stamp_explicit_scope_contract_evaluation(label_decision)
+                        line += (
+                            f" [contract: {label_decision['contract_relevance']} "
+                            f"({label_decision['contract_reason_code']})]"
+                        )
+                    lines.append(line)
                 for c in scoped_only:
-                    lines.append(f"- {c.kind.value}: {c.description}")
+                    line = f"- {c.kind.value}: {c.description}"
+                    # scoped_only Change objects are already stamped by
+                    # stamp_scoped_result_findings upstream when
+                    # contract_evaluation was requested -- render what's
+                    # already there instead of re-deriving it.
+                    relevance = getattr(c, "contract_relevance", None)
+                    if relevance is not None:
+                        line += (
+                            f" [contract: {relevance.value} "
+                            f"({getattr(c, 'contract_reason_code', None)})]"
+                        )
+                    lines.append(line)
         return "\n".join(lines)
 
     return text
