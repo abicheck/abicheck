@@ -1335,6 +1335,30 @@ already threaded to the non-root-cause fold-in path. New tests:
 `test_used_by_missing_symbol_gets_contract_evaluation_in_root_cause_mode` /
 `test_used_by_missing_symbol_omits_contract_tag_in_root_cause_mode_by_default`.
 
+**Updated (2026-07-30): the `--contract-evaluation` help text itself was
+overclaiming, on two points at once (Codex review, fresh evidence).** (1)
+It listed `--format text` as a rendering surface, but `compare`'s own
+`--format` is a `click.Choice(["json", "markdown", "sarif", "html",
+"junit", "review"])` — there is no `text` format for this command; that
+word only ever meant something inside `_fold_scoped_compat_into_text`'s
+own internal `fmt in ("markdown", "text", "review")` branch condition
+(shared plumbing, not a real CLI choice). (2) `--format review` routes
+through `reporter_markdown.to_review_digest` — a compact,
+reviewer-facing counts-table-plus-top-impacted-symbols digest that never
+reads `Change.contract_*` at all, confirmed by reading it end to end (its
+"top impacted symbols" list is a bare `- {symbol} — {kind}` line, no
+`_format_change_md` call). The only place `--format review` renders
+anything contract-related is the `--used-by`/`--required-symbol`
+scoped-gate appendix (shared with markdown/text via
+`_fold_scoped_compat_into_text`) — so a plain `compare --contract-
+evaluation --format review` run with no scoping flag is, correctly per
+Codex's fresh evidence, byte-for-byte unaffected by the flag. Fixed by
+correcting the help text to state precisely what renders where: per-finding
+in `json`/`markdown`; in `review` only via the scoped-gate appendix, never
+its own top-impacted-symbols list; still not in `sarif`/`junit`/`html`.
+Regenerated `docs/reference/cli-reference.md`; no code path changed, so no
+new test was needed beyond the existing `test_help_all_mentions_flag`.
+
 Measure:
 
 - delta by old/new decision;
