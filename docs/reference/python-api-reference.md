@@ -308,6 +308,7 @@ Render comparison result in the requested output format.
 | `severity_config` | `SeverityConfig \| None` | `None` |
 | `show_recommendation` | `bool` | `False` |
 | `demangle` | `bool` | `False` |
+| `contract_evaluation` | `bool` | `False` |
 
 **Returns:** `str`
 
