@@ -220,6 +220,45 @@ class TestJsonReport:
         assert audit["total_rules"] == 2
         assert audit["stale_rules"] == ["symbol=never_matches_anything"]
 
+    def test_label_includes_every_conjunctive_selector_not_just_the_first(
+        self, tmp_path
+    ):
+        # Regression (Codex review, fresh evidence, second round on the same
+        # fallback): two unlabeled rules sharing their first populated
+        # selector (symbol) but differing on a second (change_kind) must not
+        # render as the identical, ambiguous label -- Suppression selectors
+        # combine conjunctively, so both fields are part of what identifies
+        # a rule, not just whichever one this loop finds first.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: never_matches_anything\n"
+            "    change_kind: func_removed\n"
+            "  - symbol: never_matches_anything\n"
+            "    change_kind: var_removed\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert audit["total_rules"] == 2
+        assert len(audit["stale_rules"]) == 2
+        assert len(set(audit["stale_rules"])) == 2, (
+            "two distinct rules must not render as the same label"
+        )
+        for label in audit["stale_rules"]:
+            assert "symbol=never_matches_anything" in label
+            assert "change_kind=" in label
+
     def test_high_risk_match_reported(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(

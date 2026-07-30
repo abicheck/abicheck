@@ -1949,6 +1949,29 @@ keeping only the `assert suppression is not None` mypy-narrowing hint at
 the actual `.audit()` call site. New test:
 `test_rejected_without_suppress_even_with_dry_run`.
 
+**Updated (2026-07-30): one more real finding on `_suppression_rule_label`,
+and one restatement of an already-documented, deliberately-deferred gap
+(Codex review, fresh evidence).** (1) The selector fallback (added by the
+immediately-preceding round's fix) returned only the *first* populated
+selector field it found -- but `Suppression`'s selectors combine
+conjunctively (e.g. `symbol` + `change_kind` together narrow one rule), so
+two distinct unlabeled rules sharing their first selector (the same
+`symbol`) but differing on a second (`change_kind`) rendered as the
+identical, ambiguous label, defeating the whole point of the earlier fix.
+Fixed by rendering *every* populated selector (comma-joined), not just the
+first, and adding `change_kind` to the checked field list (present in
+`Suppression` but missing from the original fallback's field tuple). New
+test: `test_label_includes_every_conjunctive_selector_not_just_the_first`
+(two rules sharing `symbol` but differing on `change_kind`, asserting
+distinct labels). (2) A second finding restated the residual
+`scope_diff_to_app`/`scope_diff_to_required_symbols`-internal-suppression
+gap the immediately-preceding round's own fix and plan-doc update already
+named explicitly as known and deliberately deferred (a rule that only
+matches a scoping candidate suppression drops *before* `scoped_only_changes`
+is ever populated is still invisible to the audit) -- not a new finding,
+so no additional code change; replied pointing at the existing
+documentation rather than re-fixing the same acknowledged gap twice.
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve
