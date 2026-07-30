@@ -485,7 +485,8 @@ def _fold_scoped_compat_into_text(
                         stamp_explicit_scope_contract_evaluation(label_decision)
                         line += (
                             f" [contract: {label_decision['contract_relevance']} "
-                            f"({label_decision['contract_reason_code']})]"
+                            f"({label_decision['contract_reason_code']}), "
+                            f"assurance: {label_decision['contract_assurance']}]"
                         )
                     lines.append(line)
                 for c in scoped_only:
@@ -496,10 +497,14 @@ def _fold_scoped_compat_into_text(
                     # already there instead of re-deriving it.
                     relevance = getattr(c, "contract_relevance", None)
                     if relevance is not None:
+                        assurance = getattr(c, "contract_assurance", None)
                         line += (
                             f" [contract: {relevance.value} "
-                            f"({getattr(c, 'contract_reason_code', None)})]"
+                            f"({getattr(c, 'contract_reason_code', None)})"
                         )
+                        if assurance is not None:
+                            line += f", assurance: {assurance.value}"
+                        line += "]"
                     lines.append(line)
         return "\n".join(lines)
 

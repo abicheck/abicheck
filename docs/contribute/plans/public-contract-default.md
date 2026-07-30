@@ -1301,6 +1301,40 @@ own P1 finding offered, since a truthful, scoped help text is a complete
 fix on its own and extending three more renderers is real, separately-
 scoped follow-up work.
 
+**Updated (2026-07-30):** two more Codex findings on the same
+`--contract-evaluation` + scoped-gate combination, both in
+`cli_compare_fold._fold_scoped_compat_into_text`'s markdown/text/review
+branch: (1) the missing-label and `scoped_only` lines added
+`contract_relevance`/`contract_reason_code` but dropped `contract_assurance`
+even though the JSON branch and `reporter_markdown._format_change_md`
+both already render it — fixed by appending `, assurance: <level>` to
+both lines, verified against the existing
+`TestUsedByScopingStampsExplicitEvidence` markdown tests plus assurance
+assertions. (2) `--report-mode root-cause` never reached this fold-in at
+all — it is deliberately skipped for root-cause markdown (see the
+skip-reason comment above) because `reporter_markdown._to_markdown_root_cause`
+already merges `scoped_only`/missing-label findings into its own
+root-cause groups. That merge covers `scoped_only` for free (grouped
+`Change` objects render via `_format_change_md`, which already reads
+already-stamped `contract_*` fields), but the `missing_labels` loop builds
+its own plain bullet line independently, with no `Change` object to read a
+stamped decision off of — so a missing-contract label's own tag was
+silently dropped in root-cause mode specifically. A first fix attempt
+tried to *derive* whether `--contract-evaluation` was active from data (any
+already-stamped finding in `changes`/`scoped_only`), to avoid growing
+`to_markdown`'s public signature — but that heuristic breaks precisely for
+the common case this bug covers: a run whose *only* finding is the
+missing label itself has nothing else stamped to derive the signal from,
+so the heuristic silently stayed off. Fixed properly instead by threading
+an explicit `contract_evaluation: bool = False` parameter through the full
+call chain — `render_output`/`_render_output` (both the shared
+`service_render.py` version and its `cli.py`/`mcp_server.py`-local
+duplicates) → `reporter_markdown.to_markdown` →
+`_to_markdown_root_cause` — mirroring how `contract_evaluation` was
+already threaded to the non-root-cause fold-in path. New tests:
+`test_used_by_missing_symbol_gets_contract_evaluation_in_root_cause_mode` /
+`test_used_by_missing_symbol_omits_contract_tag_in_root_cause_mode_by_default`.
+
 Measure:
 
 - delta by old/new decision;

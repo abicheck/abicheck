@@ -311,6 +311,7 @@ def _render_output(
     show_impact: bool = False,
     stat: bool = False,
     severity_config: SeverityConfig | None = None,
+    contract_evaluation: bool = False,
 ) -> str:
     """Render comparison result in the requested output format.
 
@@ -367,6 +368,7 @@ def _render_output(
         report_mode=report_mode,
         show_impact=show_impact,
         severity_config=severity_config,
+        contract_evaluation=contract_evaluation,
     )
 
 
@@ -1276,6 +1278,7 @@ def abi_compare(
             show_impact=show_impact,
             stat=stat,
             severity_config=severity_config,
+            contract_evaluation=contract_evaluation,
         )
         # When format is json, embed as nested object (not double-encoded string)
         if scoped_key is not None:

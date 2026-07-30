@@ -1696,6 +1696,7 @@ def run_compare(
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
         show_recommendation=recommend,
         demangle=demangle,
+        contract_evaluation=contract_evaluation,
     )
     text = _fold_scoped_compat_into_text(
         text, fmt, result,

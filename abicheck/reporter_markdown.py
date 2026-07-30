@@ -879,6 +879,7 @@ def _to_markdown_root_cause(
     show_impact: bool = False,
     *,
     severity_config: SeverityConfig | None = None,
+    contract_evaluation: bool = False,
 ) -> str:
     """``--report-mode root-cause`` markdown rendering (G29 Phase 3 slice 4, ADR-052).
 
@@ -981,6 +982,32 @@ def _to_markdown_root_cause(
                     f"- `{label}` is required but missing from the new "
                     f"library ({severity_tag})"
                 )
+                # ADR-049 Phase 3 (Codex review, fresh evidence): the
+                # non-root-cause markdown/text/review fold-in
+                # (cli_compare_fold._fold_scoped_compat_into_text) already
+                # tags a missing-contract label with its stamped decision;
+                # this root-cause path builds the identical label shape
+                # independently and was missing the same treatment, so
+                # --report-mode root-cause silently dropped the contract
+                # decision for this one finding shape. A missing-contract
+                # label has no Change object of its own to read an
+                # already-stamped decision off of (unlike scoped_only,
+                # rendered via _format_change_md above), so unlike every
+                # other contract-rendering site in this fix, this one
+                # genuinely needs the caller's own --contract-evaluation
+                # intent threaded through explicitly.
+                if contract_evaluation:
+                    from .contract_evaluation import (
+                        stamp_explicit_scope_contract_evaluation,
+                    )
+
+                    label_decision: dict[str, object] = {}
+                    stamp_explicit_scope_contract_evaluation(label_decision)
+                    line += (
+                        f" [contract: {label_decision['contract_relevance']} "
+                        f"({label_decision['contract_reason_code']}), "
+                        f"assurance: {label_decision['contract_assurance']}]"
+                    )
                 if key in finding_lines_by_key:
                     finding_lines_by_key[key].append(line)
                     count_by_key[key] += 1
@@ -1487,6 +1514,7 @@ def to_markdown(
     severity_config: SeverityConfig | None = None,
     show_recommendation: bool = False,
     demangle: bool = False,
+    contract_evaluation: bool = False,
 ) -> str:
     # Human-facing only: optionally demangle Itanium C++ symbols in the rendered
     # output. Machine formats (JSON/SARIF/JUnit) keep the raw mangled symbols.
@@ -1519,6 +1547,7 @@ def to_markdown(
                 show_recommendation=show_recommendation,
                 show_impact=show_impact,
                 severity_config=severity_config,
+                contract_evaluation=contract_evaluation,
             )
         )
 

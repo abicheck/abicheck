@@ -401,3 +401,59 @@ class TestUsedByScopingStampsExplicitEvidence:
         assert result.exit_code == 4, result.output
         assert "Additional scoped-gate findings" in result.output
         assert "[contract:" not in result.output
+
+    def test_used_by_missing_symbol_gets_contract_evaluation_in_root_cause_mode(
+        self, tmp_path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence, PR #658): --report-mode
+        # root-cause builds its own missing-label lines independently of
+        # cli_compare_fold._fold_scoped_compat_into_text (the latter is
+        # explicitly skipped for root-cause markdown), so the same
+        # --contract-evaluation tag was silently dropped for this one
+        # report mode even after the fold-in path was fixed.
+        from abicheck.appcompat import AppCompatResult
+
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_scope(monkeypatch, scoped)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new),
+                "--used-by", str(app), "--contract-evaluation",
+                "--report-mode", "root-cause",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "Root Causes" in result.output
+        assert "[contract: IN_CONTRACT" in result.output
+        assert "assurance:" in result.output
+
+    def test_used_by_missing_symbol_omits_contract_tag_in_root_cause_mode_by_default(
+        self, tmp_path, monkeypatch
+    ):
+        from abicheck.appcompat import AppCompatResult
+
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_scope(monkeypatch, scoped)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new),
+                "--used-by", str(app), "--report-mode", "root-cause",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "Root Causes" in result.output
+        assert "[contract:" not in result.output
