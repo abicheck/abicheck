@@ -1311,6 +1311,14 @@ _ELF_MAGIC = b"\x7fELF"
 _ET_DYN = 3
 # Program header type PT_INTERP (interpreter segment — present in executables, absent in DSOs)
 _PT_INTERP = 3
+# Program header type PT_DYNAMIC (the .dynamic section, describing dynamic-linking metadata)
+_PT_DYNAMIC = 2
+# Dynamic section tag DT_FLAGS_1 and its DF_1_PIE bit — the standard linker
+# signal a genuine PIE executable (static or dynamic) carries and a real
+# shared object never does, even one built with a custom entry point.
+_DT_NULL = 0
+_DT_FLAGS_1 = 0x6FFFFFFB
+_DF_1_PIE = 0x08000000
 _SO_NAME_RE = re.compile(r"^(?P<stem>.+)\.so(?P<version>(?:\.[A-Za-z0-9]+)*)$", re.IGNORECASE)
 _NUMERIC_SO_VERSION_RE = re.compile(r"(?:\.\d+)+$")
 _ALNUM_SO_VERSION_RE = re.compile(r"(?:\.[A-Za-z0-9]+)+$")
@@ -1370,6 +1378,99 @@ def _has_interp_segment(f: IO[bytes], ei_class: int, byte_order: str) -> bool | 
         return None
 
 
+def _find_pt_dynamic(f: IO[bytes], ei_class: int, byte_order: str) -> tuple[int, int] | None:
+    """Return (p_offset, p_filesz) of the PT_DYNAMIC segment, or None if
+    absent or the program header table is malformed/untrustworthy."""
+    try:
+        if ei_class == 1:  # 32-bit
+            f.seek(28)
+            e_phoff = struct.unpack(f"{byte_order}I", f.read(4))[0]
+            f.seek(42)
+            e_phentsize = struct.unpack(f"{byte_order}H", f.read(2))[0]
+            e_phnum = struct.unpack(f"{byte_order}H", f.read(2))[0]
+        else:  # 64-bit
+            f.seek(32)
+            e_phoff = struct.unpack(f"{byte_order}Q", f.read(8))[0]
+            f.seek(54)
+            e_phentsize = struct.unpack(f"{byte_order}H", f.read(2))[0]
+            e_phnum = struct.unpack(f"{byte_order}H", f.read(2))[0]
+
+        if e_phoff == 0 or e_phnum == 0:
+            return None
+        expected_phentsize = 32 if ei_class == 1 else 56
+        if e_phentsize != expected_phentsize:
+            return None
+
+        for i in range(e_phnum):
+            f.seek(e_phoff + i * e_phentsize)
+            entry = f.read(e_phentsize)
+            if len(entry) != e_phentsize:
+                return None
+            p_type = struct.unpack_from(f"{byte_order}I", entry, 0)[0]
+            if p_type != _PT_DYNAMIC:
+                continue
+            if ei_class == 1:
+                p_offset = struct.unpack_from(f"{byte_order}I", entry, 4)[0]
+                p_filesz = struct.unpack_from(f"{byte_order}I", entry, 16)[0]
+            else:
+                p_offset = struct.unpack_from(f"{byte_order}Q", entry, 8)[0]
+                p_filesz = struct.unpack_from(f"{byte_order}Q", entry, 32)[0]
+            return p_offset, p_filesz
+        return None
+    except (OSError, struct.error):
+        return None
+
+
+def _has_pie_executable_flag(f: IO[bytes], ei_class: int, byte_order: str) -> bool:
+    """Check the .dynamic section's DT_FLAGS_1 for the DF_1_PIE bit.
+
+    This is the standard signal linkers set on a genuine PIE executable
+    (static *or* dynamic) that a real shared object never carries — even
+    one built with a custom entry point (``-Wl,-e,entry``), which a naive
+    "entry point must be zero" check would incorrectly reject (Codex
+    review; verified against real ``-static-pie``/``-Wl,-e``-linked
+    binaries). Deliberately conservative: any inconclusive case (no
+    PT_DYNAMIC, malformed/truncated dynamic table, DT_FLAGS_1 not present)
+    returns False rather than rejecting the file — this signal is used
+    only as a targeted, positive rejection, not a required-presence gate,
+    so a minimal/synthetic ELF stub with no real .dynamic section at all
+    is unaffected.
+    """
+    location = _find_pt_dynamic(f, ei_class, byte_order)
+    if location is None:
+        return False
+    p_offset, p_filesz = location
+    entry_size = 8 if ei_class == 1 else 16  # d_tag + d_val/d_ptr, word-sized
+    if p_filesz <= 0 or p_filesz % entry_size != 0:
+        return False
+    # p_filesz is an 8-byte ELF64 field with no natural bound (unlike
+    # e_phnum, a uint16 already capped at 65535) -- a crafted or sparse-
+    # file-backed ELF advertising a huge PT_DYNAMIC p_filesz could
+    # otherwise drive an effectively unbounded seek+read loop over
+    # externally-supplied binaries (CodeRabbit review). Real .dynamic
+    # sections have at most a few hundred entries; cap well above that.
+    _MAX_DYNAMIC_ENTRIES = 8192
+    entry_count = min(p_filesz // entry_size, _MAX_DYNAMIC_ENTRIES)
+    word_fmt = "I" if ei_class == 1 else "Q"
+    try:
+        for i in range(entry_count):
+            f.seek(p_offset + i * entry_size)
+            entry = f.read(entry_size)
+            if len(entry) != entry_size:
+                return False
+            d_tag = struct.unpack_from(f"{byte_order}{word_fmt}", entry, 0)[0]
+            if d_tag == _DT_NULL:
+                return False
+            if d_tag == _DT_FLAGS_1:
+                d_val = struct.unpack_from(
+                    f"{byte_order}{word_fmt}", entry, entry_size // 2
+                )[0]
+                return bool(d_val & _DF_1_PIE)
+        return False
+    except (OSError, struct.error):
+        return False
+
+
 def _is_elf_shared_object(path: Path) -> bool:
     """Check if a file is an ELF shared object (ET_DYN) and not a PIE executable."""
     try:
@@ -1388,6 +1489,19 @@ def _is_elf_shared_object(path: Path) -> bool:
             if e_type != _ET_DYN:
                 return False
 
+            # Check the DF_1_PIE flag *before* the PT_INTERP/filename
+            # fallback below, not only in the no-PT_INTERP branch: a normal
+            # `gcc -pie -o fake.so` executable has *both* PT_INTERP and
+            # DF_1_PIE set, and previously reached the has_interp branch's
+            # filename check first, which accepts anything shaped like a
+            # library name -- silently admitting a real, directly-invocable
+            # PIE executable that only happens to be named ``*.so`` (Codex
+            # review; verified against a real `gcc -pie` binary). DF_1_PIE
+            # is unconditionally decisive when set: a real shared object
+            # never carries it, PT_INTERP or not.
+            if _has_pie_executable_flag(f, ei_class, byte_order):
+                return False
+
             # Distinguish PIE executables from true shared objects:
             # executables have a PT_INTERP segment, shared objects don't.
             has_interp = _has_interp_segment(f, ei_class, byte_order)
@@ -1395,11 +1509,20 @@ def _is_elf_shared_object(path: Path) -> bool:
                 return False
             if has_interp:
                 # A few distro runtime DSOs are ET_DYN, named like libraries,
-                # and intentionally carry PT_INTERP so they can be invoked
-                # directly (for example Ubuntu's libcap.so.2.66).  Keep the
-                # PIE-executable guard for app-like filenames, but do not drop
-                # real versioned .so files from package discovery.
+                # and intentionally carry PT_INTERP (and a nonzero entry
+                # point, since they're meant to be directly invocable) so
+                # they can be run directly (for example Ubuntu's
+                # libcap.so.2.66) -- these don't carry DF_1_PIE (already
+                # ruled out above), so this filename fallback is now only
+                # reached for a real, non-PIE-executable ET_DYN. Keep the
+                # PIE-executable guard for app-like filenames, but do not
+                # drop real versioned .so files from package discovery.
                 return _has_shared_object_name(path)
+
+            # No PT_INTERP and no DF_1_PIE: a real shared object (the
+            # common case -- most .so files carry neither). A
+            # `gcc -static-pie` executable is also ET_DYN with no
+            # PT_INTERP, but it's already been rejected above via DF_1_PIE.
             return True
     except (OSError, struct.error):
         return False

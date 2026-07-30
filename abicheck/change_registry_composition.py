@@ -141,4 +141,14 @@ COMPOSITION_EXTENSION_ENTRIES: list[ChangeKindMeta] = [
               "changes size and signedness with no symbol-level signal, so a "
               "symbol-only check is blind to it.",
        description_template="wchar_t model changed: {old} → {new}. Objects built with and without -fshort-wchar are not binary compatible for any public wchar_t parameter, field, or return value."),
+
+    # ── Audit-mode bundle finding (ADR-056, scan --artifact-set) ─────────────
+    _E("bundle_unresolved_intra_dependency", _R,
+       impact="Audit-mode (scan --artifact-set, no old side): a library in this "
+              "artifact set imports a symbol that no library in the set exports, "
+              "and the import is not covered by the declared or built-in "
+              "system-provider allow-list. Unlike bundle_intra_dep_removed this "
+              "is not diff-confirmed (there is no old side to compare against), "
+              "so it is reported as a risk rather than a confirmed break — the "
+              "symbol may be satisfied by a dependency outside the declared set."),
 ]

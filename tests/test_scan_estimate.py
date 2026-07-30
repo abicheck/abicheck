@@ -920,6 +920,92 @@ def test_run_scan_auto_default_without_evidence_is_best_effort(snap_path: Path) 
     assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
 
 
+def test_run_scan_forwards_new_scan_request_controls(
+    monkeypatch, snap_path: Path
+) -> None:
+    # P2 regression (Codex review): run_scan() used to silently ignore
+    # abi3_floor/enabled_checks/severities/build_config/allow_build_query
+    # even when a direct Python API caller set them on ScanRequest --
+    # run_scan_set (--artifact-set) already forwarded them, but run_scan
+    # hard-coded build_config=None/allow_build_query=False/all
+    # checks/no severities/no abi3_floor regardless of the request.
+    import abicheck.scan_engine as scan_engine_mod
+    from abicheck.service import ScanRequest, run_scan
+
+    captured: dict[str, object] = {}
+    real_run_scan_core = scan_engine_mod.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured.update(kwargs)
+        return real_run_scan_core(*args, **kwargs)
+
+    monkeypatch.setattr(scan_engine_mod, "run_scan_core", _spy)
+
+    custom_checks = frozenset({"exported_not_public"})
+    run_scan(
+        ScanRequest(
+            binaries=[snap_path],
+            mode="audit",
+            abi3_floor=(3, 9),
+            enabled_checks=custom_checks,
+            severities={"exported_not_public": "error"},
+            allow_build_query=True,
+        )
+    )
+    assert captured["abi3_floor"] == (3, 9)
+    assert captured["enabled_checks"] == custom_checks
+    assert captured["severities"] == {"exported_not_public": "error"}
+    assert captured["allow_build_query"] is True
+
+
+def test_run_scan_risk_rules_error_is_service_level(
+    tmp_path: Path, snap_path: Path
+) -> None:
+    # P2 regression (CodeRabbit review): cli_scan_baseline._load_risk_rules
+    # raises click.ClickException for unreadable/malformed --risk-rules
+    # YAML -- fine inside a click command, but risk_rules_path is a plain
+    # ScanRequest field a direct Python API caller can set without ever
+    # importing click. run_scan() must not let a click exception escape
+    # its own service/API boundary.
+    from abicheck.service import ScanRequest, run_scan
+
+    bad_yaml = tmp_path / "risk_rules.yml"
+    bad_yaml.write_text("not: [valid, yaml: :", encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        run_scan(
+            ScanRequest(
+                binaries=[snap_path], mode="audit", risk_rules_path=bad_yaml
+            )
+        )
+    import click
+
+    assert not isinstance(excinfo.value, click.ClickException)
+
+
+def test_run_scan_forwards_level_explicit(monkeypatch, snap_path: Path) -> None:
+    # P2 regression (Codex review): run_scan() never computed/forwarded
+    # level_explicit at all, so run_scan_core defaulted it to False and
+    # refused to auto-run a trusted --config's build.query even for an
+    # explicit depth="build"/"source" -- unlike the CLI and run_scan_set,
+    # which both compute this the same way (sm_pin or (sm is None and dp
+    # is not None)).
+    import abicheck.scan_engine as scan_engine_mod
+    from abicheck.service import ScanRequest, run_scan
+
+    captured: dict[str, object] = {}
+    real_run_scan_core = scan_engine_mod.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["level_explicit"] = kwargs.get("level_explicit")
+        return real_run_scan_core(*args, **kwargs)
+
+    monkeypatch.setattr(scan_engine_mod, "run_scan_core", _spy)
+
+    run_scan(ScanRequest(binaries=[snap_path], mode="audit", depth="binary"))
+    assert captured["level_explicit"] is True
+
+
 def test_run_scan_binary_depth_suppresses_headers(
     monkeypatch, snap_path: Path, header: Path
 ) -> None:

@@ -69,6 +69,15 @@ class ProviderEntry:
 
     library: str  # e.g. "libcore.so"
     version: str  # gnu.version_d tag, "" if unversioned
+    # True for an unversioned export, or a versioned "@@default" definition
+    # (ElfSymbol.is_default); False for a "@specific" (non-default) versioned
+    # definition. The dynamic linker can only satisfy an *unversioned*
+    # symbol reference against a default definition -- a provider whose
+    # only definition of this symbol is non-default-only cannot satisfy an
+    # unversioned import, even though the symbol name itself is "reachable"
+    # (Codex review). Defaults to True for the few synthetic ProviderEntry
+    # construction sites that have no real per-symbol version data.
+    is_default: bool = True
 
 
 @dataclass(frozen=True)
@@ -103,6 +112,17 @@ class ResolutionGraph:
     # library -> DT_NEEDED sonames that did NOT resolve inside the bundle
     # (likely system libs — see DEFAULT_SYSTEM_PROVIDERS).
     extra_needed: dict[str, list[str]] = field(default_factory=dict)
+    # The exact reverse map _compute_resolution_graph() used to classify
+    # each DT_NEEDED edge as intra vs. extra (soname / canonical key / real
+    # on-disk filename -> library name). Stored so a later BFS resolving
+    # those same edges (_reachable_intra_libraries) uses the identical
+    # mapping instead of independently re-deriving one -- the two used to
+    # disagree for a versioned, no-DT_SONAME library discovered via a
+    # differently-named symlink alias, where the classifying map's
+    # resolved-real-filename entry had no equivalent in
+    # provider_library_for_soname()'s own name/soname/stem heuristic
+    # (Codex review).
+    soname_to_name: dict[str, str] = field(default_factory=dict)
 
     def providers_for(self, symbol: str) -> list[ProviderEntry]:
         return list(self.provides.get(symbol, ()))
@@ -133,17 +153,29 @@ class BundleSnapshot:
         Matches on either the raw filename (``libfoo.so``) or the soname
         encoded by the library (``libfoo.so.1``).
         """
+        return self.provider_library_for_soname(soname) is not None
+
+    def provider_library_for_soname(self, soname: str) -> str | None:
+        """Resolve ``soname`` to the bundle library name it identifies, if any.
+
+        Same matching rules as :meth:`is_intra_bundle_provider` (raw filename
+        or encoded soname, with filename-stem fallback in either direction),
+        but returns the matched library name instead of a bool — used by
+        ADR-056's audit-mode detector to resolve a consumer's precise
+        ``version_soname`` to the specific provider it must come from,
+        rather than merely confirming *some* provider resolves it.
+        """
         if soname in self.libraries:
-            return True
+            return soname
         for name, meta in self.metadata.items():
             if meta.soname == soname:
-                return True
+                return name
             # Allow filename-stem fallback (libfoo.so matches libfoo.so.1)
             if soname.startswith(name + "."):
-                return True
+                return name
             if name.startswith(soname + "."):
-                return True
-        return False
+                return name
+        return None
 
 
 @dataclass

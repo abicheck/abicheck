@@ -1,7 +1,8 @@
 # ADR-023: Bundle-aware multi-binary ABI analysis
 
 **Date:** 2026-05-20
-**Status:** Accepted — implemented. **Amendment:** as ADR-002's amendment
+**Status:** Accepted — implemented.
+**Amendment:** see the 2026-07-29 amendment below
 notes, `compare-release` is no longer a registered top-level command
 (`python -m abicheck --help` lists `compare` only; `compare-release` lives on
 as the unregistered engine `compare` dispatches directory/package operands
@@ -12,6 +13,21 @@ and is not in the table below: `bundle_soname_skew` (opt-in via
 `compare --bundle-cohort`, detected by `_detect_soname_skew` in
 `abicheck/bundle.py`) — a co-versioned cohort inconsistently bumping SONAMEs.
 See `examples/case84_bundle_soname_skew/README.md`.
+**Amendment (2026-07-29, verified against code):** the "Resolution graph"
+section's claim that the bundle layer "reuses `resolver.py`/`binder.py`
+already shipped for `stack-check`" (ADR-008) does **not** match
+`abicheck/bundle.py` as shipped — `_compute_resolution_graph` is a
+self-contained ELF-symbol resolution graph that does not import or call
+`resolver.py`/`binder.py`. The codebase currently has **two independent**
+dependency-graph engines: `resolver.py`/`binder.py` (asymmetric, one root
+binary + its DT_NEEDED closure, used by `deps tree`/`deps compare`/
+`stack-check`) and `bundle.py`'s own graph (symmetric peer-library set, used
+only by `compare`'s bundle layer). The Decision text below is left as
+originally written (this repo's amendment convention appends corrections
+rather than retconning the original text); treat "reuses `resolver.py`/
+`binder.py`" in that section as historical intent, not current fact. See
+[ADR-056](056-multi-artifact-library-set-scan.md) for the follow-on decision
+that surfaced this while scoping multi-artifact `scan`.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -136,6 +152,10 @@ Each kind takes a single registry entry with the colocated metadata
 pattern.
 
 ### Resolution graph
+
+> **Not as shipped — see the 2026-07-29 amendment at the top of this ADR.**
+> `bundle.py` implements its own self-contained ELF resolution graph instead
+> of the `resolver.py`/`binder.py` reuse described below.
 
 For each side (old, new) the bundle layer runs the existing
 `abicheck.resolver` and `abicheck.binder` modules (built for `stack-check`)
@@ -326,7 +346,8 @@ The bundle layer additionally maintains SONAME identity:
 **Pro:**
 - Closes the headline gap: co-versioned multi-library bundles (for example oneDAL) get correct verdicts.
 - Reuses `resolver.py` and `binder.py` already shipped for `stack-check`;
-  no new graph engine.
+  no new graph engine. **(Not as shipped — see the 2026-07-29 amendment
+  above; `bundle.py` built its own graph instead.)**
 - The new ChangeKinds plug into the existing registry, suppression, policy,
   severity, exit-code, and reporter machinery without special cases.
 - `--manifest` gives downstream projects a way to encode "this is what we

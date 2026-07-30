@@ -213,6 +213,201 @@ class TestScanRejectsDirectoryOrPackage:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
+class TestScanNewLibrarySet:
+    """ADR-056: new-library-set (--artifact-set) validation."""
+
+    def test_directory_passes(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "release" / "lib"
+        lib_dir.mkdir(parents=True)
+        result = _run_validate(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": str(lib_dir)}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_rejects_new_library_and_new_library_set_together(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+            }
+        )
+        assert result.returncode == 1
+        assert "new-library-set" in result.stdout
+        assert "new-library" in result.stdout
+
+    def test_rejects_against_with_new_library_set(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_AGAINST": "old.so",
+            }
+        )
+        assert result.returncode == 1
+        assert "against" in result.stdout
+
+    def test_rejects_abi_baseline_with_new_library_set(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_ABI_BASELINE": "latest-release",
+            }
+        )
+        assert result.returncode == 1
+
+    def test_rejects_old_header_with_new_library_set(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_OLD_HEADER": "old/include/foo.h",
+            }
+        )
+        assert result.returncode == 1
+        assert "old-header" in result.stdout
+
+    def test_rejects_old_include_with_new_library_set(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_OLD_INCLUDE": "old/include",
+            }
+        )
+        assert result.returncode == 1
+
+    def test_rejects_dry_run_with_new_library_set(self) -> None:
+        # P2 regression (Codex review): --artifact-set estimation isn't
+        # implemented; without this preflight check a dry-run + set step
+        # incurred the full toolchain install before the CLI's own
+        # UsageError.
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_DRY_RUN": "true",
+            }
+        )
+        assert result.returncode == 1
+        assert "dry-run" in result.stdout
+
+    def test_rejects_estimate_alias_with_new_library_set(self) -> None:
+        # P2 regression (Codex review): run.sh converts the deprecated
+        # estimate: true alias into INPUT_DRY_RUN=true downstream, but this
+        # preflight check only looked at INPUT_DRY_RUN directly -- a set +
+        # estimate combination passed preflight and only failed after the
+        # full Python/toolchain install, same as the direct dry-run case
+        # above.
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_ESTIMATE": "true",
+            }
+        )
+        assert result.returncode == 1
+        assert "estimate" in result.stdout
+
+    def test_warns_new_library_set_outside_scan(self) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "new-library-set" in result.stdout
+
+    def test_bundle_system_providers_silent_on_compare(self) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    def test_bundle_system_providers_silent_on_scan_with_new_library_set(
+        self,
+    ) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
+                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    def test_bundle_system_providers_warns_on_scalar_scan(self) -> None:
+        # P2 regression (Codex review): run.sh's scan branch only forwards
+        # --bundle-system-providers inside the new-library-set branch, so a
+        # scalar new-library scan silently drops it -- must warn.
+        result = _run_validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "bundle-system-providers" in result.stdout
+
+    def test_bundle_system_providers_warns_outside_compare_and_scan(self) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": "dump", "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "bundle-system-providers" in result.stdout
+
+    def test_bundle_system_providers_warns_on_scalar_compare(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): cli_compare_helpers.py only reaches
+        # bundle analysis on the directory/package dispatch --
+        # bundle-system-providers with single-file old-library/new-library
+        # operands is silently discarded the same way a scalar scan is,
+        # but this check previously treated any mode: compare as
+        # meaningful regardless of operand style.
+        old = tmp_path / "old.so"
+        new = tmp_path / "new.so"
+        old.write_bytes(b"")
+        new.write_bytes(b"")
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(old),
+                "INPUT_NEW_LIBRARY": str(new),
+                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "bundle-system-providers" in result.stdout
+
+    def test_bundle_system_providers_silent_on_directory_compare(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(old_dir),
+                "INPUT_NEW_LIBRARY": str(new_dir),
+                "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+
+@pytest.mark.skipif(
+    not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
+)
 class TestFormatIsHardErrorNotSilentFallback:
     @pytest.mark.parametrize("fmt", ["sarif", "html", "xml", "csv"])
     def test_scan_rejects_unsupported_format(self, fmt: str) -> None:

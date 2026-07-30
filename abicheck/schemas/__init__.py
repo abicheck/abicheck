@@ -316,7 +316,21 @@ REPORT_SCHEMA_VERSION = "2.23"
 #:       when the suppressed-change count exceeds the same cap
 #:       ``findings_truncated`` already uses). Omitted entirely when no
 #:       suppression is in effect, matching every other additive scan key.
-SCAN_SCHEMA_VERSION = "1.4"
+#: 1.5 — ``scan --artifact-set`` (ADR-056): ``ScanSetResult.to_dict()``
+#:       carries this same ``scan_schema_version`` marker but is a
+#:       structurally distinct payload shape from ``ScanResult.to_dict()``
+#:       (``per_artifact``/``bundle_findings``/``bundle_verdict``/
+#:       ``bundle_incomplete`` instead of ``findings``/``layers``/
+#:       ``confidence``/``estimate``/``report``) — a pre-1.5 consumer
+#:       parsing a fixed ``ScanResult`` shape from this marker could not
+#:       have expected the aggregate form. A consumer distinguishes the two
+#:       by the presence of ``per_artifact``, not the version number alone.
+#:       Bumped to 1.5, not 1.4, because 1.4 was independently claimed by
+#:       the ADR-049 Phase 5 suppression-block addition above (a rebase-time
+#:       version collision between two structurally distinct additive
+#:       changes — reusing 1.4 here would leave a consumer unable to detect
+#:       which shape it actually received).
+SCAN_SCHEMA_VERSION = "1.5"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

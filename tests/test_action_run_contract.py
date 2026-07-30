@@ -80,7 +80,20 @@ def _valid_flags(subcommand: str) -> set[str]:
     # rich-click renders help with UTF-8 box-drawing chars. On Windows the child
     # would otherwise encode stdout as cp1252 and crash (exit 1) on those chars,
     # so force UTF-8 in the child too — not just in our decode.
-    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    # COLUMNS is forced wide: with no TTY, rich-click falls back to an 80-col
+    # default, and at that width it truncates a long option name in its own
+    # option-name column with an ellipsis (e.g. "--bundle-system-provide…")
+    # rather than wrapping it — the comment below about joining wrapped lines
+    # only covers word-wrap inside the help *body* text, not this column
+    # truncation, and an ellipsis-truncated flag can never match a real one
+    # (a false "action/run.sh passes an option scan doesn't accept" failure,
+    # reproduced deterministically at COLUMNS=80/unset).
+    env = {
+        **os.environ,
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "COLUMNS": "300",
+    }
     # `compare --help` only shows its curated common subset (G21.8 collapse
     # M2); `--help-all` is the full surface and is what this test needs to
     # validate action/run.sh's flags against. Other subcommands don't have

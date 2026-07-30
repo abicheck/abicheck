@@ -387,6 +387,15 @@ elif [[ "$MODE" == "compare" ]]; then
   # rejected flags and silently dropped a bundle caller's build-config
   # (Codex review, second round).
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # bundle-system-providers reaches the cross-library bundle-analysis layer
+  # (ADR-023) the same way --config does above: unconditional, since the CLI
+  # itself already treats it as a no-op (silently ignored) for a single-pair
+  # operand rather than rejecting it outright. Previously not wired to the
+  # Action at all, even though compare's CLI has carried
+  # --bundle-system-providers since ADR-023 (a pre-existing gap, not scoped
+  # to ADR-056 — added here since this pass is wiring the input from scratch
+  # anyway; see ADR-056/G34's Action-wiring correction).
+  add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     # A caller that explicitly asked for build/source-depth evidence (via
@@ -568,27 +577,68 @@ elif [[ "$MODE" == "scan" ]]; then
   # — there is no separate --audit/--mode/--source-method/--estimate flag any
   # more (CLI simplification).
   CMD+=(scan)
-  SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}"
-  # scan has no per-library fan-out (unlike compare) — a directory/package
-  # is normally caught early by action/validate-inputs.sh, before any
-  # dependency install; re-checked here for anyone invoking run.sh directly
-  # (e.g. tests) without that step.
-  if _is_release_style_operand "$SCAN_ARTIFACT"; then
-    echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use mode: compare against a directory/package for a multi-library binary comparison instead."
-    exit 1
+  SCAN_ARTIFACT_SET="${INPUT_NEW_LIBRARY_SET:-}"
+  if [[ -n "$SCAN_ARTIFACT_SET" ]]; then
+    # ADR-056: audit a *set* of libraries with no old side, as one
+    # operation. Mutually exclusive with new-library and against/
+    # abi-baseline — normally caught early by action/validate-inputs.sh,
+    # before any dependency install; re-checked here for anyone invoking
+    # run.sh directly (e.g. tests) without that step.
+    if [[ -n "${INPUT_NEW_LIBRARY:-}" ]]; then
+      echo "::error::mode: scan cannot take both new-library and new-library-set — new-library-set audits a *set* of libraries with no old side (ADR-056), new-library scans exactly one artifact. Set only one."
+      exit 1
+    fi
+    if [[ -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ]]; then
+      # Without this, the later "omit --against for new-library-set" logic
+      # (below) would silently downgrade an explicitly-requested baseline
+      # compare into an audit-only run instead of rejecting it -- a direct
+      # run.sh caller (bypassing validate-inputs.sh's own copy of this
+      # check) would get a successful result for a different operation
+      # than requested (Codex review).
+      echo "::error::mode: scan with new-library-set does not support against/abi-baseline — new-library-set is audit-only (no old side to compare a set against, ADR-056). Remove against/abi-baseline, or use new-library (a single artifact) for a baseline comparison instead."
+      exit 1
+    fi
+    CMD+=(--artifact-set "$SCAN_ARTIFACT_SET")
+    add_single_flag "--bundle-system-providers" "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}"
+  else
+    SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode, unless new-library-set is given}"
+    # scan has no per-library fan-out (unlike compare) — a directory/package
+    # is normally caught early by action/validate-inputs.sh, before any
+    # dependency install; re-checked here for anyone invoking run.sh directly
+    # (e.g. tests) without that step.
+    if _is_release_style_operand "$SCAN_ARTIFACT"; then
+      echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use new-library-set to audit a set with no old side, or mode: compare against a directory/package for a multi-library binary comparison instead."
+      exit 1
+    fi
+    CMD+=("$SCAN_ARTIFACT")
   fi
-  CMD+=("$SCAN_ARTIFACT")
 
-  # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
-  # the --against side; old-header/old-include and new-header/new-include
-  # scope to one side only (ADR-040 L1) so a candidate-only header doesn't
-  # leak into the baseline side's parse (Codex review).
-  add_flag "-H" "${INPUT_HEADER:-}"
-  add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
-  add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
-  add_flag "-I" "${INPUT_INCLUDE:-}"
-  add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
-  add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
+  if [[ -n "$SCAN_ARTIFACT_SET" ]]; then
+    # --artifact-set has no old side, so cli_scan._run_artifact_set rejects
+    # old=/new= scoping outright -- old-header/old-include are meaningless
+    # here (reject loudly rather than let the CLI's own UsageError surface
+    # only after toolchain install) and new-header/new-include map to the
+    # bare flags, not "-H new=..."/"-I new=..." (Codex review).
+    if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
+      echo "::error::mode: scan with new-library-set does not support old-header/old-include -- new-library-set is audit-only (no old side, ADR-056)."
+      exit 1
+    fi
+    add_flag "-H" "${INPUT_HEADER:-}"
+    add_flag "-H" "${INPUT_NEW_HEADER:-}"
+    add_flag "-I" "${INPUT_INCLUDE:-}"
+    add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
+  else
+    # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
+    # the --against side; old-header/old-include and new-header/new-include
+    # scope to one side only (ADR-040 L1) so a candidate-only header doesn't
+    # leak into the baseline side's parse (Codex review).
+    add_flag "-H" "${INPUT_HEADER:-}"
+    add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
+    add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
+    add_flag "-I" "${INPUT_INCLUDE:-}"
+    add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
+    add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
+  fi
 
   # Cross-compiler flags -- documented root-Action inputs, but previously
   # only wired to dump mode's branch (Codex review, same gap as compare
@@ -610,7 +660,10 @@ elif [[ "$MODE" == "scan" ]]; then
   # abi-baseline there. The deprecated `audit: true` back-compat alias
   # (above) achieves the same by skipping --against outright even when
   # against/abi-baseline resolved to a value elsewhere in the workflow.
-  if [[ "$FORCE_AUDIT_ONLY" != "true" ]]; then
+  # --artifact-set is audit-only at the CLI level too (ADR-056) — normally
+  # caught early by validate-inputs.sh; skip forwarding here as well for
+  # anyone invoking run.sh directly.
+  if [[ "$FORCE_AUDIT_ONLY" != "true" && -z "$SCAN_ARTIFACT_SET" ]]; then
     add_single_flag "--against" "${INPUT_AGAINST:-}"
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
@@ -913,7 +966,15 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       echo "| Old root | \`${INPUT_OLD_ROOT:-}\` |"
       echo "| New root | \`${INPUT_NEW_ROOT:-}\` |"
     elif [[ "$MODE" == "scan" ]]; then
-      echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
+      # new-library-set (ADR-056, --artifact-set) has no INPUT_NEW_LIBRARY
+      # value at all -- render the set operand instead so the summary
+      # doesn't show an empty Binary row for every artifact-set run
+      # (Codex review).
+      if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
+        echo "| Artifact set | \`${INPUT_NEW_LIBRARY_SET}\` |"
+      else
+        echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
+      fi
       if [[ -n "${INPUT_AGAINST:-}" ]]; then
         echo "| Against | \`${INPUT_AGAINST}\` |"
       fi

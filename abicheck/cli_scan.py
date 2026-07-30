@@ -52,6 +52,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import click
@@ -86,6 +87,7 @@ from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_compare_helpers import _cli_flag, _warn_force_public_ignored
 from .cli_helpers_compare import _collect_force_public_symbols
 from .cli_options import (
+    artifact_set_options,
     compile_context_options,
     env_matrix_option,
     lang_option,
@@ -478,8 +480,312 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
         sys.exit(outcome.exit_code)
 
 
+def _resolve_artifact_set_paths(spec: str) -> tuple[list[Path], bool]:
+    """``--artifact-set`` value → ``(paths, explicit)`` (ADR-056).
+
+    A single existing directory is expanded to every discoverable shared
+    library in it (``explicit=False`` — an unsupported file found this way is
+    silently skipped, mirroring ``build_bundle_snapshot``'s directory-scan
+    behavior); anything else is read as a comma-separated explicit path list
+    (``explicit=True`` — every named member must resolve and must look like a
+    real library, enforced by :func:`bundle.discover_artifact_set`).
+    """
+    from .package import discover_shared_libraries
+
+    candidate = Path(spec)
+    if "," not in spec and candidate.is_dir():
+        return discover_shared_libraries(candidate), False
+    parts = [p.strip() for p in spec.split(",") if p.strip()]
+    if not parts:
+        raise click.UsageError("--artifact-set must not be empty.")
+    paths: list[Path] = []
+    for part in parts:
+        p = Path(part)
+        if not p.exists():
+            raise click.UsageError(f"--artifact-set member not found: {part}")
+        paths.append(p)
+    return paths, True
+
+
+def _render_member_findings_lines(result: Any) -> list[str]:
+    """Render one artifact-set member's cross-check/pattern/preprocessor
+    findings for text output (P2, Codex review): the artifact-set text
+    report previously showed only ``path: verdict`` per member -- unlike the
+    single-binary ``scan``'s richly-rendered report and the aggregate JSON's
+    nested ``report``, it gave no finding descriptions or evidence
+    explaining *why* a member was flagged, leaving CLI/Action-summary users
+    unable to act on the result.
+
+    Reuses the same section renderers the single-binary path uses
+    (:func:`render_crosscheck_lines`/:func:`render_pattern_lines`/
+    :func:`render_preprocessor_lines`) via a minimal attribute shim, since
+    those renderers only ever read the report's already-plain-dict
+    ``crosscheck``/``pattern_scan``/``preprocessor_scan`` keys -- not any
+    behavior specific to the full :class:`~abicheck.scan_engine.ScanOutcome`
+    object ``ScanArtifactResult.result.report`` was flattened from.
+    """
+    report = result.report or {}
+    if not report:
+        return []
+    shim = SimpleNamespace(
+        crosscheck=report.get("crosscheck") or {},
+        crosscheck_severities=report.get("crosscheck_severities") or {},
+        pattern=report.get("pattern_scan") or {},
+        preprocessor=report.get("preprocessor_scan") or {},
+        audit=report.get("mode") == "audit",
+    )
+    lines = render_crosscheck_lines(shim)
+    lines += render_pattern_lines(shim)
+    lines += render_preprocessor_lines(shim)
+    return [f"  {ln}" if ln else "" for ln in lines]
+
+
+def _render_artifact_set_text(result: Any) -> str:
+    """Human-facing render of a :class:`ScanSetResult` (ADR-056).
+
+    Reuses :func:`bundle.render_bundle_findings_markdown` (G34 Phase 4) for
+    the bundle-findings section, the same helper
+    ``cli_compare_release_helpers._release_md_bundle_findings`` calls for
+    the two-sided ``compare``/release path — one rendering for
+    :class:`bundle.BundleFinding`, regardless of which side produced it.
+    """
+    from .bundle import render_bundle_findings_markdown
+
+    lines: list[str] = [
+        f"Artifact-set scan verdict: {result.verdict} (exit {result.exit_code})",
+        "",
+        "Per-artifact results:",
+    ]
+    for member in result.per_artifact:
+        lines.append(f"  {member.artifact}: {member.result.verdict}")
+        lines.extend(_render_member_findings_lines(member.result))
+    lines.append("")
+    if result.bundle_incomplete:
+        lines.append("Bundle analysis: incomplete (artifact-set discovery failed)")
+    elif result.verdict == "BUDGET_OVERFLOW":
+        # CodeRabbit review: run_scan_set() returns BUDGET_OVERFLOW before
+        # ever calling audit_bundle() -- bundle_incomplete/bundle_verdict
+        # stay at their ScanSetResult defaults (False/None), so without
+        # this branch the report fell through to the else below and
+        # printed the misleading "Bundle analysis: None (0 finding(s))"
+        # instead of stating the bundle audit never ran.
+        lines.append("Bundle analysis: not run (budget overflow)")
+    else:
+        lines.append(
+            f"Bundle analysis: {result.bundle_verdict} "
+            f"({len(result.bundle_findings)} finding(s))"
+        )
+        lines.extend(render_bundle_findings_markdown(result.bundle_findings))
+    return "\n".join(lines)
+
+
+_COMPARISON_ONLY_FLAGS = {
+    "suppress": "--suppress",
+    "policy_file_path": "--policy-file",
+    "policy": "--policy",
+    "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
+    "strict_suppressions": "--strict-suppressions",
+    "public_symbols": "--public-symbol",
+    "public_symbols_list": "--public-symbols-list",
+    "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
+    "env_matrix_path": "--env-matrix",
+}
+
+
+def _reject_comparison_only_flags(*, no_baseline_reason: str) -> None:
+    """Reject any flag from :data:`_COMPARISON_ONLY_FLAGS` given explicitly
+    on the command line, for a scan that has no ``--against`` baseline to
+    apply them to.
+
+    Shared by both the ``--against``-less single-binary path and the
+    ``--artifact-set`` path (always audit-only, ADR-056 D2 -- Codex review:
+    the single-binary check alone left this validation reachable only via
+    ``against is None``, which the ``--artifact-set`` branch's early
+    ``return`` never passes through, so these flags were silently parsed,
+    validated, and then discarded for a set instead of erroring).
+    """
+    ctx = click.get_current_context()
+    explicit = [
+        flag
+        for dest, flag in _COMPARISON_ONLY_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    ]
+    if explicit:
+        noun = "flag" if len(explicit) == 1 else "flags"
+        raise click.UsageError(
+            f"{', '.join(explicit)} only take effect with --against (they "
+            f"configure the baseline comparison); drop {'this' if len(explicit) == 1 else 'these'} "
+            f"{noun} or {no_baseline_reason}."
+        )
+
+
+def _run_artifact_set(
+    *,
+    artifact_set: str,
+    bundle_system_providers: str,
+    header_pairs: tuple[tuple[str, Path], ...],
+    include_pairs: tuple[tuple[str, Path], ...],
+    public_header_dirs: tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    compile_db: Path | None,
+    build_config: Path | None,
+    depth: str | None,
+    since: str | None,
+    changed_paths_opt: tuple[str, ...],
+    budget: str | None,
+    abi3: str | None,
+    crosschecks: tuple[str, ...],
+    risk_rules_path: Path | None,
+    lang: str,
+    allow_build_query: bool,
+    fmt: str,
+    output: Path | None,
+    header_backend: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    frontend_context: str,
+) -> None:
+    """``scan --artifact-set`` (ADR-056/G34): audit a set of libraries as one.
+
+    No old side (no ``--against``): discovers the declared set, scans each
+    member (the same always-on tier + pinned level every single-binary scan
+    runs), and adds one cross-library bundle-audit pass over the whole set.
+    Deliberately does not thread ``--dry-run`` through yet — see G34's
+    status for what's still deferred from this first slice.
+    """
+    from .bundle import ArtifactSetError, discover_artifact_set
+    from .service import Budget, ScanRequest
+    from .service_scan import run_scan_set
+
+    paths, explicit = _resolve_artifact_set_paths(artifact_set)
+    try:
+        discovered = discover_artifact_set(paths, explicit=explicit)
+    except ArtifactSetError as exc:
+        raise click.UsageError(str(exc)) from exc
+    if len(discovered) < 2:
+        raise click.UsageError(
+            "--artifact-set must resolve to 2 or more libraries "
+            f"(found {len(discovered)})."
+        )
+
+    header_both, header_old, header_new = split_sided_paths(header_pairs)
+    if header_old or header_new:
+        raise click.UsageError(
+            "--header old=/new= scoping is not supported with --artifact-set "
+            "(there is no old side to scope to)."
+        )
+    include_both, include_old, include_new = split_sided_paths(include_pairs)
+    if include_old or include_new:
+        raise click.UsageError(
+            "--include old=/new= scoping is not supported with --artifact-set "
+            "(there is no old side to scope to)."
+        )
+
+    # L2 compile context (dump<->scan<->compare parity, ADR-037 D3): the same
+    # resolver the single-binary path uses, so an --artifact-set cross-scan
+    # doesn't silently parse headers against the host toolchain when the
+    # caller explicitly selected a target sysroot/toolchain (Codex review).
+    compile_context, includes_tuple = resolve_compile_context(
+        click.get_current_context(),
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=tuple(gcc_option_tokens),
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        header_backend=header_backend,
+        includes=tuple(include_both),
+        build_config=build_config,
+        sources=sources,
+        frontend_context=frontend_context,
+    )
+
+    changed, changed_src, seeded = _resolve_changed_seed(
+        changed_paths_opt, since, sources
+    )
+    budget_s = _parse_budget(budget)
+    abi3_floor = _parse_abi3_floor(abi3)
+    enabled_checks, severities = _parse_crosschecks(crosschecks)
+    bsp = tuple(
+        s.strip() for s in bundle_system_providers.split(",") if s.strip()
+    )
+
+    req = ScanRequest(
+        binaries=list(discovered.values()),
+        headers=list(header_both),
+        includes=list(includes_tuple),
+        public_header_dirs=list(public_header_dirs),
+        sources=sources,
+        compile_db=compile_db,
+        build_info=build_info,
+        baseline=None,
+        mode="audit",
+        # The unset dial means 'auto' (ADR-037 D5), same as the single-binary
+        # path: only when --depth was omitted entirely does a member opt into
+        # risk-driven method selection -- a pinned --depth stays deterministic
+        # (Codex review: this was hard-coded to None, silently disabling
+        # --since/--changed-path risk-driven selection for every member).
+        source_method=SourceMethod.AUTO.value if depth is None else None,
+        depth=depth,
+        changed_paths=changed,
+        seeded=seeded,
+        budget=Budget(total_timeout=budget_s),
+        lang=lang,
+        compile=compile_context,
+        abi3_floor=abi3_floor,
+        enabled_checks=enabled_checks,
+        severities=severities,
+        build_config=build_config,
+        allow_build_query=allow_build_query,
+        risk_rules_path=risk_rules_path,
+        bundle_system_providers=bsp,
+        changed_src=changed_src,
+    )
+    try:
+        # run_scan_set()'s own audit_bundle() call can raise ArtifactSetError
+        # too (e.g. an ambiguous duplicate-SONAME set, only detectable after
+        # parsing every member's ELF metadata) -- propagated rather than
+        # degraded to a "successful" bundle_incomplete result (Codex
+        # review), surfaced here the same way discover_artifact_set's own
+        # ArtifactSetError already is above.
+        #
+        # ValueError: run_scan_set() loads --risk-rules via
+        # _load_risk_rules_for_service(), which is deliberately click-free
+        # (service_scan.py has no click dependency -- it's also reachable
+        # from the MCP server/Python API) and converts the single-binary
+        # path's own click.ClickException into ValueError instead. The
+        # single-binary path never needs a try/except for this because it
+        # calls the click-raising _load_risk_rules() directly, letting
+        # Click's own top-level handler render it; this service-layer call
+        # must translate that ValueError back into a usage error itself, or
+        # a malformed/unreadable --risk-rules file surfaces as an
+        # unhandled Python traceback and exit 1 instead (Codex review).
+        result = run_scan_set(req)
+    except (ArtifactSetError, ValueError) as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    text = (
+        json.dumps(result.to_dict(), indent=2)
+        if fmt == "json"
+        else _render_artifact_set_text(result)
+    )
+    if output:
+        _safe_write_output(output, text)
+        click.echo(f"Report written to {output}", err=True)
+    else:
+        click.echo(text)
+    if result.exit_code != 0:
+        sys.exit(result.exit_code)
+
+
 @main.command("scan")
-@click.argument("artifact", type=click.Path(exists=True, path_type=Path))
+@click.argument("artifact", type=click.Path(exists=True, path_type=Path), required=False)
+@artifact_set_options
 @click.option(
     "-H",
     "--header",
@@ -678,7 +984,9 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
 @verbose_option
 @compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
-    artifact: Path,
+    artifact: Path | None,
+    artifact_set: str | None,
+    bundle_system_providers: str,
     header_pairs: tuple[tuple[str, Path], ...],
     include_pairs: tuple[tuple[str, Path], ...],
     public_header_dirs: tuple[Path, ...],
@@ -746,8 +1054,79 @@ def scan_cmd(
     from .dry_run import reject_dry_run_with_output
     from .package import is_package
 
-    reject_dry_run_with_output(dry_run, output)
     _setup_verbosity(verbose)
+
+    # ADR-056: --artifact-set is mutually exclusive with the positional
+    # ARTIFACT, with --against (audit-only -- no old side for a set), and
+    # --bundle-system-providers is meaningless without --artifact-set.
+    #
+    # An empty ``--artifact-set ""`` must count as *supplied* (and be
+    # rejected outright), not as "not set": the exclusivity check below
+    # used to test truthiness (`bool(artifact_set)`, False for "") while
+    # the branch just after it tested `is not None` (True for "") -- with
+    # ARTIFACT also given, that mismatch let both pass the exclusivity
+    # check and then silently ignored ARTIFACT, resolving the empty string
+    # to Path("") == Path(".") and auditing the whole CWD instead of
+    # erroring (CodeRabbit review).
+    if artifact_set is not None and not artifact_set.strip():
+        raise click.UsageError("--artifact-set must not be empty.")
+    if (artifact is not None) == (artifact_set is not None):
+        raise click.UsageError(
+            "scan requires exactly one of ARTIFACT or --artifact-set."
+        )
+    if artifact_set is not None:
+        if against is not None:
+            raise click.UsageError(
+                "--against is not supported with --artifact-set "
+                "(audit-only -- no old side for a set)."
+            )
+        if dry_run:
+            raise click.UsageError(
+                "--dry-run is not yet supported with --artifact-set."
+            )
+        _reject_comparison_only_flags(no_baseline_reason="drop --artifact-set")
+        _run_artifact_set(
+            artifact_set=artifact_set,
+            bundle_system_providers=bundle_system_providers,
+            header_pairs=header_pairs,
+            include_pairs=include_pairs,
+            public_header_dirs=public_header_dirs,
+            sources=sources,
+            build_info=build_info,
+            compile_db=compile_db,
+            build_config=build_config,
+            depth=depth,
+            since=since,
+            changed_paths_opt=changed_paths_opt,
+            budget=budget,
+            abi3=abi3,
+            crosschecks=crosschecks,
+            risk_rules_path=risk_rules_path,
+            lang=lang,
+            allow_build_query=allow_build_query,
+            fmt=fmt,
+            output=output,
+            header_backend=header_backend,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            frontend_context=frontend_context,
+        )
+        return
+    if bundle_system_providers:
+        raise click.UsageError(
+            "--bundle-system-providers requires --artifact-set."
+        )
+    # The mutual-exclusion check above already guarantees exactly one of
+    # ARTIFACT/--artifact-set is set, and the --artifact-set branch always
+    # returns -- so `artifact` is non-None on every path reaching here.
+    # Narrows for mypy, which can't see that across the early return.
+    assert artifact is not None
+
+    reject_dry_run_with_output(dry_run, output)
     # --against's help text documents "a single file -- not a directory or
     # package", but `dir_okay=False` on the option itself only rejects
     # directories -- a package archive (.deb/.rpm/.tar.gz/...) still passes
@@ -853,30 +1232,7 @@ def scan_cmd(
     # setting the user actually needed. Reject them explicitly rather than
     # accepting no-op configuration.
     if against is None:
-        ctx = click.get_current_context()
-        _comparison_only_flags = {
-            "suppress": "--suppress",
-            "policy_file_path": "--policy-file",
-            "policy": "--policy",
-            "scope_public_headers": "--scope-public-headers/--no-scope-public-headers",
-            "strict_suppressions": "--strict-suppressions",
-            "public_symbols": "--public-symbol",
-            "public_symbols_list": "--public-symbols-list",
-            "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
-            "env_matrix_path": "--env-matrix",
-        }
-        explicit = [
-            flag
-            for dest, flag in _comparison_only_flags.items()
-            if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
-        ]
-        if explicit:
-            noun = "flag" if len(explicit) == 1 else "flags"
-            raise click.UsageError(
-                f"{', '.join(explicit)} only take effect with --against (they "
-                f"configure the baseline comparison); drop {'this' if len(explicit) == 1 else 'these'} "
-                f"{noun} or pass --against."
-            )
+        _reject_comparison_only_flags(no_baseline_reason="pass --against")
 
     # ADR-049 Phase 5 review (Codex, PR #657): resolve scope/suppression
     # settings through the project's `.abicheck.yml` the same way `compare`

@@ -126,6 +126,17 @@ Where/how a result is rendered — the invocation-level output choice.
 | `fmt` | `str` | `'text'` |
 | `path` | `Path \| None` | `None` |
 
+## `ScanArtifactResult`
+
+One member's :class:`ScanResult`, with the identity that result alone doesn't carry (ADR-056 — neither `ScanResult` nor its nested report carries a binary path or library name anywhere).
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `artifact` | `Path` | *(required)* |
+| `result` | `ScanResult` | *(required)* |
+
 ## `ScanRequest`
 
 Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
@@ -158,6 +169,14 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `pattern_verdicts` | `bool` | `False` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
+| `abi3_floor` | `tuple[int, int] \| None` | `None` |
+| `enabled_checks` | `frozenset[str] \| None` | `None` |
+| `severities` | `dict[str, str]` | `{}` |
+| `build_config` | `Path \| None` | `None` |
+| `allow_build_query` | `bool` | `False` |
+| `risk_rules_path` | `Path \| None` | `None` |
+| `bundle_system_providers` | `tuple[str, ...]` | `()` |
+| `changed_src` | `str` | `'run_scan_set'` |
 
 ## `ScanResult`
 
@@ -174,6 +193,21 @@ Typed result of an executed scan (ADR-035 D10) — the one object the CLI, the M
 | `confidence` | `dict[str, list[str]]` | `{}` |
 | `estimate` | `list[CostEstimate]` | `[]` |
 | `report` | `dict[str, Any]` | `{}` |
+
+## `ScanSetResult`
+
+Result of :func:`run_scan_set` — the ``--artifact-set`` sibling of :class:`ScanResult` (ADR-056). Not a change to what `run_scan`/ `ScanResult` return for the single-binary path.
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `verdict` | `str` | *(required)* |
+| `exit_code` | `int` | *(required)* |
+| `per_artifact` | `list[ScanArtifactResult]` | `[]` |
+| `bundle_findings` | `list[Any]` | `[]` |
+| `bundle_verdict` | `str \| None` | `None` |
+| `bundle_incomplete` | `bool` | `False` |
 
 ## `collect_metadata`
 
@@ -406,6 +440,27 @@ Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
 | `req` | `ScanRequest` | *(required)* |
 
 **Returns:** `ScanResult`
+
+## `run_scan_set`
+
+Execute an audit-mode, no-old-side scan over a *set* of artifacts (ADR-056, ``scan --artifact-set``).
+
+| Parameter | Type | Default |
+|---|---|---|
+| `req` | `ScanRequest` | *(required)* |
+
+**Returns:** `ScanSetResult`
+
+## `run_scan_set_subprocess`
+
+Run :func:`run_scan_set` in a killable child process (ADR-056).
+
+| Parameter | Type | Default |
+|---|---|---|
+| `req` | `ScanRequest` | *(required)* |
+| `timeout` | `float` | *(required)* |
+
+**Returns:** `dict[str, Any]`
 
 ## `run_scan_subprocess`
 

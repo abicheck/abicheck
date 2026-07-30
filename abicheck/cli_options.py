@@ -1005,6 +1005,38 @@ def set_input_options(func: F) -> F:
     return func
 
 
+def artifact_set_options(func: F) -> F:
+    """``scan --artifact-set`` knobs (ADR-056).
+
+    A small, dedicated pair rather than reuse of `release_options` wholesale
+    — `scan` doesn't need `--no-bundle-analysis`/`--bundle-cohort`/
+    `--manifest`, only the set operand and the system-provider allow-list.
+    `--bundle-system-providers`' option text matches `release_options`'
+    below verbatim (same flag, same meaning, just declared for a different
+    command) rather than being redefined with different wording.
+    """
+    func = click.option(
+        "--artifact-set",
+        "artifact_set",
+        default=None,
+        metavar="DIR|PATH,PATH,...",
+        help="Audit a *set* of libraries with no old side, as one artifact "
+        "(ADR-056): a directory (every discoverable shared library in it) "
+        "or an explicit comma-separated path list. Mutually exclusive with "
+        "the positional ARTIFACT and with --against (audit-only — no "
+        "old-side comparison for a set).",
+    )(func)
+    func = click.option(
+        "--bundle-system-providers",
+        "bundle_system_providers",
+        default="",
+        help="Comma-separated extra sonames to treat as system-provided "
+        "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
+        "Only meaningful with --artifact-set.",
+    )(func)
+    return func
+
+
 def release_options(func: F) -> F:
     """Directory/package (release) comparison knobs, folded onto ``compare``.
 

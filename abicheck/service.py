@@ -1923,34 +1923,28 @@ def run_compare(
     )
     return run_compare_request(request)
 
-
-# ── Output rendering (extracted to a leaf module) ────────────────────────────
-#
-# ``render_output`` and friends live in ``service_render`` so this module stays
-# under the AI-readiness size cap. Re-exported here verbatim so the public
-# Python API — ``from abicheck.service import render_output`` — is unchanged.
-# ``service_render`` is a leaf: it does not import this module at load time.
+# ── Output rendering (extracted to leaf module service_render, a non-
+# importing-us leaf) to stay under the AI-readiness size cap; re-exported
+# verbatim so ``from abicheck.service import render_output`` is unchanged. ──
 from .service_render import (  # noqa: E402,F401
     _render_deps_section_md,
     _render_json_output,
     render_output,
 )
 
-# ── Scan service (extracted to a leaf module) ────────────────────────────────
-#
-# The ADR-035 D10 typed scan engine (ScanRequest → ScanResult / [CostEstimate])
-# lives in ``service_scan`` so this module stays under the AI-readiness size cap.
-# Re-exported here verbatim so the public Python API — ``from abicheck.service
-# import ScanRequest`` etc. — is unchanged. ``service_scan`` is a leaf: it does
-# not import this module at load time.
+# ── Scan service (ADR-035 D10 typed engine: ScanRequest → ScanResult /
+# [CostEstimate]) extracted to leaf module service_scan, same size-cap/re-
+# export/non-circular-import rationale as service_render above. ────────────
 from .service_scan import (  # noqa: E402,F401
     _HEADER_EXTS,
     Budget,
     CompileContext,
     CostEstimate,
     LayerResult,
+    ScanArtifactResult,
     ScanRequest,
     ScanResult,
+    ScanSetResult,
     _count_compile_db_tus,
     _count_pack_tus,
     _count_source_tus,
@@ -1966,6 +1960,8 @@ from .service_scan import (  # noqa: E402,F401
     pair_wide_cxx20_std_override,
     run_audit,
     run_scan,
+    run_scan_set,
+    run_scan_set_subprocess,
     run_scan_subprocess,
 )
 
@@ -1980,8 +1976,10 @@ __all__ = [
     "InputSpec",
     "LayerResult",
     "OutputSpec",
+    "ScanArtifactResult",
     "ScanRequest",
     "ScanResult",
+    "ScanSetResult",
     "collect_metadata",
     "compare_snapshots",
     "detect_binary_format",
@@ -1995,6 +1993,8 @@ __all__ = [
     "run_compare_request",
     "run_dump",
     "run_scan",
+    "run_scan_set",
+    "run_scan_set_subprocess",
     "run_scan_subprocess",
     "sniff_text_format",
 ]

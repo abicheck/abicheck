@@ -7,6 +7,7 @@ examples/case90-93 fixtures live in tests/test_bundle_examples.py.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -82,6 +83,25 @@ def _snapshot(libraries: dict[str, ElfMetadata]) -> BundleSnapshot:
     )
 
 
+def _write_elf_shared_object_stub(path: Path) -> None:
+    """Write a minimal, structurally-valid ELF64 shared-object (ET_DYN, no
+    program headers) -- enough to pass package._is_elf_shared_object's
+    magic/class/type/PT_INTERP-absence checks (discover_artifact_set's
+    explicit-list form validates against that, not just the 4-byte magic
+    sniff -- Codex review), without needing a real compiled binary.
+    """
+    import struct
+
+    data = bytearray(64)
+    data[0:4] = b"\x7fELF"
+    data[4] = 2  # ELFCLASS64
+    data[5] = 1  # little-endian
+    struct.pack_into("<H", data, 16, 3)  # e_type = ET_DYN
+    struct.pack_into("<Q", data, 32, 0)  # e_phoff = 0
+    struct.pack_into("<H", data, 56, 0)  # e_phnum = 0
+    path.write_bytes(bytes(data))
+
+
 def _diff(
     library: str, *changes: Change, verdict: Verdict = Verdict.BREAKING
 ) -> DiffResult:
@@ -143,6 +163,58 @@ class TestResolutionGraph:
         snap = _snapshot(meta)
         assert "libalgo.so.1" in snap.resolution.intra_needed["libcore.so"]
         assert "libc.so.6" in snap.resolution.extra_needed["libcore.so"]
+
+    def test_dt_needed_resolves_via_real_filename_without_soname(self) -> None:
+        # P2 regression (Codex review): a versioned library with no
+        # DT_SONAME must still resolve a sibling's DT_NEEDED entry that
+        # names its real on-disk filename (e.g. "libfoo.so.1"), not just
+        # its canonical key ("libfoo.so") -- indexing only the canonical
+        # key misclassified this as an "extra" (external) edge instead of
+        # "intra", breaking reachability for consumers of that provider.
+        libraries = {
+            "libfoo.so": Path("/fake/libfoo.so.1"),
+            "libconsumer.so": Path("/fake/libconsumer.so"),
+        }
+        metadata = {
+            "libfoo.so": _meta(soname=""),  # no DT_SONAME
+            "libconsumer.so": _meta(
+                soname="libconsumer.so", needed=["libfoo.so.1"]
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
+        assert graph.extra_needed["libconsumer.so"] == []
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin on Windows")
+    def test_dt_needed_resolves_via_real_filename_of_symlinked_member(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): the earlier fix above indexed
+        # ``libraries[name].name`` -- fine when the discovered path already
+        # *is* the real file, but directory discovery's usual
+        # "libfoo.so -> libfoo.so.1" pair sorts the symlink first and keeps
+        # it as the representative discovered path, so ``.name`` on it was
+        # still just "libfoo.so", never the real target's on-disk filename
+        # a sibling's DT_NEEDED actually names. Must resolve through the
+        # symlink to index the real basename.
+        real = tmp_path / "libfoo.so.1"
+        real.write_bytes(b"")
+        link = tmp_path / "libfoo.so"
+        link.symlink_to(real)
+
+        libraries = {
+            "libfoo.so": link,
+            "libconsumer.so": tmp_path / "libconsumer.so",
+        }
+        metadata = {
+            "libfoo.so": _meta(soname=""),  # no DT_SONAME
+            "libconsumer.so": _meta(
+                soname="libconsumer.so", needed=["libfoo.so.1"]
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        assert graph.intra_needed["libconsumer.so"] == ["libfoo.so.1"]
+        assert graph.extra_needed["libconsumer.so"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -1463,6 +1535,574 @@ class TestSystemProvidersAllowList:
                 and f.symbol == "__cxa_atexit"
                 for f in r.bundle_findings
             )
+
+
+# ---------------------------------------------------------------------------
+# Audit-mode (no old side) bundle finding — ADR-056, scan --artifact-set
+# ---------------------------------------------------------------------------
+
+
+class TestUnresolvedIntraDependency:
+    """`_detect_unresolved_intra_dependency` — the audit-mode sibling of
+    `_detect_intra_dep_removed` (no old side, single resolution graph)."""
+
+    def _detect(self, snapshot: BundleSnapshot, system_providers: set[str] | None = None):
+        from abicheck.bundle import _detect_unresolved_intra_dependency
+
+        return _detect_unresolved_intra_dependency(
+            snapshot, system_providers or set()
+        )
+
+    def test_detects_missing_provider(self) -> None:
+        new = _snapshot(
+            {
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    imports=["mystery_symbol"],
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert len(findings) == 1
+        assert findings[0].kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+        assert findings[0].symbol == "mystery_symbol"
+        assert findings[0].consumer_library == "libalgo.so"
+
+    def test_resolved_import_no_finding(self) -> None:
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_add"],
+                ),
+            }
+        )
+        assert self._detect(new) == []
+
+    def test_skips_weak_import(self) -> None:
+        from abicheck.elf_metadata import ElfImport, SymbolBinding
+
+        meta = _meta(soname="libplugin.so.1")
+        meta.imports.append(
+            ElfImport(name="optional_hook", binding=SymbolBinding.WEAK)
+        )
+        new = _snapshot({"libplugin.so": meta})
+        assert self._detect(new) == []
+
+    def test_version_mismatch_produces_finding(self) -> None:
+        # Consumer requires foo@V2; the only intra-set provider exports foo@V1.
+        # A real, load-time-unresolvable mismatch (P1 regression).
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=["foo"],
+                    export_versions={"foo": "V1"},
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["foo"],
+                    import_versions={"foo": "V2"},
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
+    def test_unversioned_import_not_resolved_by_nondefault_only_export(
+        self,
+    ) -> None:
+        # P2 regression (Codex review): a provider exporting a symbol only
+        # as a non-default versioned definition (foo@V1, not foo@@V1)
+        # cannot satisfy an unversioned consumer reference -- the dynamic
+        # linker requires a *default* definition for that. ProviderEntry
+        # previously dropped ElfSymbol.is_default entirely, so any
+        # reachable provider of the bare symbol name resolved an
+        # unversioned import regardless of default-ness.
+        provider_meta = _meta(soname="libcore.so.1")
+        provider_meta.symbols.append(
+            ElfSymbol(
+                name="foo", visibility="default", version="V1", is_default=False
+            )
+        )
+        new = _snapshot(
+            {
+                "libcore.so": provider_meta,
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["foo"],
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
+    def test_version_soname_target_matches_but_version_differs(self) -> None:
+        # Consumer's verneed pins the exact provider soname (liba.so.1) AND
+        # requires foo@V2 from it; liba.so is reachable and does export foo,
+        # but only at V1. The version_soname branch must still check
+        # p.version == consumer.version, not just p.library == target_lib
+        # (P1 regression: the soname-precise match alone let a wrong-version
+        # export on the *correct* library read as resolved).
+        new = _snapshot(
+            {
+                "liba.so": _meta(
+                    soname="liba.so.1",
+                    exports=["foo"],
+                    export_versions={"foo": "V1"},
+                ),
+                "libconsumer.so": _meta(
+                    soname="libconsumer.so.1",
+                    needed=["liba.so.1"],
+                    imports=["foo"],
+                    import_versions={"foo": "V2"},
+                    import_version_sonames={"foo": "liba.so.1"},
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
+    def test_same_label_different_provider_produces_finding(self) -> None:
+        # Consumer's verneed targets liba.so for foo@V1; liba.so no longer
+        # exports it, but unrelated sibling libb.so also exports foo@V1.
+        # Label-only matching would wrongly accept libb.so.
+        new = _snapshot(
+            {
+                "liba.so": _meta(soname="liba.so.1"),  # dropped foo
+                "libb.so": _meta(
+                    soname="libb.so.1",
+                    exports=["foo"],
+                    export_versions={"foo": "V1"},
+                ),
+                "libconsumer.so": _meta(
+                    soname="libconsumer.so.1",
+                    needed=["liba.so.1", "libb.so.1"],
+                    imports=["foo"],
+                    import_versions={"foo": "V1"},
+                    import_version_sonames={"foo": "liba.so.1"},
+                ),
+            }
+        )
+        findings = self._detect(new)
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
+    def test_mixed_intra_and_external_consumer_not_suppressed(self) -> None:
+        # P1 soundness fix: a consumer depending on both an intra-set
+        # library (which stopped exporting the symbol) and an ordinary
+        # external one (libc.so.6) must still produce the finding — the
+        # coarse allow-list suppression only applies to a purely-external
+        # consumer.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # stopped exporting
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libc.so.6"],
+                    imports=["core_symbol"],
+                ),
+            }
+        )
+        from abicheck.bundle import DEFAULT_SYSTEM_PROVIDERS
+
+        findings = self._detect(new, set(DEFAULT_SYSTEM_PROVIDERS))
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "core_symbol"
+            for f in findings
+        )
+
+    def test_purely_external_consumer_suppressed_with_allow_list(self) -> None:
+        new = _snapshot(
+            {
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libvendor.so.1"],
+                    imports=["vendor_init"],
+                ),
+            }
+        )
+        without_allow_list = self._detect(new)
+        assert any(f.symbol == "vendor_init" for f in without_allow_list)
+
+        with_allow_list = self._detect(new, {"libvendor.so.1"})
+        assert not any(f.symbol == "vendor_init" for f in with_allow_list)
+
+    def test_unversioned_zero_edges_not_suppressed(self) -> None:
+        # Vacuous-all([])-guard regression: a consumer with zero non-intra
+        # DT_NEEDED edges must not be suppressed merely because all() over
+        # an empty list is vacuously True.
+        new = _snapshot(
+            {
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", imports=["orphan_symbol"]
+                ),
+            }
+        )
+        findings = self._detect(new, {"anything"})
+        assert any(f.symbol == "orphan_symbol" for f in findings)
+
+    def test_unreachable_provider_still_produces_finding(self) -> None:
+        # libconsumer imports foo but has no DT_NEEDED path (direct or
+        # transitive) to unrelated sibling libplugin — merely including
+        # libplugin in the set must not count as resolving the import.
+        new = _snapshot(
+            {
+                "libconsumer.so": _meta(soname="libconsumer.so.1", imports=["foo"]),
+                "libplugin.so": _meta(soname="libplugin.so.1", exports=["foo"]),
+            }
+        )
+        findings = self._detect(new)
+        assert any(f.symbol == "foo" for f in findings)
+
+    def test_reachable_provider_via_transitive_dependency(self) -> None:
+        # libalgo -> libcore -> libbase; libbase provides the symbol.
+        new = _snapshot(
+            {
+                "libbase.so": _meta(soname="libbase.so.1", exports=["base_fn"]),
+                "libcore.so": _meta(
+                    soname="libcore.so.1", needed=["libbase.so.1"]
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["base_fn"],
+                ),
+            }
+        )
+        assert self._detect(new) == []
+
+
+class TestAuditBundleDuplicateSoname:
+    """P2 regression (Codex review): two distinct set members sharing the
+    same DT_SONAME make provider resolution ambiguous --
+    provider_library_for_soname() (first-metadata-match) and
+    _compute_resolution_graph()'s reverse-soname map (last-match-wins)
+    disagreed on which library a shared soname resolves to, so the same
+    DT_NEEDED edge could be classified against the wrong provider and
+    produce a false bundle_unresolved_intra_dependency finding.
+    audit_bundle() now rejects the ambiguity outright instead of guessing.
+    """
+
+    def test_rejects_duplicate_soname(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle import ArtifactSetError, audit_bundle
+
+        libraries = {
+            "liba.so": Path("liba.so"),
+            "libb.so": Path("libb.so"),
+        }
+
+        def _fake_snapshot(libs):
+            return _snapshot(
+                {
+                    "liba.so": _meta(soname="libshared.so.1"),
+                    "libb.so": _meta(soname="libshared.so.1", exports=["foo"]),
+                }
+            )
+
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", _fake_snapshot)
+        with pytest.raises(ArtifactSetError, match="ambiguous duplicate SONAME"):
+            audit_bundle(libraries)
+
+    def test_distinct_sonames_not_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        from abicheck.bundle import audit_bundle
+
+        libraries = {
+            "liba.so": Path("liba.so"),
+            "libb.so": Path("libb.so"),
+        }
+
+        def _fake_snapshot(libs):
+            return _snapshot(
+                {
+                    "liba.so": _meta(soname="liba.so.1"),
+                    "libb.so": _meta(soname="libb.so.1"),
+                }
+            )
+
+        monkeypatch.setattr(bundle_mod, "build_bundle_snapshot", _fake_snapshot)
+        result = audit_bundle(libraries)
+        assert result.findings == []
+
+
+class TestBuildBundleSnapshotDeadlineCheckpoint:
+    """P2 regression (Codex review): build_bundle_snapshot()'s per-library
+    parsing loop must call deadline.check() between members so a slow or
+    pathological ELF set aborts as soon as an active deadline.deadline_scope
+    expires, rather than only being detectable by an elapsed-time check
+    after the whole snapshot finishes building.
+    """
+
+    def test_raises_when_deadline_already_expired(self) -> None:
+        from abicheck import deadline
+        from abicheck.bundle import build_bundle_snapshot
+
+        with deadline.deadline_scope(-1):
+            with pytest.raises(deadline.DeadlineExceeded):
+                build_bundle_snapshot(
+                    {"a.so": Path("/fake/a.so"), "b.so": Path("/fake/b.so")}
+                )
+
+    def test_no_deadline_is_a_no_op(self, tmp_path: Path) -> None:
+        from abicheck.bundle import build_bundle_snapshot
+
+        json_file = tmp_path / "libnotelf.so"
+        json_file.write_text('{"library": "fake", "version": "1"}')
+        # No deadline_scope active -- must behave exactly as before.
+        snap = build_bundle_snapshot({"libnotelf.so": json_file})
+        assert snap.libraries == {}
+
+
+class TestReachableIntraLibrariesSymlinkAlias:
+    """P2 regression (Codex review): _reachable_intra_libraries() BFS used
+    provider_library_for_soname()'s independent name/soname/filename-stem
+    heuristic to resolve an intra-bundle DT_NEEDED edge, which doesn't know
+    about a resolved-through-symlink real filename --
+    _compute_resolution_graph() classified that edge as intra correctly
+    (using its own soname_to_name map, which the resolved-basename fix
+    populates), but the BFS resolving the *same* edge disagreed, so a
+    provider discovered via a differently-named symlink alias
+    (``aaa.so -> libreal.so.1``, no DT_SONAME) was never marked reachable,
+    producing a false bundle_unresolved_intra_dependency finding for a
+    genuinely resolved import.
+    """
+
+    def test_provider_reachable_via_symlink_alias_real_filename(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.bundle import (
+            _compute_resolution_graph,
+            _detect_unresolved_intra_dependency,
+        )
+
+        real = tmp_path / "libreal.so.1"
+        real.write_bytes(b"")
+        link = tmp_path / "aaa.so"  # arbitrarily named, sorts before the target
+        link.symlink_to(real)
+
+        libraries = {
+            "aaa.so": link,
+            "libconsumer.so": tmp_path / "libconsumer.so",
+        }
+        metadata = {
+            "aaa.so": _meta(soname="", exports=["foo"]),  # no DT_SONAME
+            "libconsumer.so": _meta(
+                soname="libconsumer.so",
+                needed=["libreal.so.1"],
+                imports=["foo"],
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        # Sanity: the edge really is classified as intra (pre-existing fix).
+        assert graph.intra_needed["libconsumer.so"] == ["libreal.so.1"]
+
+        snapshot = BundleSnapshot(
+            root=tmp_path, libraries=libraries, metadata=metadata, resolution=graph
+        )
+        findings = _detect_unresolved_intra_dependency(snapshot, set())
+        assert findings == []
+
+    def test_version_mismatch_not_misclassified_as_external_via_symlink_alias(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): _import_is_external()'s
+        # version_soname path called BundleSnapshot.is_intra_bundle_provider()
+        # (the same independent heuristic just fixed above), which doesn't
+        # resolve a provider retained through a differently-named symlink
+        # alias with no DT_SONAME -- misclassifying it as "external" and
+        # suppressing a genuine, real version-mismatch finding (consumer
+        # needs foo@V2, the reachable provider only exports foo@V1).
+        from abicheck.bundle import (
+            _compute_resolution_graph,
+            _detect_unresolved_intra_dependency,
+        )
+
+        real = tmp_path / "libreal.so.1"
+        real.write_bytes(b"")
+        link = tmp_path / "aaa.so"
+        link.symlink_to(real)
+
+        libraries = {
+            "aaa.so": link,
+            "libconsumer.so": tmp_path / "libconsumer.so",
+        }
+        metadata = {
+            "aaa.so": _meta(
+                soname="", exports=["foo"], export_versions={"foo": "V1"}
+            ),
+            "libconsumer.so": _meta(
+                soname="libconsumer.so",
+                needed=["libreal.so.1"],
+                imports=["foo"],
+                import_versions={"foo": "V2"},
+                import_version_sonames={"foo": "libreal.so.1"},
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        snapshot = BundleSnapshot(
+            root=tmp_path, libraries=libraries, metadata=metadata, resolution=graph
+        )
+        findings = _detect_unresolved_intra_dependency(snapshot, set())
+        assert any(
+            f.kind == ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY
+            and f.symbol == "foo"
+            for f in findings
+        )
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="hard links behave differently on Windows"
+    )
+    def test_hard_link_alias_not_misclassified_as_unresolved(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review, fresh evidence after the prior
+        # hard-link dedup finding): discover_artifact_set() dedupes
+        # candidate paths on filesystem identity and keeps only one
+        # representative path per inode -- so when a provider has multiple
+        # hard-linked names (e.g. "libfoo.so.1" and "libfoo.so.1.0.0") and a
+        # consumer's DT_NEEDED names the alias that was *not* kept as the
+        # representative, _compute_resolution_graph()'s soname_to_name map
+        # previously had no entry for it at all: the provider read as
+        # unreachable and the audit emitted a false
+        # bundle_unresolved_intra_dependency. Inode dedup correctly counts
+        # one binary but must still index every loader-visible alias.
+        from abicheck.bundle import _detect_unresolved_intra_dependency
+
+        representative = tmp_path / "libfoo.so.1"
+        _write_elf_shared_object_stub(representative)
+        alias = tmp_path / "libfoo.so.1.0.0"
+        os.link(representative, alias)
+
+        # The representative path kept by discover_artifact_set's dedup is
+        # "libfoo.so.1" (first-seen); the consumer's DT_NEEDED names the
+        # *other* hard-linked alias, "libfoo.so.1.0.0", which discovery
+        # discarded entirely.
+        libraries = {
+            "libfoo.so.1": representative,
+            "libconsumer.so": tmp_path / "libconsumer.so",
+        }
+        metadata = {
+            "libfoo.so.1": _meta(soname="", exports=["foo"]),
+            "libconsumer.so": _meta(
+                soname="libconsumer.so",
+                needed=["libfoo.so.1.0.0"],
+                imports=["foo"],
+            ),
+        }
+        graph = _compute_resolution_graph(libraries, metadata)
+        snapshot = BundleSnapshot(
+            root=tmp_path, libraries=libraries, metadata=metadata, resolution=graph
+        )
+        findings = _detect_unresolved_intra_dependency(snapshot, set())
+        assert findings == []
+
+
+class TestArtifactSetDiscovery:
+    def test_rejects_colliding_explicit_paths(self, tmp_path: Path) -> None:
+        from abicheck.bundle import ArtifactSetError, discover_artifact_set
+
+        d1 = tmp_path / "dir1"
+        d2 = tmp_path / "dir2"
+        d1.mkdir()
+        d2.mkdir()
+        p1 = d1 / "libfoo.so"
+        p2 = d2 / "libfoo.so"
+        _write_elf_shared_object_stub(p1)
+        _write_elf_shared_object_stub(p2)
+        with pytest.raises(ArtifactSetError, match="colliding library identities"):
+            discover_artifact_set([p1, p2], explicit=True)
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="symlinks need admin on Windows"
+    )
+    def test_dedupes_symlink_alias(self, tmp_path: Path) -> None:
+        from abicheck.bundle import discover_artifact_set
+
+        real = tmp_path / "libfoo.so.1"
+        _write_elf_shared_object_stub(real)
+        link = tmp_path / "libfoo.so"
+        link.symlink_to(real)
+        result = discover_artifact_set([real, link], explicit=False)
+        assert len(result) == 1
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="hard links behave differently on Windows"
+    )
+    def test_dedupes_hard_link_alias(self, tmp_path: Path) -> None:
+        # P2 regression (Codex review): Path.resolve() only follows
+        # symlinks, not hard links -- two hard-linked aliases of the same
+        # DSO (a real, if unusual, library-directory layout) previously
+        # survived discovery as distinct members instead of being
+        # deduplicated the same way a symlink alias already is.
+        from abicheck.bundle import discover_artifact_set
+
+        real = tmp_path / "libfoo.so.1"
+        _write_elf_shared_object_stub(real)
+        alias = tmp_path / "libfoo.so"
+        try:
+            os.link(real, alias)
+        except OSError:
+            pytest.skip("hard links unsupported in this environment")
+        result = discover_artifact_set([real, alias], explicit=False)
+        assert len(result) == 1
+
+    def test_rejects_unsupported_explicit_member(self, tmp_path: Path) -> None:
+        from abicheck.bundle import ArtifactSetError, discover_artifact_set
+
+        not_elf = tmp_path / "readme.txt"
+        not_elf.write_text("not a library")
+        with pytest.raises(ArtifactSetError):
+            discover_artifact_set([not_elf], explicit=True)
+
+    def test_rejects_non_shared_object_elf_explicit_member(
+        self, tmp_path: Path
+    ) -> None:
+        # P2 regression (Codex review): an explicitly-named ELF file with the
+        # right magic bytes but the wrong e_type (an executable, relocatable
+        # object, or core file, not ET_DYN) must still be rejected -- the
+        # explicit-list form is not laxer than directory discovery, which
+        # already restricts itself to real shared objects.
+        from abicheck.bundle import ArtifactSetError, discover_artifact_set
+
+        good = tmp_path / "libgood.so"
+        _write_elf_shared_object_stub(good)
+        executable = tmp_path / "not_a_library"
+        data = bytearray(64)
+        data[0:4] = b"\x7fELF"
+        data[4] = 2
+        data[5] = 1
+        import struct as _struct
+
+        _struct.pack_into("<H", data, 16, 2)  # e_type = ET_EXEC
+        executable.write_bytes(bytes(data))
+        with pytest.raises(ArtifactSetError, match="non-ELF-shared-object"):
+            discover_artifact_set([good, executable], explicit=True)
 
 
 # ---------------------------------------------------------------------------

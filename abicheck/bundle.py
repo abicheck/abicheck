@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -62,7 +63,7 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     ProviderEntry as ProviderEntry,
     ResolutionGraph as ResolutionGraph,
 )
-from .checker_policy import ChangeKind, Verdict
+from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
 
@@ -92,9 +93,34 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
     Linux/ELF-only by design (see ADR-018 — PE/Mach-O bundle analysis is
     out of scope for this iteration).
     """
+    from . import deadline
+
     metadata: dict[str, ElfMetadata] = {}
     surviving: dict[str, Path] = {}
     for name, path in libraries.items():
+        # Cooperative checkpoint (no-op unless a deadline.deadline_scope()
+        # is active, e.g. service_scan.run_scan_set's audit-mode call) --
+        # lets a large/pathological set's parsing loop abort between
+        # members instead of only being caught by an elapsed-time check
+        # after the whole snapshot finishes building (Codex review).
+        # Deliberately not a bound on the parse_elf_metadata() call itself
+        # (Codex review, fresh finding): a single large/malformed member
+        # can still run past --budget mid-parse before this checkpoint is
+        # reached again on the *next* member, unlike a spawned castxml/
+        # clang subprocess (bounded per-call via deadline.bounded_timeout())
+        # -- parse_elf_metadata is pure in-process struct parsing, not a
+        # killable child process, and threading deadline.check() calls
+        # into its shared, general-purpose ELF-parsing internals (used far
+        # beyond this one audit-mode caller) is out of scope for this
+        # narrow fix. The one place this call path *is* genuinely bounded
+        # by an OS-level killable timeout end to end is
+        # service_scan.run_scan_set_subprocess (what MCP's abi_scan uses);
+        # the CLI path (cli_scan._run_artifact_set) calls run_scan_set()
+        # directly, the same architecture the single-binary scan command
+        # already uses for run_scan_core, so this is a pre-existing CLI-
+        # wide limitation (cooperative checkpoints only, no OS-level kill),
+        # not one specific to bundle auditing.
+        deadline.check()
         # Bundle analysis is Linux/ELF-only by design (see ADR-018,
         # ADR-023). Skip JSON snapshots, PE/Mach-O, or other formats up
         # front so parse_elf_metadata never emits its "Magic number does
@@ -131,6 +157,311 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
     )
 
 
+class ArtifactSetError(ValueError):
+    """Raised by :func:`discover_artifact_set` for an invalid `--artifact-set`.
+
+    A plain, framework-agnostic exception — the CLI layer (``cli_scan.py``)
+    turns this into a ``click.UsageError`` (exit 64); this module has no
+    click dependency.
+    """
+
+
+def discover_artifact_set(
+    paths: list[Path], *, explicit: bool
+) -> dict[str, Path]:
+    """Resolve a list of paths into a ``{canonical_name: path}`` bundle map.
+
+    ADR-056: shared by both ``--artifact-set`` forms (a directory the caller
+    already expanded to its member files, or an explicit comma-separated
+    path list) — the caller passes ``explicit=True`` only for the latter.
+
+    Two corrections folded in after review (both real, not edge cases):
+
+    - **Symlink-alias deduplication.** A completely ordinary Unix install
+      layout has both a versioned real file (``libfoo.so.1``) and an
+      unversioned dev symlink to it (``libfoo.so``) — ``discover_shared_
+      libraries()`` (``abicheck/package.py``) lists both as separate
+      discovered paths, and both canonicalize to the same name. Resolving
+      each path (``Path.resolve()``) and deduplicating identical targets
+      *before* collision-checking means this common layout is accepted, not
+      rejected.
+    - **Collision rejection for genuinely distinct files.** Once aliases are
+      collapsed, two *different* resolved files that still canonicalize to
+      the same library name (e.g. an explicit ``dir1/libfoo.so,
+      dir2/libfoo.so`` naming two unrelated real files) are rejected
+      outright — unlike ``compare``'s two-sided old-vs-new matching
+      (``_build_match_map``), a one-sided audit set has no "newest version
+      wins" tiebreak that would be sound here.
+
+    For the explicit-list form, every named path must look like a real ELF
+    shared object (``package._is_elf_shared_object``) — every entry was
+    deliberately named by the caller, so silently dropping an unsupported
+    one (the way
+    :func:`build_bundle_snapshot` does for a directory scan, where "some
+    files aren't libraries" is expected) would misrepresent the audit as
+    covering the full declared set. Raises :class:`ArtifactSetError` for any
+    unsupported explicit member, or for a genuine name collision.
+    """
+    from .binary_utils import _canonical_library_key
+
+    resolved_by_real: dict[Path | tuple[int, int], Path] = {}
+    for path in paths:
+        try:
+            real = path.resolve()
+        except OSError:
+            real = path
+        # Path.resolve() only follows symlinks -- it does not coalesce two
+        # hard links to the same inode (a real, if unusual, way a library
+        # directory can carry both a versioned name and an unversioned
+        # alias). When available, key on filesystem identity
+        # (st_dev, st_ino) instead of the resolved path, so both survive-
+        # as-distinct-members outcomes Codex flagged are avoided: two
+        # hard-linked aliases with the *same* canonical name no longer
+        # spuriously collide below, and two differently-named hard-linked
+        # aliases no longer pass the cardinality check as if they were
+        # genuinely distinct libraries (bundle analysis is Linux/ELF-only
+        # by design, ADR-018/023, so POSIX inode semantics always apply
+        # here).
+        try:
+            st = real.stat()
+            identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
+        except OSError:
+            identity = real
+        # Keep the first-seen original (unresolved) path for user-facing
+        # messages/reporting identity; only the resolution key is the
+        # canonicalized real path / filesystem identity.
+        resolved_by_real.setdefault(identity, path)
+
+    if explicit:
+        # A full ET_DYN-vs-PIE shared-object check (package.py's
+        # _is_elf_shared_object), not just the cheap 4-byte magic sniff
+        # _path_looks_like_elf uses elsewhere in this module: an explicitly
+        # named ELF executable, relocatable object, or core file has the
+        # right magic bytes but is not a library, and directory discovery
+        # (package.discover_shared_libraries) already restricts its own
+        # members to real shared objects -- the explicit-list form must not
+        # be laxer just because the caller typed the path out (Codex review).
+        from .package import _is_elf_shared_object
+
+        unsupported = [
+            p for p in resolved_by_real.values() if not _is_elf_shared_object(p)
+        ]
+        if unsupported:
+            names = ", ".join(str(p) for p in unsupported)
+            raise ArtifactSetError(
+                f"--artifact-set names unsupported (non-ELF-shared-object) "
+                f"member(s): {names}. Every explicitly-named path must be a "
+                "real shared library (not an executable, relocatable "
+                "object, or core file); for a mixed directory, pass the "
+                "directory instead."
+            )
+
+    buckets: dict[str, list[Path]] = {}
+    for path in resolved_by_real.values():
+        buckets.setdefault(_canonical_library_key(path), []).append(path)
+
+    collisions = {key: vals for key, vals in buckets.items() if len(vals) > 1}
+    if collisions:
+        detail = "; ".join(
+            f"'{key}': {[str(p) for p in vals]}" for key, vals in collisions.items()
+        )
+        raise ArtifactSetError(
+            f"--artifact-set has colliding library identities: {detail}. "
+            "Each library in an artifact set must have a distinct canonical "
+            "name; rename or drop the duplicate(s)."
+        )
+
+    return {key: vals[0] for key, vals in buckets.items()}
+
+
+@dataclass
+class BundleAuditResult:
+    """Output of :func:`audit_bundle` — the no-old-side sibling of
+    :class:`BundleDiffResult`.
+
+    Unlike :class:`BundleDiffResult` there is no ``old_root``/``per_library``:
+    an audit has exactly one side (the declared artifact set), no diff to
+    read, and therefore only the subset of bundle findings computable from a
+    single-side resolution graph (see
+    :func:`_detect_unresolved_intra_dependency`).
+    """
+
+    snapshot: BundleSnapshot
+    findings: list[BundleFinding] = field(default_factory=list)
+
+    @property
+    def verdict(self) -> Verdict:
+        changes = [f.to_change() for f in self.findings]
+        return compute_verdict(changes)
+
+
+def check_artifact_set_soname_collisions(libraries: dict[str, Path]) -> None:
+    """Reject an ambiguous duplicate-``DT_SONAME`` artifact set up front.
+
+    P2 regression (Codex review): :func:`audit_bundle` only discovers this
+    ambiguity *after* building the full resolution graph — for
+    ``scan --artifact-set``, that means only after every member has already
+    been individually scanned (:func:`~abicheck.service_scan.run_scan_set`
+    runs :func:`discover_artifact_set` → per-member scans →
+    :func:`audit_bundle`, in that order). If an earlier member scan then
+    exhausted ``--budget``, this genuine usage error was masked as an
+    ordinary ``BUDGET_OVERFLOW``, and every member's own (potentially
+    expensive, e.g. a build/compiler query) scan already ran for a request
+    that was always going to be rejected. ``discover_artifact_set``'s own
+    prevalidation is filesystem-identity-only and cannot see this — a
+    ``DT_SONAME`` collision is only visible after parsing each member's ELF
+    dynamic section.
+
+    Deliberately re-parses each member (the same per-library
+    :func:`~abicheck.elf_metadata.parse_elf_metadata` cost
+    :func:`build_bundle_snapshot` already pays) rather than building the
+    full snapshot's resolution graph here — the collision check only needs
+    each member's ``DT_SONAME``, not the (comparatively more expensive)
+    intra-set dependency edges ``build_bundle_snapshot`` also computes.
+    """
+    from . import deadline
+
+    metadata: dict[str, ElfMetadata] = {}
+    for name, path in libraries.items():
+        deadline.check()
+        if not _path_looks_like_elf(path):
+            continue
+        try:
+            meta = parse_elf_metadata(path)
+        except Exception as exc:  # pragma: no cover — parse_elf_metadata already swallows most
+            log.warning("bundle: failed to parse %s: %s", path, exc)
+            continue
+        if meta is not None:
+            metadata[name] = meta
+    duplicate_sonames = _find_duplicate_sonames(metadata)
+    if duplicate_sonames:
+        detail = "; ".join(
+            f"'{soname}': {names}" for soname, names in duplicate_sonames.items()
+        )
+        raise ArtifactSetError(
+            f"--artifact-set has ambiguous duplicate SONAME provider(s): "
+            f"{detail}. Each library in an artifact set must advertise a "
+            "distinct DT_SONAME; rename or drop the duplicate(s)."
+        )
+
+
+def audit_bundle(
+    libraries: dict[str, Path],
+    *,
+    bundle_system_providers: Iterable[str] = (),
+) -> BundleAuditResult:
+    """Run the audit-mode (no old side) bundle analysis for a declared set.
+
+    ADR-056: the ``scan --artifact-set`` entry point into the bundle layer.
+    ``libraries`` is expected to already be collision-free and ELF-validated
+    (:func:`discover_artifact_set`) — this function does not re-validate
+    that, it only builds the snapshot and runs the audit-mode detector.
+    """
+    snapshot = build_bundle_snapshot(libraries)
+    # P2 regression (Codex review): two distinct set members advertising the
+    # same DT_SONAME make provider resolution genuinely ambiguous --
+    # provider_library_for_soname() (bundle_models.py) returns the first
+    # metadata match, while _compute_resolution_graph()'s reverse-soname map
+    # keeps the *last* match, so the same DT_NEEDED edge is classified
+    # against two different candidate providers by two different call
+    # sites. Rather than silently guessing (either a false "unresolved"
+    # finding when the picked provider doesn't actually export the symbol,
+    # or a false negative if it happens to), reject the ambiguity outright
+    # -- mirroring discover_artifact_set()'s own collision rejection for
+    # duplicate canonical names.
+    duplicate_sonames = _find_duplicate_sonames(snapshot.metadata)
+    if duplicate_sonames:
+        detail = "; ".join(
+            f"'{soname}': {names}" for soname, names in duplicate_sonames.items()
+        )
+        raise ArtifactSetError(
+            f"--artifact-set has ambiguous duplicate SONAME provider(s): "
+            f"{detail}. Each library in an artifact set must advertise a "
+            "distinct DT_SONAME; rename or drop the duplicate(s)."
+        )
+    sys_providers = set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)
+    findings = _detect_unresolved_intra_dependency(snapshot, sys_providers)
+    return BundleAuditResult(snapshot=snapshot, findings=findings)
+
+
+def _find_duplicate_sonames(
+    metadata: dict[str, ElfMetadata],
+) -> dict[str, list[str]]:
+    """Return ``{soname: [library_names]}`` for every non-empty DT_SONAME
+    shared by 2+ distinct libraries in *metadata* (empty dict if none)."""
+    by_soname: dict[str, list[str]] = {}
+    for name, meta in metadata.items():
+        if meta.soname:
+            by_soname.setdefault(meta.soname, []).append(name)
+    return {soname: names for soname, names in by_soname.items() if len(names) > 1}
+
+
+def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
+    """Markdown lines for a list of bundle findings (G34 Phase 4).
+
+    Shared by ``cli_compare_release_helpers._release_md_bundle_findings``
+    (:class:`BundleDiffResult`'s two-sided findings) and
+    ``cli_scan._render_artifact_set_text`` (:class:`BundleAuditResult`'s
+    single-sided ``scan --artifact-set`` findings, ADR-056) — the rendering
+    itself only ever needs the flat ``list[BundleFinding]``, never the
+    wrapper object, so one function covers both call sites. Returns ``[]``
+    for an empty list (the caller decides whether/how to still render a
+    section heading for "no findings").
+    """
+    lines: list[str] = []
+    for f in findings:
+        # Library-scoped findings (bundle_library_added /
+        # bundle_library_removed) carry the library name in `symbol`;
+        # manifest/import findings carry the symbol. Both are non-empty in
+        # practice, but guard against future finding shapes with no attribution.
+        lines.append(
+            f"- **{f.kind.value}**"
+            + (f" — `{f.symbol}`" if f.symbol else "")
+            + (f" (consumer: `{f.consumer_library}`)" if f.consumer_library else "")
+            + (f" (provider: `{f.provider_library}`)" if f.provider_library else ""),
+        )
+        lines.append(f"  - {f.description}")
+    return lines
+
+
+def _hard_link_alias_basenames(path: Path) -> list[str]:
+    """Basenames of *other* directory entries hard-linked to ``path``.
+
+    ``discover_artifact_set()`` dedupes candidate paths on filesystem
+    identity (``st_dev``/``st_ino``) and keeps only one representative path
+    per inode -- so if a provider library has multiple hard-linked names
+    (e.g. ``libfoo.so.1`` and ``libfoo.so.1.0.0``), any alias basename other
+    than the representative's own is otherwise discarded entirely and never
+    reaches ``soname_to_name``. Recover them by scanning the representative
+    path's own directory for siblings sharing its identity. Best-effort: a
+    permission error or non-existent path/parent yields no aliases rather
+    than raising, matching this module's existing conservative-on-failure
+    behavior for filesystem probes.
+    """
+    try:
+        target_stat = path.stat()
+    except OSError:
+        return []
+    aliases = []
+    try:
+        entries = list(path.parent.iterdir())
+    except OSError:
+        return []
+    for entry in entries:
+        if entry.name == path.name:
+            continue
+        try:
+            entry_stat = entry.stat()
+        except OSError:
+            continue
+        if (entry_stat.st_dev, entry_stat.st_ino) == (
+            target_stat.st_dev,
+            target_stat.st_ino,
+        ):
+            aliases.append(entry.name)
+    return aliases
+
+
 def _compute_resolution_graph(
     libraries: dict[str, Path],
     metadata: dict[str, ElfMetadata],
@@ -150,8 +481,52 @@ def _compute_resolution_graph(
     for name, meta in metadata.items():
         if meta.soname:
             soname_to_name[meta.soname] = name
-        # Also map raw filename so a missing SONAME doesn't hide siblings.
+        # Also map the canonical key itself so a missing SONAME doesn't hide
+        # siblings when a consumer's DT_NEEDED happens to spell the
+        # canonical form verbatim.
         soname_to_name.setdefault(name, name)
+        # And the library's *actual* on-disk filename (e.g. "libfoo.so.1")
+        # -- distinct from the canonical key (e.g. "libfoo.so") whenever the
+        # library is versioned. Without a DT_SONAME, a sibling's DT_NEEDED
+        # entry names this real filename verbatim; indexing only the
+        # canonical key left that edge unresolved, misclassifying a real
+        # intra-bundle DT_NEEDED as "extra" (external) and breaking
+        # reachability for consumers of that provider (Codex review).
+        #
+        # ``libraries[name]`` is the discovered path, which for the common
+        # ``libfoo.so -> libfoo.so.1`` symlink pair is the *symlink itself*
+        # (discover_artifact_set/directory discovery sort alphabetically and
+        # keep the first-seen alias, i.e. the unversioned symlink, as the
+        # representative path) -- so ``.name`` on it is just "libfoo.so"
+        # again, not the real target's filename. Resolve through the
+        # symlink to index the actual on-disk basename a sibling's
+        # DT_NEEDED would name (Codex review: the original fix only worked
+        # when the discovered path already *was* the real file).
+        if name in libraries:
+            try:
+                resolved_name = libraries[name].resolve().name
+            except OSError:
+                resolved_name = libraries[name].name
+            soname_to_name.setdefault(resolved_name, name)
+            soname_to_name.setdefault(libraries[name].name, name)
+            # A provider can also have *hard-linked* aliases -- distinct
+            # directory entries sharing one inode, common for a
+            # ``libfoo.so.1``/``libfoo.so.1.0.0`` pair. discover_artifact_
+            # set()'s own dedup keeps only one representative path per
+            # inode, so an alias basename a consumer's DT_NEEDED names is
+            # otherwise never indexed here at all -- the provider reads as
+            # unreachable and the audit emits a false
+            # bundle_unresolved_intra_dependency (Codex review, fresh
+            # evidence). Recover the discarded aliases by scanning the
+            # representative path's own directory for siblings sharing its
+            # (st_dev, st_ino) identity and indexing each one's basename
+            # too -- self-contained here, no need to thread alias lists
+            # through discover_artifact_set's public dict[str, Path] return
+            # type.
+            for alias in _hard_link_alias_basenames(libraries[name]):
+                soname_to_name.setdefault(alias, name)
+
+    graph.soname_to_name = soname_to_name
 
     # Index exports.
     for name, meta in metadata.items():
@@ -159,7 +534,9 @@ def _compute_resolution_graph(
             if sym.visibility not in ("default", "protected"):
                 continue
             graph.provides.setdefault(sym.name, []).append(
-                ProviderEntry(library=name, version=sym.version),
+                ProviderEntry(
+                    library=name, version=sym.version, is_default=sym.is_default
+                ),
             )
 
     # Index DT_NEEDED edges and intra-bundle imports.
@@ -409,6 +786,173 @@ def _detect_intra_dep_removed(
                         f"{consumer.library} imports {symbol}, but no library in "
                         f"the new bundle exports it. Runtime load of "
                         f"{consumer.library} will fail with undefined symbol."
+                    ),
+                    consumer_library=consumer.library,
+                    affected_libraries=[consumer.library],
+                ),
+            )
+    return findings
+
+
+def _reachable_intra_libraries(snapshot: BundleSnapshot, root: str) -> set[str]:
+    """BFS over intra-bundle ``DT_NEEDED`` edges starting at ``root``.
+
+    Returns every library transitively reachable from ``root`` through the
+    bundle's own resolution graph (i.e. what would actually be loaded when
+    ``root`` is loaded) — not including ``root`` itself. Used by
+    :func:`_detect_unresolved_intra_dependency` so a symbol is only
+    considered resolved by a provider the consumer can actually reach, not
+    merely one present somewhere else in the declared set.
+    """
+    seen: set[str] = set()
+    queue = [root]
+    while queue:
+        lib = queue.pop()
+        for soname in snapshot.resolution.intra_needed.get(lib, []):
+            # Resolve via the exact same soname_to_name map
+            # _compute_resolution_graph() used to classify this edge as
+            # intra in the first place -- provider_library_for_soname()'s
+            # independent name/soname/filename-stem heuristic doesn't know
+            # about a resolved-through-symlink real filename, so a library
+            # discovered via a differently-named alias (Codex review)
+            # classified correctly as intra could still resolve to no
+            # target here, understating reachability and producing a false
+            # bundle_unresolved_intra_dependency finding.
+            target = snapshot.resolution.soname_to_name.get(soname)
+            if target is None or target == lib or target in seen:
+                continue
+            seen.add(target)
+            queue.append(target)
+    return seen
+
+
+def _detect_unresolved_intra_dependency(
+    new: BundleSnapshot,
+    system_providers: set[str],
+) -> list[BundleFinding]:
+    """Audit-mode (no old side) sibling of :func:`_detect_intra_dep_removed`.
+
+    ADR-056 D2: ``scan --artifact-set`` has no per-library diff to read
+    (unlike :func:`_detect_intra_dep_removed`, driven by a diff's
+    ``func_removed``/``var_removed`` changes) — this operates purely off the
+    new-side resolution graph. It is deliberately **not** a call into
+    :func:`_detect_intra_dep_removed` and differs from it in three ways that
+    matter for soundness here:
+
+    1. **Version-aware, reachability-constrained provider matching.**
+       ``providers_for(symbol)`` is name-only and set-wide.
+       ``ProviderEntry.version``/``ConsumerEntry.version`` are consulted so a
+       version mismatch (consumer needs ``foo@V2``, set only provides
+       ``foo@V1``) is not mistaken for a resolved import; when the precise
+       ``ConsumerEntry.version_soname`` is known, the match is further
+       pinned to that exact provider library (GNU version *labels* are not
+       globally unique, so two siblings can both export ``foo@V1`` and a
+       label-only match could accept the wrong one). Every candidate
+       provider must additionally be reachable from the consumer through
+       :func:`_reachable_intra_libraries` — a name/version match on a
+       library the consumer has no ``DT_NEEDED`` path to would never
+       actually be loaded together with the consumer.
+    2. **A narrower, explicitly-approximate suppression path for unversioned
+       imports.** Mirrors ``_detect_intra_dep_removed``'s
+       ``e in system_providers or _looks_system(e)`` allow-list union
+       (built-in ``DEFAULT_SYSTEM_PROVIDERS`` plus caller-supplied
+       ``--bundle-system-providers``) and its non-empty guard
+       (``extra_edges and all(...)``, never a bare ``all([])``), but adds a
+       requirement that one-sided audit needs and the diff-driven detector
+       does not: the consumer must have **zero** intra-bundle ``DT_NEEDED``
+       edges. A consumer that still depends on an intra-set library (which
+       simply stopped exporting the symbol) has a real, in-set candidate
+       provider that this coarse allow-list check cannot rule out — only a
+       consumer whose entire dependency set is external is eligible for
+       this suppression path. Deliberately has **no** symbol-name-shape
+       fallback (``_looks_system_symbol``): ``--bundle-system-providers``
+       exists specifically to cover a legitimate, non-system-shaped custom
+       export (e.g. ``vendor_init``) that a shape heuristic would never
+       match.
+    3. Emits ``ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY`` (not
+       ``BUNDLE_INTRA_DEP_REMOVED`` — that kind's own description implies a
+       diff-confirmed removal, which this finding cannot claim) at
+       ``COMPATIBLE_WITH_RISK``, not ``BREAKING``: an audit has no old side
+       to confirm the symbol ever resolved, so this is reported as a risk to
+       investigate, not a confirmed break.
+    """
+    findings: list[BundleFinding] = []
+    reachable_cache: dict[str, set[str]] = {}
+
+    def _reachable(lib: str) -> set[str]:
+        if lib not in reachable_cache:
+            reachable_cache[lib] = _reachable_intra_libraries(new, lib)
+        return reachable_cache[lib]
+
+    for symbol, consumers in new.resolution.consumers.items():
+        providers = new.resolution.providers_for(symbol)
+        for consumer in consumers:
+            if consumer.weak:
+                continue
+            consumer_meta = new.metadata.get(consumer.library)
+            if consumer_meta is None:
+                continue
+            reachable = _reachable(consumer.library)
+
+            if consumer.version:
+                if consumer.version_soname:
+                    # Same soname_to_name map _reachable_intra_libraries()
+                    # uses (Codex review) -- provider_library_for_soname()'s
+                    # independent heuristic has the identical
+                    # resolved-through-symlink gap, so a version_soname
+                    # naming a provider's real on-disk filename could fail
+                    # to resolve here even when that provider is genuinely
+                    # reachable.
+                    target_lib = new.resolution.soname_to_name.get(
+                        consumer.version_soname
+                    )
+                    resolved = target_lib is not None and target_lib in reachable
+                    resolved = resolved and any(
+                        p.library == target_lib and p.version == consumer.version
+                        for p in providers
+                    )
+                else:
+                    resolved = any(
+                        p.version == consumer.version and p.library in reachable
+                        for p in providers
+                    )
+            else:
+                # P2 regression (Codex review): an unversioned consumer
+                # reference can only be satisfied by an unversioned or
+                # default-version ("@@default") provider definition -- a
+                # provider that exports this symbol *only* as a non-default
+                # versioned definition ("foo@V1", not "foo@@V1") cannot
+                # satisfy it, even though the bare symbol name is reachable.
+                resolved = any(
+                    p.library in reachable and p.is_default for p in providers
+                )
+
+            if resolved:
+                continue
+            if _import_is_external(consumer, consumer_meta, new):
+                continue
+
+            if not consumer.version:
+                intra_edges = new.resolution.intra_needed.get(consumer.library, [])
+                extra_edges = new.resolution.extra_needed.get(consumer.library, [])
+                if (
+                    not intra_edges
+                    and extra_edges
+                    and all(
+                        e in system_providers or _looks_system(e)
+                        for e in extra_edges
+                    )
+                ):
+                    continue
+
+            findings.append(
+                BundleFinding(
+                    kind=ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY,
+                    symbol=symbol,
+                    description=(
+                        f"{consumer.library} imports {symbol}, but no provider "
+                        "was found for it in this artifact set (audit mode — "
+                        "no old side to confirm this ever resolved)."
                     ),
                     consumer_library=consumer.library,
                     affected_libraries=[consumer.library],
@@ -1173,10 +1717,29 @@ def _import_is_external(
     version = consumer.version
     if not version:
         return False
+
+    def _resolves_intra(soname: str) -> bool:
+        # Two independent, complementary signals, either sufficient:
+        # resolution.soname_to_name is the exact map
+        # _reachable_intra_libraries()/the version_soname pinning above use
+        # (knows a member's real on-disk filename when retained through a
+        # differently named symlink alias with no DT_SONAME -- Codex
+        # review); is_intra_bundle_provider() additionally does filename-
+        # stem matching (a SONAME-major bump, e.g. libcore.so.1 ->
+        # libcore.so.2, where a sibling's DT_NEEDED still cites the old
+        # soname -- test_versioned_import_after_soname_bump_still_fires),
+        # which the exact map alone does not cover since it only indexes a
+        # library's *current* soname/canonical key/real filename, never a
+        # soname it used to advertise.
+        return (
+            soname in snapshot.resolution.soname_to_name
+            or snapshot.is_intra_bundle_provider(soname)
+        )
+
     # Preferred path: the exact verneed provider for *this* symbol is known.
     # No label-collision ambiguity — resolve this import directly.
     if consumer.version_soname:
-        return not snapshot.is_intra_bundle_provider(consumer.version_soname)
+        return not _resolves_intra(consumer.version_soname)
     # Fallback: per-symbol verneed soname not captured. Scan the label across
     # all verneed providers. If any soname carrying this label resolves inside
     # the bundle, treat the import as intra (keep the finding); only when every
@@ -1186,7 +1749,7 @@ def _import_is_external(
     for soname, versions in consumer_meta.versions_required.items():
         if version not in versions:
             continue
-        if snapshot.is_intra_bundle_provider(soname):
+        if _resolves_intra(soname):
             return False  # required from a bundle sibling — keep the finding
         external_match = True
     if external_match:

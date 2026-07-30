@@ -463,6 +463,10 @@ class ChangeKind(str, Enum):
     BUNDLE_LIBRARY_REMOVED = "bundle_library_removed"
     BUNDLE_LIBRARY_ADDED = "bundle_library_added"
     BUNDLE_INTRA_DEP_VERSION_DRIFT = "bundle_intra_dep_resolved_to_different_version"
+    # ADR-056: audit-scoped (no old side) bundle finding, scan --artifact-set.
+    # Deliberately distinct from BUNDLE_INTRA_DEP_REMOVED, which implies a
+    # diff-confirmed removal; this fires from a single-side resolution graph.
+    BUNDLE_UNRESOLVED_INTRA_DEPENDENCY = "bundle_unresolved_intra_dependency"
 
     # ── Explicit specifier transitions on constructors / conversion ops ─
     # Source-level contract: an `explicit` specifier added to a previously-

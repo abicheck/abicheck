@@ -318,18 +318,13 @@ def _collect_additions(result: DiffResult) -> list[object]:
     return [c for c in result.changes if c.kind in addition_kinds]
 
 
-def _canonical_library_key(path: Path) -> str:
-    """Canonical key used to match libraries across releases.
-
-    For ELF versioned names, canonicalize to ``*.so`` (e.g. ``libfoo.so.1.2`` → ``libfoo.so``).
-    Vendored auditwheel/delocate hash suffixes are stripped first (G9) so the
-    same bundled dependency pairs across rebuilds despite its hash changing.
-    """
-    lower = strip_vendor_hash(path.name.lower())
-    m = re.search(r"\.so(?:\.|$)", lower)
-    if m:
-        return lower[: m.start() + 3]
-    return lower
+#: Moved to ``binary_utils.py`` (a true leaf module) to break an import
+#: cycle (`bundle -> cli_helpers_compare -> service -> service_scan ->
+#: bundle`, ADR-056) introduced when ``service_scan.run_scan_set`` started
+#: importing ``bundle.discover_artifact_set``, which itself needs this
+#: function. Re-exported here for every existing caller of
+#: ``cli_helpers_compare._canonical_library_key`` (notably ``cli.py``).
+from .binary_utils import _canonical_library_key as _canonical_library_key  # noqa: E402
 
 
 def _version_sort_key(
