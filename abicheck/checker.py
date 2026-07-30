@@ -542,6 +542,7 @@ def _apply_contract_evaluation_shadow(
     pp_ctx: PipelineContext,
     redundant: list[Change] | None = None,
     suppressed: list[Change] | None = None,
+    reconciled: list[Change] | None = None,
 ) -> None:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
     *kept* finding **and** every finding public-surface scoping already
@@ -570,6 +571,20 @@ def _apply_contract_evaluation_shadow(
     the finding itself is still rendered -- suppression is a display/gate
     decision, not a reason to erase what contract relevance was already
     established (or would be established) for the underlying finding.
+
+    *reconciled* (Codex review, fresh evidence) is ``DiffResult.
+    reconciled_changes`` -- a finding ``--reconcile-build-context`` cleared
+    from ``kept`` because the build's active preprocessor defines prove it
+    a context-free header-parse phantom (a conditional field's phantom
+    add/remove the build proves never actually happened), but which stays
+    visible in its own audit ledger (``reporter._add_reconciled``,
+    ``build_context_reconciled.changes``). Reconciliation runs *before*
+    this shadow evaluator (so a reconciled finding never reaches ``kept``
+    in the first place), so without stamping this bucket too, its audit
+    entry would report none of the promised contract fields even though
+    the finding is still reported -- the same "moved to an audit bucket,
+    not entitled to lose its contract decision" reasoning as *redundant*/
+    *suppressed* above.
 
     Purely additive -- never consulted by verdict computation, policy, or
     exit-code logic (see ``Change.contract_relevance``'s own docstring).
@@ -619,7 +634,13 @@ def _apply_contract_evaluation_shadow(
     # a header-scoping run corresponds to contract=public.
     mode = ContractMode.PUBLIC if scope_to_public_surface else ContractMode.ALL
 
-    all_changes = kept + pp_ctx.out_of_surface + (redundant or []) + (suppressed or [])
+    all_changes = (
+        kept
+        + pp_ctx.out_of_surface
+        + (redundant or [])
+        + (suppressed or [])
+        + (reconciled or [])
+    )
     decisions = evaluate_snapshot_pair_contract_relevance(
         all_changes,
         surf_old,
@@ -1053,6 +1074,7 @@ def compare(
         _apply_contract_evaluation_shadow(
             kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx,
             redundant=redundant_for_report, suppressed=suppressed,
+            reconciled=reconciled,
         )
 
     return DiffResult(

@@ -393,6 +393,67 @@ class TestReportValidatesAgainstSchema:
         assert redundant[0].contract_relevance is not None
         assert redundant[0].contract_reason_code is not None
 
+    def test_contract_evaluation_stamps_reconciled_bucket(self):
+        # Regression (Codex review, PR #658, fresh evidence): a finding
+        # --reconcile-build-context clears from `kept` (a context-free
+        # header-parse phantom the build's active defines prove never
+        # happened) stays visible in its own audit ledger
+        # (reporter._add_reconciled, build_context_reconciled.changes) --
+        # but reconciliation runs *before* _apply_contract_evaluation_shadow
+        # (checker.compare's own pipeline order), so the cleared finding
+        # never reached `kept` and its ledger entry silently lost the
+        # contract decision it would otherwise carry.
+        from abicheck.checker import _apply_contract_evaluation_shadow
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.post_processing import PipelineContext
+
+        old = AbiSnapshot(library="lib", version="1")
+        new = AbiSnapshot(library="lib", version="2")
+        kept = [
+            Change(ChangeKind.FUNC_REMOVED, "api", "removed"),
+        ]
+        reconciled = [
+            Change(
+                ChangeKind.TYPE_FIELD_ADDED, "Cfg::flag",
+                "conditional field phantom add cleared by build context",
+            )
+        ]
+        assert reconciled[0].contract_relevance is None
+        _apply_contract_evaluation_shadow(
+            kept, old, new,
+            scope_to_public_surface=True, force_public_symbols=None,
+            pp_ctx=PipelineContext(old=old, new=new),
+            reconciled=reconciled,
+        )
+        assert reconciled[0].contract_relevance is not None
+        assert reconciled[0].contract_reason_code is not None
+
+    def test_contract_evaluation_stamps_reconciled_bucket_end_to_end(self):
+        # Same fix, exercised through a real --reconcile-build-context
+        # false-positive clear (test_diff_reconcile.py's own canonical
+        # fixture) rather than a hand-built Change, and through the real
+        # JSON renderer (reporter._add_reconciled) end to end.
+        from tests.test_diff_reconcile import _fp_pair
+
+        old, new = _fp_pair()
+        result = compare(
+            old, new,
+            scope_to_public_surface=True,
+            reconcile_build_context=True,
+            contract_evaluation=True,
+        )
+        assert result.reconciled_count == 1
+        assert result.reconciled_changes[0].contract_relevance is not None
+
+        payload = json.loads(reporter.to_json(result))
+        self._validate(payload)
+        reconciled_entries = payload["build_context_reconciled"]["changes"]
+        assert reconciled_entries
+        for e in reconciled_entries:
+            assert "contract_relevance" in e
+            assert "contract_reason_code" in e
+
     def test_out_of_surface_findings_omit_contract_fields_by_default(self):
         # Without contract_evaluation=True, out_of_surface_changes entries
         # must stay exactly as before -- no new keys at all.

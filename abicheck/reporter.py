@@ -249,18 +249,26 @@ def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
     """
     if not result.reconciled_changes:
         return
+    entries: list[dict[str, object]] = []
+    for c in result.reconciled_changes:
+        entry: dict[str, object] = {
+            "kind": c.kind.value,
+            "symbol": c.symbol,
+            "description": c.description,
+            "source_location": c.source_location,
+            "reason": getattr(c, "surface_exclusion_reason", None),
+        }
+        # ADR-049 Phase 3 (Codex review, fresh evidence): reconciliation runs
+        # before checker._apply_contract_evaluation_shadow (a reconciled
+        # finding never reaches `kept`), so without this call the ledger
+        # entry silently lost the contract decision the finding would
+        # otherwise carry -- a no-op when contract_evaluation was never
+        # requested, mirroring this helper's other callers.
+        _add_contract_evaluation_fields(entry, c)
+        entries.append(entry)
     d["build_context_reconciled"] = {
         "count": result.reconciled_count,
-        "changes": [
-            {
-                "kind": c.kind.value,
-                "symbol": c.symbol,
-                "description": c.description,
-                "source_location": c.source_location,
-                "reason": getattr(c, "surface_exclusion_reason", None),
-            }
-            for c in result.reconciled_changes
-        ],
+        "changes": entries,
     }
 
 

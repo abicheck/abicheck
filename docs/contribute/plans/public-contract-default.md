@@ -1230,6 +1230,47 @@ callable parameter instead of importing it itself; both call sites already
 had their own `_finding_id` import in scope for other reasons, so this
 closes the duplication without adding a new cross-module edge.
 
+**A fourth review round (Codex) found one more audit bucket with the
+identical unstamped-ledger shape as the redundant/suppressed fixes
+above.** A finding `--reconcile-build-context` clears from `kept` (a
+context-free header-parse phantom the build's active defines prove never
+happened, ADR-039) stays visible in its own ledger
+(`reporter._add_reconciled`, `build_context_reconciled.changes`), but
+reconciliation runs *before* `_apply_contract_evaluation_shadow` in
+`checker.compare`'s own pipeline order — the reconciled finding never
+reaches `kept`, so its ledger entry never got a contract decision. Fixed
+the same way as the two buckets before it: `_apply_contract_evaluation_shadow`
+gained a third optional `reconciled` parameter (folded into `all_changes`
+alongside `redundant`/`suppressed`), threaded from `checker.compare`'s own
+already-in-scope `reconciled` local, and `_add_reconciled` now calls
+`_add_contract_evaluation_fields` on each ledger entry. Two new tests:
+`test_contract_evaluation_stamps_reconciled_bucket` (unit-level, mirroring
+the redundant-bucket test's direct-call pattern) and
+`test_contract_evaluation_stamps_reconciled_bucket_end_to_end` (a real
+`--reconcile-build-context` false-positive clear, reusing
+`test_diff_reconcile.py`'s own canonical `_fp_pair()` fixture, through the
+real JSON renderer) — unlike the redundant-bucket fix, a natural real-
+detector fixture *was* readily available here via existing test
+infrastructure, so both a unit and an end-to-end test landed.
+
+At this point, four independent review rounds (two Codex, one CodeRabbit,
+one more Codex) have each found exactly one more unstamped bucket/gap in
+this same feature — `scoped_only_changes`/missing-labels,
+`redundant_changes`+`MCP_CLI_NAME_MAP`, markdown rendering+
+`suppressed_changes`, and now `reconciled_changes`. `Change.contract_relevance`
+is genuinely a **shadow, cross-cutting field**: every place `checker.py`'s
+pipeline can pull a finding out of `kept` into a side ledger before
+`_apply_contract_evaluation_shadow` runs is a place that ledger can go
+unstamped unless it's explicitly threaded through. `kept` +
+`pp_ctx.out_of_surface` + `redundant` + `suppressed` + `reconciled` is
+believed to be the complete set of pre-shadow-evaluator side buckets as of
+this pass (grep for `DiffResult` fields populated from a list separate
+from `changes` turns up no further candidates), but this pattern — a
+*new* opt-in post-processing step landing in the future and creating a
+*sixth* bucket without updating `_apply_contract_evaluation_shadow` to
+match — is a real, structural risk worth naming explicitly for whoever
+adds the next one.
+
 Measure:
 
 - delta by old/new decision;
