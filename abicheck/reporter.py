@@ -679,15 +679,25 @@ def _scope_dict(result: DiffResult) -> dict[str, object] | None:
         "manual_review_required": not result.scope_resolved,
         "public_additions": summary.compatible_additions,
         "filtered_internal_count": result.out_of_surface_count,
-        "filtered_internal_changes": [
-            {
-                "kind": c.kind.value,
-                "symbol": c.symbol,
-                "description": c.description,
-            }
-            for c in result.out_of_surface_changes
-        ],
+        "filtered_internal_changes": [_filtered_internal_entry(c) for c in result.out_of_surface_changes],
     }
+
+
+def _filtered_internal_entry(c: Change) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "kind": c.kind.value,
+        "symbol": c.symbol,
+        "description": c.description,
+    }
+    # ADR-049 Phase 3 (Codex review, fresh evidence): result.out_of_surface_changes
+    # is the same list _apply_contract_evaluation_shadow already stamps
+    # (folded into all_changes alongside `kept`) -- this second, independent
+    # serialization of the identical Change objects (scope.filtered_internal_changes,
+    # distinct from surface_scope.out_of_surface_changes above) never read the
+    # fields, so a --contract-evaluation consumer of this established ledger
+    # missed the decision even though the sibling ledger already carried it.
+    _add_contract_evaluation_fields(entry, c)
+    return entry
 
 
 def _add_check_identity(d: dict[str, object], result: DiffResult) -> None:

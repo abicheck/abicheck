@@ -1436,6 +1436,30 @@ on the `PUBLIC` path, unchanged. New test:
 (`tests/test_contract_evaluation.py`), mirroring the existing PUBLIC-mode
 regression test for the identical reason but asserting the ALL-mode case.
 
+**Updated (2026-07-30): a fourth independent JSON serialization site of the
+same demoted findings never carried the stamp (Codex review, fresh
+evidence).** `result.out_of_surface_changes` is serialized twice in a JSON
+report: once under `surface_scope.out_of_surface_changes` (already stamped,
+per the P1 fix above) and once more, independently, under `reporter.
+_scope_dict`'s own `scope.filtered_internal_changes` ledger (ADR-024/issue
+#235's older, `--scope-public-headers`-only public-surface-scoping block) --
+the *same* `Change` objects, but `_scope_dict` built its own bare
+kind/symbol/description dict from scratch rather than routing through
+`_add_contract_evaluation_fields` (or `_change_to_dict`) the way every
+other serialization site in this fix already does. A `--contract-evaluation`
+consumer reading `scope.filtered_internal_changes` (the older, more
+established ledger) rather than `surface_scope.out_of_surface_changes`
+(newer) therefore missed the decision entirely, even though the sibling
+ledger for the identical finding carried it. Fixed by extracting a small
+`_filtered_internal_entry()` helper that calls
+`_add_contract_evaluation_fields` the same way, keeping `_scope_dict`
+itself a one-line list comprehension over it. New test extends
+`test_contract_evaluation_stamps_demoted_out_of_surface_findings`
+(`tests/test_report_schema.py`) with an assertion against `payload["scope"]
+["filtered_internal_changes"]` alongside its existing `surface_scope`
+assertion, on the same fixture/result -- confirming both ledgers agree,
+not just that each independently contains *a* stamped entry.
+
 Measure:
 
 - delta by old/new decision;

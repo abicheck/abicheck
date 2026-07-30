@@ -372,6 +372,20 @@ class TestReportValidatesAgainstSchema:
             assert e["contract_reason_code"] == "terminal_authoritative_exclusion"
             assert e["contract_assurance"] == "complete"
 
+        # Regression (Codex review, fresh evidence): the identical
+        # out_of_surface_changes Change objects are also serialized a
+        # second, independent time as scope.filtered_internal_changes
+        # (reporter._scope_dict) -- that ledger's own entries never read
+        # the already-stamped fields, so a consumer of it (rather than
+        # surface_scope.out_of_surface_changes) missed the decision.
+        scope_entries = payload["scope"]["filtered_internal_changes"]
+        scope_stamped = [e for e in scope_entries if e["symbol"] == "InternalCache"]
+        assert scope_stamped
+        for e in scope_stamped:
+            assert e["contract_relevance"] == "PROVEN_OUT_OF_CONTRACT"
+            assert e["contract_reason_code"] == "terminal_authoritative_exclusion"
+            assert e["contract_assurance"] == "complete"
+
     def test_contract_evaluation_stamps_redundant_bucket(self):
         # Regression (Codex review, PR #658, fresh evidence): a redundant
         # (display-dedup) finding is only restored into the rendered report
