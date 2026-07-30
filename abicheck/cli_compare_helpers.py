@@ -1301,6 +1301,16 @@ def run_compare(
         except ManifestValidationError as exc:
             raise click.UsageError(str(exc)) from exc
 
+    if audit_suppressions and suppress is None:
+        # Validated ahead of the --dry-run emit below, same reasoning as the
+        # directory/package rejection above (Codex review, fresh evidence):
+        # a dry run must not report "ok" for `--audit-suppressions` without
+        # `--suppress` when the identical non-dry-run invocation is rejected
+        # by the later (post-suppression-loading) guard in this function.
+        raise click.UsageError(
+            "--audit-suppressions requires --suppress (nothing to audit)."
+        )
+
     if dry_run:
         from .dry_run import emit_dry_run
 
@@ -1592,10 +1602,10 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
     )
-    if audit_suppressions and suppression is None:
-        raise click.UsageError(
-            "--audit-suppressions requires --suppress (nothing to audit)."
-        )
+    # audit_suppressions=True implies suppress is not None (guarded earlier,
+    # before the --dry-run emit above) -- _load_suppression_and_policy only
+    # returns None here when suppress itself was None, so suppression is
+    # guaranteed non-None at this point too.
 
     force_public = _collect_force_public_symbols(
         resolved_cfg.public_symbols, public_symbols_list

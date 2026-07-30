@@ -27,11 +27,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.schemas import load_compare_report_schema
 from abicheck.serialization import snapshot_to_json
+
+try:
+    import jsonschema
+except ImportError:  # pragma: no cover - exercised only when jsonschema absent
+    jsonschema = None
+
+_requires_jsonschema = pytest.mark.skipif(
+    jsonschema is None, reason="jsonschema not installed"
+)
 
 
 def _fn(name: str, mangled: str, ret: str = "int") -> Function:
@@ -76,6 +87,23 @@ class TestRequiresSuppress:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main, ["compare", str(old_p), str(new_p), "--audit-suppressions"]
+        )
+        assert result.exit_code != 0
+        assert "--audit-suppressions requires --suppress" in result.output
+
+    def test_rejected_without_suppress_even_with_dry_run(self, tmp_path):
+        # Regression (Codex review, fresh evidence): --dry-run exits via
+        # emit_dry_run's SystemExit before the CLI ever reaches the later,
+        # post-suppression-loading guard -- without an earlier check,
+        # `--audit-suppressions --dry-run` (no --suppress) reported "ok" for
+        # an invocation the identical non-dry-run call rejects outright.
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--audit-suppressions", "--dry-run",
+            ],
         )
         assert result.exit_code != 0
         assert "--audit-suppressions requires --suppress" in result.output
@@ -128,6 +156,37 @@ class TestJsonReport:
         assert audit["total_rules"] == 1
         assert audit["stale_rules"] == ["workaround"]
         assert audit["high_risk_matches"] == []
+
+    @_requires_jsonschema
+    def test_suppression_audit_validates_against_packaged_schema(self, tmp_path):
+        # Regression (Codex review, fresh evidence): report_schema_version
+        # must actually bump (and the packaged schema declare the new key)
+        # whenever an additive top-level key like suppression_audit is
+        # introduced -- jsonschema.validate alone wouldn't catch a missing
+        # bump, since the schema's own additionalProperties: true accepts an
+        # undeclared key silently.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: _Z5api_bv\n"
+            "    reason: intentional removal\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert "suppression_audit" in payload
+        schema = load_compare_report_schema()
+        jsonschema.validate(instance=payload, schema=schema)
+        assert "suppression_audit" in schema["properties"]
 
     def test_label_falls_back_to_selector_not_bucket_index(self, tmp_path):
         # Regression (Codex/CodeRabbit review, fresh evidence): a rule with

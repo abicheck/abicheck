@@ -1921,6 +1921,34 @@ monkeypatch pattern). Also fixed the MD018 markdownlint warning this same
 review round flagged: an unescaped `#235` (issue reference) at the start of
 a line, misparsed as an invalid ATX heading -- reworded to "issue 235".
 
+**Updated (2026-07-30): two more real findings on the same
+`--audit-suppressions` slice (Codex review, fresh evidence).** (1) The new
+top-level `suppression_audit` JSON key was additive but never bumped
+`REPORT_SCHEMA_VERSION` or declared itself in the packaged
+`compare_report.schema.json` -- `jsonschema.validate` alone wouldn't have
+caught this (the schema's `additionalProperties: true` accepts an
+undeclared key silently), so a version-aware consumer had no way to detect
+this report shape exists. Fixed by bumping `REPORT_SCHEMA_VERSION` to
+`"2.24"` (`abicheck/schemas/__init__.py`, with the same per-version
+docstring convention every prior bump uses), adding the `suppression_audit`
+object schema to `compare_report.schema.json`, and regenerating the
+published docs mirror (`scripts/publish_schemas.py`). New test:
+`test_suppression_audit_validates_against_packaged_schema` -- deliberately
+asserts `"suppression_audit" in schema["properties"]` on top of the plain
+`jsonschema.validate` call, since the latter alone can't distinguish a
+correctly-declared key from an accepted-but-undeclared one. (2)
+`compare --audit-suppressions --dry-run` (no `--suppress`) reported "ok"
+even though the identical non-dry-run invocation is rejected: `emit_dry_run`
+raises `SystemExit` before `run_compare` ever reaches the post-suppression-
+loading guard this fix added earlier. Fixed by moving the validation to
+right after the directory/package rejection block -- the same place, and
+same "validated ahead of the --dry-run emit" reasoning, `_reject_set_input_
+flags` already uses for the identical class of gap. The now-redundant later
+guard (unreachable once the earlier one always fires first) was removed,
+keeping only the `assert suppression is not None` mypy-narrowing hint at
+the actual `.audit()` call site. New test:
+`test_rejected_without_suppress_even_with_dry_run`.
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve
