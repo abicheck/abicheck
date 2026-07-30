@@ -547,6 +547,15 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
         )
         if (value := getattr(rule, field, None))
     ]
+    # expires (Codex review, fresh evidence) is not a matching selector --
+    # two rules with identical selectors but different expiry dates match
+    # the exact same findings -- but it's exactly what distinguishes them
+    # in the expired_rules/near_expiry_rules buckets themselves, where an
+    # otherwise-identical pair would otherwise render as the same label
+    # with no way to tell which deadline belongs to which rule.
+    expires = getattr(rule, "expires", None)
+    if expires is not None:
+        parts.append(f"expires={expires.isoformat()}")
     selectors = ", ".join(parts)
     if label and selectors:
         return f"{label} ({selectors})"

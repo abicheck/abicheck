@@ -2113,6 +2113,23 @@ buckets already do. New tests:
 since it only checks for the word "stale"/"matched nothing", not the
 removed per-rule detail.
 
+**Updated (2026-07-30): one more real finding on `_suppression_rule_label`
+(Codex review, fresh evidence) -- `expires` was still missing from the
+identifier.** Two otherwise-identical rules (same symbol, same label)
+differing only by their `expires` date rendered as the identical label in
+`expired_rules`/`near_expiry_rules` -- exactly the two buckets where expiry
+is the one thing distinguishing them, so a reader couldn't tell which
+deadline belonged to which rule. Unlike the earlier `reachability` fix,
+`expires` is deliberately *not* a matching selector (it doesn't affect
+which findings a rule matches, only whether the rule itself is still
+active) -- appended separately after the selector loop, as
+`expires=<ISO date>`, whenever set. Updated
+`test_expired_rule_labeled_not_just_counted`'s exact-label assertion to
+include the now-appended `expires=2000-01-01`, and added
+`test_label_includes_expires_date` (two rules sharing a label, differing
+only by `expires`, asserting distinct `near_expiry_rules` labels each
+containing their own date).
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve

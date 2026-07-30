@@ -329,6 +329,47 @@ class TestJsonReport:
         for label in audit["stale_rules"]:
             assert "reachability=" in label
 
+    def test_label_includes_expires_date(self, tmp_path):
+        # Regression (Codex review, fresh evidence): two otherwise-identical
+        # rules (same symbol and label) differing only by their `expires`
+        # date rendered as the identical label in near_expiry_rules/
+        # expired_rules -- exactly the buckets where expiry is the one thing
+        # that distinguishes them, so a reader couldn't tell which deadline
+        # belonged to which rule.
+        from datetime import date, timedelta
+
+        old_p, new_p = _write_pair(tmp_path)
+        soon1 = (date.today() + timedelta(days=10)).isoformat()
+        soon2 = (date.today() + timedelta(days=20)).isoformat()
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: never_matches_anything\n"
+            "    label: shared-label\n"
+            f'    expires: "{soon1}"\n'
+            "  - symbol: never_matches_anything\n"
+            "    label: shared-label\n"
+            f'    expires: "{soon2}"\n',
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert len(audit["near_expiry_rules"]) == 2
+        assert len(set(audit["near_expiry_rules"])) == 2, (
+            "rules differing only by expires must not render identically"
+        )
+        assert any(soon1 in label for label in audit["near_expiry_rules"])
+        assert any(soon2 in label for label in audit["near_expiry_rules"])
+
     def test_high_risk_match_reported(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(
@@ -524,7 +565,10 @@ class TestMarkdownReport:
         assert result.exit_code == 4, result.output
         assert "## Suppression Audit" in result.output
         assert "Expired rules:" in result.output
-        assert "`stale workaround (symbol=never_matches_anything)`" in result.output
+        assert (
+            "`stale workaround (symbol=never_matches_anything, "
+            "expires=2000-01-01)`" in result.output
+        )
 
 
 class TestUsedByScopedOnlyChange:
