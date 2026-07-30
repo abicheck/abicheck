@@ -57,6 +57,7 @@ its :doc:`implementation plan </contribute/plans/public-contract-default>`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -1075,6 +1076,12 @@ def evaluate_snapshot_pair_contract_relevance(
 # identical class of finding (Codex review: originally private to
 # mcp_server.py only, leaving the CLI's own --contract-evaluation +
 # --used-by/--required-symbol combination permanently unstamped).
+#: The reason code stamp_explicit_scope_contract_evaluation always uses --
+#: hoisted so the two assignment branches below can't drift apart (CodeRabbit
+#: review), and already a registered key in CONTRACT_REASON_CODES.
+_EXPLICIT_SCOPE_REASON_CODE = "explicit_consumer_or_required_symbol_evidence"
+
+
 def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
     """Stamp *c* (a ``Change`` or a plain dict entry) ``IN_CONTRACT`` using
     ADR-049's explicit consumer/required-symbol evidence tier.
@@ -1134,9 +1141,55 @@ def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
 
     if is_dict:
         c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
-        c["contract_reason_code"] = "explicit_consumer_or_required_symbol_evidence"
+        c["contract_reason_code"] = _EXPLICIT_SCOPE_REASON_CODE
         c["contract_assurance"] = ContractAssurance.COMPLETE.value
     else:
         c.contract_relevance = ContractRelevance.IN_CONTRACT
-        c.contract_reason_code = "explicit_consumer_or_required_symbol_evidence"
+        c.contract_reason_code = _EXPLICIT_SCOPE_REASON_CODE
         c.contract_assurance = ContractAssurance.COMPLETE
+
+
+def stamp_scoped_result_findings(
+    result: Any, *, finding_id: Callable[[Any], str]
+) -> None:
+    """Stamp every ``--used-by``/``--required-symbol``-relevant finding on
+    *result* with the explicit-scope ``IN_CONTRACT`` decision
+    (:func:`stamp_explicit_scope_contract_evaluation`).
+
+    Covers both collections a scoping pass (``_apply_used_by_scoping``/
+    ``_apply_required_symbol_scoping`` in ``cli_compare_helpers.py``, or the
+    equivalent inline logic in ``mcp_server.py``'s ``abi_compare``) can
+    populate on *result*: an existing ``result.changes`` entry matched by
+    ``scoped_relevant_finding_ids`` (the ordinary case, e.g. a plain
+    ``FUNC_REMOVED`` both the full diff and the scoped gate already agree
+    on), and every fresh ``Change`` in ``scoped_only_changes`` (synthesized
+    by the scoping pass itself, e.g. a PE ordinal retarget, and never added
+    to ``result.changes``).
+
+    Hoisted here (CodeRabbit review) because the *traversal* over these two
+    collections was independently hand-copied in both
+    ``cli_compare_helpers.py`` and ``mcp_server.py`` -- exactly the kind of
+    duplication that let one of the two call sites go unstamped for a real
+    PR cycle before being caught by review. A no-op when *result* carries
+    neither collection (no scoping was applied) or when calling this
+    without a caller having opted into ``contract_evaluation=True`` in the
+    first place -- callers are expected to gate the call on that flag
+    themselves, mirroring every other function in this module.
+
+    *finding_id* is injected rather than imported here: the real
+    implementation lives in ``reporter_markdown.py``/``reporter.py``, both
+    of which import ``checker.py`` at module level, and ``checker.py``
+    already imports this module (function-locally, in
+    ``_apply_contract_evaluation_shadow``) -- importing it back from here
+    would close a real ``checker -> contract_evaluation -> reporter[...] ->
+    checker`` cycle (caught by the ``import-cycle-growth`` AI-readiness
+    gate). Every caller already has its own ``_finding_id`` import in scope
+    for other reasons.
+    """
+    relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
+    if relevant_ids:
+        for c in result.changes:
+            if finding_id(c) in relevant_ids:
+                stamp_explicit_scope_contract_evaluation(c)
+    for c in getattr(result, "scoped_only_changes", ()) or ():
+        stamp_explicit_scope_contract_evaluation(c)

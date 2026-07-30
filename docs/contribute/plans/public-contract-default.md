@@ -1186,6 +1186,50 @@ value text of the derived change, which a real signature-level parameter
 change does not naturally produce without also changing the param's own
 type spelling).
 
+**A third review round (Codex + CodeRabbit) found two more real gaps, plus
+two applied quality nits.** (1) Codex, P1: an ordinary `compare --contract-
+evaluation` run (default markdown format, no `--format json`) was
+byte-for-byte identical to a run without the flag — only the JSON renderer
+(`reporter._add_contract_evaluation_fields`) ever surfaced the stamped
+fields, so the flag's own help text ("Stamps each finding in the report")
+was false for the CLI's default output. Fixed by rendering a `Contract:
+<relevance> (<reason_code>), assurance: <level>` line in
+`reporter_markdown._format_change_md` (a no-op when the `Change` was never
+stamped) — shared by every markdown-based report shape (full, leaf, root-
+cause) since they all route through this one per-finding formatter. (2)
+Codex, P2: a finding a `--suppress` rule matched was moved to
+`DiffResult.suppressed_changes` before `_apply_contract_evaluation_shadow`
+ever ran (which only evaluated `kept` + `out_of_surface` + `redundant`), so
+its audit-trail entry (`reporter._suppressed_change_entry`) silently lost
+its contract decision even though the finding itself stays visible in the
+report. Fixed by threading a new `suppressed` parameter into
+`_apply_contract_evaluation_shadow` the same way as `redundant` above, and
+calling `_add_contract_evaluation_fields` from `_suppressed_change_entry`.
+New tests for both:
+`tests/test_report_schema.py::TestReportValidatesAgainstSchema::
+test_contract_evaluation_renders_in_markdown_report`/
+`test_contract_evaluation_stamps_suppressed_changes`.
+
+The two CodeRabbit nits applied in the same pass: hoisted the
+`"explicit_consumer_or_required_symbol_evidence"` reason-code literal
+(previously duplicated across `stamp_explicit_scope_contract_evaluation`'s
+two assignment branches) into one `_EXPLICIT_SCOPE_REASON_CODE` constant;
+and factored the `scoped_relevant_finding_ids`/`scoped_only_changes`
+traversal — independently hand-copied in both `cli_compare_helpers.py` and
+`mcp_server.py`, which is exactly the class of duplication that let the P1
+finding above go unnoticed in one of the two call sites for a full review
+round — into one shared `contract_evaluation.stamp_scoped_result_findings`.
+That hoist required care: a naive version importing `reporter._finding_id`
+directly closed a real `checker -> contract_evaluation -> reporter[...] ->
+checker` cycle (`checker.py` already imports `contract_evaluation.py`
+function-locally, and `reporter.py`/`reporter_markdown.py` both import
+`checker.py` at module level) — caught immediately by the
+`import-cycle-growth` AI-readiness gate, not discovered later. Fixed by
+having `stamp_scoped_result_findings` accept `finding_id` as an injected
+callable parameter instead of importing it itself; both call sites already
+had their own `_finding_id` import in scope for other reasons, so this
+closes the duplication without adding a new cross-module edge.
+
 Measure:
 
 - delta by old/new decision;

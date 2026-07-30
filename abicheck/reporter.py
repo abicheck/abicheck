@@ -814,6 +814,12 @@ def _suppressed_change_entry(
     entry["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         entry["impact_assessment"] = assessment.to_dict()
+    # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
+    # display/gate decision, not a reason to erase the contract-relevance
+    # decision checker._apply_contract_evaluation_shadow already stamped on
+    # this Change -- a no-op when contract_evaluation was never requested,
+    # mirroring this helper's other callers.
+    _add_contract_evaluation_fields(entry, c)
     return entry
 
 

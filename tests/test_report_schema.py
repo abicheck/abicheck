@@ -241,6 +241,46 @@ class TestReportValidatesAgainstSchema:
             assert "contract_reason_code" not in c
             assert "contract_assurance" not in c
 
+    def test_contract_evaluation_renders_in_markdown_report(self):
+        # Regression (Codex review, PR #658, fresh evidence): --contract-
+        # evaluation's own help text promises every finding is stamped, but
+        # only the JSON report (reporter._add_contract_evaluation_fields)
+        # ever rendered the decision -- an ordinary `compare
+        # --contract-evaluation` run (default markdown format) was
+        # byte-for-byte identical to one without the flag.
+        old, new = _breaking_pair()
+        md_with = reporter.to_markdown(compare(old, new, contract_evaluation=True))
+        md_without = reporter.to_markdown(compare(old, new))
+        assert md_with != md_without
+        assert "Contract:" in md_with
+        assert "Contract:" not in md_without
+
+    def test_contract_evaluation_stamps_suppressed_changes(self):
+        # Regression (Codex review, PR #658, fresh evidence): a suppressed
+        # finding stays visible in the ADR-013 audit trail
+        # (suppression.suppressed_changes), but _apply_contract_evaluation_shadow
+        # only ever evaluated kept + out_of_surface + redundant -- suppression
+        # silently erased the contract decision even though the finding
+        # itself is still rendered.
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old, new = _breaking_pair()
+        suppression = SuppressionList([Suppression(symbol="_Z5api_bv")])
+        result = compare(
+            old, new, suppression=suppression, contract_evaluation=True
+        )
+        assert result.suppressed_changes, "fixture must produce a suppressed finding"
+        for c in result.suppressed_changes:
+            assert c.contract_relevance is not None
+
+        payload = json.loads(reporter.to_json(result))
+        self._validate(payload)
+        suppressed_entries = payload["suppression"]["suppressed_changes"]
+        assert suppressed_entries
+        for e in suppressed_entries:
+            assert "contract_relevance" in e
+            assert "contract_reason_code" in e
+
     def test_contract_evaluation_all_mode_report_validates(self):
         # scope_to_public_surface=False means FilterNonPublicSurface never
         # runs its header-scoping path, so PipelineContext.surf_old/surf_new

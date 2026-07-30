@@ -54,7 +54,10 @@ from .checker_policy import (
     policy_for,
     policy_kind_sets,
 )
-from .contract_evaluation import stamp_explicit_scope_contract_evaluation
+from .contract_evaluation import (
+    stamp_explicit_scope_contract_evaluation,
+    stamp_scoped_result_findings,
+)
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .mcp_shared import (
     _audit_log,
@@ -1165,11 +1168,7 @@ def abi_compare(
         # fresh evidence). Must run before the "changes" list comprehension
         # below, which serializes result.changes as-is.
         if contract_evaluation:
-            relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
-            if relevant_ids:
-                for c in result.changes:
-                    if _finding_id(c) in relevant_ids:
-                        _stamp_explicit_scope_contract_evaluation(c)
+            stamp_scoped_result_findings(result, finding_id=_finding_id)
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):
@@ -1204,11 +1203,12 @@ def abi_compare(
             # this array with nothing to explain the failure (Codex review,
             # mirrors the identical fold-in in
             # cli_compare_helpers._fold_scoped_compat_into_text).
+            # scoped_only entries are already stamped by
+            # stamp_scoped_result_findings above when contract_evaluation is
+            # set -- no per-item stamp call needed here anymore.
             existing_ids = {_finding_id(c) for c in result.changes}
             scoped_only = getattr(result, "scoped_only_changes", ()) or ()
             for c in scoped_only:
-                if contract_evaluation:
-                    _stamp_explicit_scope_contract_evaluation(c)
                 if _finding_id(c) not in existing_ids:
                     response["changes"].append(_mcp_change_entry(c, active_policy))
             from .severity import missing_contract_exit_code

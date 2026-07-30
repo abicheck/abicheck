@@ -541,6 +541,7 @@ def _apply_contract_evaluation_shadow(
     force_public_symbols: set[str] | None,
     pp_ctx: PipelineContext,
     redundant: list[Change] | None = None,
+    suppressed: list[Change] | None = None,
 ) -> None:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
     *kept* finding **and** every finding public-surface scoping already
@@ -558,6 +559,17 @@ def _apply_contract_evaluation_shadow(
     contract fields regardless of ``contract_evaluation=True``. Stamped the
     same way as every other finding -- a redundant change is an ordinary
     entity finding once restored, not a different evidence tier.
+
+    *suppressed* (Codex review, fresh evidence) is ``DiffResult.
+    suppressed_changes`` -- a finding a ``--suppress`` rule matched and
+    removed from ``kept``, but which stays visible in the ADR-013 audit
+    trail (``reporter._suppressed_change_entry``). Suppression happens
+    throughout the pipeline, both before and after this shadow evaluator
+    would otherwise run, so without stamping this bucket too, a suppressed
+    finding's audit entry silently lost its contract decision even though
+    the finding itself is still rendered -- suppression is a display/gate
+    decision, not a reason to erase what contract relevance was already
+    established (or would be established) for the underlying finding.
 
     Purely additive -- never consulted by verdict computation, policy, or
     exit-code logic (see ``Change.contract_relevance``'s own docstring).
@@ -607,7 +619,7 @@ def _apply_contract_evaluation_shadow(
     # a header-scoping run corresponds to contract=public.
     mode = ContractMode.PUBLIC if scope_to_public_surface else ContractMode.ALL
 
-    all_changes = kept + pp_ctx.out_of_surface + (redundant or [])
+    all_changes = kept + pp_ctx.out_of_surface + (redundant or []) + (suppressed or [])
     decisions = evaluate_snapshot_pair_contract_relevance(
         all_changes,
         surf_old,
@@ -1040,7 +1052,7 @@ def compare(
     if contract_evaluation:
         _apply_contract_evaluation_shadow(
             kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx,
-            redundant=redundant_for_report,
+            redundant=redundant_for_report, suppressed=suppressed,
         )
 
     return DiffResult(

@@ -72,7 +72,7 @@ from .cli_resolve import (
     _resolve_compare_snapshots,
     classify_compare_operand,
 )
-from .contract_evaluation import stamp_explicit_scope_contract_evaluation
+from .contract_evaluation import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 
 if TYPE_CHECKING:
@@ -1680,17 +1680,13 @@ def run_compare(
     # both stayed permanently unstamped even when --contract-evaluation was
     # given. This must run before _render_output below serializes
     # result.changes, and mirrors the identical fix already applied to the
-    # MCP abi_compare tool (mcp_server.py).
+    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal
+    # (CodeRabbit review: hand-copying it here previously let one call site
+    # drift out of sync with the other).
     if contract_evaluation:
-        relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
-        if relevant_ids:
-            from .reporter import _finding_id
+        from .reporter import _finding_id
 
-            for c in result.changes:
-                if _finding_id(c) in relevant_ids:
-                    stamp_explicit_scope_contract_evaluation(c)
-        for c in getattr(result, "scoped_only_changes", ()) or ():
-            stamp_explicit_scope_contract_evaluation(c)
+        stamp_scoped_result_findings(result, finding_id=_finding_id)
 
     text = _render_output(
         fmt, result, old, new,

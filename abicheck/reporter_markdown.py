@@ -1728,4 +1728,22 @@ def _format_change_md(c: object) -> str:
         suffix = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
         line += f"\n  > Affected symbols: {names}{suffix}"
 
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --contract-evaluation's
+    # own help text promises every finding is stamped with a contract
+    # decision, but only the JSON report (reporter.py's
+    # _add_contract_evaluation_fields) ever rendered it -- an ordinary
+    # `compare --contract-evaluation` run (default markdown format) was
+    # byte-for-byte identical to one without the flag. A no-op when *c* was
+    # never stamped (contract_evaluation not requested), mirroring that
+    # helper's own documented default.
+    contract_relevance = getattr(c, "contract_relevance", None)
+    if contract_relevance is not None:
+        reason_code = getattr(c, "contract_reason_code", None)
+        contract_assurance = getattr(c, "contract_assurance", None)
+        line += f"\n  > Contract: {contract_relevance.value}"
+        if reason_code:
+            line += f" ({reason_code})"
+        if contract_assurance is not None:
+            line += f", assurance: {contract_assurance.value}"
+
     return line
