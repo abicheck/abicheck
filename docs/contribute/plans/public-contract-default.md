@@ -870,12 +870,29 @@ needs a prerequisite extraction, not a same-PR addition.
 
 Still remaining: wiring any other field (`cli_options.py`'s other shared
 option families beyond `scope_options`, `.abicheck.yml` schema/reference
-docs, service/API request models) to construct real `FieldCandidate`s, and
-folding a selected policy pack's resolved `ChangeKind -> Verdict`
-assignments into `CompatibilityPolicyConfig.overrides` (and a contract/gate
-pack's field assignments into their respective configs) for a real run —
+docs, service/API request models) to construct real `FieldCandidate`s —
 `resolve_selected_packs` resolves *which* packs are selected, not what
 selecting them changes about the rest of the effective config.
+
+**Updated (2026-07-30): the policy-pack half of that gap is closed.**
+`compatibility_evaluation_wiring.resolve_policy_pack_overrides` loads every
+selected pack, runs the identical D8 conflict check
+`resolve_selected_packs` already runs for the `POLICY` namespace (scoped to
+only the policy-kind packs among the given paths), and folds every
+non-conflicting pack's `ChangeKind` slug -> `Verdict` assignments into one
+merged mapping — the exact shape
+`CompatibilityPolicyConfig.overrides` already requires, so the result can
+be passed straight through. An `explicit_overrides` parameter (forwarded to
+the conflict check, same as `resolve_selected_packs`'s own parameter) is
+re-applied after the pack merge so an explicit override always wins, even
+for a `ChangeKind` no two packs actually disagreed on. Still not attempted:
+a contract/gate pack's own field assignments have no equivalent target —
+`ContractConfig`/`GateConfig` are fixed-field dataclasses with no open
+field-name -> value bag the way `CompatibilityPolicyConfig.overrides` is,
+so folding those needs a per-field router this slice does not build (a
+separate, larger piece of work). Not called from any live command yet, same
+"land the wiring function itself, fully tested" pattern as every other
+function in this module.
 
 ### Phase 2 — canonical identity and fact conservation
 

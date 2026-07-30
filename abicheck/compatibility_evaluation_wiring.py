@@ -64,6 +64,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
+from .change_registry_types import Verdict
 from .compatibility_evaluation_config import (
     ImmutableIdentity,
     SelectedByEntry,
@@ -378,3 +379,67 @@ def resolve_selected_packs(
             provenance,
         )
     return result
+
+
+def resolve_policy_pack_overrides(
+    pack_paths: Sequence[str | Path],
+    *,
+    explicit_overrides: Mapping[str, Verdict] = MappingProxyType({}),
+) -> Mapping[str, Verdict]:
+    """Fold every selected ``kind: policy`` pack's ``ChangeKind`` slug ->
+    :class:`~abicheck.change_registry_types.Verdict` assignments into one
+    merged mapping, suitable to pass directly as
+    :attr:`~abicheck.compatibility_evaluation_config.CompatibilityPolicyConfig.overrides`.
+
+    :func:`resolve_selected_packs` resolves *which* packs are selected
+    (``policy.packs``, an opaque tuple of :class:`ImmutableIdentity`) but
+    never applies their content -- this is that missing composition step
+    for the one namespace with an unambiguous target field
+    (``CompatibilityPolicyConfig.overrides`` already exists and is exactly
+    ``Mapping[str, Verdict]``, the same shape a policy pack's own
+    assignments already carry post-:func:`~abicheck.compatibility_evaluation_packs.load_pack_manifest`).
+    A contract/gate pack's own field assignments have no equivalent generic
+    target yet -- :class:`~abicheck.compatibility_evaluation_config.ContractConfig`/
+    :class:`~abicheck.compatibility_evaluation_config.GateConfig` are typed,
+    fixed-field dataclasses with no open field-name -> value bag to fold an
+    arbitrary assignment into, so composing those needs a per-field router
+    this function does not attempt to build; that is separate, still-unwired
+    follow-up work.
+
+    Runs the identical D8 conflict check :func:`resolve_selected_packs`
+    already runs for the ``POLICY`` namespace
+    (:func:`~abicheck.compatibility_evaluation_resolver.detect_pack_conflicts`,
+    scoped to only the policy-kind packs among *pack_paths* -- a contract/
+    gate pack in the same list is loaded but otherwise ignored here), so
+    calling both functions with the same *pack_paths* never disagrees about
+    which packs are in conflict. *explicit_overrides* is forwarded verbatim
+    as that check's own ``explicit_overrides`` (ADR-049 D8 composition:
+    "explicit per-kind override > selected packs > base policy" -- a field
+    the effective config already explicitly overrides is exempt from
+    pack-vs-pack conflict detection) and is re-applied after the pack merge
+    below, so an explicit override always wins even for a
+    ``ChangeKind`` no two packs actually disagreed on (conflict detection
+    alone would silently let a lone pack's value stand unless something
+    forces the override to take precedence).
+
+    Two selected packs assigning the *same* Verdict to the same
+    ``ChangeKind`` slug is not a conflict (D7), so a plain last-write-wins
+    merge over packs is safe once :func:`detect_pack_conflicts` has already
+    confirmed no unresolved disagreement exists — every pack that assigned
+    that key must have assigned the identical value. Performs no I/O beyond
+    loading the given manifests; not called from any live command yet (see
+    module docstring).
+    """
+    loaded = [load_pack_manifest(path) for path in pack_paths]
+    policy_packs = [pack for pack in loaded if pack.kind is PackKind.POLICY]
+
+    detect_pack_conflicts(
+        [(pack.identity, pack.assignments) for pack in policy_packs],
+        explicit_overrides=explicit_overrides,
+    )
+
+    merged: dict[str, Verdict] = {}
+    for pack in policy_packs:
+        merged.update(cast("Mapping[str, Verdict]", pack.assignments))
+    merged.update(explicit_overrides)
+    return merged
