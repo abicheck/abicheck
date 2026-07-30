@@ -1993,6 +1993,36 @@ adding the identical per-rule detail-line treatment for `expired_rules`/
 `reason`, asserting its label appears under an "Expired rules:" heading in
 the markdown report, not just a bare count).
 
+**Updated (2026-07-30): two more real findings, closing out this pass on
+`--audit-suppressions`/`--contract-evaluation` (Codex review, fresh
+evidence).** (1) `--report-mode leaf` routes a root `TYPE_*` finding (e.g.
+`type_size_changed`) through `reporter_markdown._format_leaf_type_change`
+-- a separate code path from `_format_change_md`, which full and root-cause
+mode both already use for every finding, type or not. That separate path
+never read the already-stamped contract fields, so a leaf-mode type
+finding's own decision was silently dropped -- the fourth independent
+markdown rendering site this pass has found and fixed the identical gap
+in (after `_format_change_md`, the scoped-gate fold-in, and the
+suppression-note line). Fixed with the identical `Contract: <relevance>
+(<reason_code>), assurance: <level>` tag, gated on `c.contract_relevance
+is not None` the same "no-op unless already stamped" way every other site
+uses. New test: `test_contract_evaluation_renders_in_leaf_type_findings`
+(a public struct's own size change, `--report-mode leaf`). (2)
+`_suppression_rule_label` disambiguated *unlabeled* rules by rendering
+every populated selector, but a rule *with* a `label`/`reason` returned it
+bare, with no disambiguation at all -- `label`/`reason` is documented as a
+free-form grouping tag with no uniqueness guarantee (`Suppression`'s own
+docstring), so two distinct rules sharing one reason (a common real
+pattern -- rules grouped under the same waiver ticket, say) still rendered
+as the identical, ambiguous identifier this whole line of fixes exists to
+prevent. Fixed by always appending the selector tuple in parentheses
+alongside label/reason when both exist (`"reason (symbol=foo)"`), not only
+as a fallback for the label-less case. Updated the existing high-risk/
+stale/expired-rule tests' exact-string assertions to the new format, and
+added `test_shared_reason_still_disambiguated_by_selectors` (two rules
+sharing one `reason`, differing only by `symbol`, asserting distinct
+rendered labels).
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve

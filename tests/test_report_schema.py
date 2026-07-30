@@ -255,6 +255,35 @@ class TestReportValidatesAgainstSchema:
         assert "Contract:" in md_with
         assert "Contract:" not in md_without
 
+    def test_contract_evaluation_renders_in_leaf_type_findings(self):
+        # Regression (Codex review, PR #658, fresh evidence): --report-mode
+        # leaf routes root TYPE_* changes through
+        # reporter_markdown._format_leaf_type_change, a separate code path
+        # from _format_change_md -- the already-stamped contract decision
+        # was silently dropped for this one finding shape/report-mode
+        # combination, unlike full and root-cause mode (which both use
+        # _format_change_md for every finding, type or not).
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[RecordType(name="Result", kind="struct", size_bits=64)],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", "_Z10public_apiv", ret="Result *")],
+            types=[RecordType(name="Result", kind="struct", size_bits=128)],
+        )
+        result = compare(old, new, contract_evaluation=True)
+        type_changes = [c for c in result.changes if c.symbol == "Result"]
+        assert type_changes, "fixture must produce a Result type-size finding"
+        assert any(c.contract_relevance is not None for c in type_changes)
+
+        md = reporter.to_markdown(result, report_mode="leaf")
+        assert "Result" in md
+        assert "Contract:" in md
+
     def test_contract_evaluation_stamps_suppressed_changes(self):
         # Regression (Codex review, PR #658, fresh evidence): a suppressed
         # finding stays visible in the ADR-013 audit trail

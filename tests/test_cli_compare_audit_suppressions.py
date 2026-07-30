@@ -154,7 +154,7 @@ class TestJsonReport:
         payload = json.loads(result.stdout)
         audit = payload["suppression_audit"]
         assert audit["total_rules"] == 1
-        assert audit["stale_rules"] == ["workaround"]
+        assert audit["stale_rules"] == ["workaround (symbol=never_matches_anything)"]
         assert audit["high_risk_matches"] == []
 
     @_requires_jsonschema
@@ -259,6 +259,41 @@ class TestJsonReport:
             assert "symbol=never_matches_anything" in label
             assert "change_kind=" in label
 
+    def test_shared_reason_still_disambiguated_by_selectors(self, tmp_path):
+        # Regression (Codex review, fresh evidence, third round on the same
+        # label): label/reason is a free-form grouping tag with no
+        # uniqueness guarantee -- two distinct rules sharing one reason but
+        # differing on their selector must still render distinct
+        # identifiers, not the identical bare reason for both.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: never_matches_anything\n"
+            "    reason: shared grouping tag\n"
+            "  - symbol: also_never_matches\n"
+            "    reason: shared grouping tag\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert audit["total_rules"] == 2
+        assert len(audit["stale_rules"]) == 2
+        assert len(set(audit["stale_rules"])) == 2, (
+            "two rules sharing a reason must still render distinct labels"
+        )
+        for label in audit["stale_rules"]:
+            assert label.startswith("shared grouping tag (symbol=")
+
     def test_high_risk_match_reported(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(
@@ -282,7 +317,7 @@ class TestJsonReport:
         assert audit["stale_rules"] == []
         assert len(audit["high_risk_matches"]) == 1
         match = audit["high_risk_matches"][0]
-        assert match["rule"] == "intentional removal"
+        assert match["rule"] == "intentional removal (symbol=_Z5api_bv)"
         assert match["symbol"] == "_Z5api_bv"
 
     def test_omitted_by_default(self, tmp_path):
@@ -346,7 +381,7 @@ class TestMarkdownReport:
         assert result.exit_code == 0, result.output
         assert "## Suppression Audit" in result.output
         assert "High-risk matches" in result.output
-        assert "`intentional removal` suppressed" in result.output
+        assert "`intentional removal (symbol=_Z5api_bv)` suppressed" in result.output
 
     def test_omitted_by_default(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
@@ -390,7 +425,7 @@ class TestMarkdownReport:
         assert result.exit_code == 4, result.output
         assert "## Suppression Audit" in result.output
         assert "Expired rules:" in result.output
-        assert "`stale workaround`" in result.output
+        assert "`stale workaround (symbol=never_matches_anything)`" in result.output
 
 
 class TestUsedByScopedOnlyChange:

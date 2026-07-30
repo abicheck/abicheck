@@ -509,6 +509,19 @@ def _format_leaf_type_change(c: Change) -> list[str]:
             lines.append(f"- ... ({len(c.affected_symbols) - 10} more)")
     if c.caused_count > 0:
         lines.append(f"\n> {c.caused_count} derived change(s) collapsed")
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --report-mode leaf
+    # routes root TYPE_* changes through this function, never through
+    # _format_change_md -- unlike the full/root-cause views, a leaf-mode
+    # type finding's own contract decision (already stamped when
+    # --contract-evaluation was requested) was silently dropped. Mirrors
+    # _format_change_md's own "no-op unless already stamped" idiom.
+    if c.contract_relevance is not None:
+        tag = f"\n> Contract: {c.contract_relevance.value}"
+        if c.contract_reason_code:
+            tag += f" ({c.contract_reason_code})"
+        if c.contract_assurance is not None:
+            tag += f", assurance: {c.contract_assurance.value}"
+        lines.append(tag)
     lines.append("")
     return lines
 

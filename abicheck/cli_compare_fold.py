@@ -517,20 +517,18 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
     position in the original file, so *index* is only this bucket's own
     position -- misleading as a rule identifier, e.g. the second rule in
     the file being the only stale one renders as ``rule#0`` -- Codex/
-    CodeRabbit review, fresh evidence). Falls back to the rule's own
-    matching selectors (whichever ones it was actually defined with) before
-    ever falling back to *index*, which is now only a last resort for a
-    rule with none of label/reason/any selector set at all.
+    CodeRabbit review, fresh evidence).
 
-    Renders *every* populated selector, not just the first (Codex review,
-    fresh evidence, second round): ``Suppression`` selectors combine
-    conjunctively, so two distinct unlabeled rules can share one selector
-    (e.g. the same ``symbol``) while differing on another (e.g.
-    ``change_kind``) -- returning only the first match would render both
-    as the identical, ambiguous label."""
+    Always appends the rule's own matching selectors (every populated one,
+    not just the first -- ``Suppression`` selectors combine conjunctively)
+    alongside ``label``/``reason`` when either is set, not only as a
+    fallback for an unlabeled rule (Codex review, fresh evidence, third
+    round): a ``label``/``reason`` is a free-form grouping tag with no
+    uniqueness guarantee, so two distinct rules sharing one would otherwise
+    still render as the identical, ambiguous identifier. Falls back to
+    *index* only for a rule with none of label/reason/any selector set at
+    all."""
     label: str | None = getattr(rule, "label", None) or getattr(rule, "reason", None)
-    if label:
-        return label
     parts = [
         f"{field}={value}"
         for field in (
@@ -540,8 +538,13 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
         )
         if (value := getattr(rule, field, None))
     ]
-    if parts:
-        return ", ".join(parts)
+    selectors = ", ".join(parts)
+    if label and selectors:
+        return f"{label} ({selectors})"
+    if label:
+        return label
+    if selectors:
+        return selectors
     return f"rule#{index}"
 
 
