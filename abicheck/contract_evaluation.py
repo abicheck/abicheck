@@ -872,6 +872,24 @@ def evaluate_change_contract_relevance(
     if change.kind.value in _NOT_APPLICABLE_KIND_SLUGS:
         return _not_applicable_decision()
 
+    # `--post-manifest`'s own exclusion reason is a mode-independent,
+    # explicit-evidence exclusion (an exact, closed-domain manifest proved
+    # this concrete export was not committed), not a header-origin
+    # classification the way the rest of `_ALL_SURFACE_REASONS` is -- unlike
+    # private-header/system-header provenance (which ALL mode deliberately
+    # treats as in-domain, since that's the whole point of "no header-origin
+    # scoping"), a POST-manifest demotion is authoritative regardless of
+    # which contract mode is selected. Checked before the ALL-mode shortcut
+    # below so a change `FilterNonPublicSurface._run_allowlist` already
+    # demoted to `pp_ctx.out_of_surface` for this reason can't simultaneously
+    # be stamped `IN_CONTRACT` by the shortcut, contradicting its own
+    # presence in `surface_scope.out_of_surface_changes` (Codex review,
+    # fresh evidence: `--post-manifest` + `--no-scope-public-headers`).
+    if change.surface_exclusion_reason == _REASON_POST_MANIFEST_NOT_COMMITTED:
+        return _decision_for_surface_reason(
+            change.surface_exclusion_reason, change, surf_old, surf_new
+        )
+
     if mode is ContractMode.ALL:
         return _all_mode_decision()
 

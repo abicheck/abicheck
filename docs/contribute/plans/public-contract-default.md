@@ -1404,6 +1404,38 @@ dedicated new test (no per-call-site regression test existed for any of
 transitively by the existing primary-render contract-evaluation tests,
 which exercise the identical code path with the identical parameter).
 
+**Updated (2026-07-30): a real logic bug in the evaluator itself, not
+another rendering gap (Codex review, fresh evidence).** `--post-manifest`
+combined with `--no-scope-public-headers` (ALL mode) let
+`evaluate_change_contract_relevance`'s `if mode is ContractMode.ALL:
+return _all_mode_decision()` shortcut run *before* the function ever
+consulted `change.surface_exclusion_reason` -- so a concrete export
+`FilterNonPublicSurface._run_allowlist` already demoted to
+`pp_ctx.out_of_surface` for `_REASON_POST_MANIFEST_NOT_COMMITTED` (and
+therefore listed in the report's own `surface_scope.out_of_surface_changes`)
+was simultaneously stamped `contract_relevance: IN_CONTRACT` with
+`COMPLETE` assurance -- directly contradicting the report's own other
+ledger for the same finding. The existing `surface_exclusion_reason` check
+(`_ALL_SURFACE_REASONS`) only ran on the `ContractMode.PUBLIC` path, one
+branch below the ALL-mode shortcut, so it never got a chance to apply.
+Not fixed by moving the *whole* check earlier, though: `_ALL_SURFACE_REASONS`
+also contains header-origin reasons (`REASON_PRIVATE_HEADER`,
+`REASON_SYSTEM_HEADER`, `REASON_OFF_PYTHON_SURFACE`, ...) that ALL mode
+*deliberately* treats as irrelevant -- that's the entire point of
+`--no-scope-public-headers` (already covered by the pre-existing
+`test_all_mode_ignores_pipeline_surface_exclusion_reason` regression test,
+confirmed still green). `_REASON_POST_MANIFEST_NOT_COMMITTED` is different
+in kind: it's an explicit, exact-manifest fact (ADR-049 D2's own "exact
+manifests" evidence provider), not a header-origin classification, so it is
+authoritative regardless of which contract mode is selected. Fixed with a
+narrow, mode-independent check for specifically that one reason, inserted
+between the `NOT_APPLICABLE`-kind check and the `ContractMode.ALL`
+shortcut -- every other reason in `_ALL_SURFACE_REASONS` still only applies
+on the `PUBLIC` path, unchanged. New test:
+`test_post_manifest_not_committed_reason_is_terminal_under_all_mode_too`
+(`tests/test_contract_evaluation.py`), mirroring the existing PUBLIC-mode
+regression test for the identical reason but asserting the ALL-mode case.
+
 Measure:
 
 - delta by old/new decision;

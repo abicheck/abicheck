@@ -420,6 +420,38 @@ class TestPublicModeAlreadyExcludedByPipeline:
             assurance=ContractAssurance.COMPLETE,
         )
 
+    def test_post_manifest_not_committed_reason_is_terminal_under_all_mode_too(
+        self,
+    ) -> None:
+        # Regression (Codex review, PR #658, fresh evidence): --post-manifest
+        # combined with --no-scope-public-headers (ALL mode) reached the
+        # ALL-mode shortcut before this reason was ever consulted, so a
+        # concrete export FilterNonPublicSurface._run_allowlist already
+        # demoted to pp_ctx.out_of_surface (and surface_scope.
+        # out_of_surface_changes in the report) was simultaneously stamped
+        # contract_relevance=IN_CONTRACT -- contradicting its own presence
+        # in that same report's out-of-surface ledger. Unlike
+        # test_all_mode_ignores_pipeline_surface_exclusion_reason above (a
+        # header-origin reason ALL mode deliberately treats as irrelevant),
+        # a POST-manifest exclusion is an explicit, mode-independent
+        # exact-manifest fact, so it must win regardless of mode.
+        import abicheck.contract_evaluation as mod
+
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3api",
+            description="",
+            surface_exclusion_reason=mod._REASON_POST_MANIFEST_NOT_COMMITTED,
+        )
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=ContractMode.ALL
+        )
+        assert decision == ContractEvaluationDecision(
+            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+            reason_code="terminal_authoritative_exclusion",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
 
 class TestPublicModeIdentityAmbiguous:
     def test_reduced_tier_identity_downgrades_before_surface_is_consulted(self) -> None:
