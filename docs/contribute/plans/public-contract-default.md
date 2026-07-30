@@ -1376,6 +1376,34 @@ the same way. New test:
 `output_format="markdown"` and asserts the returned `response["report"]`
 text carries the tag.
 
+**Updated (2026-07-30): two more real gaps in the same "thread contract_
+evaluation to every sibling call site" pattern, both caught fresh (Codex/
+CodeRabbit review).** (1) `cli_compare_helpers.run_compare`'s *secondary*
+`_render_output` call (the `--secondary-format`/`--secondary-output`
+side-channel report) never forwarded `contract_evaluation`, unlike the
+primary render call right above it and the secondary
+`_fold_scoped_compat_into_text` call right below it in the same block --
+a `compare --contract-evaluation --secondary-format markdown` run's
+secondary output silently carried no contract fields. Fixed by adding
+`contract_evaluation=contract_evaluation` to that call, matching its two
+siblings. (2) `reporter_markdown._append_suppression_note` (the "N change(s)
+suppressed via suppression file" bullet list, rendered in every markdown
+report shape) built its line from only `sc.symbol`/`sc.description`,
+never reading the `contract_*` fields `_apply_contract_evaluation_shadow`'s
+`suppressed` bucket already stamps (landed earlier this pass) -- so a
+suppressed, contract-stamped finding's *JSON* audit entry carried the
+decision while its *markdown* audit line did not, the identical
+JSON-vs-markdown gap already fixed for `_format_change_md` and the scoped-
+gate fold-in, just in this third, independent rendering site. Fixed by
+appending the same `[contract: <relevance> (<reason_code>), assurance:
+<level>]` tag when `contract_relevance` is present. New tests:
+`test_contract_evaluation_renders_suppressed_changes_in_markdown`
+(`tests/test_report_schema.py`); the secondary-render fix has no
+dedicated new test (no per-call-site regression test existed for any of
+`run_compare`'s other secondary-render kwargs either -- covered
+transitively by the existing primary-render contract-evaluation tests,
+which exercise the identical code path with the identical parameter).
+
 Measure:
 
 - delta by old/new decision;

@@ -281,6 +281,24 @@ class TestReportValidatesAgainstSchema:
             assert "contract_relevance" in e
             assert "contract_reason_code" in e
 
+    def test_contract_evaluation_renders_suppressed_changes_in_markdown(self):
+        # Regression (Codex review, PR #658, fresh evidence): the JSON audit
+        # trail fix above stamps suppression.suppressed_changes, but
+        # reporter_markdown._append_suppression_note's own bullet line
+        # (rendered in every markdown report shape) never read the stamped
+        # fields -- the suppression-note line for a stamped finding carried
+        # no [contract: ...] tag even though the JSON sibling did.
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old, new = _breaking_pair()
+        suppression = SuppressionList([Suppression(symbol="_Z5api_bv")])
+        result = compare(old, new, suppression=suppression, contract_evaluation=True)
+        assert result.suppressed_changes, "fixture must produce a suppressed finding"
+
+        md = reporter.to_markdown(result)
+        assert "suppressed via suppression file" in md
+        assert "[contract:" in md
+
     def test_contract_evaluation_all_mode_report_validates(self):
         # scope_to_public_surface=False means FilterNonPublicSurface never
         # runs its header-scoping path, so PipelineContext.surf_old/surf_new

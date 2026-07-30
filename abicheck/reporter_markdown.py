@@ -1082,7 +1082,16 @@ def _append_suppression_note(lines: list[str], result: DiffResult) -> None:
                 f"> ℹ️ {result.suppressed_count} change(s) suppressed via suppression file"
             )
             for sc in result.suppressed_changes:
-                lines.append(f">   - `{sc.symbol}` — {sc.description}")
+                line = f">   - `{sc.symbol}` — {sc.description}"
+                relevance = getattr(sc, "contract_relevance", None)
+                if relevance is not None:
+                    reason_code = getattr(sc, "contract_reason_code", None)
+                    assurance = getattr(sc, "contract_assurance", None)
+                    line += f" [contract: {relevance.value} ({reason_code})"
+                    if assurance is not None:
+                        line += f", assurance: {assurance.value}"
+                    line += "]"
+                lines.append(line)
 
 
 # ---------------------------------------------------------------------------
