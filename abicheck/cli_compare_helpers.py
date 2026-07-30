@@ -1711,10 +1711,18 @@ def run_compare(
         # expose their own pre-suppression candidate list, a separate,
         # larger change to appcompat.py this fix does not attempt.
         assert suppression is not None
+        # Codex review, fresh evidence: pass the *effective*, policy-override-
+        # applied breaking set (not the static BREAKING_KINDS default) so a
+        # rule's "high risk" classification matches the verdict this run's
+        # own --policy-file would actually produce, e.g. a rule suppressing
+        # a kind the policy promoted to BREAKING is reported as high-risk
+        # even though it isn't in the built-in BREAKING_KINDS.
+        effective_breaking_kinds, _, _, _ = result._effective_kind_sets()
         result.suppression_audit = suppression.audit(  # type: ignore[attr-defined]
             list(result.changes)
             + list(result.suppressed_changes)
-            + list(getattr(result, "scoped_only_changes", ()) or ())
+            + list(getattr(result, "scoped_only_changes", ()) or ()),
+            breaking_kinds=effective_breaking_kinds,
         )
 
     # ADR-049 Phase 3 (Codex review, fresh evidence): --used-by/

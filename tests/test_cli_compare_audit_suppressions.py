@@ -320,6 +320,40 @@ class TestJsonReport:
         assert match["rule"] == "intentional removal (symbol=_Z5api_bv)"
         assert match["symbol"] == "_Z5api_bv"
 
+    def test_high_risk_respects_policy_file_demotion(self, tmp_path):
+        # Regression (Codex review, fresh evidence): audit() used to classify
+        # "high risk" solely via the static BREAKING_KINDS import, ignoring
+        # any active --policy-file override. A policy demoting func_removed
+        # away from BREAKING means the suppressed change here is no longer
+        # actually breaking under this run's own policy, so it must not be
+        # reported as a high-risk match either.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: _Z5api_bv\n"
+            "    reason: intentional removal\n",
+        )
+        policy = tmp_path / "policy.yml"
+        policy.write_text(
+            "base_policy: strict_abi\noverrides:\n  func_removed: risk\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--policy-file", str(policy), "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert audit["stale_rules"] == []
+        assert audit["high_risk_matches"] == []
+
     def test_omitted_by_default(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(

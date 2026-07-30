@@ -2023,6 +2023,27 @@ added `test_shared_reason_still_disambiguated_by_selectors` (two rules
 sharing one `reason`, differing only by `symbol`, asserting distinct
 rendered labels).
 
+**Updated (2026-07-30): `--audit-suppressions`'s "high risk" classification
+now respects an active `--policy-file` (Codex review, fresh evidence).**
+`SuppressionList.audit()` classified a matched change as high-risk solely
+via the static, imported `BREAKING_KINDS` set, ignoring any
+`--policy-file overrides:` in effect for the same run. A policy that
+promotes a normally-`API_BREAK` kind (e.g. `constant_removed`) to
+`BREAKING` meant a rule suppressing that finding actually prevented a
+BREAKING verdict, but the audit still reported it as not-high-risk;
+conversely a policy that demotes a normally-`BREAKING` kind away from it
+(as this fix's regression test does with `func_removed`) still had the
+audit calling that suppression high-risk even though the run's own
+verdict wouldn't have been BREAKING either way. Fixed by adding an
+optional `breaking_kinds` parameter to `audit()` (default: the existing
+`BREAKING_KINDS`, so every other caller is unaffected), and passing
+`result._effective_kind_sets()[0]` -- the same override-applied breaking
+set `DiffResult.breaking`/`_effective_verdict_for_change` already use --
+from `cli_compare_helpers.run_compare`'s `--audit-suppressions` call site.
+New test: `test_high_risk_respects_policy_file_demotion` (a `--policy-file`
+demoting `func_removed` to `risk`, asserting the suppressed removal is no
+longer reported in `high_risk_matches`).
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve

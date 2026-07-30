@@ -828,20 +828,34 @@ class SuppressionList:
         today: date | None = None,
         *,
         near_expiry_days: int = 30,
+        breaking_kinds: frozenset[ChangeKind] | None = None,
     ) -> SuppressionAudit:
         """Audit suppression rules against a set of changes.
 
         Returns a :class:`SuppressionAudit` with:
         - ``stale_rules``: suppressions that matched zero changes (misconfigured?)
-        - ``high_risk_matches``: suppressions that matched BREAKING changes
+        - ``high_risk_matches``: suppressions that matched a change breaking
+          under *breaking_kinds*
         - ``expired_rules``: rules past their expiry date
         - ``near_expiry_rules``: rules expiring within *near_expiry_days*
         - ``match_counts``: per-rule match count
+
+        *breaking_kinds* defaults to the built-in :data:`BREAKING_KINDS`, but
+        a caller running under an active ``--policy-file`` should pass its
+        effective, override-applied breaking set (e.g.
+        ``result._effective_kind_sets()[0]``) instead -- a policy can promote
+        a normally-API_BREAK kind to BREAKING or demote a normally-BREAKING
+        kind away from it, and this audit's "high risk" classification should
+        match the verdict the user's own comparison actually produced, not
+        the static default.
         """
         if near_expiry_days < 0:
             raise ValueError("near_expiry_days must be non-negative")
         check_date = today or date.today()
         near_expiry_cutoff = check_date + timedelta(days=near_expiry_days)
+        effective_breaking_kinds = (
+            BREAKING_KINDS if breaking_kinds is None else breaking_kinds
+        )
 
         match_counts: dict[int, int] = {i: 0 for i in range(len(self._suppressions))}
         high_risk: list[tuple[Suppression, Change]] = []
@@ -850,7 +864,7 @@ class SuppressionList:
             for i, s in enumerate(self._suppressions):
                 if s.matches(c, today=today):
                     match_counts[i] += 1
-                    if c.kind in BREAKING_KINDS:
+                    if c.kind in effective_breaking_kinds:
                         high_risk.append((s, c))
 
         stale = [
