@@ -294,6 +294,41 @@ class TestJsonReport:
         for label in audit["stale_rules"]:
             assert label.startswith("shared grouping tag (symbol=")
 
+    def test_label_includes_reachability_gates(self, tmp_path):
+        # Regression (Codex review, fresh evidence): two rules sharing every
+        # listed selector but differing by `reachability` (or
+        # allow_public_break/allow_unknown_reachability) match disjoint
+        # findings and must not render identically -- these gates affect
+        # matching exactly like symbol/change_kind/etc.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: never_matches_anything\n"
+            "    reachability: public-only\n"
+            "  - symbol: never_matches_anything\n"
+            "    reachability: unreachable-only\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert audit["total_rules"] == 2
+        assert len(audit["stale_rules"]) == 2
+        assert len(set(audit["stale_rules"])) == 2, (
+            "rules differing only by reachability must not render identically"
+        )
+        for label in audit["stale_rules"]:
+            assert "reachability=" in label
+
     def test_high_risk_match_reported(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(
@@ -395,6 +430,36 @@ class TestMarkdownReport:
         assert result.exit_code == 4, result.output
         assert "## Suppression Audit" in result.output
         assert "stale rule(s)" in result.output
+
+    def test_stale_rules_rendered_with_disambiguated_labels(self, tmp_path):
+        # Regression (Codex review, fresh evidence): the markdown/text/
+        # review branch used to rely on audit.summary()'s own per-rule stale
+        # detail, which named a rule by only its first populated selector --
+        # two unlabeled rules sharing that selector (symbol) but differing
+        # on another (change_kind) rendered identically. Stale rules must
+        # now get an explicit list using the fully disambiguated label, the
+        # same as high-risk/expired/near-expiry.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: never_matches_anything\n"
+            "    change_kind: func_removed\n"
+            "  - symbol: never_matches_anything\n"
+            "    change_kind: var_removed\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "Stale rules (matched nothing):" in result.output
+        assert "symbol=never_matches_anything, change_kind=func_removed" in result.output
+        assert "symbol=never_matches_anything, change_kind=var_removed" in result.output
 
     def test_high_risk_match_rendered(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)

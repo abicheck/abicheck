@@ -535,6 +535,15 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
             "symbol", "symbol_pattern", "type_pattern", "member_name",
             "change_kind", "source_location", "namespace", "entity_namespace",
             "cause_namespace",
+            # ADR-044 D2 reachability gates (Codex review, fresh evidence):
+            # these affect which findings a rule matches exactly like the
+            # selectors above -- two rules sharing every selector but
+            # differing on reachability (e.g. "public-only" vs.
+            # "unreachable-only") match disjoint findings and must not
+            # render identically. allow_public_break/allow_unknown_reachability
+            # default False, so they're omitted (same "if truthy" convention
+            # as every other field here) unless a rule actually opted in.
+            "reachability", "allow_public_break", "allow_unknown_reachability",
         )
         if (value := getattr(rule, field, None))
     ]
@@ -589,6 +598,18 @@ def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
 
     if fmt in ("markdown", "text", "review"):
         lines = [text, "", "## Suppression Audit", "", audit.summary()]
+        # audit.summary() only reports the stale-rule count (Codex review,
+        # fresh evidence: its own per-rule detail lines named a rule by only
+        # its first selector, misidentifying two rules that share it but
+        # differ on another, e.g. the same symbol with a different
+        # change_kind) -- render each stale rule explicitly with the fully
+        # disambiguated label, the same as high-risk/expired/near-expiry
+        # below.
+        if audit.stale_rules:
+            lines.append("")
+            lines.append("Stale rules (matched nothing):")
+            for i, rule in enumerate(audit.stale_rules):
+                lines.append(f"- `{_suppression_rule_label(rule, i)}`")
         if audit.high_risk_matches:
             lines.append("")
             lines.append("High-risk matches (suppressed a BREAKING change):")

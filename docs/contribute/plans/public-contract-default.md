@@ -2086,6 +2086,33 @@ own `_contract_tag` unmerged -- genuinely different shapes (dict values
 vs. enum attributes; a different module), not the same duplicate this
 nitpick was about.
 
+**Updated (2026-07-30): two more real findings on `_suppression_rule_label`
+and the stale-rule audit ledger (Codex review, fresh evidence).** (1) The
+selector tuple `_suppression_rule_label` renders omitted `reachability`,
+`allow_public_break`, and `allow_unknown_reachability` -- ADR-044 D2 gates
+that affect which findings a rule matches exactly like `symbol`/
+`change_kind`/etc. Two rules sharing every listed selector but differing
+only by `reachability` (e.g. `public-only` vs. `unreachable-only`) match
+disjoint findings yet rendered identically. Fixed by adding all three to
+the field list (the two booleans use the same "if truthy" convention as
+every other field, since both default `False`). New test:
+`test_label_includes_reachability_gates`. (2) `_fold_suppression_audit_into_text`'s
+markdown/text/review branch included `audit.summary()` wholesale, and
+`SuppressionAudit.summary()`'s own stale-rule section printed up to 5
+per-rule detail lines naming each rule by only its *first* populated
+selector -- the identical ambiguity `_suppression_rule_label` was built to
+fix, just reintroduced by a different code path. Fixed by trimming
+`summary()`'s stale-rule section down to the count only (matching how it
+already reports expired/near-expiry as counts only), and rendering an
+explicit "Stale rules (matched nothing):" list in the fold-in using
+`_suppression_rule_label`, the same as the high-risk/expired/near-expiry
+buckets already do. New tests:
+`test_stale_rules_rendered_with_disambiguated_labels`
+(`tests/test_cli_compare_audit_suppressions.py`); existing
+`test_audit_summary_output` (`tests/test_review_fixes.py`) still passes
+since it only checks for the word "stale"/"matched nothing", not the
+removed per-rule detail.
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve

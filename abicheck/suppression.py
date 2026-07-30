@@ -940,14 +940,19 @@ class SuppressionAudit:
         """Human-readable audit summary."""
         lines = [f"Suppression audit: {self.total_rules} rules"]
         if self.stale_rules:
+            # Codex review, fresh evidence: this used to also print up to 5
+            # per-rule detail lines here, naming each stale rule by only its
+            # first populated selector -- two rules sharing that first
+            # selector (e.g. the same `symbol` but a different `change_kind`)
+            # rendered identically, misdirecting a reader to the wrong rule.
+            # A stable, fully-disambiguated identifier needs every matching
+            # selector (see cli_compare_fold._suppression_rule_label), which
+            # this module has no reason to duplicate -- callers that want
+            # per-rule detail (e.g. compare --audit-suppressions's markdown/
+            # JSON output) list stale_rules themselves; this summary only
+            # reports the count, matching the expired/near-expiry buckets
+            # below.
             lines.append(f"  ⚠ {len(self.stale_rules)} stale rule(s) matched nothing")
-            for s in self.stale_rules[:5]:
-                target = (
-                    s.symbol or s.symbol_pattern or s.type_pattern
-                    or s.member_name or s.source_location
-                    or s.namespace or s.entity_namespace or s.cause_namespace or "?"
-                )
-                lines.append(f"    - {target} ({s.reason or 'no reason'})")
         if self.high_risk_matches:
             lines.append(f"  ⚠ {len(self.high_risk_matches)} suppression(s) matched BREAKING changes")
             for sup, change in self.high_risk_matches[:5]:
