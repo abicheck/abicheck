@@ -1425,6 +1425,38 @@ class TestAbiCompare:
             c["contract_relevance"] == "IN_CONTRACT" for c in report_missing_entries
         )
 
+    def test_used_by_missing_symbol_gets_contract_evaluation_in_markdown_report(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Regression (Codex review, fresh evidence): the JSON-format fix
+        # above stamps response["report"]["changes"] via a separate
+        # post-json.loads pass, but for output_format="markdown"/"review"
+        # abi_compare's _fold_scoped_compat_into_text call never forwarded
+        # contract_evaluation at all -- response["report"] (the raw
+        # rendered text) carried no [contract: ...] tag on the same missing-
+        # symbol finding a json-format call already stamps.
+        from abicheck.appcompat import AppCompatResult
+
+        old = _make_snapshot("1.0", functions=[_pub_func("entry", "_Z5entryv", "int")])
+        new = _make_snapshot("2.0", functions=[])
+        old_p, new_p = self._make_binary_pair(tmp_path)
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old_p), new_lib_path=str(new_p),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+        )
+        self._patch_used_by(monkeypatch, tmp_path, old, new, scoped)
+
+        raw = abi_compare(
+            str(old_p), str(new_p), used_by=[str(app)], contract_evaluation=True,
+            output_format="markdown",
+        )
+        data = json.loads(raw)
+        assert "Additional scoped-gate findings" in data["report"]
+        assert "[contract: IN_CONTRACT" in data["report"]
+
     def test_used_by_missing_symbol_gets_contract_evaluation_in_root_cause_mode(
         self, tmp_path: Path, monkeypatch
     ):

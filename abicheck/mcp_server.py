@@ -1292,6 +1292,7 @@ def abi_compare(
             rendered = _fold_scoped_compat_into_text(
                 rendered, output_format, result, severity_config=severity_config,
                 show_only=show_only, report_mode=report_mode,
+                contract_evaluation=contract_evaluation,
             )
         if output_format == "json":
             response["report"] = json.loads(rendered)

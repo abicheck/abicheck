@@ -1359,6 +1359,23 @@ its own top-impacted-symbols list; still not in `sarif`/`junit`/`html`.
 Regenerated `docs/reference/cli-reference.md`; no code path changed, so no
 new test was needed beyond the existing `test_help_all_mentions_flag`.
 
+**Updated (2026-07-30): the identical MCP-side gap the CLI fold-in fix
+already closed (Codex review, fresh evidence).** `abi_compare`'s own
+`_fold_scoped_compat_into_text` call (`mcp_server.py`) never forwarded
+`contract_evaluation` at all -- for `output_format="markdown"`/`"review"`,
+`response["report"]` (the raw rendered text MCP returns for these formats)
+carried no `[contract: ...]` tag on a missing-symbol/missing-entrypoint
+finding, even though the same finding in `output_format="json"` was
+already correctly stamped (that path has its own separate post-`json.loads`
+fix, landed earlier this pass). Fixed by passing
+`contract_evaluation=contract_evaluation` into that call, mirroring the
+CLI's `run_compare` (`cli_compare_helpers.py`), which already threads it
+the same way. New test:
+`test_used_by_missing_symbol_gets_contract_evaluation_in_markdown_report`
+(`tests/test_mcp_server_unit.py`) -- calls `abi_compare` with
+`output_format="markdown"` and asserts the returned `response["report"]`
+text carries the tag.
+
 Measure:
 
 - delta by old/new decision;
