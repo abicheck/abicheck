@@ -540,11 +540,24 @@ def _apply_contract_evaluation_shadow(
     scope_to_public_surface: bool,
     force_public_symbols: set[str] | None,
     pp_ctx: PipelineContext,
+    redundant: list[Change] | None = None,
 ) -> None:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
     *kept* finding **and** every finding public-surface scoping already
     demoted to ``pp_ctx.out_of_surface``, in place. Called only when
     ``contract_evaluation=True``.
+
+    *redundant* (Codex review, fresh evidence) is ``DiffResult.
+    redundant_changes`` -- display-dedup findings folded into a causing
+    change by default, restored into the rendered report only when the
+    caller passes ``--show-redundant``/``scope.show_redundant: true``. That
+    restore happens entirely in the CLI layer
+    (``cli_helpers_compare._merge_redundant_changes``), long after this
+    function already ran, so without stamping the bucket here too, a
+    restored redundant finding would render with none of the promised
+    contract fields regardless of ``contract_evaluation=True``. Stamped the
+    same way as every other finding -- a redundant change is an ordinary
+    entity finding once restored, not a different evidence tier.
 
     Purely additive -- never consulted by verdict computation, policy, or
     exit-code logic (see ``Change.contract_relevance``'s own docstring).
@@ -594,7 +607,7 @@ def _apply_contract_evaluation_shadow(
     # a header-scoping run corresponds to contract=public.
     mode = ContractMode.PUBLIC if scope_to_public_surface else ContractMode.ALL
 
-    all_changes = kept + pp_ctx.out_of_surface
+    all_changes = kept + pp_ctx.out_of_surface + (redundant or [])
     decisions = evaluate_snapshot_pair_contract_relevance(
         all_changes,
         surf_old,
@@ -1026,7 +1039,8 @@ def compare(
     # post-processing-stage subset. Never affects `verdict` or any exit code.
     if contract_evaluation:
         _apply_contract_evaluation_shadow(
-            kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx
+            kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx,
+            redundant=redundant_for_report,
         )
 
     return DiffResult(

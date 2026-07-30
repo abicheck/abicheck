@@ -1139,6 +1139,36 @@ New tests in `tests/test_cli_compare_contract_evaluation.py`
 `tests/test_mcp_server_unit.py`'s existing coverage for the same fix on the
 MCP side.
 
+**A second Codex review round on the same PR found two more real gaps.**
+(1) `cli_options.MCP_CLI_NAME_MAP["contract_evaluation"]` was still `None`
+with a stale comment claiming no `compare` CLI equivalent existed — left
+over from before this PR's own CLI-flag work, silently exempting the new
+flag from the `cli-contract`/parity gate that keeps the MCP tool and native
+`compare` command's vocabularies in sync. Fixed by mapping it to
+`--contract-evaluation` like every other shared option. (2) `--contract-
+evaluation` combined with `--show-redundant`/`scope.show_redundant: true`
+rendered a restored redundant finding (e.g. a `func_params_changed`
+subsumed by a `type_size_changed` root) with none of the promised contract
+fields: `checker._apply_contract_evaluation_shadow` only ever stamped
+`kept` + `pp_ctx.out_of_surface`, but the redundant bucket is re-merged
+into `result.changes` entirely in the CLI layer
+(`cli_helpers_compare._merge_redundant_changes`), long after the shadow
+evaluator already ran. Fixed by threading `DiffResult.redundant_changes`
+(`redundant_for_report` in `checker.compare`) into
+`_apply_contract_evaluation_shadow` as a new `redundant` parameter, stamped
+the same way as any other finding — restoring a redundant change is not a
+different evidence tier, just a display-dedup decision being reversed. New
+test: `tests/test_report_schema.py::TestReportValidatesAgainstSchema::
+test_contract_evaluation_stamps_redundant_bucket` (unit-level, directly
+exercising `_apply_contract_evaluation_shadow`'s new parameter — a natural
+end-to-end fixture that gets a *real* detector to emit a root-type-matching
+`FUNC_PARAMS_CHANGED` redundant relative to its own `TYPE_SIZE_CHANGED` was
+attempted and found fragile/out of scope for this fix: `_match_root_type`
+requires the root type's name to appear verbatim in *both* the old and new
+value text of the derived change, which a real signature-level parameter
+change does not naturally produce without also changing the param's own
+type spelling).
+
 Measure:
 
 - delta by old/new decision;

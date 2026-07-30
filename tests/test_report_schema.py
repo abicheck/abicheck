@@ -314,6 +314,45 @@ class TestReportValidatesAgainstSchema:
             assert e["contract_reason_code"] == "terminal_authoritative_exclusion"
             assert e["contract_assurance"] == "complete"
 
+    def test_contract_evaluation_stamps_redundant_bucket(self):
+        # Regression (Codex review, PR #658, fresh evidence): a redundant
+        # (display-dedup) finding is only restored into the rendered report
+        # when the caller passes --show-redundant/scope.show_redundant --
+        # entirely in the CLI layer, via cli_helpers_compare.
+        # _merge_redundant_changes, long after _apply_contract_evaluation_shadow
+        # already ran over `kept` + out_of_surface only. Without stamping the
+        # redundant bucket too, a restored finding rendered with none of the
+        # promised contract fields regardless of contract_evaluation=True.
+        from abicheck.checker import _apply_contract_evaluation_shadow
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.checker_types import Change
+        from abicheck.post_processing import PipelineContext
+
+        old = AbiSnapshot(library="lib", version="1")
+        new = AbiSnapshot(library="lib", version="2")
+        kept = [
+            Change(
+                ChangeKind.TYPE_SIZE_CHANGED, "Cfg",
+                "size changed from 64 to 72 bytes",
+            )
+        ]
+        redundant = [
+            Change(
+                ChangeKind.FUNC_PARAMS_CHANGED, "config_init",
+                "parameter type changed in config_init(Cfg*)",
+                old_value="Cfg (64 bytes)", new_value="Cfg (72 bytes)",
+            )
+        ]
+        assert redundant[0].contract_relevance is None
+        _apply_contract_evaluation_shadow(
+            kept, old, new,
+            scope_to_public_surface=True, force_public_symbols=None,
+            pp_ctx=PipelineContext(old=old, new=new),
+            redundant=redundant,
+        )
+        assert redundant[0].contract_relevance is not None
+        assert redundant[0].contract_reason_code is not None
+
     def test_out_of_surface_findings_omit_contract_fields_by_default(self):
         # Without contract_evaluation=True, out_of_surface_changes entries
         # must stay exactly as before -- no new keys at all.
