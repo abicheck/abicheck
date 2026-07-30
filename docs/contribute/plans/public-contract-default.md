@@ -1972,6 +1972,27 @@ is ever populated is still invisible to the audit) -- not a new finding,
 so no additional code change; replied pointing at the existing
 documentation rather than re-fixing the same acknowledged gap twice.
 
+**Updated (2026-07-30): two more real findings, both on the same
+`--audit-suppressions` help text/rendering (Codex review, fresh
+evidence).** (1) The flag's help text repeated the exact `--format text`
+mistake `--contract-evaluation`'s own help text made and already had fixed
+earlier this pass: `compare`'s `--format` choice is
+`json`/`markdown`/`sarif`/`html`/`junit`/`review` -- there is no `text`
+format, so advertising an audit output under it was simply wrong. Fixed by
+dropping `text` from the documented formats (`markdown/review`, matching
+the fold-in's real behavior). (2) `_fold_suppression_audit_into_text`'s
+markdown/text/review branch rendered `audit.summary()` (which only gives
+*counts* for expired/near-expiry rules, e.g. "1 expired rule(s)") plus
+per-rule detail lines for high-risk matches only -- unlike the JSON branch,
+which already names every rule in every bucket, the default report gave no
+way to tell *which* expired or near-expiry rule needs action without
+switching to `--format json`, contrary to the flag's own promise. Fixed by
+adding the identical per-rule detail-line treatment for `expired_rules`/
+`near_expiry_rules`. New test:
+`test_expired_rule_labeled_not_just_counted` (an expired rule with a real
+`reason`, asserting its label appears under an "Expired rules:" heading in
+the markdown report, not just a bare count).
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve

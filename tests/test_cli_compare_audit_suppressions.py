@@ -364,6 +364,34 @@ class TestMarkdownReport:
         assert result.exit_code == 4, result.output
         assert "## Suppression Audit" not in result.output
 
+    def test_expired_rule_labeled_not_just_counted(self, tmp_path):
+        # Regression (Codex review, fresh evidence): audit.summary() only
+        # reports a count for expired/near-expiry rules ("1 expired
+        # rule(s)"), and this fold-in added detail lines only for
+        # high-risk matches -- unlike the JSON branch (which already names
+        # every expired/near-expiry rule), the default markdown/text/review
+        # report gave no way to tell *which* rule needs action.
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            '  - symbol: never_matches_anything\n'
+            '    reason: stale workaround\n'
+            '    expires: "2000-01-01"\n',
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "## Suppression Audit" in result.output
+        assert "Expired rules:" in result.output
+        assert "`stale workaround`" in result.output
+
 
 class TestUsedByScopedOnlyChange:
     """Regression (Codex review, PR #658, fresh evidence): --audit-

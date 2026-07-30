@@ -594,6 +594,21 @@ def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:
                     f"- `{_suppression_rule_label(rule, i)}` suppressed "
                     f"{change.kind.value}: {change.symbol}"
                 )
+        # audit.summary() only reports counts for these two buckets (Codex
+        # review, fresh evidence) -- the JSON branch above already names each
+        # rule, so the default markdown/text/review report was the one place
+        # a reader couldn't tell *which* rule needs action without switching
+        # to --format json.
+        if audit.expired_rules:
+            lines.append("")
+            lines.append("Expired rules:")
+            for i, rule in enumerate(audit.expired_rules):
+                lines.append(f"- `{_suppression_rule_label(rule, i)}`")
+        if audit.near_expiry_rules:
+            lines.append("")
+            lines.append("Rules expiring soon:")
+            for i, rule in enumerate(audit.near_expiry_rules):
+                lines.append(f"- `{_suppression_rule_label(rule, i)}`")
         return "\n".join(lines)
 
     return text
