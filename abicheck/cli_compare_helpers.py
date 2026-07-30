@@ -1672,18 +1672,6 @@ def run_compare(
         severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
     )
 
-    if audit_suppressions:
-        # Guarded above: audit_suppressions=True implies suppression is not
-        # None. Audited against the full pre-suppression change set (kept +
-        # suppressed), not just result.changes: a rule's match_counts would
-        # otherwise read every rule as "stale" purely because the changes it
-        # actually matched are exactly the ones suppression already removed
-        # from `changes`.
-        assert suppression is not None
-        result.suppression_audit = suppression.audit(  # type: ignore[attr-defined]
-            list(result.changes) + list(result.suppressed_changes)
-        )
-
     scoped_exit_code: int | None = None
     if used_by_apps:
         scoped_exit_code = _apply_used_by_scoping(
@@ -1696,6 +1684,27 @@ def run_compare(
         scoped_exit_code = _apply_required_symbol_scoping(
             result, required_symbols, old, new, policy, pf,
             exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
+        )
+
+    if audit_suppressions:
+        # Guarded above: audit_suppressions=True implies suppression is not
+        # None. Audited against the full pre-suppression change set (kept +
+        # suppressed) plus any --used-by/--required-symbol scoped_only_changes
+        # (Codex review, fresh evidence: run *after* scoping, not before, so a
+        # rule matching only a scoping-synthesized finding like
+        # CONSUMER_REQUIRED_SYMBOL_REMOVED isn't misreported as stale). Not a
+        # complete fix: scope_diff_to_app/scope_diff_to_required_symbols apply
+        # suppression internally to their own candidates before this ever
+        # sees them, so a rule matching only a scoping candidate suppression
+        # itself already dropped (never reaching scoped_only_changes at all)
+        # is still invisible here -- closing that needs those functions to
+        # expose their own pre-suppression candidate list, a separate,
+        # larger change to appcompat.py this fix does not attempt.
+        assert suppression is not None
+        result.suppression_audit = suppression.audit(  # type: ignore[attr-defined]
+            list(result.changes)
+            + list(result.suppressed_changes)
+            + list(getattr(result, "scoped_only_changes", ()) or ())
         )
 
     # ADR-049 Phase 3 (Codex review, fresh evidence): --used-by/

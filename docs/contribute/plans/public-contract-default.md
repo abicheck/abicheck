@@ -1441,8 +1441,8 @@ same demoted findings never carried the stamp (Codex review, fresh
 evidence).** `result.out_of_surface_changes` is serialized twice in a JSON
 report: once under `surface_scope.out_of_surface_changes` (already stamped,
 per the P1 fix above) and once more, independently, under `reporter.
-_scope_dict`'s own `scope.filtered_internal_changes` ledger (ADR-024/issue
-#235's older, `--scope-public-headers`-only public-surface-scoping block) --
+_scope_dict`'s own `scope.filtered_internal_changes` ledger (ADR-024/issue 235's
+older, `--scope-public-headers`-only public-surface-scoping block) --
 the *same* `Change` objects, but `_scope_dict` built its own bare
 kind/symbol/description dict from scratch rather than routing through
 `_add_contract_evaluation_fields` (or `_change_to_dict`) the way every
@@ -1875,6 +1875,51 @@ input, not a stable project setting -- like `--contract-evaluation`
 itself). New tests: `tests/test_cli_compare_audit_suppressions.py` (usage
 guard, directory/package rejection, JSON stale/high-risk-match rendering,
 markdown rendering, default-off, `--help-all` mention).
+
+**Updated (2026-07-30): two Codex/CodeRabbit review findings on the same
+`--audit-suppressions` slice, both real.** (1) `_suppression_rule_label`'s
+fallback for a rule with neither `label` nor `reason` used the rule's
+position *within the filtered bucket* (stale/high-risk/expired/near-expiry),
+not its real position in the suppression file -- e.g. the second rule in
+the file being the sole stale one rendered as `rule#0`, and two different
+rules could each render as "rule#0" across two different buckets.
+`SuppressionAudit` has no field carrying a rule's original index (`match_
+counts` does, but its own list-typed buckets don't), and threading one
+through would touch `suppression.py`'s public dataclass shape for a
+display-only concern. Fixed instead by falling back through each of the
+rule's own matching selectors (`symbol`/`symbol_pattern`/`type_pattern`/
+`member_name`/`source_location`/`namespace`/`entity_namespace`/
+`cause_namespace`, rendered as `field=value`) before ever reaching the
+`rule#<index>` fallback, which now only fires for a rule with none of
+label/reason/any selector set at all (a real rule, per `Suppression`'s own
+validation, always has at least one selector, so this last-resort path is
+effectively unreachable). New test:
+`test_label_falls_back_to_selector_not_bucket_index` (a second, unlabeled
+rule that's the sole stale one, asserting it renders via its `symbol=`
+selector, not a misleading `rule#0`). (2) The audit was computed *before*
+`_apply_used_by_scoping`/`_apply_required_symbol_scoping` ran, so a rule
+matching only a scoping-synthesized finding (e.g.
+`CONSUMER_REQUIRED_SYMBOL_REMOVED`, never present in `result.changes`) was
+misreported as stale, and its potential high-risk match was invisible.
+Fixed by moving the audit computation to after both scoping calls and
+including `result.scoped_only_changes` in the audited change set. **Not a
+complete fix**, documented in the code itself: `scope_diff_to_app`/
+`scope_diff_to_required_symbols` (`appcompat.py`) apply suppression to
+their own scoping candidates *internally*, before this code ever sees
+them -- a rule matching only a candidate suppression already dropped
+(so it never reaches `scoped_only_changes` at all) is still invisible to
+the audit. Closing that residual gap needs those functions to expose their
+own pre-suppression candidate list back to the caller, a separate, larger
+change to `appcompat.py` (a module this slice otherwise doesn't touch) that
+this fix deliberately does not attempt -- same "real, separately-scoped
+follow-up" reasoning as every other `appcompat.py`-adjacent gap already
+documented in this file. New test:
+`test_rule_matching_scoped_only_change_is_not_reported_stale`
+(`tests/test_cli_compare_audit_suppressions.py`, mirroring
+`TestUsedByScopingStampsExplicitEvidence`'s existing `scope_diff_to_app`
+monkeypatch pattern). Also fixed the MD018 markdownlint warning this same
+review round flagged: an unescaped `#235` (issue reference) at the start of
+a line, misparsed as an invalid ATX heading -- reworded to "issue 235".
 
 ### Phase 6 — opt-in public mode and corpus validation
 

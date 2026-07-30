@@ -514,10 +514,24 @@ def _fold_scoped_compat_into_text(
 def _suppression_rule_label(rule: Any, index: int) -> str:
     """A human-readable identifier for a suppression rule with no index of
     its own (``SuppressionAudit``'s per-bucket lists don't carry the rule's
-    position in the original file) -- falls back to *index* (this bucket's
-    own position) only when the rule has neither a label nor a reason."""
-    label = getattr(rule, "label", None) or getattr(rule, "reason", None)
-    return label or f"rule#{index}"
+    position in the original file, so *index* is only this bucket's own
+    position -- misleading as a rule identifier, e.g. the second rule in
+    the file being the only stale one renders as ``rule#0`` -- Codex/
+    CodeRabbit review, fresh evidence). Falls back through the rule's own
+    matching selectors (whichever one it was actually defined with) before
+    ever falling back to *index*, which is now only a last resort for a
+    rule with none of label/reason/any selector set at all."""
+    label: str | None = getattr(rule, "label", None) or getattr(rule, "reason", None)
+    if label:
+        return label
+    for field in (
+        "symbol", "symbol_pattern", "type_pattern", "member_name",
+        "source_location", "namespace", "entity_namespace", "cause_namespace",
+    ):
+        value: str | None = getattr(rule, field, None)
+        if value:
+            return f"{field}={value}"
+    return f"rule#{index}"
 
 
 def _fold_suppression_audit_into_text(text: str, fmt: str, audit: Any) -> str:

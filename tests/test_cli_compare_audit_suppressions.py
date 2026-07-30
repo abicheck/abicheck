@@ -129,6 +129,38 @@ class TestJsonReport:
         assert audit["stale_rules"] == ["workaround"]
         assert audit["high_risk_matches"] == []
 
+    def test_label_falls_back_to_selector_not_bucket_index(self, tmp_path):
+        # Regression (Codex/CodeRabbit review, fresh evidence): a rule with
+        # neither label nor reason previously fell back to its position
+        # *within the filtered bucket* (e.g. "rule#0"), not its real
+        # position in the suppression file -- misleading whenever a rule
+        # isn't first in the file, or when two buckets' "rule#0" entries
+        # are actually two different rules. A second, unlabeled rule
+        # (no `reason`) is the sole stale one here; it must render using
+        # one of its own matching selectors, not a fabricated "rule#0".
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: _Z5api_bv\n"
+            "    reason: intentional removal\n"
+            "  - symbol: never_matches_anything\n",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert audit["total_rules"] == 2
+        assert audit["stale_rules"] == ["symbol=never_matches_anything"]
+
     def test_high_risk_match_reported(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(
@@ -233,6 +265,77 @@ class TestMarkdownReport:
         )
         assert result.exit_code == 4, result.output
         assert "## Suppression Audit" not in result.output
+
+
+class TestUsedByScopedOnlyChange:
+    """Regression (Codex review, PR #658, fresh evidence): --audit-
+    suppressions ran before --used-by/--required-symbol scoping applied,
+    so a rule matching only a scoping-synthesized finding (e.g.
+    CONSUMER_REQUIRED_SYMBOL_REMOVED, never present in result.changes) was
+    misreported as stale."""
+
+    def _setup(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from abicheck import dumper as dumper_mod
+
+        app = tmp_path / "app"
+        app.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old = tmp_path / "old.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new = tmp_path / "new.so"
+        new.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        old_snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        new_snap = AbiSnapshot(library="libfoo.so", version="2.0", functions=[])
+        monkeypatch.setattr(
+            dumper_mod, "dump", MagicMock(side_effect=[old_snap, new_snap])
+        )
+        return app, old, new
+
+    def test_rule_matching_scoped_only_change_is_not_reported_stale(
+        self, tmp_path, monkeypatch
+    ):
+        import abicheck.appcompat as appcompat_mod
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.diff_helpers import make_change
+
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        synthetic = make_change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="_Z5entryv",
+            name=app.name,
+        )
+        scoped = AppCompatResult(
+            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
+            required_symbols={"_Z5entryv"}, required_symbol_count=1,
+            breaking_for_app=[synthetic], verdict=Verdict.BREAKING,
+        )
+        monkeypatch.setattr(
+            appcompat_mod, "scope_diff_to_app", lambda *a, **k: scoped
+        )
+        suppress = _write_suppression(
+            tmp_path,
+            "version: 1\n"
+            "suppressions:\n"
+            "  - symbol: _Z5entryv\n"
+            "    reason: expected app-facing removal\n",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new),
+                "--used-by", str(app),
+                "--suppress", str(suppress), "--audit-suppressions",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        audit = payload["suppression_audit"]
+        assert audit["stale_rules"] == []
 
 
 class TestHelpAll:
