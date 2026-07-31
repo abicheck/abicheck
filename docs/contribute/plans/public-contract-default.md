@@ -1584,16 +1584,45 @@ This is the same collision — and the same fix — `type_reachability.py`
 already carries (see this repo's `AGENTS.md`, "sixth finding"); `surface.py`
 still has it, deliberately, as that file documents.
 
-**Open, deliberately left for Phase 6's corpus run:** the
-"no unmatched ABI-relevant export" requirement is sound but strict, and on a
-real header-scoped C++ library the ELF table also carries `_ZTV`/`_ZTI`/`_ZTS`
-vtable/typeinfo entries (not filtered by `is_abi_relevant_elf_symbol`, which
-only drops `_ZTh`/`_ZTv`/`_ZTc` thunks) that no `Function`/`Variable`
-declaration matches — so `PROVEN_OUT_OF_CONTRACT` will rarely be reachable
-until that set is either matched or excluded. Choosing the right leniency is
-exactly what Phase 6's corpus validation measures, so it is deliberately not
-guessed here: being unresolved-but-sound costs nothing while the evaluator is
-shadow-only.
+**Measured, 2026-07-31 — the strictness is satisfiable on the DWARF path.**
+An earlier revision of this note guessed that the "no unmatched ABI-relevant
+export" rule would make `PROVEN_OUT_OF_CONTRACT` unreachable on a real C++
+library, because the ELF table carries `_ZTV`/`_ZTI`/`_ZTS` entries that
+`is_abi_relevant_elf_symbol` does not filter (it only drops `_ZTh`/`_ZTv`/
+`_ZTc` thunks). That guess is **wrong**, verified against two real
+`g++ -shared -g` libraries dumped through `dumper.dump()`: the DWARF path
+records those vtable/RTTI symbols as `Variable` declarations, so all 15
+exports of a polymorphic two-class library matched, `unmatched_exports` was
+empty, and `exclusion_is_provable` was `True`. The header-scoped (castxml)
+path was not measured — no castxml in that environment — so it stays
+genuinely unknown rather than assumed either way.
+
+**Open, and the one place this domain can still over-claim: unresolvable type
+edges** (Codex review, measured rather than guessed). A signature, field, or
+base whose type string resolves to nothing in the record/enum/typedef indexes
+stops the closure silently, yet `exclusion_is_provable` stays `True` — so a
+type reachable only through that missing edge can be reported
+`PROVEN_OUT_OF_CONTRACT`. Implementing the guard faithfully is what needs a
+decision, not more code, because of what the measurement showed at each
+granularity on the same two libraries:
+
+| Granularity of "unresolved" | libmeasure | libpoly |
+|---|---|---|
+| identifier not in `all_types` | 0 | 2 (`Base`, `string` — both false: the walk resolves bare tails via `record_by_name`) |
+| identifier not resolvable by the walk's own indexes | 0 | 1 (`string`) |
+| whole type *reference* with no resolvable identifier | 0 | 1 — field `api::Base::tag`, type recorded as bare `"string"` |
+
+That last one is real: DWARF spells the field type `"string"` while the
+typedef key is `"std::string"` and the record is
+`std::__cxx11::basic_string<...>` — exactly the bare-vs-qualified gap
+`AGENTS.md` documents at length for `type_reachability.py`. So a faithful
+guard turns `exclusion_is_provable` off for **any** C++ library with a
+`std::` member, which is nearly all of them — trading a narrow false
+exclusion for a domain that can never prove anything. Resolving those
+spellings properly means reusing `type_reachability.py`'s namespace-suffix
+and typedef-alias machinery, which is its own scoped piece of work. Left
+unimplemented deliberately, with the measurement recorded here so Phase 6
+decides from data rather than repeating it.
 
 Three membership primitives shared by both domains (`_symbol_matches`,
 `_type_candidates`, `_confirmed_type_matches`) were extracted from

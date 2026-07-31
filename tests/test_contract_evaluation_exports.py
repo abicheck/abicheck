@@ -25,6 +25,8 @@ file covers the *decisions* the evaluator makes from it.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.contract_evaluation import (
@@ -236,7 +238,10 @@ class TestExportsMode:
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "export_root_membership"
 
-    def test_manifest_exclusion_is_still_terminal_under_public_mode(self) -> None:
+    @pytest.mark.parametrize("mode", [ContractMode.PUBLIC, ContractMode.ALL])
+    def test_manifest_exclusion_is_still_terminal_under_other_modes(
+        self, mode: ContractMode
+    ) -> None:
         # The mode dispatch moved, so pin that the *other* modes' behaviour is
         # unchanged: the manifest exclusion is still authoritative there.
         import abicheck.contract_evaluation as mod
@@ -247,12 +252,11 @@ class TestExportsMode:
             description="",
             surface_exclusion_reason=mod._REASON_POST_MANIFEST_NOT_COMMITTED,
         )
-        for mode in (ContractMode.PUBLIC, ContractMode.ALL):
-            decision = evaluate_change_contract_relevance(
-                c, _UNRESOLVABLE, _UNRESOLVABLE, mode=mode
-            )
-            assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
-            assert decision.reason_code == "terminal_authoritative_exclusion"
+        decision = evaluate_change_contract_relevance(
+            c, _UNRESOLVABLE, _UNRESOLVABLE, mode=mode
+        )
+        assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        assert decision.reason_code == "terminal_authoritative_exclusion"
 
     def test_not_applicable_kind_still_wins_under_exports(self) -> None:
         snap = self._snap(elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]))
@@ -261,7 +265,12 @@ class TestExportsMode:
             ContractRelevance.NOT_APPLICABLE
         )
 
-    def test_declared_public_overlays_cannot_widen_the_export_domain(self) -> None:
+    @pytest.mark.parametrize(
+        "overlay", ["force_public_symbols", "public_surface_allowlist"]
+    )
+    def test_declared_public_overlays_cannot_widen_the_export_domain(
+        self, overlay: str
+    ) -> None:
         # `--public-symbol` and `--post-manifest` both assert something about
         # the *declared-public* surface; neither observes an export, and a
         # user assertion cannot make an unexported declaration exported. This
@@ -274,12 +283,8 @@ class TestExportsMode:
             elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]),
         )
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="d", description="")
-        for overlay in (
-            {"force_public_symbols": frozenset({"d"})},
-            {"public_surface_allowlist": frozenset({"d"})},
-        ):
-            decision = self._evaluate(c, self._exports(snap), **overlay)
-            assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        decision = self._evaluate(c, self._exports(snap), **{overlay: frozenset({"d"})})
+        assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
 
     def test_an_overlay_named_symbol_that_is_exported_is_still_a_root(self) -> None:
         # The overlays are ignored, not inverted: membership still comes from
@@ -296,7 +301,16 @@ class TestExportsMode:
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "export_root_membership"
 
-    def test_an_unmatched_export_blocks_every_exclusion(self) -> None:
+    @pytest.mark.parametrize(
+        ("symbol", "kind"),
+        [
+            ("Maybe", ChangeKind.TYPE_SIZE_CHANGED),
+            ("unexported_helper", ChangeKind.FUNC_REMOVED),
+        ],
+    )
+    def test_an_unmatched_export_blocks_every_exclusion(
+        self, symbol: str, kind: ChangeKind
+    ) -> None:
         # An export no declaration accounted for is a real entry point whose
         # own signature -- and type closure -- this snapshot knows nothing
         # about, so an absence from the root/closure sets could just mean the
@@ -311,14 +325,10 @@ class TestExportsMode:
                 symbols=[ElfSymbol(name="known"), ElfSymbol(name="mystery")]
             ),
         )
-        for symbol, kind in (
-            ("Maybe", ChangeKind.TYPE_SIZE_CHANGED),
-            ("unexported_helper", ChangeKind.FUNC_REMOVED),
-        ):
-            c = Change(kind=kind, symbol=symbol, description="")
-            assert self._evaluate(c, self._exports(snap)).relevance is not (
-                ContractRelevance.PROVEN_OUT_OF_CONTRACT
-            )
+        c = Change(kind=kind, symbol=symbol, description="")
+        assert self._evaluate(c, self._exports(snap)).relevance is not (
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
 
     def test_linker_artifacts_do_not_count_as_unmatched_exports(self) -> None:
         # Otherwise every real ELF binary (which always exports _init/_fini/
@@ -525,6 +535,34 @@ class TestExportsMode:
         c = Change(
             kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED, symbol="Foo::x", description=""
         )
+        assert self._evaluate(c, self._exports(snap)).relevance is (
+            ContractRelevance.IN_CONTRACT
+        )
+
+    @pytest.mark.parametrize(
+        ("kind", "symbol"),
+        [
+            # `diff_types` records the owning *type* alone for this family,
+            # with the field name in `detail` -- stripping the last component
+            # would yield the namespace fragment "ns", losing the owner.
+            (ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "ns::Foo"),
+            (ChangeKind.TYPE_FIELD_TYPE_CHANGED, "ns::Foo"),
+            # ... while the enum-member family records owner *and* member, so
+            # the owner really is the stripped prefix.
+            (ChangeKind.ENUM_MEMBER_VALUE_CHANGED, "ns::Foo::X"),
+        ],
+    )
+    def test_member_level_findings_resolve_their_owner_in_both_shapes(
+        self, kind: ChangeKind, symbol: str
+    ) -> None:
+        # Regression (Codex review): the two producers in one kind set spell
+        # `symbol` differently, so both readings must be offered as candidates.
+        snap = self._snap(
+            functions=[_fn("api", ret="ns::Foo *", mangled="api")],
+            types=[_rec("ns::Foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        c = Change(kind=kind, symbol=symbol, description="")
         assert self._evaluate(c, self._exports(snap)).relevance is (
             ContractRelevance.IN_CONTRACT
         )

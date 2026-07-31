@@ -817,16 +817,30 @@ def _type_candidates(change: Change) -> set[str]:
     ``caused_by_type`` spelling ``"const Foo *"`` would not literal-match a
     bare ``"Foo"`` entry).
 
-    A member-level finding (``_MEMBER_LEVEL_TYPE_KIND_NAMES``, e.g.
-    ``TYPE_FIELD_OFFSET_CHANGED`` with ``symbol="Point::x"``) resolves to its
-    *owner* type exactly like ``classify_change_surface`` reclassifies it:
-    passing the full ``"Point::x"`` to :func:`_type_identifiers` yields
-    ``{"Point::x", "x"}``, never the owner ``"Point"`` that is actually the
-    type-universe entry.
+    A member-level finding (``_MEMBER_LEVEL_TYPE_KIND_NAMES``) must resolve to
+    its *owner* type -- but the producers in that one kind set disagree on
+    whether ``symbol`` already names the member, so **both** readings are
+    offered as candidates (Codex review, confirmed against ``diff_types.py``):
+
+    - ``ENUM_MEMBER_VALUE_CHANGED`` records ``symbol=f"{name}::{mname}"``
+      (``"ns::Mode::X"``), so the owner is the ``"::"``-stripped prefix.
+      Passing the full spelling to :func:`_type_identifiers` would yield
+      ``{"ns::Mode::X", "X"}``, never the owner that is the real
+      type-universe entry.
+    - ``TYPE_FIELD_OFFSET_CHANGED``/``TYPE_FIELD_TYPE_CHANGED``/
+      ``TYPE_FIELD_REMOVED`` record ``symbol=name`` -- the owning *type*
+      alone, with the field name in ``detail``. Stripping there turns
+      ``"ns::Foo"`` into the namespace fragment ``"ns"``, losing the owner
+      entirely and leaving a genuinely public field change unconfirmed.
+
+    Nothing in the finding distinguishes the two shapes, so both are kept and
+    the caller's ambiguity check decides. Offering the extra candidate is
+    safe: it can only match a type actually named that way, and
+    :func:`_confirmed_type_matches` still rejects an ambiguous hit.
     """
     sym = change.symbol or ""
     if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and sym and "::" in sym:
-        return {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
+        return {sym.rsplit("::", 1)[0], sym} | _type_identifiers(change.caused_by_type)
     return _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
 
 

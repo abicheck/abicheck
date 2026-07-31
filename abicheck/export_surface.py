@@ -165,11 +165,11 @@ def observed_exports_by_platform(snap: AbiSnapshot) -> dict[str, set[str]] | Non
     true on incomplete evidence.
     """
     tables: dict[str, set[str]] = {}
-    elf = getattr(snap, "elf", None)
-    if elf is not None and getattr(elf, "symbols", None):
+    elf = snap.elf
+    if elf is not None and elf.symbols:
         tables["elf"] = {s.name for s in elf.symbols if s.name}
-    pe = getattr(snap, "pe", None)
-    if pe is not None and getattr(pe, "exports", None):
+    pe = snap.pe
+    if pe is not None and pe.exports:
         # An unnamed ordinal-only PE export carries an empty `name`; dropping
         # it would hide a real entry point whose signature is unknown, so a
         # named sibling could then make `exclusion_is_provable` true (Codex
@@ -177,8 +177,8 @@ def observed_exports_by_platform(snap: AbiSnapshot) -> dict[str, set[str]] | Non
         # `dumper._dump_pe` records for the same export, so a headerless PE
         # snapshot's own declarations match it.
         tables["pe"] = {(e.name or f"ordinal:{e.ordinal}") for e in pe.exports}
-    macho = getattr(snap, "macho", None)
-    if macho is not None and getattr(macho, "exports", None):
+    macho = snap.macho
+    if macho is not None and macho.exports:
         tables["macho"] = {e.name for e in macho.exports if e.name}
     return tables or None
 
@@ -221,8 +221,12 @@ def _unexplained_exports(
     The artifact filter is applied per table, only where its conventions
     hold (:data:`_ELF_CONVENTION_TABLES`) -- see
     :func:`observed_exports_by_platform` for why provenance is kept. A name
-    exported by several tables is explained if *any* table's rules accept it
-    as an artifact, since it is then the same artifact under both.
+    exported by several tables stays unexplained when *any* table's rules
+    fail to accept it as an artifact -- the conservative direction (CodeRabbit
+    review caught the docstring claiming the opposite of what the loop does),
+    since a wrongly-dropped unmatched export is exactly what would let
+    :attr:`ExportSurface.exclusion_is_provable` turn true on incomplete
+    evidence.
     """
     unexplained: set[str] = set()
     for table, names in tables.items():
