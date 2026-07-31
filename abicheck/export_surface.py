@@ -567,6 +567,11 @@ class _SpellingIndex(NamedTuple):
     #: resolves against. Naming a known node is not enough: the closure has
     #: to have been able to *follow* the edge (see :func:`_edge_is_unresolved`).
     walk_keys: frozenset[str]
+    #: Typedef keys every one of whose colliding records/enums is
+    #: toolchain-owned -- libstdc++'s bare-key alias templates. Their targets
+    #: are not judged, for the same reason a toolchain record's own fields
+    #: are not (see :func:`_followed_typedef_aliases`).
+    toolchain_alias_keys: frozenset[str]
 
 
 def _resolvable_type_spellings(
@@ -637,7 +642,37 @@ def _resolvable_type_spellings(
     # own name plus, for a namespaced one, its bare `::` tail) and
     # `snap.typedefs` by *exact* key, with no tail tolerance of its own.
     walk_keys = {*record_by_name, *enum_by_name, *snap.typedefs}
-    return _SpellingIndex(frozenset(spellings), frozenset(unscoped), frozenset(walk_keys))
+
+    # An alias key a record or enum also owns, where *every* colliding node
+    # is toolchain-owned: libstdc++'s bare-key alias templates. Measured on a
+    # real `g++` library -- `"vector" -> "std::vector<_Tp,
+    # polymorphic_allocator<_Tp>>"` collides with the record `std::vector`,
+    # and `"basic_string"` with `std::__cxx11::basic_string`. Judging those
+    # targets reports the template *parameter* names in them (`_Tp`,
+    # `_CharT`, `_Traits`) as missing edges, which is the same
+    # toolchain-internals noise `_unresolved_type_edges` already declines one
+    # level up -- and any one of them blocks every exclusion for every C++
+    # library. "Every colliding node" rather than "any" keeps the
+    # conservative direction: a library's own record sharing the key means
+    # the alias may well be its own, so it is still followed.
+    toolchain_aliases: set[str] = set()
+    for alias in snap.typedefs:
+        colliding = [
+            *record_by_name.get(alias, ()),
+            *enum_by_name.get(alias, ()),
+        ]
+        if colliding and all(
+            (node.qualified_name or node.name).startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)
+            for node in colliding
+        ):
+            toolchain_aliases.add(alias)
+
+    return _SpellingIndex(
+        frozenset(spellings),
+        frozenset(unscoped),
+        frozenset(walk_keys),
+        frozenset(toolchain_aliases),
+    )
 
 
 def _edge_is_unresolved(
@@ -719,7 +754,7 @@ def _edge_is_unresolved(
 
 
 def _followed_typedef_aliases(
-    type_str: str | None, snap: AbiSnapshot, surface: ExportSurface
+    type_str: str | None, snap: AbiSnapshot, index: _SpellingIndex
 ) -> set[str]:
     """Typedef keys named by *type_str* whose target is worth scanning too.
 
@@ -734,14 +769,31 @@ def _followed_typedef_aliases(
     the target: an alias pointing at an absent type left
     ``unresolved_type_edges`` empty and unrelated types provable-out.
 
-    An *ambiguous* key is excluded: it does not prove the spelling reached
-    this alias rather than the same-named record, the same reasoning
-    ``_confirmed_type_matches`` uses -- and it is what keeps libstdc++'s
-    bare-key alias templates (``"vector"``, ``"basic_string"``, which collide
-    with the real records) out of the scan. That guard is what makes
-    resolving through the bare tail safe rather than a new noise source, and
-    it is applied to the *resolved key*, not the written token. See
-    :func:`_unresolved_type_edges` for the full rationale.
+    An ambiguous key -- one a record or enum also owns, such as libstdc++'s
+    bare-key alias templates ``"vector"``/``"basic_string"`` -- is **not**
+    excluded, though an earlier revision excluded it on the reasoning
+    ``_confirmed_type_matches`` uses ("the spelling does not prove it reached
+    the alias rather than the same-named record"). That reasoning is right
+    for *membership* and wrong for *completeness* (Codex review, confirmed
+    empirically): ``_walk_type_closure`` does not choose between the two
+    meanings, it follows **both** -- an unconditional ``snap.typedefs.get``
+    plus the record lookup -- so a dangling target behind an ambiguous alias
+    is a hole the closure really has. Skipping it left
+    ``unresolved_type_edges`` empty and unrelated types provable-out.
+
+    The libstdc++ noise that guard *was* aimed at is real, and dropping the
+    ambiguity condition alone brought it straight back -- measured, not
+    assumed: a real ``g++`` library went from zero unresolved edges to four
+    (``_Tp``, ``_CharT``, ``_Traits``, ``std::basic_string``). What separates
+    the two cases is not ambiguity but **whose** node the alias collides
+    with: ``"vector"``/``"basic_string"`` collide with the records
+    ``std::vector``/``std::__cxx11::basic_string``, and their targets spell
+    that template's own *parameter* names. So the exclusion is keyed on
+    :data:`~abicheck.name_classification.STDLIB_TYPE_NAMESPACE_PREFIXES`
+    (:attr:`_SpellingIndex.toolchain_alias_keys`) -- the same "whose layout
+    is this" rule :func:`_unresolved_type_edges` already applies to a
+    toolchain record's own fields, one level up -- rather than on a
+    collision the library's own types can equally cause.
     """
     if not _is_real_type(type_str) or type_str is None:
         return set()
@@ -752,7 +804,7 @@ def _followed_typedef_aliases(
         if tok in _TYPE_NOISE:
             continue
         for ident in _type_identifiers(tok):
-            if ident in snap.typedefs and ident not in surface.ambiguous_type_names:
+            if ident in snap.typedefs and ident not in index.toolchain_alias_keys:
                 aliases.add(ident)
     return aliases
 
@@ -830,12 +882,22 @@ def _unresolved_type_edges(
     seen_aliases: set[str] = set()
 
     def scan(type_str: str | None) -> None:
-        unresolved.update(_edge_is_unresolved(type_str, index))
-        for alias in _followed_typedef_aliases(type_str, snap, surface):
-            if alias in seen_aliases:
-                continue
-            seen_aliases.add(alias)
-            scan(snap.typedefs[alias])
+        # An explicit stack, not recursion: an alias chain
+        # (``A0 -> A1 -> ... -> An``) is followed one link per iteration, and
+        # a chain longer than Python's frame limit raised ``RecursionError``
+        # and aborted the whole comparison -- reproduced at 1200 links, which
+        # template-heavy C++ reaches (one real library measured here already
+        # carries 399 typedefs). Same conversion, for the same reason, that
+        # ``type_reachability._finditer_allow_nested`` already carries.
+        pending: list[str | None] = [type_str]
+        while pending:
+            current = pending.pop()
+            unresolved.update(_edge_is_unresolved(current, index))
+            for alias in _followed_typedef_aliases(current, snap, index):
+                if alias in seen_aliases:
+                    continue
+                seen_aliases.add(alias)
+                pending.append(snap.typedefs[alias])
 
     for fn in snap.functions:
         if _linker_identity(fn.name, fn.mangled) not in root_identities:

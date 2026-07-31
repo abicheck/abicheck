@@ -1041,6 +1041,70 @@ class TestUnresolvedTypeEdges:
         assert surf.exclusion_is_provable
         assert "std::__cxx11::Widget" in surf.export_types
 
+    def test_an_alias_colliding_with_an_own_record_is_still_followed(self) -> None:
+        # `_walk_type_closure` does not choose between a typedef and a
+        # same-named record -- it follows both -- so a dangling target behind
+        # an ambiguous alias is a hole the closure really has. Skipping it on
+        # ambiguity (as an earlier revision did, borrowing the *membership*
+        # rule) left it unreported (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Foo *",))],
+            types=[_rec("Foo"), _rec("Bystander")],
+            typedefs={"Foo": "Gone"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unresolved_type_edges == frozenset({"Gone"})
+        assert not surf.exclusion_is_provable
+
+    def test_an_alias_colliding_only_with_toolchain_records_is_not_judged(self) -> None:
+        # The same shape with the colliding record toolchain-owned is
+        # libstdc++'s bare-key alias template (`"vector"` colliding with
+        # `std::vector`, target spelling that template's own parameter names).
+        # Measured: judging those targets put four false edges back on a real
+        # g++ library, which would block every exclusion for every C++ library
+        # -- the same "whose layout is this" rule already applied to a
+        # toolchain record's own fields.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Foo *",))],
+            types=[_rec("std::Foo")],
+            typedefs={"Foo": "Gone"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unresolved_type_edges
+        assert surf.exclusion_is_provable
+
+    def test_a_long_alias_chain_does_not_exhaust_the_stack(self) -> None:
+        # The alias walk used to recurse once per link, so a chain longer
+        # than Python's frame limit raised `RecursionError` and aborted the
+        # whole comparison. 1200 links is above the default limit and well
+        # within reach of template-heavy C++ (a real library measured here
+        # already carries 399 typedefs).
+        depth = 1200
+        typedefs = {f"A{i}": f"A{i + 1}" for i in range(depth)}
+        typedefs[f"A{depth}"] = "Target"
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("A0 *",))],
+            types=[_rec("Target")],
+            typedefs=typedefs,
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unresolved_type_edges
+        assert surf.exclusion_is_provable
+
+        # ...and the chain is genuinely walked, not silently truncated: an
+        # absent target at the far end is still reported.
+        snap.typedefs[f"A{depth}"] = "Gone"
+        assert compute_export_surface(snap).unresolved_type_edges == frozenset({"Gone"})
+
     def test_a_scope_lost_alias_key_is_followed_to_its_target(self) -> None:
         # The direct-clang backend stores a typedef under its bare name while
         # a signature can spell it qualified, so the walk follows the bare
