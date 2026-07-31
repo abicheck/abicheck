@@ -235,13 +235,18 @@ def resolve_internal_namespaces(
     ``internal_namespaces`` has no CLI flag of its own -- ``policy_file.py``'s
     ``PolicyFile.internal_namespaces`` (populated only when a real
     ``--policy-file`` YAML sets the key) is the only front end that can set
-    it today. ``policy_file is None`` (no ``--policy-file`` given at all) or
-    an empty ``internal_namespaces`` list (indistinguishable, once parsed,
-    from the key never being set) both contribute no candidate at all and
-    fall through to :data:`_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES`, the same
-    "a selector layer only participates when it actually selected something"
-    principle :func:`resolve_legacy_contract_mode`'s untouched-flag case
-    already applies (ADR-049 D7).
+    it today. ``policy_file is None`` (no ``--policy-file`` given at all), or
+    an empty ``internal_namespaces`` list on a document that never carried
+    the key (``PolicyFile.internal_namespaces_stated`` is ``False``),
+    contribute no candidate at all and fall through to
+    :data:`_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES` -- the same "a selector
+    layer only participates when it actually selected something" principle
+    :func:`resolve_legacy_contract_mode`'s untouched-flag case already
+    applies (ADR-049 D7). A document that *did* carry the key with an empty
+    list stated something ("this project has no internal namespaces") and
+    contributes a real empty-tuple candidate, so nothing below it -- a
+    contract pack assigning the same field in particular -- fills it in over
+    that statement.
 
     Tagged :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`,
     not ``PROJECT_CONFIG`` -- ``--policy-file`` is a flag the user explicitly
@@ -306,7 +311,15 @@ def internal_namespaces_candidate(
     path it was read from. *option* is the selector spelling to record --
     a non-CLI front end names its own field, not the CLI flag.
     """
-    if policy_file is None or not policy_file.internal_namespaces:
+    # An *explicitly* empty list still contributes: a document that carried
+    # `internal_namespaces: []` said "this project has none", and treating
+    # that as unstated let a contract pack assigning the field inject its own
+    # namespaces over the statement (Codex review, fresh evidence). A parsed
+    # empty list with no such key -- including any PolicyFile built in code --
+    # still contributes nothing, and falls through to the built-in default.
+    if policy_file is None or not (
+        policy_file.internal_namespaces or policy_file.internal_namespaces_stated
+    ):
         return None
     canonical = tuple(dict.fromkeys(sorted(policy_file.internal_namespaces)))
     source_path = str(policy_file.source_path) if policy_file.source_path else None
@@ -795,7 +808,14 @@ def resolve_pack_field_assignments(
     # at different paths share one identity, so an identity-only sort is a
     # tie between them and stable sorting would hand the receipt back to
     # argument order (Codex review, fresh evidence).
-    merged_raw: dict[str, tuple[str, LoadedPack, Hashable]] = {}
+    # Every contributor is kept, not only the winner: a field another layer
+    # pins is exempt from conflict detection, so several packs may assign it
+    # with differing values and only the first would ever be routed. A
+    # malformed assignment in one of the others then reached no converter at
+    # all, and the resolver accepted a manifest it never validated (Codex
+    # review, fresh evidence). The value that gets *used* is still the first
+    # one in this order; the rest are validated and discarded.
+    merged_raw: dict[str, list[tuple[str, LoadedPack, Hashable]]] = {}
     for path, pack in sorted(
         selected,
         key=lambda entry: (
@@ -806,11 +826,12 @@ def resolve_pack_field_assignments(
         ),
     ):
         for field_name, value in pack.assignments.items():
-            merged_raw.setdefault(field_name, (path, pack, value))
+            merged_raw.setdefault(field_name, []).append((path, pack, value))
 
     routed: dict[str, RoutedPackAssignment] = {}
     for field_name in sorted(merged_raw):
-        path, pack, value = merged_raw[field_name]
+        contributors = merged_raw[field_name]
+        path, pack, value = contributors[0]
         convert = routes.get(field_name)
         if convert is None:
             raise PackManifestError(
@@ -820,6 +841,8 @@ def resolve_pack_field_assignments(
                 "config field with no route here is one no pack of this kind "
                 "is allowed to set"
             )
+        for other_path, _, other_value in contributors[1:]:
+            convert(other_value, field_name, other_path)
         routed[field_name] = RoutedPackAssignment(
             value=convert(value, field_name, path),
             identity=pack.identity,

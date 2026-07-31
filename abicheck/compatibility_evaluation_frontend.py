@@ -811,7 +811,12 @@ def resolve_compatibility_evaluation_config(
     # of this mapping, so the value is a marker rather than the real resolved
     # value (which several of these fields do not have yet at this point).
     pinned_contract: dict[str, Hashable] = {}
-    if explicit.policy_file is not None and explicit.policy_file.internal_namespaces:
+    if explicit.policy_file is not None and (
+        explicit.policy_file.internal_namespaces
+        # An explicit `internal_namespaces: []` states "none", so it pins the
+        # field exactly as a populated list does (Codex review).
+        or explicit.policy_file.internal_namespaces_stated
+    ):
         pinned_contract[INTERNAL_NAMESPACES_FIELD] = _STATED_ELSEWHERE
     pinned_gate: dict[str, Hashable] = {}
     if explicit.exit_code_scheme is not None or (

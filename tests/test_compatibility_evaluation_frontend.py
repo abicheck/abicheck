@@ -70,6 +70,7 @@ from abicheck.compatibility_evaluation_resolver import (
 from abicheck.compatibility_evaluation_wiring import resolve_pack_field_assignments
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.errors import PackManifestError
+from abicheck.policy_file import PolicyFile
 from abicheck.severity import SeverityLevel, resolve_severity_config
 
 
@@ -1060,6 +1061,76 @@ class TestMalformedInput:
         )
         cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
         assert cfg.contract.overlays == ("ffi",)
+
+    def test_every_selected_assignment_is_validated_not_only_the_winner(
+        self, tmp_path
+    ):
+        # A pinned field is exempt from conflict detection, so two packs may
+        # assign it differing values and only the first is ever routed. The
+        # shadowed one is still a selected manifest, and a malformed value in
+        # it must not be accepted just because nothing used it.
+        good = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="a",
+            kind="contract",
+            assignments="surface.internal_namespaces: [valid]\n",
+        )
+        malformed = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="b",
+            kind="contract",
+            assignments="surface.internal_namespaces: 123\n",
+        )
+        with pytest.raises(PackManifestError, match="must be a list of str"):
+            resolve_pack_field_assignments(
+                (str(good), str(malformed)),
+                PackKind.CONTRACT,
+                explicit_overrides={"surface.internal_namespaces": ("stated",)},
+            )
+
+    def test_an_explicitly_empty_namespace_list_outranks_a_pack(self, tmp_path):
+        # `internal_namespaces: []` states "this project has none"; a pack
+        # filling the field would override a stated value.
+        policy = tmp_path / "policy.yml"
+        policy.write_text("internal_namespaces: []\n")
+        loaded = PolicyFile.load(policy)
+        pack = _write_pack(
+            tmp_path / "c.yml",
+            pack_id="c",
+            kind="contract",
+            assignments="surface.internal_namespaces: [detail]\n",
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                policy_file=loaded,
+                policy_file_sha256=loaded.source_sha256,
+                pack_paths=(str(pack),),
+            )
+        )
+        assert cfg.surface.internal_namespaces == ()
+        assert (
+            cfg.provenance[INTERNAL_NAMESPACES_FIELD].layer
+            is SelectorLayer.EXPLICIT_CLI
+        )
+
+    def test_a_policy_file_without_the_key_still_lets_a_pack_fill_it(self, tmp_path):
+        policy = tmp_path / "policy.yml"
+        policy.write_text("base_policy: sdk_vendor\n")
+        loaded = PolicyFile.load(policy)
+        pack = _write_pack(
+            tmp_path / "c.yml",
+            pack_id="c",
+            kind="contract",
+            assignments="surface.internal_namespaces: [detail]\n",
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                policy_file=loaded,
+                policy_file_sha256=loaded.source_sha256,
+                pack_paths=(str(pack),),
+            )
+        )
+        assert cfg.surface.internal_namespaces == ("detail",)
 
     def test_policy_packs_do_not_go_through_the_field_router(self, tmp_path):
         # Its assignments are ChangeKind slugs, a different vocabulary that

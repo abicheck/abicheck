@@ -410,6 +410,15 @@ class PolicyFile:
     # unrelated to internal-implementation-detail namespaces, despite the ADR's
     # roadmap text grouping all four steps together.
     internal_namespaces: list[str] = field(default_factory=list)
+    # Whether the document actually carried the ``internal_namespaces`` key.
+    # An explicit empty list is a *statement* ("this project has none"), which
+    # a parsed empty list alone cannot be told apart from the key being absent
+    # — and the two must not behave alike where something else would otherwise
+    # fill the field in (ADR-049 D8: a selected pack never overrides a stated
+    # value). Set by ``load()``; a directly-constructed PolicyFile leaves it
+    # False, so nothing that builds one in code starts claiming a statement it
+    # never made.
+    internal_namespaces_stated: bool = False
     # ADR-033 D7 — evidence-aware policy controls. ``None`` means "unset": the
     # finding keeps its default category (current behaviour). A set value maps
     # the whole category of build/source evidence findings to a verdict ceiling.
@@ -480,6 +489,7 @@ class PolicyFile:
             source_sha256=digest,
             frozen_namespaces=frozen_namespaces,
             internal_namespaces=internal_namespaces,
+            internal_namespaces_stated="internal_namespaces" in raw,
             source_only_findings=source_only,
             build_context_drift=build_drift,
             graph_risk_findings=graph_risk,
