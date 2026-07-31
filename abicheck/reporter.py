@@ -272,6 +272,32 @@ def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
     }
 
 
+def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
+    """Attach ADR-049 Phase 4's persisted contract blocks to a JSON dict.
+
+    Emits ``contract_context`` -- the ``contract_evidence`` /
+    ``evaluation_context`` / ``decision_receipt`` sibling group (plan
+    Section 5.1) -- whenever ``compare(..., contract_evaluation=True)``
+    assembled one, and nothing at all otherwise (never a null placeholder).
+    Serialized through :mod:`abicheck.contract_context_io` rather than
+    hand-built here, so the block a report writes is byte-for-byte the one
+    :func:`~abicheck.contract_replay.replay_original_decisions` reads back --
+    a second, report-local encoding is exactly how a round-trip guarantee
+    stops holding.
+
+    Called from all three JSON paths (full, leaf, root-cause) for the same
+    reason ``_add_surface_scope``/``_add_reconciled`` are: each builds its own
+    dict, so a ledger added to only one of them silently disappears under
+    ``--report-mode``.
+    """
+    ctx = result.contract_context
+    if ctx is None:
+        return
+    from .contract_context_io import persisted_context_to_dict
+
+    d["contract_context"] = persisted_context_to_dict(ctx)  # type: ignore[arg-type]
+
+
 def _to_json_leaf(
     result: DiffResult,
     indent: int = 2,
@@ -461,6 +487,7 @@ def _to_json_leaf(
         d["coverage_warnings"] = list(result.coverage_warnings)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
+    _add_contract_context(d, result)
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
@@ -638,6 +665,7 @@ def _to_json_root_cause(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
+    _add_contract_context(d, result)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -1013,6 +1041,7 @@ def to_json(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
+    _add_contract_context(d, result)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -1147,6 +1176,14 @@ def _add_contract_evaluation_fields(d: dict[str, object], c: object) -> None:
     contract_assurance = getattr(c, "contract_assurance", None)
     if contract_assurance is not None:
         d["contract_assurance"] = contract_assurance.value
+    # ADR-049 Phase 3's provider-evidence ledger: which `contract_evidence`
+    # provider records this decision rests on. Emitted even when empty --
+    # `[]` is the real answer for a non-entity finding (its relevance follows
+    # from the ChangeKind, consulting no provider), and omitting the key
+    # there would be indistinguishable from an unstamped finding.
+    contract_evidence_refs = getattr(c, "contract_evidence_refs", None)
+    if contract_evidence_refs is not None:
+        d["contract_evidence_refs"] = list(contract_evidence_refs)
 
 
 def _change_to_dict(

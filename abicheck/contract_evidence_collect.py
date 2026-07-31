@@ -1,0 +1,843 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-049 Phase 3's observed provider ledger (plan Section 4.1), and the raw
+policy-independent type graph Phase 4's ``contract_evidence`` block persists.
+
+:mod:`abicheck.contract_evidence` landed the *shapes* (``EvidenceSearchRecord``
+/ ``ProviderEvidenceEntry`` / ``ContractEvidenceBlock`` / ``TypeGraphSnapshot``)
+with no producer. This module is that producer: it turns the two evidence
+providers this build actually has -- :mod:`abicheck.surface`'s header-derived
+public surface and :mod:`abicheck.export_surface`'s export-table surface --
+plus the run's own explicit overlays into one
+:class:`~abicheck.contract_evidence.ContractEvidenceBlock` per comparison.
+
+Three properties this module exists to hold, each one a line of Phase 3's or
+Phase 4's own gate:
+
+1. **Policy-independent.** Nothing recorded here depends on which
+   :class:`~abicheck.contract_relevance_types.ContractMode` was selected. Both
+   providers are collected for every run regardless of mode, and the raw type
+   graph is the snapshot's whole record/enum/typedef graph, not a
+   mode-dependent closure of it (plan Section 5.1: "``contract_evidence``
+   stores raw policy-independent type nodes/edges. The mode/root-dependent
+   closure is computed by the evaluator and stored in the decision receipt").
+   That is what makes the block valid input to a later re-evaluation under a
+   *different* configuration (:mod:`abicheck.contract_replay`).
+2. **Scoped failure.** Each provider carries its own status/completeness, so
+   an unavailable header surface does not poison a completed export-table
+   search, and vice versa (plan Section 4.1: "Provider failures are scoped to
+   the affected domain/entity class").
+3. **Order-independent.** Every collection this module produces is a *set* of
+   observations; :mod:`abicheck.contract_evidence`'s own frozen dataclasses
+   sort and deduplicate them, so two runs observing the same facts in a
+   different traversal order produce an equal, identically-serialized block
+   (Phase 4's byte/order-independent round-trip gate).
+
+Node encoding for :class:`~abicheck.contract_evidence.TypeGraphSnapshot`
+-----------------------------------------------------------------------
+
+``TypeGraphSnapshot`` deliberately treats nodes as opaque strings, so this
+module owns the encoding. Every node is ``"<kind>:<identity>"``:
+
+===========  ============================================================
+``decl:``    one function/variable declaration, keyed by its canonical
+             linker identity (``mangled`` when recorded, else ``name``)
+``record:``  one :class:`~abicheck.model.RecordType`, keyed by ``name``
+``enum:``    one :class:`~abicheck.model.EnumType`, keyed by ``name``
+``typedef:`` one ``snapshot.typedefs`` alias, keyed by the alias
+``alias:``   a *lookup* spelling (demangled name, bare ``::`` tail,
+             qualified name) that resolves to a canonical node above
+===========  ============================================================
+
+and every edge is a resolved reference: ``decl: -> record:/enum:/typedef:``
+(signature types), ``record: -> ...`` (fields, bases, virtual bases),
+``typedef: -> ...`` (alias target), ``alias: -> ...`` (the canonical node a
+spelling resolves to). References are resolved *at collection time*, through
+the same name/bare-tail indexes :func:`~abicheck.surface._index_surface_types`
+builds for the live closure walk -- which is exactly why the block carries an
+``identity_algorithm_version``: a future matcher resolving the same raw
+spellings differently produces a different graph from identical inputs, and
+D6 requires that to be tellable apart on replay rather than silently
+reinterpreted.
+
+A spelling that resolves to nothing is *not* recorded as an edge to a
+placeholder node -- there is no node to point at, and inventing one would
+make a replayed closure claim to have walked something it never did. The
+export provider's own :attr:`~abicheck.export_surface.ExportSurface.unresolved_type_edges`
+already tracks that incompleteness for the domain where it decides an
+exclusion; here it surfaces as the header provider's ``completeness``.
+
+Cost, stated rather than silently bounded
+-----------------------------------------
+
+The graph is *whole-snapshot*: its size grows with the library's declaration
+and type count, and it is embedded in the JSON report once per side. For a
+large C++ library that is a real number of megabytes. Collection is gated on
+the caller opting into ``compare(..., contract_evaluation=True)``, which is
+advisory and off by default, so no ordinary run pays it. It is deliberately
+*not* truncated to a "top N" or to the mode's own closure: a partial graph
+would let a replayed closure miss an edge and report a reachable type
+``PROVEN_OUT_OF_CONTRACT``, and a mode-scoped one would stop being
+policy-independent -- the two properties this block exists to have. If a
+size bound is ever needed, it has to be an explicit, disclosed
+incompleteness (a provider ``completeness`` of ``PARTIAL`` with its own
+reason code), never a silent cap.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
+
+from .contract_evidence import (
+    ContractEvidenceBlock,
+    EvidenceSearchRecord,
+    InputIdentity,
+    ProviderEvidenceEntry,
+    TypeGraphSnapshot,
+)
+from .contract_relevance_types import (
+    ContractMode,
+    EvidenceCompleteness,
+    EvidenceProviderStatus,
+    coerce_contract_mode,
+)
+from .export_surface import ExportSurface, observed_exports_by_platform
+from .model import AbiSnapshot, EnumType, RecordType, Visibility
+from .surface import (
+    PublicSurface,
+    _index_surface_types,
+    _symbol_keys,
+    _type_identifiers,
+)
+
+# --------------------------------------------------------------------------
+# Provider vocabulary.
+# --------------------------------------------------------------------------
+
+#: The header-derived public-surface provider (ADR-049 D2's ``public`` domain).
+PROVIDER_PUBLIC_HEADER = "public_header"
+#: The observed-export-table provider (ADR-049 D2's ``exports`` domain).
+PROVIDER_EXPORT_TABLE = "export_table"
+#: ``--post-manifest``: an exact, committed-export manifest (Section 4.3's
+#: item-1 evidence tier).
+PROVIDER_POST_MANIFEST = "post_manifest"
+#: ``--public-symbol``/``--public-symbols``: the user's own widening overlay
+#: (ADR-024 D6), an assertion rather than an observation -- recorded so a
+#: decision that rests on it says so, never as if it were observed evidence.
+PROVIDER_FORCED_PUBLIC = "forced_public_symbols"
+
+#: Which provider supplies the *roots* of each contract domain. ``ALL`` has no
+#: root provider at all -- that is the whole content of ADR-049 D2's ``all``
+#: row ("every normalized entity finding is in scope, with no root/closure
+#: evidence required"), so a decision under it references no root provider.
+DOMAIN_ROOT_PROVIDER: Mapping[ContractMode, str | None] = {
+    ContractMode.PUBLIC: PROVIDER_PUBLIC_HEADER,
+    ContractMode.EXPORTS: PROVIDER_EXPORT_TABLE,
+    ContractMode.ALL: None,
+}
+
+#: Run-level evidence references that name a fact the *run* carries rather
+#: than a per-side provider entry in a :class:`ContractEvidenceBlock`. A
+#: finding stamped by ``--used-by``/``--required-symbol`` scoping
+#: (``contract_evaluation.stamp_explicit_scope_contract_evaluation``) is
+#: decided after ``compare()`` already returned, by a caller that holds no
+#: evidence block at all, so its decision cites this constant instead of a
+#: block record id. :func:`validate_decision_evidence` accepts it for exactly
+#: that reason.
+EXPLICIT_SCOPE_EVIDENCE_REF = "run:explicit_consumer_or_required_symbol"
+
+RUN_LEVEL_EVIDENCE_REFS: frozenset[str] = frozenset({EXPLICIT_SCOPE_EVIDENCE_REF})
+
+_SIDES = ("old", "new")
+
+
+def evidence_record_id(provider: str, side: str) -> str:
+    """The stable id of one provider's record for one side.
+
+    ``(side, provider, id)`` is what
+    :class:`~abicheck.contract_evidence.ContractEvidenceBlock` requires to
+    identify exactly one search, so the id needs only to be unique *within*
+    that pair; spelling it ``provider:side`` anyway keeps a reference
+    self-describing in a report where it appears without its record.
+    """
+    return f"{provider}:{side}"
+
+
+# --------------------------------------------------------------------------
+# Raw, policy-independent type graph.
+# --------------------------------------------------------------------------
+
+
+def _record_node(name: str) -> str:
+    return f"record:{name}"
+
+
+def _enum_node(name: str) -> str:
+    return f"enum:{name}"
+
+
+def _typedef_node(alias: str) -> str:
+    return f"typedef:{alias}"
+
+
+def _decl_node(key: str) -> str:
+    return f"decl:{key}"
+
+
+def _alias_node(key: str) -> str:
+    return f"alias:{key}"
+
+
+def _canonical_decl_key(name: str, mangled: str) -> str:
+    """The one node key a declaration is recorded under.
+
+    ``mangled`` first: it is the linker identity, unique where a demangled
+    display name is not (two overloads share a display name, never a mangled
+    one). Falls back to ``name`` for a producer that recorded no mangled
+    symbol at all (a header-only declaration, or an ``extern "C"`` entry a
+    backend spells identically either way).
+    """
+    return mangled or name
+
+
+class _TypeIndex:
+    """Name -> canonical node resolution, mirroring the live closure walk.
+
+    Built from :func:`~abicheck.surface._index_surface_types`'s own record/enum
+    indexes (full name *and* bare ``::`` tail) plus ``snapshot.typedefs``, so a
+    spelling resolves here exactly when
+    :func:`~abicheck.surface._walk_type_closure` would resolve it there. An
+    ambiguous spelling (several records/enums answering to one bare tail)
+    resolves to *every* candidate, the same over-keeping
+    ``_index_surface_types`` documents: never hide a real reference behind
+    snapshot order.
+    """
+
+    def __init__(self, snap: AbiSnapshot) -> None:
+        scratch = PublicSurface()
+        record_by_name, enum_by_name = _index_surface_types(snap, scratch)
+        self._nodes_by_spelling: dict[str, set[str]] = {}
+        for name, records in record_by_name.items():
+            self._nodes_by_spelling.setdefault(name, set()).update(
+                _record_node(r.name) for r in records
+            )
+        for name, enums in enum_by_name.items():
+            self._nodes_by_spelling.setdefault(name, set()).update(
+                _enum_node(e.name) for e in enums
+            )
+        for alias in snap.typedefs:
+            self._nodes_by_spelling.setdefault(alias, set()).add(_typedef_node(alias))
+            if "::" in alias:
+                tail = alias.rsplit("::", 1)[1]
+                self._nodes_by_spelling.setdefault(tail, set()).add(
+                    _typedef_node(alias)
+                )
+        self.ambiguous_type_names = set(scratch.ambiguous_type_names)
+        self.all_types = set(scratch.all_types)
+
+    def resolve(self, spelling: str) -> set[str]:
+        return set(self._nodes_by_spelling.get(spelling, ()))
+
+    def resolve_type_string(self, type_str: str | None) -> set[str]:
+        """Every canonical node a type *string* references."""
+        out: set[str] = set()
+        for ident in _type_identifiers(type_str):
+            out |= self.resolve(ident)
+        return out
+
+
+def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
+    """The raw record/enum/typedef/declaration graph of *snap*.
+
+    Policy-independent by construction: every declaration is walked, whatever
+    its visibility or header origin, and no contract mode is consulted. What
+    a *domain* then treats as roots is the per-provider ``declarations`` list,
+    not this graph -- which is why one graph serves both domains and a later
+    re-evaluation under a third.
+    """
+    index = _TypeIndex(snap)
+    nodes: set[str] = set()
+    edges: set[tuple[str, str]] = set()
+
+    def link(src: str, targets: Iterable[str]) -> None:
+        for target in targets:
+            nodes.add(target)
+            edges.add((src, target))
+
+    for rec in snap.types:
+        node = _record_node(rec.name)
+        nodes.add(node)
+        for fld in rec.fields:
+            link(node, index.resolve_type_string(fld.type))
+        for base in list(rec.bases) + list(rec.virtual_bases):
+            link(node, index.resolve_type_string(base))
+        _link_type_aliases(rec, node, nodes, edges)
+
+    for en in snap.enums:
+        node = _enum_node(en.name)
+        nodes.add(node)
+        _link_type_aliases(en, node, nodes, edges)
+
+    for alias, target in snap.typedefs.items():
+        node = _typedef_node(alias)
+        nodes.add(node)
+        link(node, index.resolve_type_string(target))
+
+    for fn in snap.functions:
+        node = _decl_node(_canonical_decl_key(fn.name, fn.mangled))
+        nodes.add(node)
+        link(node, index.resolve_type_string(fn.return_type))
+        for param in fn.params:
+            link(node, index.resolve_type_string(getattr(param, "type", None)))
+        _link_decl_aliases(fn.name, fn.mangled, node, nodes, edges)
+
+    for var in snap.variables:
+        node = _decl_node(_canonical_decl_key(var.name, var.mangled))
+        nodes.add(node)
+        link(node, index.resolve_type_string(var.type))
+        _link_decl_aliases(var.name, var.mangled, node, nodes, edges)
+
+    return TypeGraphSnapshot(nodes=tuple(nodes), edges=tuple(edges))
+
+
+def _link_decl_aliases(
+    name: str,
+    mangled: str,
+    node: str,
+    nodes: set[str],
+    edges: set[tuple[str, str]],
+) -> None:
+    """Record every spelling a finding may name this declaration by.
+
+    :func:`~abicheck.surface._symbol_keys` is the repo's own answer to "what
+    can a ``Change.symbol`` look like for this declaration" (demangled name,
+    mangled name, bare ``::`` tail), so the alias set is taken from it rather
+    than re-derived -- a replayed root lookup that recognized fewer spellings
+    than the live one would silently lose roots and report findings out of a
+    contract they are actually in.
+    """
+    canonical = _canonical_decl_key(name, mangled)
+    for key in _symbol_keys(name, mangled):
+        if key == canonical:
+            continue
+        alias = _alias_node(key)
+        nodes.add(alias)
+        edges.add((alias, node))
+
+
+def _link_type_aliases(
+    type_obj: RecordType | EnumType,
+    node: str,
+    nodes: set[str],
+    edges: set[tuple[str, str]],
+) -> None:
+    """Record a type's qualified spelling as an alias of its canonical node.
+
+    A record/enum is keyed by ``name``, which for the castxml/clang producers
+    is the bare leaf while ``qualified_name`` carries the scope -- the
+    bare-vs-qualified split ``AGENTS.md`` documents at length. Both spellings
+    reach the same node here so a finding naming either one resolves.
+    """
+    qualified = getattr(type_obj, "qualified_name", None)
+    if qualified and qualified != type_obj.name:
+        alias = _alias_node(qualified)
+        nodes.add(alias)
+        edges.add((alias, node))
+
+
+# --------------------------------------------------------------------------
+# Provider records.
+# --------------------------------------------------------------------------
+
+
+def _digest(payload: object) -> str:
+    """A stable content digest of an already-canonicalized observation."""
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _domain_identity(snap: AbiSnapshot) -> str:
+    return f"{snap.library}@{snap.version}"
+
+
+def _public_header_declarations(snap: AbiSnapshot, surf: PublicSurface) -> list[str]:
+    """Canonical node ids of the header provider's observed roots.
+
+    Roots are the ``Visibility.PUBLIC`` declarations
+    :func:`~abicheck.surface._seed_public_roots` seeds the live closure from,
+    recorded as ``decl:`` node ids so a replay can start the same walk from
+    the persisted graph. Public *types* are deliberately not listed: they are
+    the closure's *result*, not its roots, and Section 5.1 keeps the
+    mode-dependent closure in the decision receipt.
+    """
+    out: list[str] = []
+    for fn in snap.functions:
+        if fn.visibility == Visibility.PUBLIC:
+            out.append(_decl_node(_canonical_decl_key(fn.name, fn.mangled)))
+    for var in snap.variables:
+        if var.visibility == Visibility.PUBLIC:
+            out.append(_decl_node(_canonical_decl_key(var.name, var.mangled)))
+    return out
+
+
+def _export_table_declarations(snap: AbiSnapshot, exports: ExportSurface) -> list[str]:
+    """Canonical node ids of the declarations the export table rooted.
+
+    Derived by asking which declarations
+    :func:`~abicheck.export_surface.compute_export_surface` actually matched --
+    via its own ``export_symbols`` alias set, the one place that answer lives
+    -- rather than re-implementing the platform-specific underscore/mangling
+    normalization that produced it.
+    """
+    out: list[str] = []
+    for fn in snap.functions:
+        if _symbol_keys(fn.name, fn.mangled) & exports.export_symbols:
+            out.append(_decl_node(_canonical_decl_key(fn.name, fn.mangled)))
+    for var in snap.variables:
+        if _symbol_keys(var.name, var.mangled) & exports.export_symbols:
+            out.append(_decl_node(_canonical_decl_key(var.name, var.mangled)))
+    return out
+
+
+def _public_header_status(
+    surf: PublicSurface,
+) -> tuple[EvidenceProviderStatus, EvidenceCompleteness, str | None]:
+    if not surf.resolvable:
+        return (
+            EvidenceProviderStatus.UNAVAILABLE,
+            EvidenceCompleteness.NOT_STARTED,
+            "header_surface_unresolvable",
+        )
+    if not surf.has_provenance:
+        return (
+            EvidenceProviderStatus.AVAILABLE,
+            EvidenceCompleteness.PARTIAL,
+            "no_declaration_provenance",
+        )
+    if not surf.has_typed_roots:
+        return (
+            EvidenceProviderStatus.AVAILABLE,
+            EvidenceCompleteness.PARTIAL,
+            "no_typed_public_roots",
+        )
+    return (EvidenceProviderStatus.AVAILABLE, EvidenceCompleteness.COMPLETE, None)
+
+
+def _export_table_status(
+    exports: ExportSurface,
+) -> tuple[EvidenceProviderStatus, EvidenceCompleteness, str | None]:
+    """Map the export provider's own completeness guards onto the ledger.
+
+    Reads the same five conditions
+    :attr:`~abicheck.export_surface.ExportSurface.exclusion_is_provable` folds
+    together, but reports *which* one failed -- the ledger's whole purpose is
+    to say why a domain was not closed, which that single boolean cannot.
+    """
+    if not exports.resolvable:
+        return (
+            EvidenceProviderStatus.UNAVAILABLE,
+            EvidenceCompleteness.NOT_STARTED,
+            "export_table_absent",
+        )
+    if not exports.has_roots:
+        return (
+            EvidenceProviderStatus.AVAILABLE,
+            EvidenceCompleteness.PARTIAL,
+            "no_export_roots_resolved",
+        )
+    if not exports.all_roots_typed:
+        return (
+            EvidenceProviderStatus.AVAILABLE,
+            EvidenceCompleteness.PARTIAL,
+            "untyped_export_roots",
+        )
+    if exports.unmatched_exports:
+        return (
+            EvidenceProviderStatus.AVAILABLE,
+            EvidenceCompleteness.PARTIAL,
+            "unmatched_exports",
+        )
+    if exports.unresolved_type_edges:
+        return (
+            EvidenceProviderStatus.AVAILABLE,
+            EvidenceCompleteness.PARTIAL,
+            "unresolved_type_edges",
+        )
+    return (EvidenceProviderStatus.AVAILABLE, EvidenceCompleteness.COMPLETE, None)
+
+
+def _identity_coverage(ambiguous: set[str]) -> EvidenceCompleteness:
+    """Section 4.2's ``identity_coverage`` facet.
+
+    "Ambiguous mangled/demangled/type identity is partial for affected
+    entities" -- an ambiguous bare tail is exactly that, so a surface carrying
+    any is ``PARTIAL`` rather than ``COMPLETE``.
+    """
+    return EvidenceCompleteness.PARTIAL if ambiguous else EvidenceCompleteness.COMPLETE
+
+
+def public_header_evidence(
+    snap: AbiSnapshot, surf: PublicSurface, side: str
+) -> ProviderEvidenceEntry:
+    """One side's ``public_header`` provider entry, graph included.
+
+    The raw type graph rides on this provider rather than being duplicated
+    onto every entry: it is a *declaration-parse* observation (records,
+    fields, bases, typedefs and the signatures that reference them), which the
+    export table -- a list of linker symbols and nothing else -- does not
+    independently observe. :func:`~abicheck.contract_replay.reevaluate_from_evidence`
+    reads it from here for every domain, which is correct precisely because
+    the graph is policy-independent.
+    """
+    declarations = _public_header_declarations(snap, surf)
+    status, completeness, reason = _public_header_status(surf)
+    graph = build_type_graph(snap)
+    record = EvidenceSearchRecord(
+        id=evidence_record_id(PROVIDER_PUBLIC_HEADER, side),
+        provider=PROVIDER_PUBLIC_HEADER,
+        side=side,
+        domain_kind="public_headers",
+        entity_class="declaration",
+        domain_identity=_domain_identity(snap),
+        status=status,
+        completeness=completeness,
+        requested_scope=("declarations", "types"),
+        # Section 4.2's "requested scope equals searched scope" clause, made
+        # checkable rather than asserted: an unresolvable header surface
+        # searched neither, so the two tuples differ and no consumer can read
+        # the record as a completed search.
+        searched_scope=(("declarations", "types") if surf.resolvable else ()),
+        identity_coverage=_identity_coverage(surf.ambiguous_type_names),
+        # No variant source is declared anywhere in this build (no
+        # ``--variant``/generated-header variant set exists yet), so the
+        # configuration-coverage facet Section 4.2's closed-world rule
+        # requires has genuinely not started. This is the ledger-level
+        # counterpart of ``contract_evaluation.py``'s own documented
+        # under-claim: with this facet never ``COMPLETE``, the closed-world
+        # rule cannot be satisfied, which is exactly why ``UNKNOWN_UNPROVEN``
+        # is never emitted. Recording it honestly is what lets a future
+        # variant provider flip that on evidence rather than by assertion.
+        configuration_coverage=EvidenceCompleteness.NOT_STARTED,
+        reason_code=reason,
+        input_identity=InputIdentity(
+            sha256=_digest(
+                {
+                    "declarations": sorted(set(declarations)),
+                    "nodes": list(graph.nodes),
+                    "edges": [list(e) for e in graph.edges],
+                }
+            ),
+            path=snap.library or None,
+        ),
+    )
+    return ProviderEvidenceEntry(
+        record=record, declarations=tuple(declarations), type_graph=graph
+    )
+
+
+def export_table_evidence(
+    snap: AbiSnapshot, exports: ExportSurface, side: str
+) -> ProviderEvidenceEntry:
+    """One side's ``export_table`` provider entry.
+
+    Carries no type graph of its own -- see :func:`public_header_evidence`.
+    ``manifests`` lists the observed export-table names (``elf``/``pe``/
+    ``macho``), the closest thing this provider has to an enumerable manifest
+    of what it searched.
+    """
+    tables = observed_exports_by_platform(snap) or {}
+    declarations = _export_table_declarations(snap, exports)
+    status, completeness, reason = _export_table_status(exports)
+    record = EvidenceSearchRecord(
+        id=evidence_record_id(PROVIDER_EXPORT_TABLE, side),
+        provider=PROVIDER_EXPORT_TABLE,
+        side=side,
+        domain_kind="exports",
+        entity_class="declaration",
+        domain_identity=_domain_identity(snap),
+        status=status,
+        completeness=completeness,
+        requested_scope=("export_table",),
+        searched_scope=("export_table",) if exports.resolvable else (),
+        identity_coverage=_identity_coverage(exports.ambiguous_type_names),
+        configuration_coverage=EvidenceCompleteness.NOT_STARTED,
+        reason_code=reason,
+        input_identity=InputIdentity(
+            sha256=_digest(
+                {
+                    "tables": {k: sorted(v) for k, v in sorted(tables.items())},
+                    "declarations": sorted(set(declarations)),
+                }
+            ),
+            path=snap.library or None,
+        ),
+    )
+    return ProviderEvidenceEntry(
+        record=record,
+        declarations=tuple(declarations),
+        manifests=tuple(sorted(tables)),
+    )
+
+
+def _overlay_evidence(
+    provider: str,
+    domain_kind: str,
+    side: str,
+    entries: Iterable[str],
+) -> ProviderEvidenceEntry:
+    """One explicitly-configured overlay's entry (manifest / forced-public).
+
+    Recorded on *both* sides with identical content: an overlay is a
+    run-level input applied to whichever side a finding is judged on, but
+    ``EvidenceSearchRecord.side`` is mandatory, and a decision on an
+    old-side-authoritative finding must be able to cite a record that exists
+    for its own side (ADR-049 D4: the authoritative side's evidence is what
+    decides). Duplicating an exactly-equal record per side is the honest
+    encoding of "this input covers both", and costs one small entry.
+    """
+    items = sorted(set(entries))
+    record = EvidenceSearchRecord(
+        id=evidence_record_id(provider, side),
+        provider=provider,
+        side=side,
+        domain_kind=domain_kind,
+        entity_class="declaration",
+        status=EvidenceProviderStatus.AVAILABLE,
+        # An explicit list is an exact, closed, enumerable domain: every entry
+        # in it was read, so the search over *it* is complete. That says
+        # nothing about the domain it overlays, which its own provider
+        # reports separately (Section 4.1: failures are scoped per provider).
+        completeness=EvidenceCompleteness.COMPLETE,
+        requested_scope=(domain_kind,),
+        searched_scope=(domain_kind,),
+        identity_coverage=EvidenceCompleteness.COMPLETE,
+        configuration_coverage=EvidenceCompleteness.NOT_STARTED,
+        input_identity=InputIdentity(sha256=_digest(items)),
+    )
+    return ProviderEvidenceEntry(record=record, manifests=tuple(items))
+
+
+def collect_contract_evidence(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+    *,
+    exports_old: ExportSurface | None = None,
+    exports_new: ExportSurface | None = None,
+    public_surface_allowlist: Iterable[str] | None = None,
+    force_public_symbols: Iterable[str] | None = None,
+) -> ContractEvidenceBlock:
+    """The observed provider ledger for one comparison (plan Section 4.1).
+
+    ``exports_old``/``exports_new`` are optional only because computing them
+    costs a full export-table match the caller may already know it does not
+    need; when omitted, the ``export_table`` provider is simply absent from
+    the block rather than recorded as failed -- "not consulted" and "consulted
+    and unavailable" are different facts, and Section 4.1 forbids persisting
+    "this provider was required under one policy" as if it were observed.
+    """
+    entries: list[ProviderEvidenceEntry] = [
+        public_header_evidence(old, surf_old, "old"),
+        public_header_evidence(new, surf_new, "new"),
+    ]
+    if exports_old is not None:
+        entries.append(export_table_evidence(old, exports_old, "old"))
+    if exports_new is not None:
+        entries.append(export_table_evidence(new, exports_new, "new"))
+    if public_surface_allowlist:
+        for side in _SIDES:
+            entries.append(
+                _overlay_evidence(
+                    PROVIDER_POST_MANIFEST,
+                    "committed_exports",
+                    side,
+                    public_surface_allowlist,
+                )
+            )
+    if force_public_symbols:
+        for side in _SIDES:
+            entries.append(
+                _overlay_evidence(
+                    PROVIDER_FORCED_PUBLIC,
+                    "explicit_public_symbols",
+                    side,
+                    force_public_symbols,
+                )
+            )
+    return ContractEvidenceBlock(providers=tuple(entries))
+
+
+# --------------------------------------------------------------------------
+# Reading the persisted graph back (Phase 4's replay/re-evaluation).
+# --------------------------------------------------------------------------
+
+
+def resolve_graph_node(graph: TypeGraphSnapshot, spelling: str) -> set[str]:
+    """Canonical nodes a *spelling* names in an already-persisted graph.
+
+    Tries the three encodings a finding can name an entity by -- a
+    declaration key, a type name, and a lookup alias of either -- and follows
+    an ``alias:`` node's own edges to the canonical node(s) it stands for. A
+    spelling naming nothing returns an empty set, never a guess: the caller
+    (:mod:`abicheck.contract_replay`) reports that as unresolved rather than
+    proving an entity out of a contract whose graph never knew it.
+    """
+    out: set[str] = set()
+    nodes = set(graph.nodes)
+    for candidate in (
+        _decl_node(spelling),
+        _record_node(spelling),
+        _enum_node(spelling),
+        _typedef_node(spelling),
+    ):
+        if candidate in nodes:
+            out.add(candidate)
+    alias = _alias_node(spelling)
+    if alias in nodes:
+        out |= {dst for src, dst in graph.edges if src == alias}
+    return out
+
+
+def closure_from_graph(
+    graph: TypeGraphSnapshot, roots: Iterable[str]
+) -> frozenset[str]:
+    """Every node reachable from *roots* over *graph*'s edges, roots included.
+
+    The mode/root-dependent closure Section 5.1 keeps in the decision receipt
+    rather than in the observed evidence -- computed here from the persisted
+    graph alone, so a replay reproduces it without re-reading a binary or a
+    header (Section 5.1: "no silent live-file re-probe changes a replayed
+    verdict"). ``alias:`` edges are followed like any other, so a root named
+    by an alias still reaches its canonical node's own closure.
+    """
+    adjacency: dict[str, set[str]] = {}
+    for src, dst in graph.edges:
+        adjacency.setdefault(src, set()).add(dst)
+    known = set(graph.nodes)
+    seen: set[str] = set()
+    stack = [r for r in roots if r in known]
+    empty: set[str] = set()
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(adjacency.get(node, empty) - seen)
+    return frozenset(seen)
+
+
+# --------------------------------------------------------------------------
+# Decision -> evidence references (Phase 3's gate).
+# --------------------------------------------------------------------------
+
+
+#: Reason codes whose decision is computed from *both* sides' surfaces (a
+#: membership classification runs against the union -- ``surface_unions`` /
+#: both ``ExportSurface`` operands), as opposed to a decision the
+#: authoritative side alone settles (an unresolvable surface, an ambiguous
+#: identity, a terminal exclusion already recorded on the finding).
+_TWO_SIDED_REASONS: frozenset[str] = frozenset(
+    {"public_root_membership", "export_root_membership", "closed_domain_no_commitment"}
+)
+
+
+def evidence_refs_for_reason(
+    reason_code: str,
+    *,
+    mode: ContractMode,
+    block: ContractEvidenceBlock,
+    authoritative_side: str,
+) -> tuple[str, ...]:
+    """Which provider records a decision with *reason_code* rests on.
+
+    Phase 3's gate is "every shadow delta has evidence and stable identity";
+    this is the "has evidence" half made explicit rather than implied by the
+    reason string. The mapping follows what
+    :func:`~abicheck.contract_evaluation.evaluate_change_contract_relevance`
+    actually consults:
+
+    - a non-entity (``NOT_APPLICABLE``) finding consults no provider at all,
+      and correctly cites none -- its classification is a property of the
+      ``ChangeKind``, not of any observation;
+    - a finding decided by ``--used-by``/``--required-symbol`` scoping cites
+      the run-level reference, since that decision is made outside any
+      comparison that holds an evidence block;
+    - every other entity decision cites the root provider for the selected
+      domain, on the authoritative side (ADR-049 D4) -- plus the other side
+      when the decision is a membership classification, which
+      ``classify_change_surface`` genuinely computes from the union of both.
+
+    Two overlay-decided cases (``--public-symbol``, ``--post-manifest``) are
+    indistinguishable by reason code alone and are attributed one level up,
+    in :func:`~abicheck.contract_evaluation.evidence_refs_for_change`, which
+    owns the matching rules -- callers stamping a real finding should use
+    that function rather than this one.
+
+    A reference is emitted only when the block really carries that record, so
+    a reference never dangles.
+    """
+    mode = coerce_contract_mode(mode)
+    available = {(e.record.provider, e.record.side) for e in block.providers}
+
+    def ref(provider: str, side: str) -> tuple[str, ...]:
+        return (
+            (evidence_record_id(provider, side),)
+            if (provider, side) in available
+            else ()
+        )
+
+    if reason_code == "non_entity_finding":
+        return ()
+    if reason_code == "explicit_consumer_or_required_symbol_evidence":
+        return (EXPLICIT_SCOPE_EVIDENCE_REF,)
+    other_side = "new" if authoritative_side == "old" else "old"
+    if mode is ContractMode.ALL:
+        # `all` needs no root/closure evidence by definition (D2), so a
+        # decision under it cites only the identity evidence that placed the
+        # finding as an entity at all -- the declaration parse, i.e. the
+        # header provider, on the authoritative side.
+        return ref(PROVIDER_PUBLIC_HEADER, authoritative_side)
+    root_provider = DOMAIN_ROOT_PROVIDER[mode] or PROVIDER_PUBLIC_HEADER
+    refs = ref(root_provider, authoritative_side)
+    if reason_code in _TWO_SIDED_REASONS:
+        refs += ref(root_provider, other_side)
+    return refs
+
+
+def validate_decision_evidence(
+    refs: Iterable[str], block: ContractEvidenceBlock | None
+) -> None:
+    """Raise ``ValueError`` for a reference naming no known record.
+
+    The executable half of Phase 3's "every shadow delta has evidence" gate:
+    a dangling reference is worse than no reference, since a consumer reading
+    the ledger cannot tell it apart from a record that failed to serialize.
+    Run-level references (:data:`RUN_LEVEL_EVIDENCE_REFS`) are always valid --
+    they name a fact of the run, not an entry in any block.
+    """
+    known = set(RUN_LEVEL_EVIDENCE_REFS)
+    if block is not None:
+        known |= {e.record.id for e in block.providers}
+    dangling = sorted(set(refs) - known)
+    if dangling:
+        raise ValueError(
+            f"contract-evidence references name no known provider record: "
+            f"{dangling!r} (known: {sorted(known)!r})"
+        )

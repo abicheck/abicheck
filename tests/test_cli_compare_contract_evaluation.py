@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.checker import DiffResult, Verdict
@@ -160,6 +161,50 @@ class TestEndToEndJsonReport:
             }
             assert isinstance(c["contract_reason_code"], str)
 
+    def test_evidence_refs_and_context_are_declared_in_the_schema(self, tmp_path):
+        """The ledger (Phase 3) and persisted context (Phase 4) in a real report.
+
+        Asserts schema *declaration* on top of ``jsonschema.validate``:
+        ``compare_report.schema.json`` is ``additionalProperties: true``, so
+        validation alone cannot tell a correctly-declared key from an
+        accepted-but-undeclared one -- the exact gap that let the
+        ``suppression_audit`` key ship undeclared (schema 2.24).
+        """
+        jsonschema = pytest.importorskip("jsonschema")
+        from abicheck.schemas import load_compare_report_schema
+
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p),
+                "--contract-evaluation", "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.output)
+        schema = load_compare_report_schema()
+        jsonschema.validate(instance=payload, schema=schema)
+        assert "contract_context" in schema["properties"]
+        assert "contract_evidence_refs" in schema["$defs"]["change"]["properties"]
+
+        context = payload["contract_context"]
+        assert {"contract_evidence", "evaluation_context", "decision_receipt"} <= set(
+            context
+        )
+        # Every reference a finding cites must name a record the same report
+        # carries -- a dangling ref is indistinguishable from one that failed
+        # to serialize (contract_evidence_collect.validate_decision_evidence).
+        known = {
+            entry["record"]["id"]
+            for entry in context["contract_evidence"]["providers"]
+        }
+        stamped = [c for c in payload["changes"] if "contract_evidence_refs" in c]
+        assert stamped, "fixture must produce at least one stamped finding"
+        for change in stamped:
+            for ref in change["contract_evidence_refs"]:
+                assert ref in known or ref.startswith("run:"), ref
+
     def test_omitted_by_default(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
@@ -168,10 +213,12 @@ class TestEndToEndJsonReport:
         )
         assert result.exit_code == 4, result.output
         payload = json.loads(result.output)
+        assert "contract_context" not in payload
         for c in payload["changes"]:
             assert "contract_relevance" not in c
             assert "contract_reason_code" not in c
             assert "contract_assurance" not in c
+            assert "contract_evidence_refs" not in c
 
     def test_help_all_mentions_flag(self):
         result = CliRunner().invoke(main, ["compare", "--help-all"])

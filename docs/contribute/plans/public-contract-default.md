@@ -2020,6 +2020,95 @@ still does not exist for either domain (`ExportSurface.resolvable`/
 `PublicSurface.resolvable`/`has_provenance` is, not a per-provider
 completeness record).
 
+**Closed (2026-07-31): the provider-evidence ledger and the measurement —
+this phase's two remaining pieces.** Both were named as missing in the note
+directly above; neither is now.
+
+*The ledger* (`abicheck/contract_evidence_collect.py`, a new leaf module) is
+the producer for the `EvidenceSearchRecord`/`ProviderEvidenceEntry` shapes
+Phase 4 landed with no writer. It emits one record per *(provider, side)* —
+`public_header` and `export_table` for the two domains this build actually
+has, plus `post_manifest`/`forced_public_symbols` for the explicit overlays
+when a run configures them — each carrying its own status, completeness,
+identity coverage, requested-vs-searched scope, and a content digest of what
+it observed. Three things it does deliberately, each of them a line of
+Section 4.1 or 4.2:
+
+- **Failure is scoped per provider.** An unavailable header surface leaves a
+  completed export-table search alone, and vice versa. That is why the
+  ledger reports *which* guard failed
+  (`unmatched_exports`/`untyped_export_roots`/`unresolved_type_edges`/…)
+  rather than mirroring `ExportSurface.exclusion_is_provable`'s single
+  boolean: the whole purpose of the ledger is to say why a domain was not
+  closed, which that boolean cannot.
+- **`configuration_coverage` is honestly `NOT_STARTED` everywhere.** No
+  variant source exists in this build, so the closed-world rule for
+  `UNKNOWN_UNPROVEN` (Section 4.2) cannot be satisfied — which is exactly
+  why `contract_evaluation.py` never emits that value. Recording the facet
+  as not-started rather than quietly complete is what will let a future
+  variant provider flip it *on evidence*, instead of the under-claim being
+  an unexplained constant in a module docstring.
+- **"Not consulted" ≠ "consulted and failed".** A run that never computed an
+  export surface has no `export_table` entry at all, rather than one marked
+  unavailable — Section 4.1 forbids persisting "this provider was required
+  under one policy" as though it were an observed fact.
+
+Each stamped finding now carries `Change.contract_evidence_refs`: the record
+ids its decision rests on, computed by `evidence_refs_for_reason()` from the
+reason code, the selected domain, and the authoritative side (ADR-049 D4 —
+exposed as `contract_evaluation.authoritative_side()` rather than re-derived,
+so the two cannot drift from that function's two carefully-scoped kind sets).
+A non-entity finding correctly cites *nothing*: its relevance follows from
+its `ChangeKind`, consulting no provider. A `--used-by`/`--required-symbol`
+stamp cites a run-level reference instead of a block record, because that
+decision is made after `compare()` returned, by a caller holding no block.
+`validate_decision_evidence()` rejects a reference naming neither — a
+dangling ref is worse than none, since a consumer cannot tell it apart from a
+record that failed to serialize.
+
+Two cases the reason code alone cannot distinguish get their own attribution,
+in `contract_evaluation.evidence_refs_for_change()` (there, not in the
+collector, so the matching reuses this module's own overlay rules rather than
+a second copy): an `IN_CONTRACT` decision produced by `--public-symbol`'s
+widening overlay or by a `--post-manifest` commitment carries exactly the
+same `public_root_membership` code a genuine header-derived membership does,
+and a `--post-manifest`-driven *exclusion* shares
+`terminal_authoritative_exclusion` with header-origin exclusions. In both,
+the evaluator short-circuits on the overlay before consulting the surface at
+all, so citing the header provider would be a false citation in a ledger
+whose whole purpose is evidence honesty. Matching mirrors each overlay's own
+rule exactly — suffix-tolerant for the widening overlay, exact-name for the
+manifest — and is skipped entirely under `exports`, where Section 7 makes
+manifest/consumer evidence unrelated and advisory. The refs are serialized on every finding
+entry the JSON report already stamps (`reporter._add_contract_evaluation_fields`,
+so `changes`, `out_of_surface_changes`, the suppressed/redundant/reconciled
+ledgers, and `scope.filtered_internal_changes` all inherit it).
+
+*The measurement* is `scripts/measure_contract_shadow.py`, mirrored into the
+unit lane by `tests/test_contract_shadow_measurement.py` (the same
+script-plus-mirror pattern `check_fp_rate.py`/`test_fp_rate_gate.py`
+established). It runs the FP-rate corpus — already labelled internal-noise
+vs. real-break, so the ground truth needed no new curation — through
+`compare(..., contract_evaluation=True)` in **all three** domains, and
+reports this phase's four quantities: the delta matrix (legacy kept/demoted ×
+contract relevance), unresolved rate by provider state / domain / platform,
+proven public-break losses, and proven false-positive reductions. The gate is
+three zero baselines: a proven public-break loss, a delta whose decision
+cites no resolvable evidence, and a finding with no recorded decision
+("zero unexplained fact loss", read literally).
+
+First run, 32 cases, 41 findings per domain: **0 losses, 0 unevidenced
+deltas, 0 fact losses.** `public` resolves 71% of findings and proves 7
+internal-noise findings out of contract; `all` produces 16 deltas (every
+legacy-demoted finding, by definition of the mode) and 0 unresolved;
+`exports` is 100% unresolved on this corpus, because the corpus's synthetic
+snapshots carry no export table. That last number is reported rather than
+hidden: it is the honest "unresolved rate by domain" signal the phase asks
+for, and measuring only the flattering domain would defeat the point. One
+gate test asserts the `public` domain proves *something* out of contract,
+so the loss baseline cannot pass vacuously — zero losses is trivial for an
+evaluator that never concludes anything.
+
 ### Phase 4 — snapshot evidence/context split
 
 Persist policy-independent `contract_evidence` and separate
@@ -2081,6 +2170,120 @@ persists these blocks; the original-replay and new-policy-re-evaluation
 implemented); and populating `TypeGraphSnapshot`'s nodes/edges with real
 type-graph content (they are deliberately opaque strings for now, mirroring
 `ContractEvidenceBlock`'s own "land the shape, not the producer" scope).
+
+**Closed (2026-07-31): all three, plus the round-trip the gate names.** The
+paragraph above lists exactly what was missing; each is now implemented, and
+the one place this pass deliberately departs from the plan's own wording is
+called out below rather than quietly resolved.
+
+*Real type-graph content.* `contract_evidence_collect.build_type_graph()`
+walks the snapshot's whole record/enum/typedef/declaration graph and emits it
+as `TypeGraphSnapshot` nodes/edges. The node encoding
+(`decl:`/`record:`/`enum:`/`typedef:`/`alias:`) is documented in that module,
+since `TypeGraphSnapshot` itself deliberately treats nodes as opaque. Two
+properties matter more than the encoding:
+
+- It is **policy-independent**, the block's whole contract: a private,
+  hidden-visibility declaration is walked exactly like a public one, and no
+  contract mode is consulted anywhere. That is what makes one collected block
+  valid input to a re-evaluation under a mode the original run never
+  evaluated (`test_a_different_mode_needs_no_new_evidence`).
+- References are resolved **at collection time**, through the same
+  name/bare-tail indexes `surface._index_surface_types` builds for the live
+  closure walk — which is precisely why the block carries an
+  `identity_algorithm_version`. A future matcher resolving the same raw
+  spellings differently produces a different graph from identical inputs, and
+  D6 requires that to be tellable apart rather than silently reinterpreted. A
+  spelling resolving to nothing is *not* recorded as an edge to a placeholder
+  node: there is no node to point at, and inventing one would let a replayed
+  closure claim to have walked something it never did.
+
+*The two procedures* are `abicheck/contract_replay.py`.
+`replay_original_decisions()` reads the `decision_receipt` and nothing else —
+no evidence re-walk, no live re-probe, and this build's own provider defaults
+cannot alter the answer (`test_replay_ignores_this_build_s_evidence` empties
+the entire evidence block and asserts the replayed decisions are unchanged).
+`reevaluate_from_evidence()` answers the *different* question — old
+observations, newly resolved context — by walking the persisted graph and
+never reading the receipt, so a receipt written under `public` puts no thumb
+on an `exports` re-evaluation. Both route through
+`load_replayable_context()`, so there is no path that consumes a persisted
+context without D6's fail-closed version check; a *mixed* context (older
+evidence, current evaluation context) is explicitly fine, since that is the
+ordinary re-evaluation case rather than an error.
+
+Re-evaluation is deliberately a **narrower** evaluator than the live one, and
+says so instead of pretending otherwise: it has no access to the live
+surfaces' origin maps, hidden-friend reasoning, or the pipeline's own
+`surface_exclusion_reason` annotations — none of which are observations the
+evidence block carries — so where the live evaluator would use one of those,
+this one answers `UNKNOWN_UNRESOLVED`. That is why `compare_decisions()`
+checks *directional* soundness rather than equality: a replay that weakens a
+decision is a known coverage limit, while one that strengthens it (or flips
+`IN_CONTRACT` ↔ `PROVEN_OUT_OF_CONTRACT`, equally strong but opposite) is a
+real defect — persisted evidence may never out-claim the live evaluator that
+wrote it. The same conservatism governs the exclusion branch: an entity
+absent from the graph is *unplaceable*, never proven out, and a `PARTIAL`
+provider search proves no absence at all
+(`test_incomplete_provider_cannot_prove_an_exclusion` uses the identical
+snapshot as its proven-out sibling, minus declaration provenance).
+
+*Persistence and the round-trip gate.* `abicheck/contract_context.py`
+assembles the three blocks from a real comparison and `checker.compare(...,
+contract_evaluation=True)` now returns one on `DiffResult.contract_context`;
+`abicheck/contract_context_io.py` round-trips the whole group — including the
+complete resolved `CompatibilityEvaluationConfig` and its field provenance,
+per Section 5.1's "must serialize the complete immutable resolved
+configuration" — and `reporter.py` emits it as the JSON report's
+`contract_context` block from all three report paths (full/leaf/root-cause,
+the same three `_add_surface_scope`/`_add_reconciled` already cover). The
+gate is tested as stated: round-trip through *real* `json.dumps`/`loads`
+(not dict-level, so a decoder's tuple→list conversion is actually exercised)
+is the identity, serialization is byte-stable, and a provider-order-reversed
+block serializes to identical bytes rather than merely to an equal object.
+Version counters survive a decode verbatim — re-stamping them with this
+build's constants would erase exactly the mixed-version evidence D6 requires
+a reader to act on — and the *decoder* deliberately does not enforce the
+ceiling, so a tool can read a newer-than-supported block in order to *report*
+the mismatch, while `load_replayable_context()` is what refuses to evaluate
+it.
+
+**Deliberate departure from this section's own first sentence, stated rather
+than glossed:** the blocks are persisted with the *comparison* (the JSON
+report), not inside `AbiSnapshot` via `dumper.py`/`serialization.py`. Three
+reasons, in order of weight. (1) The evidence is two-sided by construction —
+every `EvidenceSearchRecord` carries `side: old|new`, and the header/export
+providers are collected per side of one pair — so it is a fact about a
+comparison, not about either snapshot alone. (2) Everything the block records
+is *derived* from the snapshot's own already-persisted content (declarations,
+visibilities, type graph, export tables); deriving it at compare time from a
+persisted snapshot is lossless and equivalent, while storing it in the
+snapshot would duplicate that content on disk. (3) A new `AbiSnapshot` field
+means a `serialization.SCHEMA_VERSION` bump, which is part of the
+comparability contract (ADR-050) and would need its own
+`SCOPE_FIELD_KEYS`/`check_contracts_comparable` review — a materially larger
+blast radius than this phase's gate requires, since the gate is about
+round-trip *decisions*, which the comparison-level record satisfies in full.
+The replay guarantee is unaffected: the persisted comparison record carries
+the evidence, so no replayed verdict depends on re-reading a binary or a
+header. If a genuine single-side use case appears (e.g. `dump` publishing a
+baseline whose evidence a later consumer wants without the pair), moving the
+block into the snapshot is an additive schema change on top of this shape,
+not a rewrite of it.
+
+Two smaller limits worth naming rather than discovering later. The
+`evaluation_context` this build assembles is resolved by `checker.compare`,
+which sees only its own arguments — so `contract.mode` carries the real D7
+`LEGACY_ALIAS`/explicit provenance, while `policy.base` records
+`API_REQUEST` (a typed caller stated it) rather than claiming a CLI/recipe
+layer this core verb cannot observe. Phase 5, which routes every front end
+through one already-resolved config, is what replaces it; under-claiming
+until then is the honest encoding, since a wrong provenance layer is exactly
+what D7's receipts exist to make impossible. And the decision receipt's
+per-finding keys are `"<kind>:<symbol>"` unless a caller injects
+`reporter._finding_id` — injected as a callable rather than imported, since a
+direct import would close a `checker → contract_context → reporter → checker`
+cycle the `import-cycle-growth` gate rejects.
 
 ### Phase 5 — shared authoritative comparison
 

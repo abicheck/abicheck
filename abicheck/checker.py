@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
 
 from . import (
@@ -544,7 +545,9 @@ def _apply_contract_evaluation_shadow(
     suppressed: list[Change] | None = None,
     reconciled: list[Change] | None = None,
     contract_mode: str | None = None,
-) -> None:
+    policy: str = "strict_abi",
+    internal_namespaces: Sequence[str] = (),
+) -> object:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
     *kept* finding **and** every finding public-surface scoping already
     demoted to ``pp_ctx.out_of_surface``, in place. Called only when
@@ -613,9 +616,25 @@ def _apply_contract_evaluation_shadow(
     ``classify_change_surface`` recomputation could wrongly reach
     ``PROVEN_OUT_OF_CONTRACT`` for a finding POST-manifest already proved
     committed (Codex review, fresh evidence).
+
+    Returns ADR-049 Phase 4's :class:`~abicheck.contract_evidence.PersistedContractContext`
+    for this comparison -- the observed provider ledger every stamped
+    decision now references (Phase 3's "every shadow delta has evidence"
+    gate), the resolved evaluation context, and the decision receipt.
+    Always a real context, never ``None``: a comparison with zero findings
+    still observed both sides' providers, and recording that is the point of
+    a ledger (an empty evidence block would be a different, false claim).
+    ``DiffResult.contract_context`` is ``None`` only for a caller that never
+    opted in, so this function was never called. Typed as ``object`` for the
+    same circular-import reason as that field.
     """
     from .compatibility_evaluation_wiring import resolve_legacy_contract_mode
-    from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
+    from .contract_context import build_persisted_context
+    from .contract_evaluation import (
+        evaluate_snapshot_pair_contract_relevance,
+        evidence_refs_for_change,
+    )
+    from .contract_evidence_collect import collect_contract_evidence
     from .contract_relevance_types import ContractMode, coerce_contract_mode
     from .export_surface import compute_export_surface
     from .surface import compute_public_surface
@@ -639,6 +658,7 @@ def _apply_contract_evaluation_shadow(
     # `resolve_legacy_contract_mode` rather than re-deriving the mapping
     # here, so the two cannot drift; this is the first live caller of that
     # wiring, which Phase 1 landed and deliberately left uncalled.
+    mode_provenance = None
     if contract_mode is not None:
         mode = coerce_contract_mode(contract_mode)
     else:
@@ -649,7 +669,7 @@ def _apply_contract_evaluation_shadow(
         # alias mapping. Passing `False` would contribute no candidate at
         # all, fall through to the built-in default, and silently change the
         # evidence domain of every legacy caller.
-        mode, _provenance = resolve_legacy_contract_mode(
+        mode, mode_provenance = resolve_legacy_contract_mode(
             scope_public_headers=scope_to_public_surface,
             scope_public_headers_is_explicit=True,
         )
@@ -668,26 +688,61 @@ def _apply_contract_evaluation_shadow(
         + (suppressed or [])
         + (reconciled or [])
     )
+    forced_public = (
+        frozenset(force_public_symbols) if force_public_symbols else None
+    )
+    committed_exports = (
+        frozenset(pp_ctx.public_surface_allowlist)
+        if pp_ctx.public_surface_allowlist
+        else None
+    )
     decisions = evaluate_snapshot_pair_contract_relevance(
         all_changes,
         surf_old,
         surf_new,
         mode=mode,
-        force_public_symbols=(
-            frozenset(force_public_symbols) if force_public_symbols else None
-        ),
-        public_surface_allowlist=(
-            frozenset(pp_ctx.public_surface_allowlist)
-            if pp_ctx.public_surface_allowlist
-            else None
-        ),
+        force_public_symbols=forced_public,
+        public_surface_allowlist=committed_exports,
         exports_old=exports_old,
         exports_new=exports_new,
+    )
+    # ADR-049 Phase 3's observed provider ledger (plan Section 4.1).
+    # Collected for *both* providers whenever the export surfaces were
+    # computed at all, and always for the header provider: the block is
+    # policy-independent by contract, so a later re-evaluation under a
+    # different mode can read it without the original run having had to
+    # anticipate that mode (plan Section 5.1).
+    evidence = collect_contract_evidence(
+        old,
+        new,
+        surf_old,
+        surf_new,
+        exports_old=exports_old,
+        exports_new=exports_new,
+        public_surface_allowlist=pp_ctx.public_surface_allowlist,
+        force_public_symbols=force_public_symbols,
     )
     for change, decision in zip(all_changes, decisions, strict=True):
         change.contract_relevance = decision.relevance
         change.contract_reason_code = decision.reason_code
         change.contract_assurance = decision.assurance
+        change.contract_evidence_refs = evidence_refs_for_change(
+            change,
+            decision,
+            mode=mode,
+            block=evidence,
+            force_public_symbols=forced_public,
+            public_surface_allowlist=committed_exports,
+        )
+
+    return build_persisted_context(
+        evidence,
+        mode=mode,
+        mode_provenance=mode_provenance,
+        policy=policy,
+        internal_namespaces=internal_namespaces,
+        changes=all_changes,
+    )
 
 
 def _old_public_symbol_count(old: AbiSnapshot) -> int | None:
@@ -753,10 +808,16 @@ def compare(
             :func:`~abicheck.contract_evaluation.evaluate_snapshot_pair_contract_relevance`
             -- ``contract=public`` when *scope_to_public_surface* is True,
             ``contract=all`` otherwise (the exact `--no-scope-public-headers`
-            alias, per the ADR-049 plan). Purely additive and non-authoritative:
-            it changes no verdict, exit code, or existing report field, and
-            defaults to off so every existing caller behaves exactly as
-            before.
+            alias, per the ADR-049 plan). Also stamps each finding's
+            ``contract_evidence_refs`` (Phase 3's provider ledger: which
+            observed evidence records the decision rests on) and populates
+            ``DiffResult.contract_context`` with Phase 4's three persisted
+            blocks, so the decision can later be replayed or re-evaluated
+            under a different contract without re-reading either binary
+            (:mod:`abicheck.contract_replay`). Purely additive and
+            non-authoritative: it changes no verdict, exit code, or existing
+            report field, and defaults to off so every existing caller
+            behaves exactly as before.
         contract_mode: ADR-049 Phase 6 -- which evidence domain
             *contract_evaluation* judges against: ``"public"`` (header-derived
             declared surface), ``"exports"`` (the binary's own export table
@@ -1125,11 +1186,18 @@ def compare(
     # earlier opt-in step above (surface metrics, pattern verdicts, the
     # declared-floor/wheel checks) also gets a shadow decision, not just the
     # post-processing-stage subset. Never affects `verdict` or any exit code.
+    contract_context: object | None = None
     if contract_evaluation:
-        _apply_contract_evaluation_shadow(
+        contract_context = _apply_contract_evaluation_shadow(
             kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx,
             redundant=redundant_for_report, suppressed=suppressed,
             reconciled=reconciled, contract_mode=contract_mode,
+            policy=effective_policy,
+            internal_namespaces=(
+                tuple(policy_file.internal_namespaces)
+                if policy_file is not None and policy_file.internal_namespaces
+                else ()
+            ),
         )
 
     return DiffResult(
@@ -1162,4 +1230,5 @@ def compare(
         pattern_modulations=pattern_modulations,
         contract_coverage=contract_coverage,
         assurance=assurance,
+        contract_context=contract_context,
     )

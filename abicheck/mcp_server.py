@@ -760,7 +760,13 @@ def abi_compare(
             ``UNKNOWN_UNPROVEN``/``UNKNOWN_UNRESOLVED``/``NOT_APPLICABLE``),
             ``contract_reason_code``, and — when resolved — ``contract_assurance``
             field, reflecting whether the finding falls inside the library's
-            declared public contract. This is advisory only: it never
+            declared public contract. Each finding also gains
+            ``contract_evidence_refs`` (which evidence records its decision
+            rests on), and the JSON response's ``report`` gains a
+            ``contract_context`` block — the observed provider evidence, the
+            resolved evaluation context, and the decision receipt — so a
+            decision can be replayed or re-evaluated later without re-reading
+            the binaries. This is advisory only: it never
             changes ``verdict``, ``exit_code``, or which findings appear.
             Default False; the response is unchanged from today's shape
             unless this is set.

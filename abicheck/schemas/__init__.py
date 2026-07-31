@@ -283,7 +283,25 @@ from typing import Any
 #:       ``{"rule": str, "kind": str, "symbol": str | None}``). Purely
 #:       additive: absent for every existing caller, and never affects
 #:       ``verdict``, ``severity``, or any exit code.
-REPORT_SCHEMA_VERSION = "2.24"
+#:   2.25: ADR-049 Phase 3's provider-evidence ledger and Phase 4's persisted
+#:       decision context, both present only under ``compare(...,
+#:       contract_evaluation=True)`` alongside the 2.23 fields. Per finding:
+#:       ``contract_evidence_refs`` (array of strings), the ids of the
+#:       ``contract_evidence`` provider records that finding's contract
+#:       decision rests on — ``[]`` is a real value, meaning the decision
+#:       consulted no provider (a non-entity finding, whose relevance
+#:       follows from its ``ChangeKind`` alone). Top-level:
+#:       ``contract_context``, the three sibling blocks ADR-049 plan
+#:       Section 5.1 persists together — ``contract_evidence`` (observed,
+#:       policy-independent provider records plus the raw type graph),
+#:       ``evaluation_context`` (the resolved effective configuration and
+#:       its field provenance), and ``decision_receipt`` (the evaluated
+#:       roots/closure and per-finding relevance). Each block carries its
+#:       own version counters, checked independently on read
+#:       (``contract_replay.load_replayable_context``). Purely additive and
+#:       shadow, same as 2.23: absent by default, and never affects
+#:       ``verdict``, ``severity``, or any exit code.
+REPORT_SCHEMA_VERSION = "2.25"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

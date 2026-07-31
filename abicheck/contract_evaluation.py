@@ -60,7 +60,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .checker_policy import ADDITION_KINDS, ChangeKind
 from .checker_types import Change
@@ -96,6 +96,14 @@ from .surface import (
     classify_change_surface,
     surface_unions,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # Imported for annotations only: at runtime `contract_evidence_collect`
+    # is pulled in inside the two functions that need it, keeping this
+    # module free of a module-level edge the `import-cycle-growth` gate
+    # would have to reason about (that module imports `surface`/
+    # `export_surface`, as this one does).
+    from .contract_evidence import ContractEvidenceBlock
 
 # --------------------------------------------------------------------------
 # NOT_APPLICABLE: findings that are not about a contract entity at all.
@@ -604,6 +612,20 @@ def _new_side_is_authoritative(change: Change) -> bool:
         change.kind in ADDITION_KINDS
         or change.kind in _NON_COMPATIBLE_ADDITION_SHAPE_KINDS
     )
+
+
+def authoritative_side(change: Change) -> str:
+    """``"old"`` or ``"new"`` -- which side's evidence decides *change*.
+
+    The public spelling of :func:`_new_side_is_authoritative`, for callers
+    that need to *name* the authoritative side rather than select a surface
+    with it -- specifically
+    :func:`~abicheck.contract_evidence_collect.evidence_refs_for_reason`,
+    which cites the provider record for that side (ADR-049 D4). Exposed here
+    rather than re-derived there so the two cannot drift apart from the two
+    carefully-scoped kind sets :func:`_authoritative_surface` documents.
+    """
+    return "new" if _new_side_is_authoritative(change) else "old"
 
 
 def _hidden_friend_confirmed_public(
@@ -1418,6 +1440,78 @@ def evaluate_change_contract_relevance(
     return _decision_for_surface_reason(reason or "", change, surf_old, surf_new)
 
 
+def evidence_refs_for_change(
+    change: Change,
+    decision: ContractEvaluationDecision,
+    *,
+    mode: ContractMode,
+    block: ContractEvidenceBlock,
+    force_public_symbols: frozenset[str] | None = None,
+    public_surface_allowlist: frozenset[str] | None = None,
+) -> tuple[str, ...]:
+    """Which provider records *decision* actually rests on (Phase 3's gate).
+
+    Mostly a thin wrapper over
+    :func:`~abicheck.contract_evidence_collect.evidence_refs_for_reason`,
+    which maps a reason code plus the selected domain onto the domain's own
+    provider. The wrapping exists for the two cases a reason code alone
+    cannot distinguish, and it lives *here* rather than in the collector so
+    the attribution uses this module's own matching rules instead of a
+    second copy of them:
+
+    - an ``IN_CONTRACT`` decision this function's own overlay short-circuits
+      produced (``--public-symbol``'s widening overlay, or a
+      ``--post-manifest`` commitment) carries reason
+      ``public_root_membership``, identical to a genuine header-derived
+      root membership -- but it rests on the *overlay*, which the evaluator
+      consulted before ever looking at the surface. Citing the header
+      provider for it would be a false citation in an audit ledger whose
+      entire purpose is evidence honesty;
+    - a ``--post-manifest``-driven *exclusion* carries
+      ``terminal_authoritative_exclusion``, shared with header-origin
+      terminal exclusions, and rests on the manifest for the same reason.
+
+    Matching mirrors each overlay's own rule exactly: suffix-tolerant for
+    the widening overlay (``_change_matches_symbols``, what
+    ``FilterNonPublicSurface._run_scope`` uses) and exact-name for the
+    manifest (what ``_run_allowlist`` uses -- a suffix-tolerant match there
+    would let an uncommitted namespaced helper masquerade as a committed
+    bare name). ``exports`` never consults either overlay (plan Section 7:
+    manifest/consumer evidence is unrelated and advisory in that domain), so
+    the attribution is skipped for it entirely.
+    """
+    from .contract_evidence_collect import (
+        PROVIDER_FORCED_PUBLIC,
+        PROVIDER_POST_MANIFEST,
+        evidence_record_id,
+        evidence_refs_for_reason,
+    )
+
+    side = authoritative_side(change)
+    if coerce_contract_mode(mode) is not ContractMode.EXPORTS:
+        available = {(e.record.provider, e.record.side) for e in block.providers}
+        overlay: str | None = None
+        if (
+            decision.relevance is ContractRelevance.IN_CONTRACT
+            and force_public_symbols
+            and _change_matches_symbols(change, force_public_symbols)
+        ):
+            overlay = PROVIDER_FORCED_PUBLIC
+        elif public_surface_allowlist and (
+            (
+                decision.relevance is ContractRelevance.IN_CONTRACT
+                and (change.symbol or "") in public_surface_allowlist
+            )
+            or change.surface_exclusion_reason == _REASON_POST_MANIFEST_NOT_COMMITTED
+        ):
+            overlay = PROVIDER_POST_MANIFEST
+        if overlay is not None and (overlay, side) in available:
+            return (evidence_record_id(overlay, side),)
+    return evidence_refs_for_reason(
+        decision.reason_code, mode=mode, block=block, authoritative_side=side
+    )
+
+
 def evaluate_snapshot_pair_contract_relevance(
     changes: list[Change],
     surf_old: PublicSurface,
@@ -1529,14 +1623,26 @@ def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
         if kind_value in _NOT_APPLICABLE_KIND_SLUGS:
             return
 
+    # The evidence this decision rests on is the run's own explicit
+    # consumer/required-symbol input, not a per-side provider record in a
+    # `ContractEvidenceBlock` -- this function runs after `compare()` already
+    # returned, in a caller that holds no block at all. A run-level reference
+    # is what `contract_evidence_collect.validate_decision_evidence` accepts
+    # for exactly this case, so the finding still carries evidence rather
+    # than an empty ledger entry that would read as "no provider consulted"
+    # (the non-entity meaning).
+    from .contract_evidence_collect import EXPLICIT_SCOPE_EVIDENCE_REF
+
     if is_dict:
         c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
         c["contract_reason_code"] = _EXPLICIT_SCOPE_REASON_CODE
         c["contract_assurance"] = ContractAssurance.COMPLETE.value
+        c["contract_evidence_refs"] = [EXPLICIT_SCOPE_EVIDENCE_REF]
     else:
         c.contract_relevance = ContractRelevance.IN_CONTRACT
         c.contract_reason_code = _EXPLICIT_SCOPE_REASON_CODE
         c.contract_assurance = ContractAssurance.COMPLETE
+        c.contract_evidence_refs = (EXPLICIT_SCOPE_EVIDENCE_REF,)
 
 
 def stamp_scoped_result_findings(

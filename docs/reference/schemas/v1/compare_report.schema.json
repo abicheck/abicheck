@@ -310,6 +310,48 @@
         }
       }
     },
+    "contract_context": {
+      "type": "object",
+      "description": "ADR-049 Phase 4 (schema 2.25): present only when the caller opts into `compare --contract-evaluation`. The three sibling blocks ADR-049 plan Section 5.1 persists together, so a decision can be replayed (from the receipt alone) or re-evaluated under a different contract mode (from the observations alone) without re-reading any binary or header. Advisory only; never affects verdict, severity, or any exit code.",
+      "required": ["contract_evidence", "evaluation_context", "decision_receipt"],
+      "additionalProperties": true,
+      "properties": {
+        "contract_evidence": {
+          "type": "object",
+          "description": "Observed, policy-independent provider evidence: one entry per (provider, side) with its own EvidenceSearchRecord (status/completeness/identity coverage/requested-vs-searched scope/input digest), the declarations it rooted, any manifests it read, and the raw record/enum/typedef/declaration type graph. Independent of which contract mode was selected -- that is what makes it valid input to a later re-evaluation under a different one.",
+          "required": ["providers", "schema_version", "identity_algorithm_version"],
+          "additionalProperties": true,
+          "properties": {
+            "schema_version": { "type": "integer", "minimum": 1 },
+            "identity_algorithm_version": { "type": "integer", "minimum": 1 },
+            "providers": { "type": "array", "items": { "type": "object" } }
+          }
+        },
+        "evaluation_context": {
+          "type": "object",
+          "description": "The resolved effective configuration that produced the decisions (contract/evidence/surface/assurance/policy/gate/suppressions), plus field-level provenance and the evaluator/identity-algorithm versions active at decision time.",
+          "required": ["resolved_config", "schema_version", "evaluator_version", "identity_algorithm_version"],
+          "additionalProperties": true,
+          "properties": {
+            "schema_version": { "type": "integer", "minimum": 1 },
+            "evaluator_version": { "type": "integer", "minimum": 1 },
+            "identity_algorithm_version": { "type": "integer", "minimum": 1 },
+            "resolved_config": { "type": "object" },
+            "field_provenance": { "type": "object" }
+          }
+        },
+        "decision_receipt": {
+          "type": "object",
+          "description": "The mode/root-dependent result computed *from* the evidence block: the evaluated contract roots, the type closure walked from them, and each finding's recorded relevance. Not observed evidence -- which is why it is a separate block a re-evaluation ignores.",
+          "additionalProperties": true,
+          "properties": {
+            "evaluated_contract_roots": { "type": "array", "items": { "type": "string" } },
+            "evaluated_type_closure": { "type": "array", "items": { "type": "string" } },
+            "relevance_by_finding": { "type": "object" }
+          }
+        }
+      }
+    },
     "release_recommendation": {
       "type": "object",
       "description": "Recommended next release: a semantic-version bump and a SONAME action derived from the policy-aware verdict and change set. See docs/user-guide/output-formats.md.",
@@ -679,6 +721,11 @@
           "type": "string",
           "description": "ADR-049 Phase 3 (schema 2.23): how much confidence backs contract_relevance -- 'complete' (a terminal or positively-confirmed determination), 'partial' (a weak surface-exclusion reason with no stronger corroboration), or 'unavailable' (the required surface was unresolvable). Present only alongside contract_relevance, and only when the evaluator itself set a value (this field is None internally only in unreached code paths).",
           "enum": ["complete", "partial", "unavailable"]
+        },
+        "contract_evidence_refs": {
+          "type": "array",
+          "description": "ADR-049 Phase 3 (schema 2.25): the ids of the top-level contract_context.contract_evidence provider records this finding's contract decision rests on (e.g. 'public_header:old', 'export_table:new'). An empty array is a real value, not a missing one: a non-entity finding's relevance follows from its ChangeKind alone and consults no provider. A run-level reference ('run:explicit_consumer_or_required_symbol') appears instead when the decision was made by --used-by/--required-symbol scoping after the comparison returned, which holds no evidence block. Present only alongside contract_relevance.",
+          "items": { "type": "string" }
         }
       }
     }
