@@ -27,6 +27,8 @@ all.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.export_surface import compute_export_surface, observed_export_names
 from abicheck.macho_metadata import MachoExport, MachoMetadata
@@ -1182,6 +1184,59 @@ class TestUnresolvedTypeEdges:
             elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
         )
         assert not compute_export_surface(snap).unresolved_type_edges
+
+    def test_a_dependent_marker_poisons_only_its_own_argument(self) -> None:
+        # A marker governs the name it introduces, not every name in the
+        # spelling it appears in. Discarding the whole string (as an earlier
+        # revision did) hid an ordinary missing edge behind a dependent
+        # sibling in the same argument list (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("api", "api", params=("Wrapper<Missing, typename T::type> *",))
+            ],
+            types=[_rec("Wrapper"), _rec("Bystander")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unresolved_type_edges == frozenset({"Missing"})
+        assert not surf.exclusion_is_provable
+
+        # The dependent argument alone is still not an edge, so the
+        # narrowing didn't simply stop excluding.
+        snap.functions[0].params[0].type = "Wrapper<typename T::type> *"
+        assert not compute_export_surface(snap).unresolved_type_edges
+
+    @pytest.mark.parametrize(
+        ("spelling", "expected"),
+        [
+            ("Wrapper<Missing, typename T::type>", ["Missing", "Wrapper"]),
+            # libstdc++'s own alias target: one dependent name from the first
+            # keyword onward, with no depth-zero comma to end it.
+            (
+                "typename __gnu_cxx::__alloc_traits<_Alloc>::template rebind<X>::other",
+                [],
+            ),
+            # A marker nested one level deep ends at its own list's comma, so
+            # its siblings and the enclosing names survive.
+            ("Outer<Inner<typename A::x, Real>, Other>", ["Inner", "Other", "Outer", "Real"]),
+            ("PlainType", ["PlainType"]),
+        ],
+    )
+    def test_dependent_spans_scope_to_the_governed_argument(
+        self, spelling, expected
+    ) -> None:
+        from abicheck.export_surface import _dependent_spans, _is_dependent_token
+        from abicheck.surface import _IDENT_RE
+
+        spans = _dependent_spans(spelling)
+        kept = sorted(
+            m.group(0)
+            for m in _IDENT_RE.finditer(spelling)
+            if not _is_dependent_token(m.start(), spans)
+        )
+        assert kept == expected
 
     def test_a_dependent_spelling_is_not_an_edge(self) -> None:
         # `typename`/`template` mark a spelling that names nothing until

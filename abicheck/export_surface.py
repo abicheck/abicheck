@@ -554,6 +554,59 @@ def _seed_export_roots(
 _DEPENDENT_SPELLING_RE = re.compile(r"\b(?:typename|template)\b")
 
 
+def _dependent_spans(type_str: str) -> list[tuple[int, int]]:
+    """Character ranges of *type_str* a dependent marker actually governs.
+
+    A marker poisons the name it introduces, not the whole spelling it
+    happens to appear in (Codex review, confirmed empirically). An earlier
+    revision discarded the entire string on any marker, so a mixed argument
+    list such as ``Wrapper<Missing, typename T::type>`` hid the ordinary,
+    genuinely-missing ``Missing`` edge behind its dependent sibling and let
+    unrelated types be proven out of contract.
+
+    A marker's region runs from the keyword to the end of the
+    template-argument it sits in: the next ``,`` at its own bracket depth, or
+    the ``>`` that closes the enclosing list, whichever comes first -- and to
+    the end of the string when neither does, which is the shape libstdc++'s
+    own fully-dependent alias targets take (``typename
+    __gnu_cxx::__alloc_traits<_Alloc>::template rebind<...>::other`` is one
+    dependent name from the first keyword onward).
+    """
+    if not _DEPENDENT_SPELLING_RE.search(type_str):
+        return []
+    # Depth *at* each index: a `<` is recorded at the depth it opens from, a
+    # `>` at the depth it closes to, so a comma separating two arguments and
+    # the marker inside one of them compare on the same scale.
+    depths: list[int] = []
+    depth = 0
+    for ch in type_str:
+        if ch == "<":
+            depths.append(depth)
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+            depths.append(depth)
+        else:
+            depths.append(depth)
+
+    spans: list[tuple[int, int]] = []
+    for match in _DEPENDENT_SPELLING_RE.finditer(type_str):
+        start = match.start()
+        own_depth = depths[start]
+        end = len(type_str)
+        for i in range(start + 1, len(type_str)):
+            if depths[i] < own_depth or (type_str[i] == "," and depths[i] <= own_depth):
+                end = i
+                break
+        spans.append((start, end))
+    return spans
+
+
+def _is_dependent_token(position: int, spans: list[tuple[int, int]]) -> bool:
+    """Whether the token at *position* falls inside a dependent region."""
+    return any(start <= position < end for start, end in spans)
+
+
 class _SpellingIndex(NamedTuple):
     """How :func:`_edge_is_unresolved` decides an edge landed somewhere."""
 
@@ -734,11 +787,11 @@ def _edge_is_unresolved(
     # Measured: libstdc++'s `_Bit_alloc_type` alias, whose target is
     # `typename __gnu_cxx::__alloc_traits<_Alloc>::template rebind<...>
     # ::other`, was the last false edge left on a real `g++`-built library.
-    if _DEPENDENT_SPELLING_RE.search(type_str):
-        return set()
+    spans = _dependent_spans(type_str)
     missing: set[str] = set()
-    for tok in _IDENT_RE.findall(type_str):
-        if tok in _TYPE_NOISE:
+    for match in _IDENT_RE.finditer(type_str):
+        tok = match.group(0)
+        if tok in _TYPE_NOISE or _is_dependent_token(match.start(), spans):
             continue
         leaf = _namespace_suffix_spellings(tok)[-1]
         names_a_node = tok in index.spellings or (
@@ -797,11 +850,11 @@ def _followed_typedef_aliases(
     """
     if not _is_real_type(type_str) or type_str is None:
         return set()
-    if _DEPENDENT_SPELLING_RE.search(type_str):
-        return set()
+    spans = _dependent_spans(type_str)
     aliases: set[str] = set()
-    for tok in _IDENT_RE.findall(type_str):
-        if tok in _TYPE_NOISE:
+    for match in _IDENT_RE.finditer(type_str):
+        tok = match.group(0)
+        if tok in _TYPE_NOISE or _is_dependent_token(match.start(), spans):
             continue
         for ident in _type_identifiers(tok):
             if ident in snap.typedefs and ident not in index.toolchain_alias_keys:
