@@ -642,6 +642,13 @@ def _apply_contract_evaluation_shadow(
     if contract_mode is not None:
         mode = ContractMode(contract_mode)
     else:
+        # `scope_public_headers_is_explicit=True` is unconditional on
+        # purpose (CodeRabbit review): this core verb receives only the
+        # resolved boolean, never whether a user typed the flag, and the
+        # pre-Phase-6 behaviour for an absent `contract_mode` is exactly the
+        # alias mapping. Passing `False` would contribute no candidate at
+        # all, fall through to the built-in default, and silently change the
+        # evidence domain of every legacy caller.
         mode, _provenance = resolve_legacy_contract_mode(
             scope_public_headers=scope_to_public_surface,
             scope_public_headers_is_explicit=True,

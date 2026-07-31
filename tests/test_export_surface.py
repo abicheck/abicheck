@@ -1022,21 +1022,52 @@ class TestUnresolvedTypeEdges:
         )
         assert not compute_export_surface(snap).unresolved_type_edges
 
-    def test_a_stdlib_typedef_key_resolves_its_bare_signature_spelling(self) -> None:
-        # The DWARF backend spells a `std::string` parameter bare while the
-        # typedef key is qualified -- without stripping, every C++ library
-        # using a standard-library type could never prove an exclusion.
+    def test_a_bare_spelling_of_a_namespaced_record_resolves(self) -> None:
+        # A backend spells a stdlib parameter bare while the recorded identity
+        # is qualified. For a *record* that resolves in both senses: the
+        # spelling names a known node, and the walk's own index carries the
+        # bare `::` tail as a key -- so the closure really does reach the node
+        # the guard says it did, which is what the traversability gate below
+        # (`test_a_spelling_the_walk_cannot_follow_...`) requires.
         snap = AbiSnapshot(
             library="l",
             version="1",
-            functions=[_fn("api", "api", params=("string *",))],
-            types=[],
-            typedefs={"std::string": "basic_string<char>"},
+            functions=[_fn("api", "api", params=("Widget *",))],
+            types=[_rec("std::__cxx11::Widget")],
             elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
         )
         surf = compute_export_surface(snap)
         assert not surf.unresolved_type_edges
         assert surf.exclusion_is_provable
+        assert "std::__cxx11::Widget" in surf.export_types
+
+    def test_a_spelling_the_walk_cannot_follow_is_an_unresolved_edge(self) -> None:
+        # Naming a known node is not enough -- the closure has to have been
+        # able to *follow* the edge (Codex review). A typedef is looked up by
+        # exact key only, with no spelling tolerance, so a suffix spelling of
+        # a qualified alias key names something real that the walk never
+        # reaches: `Victim` stays outside `export_types`, and treating the
+        # edge as resolved let a change to it be proven out of contract.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("ns::Alias *",))],
+            types=[_rec("Victim")],
+            typedefs={"outer::ns::Alias": "Victim"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert "Victim" not in surf.export_types
+        assert surf.unresolved_type_edges == frozenset({"ns::Alias"})
+        assert not surf.exclusion_is_provable
+
+        # The exact key is traversable, so the same alias resolves and the
+        # target really does enter the closure -- the guard tracks the walk.
+        snap.functions[0].params[0].type = "outer::ns::Alias *"
+        exact = compute_export_surface(snap)
+        assert "Victim" in exact.export_types
+        assert not exact.unresolved_type_edges
+        assert exact.exclusion_is_provable
 
     def test_toolchain_owned_internals_are_not_scanned(self) -> None:
         # Measured on a real g++ library: libstdc++'s own records spell

@@ -1788,6 +1788,31 @@ are measured: dropping the fallback outright made the real C++ library report
 `std::string` unresolved, and keeping it unconditional made the synthetic
 `ns::Missing` case resolve wrongly.
 
+**Naming a known node is necessary but not sufficient**, a second condition
+added after the resolver above was measured. The registered spellings are
+broader than what `_walk_type_closure` can actually look up: the walk
+resolves a record or enum through its own name or bare `::` tail, but a
+*typedef* only through its exact key, with no spelling tolerance at all. So
+an exported parameter spelled `ns::Alias` against a captured typedef
+`outer::ns::Alias -> Victim` counted as a resolved edge while the walk —
+trying only `ns::Alias` and its tail `Alias`, neither of them that key —
+never followed the alias, leaving `Victim` outside `export_types` and free to
+be stamped `PROVEN_OUT_OF_CONTRACT` (Codex review, reproduced). An edge is
+now resolved only when it *both* names a known node and is one the walk could
+traverse.
+
+The two conditions are independent, and each catches what the other misses:
+a token can be traversable yet wrong (the `ns::Missing` → `other::Missing`
+tail collision above — the walk follows *something*, but not the node the
+edge names, so the real node's closure stays unknown), and a token can name a
+known node yet be untraversable (the typedef case here). Both are holes in
+the same closure, so both are reported. Re-measured after adding the second
+condition: the pure-C and `std::`-carrying C++ libraries above still report
+zero unresolved edges with `exclusion_is_provable = True`, on both the
+header-scoped and headerless dumps — the narrowing costs the domain nothing
+real, because a backend that bares a *record* spelling produces exactly the
+tail key the walk indexes.
+
 `exclusion_is_provable` folds in every incompleteness signal rather than
 leaving some to the caller: an observed table, at least one resolved root,
 **every** root carrying real signature types (`all_roots_typed`, which the

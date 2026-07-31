@@ -4426,6 +4426,27 @@ class TestMetadataAttachFailuresAreSwallowed:
 
         return AbiSnapshot(library="libfoo.so", version="1")
 
+    def test_a_symlink_loop_in_the_library_path_is_swallowed(
+        self, tmp_path, caplog
+    ) -> None:
+        # `Path.resolve()` raises `RuntimeError` on a symlink loop (a merely
+        # missing path resolves fine), and it used to run *above* the
+        # handler, so a malformed library path aborted the whole dump
+        # instead of skipping metadata extraction (CodeRabbit review).
+        import logging
+        import os
+
+        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+
+        looped = tmp_path / "libfoo.so"
+        os.symlink(looped, looped)
+
+        snap = self._snap()
+        with caplog.at_level(logging.DEBUG, logger="abicheck.service"):
+            _try_attach_sycl_metadata(snap, looped)
+        assert snap.sycl is None
+        assert "SYCL metadata extraction skipped" in caplog.text
+
     def test_python_extension_detection_failure_attaches_nothing(
         self, monkeypatch, caplog
     ) -> None:

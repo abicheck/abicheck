@@ -475,7 +475,14 @@ def _seed_export_roots(
             nonroot_keys |= keys
             continue
         matched_pairs |= matched
-        root_identities.add(_linker_identity(fn.name, fn.mangled))
+        # Truthiness-guarded: an empty identity in this set would make every
+        # *other* identity-less declaration look like a root to
+        # `_unresolved_type_edges` (CodeRabbit review). Unreachable today --
+        # `_matched_export_names` returns nothing for an empty identity, so a
+        # declaration carrying one never matches -- but the invariant belongs
+        # where the set is built, not in a reader's head.
+        if identity := _linker_identity(fn.name, fn.mangled):
+            root_identities.add(identity)
         surface.matched_exports |= {n for _, n in matched}
         surface.export_symbols |= keys
         surface.has_roots = True
@@ -506,7 +513,8 @@ def _seed_export_roots(
             nonroot_keys |= keys
             continue
         matched_pairs |= matched
-        root_identities.add(_linker_identity(var.name, var.mangled))
+        if identity := _linker_identity(var.name, var.mangled):
+            root_identities.add(identity)
         surface.matched_exports |= {n for _, n in matched}
         surface.export_symbols |= keys
         surface.has_roots = True
@@ -546,18 +554,27 @@ def _seed_export_roots(
 _DEPENDENT_SPELLING_RE = re.compile(r"\b(?:typename|template)\b")
 
 
+class _SpellingIndex(NamedTuple):
+    """How :func:`_edge_is_unresolved` decides an edge landed somewhere."""
+
+    #: Every spelling that names a record, enum, or typedef this snapshot has.
+    spellings: frozenset[str]
+    #: Spellings that are the **complete** recorded identity of a node
+    #: carrying no scope of its own -- the only ones a *more*-qualified token
+    #: may fall back to.
+    unscoped_leaves: frozenset[str]
+    #: The lookup keys :func:`~abicheck.surface._walk_type_closure` itself
+    #: resolves against. Naming a known node is not enough: the closure has
+    #: to have been able to *follow* the edge (see :func:`_edge_is_unresolved`).
+    walk_keys: frozenset[str]
+
+
 def _resolvable_type_spellings(
     snap: AbiSnapshot,
     record_by_name: dict[str, list[RecordType]],
     enum_by_name: dict[str, list[EnumType]],
-) -> tuple[frozenset[str], frozenset[str]]:
-    """``(spellings, unscoped_leaves)`` for this snapshot's known nodes.
-
-    *spellings* is every spelling that names a record, enum, or typedef the
-    snapshot has. *unscoped_leaves* is the subset of those that are the
-    **complete** recorded identity of a node carrying no scope of its own --
-    the only spellings a *more*-qualified token may fall back to, see
-    :func:`_edge_is_unresolved`.
+) -> _SpellingIndex:
+    """Build the :class:`_SpellingIndex` for this snapshot's known nodes.
 
     Membership here means "this edge lands on a node we know", which is the
     only question :func:`_unresolved_type_edges` asks -- deliberately *not*
@@ -614,15 +631,20 @@ def _resolvable_type_spellings(
     for alias in snap.typedefs:
         if "::" not in alias and alias not in scoped_leaves:
             unscoped.add(alias)
-    return frozenset(spellings), frozenset(unscoped)
+
+    # Exactly what `_walk_type_closure` looks a queued name up in: the two
+    # index dicts (whose keys `_index_surface_types` builds as each node's
+    # own name plus, for a namespaced one, its bare `::` tail) and
+    # `snap.typedefs` by *exact* key, with no tail tolerance of its own.
+    walk_keys = {*record_by_name, *enum_by_name, *snap.typedefs}
+    return _SpellingIndex(frozenset(spellings), frozenset(unscoped), frozenset(walk_keys))
 
 
 def _edge_is_unresolved(
     type_str: str | None,
-    resolvable: frozenset[str],
-    unscoped_leaves: frozenset[str] = frozenset(),
+    index: _SpellingIndex,
 ) -> set[str]:
-    """Identifiers in *type_str* that name nothing this snapshot knows.
+    """Identifiers in *type_str* the closure did not follow to a known node.
 
     Each ``_IDENT_RE`` token is judged on its own -- a template spelling
     like ``Wrapper<Payload>`` carries two independent edges, and either can
@@ -643,6 +665,28 @@ def _edge_is_unresolved(
     node's full identity *and* every namespace-suffix spelling of it, so a
     backend that partially qualifies or fully bares a name still matches --
     what it will not do is invent a scope the snapshot never recorded.
+
+    **Naming a known node is necessary but not sufficient.** The token must
+    also be one :func:`~abicheck.surface._walk_type_closure` could actually
+    look up, which is a strictly narrower set: the walk resolves a record or
+    enum through its own name or bare ``::`` tail, but a *typedef* only
+    through its exact key, with no spelling tolerance at all. Registered
+    spellings are broader than that by construction, so accepting one on its
+    own claimed a completeness the closure does not have (Codex review,
+    confirmed empirically): an exported parameter spelled ``ns::Alias``
+    against a captured typedef ``outer::ns::Alias -> Victim`` counted as a
+    resolved edge, while the walk -- which tries only ``ns::Alias`` and its
+    tail ``Alias``, neither of them that typedef's key -- never followed the
+    alias, left ``Victim`` outside ``export_types``, and let a change to the
+    genuinely reachable ``Victim`` be stamped ``PROVEN_OUT_OF_CONTRACT``.
+
+    The two conditions are independent, and each catches what the other
+    misses. A token can be traversable yet wrong (a qualified ``ns::Missing``
+    reaching an unrelated ``other::Missing`` through the shared tail key --
+    the walk follows *something*, but not the node the edge names, so the
+    real node's own closure stays unknown), and a token can name a known
+    node yet be untraversable (the typedef case above). Either way the
+    closure has a hole, so both are reported.
     """
     if not _is_real_type(type_str) or type_str is None:
         return set()
@@ -659,10 +703,16 @@ def _edge_is_unresolved(
         return set()
     missing: set[str] = set()
     for tok in _IDENT_RE.findall(type_str):
-        if tok in _TYPE_NOISE or tok in resolvable:
+        if tok in _TYPE_NOISE:
             continue
         leaf = _namespace_suffix_spellings(tok)[-1]
-        if leaf != tok and leaf in unscoped_leaves:
+        names_a_node = tok in index.spellings or (
+            leaf != tok and leaf in index.unscoped_leaves
+        )
+        # `_type_identifiers` is what the walk itself queues from a type
+        # string, so asking it for this one token is exactly "which keys
+        # would the walk have tried".
+        if names_a_node and _type_identifiers(tok) & index.walk_keys:
             continue
         missing.add(tok)
     return missing
@@ -698,8 +748,7 @@ def _unresolved_type_edges(
     surface: ExportSurface,
     reached_types: set[str],
     root_identities: set[str],
-    resolvable: frozenset[str],
-    unscoped_leaves: frozenset[str],
+    index: _SpellingIndex,
 ) -> frozenset[str]:
     """Type identifiers reachable from an export root that name nothing known.
 
@@ -767,7 +816,7 @@ def _unresolved_type_edges(
     seen_aliases: set[str] = set()
 
     def scan(type_str: str | None) -> None:
-        unresolved.update(_edge_is_unresolved(type_str, resolvable, unscoped_leaves))
+        unresolved.update(_edge_is_unresolved(type_str, index))
         for alias in _followed_typedef_aliases(type_str, snap, surface):
             if alias in seen_aliases:
                 continue
@@ -932,6 +981,6 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         surface,
         surface.export_types,
         roots.root_identities,
-        *_resolvable_type_spellings(snap, record_by_name, enum_by_name),
+        _resolvable_type_spellings(snap, record_by_name, enum_by_name),
     )
     return surface

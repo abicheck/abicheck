@@ -50,9 +50,14 @@ def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
     which is a few ``Path.exists()`` checks — effectively zero overhead.
     """
     from .sycl_metadata import parse_sycl_metadata
-    lib_dir = lib_path.resolve().parent
+
     try:
-        sycl = parse_sycl_metadata(lib_dir)
+        # Inside the handler, not above it: `resolve()` raises `RuntimeError`
+        # on a symlink loop (confirmed empirically; a merely *missing* path
+        # resolves fine under the default `strict=False`), and a malformed
+        # library path must skip metadata extraction, not abort the dump
+        # (CodeRabbit review).
+        sycl = parse_sycl_metadata(lib_path.resolve().parent)
     except Exception as exc:  # noqa: BLE001
         _logger.debug("SYCL metadata extraction skipped: %s", exc)
         return
@@ -94,8 +99,13 @@ def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
     """Scan for NumPy C-API consumption evidence and attach it (G26).
 
     Cheap: a bounded read of the binary plus a handful of substring/regex
-    scans. A library that doesn't consume the NumPy C-API at all leaves
-    ``numpy_capi`` at ``None`` — no finding, not a false positive.
+    scans. A successfully-scanned library that doesn't consume the NumPy
+    C-API gets a real ``NumPyCapiSurface`` with both flags ``False``
+    ("confirmed not consuming"); ``numpy_capi`` stays ``None`` only when the
+    binary could not be scanned at all. Keeping those two apart is
+    deliberate — see :func:`~abicheck.numpy_capi.extract_numpy_capi_surface`,
+    which owns the distinction (CodeRabbit review caught this docstring,
+    carried over verbatim from ``service.py``, claiming the opposite).
     """
     from .numpy_capi import extract_numpy_capi_surface
     try:
