@@ -924,12 +924,29 @@ provenance-receipt entry per resolved field.
   verbatim), and `--contract` vs. `--scope-public-headers` (the Phase 6
   flag's own documented "an explicit value outranks those" — making that pair
   a usage error would reject a combination the live CLI accepts today).
-- **`auto` never reaches a resolved value.** An `--exit-code-scheme auto` at
-  any layer contributes no candidate; the built-in default carries the
-  resolved answer, computed by the same "severity setting in effect?" rule
-  `cli_helpers_compare.resolve_compare_config` already applies. A test pins
-  the resolved `gate.severity` field-for-field against
-  `severity.resolve_severity_config`, so the two cannot drift.
+- **`auto` never reaches a resolved value, but selecting it is still a
+  stated choice.** An explicit `--exit-code-scheme auto` contributes a
+  candidate carrying the answer to "is a severity setting in effect?", so it
+  outranks a lower layer's concrete scheme exactly as any other explicit
+  value would — matching `cli_helpers_compare.resolve_compare_config`, where
+  the CLI value wins whatever it is. (A first cut treated `auto` as "not
+  stated" at every layer, which let a project config's concrete scheme beat
+  an explicitly typed `--exit-code-scheme auto`; caught in review.) A
+  project config's own `auto` does contribute nothing, because
+  `BuildConfig`'s default for that key *is* the string `"auto"`, making a
+  stated one indistinguishable from an absent one. A test pins the resolved
+  `gate.severity` field-for-field against `severity.resolve_severity_config`,
+  so the two cannot drift.
+- **Every file-derived receipt entry carries its source's own digest**
+  (ADR-049 D6): the `--policy-file` document's bytes for the base/overrides/
+  namespaces it supplied, and the pack manifest's `id`/`version`/`sha256` for
+  a field a pack filled — `resolve_pack_field_assignments` returns a
+  `RoutedPackAssignment` (value + identity + path) rather than a bare value
+  for exactly this reason. Which of several *agreeing* packs is credited is
+  decided by sorted pack identity, so the receipt never depends on `--pack`
+  order. A composed field (`policy.overrides`, `surface.explicit_scope`)
+  credits only sources that actually contributed: a policy pack whose every
+  assignment the policy file overrode is not listed.
 - **`surface.explicit_scope` is resolved as the additive field it really
   is.** `--public-symbol` and `scope.public_symbols` *merge* today (ADR-037
   D4), which is a genuine exception to per-field highest-layer-wins; the

@@ -69,6 +69,7 @@ input to an equal ``CompatibilityEvaluationConfig`` and provenance receipt."
 from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
@@ -278,6 +279,7 @@ def internal_namespaces_candidate(
     *,
     policy_file: PolicyFile | None,
     layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
+    sha256: str | None = None,
 ) -> FieldCandidate | None:
     """Build the ``surface.internal_namespaces`` candidate a ``--policy-file``
     contributes, or ``None`` when it contributes nothing.
@@ -289,7 +291,10 @@ def internal_namespaces_candidate(
     construction rather than re-deriving the canonicalization and provenance
     shape. *layer* mirrors that function's own parameter, for a front end
     whose policy manifest was selected by a project config rather than typed
-    on this invocation.
+    on this invocation. *sha256* is the selected file's own content digest,
+    which a caller that has it should pass so the receipt can identify the
+    exact document that supplied the value (ADR-049 D6) rather than only the
+    path it was read from.
     """
     if policy_file is None or not policy_file.internal_namespaces:
         return None
@@ -299,6 +304,7 @@ def internal_namespaces_candidate(
         provenance=ValueProvenance(
             layer=layer,
             source_kind="policy_file",
+            sha256=sha256,
             path=source_path,
             selected_by=(
                 SelectedByEntry(
@@ -603,14 +609,31 @@ PACK_FIELD_ROUTES_BY_KIND: Mapping[
 )
 
 
+@dataclass(frozen=True)
+class RoutedPackAssignment:
+    """One effective-config field a selected pack assigns, with its source.
+
+    The *identity* and *path* travel with the value so a caller can build a
+    provenance receipt that identifies the exact manifest revision the value
+    came from (ADR-049 D6: "path, digest, manifest identity/version, and
+    field location identify the actual definition used for exact replay") --
+    a bare ``field -> value`` mapping could name the file at best, and only
+    when exactly one pack was selected.
+    """
+
+    value: Hashable
+    identity: ImmutableIdentity
+    path: str
+
+
 def resolve_pack_field_assignments(
     pack_paths: Sequence[str | Path],
     kind: PackKind,
     *,
     explicit_overrides: Mapping[str, Hashable] = MappingProxyType({}),
-) -> dict[str, Hashable]:
+) -> dict[str, RoutedPackAssignment]:
     """Fold every selected pack of *kind* into one routed, typed
-    ``field name -> value`` mapping.
+    ``field name -> assignment`` mapping.
 
     The contract/gate counterpart of :func:`resolve_policy_pack_overrides`.
     A policy pack folds into one open bag (``CompatibilityPolicyConfig.
@@ -635,12 +658,20 @@ def resolve_pack_field_assignments(
     as the other two pack functions, scoped to only the packs of *kind* among
     *pack_paths* (packs of another kind are loaded but otherwise ignored), so
     all three agree about which packs conflict. *explicit_overrides* is
-    forwarded verbatim to that check and re-applied, already-typed, after the
-    merge -- D8's "explicit per-kind override > selected packs > base". Its
-    keys are not themselves route-checked: an override for a field no pack of
-    this kind may assign is inert, not an error, since the caller may
-    legitimately be pinning a field it resolves through another layer
-    entirely.
+    forwarded verbatim to that check -- D8 exempts a field the caller already
+    states from pack-vs-pack conflict detection, since the stated value
+    resolves any disagreement about it. Only the *keys* are read, so a marker
+    value is enough for a field whose real value the caller hasn't resolved
+    yet; the keys are not route-checked either, since a caller may
+    legitimately state a field no pack of this kind could assign.
+
+    Unlike :func:`resolve_policy_pack_overrides`, the overrides are **not**
+    re-applied onto the returned mapping: that function's result *is* the
+    final ``overrides`` value, whereas this one's is an input to per-field
+    resolution, where D8's "explicit override > selected packs" is applied by
+    the stated value's own candidate outranking the pack's. Returning them
+    merged here would hand the caller back its own marker values as if a pack
+    had assigned them.
 
     Conflicts are detected on the packs' *raw* manifest values, before
     routing, so a manifest whose value is malformed for its field still
@@ -666,15 +697,26 @@ def resolve_pack_field_assignments(
 
     # Safe as last-write-wins only because detect_pack_conflicts already
     # proved every pack assigning a given field assigned the identical value
-    # (the same reasoning resolve_policy_pack_overrides documents).
-    merged_raw: dict[str, tuple[str, Hashable]] = {}
-    for path, pack in selected:
+    # (the same reasoning resolve_policy_pack_overrides documents). Which of
+    # several agreeing packs is recorded as the source is therefore a choice
+    # among equals -- made deterministic by sorting on the pack identity, so
+    # the receipt never depends on the order the paths were given in ("pack
+    # order never decides semantics", D8).
+    merged_raw: dict[str, tuple[str, LoadedPack, Hashable]] = {}
+    for path, pack in sorted(
+        selected,
+        key=lambda entry: (
+            entry[1].identity.id,
+            entry[1].identity.version,
+            entry[1].identity.sha256,
+        ),
+    ):
         for field_name, value in pack.assignments.items():
-            merged_raw[field_name] = (path, value)
+            merged_raw.setdefault(field_name, (path, pack, value))
 
-    routed: dict[str, Hashable] = {}
+    routed: dict[str, RoutedPackAssignment] = {}
     for field_name in sorted(merged_raw):
-        path, value = merged_raw[field_name]
+        path, pack, value = merged_raw[field_name]
         convert = routes.get(field_name)
         if convert is None:
             raise PackManifestError(
@@ -684,6 +726,9 @@ def resolve_pack_field_assignments(
                 "config field with no route here is one no pack of this kind "
                 "is allowed to set"
             )
-        routed[field_name] = convert(value, field_name, path)
-    routed.update(explicit_overrides)
+        routed[field_name] = RoutedPackAssignment(
+            value=convert(value, field_name, path),
+            identity=pack.identity,
+            path=path,
+        )
     return routed

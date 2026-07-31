@@ -100,6 +100,7 @@ from .compatibility_evaluation_wiring import (
     BUILT_IN_DEFAULT_CONTRACT_MODE,
     CONTRACT_MODE_FIELD,
     INTERNAL_NAMESPACES_FIELD,
+    RoutedPackAssignment,
     internal_namespaces_candidate,
     legacy_contract_mode_candidate,
     resolve_pack_field_assignments,
@@ -326,13 +327,19 @@ class ExplicitCompatibilityInputs:
     policy_base: str | None = None
     #: An already-loaded ``--policy-file`` document.
     policy_file: PolicyFile | None = None
+    #: Digest of that file's own bytes, for the receipt (ADR-049 D6). Left
+    #: unset, it is computed from ``policy_file.source_path`` -- supply it
+    #: only when the caller already has the digest, or when the document did
+    #: not come from a readable path.
+    policy_file_sha256: str | None = None
     #: ``--public-symbol``/``--public-symbols-list`` /
     #: ``CompareRequest.force_public_symbols`` (ADR-024 D6 widening overlay).
     public_symbols: tuple[str, ...] = ()
     #: An already-read ``--suppress`` source.
     suppression: SuppressionSource | None = None
-    #: ``--exit-code-scheme``; ``"auto"`` is a resolution-time choice, not a
-    #: stated value (see :func:`resolve_compatibility_evaluation_config`).
+    #: ``--exit-code-scheme``. ``"auto"`` is a stated selection whose value is
+    #: resolved at resolution time (see
+    #: :func:`resolve_compatibility_evaluation_config`).
     exit_code_scheme: str | None = None
     severity_preset: str | None = None
     severity_abi_breaking: str | None = None
@@ -417,6 +424,8 @@ def _candidate(
     option: str | None = None,
     source_kind: str | None = None,
     reference: str | None = None,
+    version: int | None = None,
+    sha256: str | None = None,
     path: str | None = None,
     field_location: str | None = None,
 ) -> FieldCandidate:
@@ -425,6 +434,8 @@ def _candidate(
             layer=layer,
             source_kind=source_kind,
             reference=reference,
+            version=version,
+            sha256=sha256,
             path=path,
             field_location=field_location,
             selected_by=(SelectedByEntry(layer=layer, option=option, path=path),),
@@ -447,8 +458,7 @@ def _resolve(
     candidates: Sequence[FieldCandidate],
     *,
     default: FieldCandidate,
-    pack_value: Hashable | None = None,
-    pack_paths: Sequence[str] = (),
+    pack: RoutedPackAssignment | None = None,
     pack_layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
     require_legacy_alias_agreement: bool = True,
 ) -> tuple[Hashable, ValueProvenance]:
@@ -470,15 +480,18 @@ def _resolve(
     that wants the pack's value simply stops stating its own.
     """
     all_candidates = list(candidates)
-    if not all_candidates and pack_value is not None:
+    if not all_candidates and pack is not None:
         all_candidates.append(
             _candidate(
                 pack_layer,
-                pack_value,
+                pack.value,
                 option="--pack",
                 source_kind="pack_manifest",
+                reference=pack.identity.id,
+                version=pack.identity.version,
+                sha256=pack.identity.sha256,
+                path=pack.path,
                 field_location=field_name,
-                path=pack_paths[0] if len(pack_paths) == 1 else None,
             )
         )
     return resolve_field(
@@ -497,11 +510,22 @@ def _resolve(
 _STATED_ELSEWHERE: Hashable = "<stated by another layer>"
 
 
-def _pack_assigned_only(
-    routed: Mapping[str, Hashable], pinned: Mapping[str, Hashable]
-) -> dict[str, Hashable]:
-    """*routed* without the ``explicit_overrides`` entries re-applied onto it."""
-    return {name: value for name, value in routed.items() if name not in pinned}
+def file_sha256(path: str | Path) -> str | None:
+    """Digest a selected configuration source, or ``None`` if unreadable.
+
+    ADR-049 D6 wants "path, digest, manifest identity/version, and field
+    location" on every file-derived provenance entry: without the digest, a
+    receipt naming a since-edited file cannot prove *which* content produced
+    the recorded value. Returns ``None`` rather than raising when the file
+    cannot be read -- a missing digest degrades the receipt, but refusing to
+    resolve a configuration whose policy file has become unreadable *after*
+    it was successfully loaded would be a worse failure than recording less
+    provenance.
+    """
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def _policy_file_override_slugs(policy_file: PolicyFile | None) -> dict[str, Verdict]:
@@ -510,6 +534,25 @@ def _policy_file_override_slugs(policy_file: PolicyFile | None) -> dict[str, Ver
     if policy_file is None:
         return {}
     return {kind.value: verdict for kind, verdict in policy_file.overrides.items()}
+
+
+@dataclass(frozen=True)
+class _PolicyFileSource:
+    """A loaded ``--policy-file`` with its path and content digest."""
+
+    path: str | None
+    sha256: str | None
+
+    @classmethod
+    def of(
+        cls, policy_file: PolicyFile | None, override: str | None
+    ) -> _PolicyFileSource:
+        if policy_file is None:
+            return cls(path=None, sha256=None)
+        path = str(policy_file.source_path) if policy_file.source_path else None
+        if override is not None:
+            return cls(path=path, sha256=override)
+        return cls(path=path, sha256=file_sha256(path) if path else None)
 
 
 def _explicit_scope(
@@ -605,13 +648,18 @@ def resolve_compatibility_evaluation_config(
       those"). Making that pair an error would reject a combination the live
       CLI accepts today.
 
-    ``"auto"`` never reaches a resolved value: ADR-037 D12's third
+    ``"auto"`` never reaches a resolved *value*: ADR-037 D12's third
     ``--exit-code-scheme`` choice means "decide from whether a severity
     setting is in effect", and
     :class:`~abicheck.compatibility_evaluation_config.GateConfig` rejects it
-    for that reason. An ``auto`` at any layer therefore contributes no
-    candidate, and the built-in default carries the resolved answer -- the
-    same rule ``cli_helpers_compare.resolve_compare_config`` applies today.
+    for that reason. It is still a stated *selection* where a front end can
+    really state it, though: an explicit ``--exit-code-scheme auto``
+    contributes a candidate carrying that decision's answer and outranks a
+    lower layer's concrete scheme, matching
+    ``cli_helpers_compare.resolve_compare_config``. Only a project config's
+    ``auto`` contributes nothing, because ``BuildConfig``'s own default for
+    that key *is* the string ``"auto"``, making a stated one
+    indistinguishable from an absent one.
 
     Raises :class:`~abicheck.compatibility_evaluation_resolver.FieldResolutionError`
     (D7 usage errors), :class:`~abicheck.compatibility_evaluation_resolver.PackConflictError`
@@ -624,6 +672,9 @@ def resolve_compatibility_evaluation_config(
     prov: dict[str, ValueProvenance] = {}
 
     policy_overrides_explicit = _policy_file_override_slugs(explicit.policy_file)
+    policy_source = _PolicyFileSource.of(
+        explicit.policy_file, explicit.policy_file_sha256
+    )
     pack_paths = explicit.pack_paths
 
     # ── D8: which fields another layer already states, per pack namespace ────
@@ -636,7 +687,7 @@ def resolve_compatibility_evaluation_config(
     if explicit.policy_file is not None and explicit.policy_file.internal_namespaces:
         pinned_contract[INTERNAL_NAMESPACES_FIELD] = _STATED_ELSEWHERE
     pinned_gate: dict[str, Hashable] = {}
-    if _stated_exit_code_scheme(explicit.exit_code_scheme) is not None or (
+    if explicit.exit_code_scheme is not None or (
         project is not None
         and _stated_exit_code_scheme(project.exit_code_scheme) is not None
     ):
@@ -655,22 +706,13 @@ def resolve_compatibility_evaluation_config(
             PackKind.POLICY: policy_overrides_explicit,
         },
     )
-    # `resolve_pack_field_assignments` re-applies its `explicit_overrides` on
-    # top of the routed result (D8's "explicit override > selected packs"), so
-    # the markers above would come back out as values. Drop them: what this
-    # resolver wants from these mappings is only what the packs themselves
-    # assigned -- the stated value reaches the field through its own candidate.
-    contract_pack_fields = _pack_assigned_only(
-        resolve_pack_field_assignments(
-            pack_paths, PackKind.CONTRACT, explicit_overrides=pinned_contract
-        ),
-        pinned_contract,
+    # Each entry carries its own pack identity/path, so a field a pack filled
+    # gets a receipt naming the exact manifest revision it came from.
+    contract_pack_fields = resolve_pack_field_assignments(
+        pack_paths, PackKind.CONTRACT, explicit_overrides=pinned_contract
     )
-    gate_pack_fields = _pack_assigned_only(
-        resolve_pack_field_assignments(
-            pack_paths, PackKind.GATE, explicit_overrides=pinned_gate
-        ),
-        pinned_gate,
+    gate_pack_fields = resolve_pack_field_assignments(
+        pack_paths, PackKind.GATE, explicit_overrides=pinned_gate
     )
 
     # ── contract ────────────────────────────────────────────────────────────
@@ -713,16 +755,14 @@ def resolve_compatibility_evaluation_config(
         CONTRACT_UNRESOLVED_FIELD,
         [],
         default=_default("not_checkable"),
-        pack_value=contract_pack_fields.get(CONTRACT_UNRESOLVED_FIELD),
-        pack_paths=pack_paths,
+        pack=contract_pack_fields.get(CONTRACT_UNRESOLVED_FIELD),
         pack_layer=layer,
     )
     overlays, prov[CONTRACT_OVERLAYS_FIELD] = _resolve(
         CONTRACT_OVERLAYS_FIELD,
         [],
         default=_default(()),
-        pack_value=contract_pack_fields.get(CONTRACT_OVERLAYS_FIELD),
-        pack_paths=pack_paths,
+        pack=contract_pack_fields.get(CONTRACT_OVERLAYS_FIELD),
         pack_layer=layer,
     )
     contract_packs, prov[CONTRACT_PACKS_FIELD] = packs_by_field[CONTRACT_PACKS_FIELD]
@@ -736,14 +776,13 @@ def resolve_compatibility_evaluation_config(
 
     # ── surface ─────────────────────────────────────────────────────────────
     namespace_candidate = internal_namespaces_candidate(
-        policy_file=explicit.policy_file, layer=layer
+        policy_file=explicit.policy_file, layer=layer, sha256=policy_source.sha256
     )
     internal_namespaces, prov[INTERNAL_NAMESPACES_FIELD] = _resolve(
         INTERNAL_NAMESPACES_FIELD,
         [] if namespace_candidate is None else [namespace_candidate],
         default=_default(()),
-        pack_value=contract_pack_fields.get(INTERNAL_NAMESPACES_FIELD),
-        pack_paths=pack_paths,
+        pack=contract_pack_fields.get(INTERNAL_NAMESPACES_FIELD),
         pack_layer=layer,
     )
     explicit_scope, prov[EXPLICIT_SCOPE_FIELD] = _explicit_scope(
@@ -759,8 +798,7 @@ def resolve_compatibility_evaluation_config(
         REQUIRE_EVIDENCE_FIELD,
         [],
         default=_default(True),
-        pack_value=contract_pack_fields.get(REQUIRE_EVIDENCE_FIELD),
-        pack_paths=pack_paths,
+        pack=contract_pack_fields.get(REQUIRE_EVIDENCE_FIELD),
         pack_layer=layer,
     )
     assurance = AssuranceConfig(require_evidence=cast(bool, require_evidence))
@@ -768,11 +806,6 @@ def resolve_compatibility_evaluation_config(
     # ── policy ──────────────────────────────────────────────────────────────
     base_candidates: list[FieldCandidate] = []
     if explicit.policy_file is not None:
-        source_path = (
-            str(explicit.policy_file.source_path)
-            if explicit.policy_file.source_path
-            else None
-        )
         base_candidates.append(
             _candidate(
                 layer,
@@ -780,7 +813,8 @@ def resolve_compatibility_evaluation_config(
                 option="--policy-file",
                 source_kind="policy_file",
                 reference=explicit.policy_file.base_policy,
-                path=source_path,
+                sha256=policy_source.sha256,
+                path=policy_source.path,
                 field_location="base_policy",
             )
         )
@@ -807,8 +841,15 @@ def resolve_compatibility_evaluation_config(
     )
     prov[POLICY_OVERRIDES_FIELD] = _overrides_provenance(
         layer,
-        policy_file=explicit.policy_file,
-        has_pack_overrides=bool(policy_overrides) and bool(pack_paths),
+        policy_source=policy_source,
+        # A pack contributed only if some slug in the merged result did not
+        # come from the policy file: a selected policy pack whose every
+        # assignment the file also overrides contributed nothing to the
+        # resolved value, and a contract/gate pack in the same `--pack` list
+        # never could (Codex review: keying this off "any pack path was given"
+        # credited an unrelated pack, and off the merged mapping alone
+        # credited a fully-shadowed one).
+        has_pack_overrides=bool(set(policy_overrides) - set(policy_overrides_explicit)),
         explicit_overrides=policy_overrides_explicit,
     )
     policy = CompatibilityPolicyConfig(
@@ -882,24 +923,36 @@ def resolve_compatibility_evaluation_config(
                 getattr(preset_base, category),
                 source_kind="severity_preset" if gate_preset is not None else None,
             ),
-            pack_value=gate_pack_fields.get(field_name),
-            pack_paths=pack_paths,
+            pack=gate_pack_fields.get(field_name),
             pack_layer=layer,
         )
         levels[category] = cast(SeverityLevel, value)
 
     severity_active = _severity_active(explicit, project, gate_pack_fields)
+    auto_scheme = "severity" if severity_active else "legacy"
     scheme_candidates: list[FieldCandidate] = []
-    stated_scheme = _stated_exit_code_scheme(explicit.exit_code_scheme)
-    if stated_scheme is not None:
+    if explicit.exit_code_scheme is not None:
+        # An explicit `--exit-code-scheme auto` is a *stated selection* --
+        # "decide from whether a severity setting is in effect" -- so it
+        # contributes a candidate carrying that decision's answer, and
+        # outranks a lower layer's concrete scheme exactly as any other
+        # explicit value would. Treating it as "not stated" instead let a
+        # project config's concrete scheme win, diverging from
+        # `cli_helpers_compare.resolve_compare_config`, where the CLI value
+        # wins whatever it is (Codex review).
         scheme_candidates.append(
             _candidate(
                 layer,
-                stated_scheme,
+                _stated_exit_code_scheme(explicit.exit_code_scheme) or auto_scheme,
                 option="--exit-code-scheme",
                 source_kind="exit_code_scheme",
+                reference=explicit.exit_code_scheme,
             )
         )
+    # A project config's own `exit_code_scheme:` defaults to the *string*
+    # "auto" when the key is absent (`BuildConfig.exit_code_scheme`), so
+    # unlike the CLI flag, "auto" there is indistinguishable from unset and
+    # contributes nothing -- which resolves to the same answer anyway.
     project_scheme = (
         _stated_exit_code_scheme(project.exit_code_scheme) if project else None
     )
@@ -916,11 +969,8 @@ def resolve_compatibility_evaluation_config(
     exit_code_scheme, prov[EXIT_CODE_SCHEME_FIELD] = _resolve(
         EXIT_CODE_SCHEME_FIELD,
         scheme_candidates,
-        default=_default(
-            "severity" if severity_active else "legacy", source_kind="auto"
-        ),
-        pack_value=gate_pack_fields.get(EXIT_CODE_SCHEME_FIELD),
-        pack_paths=pack_paths,
+        default=_default(auto_scheme, source_kind="auto"),
+        pack=gate_pack_fields.get(EXIT_CODE_SCHEME_FIELD),
         pack_layer=layer,
     )
 
@@ -968,11 +1018,12 @@ def resolve_compatibility_evaluation_config(
 
 
 def _stated_exit_code_scheme(value: str | None) -> str | None:
-    """``None`` unless *value* names a real resolved scheme.
+    """``None`` unless *value* names a real, already-resolved scheme.
 
     ``"auto"`` is a resolution-time choice, not a value (ADR-037 D12), so it
-    is treated as "not stated" and the built-in default carries the resolved
-    answer -- see :func:`resolve_compatibility_evaluation_config`.
+    never passes through as one. Whether *selecting* ``auto`` still counts as
+    stating the field depends on the layer, and is decided by the caller --
+    see :func:`resolve_compatibility_evaluation_config`.
     """
     if value is None or value == "auto":
         return None
@@ -1009,7 +1060,7 @@ def _severity_active(
 def _overrides_provenance(
     layer: SelectorLayer,
     *,
-    policy_file: PolicyFile | None,
+    policy_source: _PolicyFileSource,
     has_pack_overrides: bool,
     explicit_overrides: Mapping[str, Verdict],
 ) -> ValueProvenance:
@@ -1018,18 +1069,17 @@ def _overrides_provenance(
     Like ``surface.explicit_scope``, this field is composed rather than
     won outright (D8: "explicit per-``ChangeKind`` override > selected packs
     > base policy" merges across sources instead of picking one), so the
-    receipt records the highest-precedence contributor and lists each
-    contributing source in ``selected_by``.
+    receipt records the highest-precedence contributor and lists each source
+    that actually contributed to the resolved value in ``selected_by`` -- a
+    source whose every assignment a higher-precedence one shadowed did not
+    contribute and is not listed.
     """
     selected_by: list[SelectedByEntry] = []
-    source_path = (
-        str(policy_file.source_path)
-        if policy_file is not None and policy_file.source_path
-        else None
-    )
     if explicit_overrides:
         selected_by.append(
-            SelectedByEntry(layer=layer, option="--policy-file", path=source_path)
+            SelectedByEntry(
+                layer=layer, option="--policy-file", path=policy_source.path
+            )
         )
     if has_pack_overrides:
         selected_by.append(SelectedByEntry(layer=layer, option="--pack"))
@@ -1038,7 +1088,8 @@ def _overrides_provenance(
     return ValueProvenance(
         layer=layer,
         source_kind="policy_file" if explicit_overrides else "pack_manifest",
-        path=source_path if explicit_overrides else None,
+        sha256=policy_source.sha256 if explicit_overrides else None,
+        path=policy_source.path if explicit_overrides else None,
         selected_by=tuple(selected_by),
     )
 

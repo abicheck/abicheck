@@ -4,6 +4,8 @@ audience:
   - library-maintainer
   - ci-owner
 level: advanced
+canonical_for:
+  - compatibility-evaluation-config
 lifecycle: active
 generated: false
 ---
@@ -112,9 +114,13 @@ the project's symbol list rather than replacing it (ADR-037 D4's existing
 behaviour), so the resolved value is the union and the receipt lists every
 contributor.
 
-`--exit-code-scheme auto` never appears as a resolved value: it means "decide
+`--exit-code-scheme auto` never appears as a resolved *value*: it means "decide
 from whether a severity setting is in effect", so it is resolved to `legacy` or
-`severity` before the object is built.
+`severity` before the object is built. Selecting it is still a stated choice,
+though — an explicit `--exit-code-scheme auto` outranks a project config's
+concrete scheme, and the receipt records `auto` as what was selected. (A
+project config's own `auto` is indistinguishable from an unset key, since that
+is `BuildConfig`'s default for it, so it contributes nothing.)
 
 `--strict-suppressions` and `--require-justification` are real inputs with no
 field in ADR-049's typed shape; they stay outside this object.
@@ -173,7 +179,13 @@ cfg.provenance["policy.base"].reference    # "sdk_vendor"
 
 An entry records the winning layer, the kind of source, its reference/path/
 digest, the field location inside that source, the full `selected_by` selection
-chain, and any shadowed legacy input. Bases, presets, and packs are identified
+chain, and any shadowed legacy input. A file-derived entry carries that file's
+own content digest — the `--policy-file` document's bytes, or the selected pack
+manifest's `id`/`version`/`sha256` — so a receipt naming a since-edited file can
+still prove which content produced the value. For a composed field
+(`policy.overrides`, `surface.explicit_scope`), `selected_by` lists only the
+sources that actually contributed: a policy pack whose every assignment the
+policy file overrode is not credited. Bases, presets, and packs are identified
 by `id` + `version` + `sha256` — for a built-in base or preset (which is code,
 not a file) the digest is taken over what it resolves to, so a registry change
 that moves a `ChangeKind` between buckets changes the identity too.

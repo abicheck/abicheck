@@ -844,7 +844,13 @@ class SuppressionList:
           reads, never what the rule matches, and the source digest already
           records that it changed;
         - fields are emitted in declaration order with no positional index, so
-          the identity depends only on the rule's own content.
+          the identity depends only on the rule's own content;
+        - each value is rendered with ``repr()``, so a selector that itself
+          contains the ``|`` separator or an ``=`` (routine in a regex
+          selector — ``symbol_pattern: "a|change_kind=x"``) cannot render
+          the same identity as a different rule with those as separate
+          fields, and a ``date`` reads as a date rather than as a bare
+          number triple.
 
         Derived generically from :class:`Suppression`'s own dataclass fields
         (skipping the compiled/resolved ``init=False`` internals), so a rule
@@ -853,7 +859,7 @@ class SuppressionList:
         identities: list[str] = []
         for rule in self._suppressions:
             parts = [
-                f"{f.name}={getattr(rule, f.name)}"
+                f"{f.name}={getattr(rule, f.name)!r}"
                 for f in dataclasses.fields(rule)
                 if f.init
                 and f.name != "reason"

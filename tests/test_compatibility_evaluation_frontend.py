@@ -24,6 +24,7 @@ fields, and Phase 1's own gate: a CLI run and the equivalent typed
 
 from __future__ import annotations
 
+import hashlib
 import textwrap
 from pathlib import Path
 
@@ -53,6 +54,7 @@ from abicheck.compatibility_evaluation_frontend import (
     compatibility_config_from_compare_request,
     cross_front_end_differences,
     cross_front_end_equivalent,
+    file_sha256,
     resolve_compatibility_evaluation_config,
     severity_preset_identity,
 )
@@ -320,11 +322,39 @@ class TestSeverityAndExitScheme:
             )
         )
         assert cfg.gate.exit_code_scheme == "severity"
-        # `auto` is a resolution-time choice, never a resolved value.
-        assert (
-            cfg.provenance[EXIT_CODE_SCHEME_FIELD].layer
-            is SelectorLayer.BUILT_IN_DEFAULT
+        # `auto` never survives as a *value* (GateConfig rejects it), but the
+        # receipt still records that it is what the user selected.
+        prov = cfg.provenance[EXIT_CODE_SCHEME_FIELD]
+        assert prov.layer is SelectorLayer.EXPLICIT_CLI
+        assert prov.reference == "auto"
+
+    def test_explicit_auto_outranks_a_project_config_scheme(self):
+        # Matches cli_helpers_compare.resolve_compare_config, where a CLI
+        # value wins whatever it is: a typed `--exit-code-scheme auto` with a
+        # severity setting in effect resolves to severity, not to the
+        # project's concrete `legacy`.
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                exit_code_scheme="auto", severity_preset="strict"
+            ),
+            project=ProjectCompatibilityInputs(exit_code_scheme="legacy"),
         )
+        assert cfg.gate.exit_code_scheme == "severity"
+        assert cfg.provenance[EXIT_CODE_SCHEME_FIELD].layer is SelectorLayer.EXPLICIT_CLI
+
+    def test_explicit_auto_with_no_severity_setting_resolves_to_legacy(self):
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(exit_code_scheme="auto"),
+            project=ProjectCompatibilityInputs(exit_code_scheme="severity"),
+        )
+        assert cfg.gate.exit_code_scheme == "legacy"
+
+    def test_a_project_auto_is_indistinguishable_from_unset(self):
+        # BuildConfig.exit_code_scheme defaults to the string "auto", so a
+        # project stating it cannot be told apart from one that never did.
+        stated = _resolve(project=ProjectCompatibilityInputs(exit_code_scheme="auto"))
+        unset = _resolve(project=ProjectCompatibilityInputs())
+        assert stated == unset
 
     def test_explicit_scheme_wins_over_severity_activity(self):
         cfg = _resolve(
@@ -403,7 +433,7 @@ class TestSuppressions:
             )
         )
         assert cfg.suppressions is not None
-        assert cfg.suppressions.rules == ("symbol=_ZN3foo3barEv",)
+        assert cfg.suppressions.rules == ("symbol='_ZN3foo3barEv'",)
         assert len(cfg.suppressions.sha256) == 64
         assert cfg.provenance[SUPPRESSIONS_FIELD].path == str(path)
 
@@ -591,7 +621,7 @@ class TestPackComposition:
             kind="contract",
             assignments="contract.unresolved: maybe\n",
         )
-        with pytest.raises(PackManifestError, match="contract.unresolved"):
+        with pytest.raises(PackManifestError, match=r"contract\.unresolved"):
             _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
 
 
@@ -833,7 +863,7 @@ class TestMalformedInput:
             kind="gate",
             assignments="gate.severity.addition: critical\n",
         )
-        with pytest.raises(PackManifestError, match="gate.severity.addition"):
+        with pytest.raises(PackManifestError, match=r"gate\.severity\.addition"):
             _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
 
     def test_a_contract_pack_bool_field_must_be_a_bool(self, tmp_path):
@@ -869,7 +899,7 @@ class TestMalformedInput:
     def test_policy_packs_do_not_go_through_the_field_router(self, tmp_path):
         # Its assignments are ChangeKind slugs, a different vocabulary that
         # resolve_policy_pack_overrides owns.
-        with pytest.raises(ValueError, match="does not handle PackKind.POLICY"):
+        with pytest.raises(ValueError, match=r"does not handle PackKind\.POLICY"):
             resolve_pack_field_assignments([], PackKind.POLICY)
 
 
@@ -937,3 +967,158 @@ class TestPackSuppliedSeverityActivatesAuto:
         )
         assert cfg.gate.severity.quality_issues is SeverityLevel.ERROR
         assert cfg.gate.exit_code_scheme == "severity"
+
+
+class TestReplayProvenance:
+    """ADR-049 D6: a file-derived receipt entry identifies the exact content."""
+
+    def test_policy_file_derived_entries_carry_the_file_digest(self, tmp_path):
+        pf = _policy_file(
+            tmp_path,
+            """\
+            base_policy: sdk_vendor
+            internal_namespaces:
+              - detail
+            overrides:
+              soname_changed: warn
+            """,
+        )
+        expected = file_sha256(tmp_path / "policy.yml")
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=pf))
+        assert expected is not None and len(expected) == 64
+        for field_name in (
+            POLICY_BASE_FIELD,
+            POLICY_OVERRIDES_FIELD,
+            INTERNAL_NAMESPACES_FIELD,
+        ):
+            assert cfg.provenance[field_name].sha256 == expected, field_name
+
+    def test_editing_the_policy_file_changes_the_recorded_digest(self, tmp_path):
+        pf = _policy_file(tmp_path, "base_policy: sdk_vendor\n")
+        before = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=pf))
+        (tmp_path / "policy.yml").write_text("base_policy: sdk_vendor  # edited\n")
+        after = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=pf))
+        assert (
+            before.provenance[POLICY_BASE_FIELD].sha256
+            != after.provenance[POLICY_BASE_FIELD].sha256
+        )
+
+    def test_a_caller_supplied_digest_is_used_verbatim(self, tmp_path):
+        pf = _policy_file(tmp_path, "base_policy: sdk_vendor\n")
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(policy_file=pf, policy_file_sha256="ab" * 32)
+        )
+        assert cfg.provenance[POLICY_BASE_FIELD].sha256 == "ab" * 32
+
+    def test_an_unreadable_source_degrades_to_no_digest(self, tmp_path):
+        assert file_sha256(tmp_path / "missing.yml") is None
+
+    def test_a_pack_filled_field_names_the_manifest_that_filled_it(self, tmp_path):
+        pack = _write_pack(
+            tmp_path / "c.yml",
+            pack_id="rust_c_ffi",
+            kind="contract",
+            assignments="contract.unresolved: warn\n",
+        )
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
+        prov = cfg.provenance["contract.unresolved"]
+        assert prov.reference == "rust_c_ffi"
+        assert prov.version == 1
+        assert prov.path == str(pack)
+        assert prov.sha256 == hashlib.sha256(pack.read_bytes()).hexdigest()
+        assert prov.field_location == "contract.unresolved"
+
+    def test_the_recorded_pack_does_not_depend_on_path_order(self, tmp_path):
+        # Two packs agreeing on a field are equals; which one the receipt
+        # names must still not depend on the order they were passed in.
+        first = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="a",
+            kind="contract",
+            assignments="contract.unresolved: warn\n",
+        )
+        second = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="b",
+            kind="contract",
+            assignments="contract.unresolved: warn\n",
+        )
+        forward = _resolve(
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(first), str(second)))
+        )
+        reverse = _resolve(
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(second), str(first)))
+        )
+        assert forward == reverse
+        assert forward.provenance["contract.unresolved"].reference == "a"
+
+
+class TestOverridesContributors:
+    """`policy.overrides` is composed; the receipt lists real contributors only."""
+
+    def test_a_non_policy_pack_is_not_credited(self, tmp_path):
+        gate_pack = _write_pack(
+            tmp_path / "g.yml",
+            pack_id="g",
+            kind="gate",
+            assignments="gate.exit_code_scheme: severity\n",
+        )
+        pf = _policy_file(
+            tmp_path,
+            """\
+            overrides:
+              soname_changed: warn
+            """,
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                policy_file=pf, pack_paths=(str(gate_pack),)
+            )
+        )
+        options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
+        assert options == {"--policy-file"}
+
+    def test_a_fully_shadowed_policy_pack_is_not_credited(self, tmp_path):
+        pack = _write_pack(
+            tmp_path / "p.yml",
+            pack_id="p",
+            kind="policy",
+            assignments="soname_changed: break\n",
+        )
+        pf = _policy_file(
+            tmp_path,
+            """\
+            overrides:
+              soname_changed: ignore
+            """,
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                policy_file=pf, pack_paths=(str(pack),)
+            )
+        )
+        assert cfg.policy.overrides["soname_changed"] is Verdict.COMPATIBLE
+        options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
+        assert options == {"--policy-file"}
+
+    def test_a_contributing_policy_pack_is_credited(self, tmp_path):
+        pack = _write_pack(
+            tmp_path / "p.yml",
+            pack_id="p",
+            kind="policy",
+            assignments="func_added: warn\n",
+        )
+        pf = _policy_file(
+            tmp_path,
+            """\
+            overrides:
+              soname_changed: ignore
+            """,
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                policy_file=pf, pack_paths=(str(pack),)
+            )
+        )
+        options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
+        assert options == {"--policy-file", "--pack"}
