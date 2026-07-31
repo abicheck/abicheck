@@ -72,10 +72,16 @@ Rules that fall out of it:
 - **A selected pack never silently overrides a stated value.** Packs sit
   directly above the built-in default: a pack fills a field only when neither
   the user nor the project stated it (ADR-049 D8's "explicit override >
-  selected packs > base", read conservatively).
+  selected packs > base", read conservatively). "Stated" includes a value
+  *derived* from a statement: choosing `--severity-preset strict` states every
+  `gate.severity.*` category the preset expands into, so a gate pack cannot
+  replace one of them — while a single `--severity-addition info` still refines
+  the preset, which is not a conflict.
 - **Order never decides anything.** Two invocations naming the same packs, the
   same symbols, or the same namespaces in a different order resolve to an equal
-  object.
+  object — including the receipt: two paths holding byte-identical manifest
+  content collapse to one identity in the value and are both named, in sorted
+  order, in `selected_by`.
 
 ### Two documented exceptions
 

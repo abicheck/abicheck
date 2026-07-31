@@ -42,6 +42,7 @@ from abicheck.compatibility_evaluation_frontend import (
     CONTRACT_MODE_FIELD,
     EXIT_CODE_SCHEME_FIELD,
     EXPLICIT_SCOPE_FIELD,
+    GATE_PACKS_FIELD,
     GATE_PRESET_FIELD,
     INTERNAL_NAMESPACES_FIELD,
     POLICY_BASE_FIELD,
@@ -475,6 +476,49 @@ class TestPackComposition:
         )
         assert cfg.gate.severity.addition is SeverityLevel.INFO
 
+    def test_a_stated_preset_outranks_a_pack_assigning_one_of_its_categories(
+        self, tmp_path
+    ):
+        # The preset expands into per-category levels, so it *stated* them --
+        # arriving as the resolution default doesn't make them unstated.
+        pack = _write_pack(
+            tmp_path / "g.yml",
+            pack_id="security_hardening",
+            kind="gate",
+            assignments="gate.severity.addition: info\n",
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                severity_preset="strict", pack_paths=(str(pack),)
+            )
+        )
+        assert cfg.gate.severity.addition is SeverityLevel.ERROR
+
+    def test_a_project_preset_also_outranks_such_a_pack(self, tmp_path):
+        pack = _write_pack(
+            tmp_path / "g.yml",
+            pack_id="security_hardening",
+            kind="gate",
+            assignments="gate.severity.addition: info\n",
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)),
+            project=ProjectCompatibilityInputs(severity_preset="strict"),
+        )
+        assert cfg.gate.severity.addition is SeverityLevel.ERROR
+
+    def test_without_a_preset_the_pack_still_fills_the_category(self, tmp_path):
+        # The suppression above is scoped to "a preset stated it", not to
+        # severity categories in general.
+        pack = _write_pack(
+            tmp_path / "g.yml",
+            pack_id="security_hardening",
+            kind="gate",
+            assignments="gate.severity.addition: info\n",
+        )
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
+        assert cfg.gate.severity.addition is SeverityLevel.INFO
+
     def test_project_config_also_outranks_a_pack_assignment(self, tmp_path):
         pack = _write_pack(
             tmp_path / "g.yml",
@@ -530,6 +574,32 @@ class TestPackComposition:
             explicit=ExplicitCompatibilityInputs(pack_paths=(str(second), str(first)))
         )
         assert forward == reverse
+
+    def test_two_paths_holding_the_same_pack_resolve_the_same_either_way(
+        self, tmp_path
+    ):
+        # Byte-identical manifests share one identity, so an identity-keyed
+        # "first path wins" recorded whichever was passed first and the two
+        # orders resolved to unequal configurations.
+        body = "gate.severity.addition: info\n"
+        first = _write_pack(
+            tmp_path / "a.yml", pack_id="security", kind="gate", assignments=body
+        )
+        second = _write_pack(
+            tmp_path / "b.yml", pack_id="security", kind="gate", assignments=body
+        )
+        forward = _resolve(
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(first), str(second)))
+        )
+        reverse = _resolve(
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(second), str(first)))
+        )
+        assert forward == reverse
+        assert [p.id for p in forward.gate.packs] == ["security"]
+        # One identity, but both files really did select it.
+        assert [
+            e.path for e in forward.provenance[GATE_PACKS_FIELD].selected_by
+        ] == [str(first), str(second)]
 
     def test_two_gate_packs_disagreeing_on_a_field_is_a_usage_error(self, tmp_path):
         first = _write_pack(

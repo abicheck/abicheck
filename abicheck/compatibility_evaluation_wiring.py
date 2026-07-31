@@ -409,7 +409,10 @@ def resolve_selected_packs(
     ``id``/``version``/``sha256``) collapse into one contributor; the
     resolved tuple is sorted by ``(id, version, sha256)``, since D8 states
     "file order never resolves conflicts" -- two invocations naming the same
-    pack set in a different order must resolve to an equal value (D7).
+    pack set in a different order must resolve to an equal value (D7). The
+    receipt still names *every* path that selected it, in sorted order, so
+    which of two byte-identical files was passed first cannot change the
+    resolved configuration either.
 
     Every returned field is tagged *layer* (default
     :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`,
@@ -442,12 +445,21 @@ def resolve_selected_packs(
             explicit_overrides=explicit_overrides.get(kind, MappingProxyType({})),
         )
 
-        first_path_by_identity: dict[ImmutableIdentity, str] = {}
+        # Every path that selected an identity is kept, sorted: two paths
+        # holding byte-identical manifest content collapse to one identity in
+        # the resolved *value*, but keeping only the first-seen path made the
+        # receipt order-dependent -- `--pack a.yml --pack b.yml` recorded
+        # `a.yml` and the reverse order recorded `b.yml`, so two invocations
+        # naming the same pack set resolved to unequal configurations, which
+        # is exactly what D7's "file order never resolves anything" rules out
+        # (Codex review, fresh evidence). Both files really did select it, so
+        # naming both is also the more faithful receipt.
+        paths_by_identity: dict[ImmutableIdentity, set[str]] = {}
         for path, pack in by_kind[kind]:
-            first_path_by_identity.setdefault(pack.identity, path)
+            paths_by_identity.setdefault(pack.identity, set()).add(path)
         canonical = tuple(
             sorted(
-                first_path_by_identity,
+                paths_by_identity,
                 key=lambda identity: (identity.id, identity.version, identity.sha256),
             )
         )
@@ -464,12 +476,9 @@ def resolve_selected_packs(
                         layer=layer,
                         source_kind="pack_manifest",
                         selected_by=tuple(
-                            SelectedByEntry(
-                                layer=layer,
-                                option=option,
-                                path=first_path_by_identity[identity],
-                            )
+                            SelectedByEntry(layer=layer, option=option, path=path)
                             for identity in canonical
+                            for path in sorted(paths_by_identity[identity])
                         ),
                     ),
                     value=canonical,
@@ -737,7 +746,11 @@ def resolve_pack_field_assignments(
     # several agreeing packs is recorded as the source is therefore a choice
     # among equals -- made deterministic by sorting on the pack identity, so
     # the receipt never depends on the order the paths were given in ("pack
-    # order never decides semantics", D8).
+    # order never decides semantics", D8). The path is the last sort key
+    # rather than a leftover of input order: two *byte-identical* manifests
+    # at different paths share one identity, so an identity-only sort is a
+    # tie between them and stable sorting would hand the receipt back to
+    # argument order (Codex review, fresh evidence).
     merged_raw: dict[str, tuple[str, LoadedPack, Hashable]] = {}
     for path, pack in sorted(
         selected,
@@ -745,6 +758,7 @@ def resolve_pack_field_assignments(
             entry[1].identity.id,
             entry[1].identity.version,
             entry[1].identity.sha256,
+            entry[0],
         ),
     ):
         for field_name, value in pack.assignments.items():

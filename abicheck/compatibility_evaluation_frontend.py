@@ -492,6 +492,7 @@ def _resolve(
     pack: RoutedPackAssignment | None = None,
     pack_layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
     pack_option: str = "--pack",
+    default_is_stated: bool = False,
     require_legacy_alias_agreement: bool = True,
 ) -> tuple[Hashable, ValueProvenance]:
     """Resolve one field, letting a selected pack fill it only if nothing else did.
@@ -510,9 +511,24 @@ def _resolve(
     extending it to "a pack never silently overrides a value the user or the
     project stated" is the reading that cannot surprise anyone, and a project
     that wants the pack's value simply stops stating its own.
+
+    *default_is_stated* extends that same rule to a field whose value is
+    *derived* from something the user or project stated rather than stated
+    directly, and therefore arrives as this call's ``default`` -- today, the
+    per-category severity levels a ``--severity-preset``/``severity.preset``
+    selection expands into. Without it, ``--severity-preset strict`` plus a
+    gate pack assigning ``gate.severity.addition: info`` resolved to
+    ``INFO``: the preset had put its ``ERROR`` in the default slot, leaving
+    the field looking unstated, so the pack replaced a level the user really
+    had asked for (Codex review, fresh evidence). The derived levels stay in
+    the ``default`` slot rather than becoming candidates because a candidate
+    at the stating layer would *tie* with an explicit per-category flag at
+    that same layer -- and refining a preset with one category flag
+    (``--severity-preset strict --severity-addition info``) is legal, not a
+    conflict.
     """
     all_candidates = list(candidates)
-    if not all_candidates and pack is not None:
+    if not all_candidates and pack is not None and not default_is_stated:
         all_candidates.append(
             _candidate(
                 pack_layer,
@@ -1057,6 +1073,11 @@ def resolve_compatibility_evaluation_config(
             pack=gate_pack_fields.get(field_name),
             pack_layer=layer,
             pack_option=pack_option,
+            # A stated preset already decided every category it covers, so a
+            # gate pack may not quietly replace one of them; `gate.preset` is
+            # not a routable pack field, so a resolved preset is always the
+            # user's or the project's.
+            default_is_stated=gate_preset is not None,
         )
         levels[category] = cast(SeverityLevel, value)
 
