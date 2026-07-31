@@ -1122,3 +1122,122 @@ class TestOverridesContributors:
         )
         options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
         assert options == {"--policy-file", "--pack"}
+
+
+class TestPathInputsAreNotSilentlyIgnored:
+    """A path an invocation named must reach the resolved configuration."""
+
+    def test_public_symbols_list_alone_resolves_a_real_explicit_scope(self, tmp_path):
+        listed = tmp_path / "symbols.txt"
+        listed.write_text("# comment\n\nfrom_file\n")
+        cfg = _resolve(
+            explicit=compare_cli_inputs({"public_symbols_list": listed})
+        )
+        assert cfg.surface.explicit_scope is not None
+        assert cfg.surface.explicit_scope.items == ("from_file",)
+
+    def test_inline_symbols_and_the_list_file_merge(self, tmp_path):
+        listed = tmp_path / "symbols.txt"
+        listed.write_text("from_file\n")
+        inputs = compare_cli_inputs(
+            {"public_symbols": ("inline",), "public_symbols_list": listed}
+        )
+        assert inputs.public_symbols == ("from_file", "inline")
+
+    def test_cli_policy_file_path_is_loaded_when_not_pre_supplied(self, tmp_path):
+        path = tmp_path / "policy.yml"
+        path.write_text("base_policy: sdk_vendor\n")
+        cfg = _resolve(explicit=compare_cli_inputs({"policy_file_path": path}))
+        assert cfg.policy.base.id == "sdk_vendor"
+
+    def test_a_pre_supplied_policy_file_is_not_re_read(self, tmp_path):
+        pf = _policy_file(tmp_path, "base_policy: plugin_abi\n")
+        cfg = _resolve(
+            explicit=compare_cli_inputs(
+                {"policy_file_path": tmp_path / "other.yml"}, policy_file=pf
+            )
+        )
+        assert cfg.policy.base.id == "plugin_abi"
+
+    def test_cli_suppress_path_is_read_when_not_pre_supplied(self, tmp_path):
+        path = tmp_path / "s.yml"
+        path.write_text("version: 1\nsuppressions:\n  - symbol: foo\n    reason: ok\n")
+        cfg = _resolve(explicit=compare_cli_inputs({"suppress": path}))
+        assert cfg.suppressions is not None
+        assert cfg.suppressions.rules == ("symbol='foo'",)
+
+    def test_request_policy_and_suppression_paths_are_honoured(self, tmp_path):
+        policy = tmp_path / "policy.yml"
+        policy.write_text("base_policy: sdk_vendor\n")
+        suppress = tmp_path / "s.yml"
+        suppress.write_text(
+            "version: 1\nsuppressions:\n  - symbol: foo\n    reason: ok\n"
+        )
+        request = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            policy_file_path=policy,
+            suppress=suppress,
+        )
+        cfg = compatibility_config_from_compare_request(request)
+        # Previously both request fields were ignored unless the caller
+        # separately re-loaded the same files.
+        assert cfg.policy.base.id == "sdk_vendor"
+        assert cfg.suppressions is not None
+        assert cfg.suppressions.rules == ("symbol='foo'",)
+
+
+class TestReceiptMetadataIsCompared:
+    def test_a_differing_source_digest_is_a_difference(self, tmp_path):
+        pf = _policy_file(tmp_path, "base_policy: sdk_vendor\n")
+        one = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=pf))
+        two = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                policy_file=pf, policy_file_sha256="cd" * 32
+            )
+        )
+        # Same resolved base, different recorded digest: not equivalent.
+        assert one.policy == two.policy
+        differences = cross_front_end_differences(one, two)
+        assert any(POLICY_BASE_FIELD in d for d in differences)
+
+    def test_a_differing_selected_by_path_is_a_difference(self, tmp_path):
+        first = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="p",
+            kind="contract",
+            assignments="contract.unresolved: warn\n",
+        )
+        copied = tmp_path / "copy.yml"
+        copied.write_text(first.read_text())
+        a = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(first),)))
+        b = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(copied),)))
+        assert a.contract == b.contract
+        assert cross_front_end_differences(a, b)
+
+    def test_the_option_spelling_alone_is_still_permitted_to_differ(self, tmp_path):
+        # The genuine cross-front-end case the normalization exists for.
+        policy = tmp_path / "policy.yml"
+        policy.write_text("base_policy: sdk_vendor\n")
+        cli = _resolve(
+            front_end=FrontEnd.CLI,
+            explicit=compare_cli_inputs(
+                {
+                    "policy_file_path": policy,
+                    "policy": "strict_abi",
+                    # A typed request has no "unset" for scope_public, so the
+                    # equivalent CLI run has to state the flag too.
+                    "scope_public_headers": True,
+                },
+                explicit_parameters={"policy", "scope_public_headers"},
+            ),
+        )
+        api = compatibility_config_from_compare_request(
+            CompareRequest(
+                old=InputSpec(path=tmp_path / "old.so"),
+                new=InputSpec(path=tmp_path / "new.so"),
+                policy_file_path=policy,
+                policy="strict_abi",
+            )
+        )
+        assert cross_front_end_differences(cli, api) == []

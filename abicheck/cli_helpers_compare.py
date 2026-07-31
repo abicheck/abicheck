@@ -291,23 +291,18 @@ def _warn_ignored_flags(
         )
 
 
-def _collect_force_public_symbols(
-    public_symbols: tuple[str, ...],
-    symbols_list: Path | None,
-) -> set[str]:
-    """Merge --public-symbol values with a --public-symbols-list file.
+#: Moved to ``compatibility_evaluation_frontend.py`` (a leaf module) so the
+#: ADR-049 configuration resolver can merge the same two ``--public-symbol``/
+#: ``--public-symbols-list`` sources into ``surface.explicit_scope`` without
+#: importing this CLI-layer module — the resolver reading only the inline
+#: tuple made a list-file-only invocation resolve to no explicit scope at all
+#: (Codex review). Re-exported here for every existing caller, the same
+#: pattern ``_canonical_library_key`` already follows below.
+from .compatibility_evaluation_frontend import (  # noqa: E402
+    collect_force_public_symbols,
+)
 
-    The list file is one symbol per line; blank lines and ``#`` comments are
-    ignored (à la abi-compliance-checker -symbols-list). Inline trailing
-    comments are not stripped — a ``#`` must start the line to be a comment.
-    """
-    out: set[str] = {s.strip() for s in public_symbols if s.strip()}
-    if symbols_list is not None:
-        for raw in symbols_list.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if line and not line.startswith("#"):
-                out.add(line)
-    return out
+_collect_force_public_symbols = collect_force_public_symbols
 
 
 def _collect_additions(result: DiffResult) -> list[object]:

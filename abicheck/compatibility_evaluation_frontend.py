@@ -510,6 +510,32 @@ def _resolve(
 _STATED_ELSEWHERE: Hashable = "<stated by another layer>"
 
 
+def collect_force_public_symbols(
+    public_symbols: tuple[str, ...],
+    symbols_list: Path | None,
+) -> set[str]:
+    """Merge ``--public-symbol`` values with a ``--public-symbols-list`` file.
+
+    The list file is one symbol per line; blank lines and ``#`` comments are
+    ignored (à la abi-compliance-checker ``-symbols-list``). Inline trailing
+    comments are not stripped — a ``#`` must start the line to be a comment.
+
+    Lives here rather than in ``cli_helpers_compare.py`` (which re-exports it
+    as ``_collect_force_public_symbols`` for its existing callers) so this
+    module can build ``surface.explicit_scope`` from *both* sources without
+    importing a CLI-layer module. Reading only the inline tuple made a
+    list-file-only invocation resolve to no explicit scope at all, and a
+    mixed one silently drop every symbol the file supplied (Codex review).
+    """
+    out: set[str] = {s.strip() for s in public_symbols if s.strip()}
+    if symbols_list is not None:
+        for raw in Path(symbols_list).read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#"):
+                out.add(line)
+    return out
+
+
 def file_sha256(path: str | Path) -> str | None:
     """Digest a selected configuration source, or ``None`` if unreadable.
 
@@ -1107,6 +1133,13 @@ DEFAULTED_COMPARE_PARAMETERS: frozenset[str] = frozenset(
 )
 
 
+def _load_policy_file(path: str | Path) -> PolicyFile:
+    """Load a ``--policy-file`` document from a path an invocation named."""
+    from .policy_file import PolicyFile as _PolicyFile
+
+    return _PolicyFile.load(Path(path))
+
+
 def compare_cli_inputs(
     kwargs: Mapping[str, Any],
     *,
@@ -1123,16 +1156,36 @@ def compare_cli_inputs(
     indistinguishable from a stated value. Every other option already uses
     ``None``/``()`` for "not given", so it is read directly.
 
-    Pure: *policy_file* and *suppression* are passed in already loaded, since
-    the CLI loads both long before configuration would be resolved and this
-    module performs no I/O of its own.
+    *policy_file* and *suppression* let a caller pass what it already loaded
+    (the CLI loads both long before configuration would be resolved). Left
+    unset, they are loaded from the ``policy_file_path``/``suppress`` kwargs
+    the command itself carries -- silently ignoring a path the invocation
+    really named would make the resolved configuration misrepresent the run.
+
+    ``--public-symbol`` and ``--public-symbols-list`` are merged the way the
+    live CLI merges them (:func:`collect_force_public_symbols`), so a
+    list-file-only invocation resolves a real ``surface.explicit_scope``.
     """
     typed = set(explicit_parameters)
 
     def _defaulted(name: str) -> Any:
         return kwargs.get(name) if name in typed else None
 
-    public_symbols = tuple(kwargs.get("public_symbols") or ())
+    public_symbols = tuple(
+        sorted(
+            collect_force_public_symbols(
+                tuple(kwargs.get("public_symbols") or ()),
+                kwargs.get("public_symbols_list"),
+            )
+        )
+    )
+    if policy_file is None and kwargs.get("policy_file_path") is not None:
+        policy_file = _load_policy_file(kwargs["policy_file_path"])
+    if suppression is None and kwargs.get("suppress") is not None:
+        suppression = SuppressionSource.from_file(
+            kwargs["suppress"],
+            require_justification=bool(kwargs.get("require_justification")),
+        )
     return ExplicitCompatibilityInputs(
         contract_mode=kwargs.get("contract_mode"),
         scope_public_headers=_defaulted("scope_public_headers"),
@@ -1171,7 +1224,19 @@ def compare_request_inputs(
     not own. They resolve to their built-in defaults here, which is what makes
     a CLI run stating none of them cross-front-end equal to the equivalent
     request (:func:`cross_front_end_differences`).
+
+    ``policy_file_path`` and ``suppress`` *are* request fields, though, and
+    are loaded from the request when the caller does not pass an
+    already-loaded *policy_file*/*suppression*. Ignoring them unless the
+    caller separately re-loaded the same files would let a request naming an
+    ``sdk_vendor`` policy file resolve to ``strict_abi`` with no suppression
+    source at all -- an effective configuration that does not represent the
+    typed request it was built from (Codex review).
     """
+    if policy_file is None and request.policy_file_path is not None:
+        policy_file = _load_policy_file(request.policy_file_path)
+    if suppression is None and request.suppress is not None:
+        suppression = SuppressionSource.from_file(request.suppress)
     return ExplicitCompatibilityInputs(
         contract_mode=request.contract_mode,
         scope_public_headers=request.scope_public,
@@ -1207,13 +1272,18 @@ _SECTIONS = ("contract", "evidence", "surface", "assurance", "policy", "gate")
 
 
 def _normalized_provenance(prov: ValueProvenance) -> tuple[Any, ...]:
-    """*prov* with every front-end-specific detail dropped.
+    """*prov* with the two front-end-specific details dropped, and no more.
 
     ADR-049 D7 puts ``explicit_cli`` and ``api_request`` in one precedence
     tier, and the same semantic input is spelled differently by construction
-    (``--policy`` vs. the ``policy`` field). Both are legitimately different
-    *records of how* a value was stated; neither may change *what* was
-    resolved, which is what this comparison checks.
+    (``--policy`` vs. the ``policy`` field). Exactly those two -- which of the
+    pair the layer is, and the option spelling recorded with it -- are
+    legitimately different *records of how* a value was stated.
+
+    **Everything else is compared**, including each entry's own ``sha256``,
+    ``path``, and ``argument_index``: dropping the digest let two runs whose
+    receipts name differently-digested policy files compare as equivalent,
+    which is precisely the drift the digest exists to catch (Codex review).
     """
     explicit = {SelectorLayer.EXPLICIT_CLI, SelectorLayer.API_REQUEST}
 
@@ -1225,9 +1295,13 @@ def _normalized_provenance(prov: ValueProvenance) -> tuple[Any, ...]:
         prov.source_kind,
         prov.reference,
         prov.version,
+        prov.sha256,
         prov.path,
         prov.field_location,
-        tuple(_layer(entry.layer) for entry in prov.selected_by),
+        tuple(
+            (_layer(entry.layer), entry.argument_index, entry.path)
+            for entry in prov.selected_by
+        ),
         None
         if prov.shadowed_legacy is None
         else _normalized_provenance(prov.shadowed_legacy),
