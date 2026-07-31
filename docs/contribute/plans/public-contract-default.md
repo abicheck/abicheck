@@ -1669,9 +1669,28 @@ close the closure leak (the walk still visits both nodes, and a finding about
 a type reachable only through the unintended one has an unambiguous name of
 its own), which is why it is recorded here rather than presented as a fix.
 
+A third route reaches the same residue from the output side: even when the
+exact qualified key *is* seeded and only the intended record is walked,
+`_walk_type_closure` writes `rec_node.name` — the bare `Foo` — into its
+result, so `export_types` never carries `ns1::Foo` and a layout finding on
+the exported class resolves `UNKNOWN_UNRESOLVED`/`identity_ambiguous`
+instead of `IN_CONTRACT` (CodeRabbit review, confirmed with a minimal
+snapshot). It cannot be recovered afterwards, for the same reason the
+finding exists: from outside the walk, `Foo` in `export_types` is
+indistinguishable between "the exact key was seeded" and "the ambiguous bare
+key was walked, visiting both". And it has a second half —
+`_confirmed_type_matches` rejects a qualified candidate whose bare tail is
+ambiguous, correctly today because the walk adds *every* matching record for
+such a tail, so making a qualified identity meaningful means relaxing that
+guard in step with the walk change rather than independently. One
+coordinated change to the shared walk plus its consumer; the same scoped
+design as the two routes above.
+
 Note the direction: this residue over-*includes* (an unrelated internal type
-reads `IN_CONTRACT`), the opposite of the qualified-owner bug above and of
-every other guard in this section. `surface.py`'s tail keys are deliberate
+reads `IN_CONTRACT`), or — on that third route — under-resolves to
+`UNKNOWN_UNRESOLVED`. Both are the opposite of the qualified-owner and
+rival-scope bugs above, which produced a false `PROVEN_OUT_OF_CONTRACT` and
+are fixed, and of every other guard in this section. `surface.py`'s tail keys are deliberate
 over-keeping — "never hide a real break behind snapshot order" — which is the
 right default for the `public` domain and merely noisy for this one.
 
