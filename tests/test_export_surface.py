@@ -952,6 +952,30 @@ class TestUnresolvedTypeEdges:
             elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
         )
 
+    def test_only_actual_roots_are_scanned_not_alias_sharers(self) -> None:
+        # `export_symbols` is alias-expanded so a *finding* naming any
+        # encoding of a root resolves, which makes it the wrong membership
+        # question here: an unexported `ns::foo` shares the exported C
+        # `foo`'s bare tail, so intersecting that set scanned the non-root's
+        # signature and turned a type only *it* names into a spurious
+        # unresolved edge, blocking every exclusion (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("foo", "foo", ret="int"),
+                _fn("ns::foo", "_ZN2ns3fooEv", ret="Internal *"),
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="foo")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unresolved_type_edges
+        assert surf.exclusion_is_provable
+        # Positive control on the same shape: the *root*'s own absent type
+        # is still flagged, so the narrowing didn't simply stop scanning.
+        snap.functions[0].return_type = "Cfg *"
+        assert compute_export_surface(snap).unresolved_type_edges == frozenset({"Cfg"})
+
     def test_a_signature_naming_an_absent_type_blocks_exclusion(self) -> None:
         surf = compute_export_surface(self._snap("Alias *", [_rec("Internal")]))
         assert surf.unresolved_type_edges == frozenset({"Alias"})

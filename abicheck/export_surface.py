@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from .diff_cxx_rules import owner_class_of
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
@@ -379,15 +380,35 @@ def _matched_export_names(
     return matched
 
 
+class _RootSeeding(NamedTuple):
+    """What :func:`_seed_export_roots` learned, beyond what it wrote to the
+    surface.
+
+    ``root_identities`` is deliberately separate from
+    :attr:`ExportSurface.export_symbols`: that set is alias-expanded so a
+    *finding* naming any encoding of a root resolves, which makes it the
+    wrong question to ask when the caller means "is this declaration itself
+    a root" (see :func:`_unresolved_type_edges`).
+    """
+
+    #: Type names seeding the closure walk.
+    seed_types: set[str]
+    #: ``(table, spelling)`` pairs matched in the observed export tables.
+    matched_pairs: set[tuple[str, str]]
+    #: The linker identity of every declaration that actually matched.
+    root_identities: set[str]
+
+
 def _seed_export_roots(
     snap: AbiSnapshot,
     surface: ExportSurface,
     tables: dict[str, set[str]],
     *,
     owner_seed_by_identity: dict[str, str] | None = None,
-) -> tuple[set[str], set[tuple[str, str]]]:
-    """Record export roots on *surface*; return the closure's seed type names
-    and the ``(table, spelling)`` pairs actually matched.
+) -> _RootSeeding:
+    """Record export roots on *surface*; return the closure's seed type names,
+    the ``(table, spelling)`` pairs actually matched, and the roots' own
+    linker identities.
 
     Mirrors :func:`~abicheck.surface._seed_public_roots` field for field --
     the return/parameter/variable types of every root, plus a method root's
@@ -516,7 +537,7 @@ def _seed_export_roots(
     # root's identity is unambiguous by construction the same way a matched
     # export name is -- only the *derived* aliases around it can be shared.
     surface.export_symbols -= nonroot_keys - surface.matched_exports - root_identities
-    return seed_types, matched_pairs
+    return _RootSeeding(seed_types, matched_pairs, root_identities)
 
 
 #: ``typename``/``template`` as whole words -- C++'s explicit markers for a
@@ -676,6 +697,7 @@ def _unresolved_type_edges(
     snap: AbiSnapshot,
     surface: ExportSurface,
     reached_types: set[str],
+    root_identities: set[str],
     resolvable: frozenset[str],
     unscoped_leaves: frozenset[str],
 ) -> frozenset[str]:
@@ -695,6 +717,19 @@ def _unresolved_type_edges(
     unreachable internal type says nothing about what an export can reach,
     so including it would block exclusion for a graph defect that cannot
     matter.
+
+    Rootness is decided by *linker identity* against *root_identities*, not
+    by intersecting :attr:`ExportSurface.export_symbols` (Codex review,
+    confirmed empirically). That set is alias-expanded so a finding naming
+    any encoding of a root resolves, which is the wrong question here: with
+    an exported C ``foo`` and an unexported ``ns::foo``, the latter's own
+    bare-tail alias ``"foo"`` intersects it, so the *non-root*'s signature
+    was scanned and any type it names but the snapshot omits became a
+    spurious unresolved edge -- blocking exclusion for every finding on the
+    strength of an internal declaration that no export can reach. Identity
+    is exact for this question in both directions: two declarations sharing
+    one identity necessarily match the same export names, so neither a
+    false root nor a missed one is possible.
 
     A scanned spelling that resolves to a **typedef** is followed to its
     target, transitively: an alias whose own target names nothing known
@@ -740,13 +775,13 @@ def _unresolved_type_edges(
             scan(snap.typedefs[alias])
 
     for fn in snap.functions:
-        if not (_symbol_keys(fn.name, fn.mangled) & surface.export_symbols):
+        if _linker_identity(fn.name, fn.mangled) not in root_identities:
             continue
         scan(fn.return_type)
         for p in fn.params:
             scan(getattr(p, "type", None))
     for var in snap.variables:
-        if _symbol_keys(var.name, var.mangled) & surface.export_symbols:
+        if _linker_identity(var.name, var.mangled) in root_identities:
             scan(var.type)
     for rec in snap.types:
         if rec.name not in reached_types and rec.qualified_name not in reached_types:
@@ -876,26 +911,27 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         if rec.qualified_name:
             owner_seed_by_identity.setdefault(rec.qualified_name, rec.qualified_name)
 
-    seed_types, matched_pairs = _seed_export_roots(
+    roots = _seed_export_roots(
         snap, surface, tables, owner_seed_by_identity=owner_seed_by_identity
     )
     surface.resolvable = True
     surface.unmatched_exports = _unexplained_exports(
         tables,
-        matched_pairs,
+        roots.matched_pairs,
         filter_runtime=not (
             is_cxx_runtime_library(snap.library)
             or is_cxx_runtime_library(getattr(snap.elf, "soname", ""))
         ),
     )
 
-    _walk_type_closure(snap, scratch, record_by_name, enum_by_name, seed_types)
+    _walk_type_closure(snap, scratch, record_by_name, enum_by_name, roots.seed_types)
     surface.export_types = set(scratch.public_types)
     # After the walk, so only edges the closure actually reached are scanned.
     surface.unresolved_type_edges = _unresolved_type_edges(
         snap,
         surface,
         surface.export_types,
+        roots.root_identities,
         *_resolvable_type_spellings(snap, record_by_name, enum_by_name),
     )
     return surface
