@@ -1359,10 +1359,10 @@ def _overrides_provenance(
     > base policy" merges across sources instead of picking one), so the
     receipt records the highest-precedence contributor as its layer and lists
     **each source that actually contributed** in ``selected_by`` -- one entry
-    per contributing pack, naming that pack's own manifest, so a reader can
-    tell which of several selected manifests supplied a given value. A source
-    whose every assignment a higher-precedence one shadowed did not
-    contribute and is not listed.
+    per contributing pack, naming that pack's own manifest *and its identity*,
+    so a reader can tell which of several selected manifests supplied a given
+    value and prove which revision of it did. A source whose every assignment
+    a higher-precedence one shadowed did not contribute and is not listed.
     """
     selected_by: list[SelectedByEntry] = []
     if explicit_overrides:
@@ -1371,9 +1371,18 @@ def _overrides_provenance(
                 layer=layer, option=policy_file_option, path=policy_source.path
             )
         )
+    # Each hop carries its own pack's identity: for two or more contributors
+    # there is no single winning manifest for the entry-level
+    # `reference`/`version`/`sha256` to describe, so without this the
+    # revisions that actually produced the merged mapping were lost --
+    # `policy.packs` cannot stand in for them, since it also lists packs
+    # every one of whose assignments was shadowed (Codex review, fresh
+    # evidence).
     selected_by.extend(
-        SelectedByEntry(layer=layer, option=pack_option, path=path)
-        for path, _identity in sorted(pack_contributors)
+        SelectedByEntry(
+            layer=layer, option=pack_option, path=path, identity=identity
+        )
+        for path, identity in sorted(pack_contributors)
     )
     if not selected_by:
         return ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT)
@@ -1562,10 +1571,11 @@ def _normalized_provenance(prov: ValueProvenance) -> tuple[Any, ...]:
     pair the layer is, and the option spelling recorded with it -- are
     legitimately different *records of how* a value was stated.
 
-    **Everything else is compared**, including each entry's own ``sha256``,
-    ``path``, and ``argument_index``: dropping the digest let two runs whose
-    receipts name differently-digested policy files compare as equivalent,
-    which is precisely the drift the digest exists to catch (Codex review).
+    **Everything else is compared**, including each entry's own ``identity``,
+    ``sha256``, ``path``, and ``argument_index``: dropping the digest let two
+    runs whose receipts name differently-digested policy files compare as
+    equivalent, which is precisely the drift the digest exists to catch
+    (Codex review).
     """
     explicit = {SelectorLayer.EXPLICIT_CLI, SelectorLayer.API_REQUEST}
 
@@ -1581,7 +1591,7 @@ def _normalized_provenance(prov: ValueProvenance) -> tuple[Any, ...]:
         prov.path,
         prov.field_location,
         tuple(
-            (_layer(entry.layer), entry.argument_index, entry.path)
+            (_layer(entry.layer), entry.argument_index, entry.path, entry.identity)
             for entry in prov.selected_by
         ),
         None

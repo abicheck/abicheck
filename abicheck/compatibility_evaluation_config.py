@@ -242,6 +242,15 @@ class SelectedByEntry:
     option: str | None = None
     argument_index: int | None = None
     path: str | None = None
+    #: The exact manifest revision this hop selected, when the hop names one.
+    #: A *composed* field (``policy.overrides``, ``surface.explicit_scope``)
+    #: has no single winning source to describe in
+    #: :class:`ValueProvenance`'s own ``reference``/``version``/``sha256``, so
+    #: without this the identities of every contributor were lost and a later
+    #: edit to one of them could not be proved against the receipt (ADR-049
+    #: D6; Codex review, fresh evidence). ``None`` for a hop that selects no
+    #: manifest at all -- a typed flag, a project-config key.
+    identity: ImmutableIdentity | None = None
 
     def __post_init__(self) -> None:
         # An untyped manifest/API adapter constructing
@@ -273,6 +282,13 @@ class SelectedByEntry:
         if self.path is not None and not isinstance(self.path, str):
             raise TypeError(
                 f"SelectedByEntry.path must be a str or None, not {self.path!r}."
+            )
+        if self.identity is not None and not isinstance(
+            self.identity, ImmutableIdentity
+        ):
+            raise TypeError(
+                "SelectedByEntry.identity must be an ImmutableIdentity or None, "
+                f"not {self.identity!r}."
             )
 
 

@@ -497,7 +497,12 @@ def resolve_selected_packs(
                         layer=layer,
                         source_kind="pack_manifest",
                         selected_by=tuple(
-                            SelectedByEntry(layer=layer, option=option, path=path)
+                            SelectedByEntry(
+                                layer=layer,
+                                option=option,
+                                path=path,
+                                identity=identity,
+                            )
                             for identity in canonical
                             for path in sorted(paths_by_identity[identity])
                         ),

@@ -463,6 +463,43 @@ class TestOverridesReceiptNamesEachContributingPack:
         ]
         assert entries == [("--pack", str(first)), ("--pack", str(second))]
 
+    def test_each_contributing_pack_hop_carries_its_own_identity(self, tmp_path):
+        # With two contributors there is no single winning manifest for the
+        # entry-level reference/version/sha256 to name, so the identities have
+        # to travel with the hops or a later edit to one of them cannot be
+        # proved against this receipt.
+        first = self._pack(tmp_path, "a", "soname_changed: break\n")
+        second = self._pack(tmp_path, "b", "func_added: warn\n")
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                pack_paths=(str(first), str(second))
+            )
+        )
+        hops = cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by
+        assert [(e.path, e.identity.id) for e in hops] == [
+            (str(first), "a"),
+            (str(second), "b"),
+        ]
+        assert [e.identity.sha256 for e in hops] == [
+            hashlib.sha256(p.read_bytes()).hexdigest() for p in (first, second)
+        ]
+
+    def test_the_packs_receipt_pairs_each_path_with_its_identity(self, tmp_path):
+        pack = self._pack(tmp_path, "a", "soname_changed: break\n")
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
+        (hop,) = cfg.provenance["policy.packs"].selected_by
+        assert hop.path == str(pack)
+        assert hop.identity is not None
+        assert hop.identity.id == "a"
+
+    def test_a_single_contributor_still_names_its_manifest_outright(self, tmp_path):
+        pack = self._pack(tmp_path, "a", "soname_changed: break\n")
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
+        prov = cfg.provenance[POLICY_OVERRIDES_FIELD]
+        assert prov.reference == "a"
+        assert prov.version == 1
+        assert prov.sha256 == hashlib.sha256(pack.read_bytes()).hexdigest()
+
     def test_a_fully_shadowed_pack_is_not_listed(self, tmp_path):
         shadowed = self._pack(tmp_path, "a", "soname_changed: break\n")
         contributing = self._pack(tmp_path, "b", "func_added: warn\n")
