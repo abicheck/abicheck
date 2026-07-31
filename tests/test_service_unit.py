@@ -4426,24 +4426,30 @@ class TestMetadataAttachFailuresAreSwallowed:
 
         return AbiSnapshot(library="libfoo.so", version="1")
 
-    def test_a_symlink_loop_in_the_library_path_is_swallowed(
-        self, tmp_path, caplog
-    ) -> None:
-        # `Path.resolve()` raises `RuntimeError` on a symlink loop (a merely
-        # missing path resolves fine), and it used to run *above* the
-        # handler, so a malformed library path aborted the whole dump
-        # instead of skipping metadata extraction (CodeRabbit review).
+    def test_an_unresolvable_library_path_is_swallowed(self, caplog) -> None:
+        # `resolve()` used to run *above* the handler, so a path it cannot
+        # resolve aborted the whole dump instead of skipping metadata
+        # extraction (CodeRabbit review).
+        #
+        # The failure is injected rather than staged from a real filesystem
+        # shape, because every concrete trigger is either interpreter- or
+        # environment-dependent: a symlink loop raises `RuntimeError` only
+        # on 3.10-3.12 (3.13 switched to non-strict `realpath`; CI's 3.14
+        # lane caught an earlier version of this test asserting otherwise),
+        # and a deleted cwd raises everywhere but requires mutating process
+        # state. What the fix is actually about is *where the call sits*, so
+        # that is what this pins.
         import logging
-        import os
 
         from abicheck.service_metadata_attach import _try_attach_sycl_metadata
 
-        looped = tmp_path / "libfoo.so"
-        os.symlink(looped, looped)
+        class _UnresolvablePath:
+            def resolve(self):
+                raise OSError("cannot resolve")
 
         snap = self._snap()
         with caplog.at_level(logging.DEBUG, logger="abicheck.service"):
-            _try_attach_sycl_metadata(snap, looped)
+            _try_attach_sycl_metadata(snap, _UnresolvablePath())
         assert snap.sycl is None
         assert "SYCL metadata extraction skipped" in caplog.text
 

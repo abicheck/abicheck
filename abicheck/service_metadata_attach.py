@@ -52,11 +52,15 @@ def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
     from .sycl_metadata import parse_sycl_metadata
 
     try:
-        # Inside the handler, not above it: `resolve()` raises `RuntimeError`
-        # on a symlink loop (confirmed empirically; a merely *missing* path
-        # resolves fine under the default `strict=False`), and a malformed
-        # library path must skip metadata extraction, not abort the dump
-        # (CodeRabbit review).
+        # `resolve()` is inside the handler, not above it: it can raise, and
+        # a path this function cannot resolve must skip metadata extraction
+        # rather than abort the whole dump (CodeRabbit review). Measured
+        # across interpreters, since the triggers differ: a relative path
+        # whose cwd has been deleted raises `FileNotFoundError` on every
+        # supported version, while a *symlink loop* raises `RuntimeError`
+        # only on 3.10-3.12 -- 3.13 switched to non-strict `realpath` and
+        # returns the looping path unchanged. A merely missing path resolves
+        # fine everywhere.
         sycl = parse_sycl_metadata(lib_path.resolve().parent)
     except Exception as exc:  # noqa: BLE001
         _logger.debug("SYCL metadata extraction skipped: %s", exc)

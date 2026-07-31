@@ -723,24 +723,38 @@ def _followed_typedef_aliases(
 ) -> set[str]:
     """Typedef keys named by *type_str* whose target is worth scanning too.
 
+    A token is resolved to the alias key the closure *actually traversed*,
+    via :func:`~abicheck.surface._type_identifiers` -- the same function the
+    walk queues from -- rather than matched against ``snap.typedefs``
+    literally (Codex review, confirmed empirically). The direct-clang
+    backend stores a typedef under its bare ``node["name"]`` (the
+    producer-side scope loss ``AGENTS.md`` records) while a signature can
+    spell it qualified, so the walk followed the bare ``Alias`` while this
+    scan looked up only ``ns::Alias``, found no typedef, and never inspected
+    the target: an alias pointing at an absent type left
+    ``unresolved_type_edges`` empty and unrelated types provable-out.
+
     An *ambiguous* key is excluded: it does not prove the spelling reached
     this alias rather than the same-named record, the same reasoning
     ``_confirmed_type_matches`` uses -- and it is what keeps libstdc++'s
     bare-key alias templates (``"vector"``, ``"basic_string"``, which collide
-    with the real records) out of the scan. See
+    with the real records) out of the scan. That guard is what makes
+    resolving through the bare tail safe rather than a new noise source, and
+    it is applied to the *resolved key*, not the written token. See
     :func:`_unresolved_type_edges` for the full rationale.
     """
     if not _is_real_type(type_str) or type_str is None:
         return set()
     if _DEPENDENT_SPELLING_RE.search(type_str):
         return set()
-    return {
-        tok
-        for tok in _IDENT_RE.findall(type_str)
-        if tok not in _TYPE_NOISE
-        and tok in snap.typedefs
-        and tok not in surface.ambiguous_type_names
-    }
+    aliases: set[str] = set()
+    for tok in _IDENT_RE.findall(type_str):
+        if tok in _TYPE_NOISE:
+            continue
+        for ident in _type_identifiers(tok):
+            if ident in snap.typedefs and ident not in surface.ambiguous_type_names:
+                aliases.add(ident)
+    return aliases
 
 
 def _unresolved_type_edges(

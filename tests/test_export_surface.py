@@ -1041,6 +1041,34 @@ class TestUnresolvedTypeEdges:
         assert surf.exclusion_is_provable
         assert "std::__cxx11::Widget" in surf.export_types
 
+    def test_a_scope_lost_alias_key_is_followed_to_its_target(self) -> None:
+        # The direct-clang backend stores a typedef under its bare name while
+        # a signature can spell it qualified, so the walk follows the bare
+        # `Alias` (via `_type_identifiers`' tail) while an earlier revision of
+        # the scan looked up only the written `ns::Alias`, found no typedef,
+        # and never inspected the target -- leaving an alias into an absent
+        # type entirely unreported (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("ns::Alias *",))],
+            types=[_rec("Bystander")],
+            typedefs={"Alias": "Gone"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unresolved_type_edges == frozenset({"Gone"})
+        assert not surf.exclusion_is_provable
+
+        # Same shape with the target present: the alias is followed, nothing
+        # is reported, and the target really does enter the closure.
+        snap.typedefs = {"Alias": "Here"}
+        snap.types = [_rec("Here")]
+        intact = compute_export_surface(snap)
+        assert not intact.unresolved_type_edges
+        assert intact.exclusion_is_provable
+        assert "Here" in intact.export_types
+
     def test_a_spelling_the_walk_cannot_follow_is_an_unresolved_edge(self) -> None:
         # Naming a known node is not enough -- the closure has to have been
         # able to *follow* the edge (Codex review). A typedef is looked up by
@@ -1223,12 +1251,17 @@ class TestUnresolvedTypeEdges:
         # its bare `node["name"]`, losing the namespace, while the signature
         # spells it qualified. Nothing in the snapshot contradicts that
         # scope, so the edge resolves.
+        #
+        # The alias target is declared here deliberately: the qualified token
+        # now resolves *to the bare alias key* and the scan follows it, so
+        # omitting the target would leave a real dangling edge and this test
+        # would be measuring that instead of what it claims.
         snap = AbiSnapshot(
             library="l",
             version="1",
             functions=[_fn("api", "api", params=("std::string *",))],
-            types=[],
-            typedefs={"string": "basic_string<char>"},
+            types=[_rec("StringImpl")],
+            typedefs={"string": "StringImpl"},
             elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
         )
         surf = compute_export_surface(snap)
