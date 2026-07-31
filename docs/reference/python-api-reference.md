@@ -42,6 +42,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `env_matrix_path` | `Path \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
+| `contract_mode` | `str \| None` | `None` |
 | `depth` | `str \| None` | `None` |
 | `frontend_context` | `str` | `'host'` |
 
@@ -242,6 +243,7 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
+| `contract_mode` | `str \| None` | `None` |
 
 **Returns:** `DiffResult`
 
@@ -387,6 +389,7 @@ Compare two ABI inputs and return the classified diff result.
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
 | `include_dependencies` | `bool` | `True` |
+| `contract_mode` | `str \| None` | `None` |
 
 **Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
 

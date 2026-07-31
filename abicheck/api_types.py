@@ -237,6 +237,14 @@ class CompareRequest:
     # what makes the shadow evaluator reachable through the real Tier-2
     # chokepoint at all (Codex review, fresh evidence).
     contract_evaluation: bool = False
+    # ADR-049 Phase 6: which evidence domain `contract_evaluation` judges
+    # against -- "public" (header-derived declared surface), "exports" (the
+    # binary's own export table plus the raw type closure from it), or "all"
+    # (no root/closure evidence required). `None` keeps the legacy derivation
+    # from `scope_public`; an explicit value outranks it per ADR-049 D7
+    # (`explicit_cli` > `legacy_alias`). Selects the domain only -- like
+    # `contract_evaluation` itself, non-authoritative for verdict/exit code.
+    contract_mode: str | None = None
     # ADR-055 D1: the friendly evidence-depth dial (`--depth`, same vocabulary
     # as `dump`/`scan`: binary/headers/build/source). `None` (the default)
     # infers the collect mode from whether either side sets `sources`/
@@ -319,6 +327,27 @@ class CompareRequest:
             errors.append(f"policy file not found: {self.policy_file_path}")
         if self.env_matrix_path is not None and not Path(self.env_matrix_path).exists():
             errors.append(f"environment matrix file not found: {self.env_matrix_path}")
+        # ADR-049 Phase 6 (Codex review): the same two rules the CLI applies
+        # to --contract, so a typed caller fails fast and with identical text
+        # instead of having the mode silently ignored (contract_evaluation
+        # off) or raising a raw ValueError deep in the pipeline after input
+        # resolution (bad value).
+        if self.contract_mode is not None:
+            from .contract_relevance_types import ContractMode
+
+            allowed_modes = {mode.value for mode in ContractMode}
+            if self.contract_mode not in allowed_modes:
+                errors.append(
+                    f"unsupported contract mode {self.contract_mode!r}: "
+                    f"choose from {', '.join(sorted(allowed_modes))}"
+                )
+            if not self.contract_evaluation:
+                errors.append(
+                    "contract_mode requires contract_evaluation: it selects "
+                    "which evidence domain the shadow contract evaluator "
+                    "judges against, and without that flag no contract "
+                    "decision is computed at all"
+                )
         if self.depth is not None:
             from .buildsource.scan_levels import USER_DEPTHS
 

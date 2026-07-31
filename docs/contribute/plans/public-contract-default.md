@@ -1006,6 +1006,8 @@ deliberately narrower than the full phase:
   export-root-closure evidence provider exists yet (`surface.py` only
   computes a header-derived public closure, not an export-symbol-rooted
   one — a real `EXPORTS` implementation is separate, scoped follow-up work).
+  **Superseded 2026-07-31** — `EXPORTS` is now implemented, see the
+  "third mode" note at the end of this phase.
 - `ContractRelevance.UNKNOWN_UNPROVEN` is never emitted (see the module's
   own docstring): that value requires a closed-world "the declared evidence
   domain was searched completely" claim this module cannot verify with
@@ -1469,6 +1471,390 @@ Measure:
 
 **Gate:** every shadow delta has evidence and stable identity; zero unexplained
 fact loss.
+
+**Updated (2026-07-31): the shadow evaluator's third mode landed — `EXPORTS`
+is implemented, backed by its own evidence provider.** Every note above says
+`EXPORTS` raises `NotImplementedError` "since no export-root-closure evidence
+provider exists yet"; that provider now exists, in one new leaf module,
+`abicheck/export_surface.py` (`ExportSurface`/`compute_export_surface`/
+`observed_export_names`). It answers a genuinely different question than
+`surface.py` rather than re-scoping the same one: roots are the declarations
+whose own linker symbol appears in the binary's **observed export table**
+(ELF `.dynsym` defined symbols, the PE export directory, the Mach-O export
+trie — unioned, since one snapshot can legitimately carry more than one), not
+`Visibility.PUBLIC` declarations, and no header origin demotes anything
+anywhere. The closure over the raw record/enum/typedef graph reuses
+`surface.py`'s own `_index_surface_types`/`_walk_type_closure`, so
+the two domains cannot drift apart in *how* they follow fields, bases, and
+typedef targets — only the seeds differ (plus one local, additive key added to
+the returned index, described under owner seeding below), which is exactly the
+difference ADR-049 D2 draws between the two modes.
+
+`evaluate_change_contract_relevance`/`evaluate_snapshot_pair_contract_relevance`
+gained `exports_old`/`exports_new` parameters, required when and only when
+`mode` is `EXPORTS`: omitting them is a `ValueError`, never a silent
+degradation to a header-derived answer for a domain that is not
+header-derived (that would misrepresent the mode rather than implement it).
+The decision path follows Section 7's `exports` row clause by clause — an
+export root or a closure member is `IN_CONTRACT`
+(`export_root_membership`); a *known* entity outside both, after a complete
+traversal, is `PROVEN_OUT_OF_CONTRACT`; incomplete root/graph or identity
+evidence is `UNKNOWN_UNRESOLVED` — and it is dispatched **before** the
+`public` path's own `_ALL_SURFACE_REASONS` fast path, since every reason in
+that set is a header-origin/reachability classification this domain treats
+as "unrelated and advisory". The one cross-domain exclusion, `--post-manifest`
+(an exact committed-*export* manifest), is still checked ahead of every mode
+branch, unchanged.
+
+Deliberately conservative, every guard aimed at the same failure direction —
+a false `PROVEN_OUT_OF_CONTRACT`, the one that would hide a real break.
+`ExportSurface.exclusion_is_provable` gates the exclusion branch and requires
+all three of: an export table that was actually captured (a captured-but-empty
+one is indistinguishable from a failed parse in the recorded data, so it
+counts as absent); at least one declaration resolved to a root (an observed
+table that matched nothing is a mangling-scheme gap, not proof of emptiness);
+and **no ABI-relevant observed export left unaccounted for** — an export no
+declaration matched is a real entry point whose own signature, and therefore
+whose own type closure, the snapshot knows nothing about, so it could be
+exactly what reaches the entity being judged. Two further guards sit on top:
+an entity absent from the snapshot's own symbol/type universe (a macro, a
+Python-API-axis finding) is unplaceable rather than proven-excluded, and
+proving a *type* unreachable additionally requires `all_roots_typed` —
+`has_typed_roots` (i.e. *some* root is typed) is not enough, since a
+partial closure proves unreachability only from the roots it covers, and
+`all_roots_typed` is strict down to the individual parameter (one `"?"`
+sentinel, what `dwarf_snapshot._process_param` writes for a missing
+`DW_AT_type`, leaves that root's closure incomplete).
+"ABI-relevant" delegates to `elf_symbol_filter.is_abi_relevant_elf_symbol`,
+the repo's existing owner of that judgment, so `_init`/`_fini`/thunks/
+transitive stdlib exports don't count as unexplained — applied per export
+table and only where its conventions hold (ELF and Mach-O, matching what
+`dumper.py` itself does), never to PE, whose MSVC-decorated names would
+otherwise lose a legitimate export like `api__v2` to the ELF "`__` means
+private" heuristic.
+
+**No declared-public evidence crosses into this domain, in either
+direction.** Section 7's `exports` row is unconditional — "Roots/closure are
+`IN_CONTRACT` ... Public-header/manifest/consumer failures are unrelated and
+advisory" — so `--public-symbol` (`force_public_symbols`) and
+`--post-manifest` (`public_surface_allowlist`) neither add an entity to this
+contract nor remove one from it: neither observes an export, and a user
+assertion can make an unexported declaration neither exported nor
+un-exported. Consequently this mode dispatches ahead of *every* header-domain
+shortcut in `evaluate_change_contract_relevance`, including the
+POST-manifest exclusion the other two modes still honor. (An earlier revision
+had the manifest exclusion win here, on the reasoning that a committed-export
+manifest can only ever narrow the export set — the plan does not say that,
+and the ADR's own table is unconditional.)
+
+A finding's own membership is decided at the right level: a symbol-level
+finding by whether its own linker symbol is an export root, a type-level or
+member-level one by the closure. Letting a symbol-level finding match the
+closure would classify an unexported internal helper `IN_CONTRACT` merely
+because its `caused_by_type` happens to be reachable from some *other*
+exported signature. Lookup aliases are ambiguity-checked in both directions:
+rootness is decided by linker identity alone (never the demangled-name or
+bare-tail aliases `_symbol_keys` adds for finding lookup), and an alias a
+*non*-root declaration also answers to is dropped from `export_symbols`
+entirely, so an exported `ns::foo` cannot lend its bare tail to an unrelated
+unexported C `foo`.
+
+"Type-level findings never consult a symbol universe" has exactly one
+exception, and it is a producer fact rather than a relaxation:
+`diff_symbols._check_vtable_index_change` reuses the type-level
+`TYPE_VTABLE_CHANGED` for a moved virtual slot but sets `symbol` to the
+*method's mangled linker name*. Rejecting it outright left a vtable-slot
+change on an observed exported method `UNKNOWN_UNRESOLVED`, with no way back
+via the closure either (an Itanium encoding does not yield the owning class to
+`_type_candidates`). An **exact** hit on a mangled spelling is admitted for
+that reason: `_Z`/`__Z`/`?` are mangling-scheme prefixes no source-level type
+name can occupy, so the bare-name collision the blanket rejection exists to
+prevent cannot reach this branch. Nothing else about the rule changes — no
+tail fallback, and an unexported method's mangled name still resolves the
+other way.
+
+Mach-O needs underscore normalization in **both** directions, because its two
+producers disagree with the export trie by one underscore each way: clang's
+`mangledName` keeps the platform underscore (`__ZN...`) while the trie parser
+strips one (`_ZN...`), and the headerless path (`dumper._dump_macho`'s
+`_normalize_macho_sym`) strips a *second* one from that already-stripped name
+(`ZN...`). Both shifted spellings are tried, and only against the **Mach-O
+table's own names** — not the union of every table the snapshot carries — so a
+snapshot holding both an ELF and a Mach-O table can't let an ELF export `foo`
+make an unrelated `_foo` a root. Export names keep their table provenance all
+the way through root matching for this reason, not only for the artifact
+filter. An unnamed ordinal-only PE export is carried as the same
+`ordinal:<n>` placeholder `dumper._dump_pe` records, rather than dropped for
+having an empty `name` — dropping it hid a real entry point whose signature
+is unknown.
+
+A method root's owner is seeded only through an **exact** identity hit
+against a known record (its `qualified_name`, and its bare `name` only when
+no differing qualified spelling was recorded — see below). `owner_class_of`
+cannot tell an enclosing *class* from an enclosing *namespace* from the
+string alone, so an exported namespace function `api::run()` yields the bare
+fragment `"api"`, which `_walk_type_closure`'s own alias-tolerant
+`record_by_name` lookup would resolve to an unrelated `other::api` and pull
+its whole field closure in.
+
+Exactness has to hold on *both* sides of that match, which the first cut got
+half-right: on the castxml/clang path a record's `name` is the bare leaf, so
+`other::api` is stored as `name="api"` and the namespace fragment matched it
+"exactly" after all — the same collision, re-entered through the record side
+(confirmed with a minimal snapshot: `other::api`'s own field landed in
+`export_types`). A bare `name` therefore counts as a full identity only when
+the producer recorded no differing `qualified_name`. That loses no real
+owner: whenever a record carries a qualified name, `owner_class_of` produces
+the complete scope chain too — from an already-qualified declaration name, or
+from the mangled symbol's full nested-name — so a genuine owner matches on
+the qualified key instead.
+This is the same collision — and the same fix — `type_reachability.py`
+already carries (see this repo's `AGENTS.md`, "sixth finding"); `surface.py`
+still has it, deliberately, as that file documents.
+
+Exact matching alone isn't enough on the castxml/clang path, though:
+`_index_surface_types` keys its index by `RecordType.name` and its `::` tail,
+which for those producers is the *bare* leaf, so `ns1::Foo` and `ns2::Foo`
+collapse onto one ambiguous key and neither owner has an unambiguous handle at
+all. Dropping the ambiguous key (the only safe option, since seeding it walks
+both records) then left an exported `ns1::Foo::bar()` with no class-typed
+signature outside its own class's closure, and a layout finding on that
+exported class came back `PROVEN_OUT_OF_CONTRACT` — the exact failure
+direction every other guard here is aimed at. `compute_export_surface` adds
+each record's `qualified_name` to its **own local copy** of that index, which
+gives every such record an exact handle without touching `surface.py`'s shared
+indexing (relied on by every other consumer of the closure walk, and already
+recorded in `AGENTS.md` as needing its own scoped design). The ambiguity set
+is computed from the un-augmented index, so the added keys can never make an
+existing name look ambiguous.
+
+**Known residue, deliberately not fixed here — an ambiguous bare tail is
+still enqueued alongside the qualified spelling.** `_type_identifiers` turns a
+signature type `ns1::Foo *` into *both* `ns1::Foo` and the bare `Foo`, and the
+bare one still resolves through `record_by_name`'s tail keys to every
+same-named record — so a signature naming `ns1::Foo` also pulls in whatever is
+reachable only through `ns2::Foo` (confirmed with a minimal snapshot:
+`OnlyNs2` landed in `export_types`). Now that the qualified spelling resolves
+exactly, that tail adds nothing but noise for this shape. Two things make the
+narrow patch the wrong call anyway:
+
+- The identical enqueueing happens again, one edge deeper, inside
+  `_walk_type_closure` itself, for a *kept type's own field or base* spelled
+  `ns1::Foo` (confirmed the same way). Fixing only the seed set would leave
+  the same leak reachable through any record field while making the invariant
+  look enforced — the correct fix is one shared rule in `surface.py`'s walk,
+  which is exactly the scoped design this PR does not take on.
+- Dropping the ambiguous tail key outright — the obvious local shortcut —
+  would flip the failure into the *dangerous* direction: castxml's own
+  convention lets a signature spell a namespaced record with the bare leaf
+  alone, and with no tail key that reference resolves to nothing, which
+  reports a genuinely reachable type `PROVEN_OUT_OF_CONTRACT`.
+
+A typedef alias colliding with a record/enum key is the same residue reached
+by a second route: `_walk_type_closure` resolves one name through
+`snap.typedefs` *and* `record_by_name`, so a global `typedef Foo` in an
+exported signature also walks an unrelated castxml-recorded `ns::Foo` (whose
+bare `name` is `"Foo"`) and pulls in what only that record reaches —
+confirmed the same way. Same location, same direction, same scoped fix.
+
+What *was* fixed locally is the ambiguity bookkeeping that collision exposed:
+`_index_surface_types` tallies collisions across the record and enum indexes
+only, never `snap.typedefs`, so the colliding name was not flagged in
+`ambiguous_type_names` at all and a finding naming it got confirmed against
+whichever node the walk happened to reach. `compute_export_surface` now adds
+every typedef alias that is also a record/enum index key to its own ambiguity
+set, so such a finding resolves `UNKNOWN_UNRESOLVED`/`identity_ambiguous` —
+the same treatment a record-vs-record collision already gets. That does not
+close the closure leak (the walk still visits both nodes, and a finding about
+a type reachable only through the unintended one has an unambiguous name of
+its own), which is why it is recorded here rather than presented as a fix.
+
+A third route reaches the same residue from the output side: even when the
+exact qualified key *is* seeded and only the intended record is walked,
+`_walk_type_closure` writes `rec_node.name` — the bare `Foo` — into its
+result, so `export_types` never carries `ns1::Foo` and a layout finding on
+the exported class resolves `UNKNOWN_UNRESOLVED`/`identity_ambiguous`
+instead of `IN_CONTRACT` (CodeRabbit review, confirmed with a minimal
+snapshot). It cannot be recovered afterwards, for the same reason the
+finding exists: from outside the walk, `Foo` in `export_types` is
+indistinguishable between "the exact key was seeded" and "the ambiguous bare
+key was walked, visiting both". And it has a second half —
+`_confirmed_type_matches` rejects a qualified candidate whose bare tail is
+ambiguous, correctly today because the walk adds *every* matching record for
+such a tail, so making a qualified identity meaningful means relaxing that
+guard in step with the walk change rather than independently. One
+coordinated change to the shared walk plus its consumer; the same scoped
+design as the two routes above.
+
+Note the direction: this residue over-*includes* (an unrelated internal type
+reads `IN_CONTRACT`), or — on that third route — under-resolves to
+`UNKNOWN_UNRESOLVED`. Both are the opposite of the qualified-owner and
+rival-scope bugs above, which produced a false `PROVEN_OUT_OF_CONTRACT` and
+are fixed, and of every other guard in this section. `surface.py`'s tail keys are deliberate
+over-keeping — "never hide a real break behind snapshot order" — which is the
+right default for the `public` domain and merely noisy for this one.
+
+**Measured, 2026-07-31 — the strictness is satisfiable on the DWARF path.**
+An earlier revision of this note guessed that the "no unmatched ABI-relevant
+export" rule would make `PROVEN_OUT_OF_CONTRACT` unreachable on a real C++
+library, because the ELF table carries `_ZTV`/`_ZTI`/`_ZTS` entries that
+`is_abi_relevant_elf_symbol` does not filter (it only drops `_ZTh`/`_ZTv`/
+`_ZTc` thunks). That guess is **wrong**, verified against two real
+`g++ -shared -g` libraries dumped through `dumper.dump()`: the DWARF path
+records those vtable/RTTI symbols as `Variable` declarations, so all 15
+exports of a polymorphic two-class library matched, `unmatched_exports` was
+empty, and `exclusion_is_provable` was `True`. The header-scoped (castxml)
+path was not measured — no castxml in that environment — so it stays
+genuinely unknown rather than assumed either way.
+
+**Closed — unresolvable type edges are now tracked, and the domain still
+proves exclusions.** A signature, field, or base whose type string resolves
+to nothing in the record/enum/typedef indexes stops the closure silently,
+yet `exclusion_is_provable` stayed `True` — so a type reachable only through
+that missing edge could be reported `PROVEN_OUT_OF_CONTRACT` (Codex review).
+`ExportSurface.unresolved_type_edges` records those edges and
+`exclusion_is_provable` now requires the set to be empty, alongside the
+root-level `unmatched_exports` rule it already had.
+
+What made this worth deferring once was that a *naive* implementation is
+useless, not that the guard is wrong. Measured at each granularity on two
+real `g++ -shared -g` libraries:
+
+| Granularity of "unresolved" | libmeasure | libpoly |
+|---|---|---|
+| identifier not in `all_types` | 0 | 2 (`Base`, `string` — both false: the walk resolves bare tails via `record_by_name`) |
+| identifier not resolvable by the walk's own indexes | 0 | 1 (`string`) |
+| whole type *reference* with no resolvable identifier | 0 | 1 — field `api::Base::tag`, type recorded as bare `"string"` |
+
+That last one is real: DWARF spells the field type `"string"` while the
+typedef key is `"std::string"` and the record is
+`std::__cxx11::basic_string<...>` — exactly the bare-vs-qualified gap
+`AGENTS.md` documents at length for `type_reachability.py`. Resolving it is
+what the implemented guard does: `_resolvable_type_spellings` reuses that
+module's `_namespace_suffix_spellings` (partial qualification —
+direct-clang prints `api::Outer::Inner` as `"Outer::Inner"`) and
+`_stripped_signature_spelling` (the stdlib namespace and `__cxx11::`/`__1::`
+inline-ABI markers) over every record, enum, and typedef key, rather than
+matching index keys literally.
+
+Three further noise sources turned up only once the resolver was measured
+against a header-scoped (`--ast-frontend clang`) dump of a library taking a
+`std::vector<api::Item>`, and each is excluded for a stated reason rather
+than tuned away:
+
+| Reported "missing" edge | Why it is not one |
+|---|---|
+| `_Tp`, `_Alloc`, `_CharT`, `_Traits` in libstdc++ records' own fields | Template *parameter* names in a generic definition. Toolchain-owned records' internals are no longer scanned (`STDLIB_TYPE_NAMESPACE_PREFIXES`); the closure walk still follows them, so nothing is hidden |
+| `_S_local_capacity` | A static constant in an array bound, inside `basic_string` — same exclusion |
+| `_Alloc` via `allocator_type`/`pointer` | libstdc++ *member* typedefs, stored under bare unattributable keys by the direct-clang backend. Typedef *targets* are not scanned at all — see below |
+
+A spelling that resolves to a **typedef** is followed to its target,
+transitively. The motivating example — a snapshot recording parameter type
+`Alias` while omitting `typedef Alias = Internal` — is already caught by the
+*signature* scan, since `Alias` itself resolves to nothing; following adds
+the narrower "alias present, its target absent" shape, which is invisible to
+that scan because the alias key resolves fine (CodeRabbit review). An earlier
+revision skipped targets entirely, on the measurement above — that was
+over-broad: the noise comes from *how* an alias is reached, not from
+following one. Following happens only from an already-scanned spelling,
+never over `snap.typedefs` wholesale, and an ambiguous alias key is not
+followed; together those keep libstdc++'s bare-key alias templates
+(`"vector"`, `"basic_string"`, colliding with the real records) and its
+member typedefs (reachable only by walking a toolchain record's internals,
+which the rule above already declines) out of the scan. A dependent spelling
+(`typename`, `template` — C++'s own markers, not a naming heuristic) is not
+an edge either, since it names nothing until instantiation.
+
+**Result, measured after the fix** (re-measured with typedef following on):
+a pure-C library and the `std::`-carrying C++ library both report zero
+unresolved edges and `exclusion_is_provable = True`, while a synthetic
+snapshot whose export signature names an undeclared type — or names an alias
+whose target is undeclared, directly or through a chain — reports that edge
+and correctly degrades the same finding from `PROVEN_OUT_OF_CONTRACT` to
+`UNKNOWN_UNRESOLVED`. The guard is satisfiable, not vacuous.
+
+A token must match a registered spelling **as written**. Accepting its bare
+leaf as well — an earlier revision did — resolved a qualified edge through an
+unrelated record that merely shares the leaf: with `ns::Missing` absent and
+`other::Missing` present, the edge counted as resolved and exclusion stayed
+provable while a type reachable only through the omitted definition could be
+proven out (Codex review). The one legitimate fallback is narrower and
+keyed on what the snapshot actually records: a leaf may absorb a
+*more*-qualified token only when it is the complete identity of a node
+carrying no scope of its own — the producer-side scope loss that stores
+libstdc++'s `std::string` typedef under the bare key `string`. A node that
+does record a scope never lends its leaf to a different one. Both directions
+are measured: dropping the fallback outright made the real C++ library report
+`std::string` unresolved, and keeping it unconditional made the synthetic
+`ns::Missing` case resolve wrongly.
+
+**Naming a known node is necessary but not sufficient**, a second condition
+added after the resolver above was measured. The registered spellings are
+broader than what `_walk_type_closure` can actually look up: the walk
+resolves a record or enum through its own name or bare `::` tail, but a
+*typedef* only through its exact key, with no spelling tolerance at all. So
+an exported parameter spelled `ns::Alias` against a captured typedef
+`outer::ns::Alias -> Victim` counted as a resolved edge while the walk —
+trying only `ns::Alias` and its tail `Alias`, neither of them that key —
+never followed the alias, leaving `Victim` outside `export_types` and free to
+be stamped `PROVEN_OUT_OF_CONTRACT` (Codex review, reproduced). An edge is
+now resolved only when it *both* names a known node and is one the walk could
+traverse.
+
+The two conditions are independent, and each catches what the other misses:
+a token can be traversable yet wrong (the `ns::Missing` → `other::Missing`
+tail collision above — the walk follows *something*, but not the node the
+edge names, so the real node's closure stays unknown), and a token can name a
+known node yet be untraversable (the typedef case here). Both are holes in
+the same closure, so both are reported. Re-measured after adding the second
+condition: the pure-C and `std::`-carrying C++ libraries above still report
+zero unresolved edges with `exclusion_is_provable = True`, on both the
+header-scoped and headerless dumps — the narrowing costs the domain nothing
+real, because a backend that bares a *record* spelling produces exactly the
+tail key the walk indexes.
+
+`exclusion_is_provable` folds in every incompleteness signal rather than
+leaving some to the caller: an observed table, at least one resolved root,
+**every** root carrying real signature types (`all_roots_typed`, which the
+evaluator used to re-check separately for the same outcome), no unaccounted
+export, and no unresolved type edge (CodeRabbit review).
+
+Three membership primitives shared by both domains (`_symbol_matches`,
+`_type_candidates`, `_confirmed_type_matches`) were extracted from
+`_in_surface_result_is_confirmed` rather than reimplemented — the
+member-level owner-stripping and the ambiguous-bare-tail rejection this
+file's Phase 3 notes describe at length are subtle enough that a second copy
+would drift. One deliberate reason-code difference between the domains is
+documented at its own call site: an ambiguous-only closure match reports
+`identity_ambiguous` under `exports` (the registry's precise code for it)
+where `public` reports the coarser `required_evidence_incomplete`; relevance
+and assurance agree, only the reason string differs.
+
+Tests: `tests/test_export_surface.py` (the provider in isolation — the three
+platforms' tables, roots vs. declaration visibility in both directions,
+closure over fields/bases/typedefs, header origin *not* demoting, untyped
+roots, the unresolvable case) and `tests/test_contract_evaluation_exports.py`
+(the decisions — split into its own sibling file because
+`test_contract_evaluation.py` reached the AI-readiness file-size hard cap
+(see `AGENTS.md`), the same split `test_contract_evaluation_not_applicable.py`
+already is).
+
+**Phase 6's first slice landed with this:** `compare --contract
+public|exports|all` selects the domain, threaded through
+`CompareRequest.contract_mode` → `service.run_compare`/`compare_snapshots` →
+`checker.compare`. `_apply_contract_evaluation_shadow` no longer re-derives
+the D2 alias mapping inline — it calls Phase 1's own
+`compatibility_evaluation_wiring.resolve_legacy_contract_mode`, making that
+wiring's first live caller, and an explicit `--contract` outranks it per D7
+(`explicit_cli` > `legacy_alias`). The flag requires `--contract-evaluation`
+(on its own it would select a domain nothing evaluates) and is rejected for
+directory/package comparisons, matching `--contract-evaluation`'s own
+fan-out limitation. **Still open:** the corpus validation Phase 6's gate
+requires; and the provider-evidence ledger this phase's own gate names
+still does not exist for either domain (`ExportSurface.resolvable`/
+`has_typed_roots` is the same coarse per-surface signal
+`PublicSurface.resolvable`/`has_provenance` is, not a per-provider
+completeness record).
 
 ### Phase 4 — snapshot evidence/context split
 

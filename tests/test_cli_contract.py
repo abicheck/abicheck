@@ -533,6 +533,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--bundle-system-providers",
         "--collapse-versioned-symbols",
         "--config",
+        "--contract",
         "--contract-evaluation",
         "--ctf",
         "--debug-format",
@@ -910,3 +911,48 @@ def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
     assert cli_scan.run_scan_core is scan_engine.run_scan_core
     assert cli_scan._BudgetOverflow is scan_engine._BudgetOverflow
     assert cli_scan._EvidenceContractError is scan_engine._EvidenceContractError
+
+
+def test_contract_requires_contract_evaluation(tmp_path) -> None:
+    """``--contract`` alone would silently do nothing (ADR-049 Phase 6).
+
+    It selects the domain the shadow evaluator judges against; with no
+    ``--contract-evaluation`` no decision is computed at all, so accepting
+    the flag would accept a no-op. Rejected before any input is parsed, so
+    the two paths only have to exist.
+    """
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    old_path.write_text("{}", encoding="utf-8")
+    new_path.write_text("{}", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_path), str(new_path), "--contract", "exports"],
+    )
+    assert result.exit_code != 0
+    assert "--contract requires --contract-evaluation" in result.output
+
+
+def test_contract_is_rejected_for_directory_comparisons() -> None:
+    """``--contract`` has no per-library fan-out wiring (ADR-037 D12).
+
+    The shadow evaluator itself is already rejected for directory/package
+    inputs, so the domain selector must be too -- otherwise it would be
+    silently ignored rather than refused.
+    """
+    import click
+
+    from abicheck.cli_compare_helpers import _reject_set_input_flags
+
+    with pytest.raises(click.UsageError) as excinfo:
+        _reject_set_input_flags(None, False, None, contract_mode="exports")
+    assert "--contract is not supported for directory/package" in str(excinfo.value)
+
+    # The same call without the flag passes through untouched, so the
+    # rejection is attributable to `--contract` alone.
+    _reject_set_input_flags(None, False, None)

@@ -224,6 +224,32 @@ Core pipeline (in order of data flow):
      from any live command yet (deferred to the Phase 3 shadow evaluator
      per the rollout plan) — only `cli_options.py`/service/API still don't
      construct real `FieldCandidate`s for any other field
+   - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
+     evaluator: one `ContractEvaluationDecision` (relevance + stable reason
+     code + assurance) per already-emitted finding. Stamped onto findings
+     only under `compare --contract-evaluation`; never consulted by verdict,
+     policy, or exit-code logic. Which evidence domain it judges against is
+     selected by `compare --contract public|exports|all` (ADR-049 Phase 6);
+     omitted, the domain still follows `--scope-public-headers`/
+     `--no-scope-public-headers`, and an explicit value outranks that legacy
+     alias via `compatibility_evaluation_wiring.resolve_legacy_contract_mode`
+     (D7 precedence). Selecting a domain is as advisory as the evaluator
+     itself — no verdict, exit code, or finding set changes
+   - `export_surface.py` — ADR-049 `contract=exports`'s evidence provider
+     (`compute_export_surface`): roots are the declarations present in the
+     binary's *observed* export table (ELF `.dynsym` / PE export directory /
+     Mach-O export trie), closure is the raw record/enum/typedef graph walk
+     — reusing `surface.py`'s own closure walk, so only the seeds differ.
+     Deliberately not `surface.py`'s domain: no header-origin demotion
+     applies, and an uncaptured (or empty) export table leaves the surface
+     `resolvable=False` rather than claiming "exports nothing". Its
+     `exclusion_is_provable` gate is what any `PROVEN_OUT_OF_CONTRACT`
+     decision rests on, and it fails closed on four independent kinds of
+     incomplete evidence: no observed table, no resolved root, an untyped
+     root, an unaccounted export, or an unresolved *type edge* (a signature/
+     field/base spelling naming nothing the snapshot carries — resolved
+     through `type_reachability.py`'s namespace-suffix and stdlib-stripping
+     machinery, so a bare `string` for `std::string` still resolves)
 6. **Reporting** — output results
    - `reporter.py` — JSON/Markdown/text output
    - `html_report.py` — HTML reports

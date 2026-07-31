@@ -67,6 +67,29 @@ class ContractMode(str, Enum):
     ALL = "all"
 
 
+def coerce_contract_mode(mode: ContractMode | str) -> ContractMode:
+    """*mode* as a real :class:`ContractMode`, or ``ValueError`` naming the
+    valid values.
+
+    ``ContractMode`` is a ``str`` Enum, so an untyped caller passing the bare
+    serialized value (``"all"`` from a config/API adapter) compares *equal*
+    to a member but fails an ``is`` identity check -- coercing through the
+    constructor first makes every later ``is`` comparison safe.
+
+    One owner for the coercion *and* its error message, because there is more
+    than one caller: the evaluator and ``checker.compare``'s own mode
+    resolution both take an untyped value, and the bare
+    ``EnumMeta.__call__`` message (``'bogus' is not a valid ContractMode``)
+    tells a caller what is wrong without telling them what would be right.
+    """
+    try:
+        return ContractMode(mode)
+    except ValueError as exc:
+        raise ValueError(
+            f"mode must be one of {sorted(m.value for m in ContractMode)}, got {mode!r}"
+        ) from exc
+
+
 class LegacyScopeFlag(str, Enum):
     """The two pre-ADR-049 ``--[no-]scope-public-headers`` CLI flags."""
 

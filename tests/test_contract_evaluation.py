@@ -88,11 +88,17 @@ _UNRESOLVABLE = PublicSurface()  # resolvable defaults to False
 
 class TestUnsupportedMode:
     @pytest.mark.parametrize("mode", [ContractMode.EXPORTS, "exports"])
-    def test_exports_mode_raises_not_implemented(self, mode: object) -> None:
-        # A bare serialized value must be coerced through ContractMode(...)
-        # the same as a real enum member, not silently misrouted.
+    def test_exports_mode_without_export_surfaces_is_a_caller_error(
+        self, mode: object
+    ) -> None:
+        # `exports` roots are the binary's own export table -- evidence a
+        # PublicSurface does not carry -- so answering from the header
+        # surface would misrepresent the mode rather than implement it. A
+        # bare serialized value must be coerced through ContractMode(...)
+        # the same as a real enum member, not silently misrouted into the
+        # PUBLIC path.
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError, match="requires an ExportSurface pair"):
             evaluate_change_contract_relevance(
                 c, _UNRESOLVABLE, _UNRESOLVABLE, mode=mode
             )
@@ -135,8 +141,8 @@ class TestAllMode:
 
     def test_bare_all_string_is_coerced_to_the_real_enum_member(self) -> None:
         # Regression (Codex review): `mode="all"` (a bare str, not the
-        # ContractMode enum member) satisfied the `_SUPPORTED_MODES`
-        # membership check (equality/hash) but then failed the
+        # ContractMode enum member) compared equal to a member
+        # (equality/hash) but then failed the
         # `is ContractMode.ALL` identity check, silently falling through
         # to the PUBLIC path -- so an unresolvable-surface finding wrongly
         # came back UNKNOWN_UNRESOLVED instead of IN_CONTRACT.
@@ -1011,13 +1017,20 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
 
 
 class TestPublicModeMemberLevelConfirmation:
-    """A member-level finding (``TYPE_FIELD_OFFSET_CHANGED`` etc.) is
-    owner-qualified: ``symbol="Point::x"``. Confirmation must check the
-    *owner* (``Point``) against ``public_types``, mirroring
-    ``classify_change_surface``'s own owner-stripping -- passing the full
-    ``"Point::x"`` to ``_type_identifiers`` yields ``{"Point::x", "x"}``,
-    never ``"Point"``, so this previously always failed confirmation
-    (Codex review, ninth round)."""
+    """A member-level finding must be confirmed against its *owner* type.
+
+    The two producer families spell ``symbol`` differently, so
+    ``_type_candidates`` selects the shape per kind (Codex review):
+    ``diff_types``' field families record the owning type alone with the
+    member in ``detail`` (``symbol="ns::Point"``), while ``diff_platform``'s
+    ``struct_field_*`` and the enum families record owner *and* member
+    (``symbol="ns::Point::x"``).
+
+    The fixtures below use the shapes a real ``compare()`` actually emits --
+    verified by running one: a field-offset change on ``ns::Point`` produces
+    ``kind=type_field_offset_changed symbol='ns::Point'``. An earlier
+    revision of this suite asserted ``symbol="Point::x"`` for that kind,
+    which no producer emits."""
 
     def test_public_struct_field_offset_change_confirms_via_owner_type(self) -> None:
         snap = AbiSnapshot(
@@ -1037,7 +1050,7 @@ class TestPublicModeMemberLevelConfirmation:
         s = compute_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
-            symbol="Point::x",
+            symbol="Point",
             description="",
         )
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)

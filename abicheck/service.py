@@ -1088,102 +1088,15 @@ def _emit(notify: Callable[[str], None] | None, message: str) -> None:
         _logger.warning(message)
 
 
-def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
-    """Auto-detect SYCL distribution and attach plugin metadata.
-
-    Runs only when ``lib_path`` lives in a directory that looks like a
-    SYCL runtime distribution (contains ``libsycl.so`` or ``libacpp-rt.so``).
-    Cost for non-SYCL libraries: one ``_detect_sycl_implementation()`` call
-    which is a few ``Path.exists()`` checks — effectively zero overhead.
-    """
-    from .sycl_metadata import parse_sycl_metadata
-    lib_dir = lib_path.resolve().parent
-    try:
-        sycl = parse_sycl_metadata(lib_dir)
-    except Exception as exc:  # noqa: BLE001
-        _logger.debug("SYCL metadata extraction skipped: %s", exc)
-        return
-    if sycl is not None:
-        snap.sycl = sycl
-        _logger.info(
-            "SYCL metadata attached: implementation=%s, %d plugin(s)",
-            sycl.implementation,
-            len(sycl.plugins),
-        )
-
-
-def _try_attach_python_ext_metadata(snap: AbiSnapshot) -> None:
-    """Recognise a CPython extension module and attach its metadata (G14).
-
-    Cheap and side-effect-free: inspects the snapshot's already-parsed export
-    and import tables (plus the filename SOABI tag) for a ``PyInit_*`` export or
-    ``Py*`` imports. A plain C/C++ library has neither, so ``python_ext`` stays
-    ``None`` and nothing downstream changes.
-    """
-    from .python_ext import detect_python_extension
-
-    try:
-        python_ext = detect_python_extension(snap)
-    except Exception as exc:  # noqa: BLE001
-        _logger.debug("Python extension detection skipped: %s", exc)
-        return
-    if python_ext is not None:
-        snap.python_ext = python_ext
-        _logger.info(
-            "CPython extension detected: module=%s, abi3=%s, %d CPython import(s)",
-            python_ext.module_name,
-            python_ext.limited_api,
-            len(python_ext.cpython_imports),
-        )
-
-
-def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
-    """Scan for NumPy C-API consumption evidence and attach it (G26).
-
-    Cheap: a bounded read of the binary plus a handful of substring/regex
-    scans. A library that doesn't consume the NumPy C-API at all leaves
-    ``numpy_capi`` at ``None`` — no finding, not a false positive.
-    """
-    from .numpy_capi import extract_numpy_capi_surface
-    try:
-        numpy_capi = extract_numpy_capi_surface(lib_path)
-    except Exception as exc:  # noqa: BLE001
-        _logger.debug("NumPy C-API surface extraction skipped: %s", exc)
-        return
-    if numpy_capi is not None:
-        snap.numpy_capi = numpy_capi
-        if numpy_capi.consumes_array_api or numpy_capi.consumes_ufunc_api:
-            _logger.info(
-                "NumPy C-API consumption detected: array_api=%s, ufunc_api=%s, target=%s",
-                numpy_capi.consumes_array_api,
-                numpy_capi.consumes_ufunc_api,
-                numpy_capi.capi_target_version,
-            )
-
-
-def _try_attach_python_api_surface(snap: AbiSnapshot) -> None:
-    """Recover an extension module's Python-visible API surface (G23).
-
-    Looks for a ``.pyi`` type stub alongside the snapshot's ``source_path`` and,
-    if found, statically parses the top-level functions/classes/methods and
-    their signatures into ``python_api``. Never imports or executes the module.
-    A no-op (leaves ``python_api`` as ``None``) when no stub is present — the
-    common case for a plain C/C++ library or a stubless extension.
-    """
-    from .python_api import detect_python_api
-    try:
-        python_api = detect_python_api(snap)
-    except Exception as exc:  # noqa: BLE001
-        _logger.debug("Python API surface recovery skipped: %s", exc)
-        return
-    if python_api is not None:
-        snap.python_api = python_api
-        _logger.info(
-            "Python API surface recovered: module=%s, %d function(s), %d class(es)",
-            python_api.module_name,
-            len(python_api.functions),
-            len(python_api.classes),
-        )
+# ── Opportunistic per-ecosystem metadata attachment (extracted to leaf
+# module service_metadata_attach to stay under the AI-readiness size cap;
+# re-exported verbatim so the existing import paths are unchanged). ──────
+from .service_metadata_attach import (  # noqa: E402
+    _try_attach_numpy_capi_surface,
+    _try_attach_python_api_surface,
+    _try_attach_python_ext_metadata,
+    _try_attach_sycl_metadata,
+)
 
 
 def _dump_elf(
@@ -1611,6 +1524,33 @@ def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
         raise ValidationError(f"Cannot read environment matrix {path}: {e}") from e
 
 
+def _validate_contract_mode(
+    contract_mode: str | None, contract_evaluation: bool
+) -> None:
+    """Apply ADR-049 Phase 6's two ``contract_mode`` rules at a Tier-2 entry.
+
+    Same allowed values and same ``contract_evaluation`` dependency as
+    ``CompareRequest.validation_errors`` and the CLI's ``--contract``, so the
+    three front ends cannot disagree about what is accepted.
+    """
+    if contract_mode is None:
+        return
+    from .contract_relevance_types import ContractMode
+
+    allowed = {mode.value for mode in ContractMode}
+    if contract_mode not in allowed:
+        raise ValidationError(
+            f"unsupported contract mode {contract_mode!r}: "
+            f"choose from {', '.join(sorted(allowed))}"
+        )
+    if not contract_evaluation:
+        raise ValidationError(
+            "contract_mode requires contract_evaluation: it selects which "
+            "evidence domain the shadow contract evaluator judges against, "
+            "and without that flag no contract decision is computed at all"
+        )
+
+
 def compare_snapshots(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -1629,6 +1569,7 @@ def compare_snapshots(
     env_matrix: EnvironmentMatrix | None = None,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -1638,7 +1579,16 @@ def compare_snapshots(
     command with embedded build-source evidence, ``scan``, ``appcompat``) route
     through here instead of importing ``checker.compare``; the kwargs mirror the
     core verb exactly so no capability is lost.
+
+    Raises:
+        ValidationError: *contract_mode* is not one of ``public``/``exports``/
+            ``all``, or is given without *contract_evaluation*. This is a
+            documented Tier-2 entry point that direct Python callers reach
+            without building a ``CompareRequest``, so it applies the same two
+            rules that request object and the CLI do rather than silently
+            accepting a no-op or failing later inside the core (Codex review).
     """
+    _validate_contract_mode(contract_mode, contract_evaluation)
     # Centralized POST committed-wrapper recovery: when a committed-surface
     # allowlist is supplied, union the callable `pp_*` wrappers exported by the
     # old snapshot (contract_scope_allowlist's snapshot half). This keeps both
@@ -1671,6 +1621,7 @@ def compare_snapshots(
         env_matrix=env_matrix,
         diagnostic_comparison=diagnostic_comparison,
         contract_evaluation=contract_evaluation,
+        contract_mode=contract_mode,
     )
 
 
@@ -1828,6 +1779,7 @@ def run_compare_request(
         env_matrix=load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,
         contract_evaluation=request.contract_evaluation,
+        contract_mode=request.contract_mode,
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
@@ -1864,6 +1816,7 @@ def run_compare(
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
     include_dependencies: bool = True,
+    contract_mode: str | None = None,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1920,6 +1873,7 @@ def run_compare(
         debuginfod_url=debuginfod_url,
         diagnostic_comparison=diagnostic_comparison,
         contract_evaluation=contract_evaluation,
+        contract_mode=contract_mode,
     )
     return run_compare_request(request)
 

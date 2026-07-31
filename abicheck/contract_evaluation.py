@@ -27,28 +27,29 @@ the CLI, or reports calls it yet, and its output changes no verdict, no exit
 code, and no report. It exists so a decision can be computed and compared
 against real runs before Phase 6 wires it into anything that affects output.
 
-Deliberately conservative, twice over:
+All three ADR-049 D2 modes are implemented. ``PUBLIC`` and ``ALL`` read the
+header-derived :class:`~abicheck.surface.PublicSurface` pair; ``EXPORTS``
+reads its own domain's evidence provider,
+:class:`~abicheck.export_surface.ExportSurface`
+(:func:`~abicheck.export_surface.compute_export_surface`) -- roots observed in
+the binary's own export table, closure over the raw type graph, no
+header-origin classification anywhere. That pair is a required argument for
+that mode, never approximated from the header surface: silently answering an
+export-domain question with header-derived evidence would misrepresent the
+mode rather than implement it.
 
-1. **Only** :data:`~abicheck.contract_relevance_types.ContractMode.PUBLIC` and
-   :data:`~abicheck.contract_relevance_types.ContractMode.ALL` are
-   implemented. ``EXPORTS`` needs an export-root-closure evidence provider
-   that does not exist yet (``surface.py`` only computes a *header-derived*
-   public closure, not an *export-symbol-rooted* one) --
-   :func:`evaluate_change_contract_relevance` raises ``NotImplementedError``
-   for it rather than silently approximating it as ``PUBLIC`` or ``ALL``,
-   either of which would misrepresent a mode this evaluator cannot actually
-   check.
-2. This evaluator **never emits**
-   :data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNPROVEN`.
-   That value means "the declared evidence domain was searched completely and
-   found no commitment" (ADR-049's ``closed_domain_no_commitment`` reason) --
-   a closed-world completeness claim this module has no way to verify with
-   today's evidence providers (there is no per-domain "did we search
-   everything" signal, only ``PublicSurface.resolvable``/``has_provenance``).
-   Every case that would otherwise need ``UNKNOWN_UNPROVEN`` is downgraded to
-   the weaker, honestly-hedged
-   :data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNRESOLVED`
-   with reason ``required_evidence_incomplete`` instead.
+Deliberately conservative: this evaluator **never emits**
+:data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNPROVEN`.
+That value means "the declared evidence domain was searched completely and
+found no commitment" (ADR-049's ``closed_domain_no_commitment`` reason) -- a
+closed-world completeness claim this module has no way to verify with today's
+evidence providers (there is no per-domain "did we search everything" signal,
+only ``PublicSurface.resolvable``/``has_provenance`` and
+``ExportSurface.resolvable``/``has_typed_roots``). Every case that would
+otherwise need ``UNKNOWN_UNPROVEN`` is downgraded to the weaker,
+honestly-hedged
+:data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNRESOLVED`
+with reason ``required_evidence_incomplete`` instead.
 
 See :doc:`ADR-049
 </contribute/adr/049-contract-relevance-and-compatibility-configuration>` and
@@ -69,7 +70,9 @@ from .contract_relevance_types import (
     ContractAssurance,
     ContractMode,
     ContractRelevance,
+    coerce_contract_mode,
 )
+from .export_surface import ExportSurface
 from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .model import ScopeOrigin
 from .post_processing import _PUBLIC_SOURCE_ABI_KINDS, _change_matches_symbols
@@ -281,9 +284,6 @@ _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
     k.value for k in _NOT_APPLICABLE_KINDS
 )
 
-_SUPPORTED_MODES: frozenset[ContractMode] = frozenset(
-    {ContractMode.PUBLIC, ContractMode.ALL}
-)
 
 # post_processing.MarkReachability's own set of L4/L5 source-derived kinds
 # that are public-contract *by construction* -- each is built only from an
@@ -586,13 +586,24 @@ def _authoritative_surface(
     obligation *was* (the old side), not what it later became -- new public
     evidence cannot retroactively manufacture confidence about an old,
     unresolved/private commitment (Codex review, fresh evidence).
+
+    The kind test itself lives in :func:`_new_side_is_authoritative` so the
+    ``exports`` domain's own side selection
+    (:func:`_authoritative_export_surface`, over a differently-typed surface
+    pair) applies the identical ADR-049 D4 rule instead of a second copy of
+    these two kind sets.
     """
-    if (
+    return surf_new if _new_side_is_authoritative(change) else surf_old
+
+
+def _new_side_is_authoritative(change: Change) -> bool:
+    """ADR-049 D4's side rule as a plain predicate -- see
+    :func:`_authoritative_surface` for the reasoning and the empirical
+    evidence behind both kind sets."""
+    return (
         change.kind in ADDITION_KINDS
         or change.kind in _NON_COMPATIBLE_ADDITION_SHAPE_KINDS
-    ):
-        return surf_new
-    return surf_old
+    )
 
 
 def _hidden_friend_confirmed_public(
@@ -675,13 +686,10 @@ def _in_surface_result_is_confirmed(
       function, not a type) applies to this kind at all.
     - A member-level finding (``_MEMBER_LEVEL_TYPE_KIND_NAMES``, e.g.
       ``TYPE_FIELD_OFFSET_CHANGED`` with ``symbol="Point::x"``) must be
-      confirmed against its *owner* type, exactly like
-      ``classify_change_surface`` reclassifies it: passing the full
-      ``"Point::x"`` to ``_type_identifiers`` yields ``{"Point::x", "x"}``,
-      never the owner ``"Point"`` that is actually the ``public_types``
-      entry, so this case previously always failed confirmation and was
-      downgraded to ``UNKNOWN_UNRESOLVED`` even for a genuinely public
-      field/enum-member change (Codex review, ninth round).
+      confirmed against its *owner* type -- handled by :func:`_type_candidates`
+      (see its docstring); before that, this case always failed confirmation
+      and was downgraded to ``UNKNOWN_UNRESOLVED`` even for a genuinely
+      public field/enum-member change (Codex review, ninth round).
     - Every other ``True`` comes from ``_classify_symbol_level``/
       ``_classify_type_level``, where ``sym in public_symbols``/``known &
       public_types`` is genuine confirmation. The ``public_symbols`` check
@@ -698,33 +706,16 @@ def _in_surface_result_is_confirmed(
       are silently upgraded to ``IN_CONTRACT`` without this check
       (Codex review, eighth round).
 
-    Uses ``_type_identifiers`` (mirroring, not reimplementing,
-    ``classify_change_surface``'s own candidate derivation) rather than a
-    naive raw-string comparison, since a raw ``caused_by_type`` spelling
-    (``"const Foo *"``) would never literal-match a bare ``all_types``/
-    ``public_types`` entry (``"Foo"``).
-
-    A type-candidate match is also rejected when every matching candidate is
-    ambiguous -- either the candidate itself is flagged in the authoritative
-    side's own ``ambiguous_type_names`` (two distinct records/enums sharing
-    one bare tail, e.g. ``one::Point``/``two::Point`` both spelled bare
-    ``Point``:
-    ``compute_public_surface`` deliberately keeps *both* records in
-    ``public_types`` rather than silently dropping either, its own
-    anti-hiding rule), or the candidate is a *qualified* name whose own
-    trailing tail is ambiguous (``ns1::Mode``/``ns2::Mode`` sharing bare tail
-    ``Mode``): ``_walk_type_closure`` reaches an ambiguous bare tail from a
-    public signature by adding *every* matching record/enum's full qualified
-    name to ``public_types`` (walking each one, so a real dependency of
-    either isn't hidden) -- so a qualified candidate's presence in
-    ``public_types`` does not by itself prove *that* candidate, rather than
-    its ambiguous sibling, is what the public signature actually reaches
-    (Codex review, twelfth round). Neither case establishes which record --
-    or whether either -- this finding's root actually resolves to.
+    Candidate derivation (:func:`_type_candidates`) and the
+    ambiguous-candidate rejection (:func:`_confirmed_type_matches`, Codex
+    review, twelfth round) both live in shared helpers -- see their
+    docstrings; the ``exports`` domain asks the identical questions against
+    its own root/closure sets.
 
     **Known over-rejection, investigated and deliberately not fixed this
-    pass (Codex review, fifteenth round):** the qualified-tail rejection
-    above is intentionally blunt and can reject a genuinely exact match.
+    pass (Codex review, fifteenth round):** :func:`_confirmed_type_matches`'s
+    qualified-tail rejection is intentionally blunt and can reject a
+    genuinely exact match.
     When a public signature names ``ns1::Point`` *explicitly* (fully
     qualified) and the snapshot separately contains an unrelated
     ``ns2::Point``, ``_type_identifiers`` still derives the bare tail
@@ -783,37 +774,402 @@ def _in_surface_result_is_confirmed(
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _hidden_friend_confirmed_public(change, surf_old, surf_new)
     auth = _authoritative_surface(change, surf_old, surf_new)
+    if _symbol_matches(change, auth.public_symbols):
+        return True
+    return bool(
+        _confirmed_type_matches(
+            _type_candidates(change), auth.public_types, auth.ambiguous_type_names
+        )
+    )
+
+
+def _is_mangled_identity(sym: str) -> bool:
+    """Whether *sym* is spelled in a C++ mangling scheme rather than source form.
+
+    ``_Z`` is Itanium, ``__Z`` the extra platform underscore a Mach-O
+    direct-clang snapshot carries (``diff_cxx_rules._itanium_strip_prefix``
+    documents the same quirk), and ``?`` opens every MSVC-mangled name
+    (``diff_cxx_rules.msvc_scope_components``). All three are spellings a
+    source-level type or function name can never take -- ``?`` is not an
+    identifier character at all, and ``_Z``-prefixed identifiers are reserved
+    -- which is what makes an exact hit on one unambiguous.
+    """
+    return sym.startswith(("_Z", "__Z", "?"))
+
+
+def _symbol_matches(
+    change: Change, symbols: set[str], *, allow_tail_fallback: bool = True
+) -> bool:
+    """Whether *change*'s own symbol is a member of *symbols*.
+
+    ``classify_change_surface`` never consults a symbol universe for a
+    type-level kind at all (``_classify_symbol_level`` is only called when
+    ``not type_level_finding``) -- exactly to prevent a type name colliding
+    with an unrelated exported function/variable of the same spelling
+    (surface.py's own ``_TYPE_LEVEL_KIND_NAMES`` docstring: castxml
+    represents an implicit same-named constructor unmangled, so a type
+    "Foo" can share a bare name with a real symbol "Foo" that has nothing
+    to do with it). Confirmed empirically: a type completely unknown to
+    either snapshot (classify_change_surface's own "cannot place it, keep
+    it" fallback -- not genuine confirmation) whose symbol happened to
+    match an unrelated public function of the same name was wrongly
+    confirmed via this check before gating it the same way (Codex review).
+    That gate is narrowed, not lifted, for a *mangled* symbol -- see the
+    comment on the branch itself.
+
+    Shared by the ``public`` domain's :func:`_in_surface_result_is_confirmed`
+    and the ``exports`` domain's :func:`_exports_mode_decision` -- both ask
+    the identical "is this finding's own symbol a root of that domain"
+    question, differing only in which set is passed.
+
+    *allow_tail_fallback* controls the "a finding may name only the bare leaf"
+    tolerance. The ``exports`` domain turns it **off** (Codex review): its
+    root set legitimately contains a bare matched export name -- a real C
+    symbol ``foo`` -- and deriving the tail of an unrelated qualified finding
+    (``ns::foo``) then matches that root through the same spelling, which is
+    the alias collision the rootness fix removed from the *other* side.
+    Turning it off loses nothing there: an unambiguous bare tail is already a
+    key in ``export_symbols`` (``_symbol_keys`` puts it there), so the honest
+    cases still match exactly; only the derive-a-tail-from-the-finding step,
+    which cannot tell a leaf from a different symbol entirely, is dropped.
+    """
     sym = change.symbol or ""
-    # `classify_change_surface` never consults `public_symbols` for a
-    # type-level kind at all (`_classify_symbol_level` is only called when
-    # `not type_level_finding`) -- exactly to prevent a type name colliding
-    # with an unrelated exported function/variable of the same spelling
-    # (surface.py's own `_TYPE_LEVEL_KIND_NAMES` docstring: castxml
-    # represents an implicit same-named constructor unmangled, so a type
-    # "Foo" can share a bare name with a real symbol "Foo" that has nothing
-    # to do with it). Confirmed empirically: a type completely unknown to
-    # either snapshot (classify_change_surface's own "cannot place it, keep
-    # it" fallback -- not genuine confirmation) whose symbol happened to
-    # match an unrelated public function of the same name was wrongly
-    # confirmed via this check before gating it the same way (Codex
-    # review).
-    if change.kind.value not in _TYPE_LEVEL_KIND_NAMES:
-        if sym in auth.public_symbols:
-            return True
-        if sym and "::" in sym and sym.rsplit("::", 1)[1] in auth.public_symbols:
-            return True
-    if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and sym and "::" in sym:
-        candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
-    else:
-        candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
-    matched = candidates & auth.public_types
-    ambiguous = auth.ambiguous_type_names
-    confirmed_matches = {
+    if change.kind.value in _TYPE_LEVEL_KIND_NAMES:
+        # ...but a *mangled* symbol carries no such collision risk, and one
+        # type-level producer emits exactly that: `diff_symbols.
+        # _check_vtable_index_change` reuses `TYPE_VTABLE_CHANGED` for a
+        # moved virtual slot and sets `symbol=mangled`, the method's own
+        # linker name. The blanket rejection left a vtable-slot change on an
+        # observed *exported* method `UNKNOWN_UNRESOLVED` even though its
+        # exact mangled name is a root, and `_type_candidates` cannot recover
+        # the owning class from an Itanium encoding to recover via the
+        # closure either (Codex review, confirmed with a minimal snapshot).
+        # Only an *exact* hit counts: `_Z`/`__Z`/`?` are mangling-scheme
+        # prefixes no C++ type spelling can occupy, so a bare type/function
+        # name cannot reach this branch at all.
+        return bool(sym) and _is_mangled_identity(sym) and sym in symbols
+    if sym in symbols:
+        return True
+    if not allow_tail_fallback:
+        return False
+    return bool(sym and "::" in sym and sym.rsplit("::", 1)[1] in symbols)
+
+
+# Which spelling a member-level finding's `symbol` actually carries. Verified
+# producer by producer (Codex review): `diff_types.py`'s field/union families
+# and `field_bitfield_changed` record the owning *type* alone with the member
+# in `detail` (`symbol=name`), while its enum families and
+# `diff_platform.py`'s `struct_field_*` record owner *and* member
+# (`symbol=f"{name}::{mname}"`). Built from real `ChangeKind` members so a
+# stale slug fails at import instead of silently taking the wrong branch.
+_OWNER_IS_SYMBOL_KINDS: frozenset[str] = frozenset(
+    k.value
+    for k in (
+        ChangeKind.TYPE_FIELD_ADDED,
+        ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        ChangeKind.TYPE_FIELD_REMOVED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.UNION_FIELD_ADDED,
+        ChangeKind.UNION_FIELD_REMOVED,
+        ChangeKind.UNION_FIELD_TYPE_CHANGED,
+        ChangeKind.FIELD_BITFIELD_CHANGED,
+    )
+)
+
+_OWNER_PLUS_MEMBER_KINDS: frozenset[str] = frozenset(
+    k.value
+    for k in (
+        ChangeKind.ENUM_MEMBER_ADDED,
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+    )
+)
+
+assert _OWNER_IS_SYMBOL_KINDS.isdisjoint(_OWNER_PLUS_MEMBER_KINDS), (
+    "a member-level kind cannot carry both symbol shapes"
+)
+# A kind added to surface.py's member-level set but not classified here would
+# silently fall through to the generic `_type_identifiers` path and lose its
+# owner, so fail loudly at import instead (the same discipline as this
+# module's terminal/weak surface-reason assertion above).
+assert (_OWNER_IS_SYMBOL_KINDS | _OWNER_PLUS_MEMBER_KINDS) == frozenset(
+    _MEMBER_LEVEL_TYPE_KIND_NAMES
+), "every _MEMBER_LEVEL_TYPE_KIND_NAMES member must declare its symbol shape"
+
+
+def _type_candidates(change: Change) -> set[str]:
+    """Type names *change* could be about, mirroring ``classify_change_surface``'s
+    own candidate derivation (never a naive raw-string comparison: a raw
+    ``caused_by_type`` spelling ``"const Foo *"`` would not literal-match a
+    bare ``"Foo"`` entry).
+
+    A member-level finding (``_MEMBER_LEVEL_TYPE_KIND_NAMES``) must resolve to
+    its *owner* type -- but the producers in that one kind set disagree on
+    whether ``symbol`` already names the member, so **both** readings are
+    offered as candidates (Codex review, confirmed against ``diff_types.py``):
+
+    - :data:`_OWNER_PLUS_MEMBER_KINDS` record ``symbol=f"{name}::{mname}"``,
+      so the owner is the ``"::"``-stripped prefix. Passing the full spelling
+      to :func:`_type_identifiers` would yield ``{"ns::Mode::X", "X"}``, never
+      the owner that is the real type-universe entry.
+    - :data:`_OWNER_IS_SYMBOL_KINDS` record ``symbol=name`` -- the owning
+      *type* alone, with the member name in ``detail``. Stripping there turns
+      ``"ns::Foo"`` into the namespace fragment ``"ns"``, losing the owner
+      entirely and leaving a genuinely public field change unconfirmed.
+
+    The shape is selected **per kind** (:data:`_OWNER_PLUS_MEMBER_KINDS` vs
+    :data:`_OWNER_IS_SYMBOL_KINDS`), not guessed. Offering *both* readings --
+    which an earlier revision did -- over-corrects in the other direction: for
+    a nested ``"Outer::Helper"`` field finding the stripped ``"Outer"`` may
+    well be inside the closure while ``Outer::Helper`` is not, which would
+    confirm a finding about the nested type on its parent's membership (Codex
+    review).
+    """
+    sym = change.symbol or ""
+    if sym and "::" in sym:
+        if change.kind.value in _OWNER_PLUS_MEMBER_KINDS:
+            return {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
+        if change.kind.value in _OWNER_IS_SYMBOL_KINDS:
+            return {sym} | _type_identifiers(change.caused_by_type)
+    return _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
+
+
+def _confirmed_type_matches(
+    candidates: set[str], types: set[str], ambiguous: set[str]
+) -> set[str]:
+    """*candidates* present in *types* whose identity is not ambiguous.
+
+    A match is rejected when the candidate itself is flagged in *ambiguous*
+    (two distinct records/enums sharing one bare tail, e.g. ``one::Point``/
+    ``two::Point`` both spelled bare ``Point``: ``compute_public_surface``
+    deliberately keeps *both* records rather than silently dropping either,
+    its own anti-hiding rule), or when the candidate is a *qualified* name
+    whose own trailing tail is ambiguous (``ns1::Mode``/``ns2::Mode`` sharing
+    bare tail ``Mode``): ``_walk_type_closure`` reaches an ambiguous bare tail
+    from a signature by adding *every* matching record/enum's full qualified
+    name (walking each one, so a real dependency of either isn't hidden) --
+    so a qualified candidate's presence does not by itself prove *that*
+    candidate, rather than its ambiguous sibling, is what the signature
+    actually reaches. Neither case establishes which record -- or whether
+    either -- this finding's root actually resolves to.
+    """
+    return {
         m
-        for m in matched
+        for m in candidates & types
         if m not in ambiguous and not ("::" in m and m.rsplit("::", 1)[1] in ambiguous)
     }
-    return bool(confirmed_matches)
+
+
+def _authoritative_export_surface(
+    change: Change, exp_old: ExportSurface, exp_new: ExportSurface
+) -> ExportSurface:
+    """:func:`_authoritative_surface`'s ADR-049 D4 side selection, for the
+    ``exports`` domain's own surface pair. Same rule, same predicate
+    (:func:`_new_side_is_authoritative`) -- only the surface type differs."""
+    return exp_new if _new_side_is_authoritative(change) else exp_old
+
+
+def _export_root_decision() -> ContractEvaluationDecision:
+    return ContractEvaluationDecision(
+        relevance=ContractRelevance.IN_CONTRACT,
+        reason_code="export_root_membership",
+        assurance=ContractAssurance.COMPLETE,
+    )
+
+
+def _is_trusted_by_construction(change: Change) -> bool:
+    """Whether *change* is definitive regardless of any surface evidence.
+
+    Three families, each built only from an already-proven-in-contract
+    entity, so no universe-membership or identity check can add information
+    about them -- it can only take it away. See
+    :func:`evaluate_change_contract_relevance`'s own call site for the full
+    per-family rationale.
+    """
+    return (
+        change.kind.value.startswith("python_")
+        or change.kind.value in _NEVER_FILTER_KIND_NAMES
+        or change.kind.value in _PUBLIC_SOURCE_ABI_KIND_SLUGS
+    )
+
+
+def _trusted_by_construction_decision() -> ContractEvaluationDecision:
+    return ContractEvaluationDecision(
+        relevance=ContractRelevance.IN_CONTRACT,
+        reason_code="public_root_membership",
+        assurance=ContractAssurance.COMPLETE,
+    )
+
+
+#: The trusted-by-construction kinds whose construction rests on *this*
+#: domain's own evidence -- the observed export table -- and which may
+#: therefore skip the ``exports`` resolvability/identity gates.
+#:
+#: Deliberately not the whole of the `public` path's trusted set, which an
+#: earlier revision reused wholesale and an existing test immediately caught:
+#: those families are grounded in *header*/source/Python-axis evidence, which
+#: says nothing about export membership. A `PUBLIC_MACRO_REMOVED` has no
+#: linker symbol at all, and `constant_*`/`internal_*_leaks_via_public_api`
+#: are derived from the public API surface, so under a contract defined as
+#: "exported roots and their closure" they stay `UNKNOWN_UNRESOLVED` rather
+#: than being asserted in-domain.
+#:
+#: `VISIBILITY_LEAK` qualifies because `diff_platform_elf_dynamic.
+#: _diff_visibility_leak` builds it exclusively from `Visibility.ELF_ONLY`
+#: declarations -- entries of the ELF symbol table itself. Another kind
+#: belongs here only on the same footing: its producer must draw solely from
+#: the export table.
+_EXPORT_GROUNDED_KIND_NAMES: frozenset[str] = frozenset(
+    {ChangeKind.VISIBILITY_LEAK.value}
+)
+
+
+def _exports_mode_decision(
+    change: Change,
+    exp_old: ExportSurface,
+    exp_new: ExportSurface,
+) -> ContractEvaluationDecision:
+    """*change*'s relevance under ADR-049's ``exports`` contract domain.
+
+    Plan Section 7's ``exports`` row, clause by clause: "its domain is only
+    exported function/variable roots and closure computed from the raw type
+    graph. Roots/closure are ``IN_CONTRACT``; an entity proven unreachable
+    after complete root/graph traversal is ``PROVEN_OUT_OF_CONTRACT``;
+    incomplete root/graph or identity evidence is ``UNKNOWN_UNRESOLVED``;
+    non-entity findings are ``NOT_APPLICABLE``" (that last clause is already
+    handled by the caller's mode-independent ``_NOT_APPLICABLE_KIND_SLUGS``
+    short-circuit).
+
+    Header-derived evidence is deliberately *not* consulted anywhere here --
+    "Public-header/manifest/consumer failures are unrelated and advisory" for
+    this domain -- which is why the caller dispatches here *before* its own
+    ``_ALL_SURFACE_REASONS`` fast path. A private-header type reached from a
+    real export is in this contract; a public-header declaration that is not
+    exported and not reached is not.
+
+    **Neither declared-public overlay can widen this domain** (Codex review).
+    ``force_public_symbols`` (``--public-symbol``) and
+    ``public_surface_allowlist`` (``--post-manifest``) both assert something
+    about the *declared-public* surface; neither observes an export, and a
+    user assertion cannot make an unexported declaration exported. Honoring
+    them here -- as the ``public`` path rightly does, since there they *are*
+    the domain's own evidence -- would report an unexported declaration
+    ``IN_CONTRACT`` under a contract defined as "only exported roots and
+    their closure", and could gate on it.
+
+    The POST manifest's *exclusion* half does not apply here either, which is
+    why the caller dispatches this mode ahead of that shortcut too: Section
+    7's ``exports`` row is unconditional both ways -- "Roots/closure are
+    ``IN_CONTRACT`` ... Public-header/manifest/consumer failures are unrelated
+    and advisory" -- so a symbol the binary demonstrably exports stays in this
+    contract even when a manifest omits it.
+
+    Never claims ``PROVEN_OUT_OF_CONTRACT`` without both an observed export
+    table *and* an entity this snapshot actually knows about: an entity
+    absent from the snapshot's own universe (a macro, a Python-API-axis
+    finding, an inline function the dumper never recorded as a declaration)
+    cannot be placed in the export domain at all, which is "incomplete
+    root/graph evidence", not proof of exclusion.
+    """
+    # Checked before this domain's own resolvability and identity gates,
+    # exactly as the `public` path checks its own trusted-by-construction
+    # families before its equivalents (Codex review, confirmed empirically):
+    # a `VISIBILITY_LEAK` carries the producer's synthetic
+    # `symbol="<visibility>"`, which resolves to `finding_identity`'s reduced
+    # tier, so the identity gate below stamped every one of them
+    # `UNKNOWN_UNRESOLVED`.
+    if change.kind.value in _EXPORT_GROUNDED_KIND_NAMES:
+        return _trusted_by_construction_decision()
+
+    auth = _authoritative_export_surface(change, exp_old, exp_new)
+    if not auth.resolvable:
+        return _unresolved_decision(
+            "required_evidence_incomplete", ContractAssurance.UNAVAILABLE
+        )
+
+    identity = resolve_change_identity(change)
+    if identity.tier == IDENTITY_TIER_REDUCED:
+        return _unresolved_decision("identity_ambiguous", ContractAssurance.PARTIAL)
+
+    if _symbol_matches(change, auth.export_symbols, allow_tail_fallback=False):
+        return _export_root_decision()
+
+    # Closure membership answers a *type-level* question only. A symbol-level
+    # finding (`FUNC_RETURN_CHANGED` on an unexported helper, say) often
+    # carries a `caused_by_type` that some *other* exported signature does
+    # reach -- classifying the helper itself `IN_CONTRACT` on that basis would
+    # gate an internal function merely for using a public type (Codex review).
+    # Its own membership is decided by its own linker symbol being a root,
+    # which the check above already answered.
+    type_scoped = (
+        change.kind.value in _TYPE_LEVEL_KIND_NAMES
+        or change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES
+    )
+    candidates = _type_candidates(change) if type_scoped else set()
+    if _confirmed_type_matches(
+        candidates, auth.export_types, auth.ambiguous_type_names
+    ):
+        return _export_root_decision()
+
+    # A candidate that matched only ambiguously proves nothing in either
+    # direction -- which of the colliding records the finding is really about
+    # decides its membership, and that is exactly what is unknown. Crucially
+    # this must not fall through to the proven-out branch below merely
+    # because no *unambiguous* match confirmed. The reason code is
+    # deliberately `identity_ambiguous` (the registry's own "identity
+    # coverage for the affected entity is incomplete, so root/closure
+    # membership cannot be decided") rather than the coarser
+    # `required_evidence_incomplete` the `public` path reports for the same
+    # shape: the difference is the reason string only -- both paths agree on
+    # the relevance and assurance -- and this domain has the more precise one
+    # available because it reaches the ambiguity decision directly instead of
+    # through `classify_change_surface`'s own in-surface fallback.
+    if candidates & auth.export_types:
+        return _unresolved_decision("identity_ambiguous", ContractAssurance.PARTIAL)
+
+    # Nothing is provable unless the observed export table was fully
+    # accounted for: an export no declaration matched (a mangling-scheme gap,
+    # or an entry point absent from the parsed headers) is a real entry point
+    # whose own signature -- and therefore whose own type closure -- this
+    # snapshot knows nothing about, so an absence from the root/closure sets
+    # could simply mean the missing export is what reaches this entity
+    # (`ExportSurface.exclusion_is_provable`; Codex review).
+    if not auth.exclusion_is_provable:
+        return _unresolved_decision(
+            "required_evidence_incomplete", ContractAssurance.PARTIAL
+        )
+
+    known_types = candidates & auth.all_types
+    # An untyped export root -- one absent from the parsed headers, or
+    # recorded with the export-only `"?"` sentinel -- has an unknown closure
+    # of its own that could contain this very type, so it must not permit an
+    # exclusion either (ADR-024 D5.2's rule, applied to this domain; Codex
+    # review). That used to be a second check right here; it now lives
+    # inside `exclusion_is_provable` above, which is where the property's own
+    # docstring always claimed every incompleteness signal was (CodeRabbit
+    # review). Both paths returned the identical decision, so folding them
+    # loses nothing and leaves one place to add the next signal to.
+    # An unknown symbol (a macro name, a Python-API entity, a synthetic
+    # per-batch sentinel) is unplaceable, not proven-excluded. `all_symbols`
+    # is keyed by `surface._symbol_keys` exactly like the root set, so the
+    # same membership rule applies -- hence `_symbol_matches` again rather
+    # than a second copy of it (CodeRabbit review).
+    if known_types or _symbol_matches(
+        change, auth.all_symbols, allow_tail_fallback=False
+    ):
+        return ContractEvaluationDecision(
+            relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+            reason_code="terminal_authoritative_exclusion",
+            assurance=ContractAssurance.COMPLETE,
+        )
+    return _unresolved_decision(
+        "required_evidence_incomplete", ContractAssurance.PARTIAL
+    )
 
 
 def evaluate_change_contract_relevance(
@@ -825,16 +1181,26 @@ def evaluate_change_contract_relevance(
     unions: SurfaceUnions | None = None,
     force_public_symbols: frozenset[str] | None = None,
     public_surface_allowlist: frozenset[str] | None = None,
+    exports_old: ExportSurface | None = None,
+    exports_new: ExportSurface | None = None,
 ) -> ContractEvaluationDecision:
     """Compute *change*'s shadow contract-relevance decision.
 
-    ``mode`` selects the declared contract (only ``PUBLIC``/``ALL`` are
-    implemented -- see the module docstring). ``surf_old``/``surf_new`` are
+    ``mode`` selects the declared contract (all three ADR-049 D2 values are
+    implemented). ``surf_old``/``surf_new`` are
     the same :class:`~abicheck.surface.PublicSurface` pair
     ``FilterNonPublicSurface`` already computes; pass a precomputed
     ``unions`` (:func:`~abicheck.surface.surface_unions`) when evaluating many
     changes against the same pair, mirroring
     :func:`~abicheck.surface.classify_change_surface`'s own guidance.
+    ``exports_old``/``exports_new`` are the corresponding
+    :class:`~abicheck.export_surface.ExportSurface` pair
+    (:func:`~abicheck.export_surface.compute_export_surface`), required when
+    and only when ``mode`` is ``EXPORTS`` -- that domain's roots are the
+    binary's own export table, evidence a ``PublicSurface`` does not carry.
+    Omitting them under ``EXPORTS`` is a caller error (``ValueError``), not a
+    silent degradation to a header-derived answer for a domain that is not
+    header-derived.
     ``force_public_symbols`` mirrors ``PipelineContext.force_public_symbols``
     (ADR-024 D6's widening overlay, ``FilterNonPublicSurface``'s
     ``_run_scope``/``_run_allowlist``) -- omit it (the default) when the
@@ -846,45 +1212,55 @@ def evaluate_change_contract_relevance(
     Never raises for a *finding* it cannot confidently classify -- every such
     case degrades to ``UNKNOWN_UNRESOLVED`` (see the module docstring's
     ``UNKNOWN_UNPROVEN`` rule). It raises for an entirely invalid ``mode``
-    value (``ValueError``) or for a *mode* this evaluator does not implement
-    at all (``NotImplementedError``).
+    value, and for ``EXPORTS`` without an ``ExportSurface`` pair (both
+    ``ValueError``).
     """
     # `ContractMode` is a `str` Enum, so an untyped caller passing the bare
-    # serialized value (e.g. `"all"` from a config/API adapter) would satisfy
-    # `mode in _SUPPORTED_MODES` (equality/hash) but then silently fail the
+    # serialized value (e.g. `"all"` from a config/API adapter) would compare
+    # equal to a member (equality/hash) but then silently fail the
     # `is ContractMode.ALL` identity check below, falling through to the
     # PUBLIC path for a caller that actually asked for ALL (Codex review).
     # Coercing through the enum constructor first (a no-op for an
     # already-real member) means every later `is` comparison is safe.
-    try:
-        mode = ContractMode(mode)
-    except ValueError as exc:
+    mode = coerce_contract_mode(mode)
+    if mode is ContractMode.EXPORTS and (exports_old is None or exports_new is None):
         raise ValueError(
-            f"mode must be one of {sorted(m.value for m in ContractMode)}, got {mode!r}"
-        ) from exc
-    if mode not in _SUPPORTED_MODES:
-        raise NotImplementedError(
-            f"contract mode {mode!r} is not implemented by the Phase 3 shadow "
-            "evaluator yet -- only ContractMode.PUBLIC and ContractMode.ALL "
-            "are (see abicheck.contract_evaluation's module docstring)"
+            "contract mode 'exports' requires an ExportSurface pair "
+            "(exports_old/exports_new, from "
+            "abicheck.export_surface.compute_export_surface) -- its roots are "
+            "the binary's own export table, which a PublicSurface does not carry"
         )
 
     if change.kind.value in _NOT_APPLICABLE_KIND_SLUGS:
         return _not_applicable_decision()
 
-    # `--post-manifest`'s own exclusion reason is a mode-independent,
-    # explicit-evidence exclusion (an exact, closed-domain manifest proved
-    # this concrete export was not committed), not a header-origin
-    # classification the way the rest of `_ALL_SURFACE_REASONS` is -- unlike
-    # private-header/system-header provenance (which ALL mode deliberately
-    # treats as in-domain, since that's the whole point of "no header-origin
-    # scoping"), a POST-manifest demotion is authoritative regardless of
-    # which contract mode is selected. Checked before the ALL-mode shortcut
-    # below so a change `FilterNonPublicSurface._run_allowlist` already
+    # `--post-manifest`'s own exclusion reason is an explicit-evidence
+    # exclusion (an exact, closed-domain manifest proved this concrete export
+    # was not committed), not a header-origin classification the way the rest
+    # of `_ALL_SURFACE_REASONS` is -- unlike private-header/system-header
+    # provenance (which ALL mode deliberately treats as in-domain, since
+    # that's the whole point of "no header-origin scoping"), a POST-manifest
+    # demotion is authoritative for both remaining modes. (`EXPORTS` is
+    # dispatched above, ahead of this: manifest evidence is advisory in that
+    # domain -- see `_exports_mode_decision`.) Checked before the ALL-mode
+    # shortcut below so a change `FilterNonPublicSurface._run_allowlist` already
     # demoted to `pp_ctx.out_of_surface` for this reason can't simultaneously
     # be stamped `IN_CONTRACT` by the shortcut, contradicting its own
     # presence in `surface_scope.out_of_surface_changes` (Codex review,
     # fresh evidence: `--post-manifest` + `--no-scope-public-headers`).
+    if mode is ContractMode.EXPORTS:
+        # Dispatched ahead of *every* header-domain shortcut, including the
+        # POST-manifest exclusion below. ADR-049 plan Section 7's `exports`
+        # row is unconditional -- "Roots/closure are `IN_CONTRACT` ...
+        # Public-header/manifest/consumer failures are unrelated and
+        # advisory" -- so a symbol the binary demonstrably exports stays in
+        # this contract even when a manifest omits it (Codex review; an
+        # earlier revision of this function had the manifest exclusion win,
+        # on the reasoning that a committed-export manifest can only narrow
+        # the export set, which the plan does not say).
+        assert exports_old is not None and exports_new is not None  # gated above
+        return _exports_mode_decision(change, exports_old, exports_new)
+
     if change.surface_exclusion_reason == _REASON_POST_MANIFEST_NOT_COMMITTED:
         return _decision_for_surface_reason(
             change.surface_exclusion_reason, change, surf_old, surf_new
@@ -947,16 +1323,8 @@ def evaluate_change_contract_relevance(
     # identity-ambiguity tiering would downgrade a definitive
     # `PUBLIC_MACRO_REMOVED`/`INLINE_FUNCTION_REMOVED`/etc. event purely
     # because of an unrelated evidence gap (Codex review, fresh evidence).
-    if (
-        change.kind.value.startswith("python_")
-        or change.kind.value in _NEVER_FILTER_KIND_NAMES
-        or change.kind.value in _PUBLIC_SOURCE_ABI_KIND_SLUGS
-    ):
-        return ContractEvaluationDecision(
-            relevance=ContractRelevance.IN_CONTRACT,
-            reason_code="public_root_membership",
-            assurance=ContractAssurance.COMPLETE,
-        )
+    if _is_trusted_by_construction(change):
+        return _trusted_by_construction_decision()
 
     # `force_public_symbols` (ADR-024 D6's widening overlay) is a
     # user-guaranteed override: `FilterNonPublicSurface._run_scope`/
@@ -1058,12 +1426,14 @@ def evaluate_snapshot_pair_contract_relevance(
     mode: ContractMode = ContractMode.PUBLIC,
     force_public_symbols: frozenset[str] | None = None,
     public_surface_allowlist: frozenset[str] | None = None,
+    exports_old: ExportSurface | None = None,
+    exports_new: ExportSurface | None = None,
 ) -> list[ContractEvaluationDecision]:
     """:func:`evaluate_change_contract_relevance` for a whole comparison's
     findings, computing the surface unions once (see that function's
     ``unions`` parameter) rather than once per finding. ``force_public_symbols``/
-    ``public_surface_allowlist`` are passed through to every call -- see that
-    function's own parameters."""
+    ``public_surface_allowlist``/``exports_old``/``exports_new`` are passed
+    through to every call -- see that function's own parameters."""
     unions = surface_unions(surf_old, surf_new)
     return [
         evaluate_change_contract_relevance(
@@ -1074,6 +1444,8 @@ def evaluate_snapshot_pair_contract_relevance(
             unions=unions,
             force_public_symbols=force_public_symbols,
             public_surface_allowlist=public_surface_allowlist,
+            exports_old=exports_old,
+            exports_new=exports_new,
         )
         for change in changes
     ]

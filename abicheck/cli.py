@@ -1802,8 +1802,9 @@ def _embed_inline_source_side(
                    "diff is trusted. Not needed, and does nothing, on a "
                    "comparable pair.")
 @click.option("--contract-evaluation", "contract_evaluation", is_flag=True, default=False,
-              help="ADR-049 Phase 3's shadow contract evaluator (non-authoritative, "
-                   "public|all modes only). Stamps each finding in the report with a "
+              help="ADR-049 Phase 3's shadow contract evaluator (non-authoritative; "
+                   "pick its evidence domain with --contract). Stamps each finding in "
+                   "the report with a "
                    "contract_relevance (IN_CONTRACT/PROVEN_OUT_OF_CONTRACT/"
                    "UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/NOT_APPLICABLE), "
                    "contract_reason_code, and -- when resolved -- contract_assurance "
@@ -1816,6 +1817,20 @@ def _embed_inline_source_side(
                    "html. Advisory only: it never changes verdict, exit_code, or which "
                    "findings appear. Default off; the report is unchanged unless this "
                    "is set.")
+@click.option("--contract", "contract_mode",
+              type=click.Choice(["public", "exports", "all"]), default=None,
+              help="Which evidence domain --contract-evaluation judges each finding "
+                   "against (ADR-049 Phase 6). 'public': the header-derived declared "
+                   "surface. 'exports': the binary's own export table (ELF .dynsym / "
+                   "PE export directory / Mach-O export trie) plus the raw type "
+                   "closure reachable from it -- a private-header type reached from a "
+                   "real export is inside this contract, an unexported public-header "
+                   "declaration is not. 'all': every entity, no root or closure "
+                   "evidence required. Omitted, the domain follows "
+                   "--scope-public-headers/--no-scope-public-headers as before; an "
+                   "explicit value outranks those. Requires --contract-evaluation, "
+                   "and is advisory exactly like it: selecting a domain never "
+                   "changes verdict, exit_code, or which findings appear.")
 @click.option("--audit-suppressions", "audit_suppressions", is_flag=True, default=False,
               help="Audit the --suppress rule file against this run's findings: which "
                    "rules matched nothing (stale), matched a BREAKING change (high "
