@@ -101,12 +101,26 @@ class ExportSurface:
     #: False there is no root evidence at all and no membership conclusion --
     #: in either direction -- may be drawn from this surface.
     resolvable: bool = False
+    #: True when at least one declaration actually matched the observed export
+    #: table. A resolvable surface with no roots means the table lists exports
+    #: none of this snapshot's declarations could be matched to (a
+    #: mangling-scheme gap, or a binary exporting only linker-generated
+    #: symbols) -- the exports are real, so nothing may be proven *out* of a
+    #: contract whose roots were never resolved.
+    has_roots: bool = False
     #: True when at least one export root carried real signature type
     #: information (a parameter, or a return/variable type other than the
     #: export-only sentinel ``"?"``). When False the type closure has no
-    #: usable roots, so an absence from ``export_types`` is not evidence of
-    #: unreachability (ADR-024 D5.2's rule, applied to this domain).
+    #: usable roots at all (ADR-024 D5.2's rule, applied to this domain).
     has_typed_roots: bool = False
+    #: True when *every* export root carried real signature type information.
+    #: ``has_typed_roots`` alone is not enough to prove a type unreachable: a
+    #: second, untyped root (an export absent from the parsed headers, or one
+    #: recorded with the ``"?"`` sentinel) has an unknown closure of its own,
+    #: which could well contain the very type being judged (Codex review).
+    #: Vacuously True when there are no roots -- pair it with ``has_roots``,
+    #: never read it alone.
+    all_roots_typed: bool = True
 
 
 def observed_export_names(snap: AbiSnapshot) -> set[str] | None:
@@ -142,32 +156,53 @@ def observed_export_names(snap: AbiSnapshot) -> set[str] | None:
     return names if observed else None
 
 
-def _matches_export_table(keys: set[str], export_names: set[str]) -> bool:
-    """Whether any of a declaration's symbol *keys* names an observed export.
+def _is_export_root(
+    name: str, mangled: str, export_names: set[str], *, underscore_alias: bool
+) -> bool:
+    """Whether a declaration's own *linker* identity names an observed export.
 
-    Tolerates one platform quirk, exactly as ``dumper_clang._symbol_candidates``
-    already does for the same reason: clang's ``mangledName`` carries an extra
-    leading underscore on macOS (``"__ZN3lib3addEii"``), while the Mach-O
-    export trie's own names are recorded with the platform underscore already
-    stripped (``macho_metadata``'s parser, "Leading '_' stripped, matching
-    exports"). Without de-prefixing, every C++ declaration in a Mach-O
-    snapshot would fail to match a real export it *is* -- and in this domain a
-    missed root is not a missed detail, it is a false
-    ``PROVEN_OUT_OF_CONTRACT`` for the whole library.
+    Rootness is decided by linker identity alone -- the declaration's mangled
+    name, or its plain name when the producer recorded no mangled one (a C
+    symbol, or a backend that leaves the field empty; there is no other
+    identity to match on). Deliberately **not**
+    :func:`~abicheck.surface._symbol_keys`, whose demangled-name and bare-tail
+    aliases exist so a *finding* naming any encoding can be looked up: a
+    binary exporting the C symbol ``foo`` while the headers also declare an
+    unexported ``ns::foo`` would otherwise match on the bare tail ``"foo"``
+    and pull that unrelated C++ declaration -- and its whole type closure --
+    into the export contract (Codex review, confirmed empirically).
 
-    Deliberately one-directional and only for an underscore-prefixed key: it
-    can turn a missed match into a match, never the reverse, and a de-prefixed
-    spelling that collides with an unrelated real export would have to be an
-    exact linker-name collision, which the export table itself already
-    disallows.
+    *underscore_alias* tolerates one platform quirk, exactly as
+    ``dumper_clang._symbol_candidates`` already does for the same reason:
+    clang's ``mangledName`` carries an extra leading underscore on macOS
+    (``"__ZN3lib3addEii"``) while the Mach-O export trie's own names are
+    recorded with the platform underscore already stripped
+    (``macho_metadata``'s parser, "Leading '_' stripped, matching exports").
+    Without de-prefixing, every C++ declaration in a Mach-O snapshot would
+    fail to match a real export it *is* -- and here a missed root is not a
+    missed detail, it is a false ``PROVEN_OUT_OF_CONTRACT`` for the whole
+    library. It is gated on the snapshot actually carrying Mach-O metadata,
+    since on ELF/PE the underscore is meaningful: distinct declarations
+    ``foo`` and ``_foo`` can coexist there, and an unconditional fallback
+    invents an export root for ``_foo`` from an export table that only lists
+    ``foo`` (Codex review, confirmed empirically).
     """
-    if keys & export_names:
+    identity = mangled or name
+    if not identity:
+        return False
+    if identity in export_names:
         return True
-    return any(k.startswith("_") and k[1:] in export_names for k in keys)
+    return bool(
+        underscore_alias and identity.startswith("_") and identity[1:] in export_names
+    )
 
 
 def _seed_export_roots(
-    snap: AbiSnapshot, surface: ExportSurface, export_names: set[str]
+    snap: AbiSnapshot,
+    surface: ExportSurface,
+    export_names: set[str],
+    *,
+    underscore_alias: bool = False,
 ) -> set[str]:
     """Record export roots on *surface*; return the closure's seed type names.
 
@@ -176,18 +211,33 @@ def _seed_export_roots(
     own enclosing class (a consumer holding an exported method can declare,
     allocate, and inherit that class, so its layout is inside the export
     contract even when no *other* signature names it) -- with exactly one
-    difference: rootness is decided by observed export-table membership, not
-    by :data:`~abicheck.model.Visibility.PUBLIC`.
+    difference: rootness is decided by observed export-table membership
+    (:func:`_is_export_root`), not by
+    :data:`~abicheck.model.Visibility.PUBLIC`.
+
+    A root's *lookup* keys are still the full
+    :func:`~abicheck.surface._symbol_keys` set, so a finding naming any
+    encoding of a genuine root resolves; only the rootness *decision* is
+    narrowed to linker identity.
+
+    Called with an empty *export_names* on the no-export-table path, where it
+    fills the ``all_*`` universe alone (nothing can match) rather than that
+    path keeping its own copy of the same key derivation (CodeRabbit review).
     """
     seed_types: set[str] = set()
     for fn in snap.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
-        if not _matches_export_table(keys, export_names):
+        if not _is_export_root(
+            fn.name, fn.mangled, export_names, underscore_alias=underscore_alias
+        ):
             continue
         surface.export_symbols |= keys
+        surface.has_roots = True
         if fn.params or _is_real_type(fn.return_type):
             surface.has_typed_roots = True
+        else:
+            surface.all_roots_typed = False
         seed_types |= _type_identifiers(fn.return_type)
         for p in fn.params:
             seed_types |= _type_identifiers(getattr(p, "type", None))
@@ -197,11 +247,16 @@ def _seed_export_roots(
     for var in snap.variables:
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
-        if not _matches_export_table(keys, export_names):
+        if not _is_export_root(
+            var.name, var.mangled, export_names, underscore_alias=underscore_alias
+        ):
             continue
         surface.export_symbols |= keys
+        surface.has_roots = True
         if _is_real_type(var.type):
             surface.has_typed_roots = True
+        else:
+            surface.all_roots_typed = False
         seed_types |= _type_identifiers(var.type)
     return seed_types
 
@@ -233,16 +288,18 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     export_names = observed_export_names(snap)
     if export_names is None:
         # No root evidence. Still populate `all_symbols` so a caller can
-        # distinguish a known-but-undecidable entity from an unknown one.
-        for fn in snap.functions:
-            surface.all_symbols |= _symbol_keys(fn.name, fn.mangled)
-        for var in snap.variables:
-            surface.all_symbols |= _symbol_keys(
-                var.name, getattr(var, "mangled", "") or ""
-            )
+        # distinguish a known-but-undecidable entity from an unknown one --
+        # via the same seeding helper (an empty export-name set matches
+        # nothing), so the two paths cannot derive that universe differently.
+        _seed_export_roots(snap, surface, set())
         return surface
 
-    seed_types = _seed_export_roots(snap, surface, export_names)
+    seed_types = _seed_export_roots(
+        snap,
+        surface,
+        export_names,
+        underscore_alias=getattr(snap, "macho", None) is not None,
+    )
     surface.resolvable = True
 
     _walk_type_closure(snap, scratch, record_by_name, enum_by_name, seed_types)

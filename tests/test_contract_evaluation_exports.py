@@ -16,8 +16,9 @@
 """ADR-049 ``contract=exports``: the shadow evaluator's third mode.
 
 Split out of ``test_contract_evaluation.py`` (which sits at the AI-readiness
-2000-line hard cap) the same way ``test_contract_evaluation_not_applicable.py``
-already is -- one sibling file per mode/concern, not one growing module.
+file-size hard cap -- see ``AGENTS.md`` for the canonical limit) the same way
+``test_contract_evaluation_not_applicable.py`` already is -- one sibling file
+per mode/concern, not one growing module.
 ``test_export_surface.py`` covers the evidence *provider* in isolation; this
 file covers the *decisions* the evaluator makes from it.
 """
@@ -357,3 +358,53 @@ class TestExportsMode:
             ContractRelevance.IN_CONTRACT,
             ContractRelevance.PROVEN_OUT_OF_CONTRACT,
         ]
+
+    def test_partial_typed_root_coverage_cannot_prove_a_type_out(self) -> None:
+        # Regression (Codex review): with one typed root and one untyped one,
+        # `has_typed_roots` is true but the untyped root's own closure is
+        # unknown and could contain this very type -- a partial closure
+        # proves unreachability from the roots it covers, not from the ones
+        # it doesn't.
+        snap = self._snap(
+            functions=[
+                _fn("typed", ret="Known *", mangled="typed"),
+                _fn("opaque", ret="?", mangled="opaque"),
+            ],
+            types=[_rec("Known"), _rec("Maybe")],
+            elf=ElfMetadata(
+                symbols=[ElfSymbol(name="typed"), ElfSymbol(name="opaque")]
+            ),
+        )
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Maybe", description="")
+        assert self._evaluate(c, self._exports(snap)) == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_fully_typed_roots_still_prove_a_type_out(self) -> None:
+        # The mirror image: complete root coverage keeps the exclusion.
+        snap = self._snap(
+            functions=[_fn("typed", ret="Known *", mangled="typed")],
+            types=[_rec("Known"), _rec("Maybe")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="typed")]),
+        )
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Maybe", description="")
+        assert self._evaluate(c, self._exports(snap)).relevance is (
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
+
+    def test_observed_table_with_no_resolved_roots_proves_nothing(self) -> None:
+        # A real export table whose names no declaration matched (a
+        # mangling-scheme gap): the exports exist, so an absence from the
+        # empty root/closure sets is not evidence about any entity.
+        snap = self._snap(
+            functions=[_fn("local", mangled="_Z5localv")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="?unmatched@@YAXXZ")]),
+        )
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z5localv", description="")
+        assert self._evaluate(c, self._exports(snap)) == ContractEvaluationDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+        )

@@ -258,3 +258,135 @@ class TestMachoUnderscoreQuirk:
             macho=MachoMetadata(exports=[MachoExport(name="_ZN3lib3addEii")]),
         )
         assert not compute_export_surface(snap).export_symbols
+
+
+class TestRootMatchingIsLinkerIdentityOnly:
+    """Regressions for the review findings on how rootness is decided."""
+
+    def test_bare_tail_alias_does_not_make_an_unrelated_decl_a_root(self) -> None:
+        # A binary exporting the C symbol `foo` while the headers also declare
+        # an unexported `ns::foo`: `_symbol_keys` gives the latter the trailing
+        # alias "foo", which is a *lookup* alias for findings, never a linker
+        # identity. Matching on it pulled the unrelated C++ declaration -- and
+        # its whole type closure -- into the export contract.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("ns::foo", "_ZN2ns3fooEv", ret="Secret *")],
+            types=[_rec("Secret")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="foo")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.export_symbols
+        assert not surf.export_types
+        assert not surf.has_roots
+
+    def test_a_genuine_root_still_resolves_under_every_lookup_alias(self) -> None:
+        # Narrowing the rootness *decision* must not narrow the lookup keys:
+        # a finding naming any encoding of a real root still resolves.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("ns::foo", "_ZN2ns3fooEv")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN2ns3fooEv")]),
+        )
+        assert {"ns::foo", "_ZN2ns3fooEv", "foo"} <= (
+            compute_export_surface(snap).export_symbols
+        )
+
+    def test_plain_name_is_the_identity_only_when_no_mangled_name_exists(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("c_api", "")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="c_api")]),
+        )
+        assert "c_api" in compute_export_surface(snap).export_symbols
+
+    def test_underscore_alias_does_not_apply_to_elf(self) -> None:
+        # On ELF/PE the underscore is meaningful: `foo` and `_foo` can be
+        # distinct declarations, so an export table listing only `foo` must
+        # not invent a root for `_foo`.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("_foo", "_foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="foo")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.export_symbols
+        assert not surf.has_roots
+
+
+class TestRootCompleteness:
+    def test_all_roots_typed_is_false_when_any_root_is_untyped(self) -> None:
+        # `has_typed_roots` (some root is typed) is not enough to prove a type
+        # unreachable: the untyped root's own closure is unknown and could
+        # contain the very type being judged.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn("typed", "typed", ret="Known *"),
+                _fn("opaque", "opaque", ret="?"),
+            ],
+            types=[_rec("Known"), _rec("Maybe")],
+            elf=ElfMetadata(
+                symbols=[ElfSymbol(name="typed"), ElfSymbol(name="opaque")]
+            ),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.has_roots
+        assert surf.has_typed_roots
+        assert not surf.all_roots_typed
+
+    def test_all_roots_typed_when_every_root_carries_signature_types(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("a", "a", ret="Known *"), _fn("b", "b", params=("Known",))],
+            types=[_rec("Known")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="a"), ElfSymbol(name="b")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.has_roots
+        assert surf.all_roots_typed
+
+    def test_observed_table_with_no_matching_declaration_has_no_roots(self) -> None:
+        # A real export table whose names none of the declarations match (a
+        # mangling-scheme gap) is resolvable but rootless -- the exports are
+        # real, so nothing may be proven out of a contract whose roots were
+        # never resolved.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("local", "_Z5localv")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="?unmatched@@YAXXZ")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.resolvable
+        assert not surf.has_roots
+
+
+class TestUnresolvableUniverseParity:
+    def test_all_symbols_matches_the_resolvable_path(self) -> None:
+        # The no-export-table path routes through the same seeding helper, so
+        # the `all_*` universe cannot be derived differently between the two.
+        kw = {
+            "functions": [_fn("api", "_Z3apiv")],
+            "variables": [Variable(name="g", mangled="g", type="int")],
+        }
+        without_table = compute_export_surface(
+            AbiSnapshot(library="l", version="1", **kw)
+        )
+        with_table = compute_export_surface(
+            AbiSnapshot(
+                library="l",
+                version="1",
+                elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]),
+                **kw,
+            )
+        )
+        assert without_table.all_symbols == with_table.all_symbols

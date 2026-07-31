@@ -1532,8 +1532,9 @@ platforms' tables, roots vs. declaration visibility in both directions,
 closure over fields/bases/typedefs, header origin *not* demoting, untyped
 roots, the unresolvable case) and `tests/test_contract_evaluation_exports.py`
 (the decisions — split into its own sibling file because
-`test_contract_evaluation.py` reached the AI-readiness 2000-line hard cap,
-the same split `test_contract_evaluation_not_applicable.py` already is).
+`test_contract_evaluation.py` reached the AI-readiness file-size hard cap
+(see `AGENTS.md`), the same split `test_contract_evaluation_not_applicable.py`
+already is).
 
 **Still open, unchanged by this:** no front end selects `EXPORTS` yet —
 `checker._apply_contract_evaluation_shadow` still derives `PUBLIC`/`ALL` from

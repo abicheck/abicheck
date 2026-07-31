@@ -964,16 +964,35 @@ def _exports_mode_decision(
     if candidates & auth.export_types:
         return _unresolved_decision("identity_ambiguous", ContractAssurance.PARTIAL)
 
-    known_types = candidates & auth.all_types
-    if known_types and not auth.has_typed_roots:
-        # The export table was observed, but no root carried real signature
-        # type information, so the closure has no usable seeds: an absence
-        # from `export_types` is not evidence of unreachability (ADR-024
-        # D5.2's rule, applied to this domain).
+    # Nothing is provable when the observed export table resolved to no roots
+    # at all: the binary demonstrably exports something none of this
+    # snapshot's declarations could be matched to (a mangling-scheme gap),
+    # so an absence from the -- empty -- root/closure sets says nothing about
+    # this entity.
+    if not auth.has_roots:
         return _unresolved_decision(
             "required_evidence_incomplete", ContractAssurance.PARTIAL
         )
-    if known_types or _symbol_is_known(change, auth.all_symbols):
+
+    known_types = candidates & auth.all_types
+    if known_types and not auth.all_roots_typed:
+        # At least one export root carries no usable signature type
+        # information (an export absent from the parsed headers, or the
+        # export-only `"?"` sentinel), so its own closure is unknown and
+        # could contain this very type. `has_typed_roots` -- *some* root is
+        # typed -- is not enough to exclude: a partial closure proves
+        # unreachability from the roots it covers, not from the ones it
+        # doesn't (ADR-024 D5.2's rule, applied to this domain; Codex
+        # review).
+        return _unresolved_decision(
+            "required_evidence_incomplete", ContractAssurance.PARTIAL
+        )
+    # An unknown symbol (a macro name, a Python-API entity, a synthetic
+    # per-batch sentinel) is unplaceable, not proven-excluded. `all_symbols`
+    # is keyed by `surface._symbol_keys` exactly like the root set, so the
+    # same membership rule applies -- hence `_symbol_matches` again rather
+    # than a second copy of it (CodeRabbit review).
+    if known_types or _symbol_matches(change, auth.all_symbols):
         return ContractEvaluationDecision(
             relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
             reason_code="terminal_authoritative_exclusion",
@@ -982,23 +1001,6 @@ def _exports_mode_decision(
     return _unresolved_decision(
         "required_evidence_incomplete", ContractAssurance.PARTIAL
     )
-
-
-def _symbol_is_known(change: Change, all_symbols: set[str]) -> bool:
-    """Whether *change*'s symbol is a declaration this snapshot recorded at all.
-
-    The precondition for proving a symbol-level finding *out* of the export
-    domain: an unknown symbol (a macro name, a Python-API entity, a synthetic
-    per-batch sentinel) is unplaceable, not proven-excluded. Uses the same
-    bare-tail tolerance as :func:`_symbol_matches`, since ``all_symbols`` is
-    keyed by :func:`~abicheck.surface._symbol_keys` exactly like the root set.
-    """
-    if change.kind.value in _TYPE_LEVEL_KIND_NAMES:
-        return False
-    sym = change.symbol or ""
-    if sym in all_symbols:
-        return True
-    return bool(sym and "::" in sym and sym.rsplit("::", 1)[1] in all_symbols)
 
 
 def evaluate_change_contract_relevance(
