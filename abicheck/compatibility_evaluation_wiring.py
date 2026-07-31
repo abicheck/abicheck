@@ -430,7 +430,15 @@ def resolve_selected_packs(
     Not called from any live command yet -- see module docstring.
     """
     entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
-    grouped = assignments_for_conflict_check([pack for _, pack in entries])
+    grouped = {
+        kind: [
+            (identity, _conflict_values(kind, assignments))
+            for identity, assignments in packs
+        ]
+        for kind, packs in assignments_for_conflict_check(
+            [pack for _, pack in entries]
+        ).items()
+    }
 
     by_kind: dict[PackKind, list[tuple[str, LoadedPack]]] = {
         kind: [] for kind in PackKind
@@ -653,6 +661,39 @@ PACK_FIELD_ROUTES_BY_KIND: Mapping[
 )
 
 
+def _conflict_values(
+    kind: PackKind, assignments: Mapping[str, Hashable]
+) -> Mapping[str, Hashable]:
+    """Route *assignments* before they are compared pack against pack.
+
+    D8's conflict rule is about two packs assigning *different values* to one
+    field -- not about them spelling the same value differently. A field
+    routed by :func:`_route_str_tuple` accepts a bare scalar and a
+    one-element list as the same selection (``contract.overlays: foo`` and
+    ``contract.overlays: [foo]`` both mean ``("foo",)``), so comparing the raw
+    manifest values rejected that pair as conflicting before routing ever got
+    to canonicalize them (Codex review, fresh evidence).
+
+    A value its route rejects, and a field with no route at all, are passed
+    through untouched: both are real errors, and both are already reported --
+    with the manifest path in the message -- by
+    :func:`resolve_pack_field_assignments`'s own routing pass. Reporting them
+    from here instead would only change which message a caller sees first.
+    """
+    routes = PACK_FIELD_ROUTES_BY_KIND.get(kind, {})
+    normalized: dict[str, Hashable] = {}
+    for field_name, value in assignments.items():
+        convert = routes.get(field_name)
+        if convert is None:
+            normalized[field_name] = value
+            continue
+        try:
+            normalized[field_name] = convert(value, field_name, "")
+        except PackManifestError:
+            normalized[field_name] = value
+    return normalized
+
+
 @dataclass(frozen=True)
 class RoutedPackAssignment:
     """One effective-config field a selected pack assigns, with its source.
@@ -736,7 +777,10 @@ def resolve_pack_field_assignments(
     selected = [(path, pack) for path, pack in entries if pack.kind is kind]
 
     detect_pack_conflicts(
-        [(pack.identity, pack.assignments) for _, pack in selected],
+        [
+            (pack.identity, _conflict_values(kind, pack.assignments))
+            for _, pack in selected
+        ],
         explicit_overrides=explicit_overrides,
     )
 

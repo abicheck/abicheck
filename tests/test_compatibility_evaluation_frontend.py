@@ -621,6 +621,51 @@ class TestPackComposition:
                 )
             )
 
+    def test_the_same_value_spelled_two_ways_is_not_a_conflict(self, tmp_path):
+        # A bare scalar and a one-element list are the same selection for a
+        # str-tuple field, so comparing the raw manifest values called two
+        # agreeing packs a conflict.
+        scalar = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="a",
+            kind="contract",
+            assignments="contract.overlays: ffi\n",
+        )
+        listed = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="b",
+            kind="contract",
+            assignments="contract.overlays: [ffi]\n",
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                pack_paths=(str(scalar), str(listed))
+            )
+        )
+        assert cfg.contract.overlays == ("ffi",)
+
+    def test_genuinely_different_tuple_values_are_still_a_conflict(self, tmp_path):
+        # Normalizing for comparison must not normalize a real disagreement
+        # away.
+        first = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="a",
+            kind="contract",
+            assignments="contract.overlays: ffi\n",
+        )
+        second = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="b",
+            kind="contract",
+            assignments="contract.overlays: [ffi, cuda]\n",
+        )
+        with pytest.raises(PackConflictError):
+            _resolve(
+                explicit=ExplicitCompatibilityInputs(
+                    pack_paths=(str(first), str(second))
+                )
+            )
+
     def test_an_explicit_value_resolves_a_pack_conflict(self, tmp_path):
         first = _write_pack(
             tmp_path / "a.yml",
