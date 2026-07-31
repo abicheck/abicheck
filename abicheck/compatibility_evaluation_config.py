@@ -251,6 +251,13 @@ class SelectedByEntry:
     #: D6; Codex review, fresh evidence). ``None`` for a hop that selects no
     #: manifest at all -- a typed flag, a project-config key.
     identity: ImmutableIdentity | None = None
+    #: The digest of the file this hop named, for a source that has content
+    #: but no versioned identity -- a ``.abicheck.yml``, a policy document.
+    #: Separate from the entry-level :attr:`ValueProvenance.sha256`, which can
+    #: already be taken by *what the value is* (a preset's own identity)
+    #: while the hop still needs to say *which file selected it* (Codex
+    #: review, fresh evidence).
+    sha256: str | None = None
 
     def __post_init__(self) -> None:
         # An untyped manifest/API adapter constructing
@@ -289,6 +296,10 @@ class SelectedByEntry:
             raise TypeError(
                 "SelectedByEntry.identity must be an ImmutableIdentity or None, "
                 f"not {self.identity!r}."
+            )
+        if self.sha256 is not None and not isinstance(self.sha256, str):
+            raise TypeError(
+                f"SelectedByEntry.sha256 must be a str or None, not {self.sha256!r}."
             )
 
 

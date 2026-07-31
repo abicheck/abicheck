@@ -37,6 +37,7 @@ from abicheck.change_registry_types import Verdict
 from abicheck.compatibility_evaluation_frontend import (
     CONTRACT_MODE_FIELD,
     EXPLICIT_SCOPE_FIELD,
+    GATE_PRESET_FIELD,
     INTERNAL_NAMESPACES_FIELD,
     POLICY_BASE_FIELD,
     POLICY_OVERRIDES_FIELD,
@@ -571,6 +572,61 @@ class TestSelectedButEmptySources:
             cfg.provenance[EXPLICIT_SCOPE_FIELD].layer
             is SelectorLayer.BUILT_IN_DEFAULT
         )
+
+
+class TestProjectDerivedFieldsNameTheirConfigDigest:
+    """A caller that supplied the config's digest gets it back per field."""
+
+    DIGEST = "c" * 64
+
+    def _project(self, **kwargs):
+        return ProjectCompatibilityInputs(
+            path=".abicheck.yml", sha256=self.DIGEST, **kwargs
+        )
+
+    def test_the_legacy_scope_key_carries_it(self):
+        cfg = _resolve(project=self._project(scope_public=False))
+        prov = cfg.provenance[CONTRACT_MODE_FIELD]
+        assert prov.sha256 == self.DIGEST
+        assert [e.sha256 for e in prov.selected_by] == [self.DIGEST]
+
+    def test_severity_and_exit_scheme_keys_carry_it(self):
+        cfg = _resolve(
+            project=self._project(severity_addition="info", exit_code_scheme="legacy")
+        )
+        for field_name in ("gate.severity.addition", "gate.exit_code_scheme"):
+            prov = cfg.provenance[field_name]
+            assert prov.sha256 == self.DIGEST, field_name
+            assert [e.sha256 for e in prov.selected_by] == [self.DIGEST], field_name
+
+    def test_a_preset_keeps_its_own_identity_while_the_hop_names_the_file(self):
+        # Two different artifacts: the value is the built-in preset, but the
+        # file that selected it is what a replay has to re-read.
+        cfg = _resolve(project=self._project(severity_preset="strict"))
+        prov = cfg.provenance[GATE_PRESET_FIELD]
+        assert prov.sha256 == cfg.gate.preset.sha256 != self.DIGEST
+        assert [(e.option, e.sha256) for e in prov.selected_by] == [
+            ("severity.preset", self.DIGEST)
+        ]
+
+    def test_the_symbol_overlay_hop_carries_it(self):
+        cfg = _resolve(project=self._project(public_symbols=("foo",)))
+        assert [
+            (e.option, e.sha256)
+            for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
+        ] == [("scope.public_symbols", self.DIGEST)]
+
+    def test_a_list_file_hop_names_its_own_digest(self, tmp_path):
+        path = tmp_path / "symbols.txt"
+        path.write_text("foo\n")
+        listed = PublicSymbolsList.from_file(path)
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(public_symbols_list=listed)
+        )
+        assert [
+            (e.option, e.sha256)
+            for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
+        ] == [("--public-symbols-list", listed.sha256)]
 
 
 class TestExplicitScopeIdentityCoversItsSources:

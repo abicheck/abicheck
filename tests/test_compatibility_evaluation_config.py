@@ -342,6 +342,19 @@ class TestSelectedByEntry:
         )
         assert entry.identity == identity
 
+    def test_a_hop_can_name_its_source_files_digest(self):
+        entry = SelectedByEntry(
+            layer=SelectorLayer.PROJECT_CONFIG,
+            option="scope.public",
+            path=".abicheck.yml",
+            sha256="cd" * 32,
+        )
+        assert entry.sha256 == "cd" * 32
+
+    def test_a_non_string_hop_digest_is_rejected(self):
+        with pytest.raises(TypeError, match=r"SelectedByEntry\.sha256"):
+            SelectedByEntry(layer=SelectorLayer.PROJECT_CONFIG, sha256=123)  # type: ignore[arg-type]
+
     def test_a_non_identity_identity_is_rejected(self):
         with pytest.raises(TypeError, match=r"SelectedByEntry\.identity"):
             SelectedByEntry(layer=SelectorLayer.EXPLICIT_CLI, identity="ecosystem")  # type: ignore[arg-type]

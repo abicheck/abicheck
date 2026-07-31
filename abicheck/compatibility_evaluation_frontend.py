@@ -502,9 +502,19 @@ def _candidate(
     reference: str | None = None,
     version: int | None = None,
     sha256: str | None = None,
+    source_sha256: str | None = None,
     path: str | None = None,
     field_location: str | None = None,
 ) -> FieldCandidate:
+    """One candidate and the single hop that selected it.
+
+    *sha256* identifies what the value *is* (a preset's or manifest's own
+    revision); *source_sha256* identifies the file that selected it, and
+    defaults to *sha256* when the two are the same artifact. They differ for
+    a project config naming a built-in preset: the entry-level digest is the
+    preset's, while the hop still has to name the ``.abicheck.yml`` a replay
+    would re-read (Codex review, fresh evidence).
+    """
     return FieldCandidate(
         provenance=ValueProvenance(
             layer=layer,
@@ -514,7 +524,14 @@ def _candidate(
             sha256=sha256,
             path=path,
             field_location=field_location,
-            selected_by=(SelectedByEntry(layer=layer, option=option, path=path),),
+            selected_by=(
+                SelectedByEntry(
+                    layer=layer,
+                    option=option,
+                    path=path,
+                    sha256=source_sha256 if source_sha256 is not None else sha256,
+                ),
+            ),
         ),
         value=value,
     )
@@ -742,6 +759,7 @@ def _explicit_scope(
                 layer=layer,
                 option="--public-symbols-list",
                 path=explicit.public_symbols_list.path,
+                sha256=explicit.public_symbols_list.sha256,
             )
         )
         merged.extend(explicit.public_symbols_list.items)
@@ -760,6 +778,7 @@ def _explicit_scope(
                 layer=SelectorLayer.PROJECT_CONFIG,
                 option="scope.public_symbols",
                 path=project.path,
+                sha256=project.sha256,
             )
         )
         merged.extend(project.public_symbols)
@@ -969,6 +988,7 @@ def resolve_compatibility_evaluation_config(
             # receipt has to name the source a replay would have to re-read.
             option="scope.public",
             path=project.path,
+            sha256=project.sha256,
         )
         if project is not None
         else None
@@ -1139,6 +1159,7 @@ def resolve_compatibility_evaluation_config(
                 reference=project.severity_preset,
                 version=project_preset.version,
                 sha256=project_preset.sha256,
+                source_sha256=project.sha256,
                 path=project.path,
             )
         )
@@ -1174,6 +1195,7 @@ def resolve_compatibility_evaluation_config(
                     SeverityLevel(project_stated),
                     option=f"severity.{category}",
                     source_kind="severity_override",
+                    sha256=project.sha256 if project is not None else None,
                     path=project.path if project is not None else None,
                 )
             )
@@ -1245,6 +1267,7 @@ def resolve_compatibility_evaluation_config(
                 project_scheme,
                 option="exit_code_scheme",
                 source_kind="exit_code_scheme",
+                sha256=project.sha256 if project is not None else None,
                 path=project.path if project is not None else None,
             )
         )
@@ -1379,10 +1402,14 @@ def _overrides_provenance(
     # every one of whose assignments was shadowed (Codex review, fresh
     # evidence).
     selected_by.extend(
-        SelectedByEntry(
-            layer=layer, option=pack_option, path=path, identity=identity
+        SelectedByEntry(layer=layer, option=pack_option, path=path, identity=identity)
+        # Sorted on the fields themselves rather than on tuple order, so the
+        # receipt does not depend on `ImmutableIdentity`'s default ordering
+        # if a path ever contributes more than once (CodeRabbit review).
+        for path, identity in sorted(
+            pack_contributors,
+            key=lambda c: (c[0], c[1].id, c[1].version, c[1].sha256),
         )
-        for path, identity in sorted(pack_contributors)
     )
     if not selected_by:
         return ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT)
@@ -1591,7 +1618,13 @@ def _normalized_provenance(prov: ValueProvenance) -> tuple[Any, ...]:
         prov.path,
         prov.field_location,
         tuple(
-            (_layer(entry.layer), entry.argument_index, entry.path, entry.identity)
+            (
+                _layer(entry.layer),
+                entry.argument_index,
+                entry.path,
+                entry.identity,
+                entry.sha256,
+            )
             for entry in prov.selected_by
         ),
         None

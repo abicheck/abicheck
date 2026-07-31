@@ -125,6 +125,7 @@ def legacy_contract_mode_candidate(
     layer: SelectorLayer = SelectorLayer.LEGACY_ALIAS,
     option: str | None = None,
     path: str | None = None,
+    sha256: str | None = None,
 ) -> FieldCandidate | None:
     """Build the ``contract.mode`` candidate the legacy scope flag contributes.
 
@@ -149,6 +150,10 @@ def legacy_contract_mode_candidate(
     *path* too. Defaulting those to the CLI flag's spelling with no path made
     a project-config receipt claim a flag the user never typed, and gave a
     replay no way to find the file it actually came from (Codex review).
+    *sha256* is that file's own content digest, which such a caller should
+    pass as well: naming the path alone leaves an edit to it undetectable on
+    replay, the very drift a digest exists to catch (Codex review, fresh
+    evidence).
     """
     if not scope_public_headers_is_explicit:
         return None
@@ -167,9 +172,12 @@ def legacy_contract_mode_candidate(
             layer=layer,
             source_kind="legacy_scope_flag",
             reference=flag.value,
+            sha256=sha256,
             path=path,
             selected_by=(
-                SelectedByEntry(layer=layer, option=selector, path=path),
+                SelectedByEntry(
+                    layer=layer, option=selector, path=path, sha256=sha256
+                ),
             ),
         ),
         value=LEGACY_SCOPE_FLAG_CONTRACT_MODE[flag],
