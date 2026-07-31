@@ -1563,10 +1563,26 @@ producers disagree with the export trie by one underscore each way: clang's
 `mangledName` keeps the platform underscore (`__ZN...`) while the trie parser
 strips one (`_ZN...`), and the headerless path (`dumper._dump_macho`'s
 `_normalize_macho_sym`) strips a *second* one from that already-stripped name
-(`ZN...`). Both shifted spellings are tried, and only when the snapshot
-actually carries Mach-O metadata — on ELF/PE the leading underscore is
-meaningful, so `foo` and `_foo` can be distinct declarations and an
-unconditional shift would invent a root.
+(`ZN...`). Both shifted spellings are tried, and only against the **Mach-O
+table's own names** — not the union of every table the snapshot carries — so a
+snapshot holding both an ELF and a Mach-O table can't let an ELF export `foo`
+make an unrelated `_foo` a root. Export names keep their table provenance all
+the way through root matching for this reason, not only for the artifact
+filter. An unnamed ordinal-only PE export is carried as the same
+`ordinal:<n>` placeholder `dumper._dump_pe` records, rather than dropped for
+having an empty `name` — dropping it hid a real entry point whose signature
+is unknown.
+
+A method root's owner is seeded only through an **exact** identity hit
+against a known record (both the bare `name` and any `qualified_name`, mapped
+to the spelling the closure walk resolves). `owner_class_of` cannot tell an
+enclosing *class* from an enclosing *namespace* from the string alone, so an
+exported namespace function `api::run()` yields the bare fragment `"api"`,
+which `_walk_type_closure`'s own alias-tolerant `record_by_name` lookup would
+resolve to an unrelated `other::api` and pull its whole field closure in.
+This is the same collision — and the same fix — `type_reachability.py`
+already carries (see this repo's `AGENTS.md`, "sixth finding"); `surface.py`
+still has it, deliberately, as that file documents.
 
 **Open, deliberately left for Phase 6's corpus run:** the
 "no unmatched ABI-relevant export" requirement is sound but strict, and on a

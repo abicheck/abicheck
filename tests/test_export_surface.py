@@ -560,3 +560,109 @@ class TestAmbiguousLookupAliases:
             elf=ElfMetadata(symbols=[ElfSymbol(name="shared")]),
         )
         assert "shared" in compute_export_surface(snap).export_symbols
+
+
+class TestOrdinalAndOwnerAndPlatformScoping:
+    def test_ordinal_only_pe_export_is_not_dropped(self) -> None:
+        # An unnamed ordinal export has an empty `PeExport.name`; dropping it
+        # would hide a real entry point whose signature is unknown, letting a
+        # named sibling make exclusion provable (Codex review). The
+        # `ordinal:<n>` placeholder matches what `dumper._dump_pe` records.
+        snap = AbiSnapshot(
+            library="l.dll",
+            version="1",
+            functions=[_fn("named", "named")],
+            pe=PeMetadata(
+                exports=[PeExport(name="named"), PeExport(name="", ordinal=7)]
+            ),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unmatched_exports == frozenset({"ordinal:7"})
+        assert not surf.exclusion_is_provable
+
+    def test_a_headerless_ordinal_declaration_matches_the_placeholder(self) -> None:
+        snap = AbiSnapshot(
+            library="l.dll",
+            version="1",
+            functions=[_fn("ordinal:7", "ordinal:7", ret="?")],
+            pe=PeMetadata(exports=[PeExport(name="", ordinal=7)]),
+        )
+        surf = compute_export_surface(snap)
+        assert "ordinal:7" in surf.export_symbols
+        assert not surf.unmatched_exports
+
+    def test_a_namespace_is_not_seeded_as_a_method_owner(self) -> None:
+        # `owner_class_of` cannot tell an enclosing class from an enclosing
+        # namespace, so `api::run()` yields the bare fragment "api", which the
+        # walk's alias-tolerant lookup would resolve to an unrelated
+        # `other::api` and pull its field closure in (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api::run", "_ZN3api3runEv")],
+            types=[_rec("other::api", fields=("Secret",)), _rec("Secret")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN3api3runEv")]),
+        )
+        assert not compute_export_surface(snap).export_types
+
+    def test_a_real_method_owner_is_still_seeded(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("Widget::draw", "_ZN6Widget4drawEv")],
+            types=[_rec("Widget", fields=("Pixel",)), _rec("Pixel")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN6Widget4drawEv")]),
+        )
+        assert {"Widget", "Pixel"} <= compute_export_surface(snap).export_types
+
+    def test_a_qualified_owner_seeds_a_bare_recorded_record(self) -> None:
+        # castxml/clang keep `name` bare and the qualified form in
+        # `qualified_name`; the owner arrives qualified either way.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("ns::Widget::draw", "_ZN2ns6Widget4drawEv")],
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="ns::Widget",
+                )
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN2ns6Widget4drawEv")]),
+        )
+        assert "Widget" in compute_export_surface(snap).export_types
+
+    def test_macho_underscore_shift_does_not_reach_elf_names(self) -> None:
+        # `export_names` used to be unioned before normalization, so a
+        # snapshot carrying both tables let an ELF export `foo` make an
+        # unrelated `_foo` a root (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("_foo", "_foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="foo")]),
+            macho=MachoMetadata(exports=[MachoExport(name="unrelated")]),
+        )
+        assert not compute_export_surface(snap).export_symbols
+
+    def test_a_declaration_with_no_identity_at_all_is_not_a_root(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("", "")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="real")]),
+        )
+        assert not compute_export_surface(snap).export_symbols
+
+    def test_an_untyped_variable_root_marks_the_roots_incomplete(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            variables=[Variable(name="g", mangled="g", type="?")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="g")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.has_roots
+        assert not surf.all_roots_typed

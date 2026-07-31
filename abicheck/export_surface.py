@@ -170,7 +170,13 @@ def observed_exports_by_platform(snap: AbiSnapshot) -> dict[str, set[str]] | Non
         tables["elf"] = {s.name for s in elf.symbols if s.name}
     pe = getattr(snap, "pe", None)
     if pe is not None and getattr(pe, "exports", None):
-        tables["pe"] = {e.name for e in pe.exports if e.name}
+        # An unnamed ordinal-only PE export carries an empty `name`; dropping
+        # it would hide a real entry point whose signature is unknown, so a
+        # named sibling could then make `exclusion_is_provable` true (Codex
+        # review). The `ordinal:<n>` placeholder is exactly what
+        # `dumper._dump_pe` records for the same export, so a headerless PE
+        # snapshot's own declarations match it.
+        tables["pe"] = {(e.name or f"ordinal:{e.ordinal}") for e in pe.exports}
     macho = getattr(snap, "macho", None)
     if macho is not None and getattr(macho, "exports", None):
         tables["macho"] = {e.name for e in macho.exports if e.name}
@@ -227,25 +233,28 @@ def _unexplained_exports(
     return frozenset(unexplained)
 
 
-def _export_identity_candidates(
-    name: str, mangled: str, *, underscore_alias: bool
-) -> tuple[str, ...]:
-    """The linker spellings a declaration could appear under in an export table.
+def _linker_identity(name: str, mangled: str) -> str:
+    """A declaration's own linker identity, or ``""`` when it has none.
 
-    Linker identity only -- the declaration's mangled name, or its plain name
-    when the producer recorded no mangled one (a C symbol, or a backend that
-    leaves the field empty; there is no other identity to match on).
-    Deliberately **not** :func:`~abicheck.surface._symbol_keys`, whose
-    demangled-name and bare-tail aliases exist so a *finding* naming any
-    encoding can be looked up: a binary exporting the C symbol ``foo`` while
-    the headers also declare an unexported ``ns::foo`` would otherwise match on
-    the bare tail ``"foo"`` and pull that unrelated C++ declaration -- and its
-    whole type closure -- into the export contract (Codex review, confirmed
-    empirically).
+    The mangled name, or the plain name when the producer recorded no mangled
+    one (a C symbol, or a backend that leaves the field empty; there is no
+    other identity to match on). Deliberately **not**
+    :func:`~abicheck.surface._symbol_keys`, whose demangled-name and bare-tail
+    aliases exist so a *finding* naming any encoding can be looked up: a
+    binary exporting the C symbol ``foo`` while the headers also declare an
+    unexported ``ns::foo`` would otherwise match on the bare tail ``"foo"``
+    and pull that unrelated C++ declaration -- and its whole type closure --
+    into the export contract (Codex review, confirmed empirically).
+    """
+    return mangled or name
 
-    *underscore_alias* adds **both** underscore-shifted spellings, because
-    Mach-O producers disagree with each other by exactly one underscore in
-    *both* directions (Codex review, both confirmed by reading the producers):
+
+def _macho_shifted_spellings(identity: str) -> tuple[str, ...]:
+    """*identity* with one leading underscore removed and one added.
+
+    Mach-O producers disagree with the export trie by exactly one underscore
+    in *both* directions (Codex review, both confirmed by reading the
+    producers):
 
     - clang's ``mangledName`` keeps the platform underscore
       (``"__ZN3lib3addEii"``) while ``macho_metadata``'s trie parser strips one
@@ -255,44 +264,49 @@ def _export_identity_candidates(
       ``Function`` from that same already-stripped export name, yielding
       ``"ZN3lib3addEii"`` -- the declaration is one underscore *shorter*.
 
-    Only ever gated on the snapshot carrying Mach-O metadata: on ELF/PE the
-    leading underscore is meaningful, and distinct declarations ``foo`` and
-    ``_foo`` can coexist there, so an unconditional shift invents an export
-    root for one from an export table listing only the other (Codex review,
-    confirmed empirically).
+    Matched only against the Mach-O table's own names, never the union of
+    every table: on ELF/PE the leading underscore is meaningful, so distinct
+    declarations ``foo`` and ``_foo`` coexist, and a snapshot carrying both an
+    ELF and a Mach-O table would otherwise let an ELF export ``foo`` make an
+    unrelated ``_foo`` a root (Codex review, confirmed empirically).
     """
-    identity = mangled or name
-    if not identity:
-        return ()
-    if not underscore_alias:
-        return (identity,)
     shorter = identity[1:] if identity.startswith("_") else None
-    return tuple(c for c in (identity, shorter, "_" + identity) if c)
+    return tuple(c for c in (shorter, "_" + identity) if c)
 
 
 def _matched_export_name(
-    name: str, mangled: str, export_names: set[str], *, underscore_alias: bool
+    name: str, mangled: str, tables: dict[str, set[str]]
 ) -> str | None:
     """The observed export name this declaration is a root of, or ``None``.
 
     Returns the *export table's own* spelling rather than a bool, so the
-    caller can subtract matched names from the observed table and see what
+    caller can subtract matched names from the observed tables and see what
     was left over (see :attr:`ExportSurface.unmatched_exports`).
+
+    Takes the per-table mapping rather than a flat union so the Mach-O
+    underscore tolerance (:func:`_macho_shifted_spellings`) applies only to
+    Mach-O names -- see that function for why a union would be wrong.
     """
-    for cand in _export_identity_candidates(
-        name, mangled, underscore_alias=underscore_alias
-    ):
-        if cand in export_names:
-            return cand
+    identity = _linker_identity(name, mangled)
+    if not identity:
+        return None
+    for names in tables.values():
+        if identity in names:
+            return identity
+    macho = tables.get("macho")
+    if macho:
+        for cand in _macho_shifted_spellings(identity):
+            if cand in macho:
+                return cand
     return None
 
 
 def _seed_export_roots(
     snap: AbiSnapshot,
     surface: ExportSurface,
-    export_names: set[str],
+    tables: dict[str, set[str]],
     *,
-    underscore_alias: bool = False,
+    owner_seed_by_identity: dict[str, str] | None = None,
 ) -> set[str]:
     """Record export roots on *surface*; return the closure's seed type names.
 
@@ -313,18 +327,31 @@ def _seed_export_roots(
     Records the export names actually matched on ``surface.matched_exports``,
     so the caller can see which observed exports no declaration accounted for.
 
-    Called with an empty *export_names* on the no-export-table path, where it
-    fills the ``all_*`` universe alone (nothing can match) rather than that
-    path keeping its own copy of the same key derivation (CodeRabbit review).
+    *owner_seed_by_identity* maps a record's own identities (its ``name`` and,
+    when the producer recorded one, its ``qualified_name``) to the spelling
+    the closure walk resolves. A method root's owner is seeded only through an
+    **exact** hit in it: ``owner_class_of`` cannot tell an enclosing *class*
+    from an enclosing *namespace* from the string alone, so an exported
+    namespace function ``api::run()`` yields the bare fragment ``"api"``,
+    which the walk's own alias-tolerant ``record_by_name`` lookup would
+    happily resolve to an unrelated ``other::api`` and pull its whole field
+    closure in (Codex review, confirmed empirically). This mirrors the fix
+    ``type_reachability.py`` already carries for the identical collision;
+    unlike a genuine signature spelling, an owner is always either a real
+    class's complete scope chain or namespace noise, so exact matching loses
+    no real case.
+
+    Called with empty *tables* on the no-export-table path, where it fills the
+    ``all_*`` universe alone (nothing can match) rather than that path keeping
+    its own copy of the same key derivation (CodeRabbit review).
     """
+    owner_seed_by_identity = owner_seed_by_identity or {}
     seed_types: set[str] = set()
     nonroot_keys: set[str] = set()
     for fn in snap.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
-        matched = _matched_export_name(
-            fn.name, fn.mangled, export_names, underscore_alias=underscore_alias
-        )
+        matched = _matched_export_name(fn.name, fn.mangled, tables)
         if matched is None:
             nonroot_keys |= keys
             continue
@@ -347,14 +374,13 @@ def _seed_export_roots(
         for p in fn.params:
             seed_types |= _type_identifiers(getattr(p, "type", None))
         owner = owner_class_of(fn)
-        if owner:
-            seed_types |= _type_identifiers(owner)
+        owner_seed = owner_seed_by_identity.get(owner) if owner else None
+        if owner_seed:
+            seed_types.add(owner_seed)
     for var in snap.variables:
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
-        matched = _matched_export_name(
-            var.name, var.mangled, export_names, underscore_alias=underscore_alias
-        )
+        matched = _matched_export_name(var.name, var.mangled, tables)
         if matched is None:
             nonroot_keys |= keys
             continue
@@ -404,23 +430,30 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     surface.ambiguous_type_names = set(scratch.ambiguous_type_names)
 
     tables = observed_exports_by_platform(snap)
-    export_names = None if tables is None else set().union(*tables.values())
-    if export_names is None:
+    if tables is None:
         # No root evidence. Still populate `all_symbols` so a caller can
         # distinguish a known-but-undecidable entity from an unknown one --
-        # via the same seeding helper (an empty export-name set matches
-        # nothing), so the two paths cannot derive that universe differently.
-        _seed_export_roots(snap, surface, set())
+        # via the same seeding helper (empty tables match nothing), so the two
+        # paths cannot derive that universe differently.
+        _seed_export_roots(snap, surface, {})
         return surface
 
+    # A method root's owner may only be seeded through an exact identity hit
+    # (see `_seed_export_roots`). Both spellings a producer can record are
+    # mapped to the record's own `name`, which is what the closure walk's
+    # `record_by_name` index is keyed by: DWARF bakes the qualified path into
+    # `name` directly, while castxml/clang keep `name` bare and put the
+    # qualified form in `qualified_name`.
+    owner_seed_by_identity: dict[str, str] = {}
+    for rec in snap.types:
+        owner_seed_by_identity[rec.name] = rec.name
+        if rec.qualified_name:
+            owner_seed_by_identity.setdefault(rec.qualified_name, rec.name)
+
     seed_types = _seed_export_roots(
-        snap,
-        surface,
-        export_names,
-        underscore_alias=getattr(snap, "macho", None) is not None,
+        snap, surface, tables, owner_seed_by_identity=owner_seed_by_identity
     )
     surface.resolvable = True
-    assert tables is not None  # export_names is None iff tables is None
     surface.unmatched_exports = _unexplained_exports(tables, surface.matched_exports)
 
     _walk_type_closure(snap, scratch, record_by_name, enum_by_name, seed_types)
