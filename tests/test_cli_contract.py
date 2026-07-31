@@ -936,3 +936,23 @@ def test_contract_requires_contract_evaluation(tmp_path) -> None:
     )
     assert result.exit_code != 0
     assert "--contract requires --contract-evaluation" in result.output
+
+
+def test_contract_is_rejected_for_directory_comparisons() -> None:
+    """``--contract`` has no per-library fan-out wiring (ADR-037 D12).
+
+    The shadow evaluator itself is already rejected for directory/package
+    inputs, so the domain selector must be too -- otherwise it would be
+    silently ignored rather than refused.
+    """
+    import click
+
+    from abicheck.cli_compare_helpers import _reject_set_input_flags
+
+    with pytest.raises(click.UsageError) as excinfo:
+        _reject_set_input_flags(None, False, None, contract_mode="exports")
+    assert "--contract is not supported for directory/package" in str(excinfo.value)
+
+    # The same call without the flag passes through untouched, so the
+    # rejection is attributable to `--contract` alone.
+    _reject_set_input_flags(None, False, None)

@@ -444,6 +444,7 @@ def _seed_export_roots(
 
     seed_types: set[str] = set()
     nonroot_keys: set[str] = set()
+    root_identities: set[str] = set()
     matched_pairs: set[tuple[str, str]] = set()
     for fn in snap.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
@@ -453,6 +454,7 @@ def _seed_export_roots(
             nonroot_keys |= keys
             continue
         matched_pairs |= matched
+        root_identities.add(_linker_identity(fn.name, fn.mangled))
         surface.matched_exports |= {n for _, n in matched}
         surface.export_symbols |= keys
         surface.has_roots = True
@@ -483,6 +485,7 @@ def _seed_export_roots(
             nonroot_keys |= keys
             continue
         matched_pairs |= matched
+        root_identities.add(_linker_identity(var.name, var.mangled))
         surface.matched_exports |= {n for _, n in matched}
         surface.export_symbols |= keys
         surface.has_roots = True
@@ -498,9 +501,21 @@ def _seed_export_roots(
     # also declared, `_symbol_keys` puts the bare tail `"foo"` in
     # `export_symbols`, so a finding about the C `foo` matched the C++ root's
     # alias. An alias shared with a non-root proves nothing about which
-    # declaration a finding names; the matched export names themselves are
-    # exempt, being unambiguous by construction.
-    surface.export_symbols -= nonroot_keys - surface.matched_exports
+    # declaration a finding names.
+    #
+    # Two things are exempt, and both must be: the matched export *names*, and
+    # each root's own *linker identity*. They are not the same string whenever
+    # the Mach-O underscore tolerance fired -- an export trie entry `_foo`
+    # matched by a declaration whose identity is `foo` records `"_foo"` in
+    # `matched_exports`, so exempting only that let an unexported `ns::foo`
+    # sharing the bare tail `"foo"` prune the genuinely exported declaration's
+    # own identity (Codex review, confirmed empirically: `export_symbols`
+    # emptied while the surface still reported a resolved, complete root, so
+    # removing the exported `foo` came back `PROVEN_OUT_OF_CONTRACT` and
+    # `_unresolved_type_edges` skipped that root's signature entirely). A
+    # root's identity is unambiguous by construction the same way a matched
+    # export name is -- only the *derived* aliases around it can be shared.
+    surface.export_symbols -= nonroot_keys - surface.matched_exports - root_identities
     return seed_types, matched_pairs
 
 

@@ -710,6 +710,32 @@ class TestAmbiguityAndRuntimeOwnership:
         assert surf.export_symbols == {"_foo"}
         assert "AOnly" not in surf.export_types
 
+    def test_a_shifted_macho_root_keeps_its_own_identity(self) -> None:
+        # Mach-O exports `_foo`; the C declaration `foo` matches through the
+        # underscore shift, so `matched_exports` holds the *table* spelling
+        # `_foo`, not `foo`. An unexported `ns::foo` sharing the bare tail
+        # `"foo"` must not prune the exported declaration's own identity
+        # (Codex review, confirmed empirically) -- doing so emptied
+        # `export_symbols` while the surface still claimed a resolved,
+        # complete root, so removing the exported `foo` came back proven out
+        # of contract and its signature was never scanned for edges.
+        snap = AbiSnapshot(
+            library="l.dylib",
+            version="1",
+            functions=[
+                _fn("foo", "foo", ret="Cfg *"),
+                _fn("ns::foo", "_ZN2ns3fooEv"),
+            ],
+            macho=MachoMetadata(exports=[MachoExport(name="_foo")]),
+        )
+        surf = compute_export_surface(snap)
+        assert "foo" in surf.export_symbols
+        assert "ns::foo" not in surf.export_symbols
+        # The root's signature is scanned again, so its undeclared return
+        # type is flagged and exclusion is no longer claimed as provable.
+        assert surf.unresolved_type_edges == frozenset({"Cfg"})
+        assert not surf.exclusion_is_provable
+
     def test_an_export_matched_in_one_table_leaves_the_other_unexplained(self) -> None:
         # Only the Mach-O shift from `foo` matched; the ELF `_foo` is a real
         # entry point no declaration accounts for (Codex review).
