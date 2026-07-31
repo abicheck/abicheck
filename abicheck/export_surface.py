@@ -56,19 +56,29 @@ its :doc:`implementation plan </contribute/plans/public-contract-default>`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .diff_cxx_rules import owner_class_of
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .model import AbiSnapshot
-from .name_classification import is_cxx_runtime_library
+from .model import AbiSnapshot, EnumType, RecordType
+from .name_classification import (
+    STDLIB_TYPE_NAMESPACE_PREFIXES,
+    is_cxx_runtime_library,
+)
 from .surface import (
+    _IDENT_RE,
+    _TYPE_NOISE,
     PublicSurface,
     _index_surface_types,
     _is_real_type,
     _symbol_keys,
     _type_identifiers,
     _walk_type_closure,
+)
+from .type_reachability import (
+    _namespace_suffix_spellings,
+    _stripped_signature_spelling,
 )
 
 
@@ -137,18 +147,32 @@ class ExportSurface:
     #: owner of that judgment, so ``_init``/``_fini``/thunks/transitive stdlib
     #: exports don't count as unexplained.
     unmatched_exports: frozenset[str] = frozenset()
+    #: Type identifiers reachable from an export root that name no record,
+    #: enum, or typedef this snapshot carries. Where ``unmatched_exports``
+    #: records an unaccounted *root*, this records an unaccounted *edge*:
+    #: the node behind it was never walked, so a type absent from
+    #: ``export_types`` may simply be reachable through it (Codex review).
+    #: See :func:`_unresolved_type_edges` for what is scanned and
+    #: :func:`_resolvable_type_spellings` for how an edge is resolved.
+    unresolved_type_edges: frozenset[str] = frozenset()
 
     @property
     def exclusion_is_provable(self) -> bool:
         """Whether an absence from the root/closure sets is real evidence.
 
-        Requires an observed export table, at least one resolved root, and no
-        unexplained ABI-relevant export left over. Read this rather than the
-        individual flags: each covers a different way the root set can be
+        Requires an observed export table, at least one resolved root, no
+        unexplained ABI-relevant export left over, and no unresolved type
+        edge in what the closure walked. Read this rather than the
+        individual flags: each covers a different way the traversal can be
         incomplete, and any one of them alone permits a false
         ``PROVEN_OUT_OF_CONTRACT``.
         """
-        return self.resolvable and self.has_roots and not self.unmatched_exports
+        return (
+            self.resolvable
+            and self.has_roots
+            and not self.unmatched_exports
+            and not self.unresolved_type_edges
+        )
 
 
 def observed_exports_by_platform(snap: AbiSnapshot) -> dict[str, set[str]] | None:
@@ -215,7 +239,10 @@ def observed_export_names(snap: AbiSnapshot) -> set[str] | None:
 
 
 def _unexplained_exports(
-    tables: dict[str, set[str]], matched: set[str], *, filter_runtime: bool = True
+    tables: dict[str, set[str]],
+    matched: set[tuple[str, str]],
+    *,
+    filter_runtime: bool = True,
 ) -> frozenset[str]:
     """Observed exports no declaration matched, minus toolchain artifacts.
 
@@ -237,7 +264,17 @@ def _unexplained_exports(
     """
     unexplained: set[str] = set()
     for table, names in tables.items():
-        for n in names - matched:
+        for n in names:
+            # Matches are keyed by ``(table, name)``, never by name alone
+            # (Codex review, confirmed empirically): with an ELF and a
+            # Mach-O table both listing ``_foo`` and the sole declaration
+            # ``foo`` matching only through the Mach-O underscore shift, a
+            # flat name set marked the *ELF* ``_foo`` accounted for too --
+            # leaving ``unmatched_exports`` empty and letting types be proven
+            # out of contract while a real entry point's signature was
+            # entirely unknown.
+            if (table, n) in matched:
+                continue
             if table in _ELF_CONVENTION_TABLES and not is_abi_relevant_elf_symbol(
                 n, filter_transitive_runtime_symbols=filter_runtime
             ):
@@ -289,12 +326,15 @@ def _macho_shifted_spellings(identity: str) -> tuple[str, ...]:
 
 def _matched_export_names(
     name: str, mangled: str, tables: dict[str, set[str]], exact_owners: set[str]
-) -> set[str]:
-    """Every observed export spelling this declaration is a root of.
+) -> set[tuple[str, str]]:
+    """Every observed export this declaration is a root of, as
+    ``(table, spelling)`` pairs.
 
     Returns the *export tables' own* spellings rather than a bool, so the
-    caller can subtract matched names from the observed tables and see what
-    was left over (see :attr:`ExportSurface.unmatched_exports`).
+    caller can subtract matched entries from the observed tables and see what
+    was left over (see :attr:`ExportSurface.unmatched_exports`) -- keyed by
+    table, since the same spelling can appear in two tables while only one of
+    them is the one this declaration actually answers to.
 
     **All** matching spellings, not the first: one C declaration exported by
     a multi-platform snapshot is legitimately ``foo`` in the ELF table and
@@ -318,11 +358,13 @@ def _matched_export_names(
     identity = _linker_identity(name, mangled)
     if not identity:
         return set()
-    matched = {identity for names in tables.values() if identity in names}
+    matched = {
+        (table, identity) for table, names in tables.items() if identity in names
+    }
     macho = tables.get("macho")
     if macho:
         matched |= {
-            c
+            ("macho", c)
             for c in _macho_shifted_spellings(identity)
             if c in macho and c not in exact_owners
         }
@@ -335,8 +377,9 @@ def _seed_export_roots(
     tables: dict[str, set[str]],
     *,
     owner_seed_by_identity: dict[str, str] | None = None,
-) -> set[str]:
-    """Record export roots on *surface*; return the closure's seed type names.
+) -> tuple[set[str], set[tuple[str, str]]]:
+    """Record export roots on *surface*; return the closure's seed type names
+    and the ``(table, spelling)`` pairs actually matched.
 
     Mirrors :func:`~abicheck.surface._seed_public_roots` field for field --
     the return/parameter/variable types of every root, plus a method root's
@@ -393,6 +436,7 @@ def _seed_export_roots(
 
     seed_types: set[str] = set()
     nonroot_keys: set[str] = set()
+    matched_pairs: set[tuple[str, str]] = set()
     for fn in snap.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
@@ -400,7 +444,8 @@ def _seed_export_roots(
         if not matched:
             nonroot_keys |= keys
             continue
-        surface.matched_exports |= matched
+        matched_pairs |= matched
+        surface.matched_exports |= {n for _, n in matched}
         surface.export_symbols |= keys
         surface.has_roots = True
         if fn.params or _is_real_type(fn.return_type):
@@ -429,7 +474,8 @@ def _seed_export_roots(
         if not matched:
             nonroot_keys |= keys
             continue
-        surface.matched_exports |= matched
+        matched_pairs |= matched
+        surface.matched_exports |= {n for _, n in matched}
         surface.export_symbols |= keys
         surface.has_roots = True
         if _is_real_type(var.type):
@@ -447,7 +493,162 @@ def _seed_export_roots(
     # declaration a finding names; the matched export names themselves are
     # exempt, being unambiguous by construction.
     surface.export_symbols -= nonroot_keys - surface.matched_exports
-    return seed_types
+    return seed_types, matched_pairs
+
+
+#: ``typename``/``template`` as whole words -- C++'s explicit markers for a
+#: dependent spelling, which names nothing resolvable until instantiation
+#: (see :func:`_edge_is_unresolved`).
+_DEPENDENT_SPELLING_RE = re.compile(r"\b(?:typename|template)\b")
+
+
+def _resolvable_type_spellings(
+    snap: AbiSnapshot,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> frozenset[str]:
+    """Every spelling that names a record, enum, or typedef this snapshot has.
+
+    Membership here means "this edge lands on a node we know", which is the
+    only question :func:`_unresolved_type_edges` asks -- deliberately *not*
+    which node, so no ambiguity handling belongs here (an edge resolving to
+    two candidates is still a resolved edge).
+
+    The index keys alone are not enough, and getting this wrong is what makes
+    the whole guard useless rather than merely imprecise. A real backend
+    spells a type by any of several equivalent forms, so the same
+    machinery ``type_reachability.py`` built for that problem is reused
+    rather than re-derived:
+
+    - :func:`~abicheck.type_reachability._namespace_suffix_spellings` for
+      partial qualification -- direct-clang prints ``api::Outer::Inner`` as
+      ``"Outer::Inner"``, neither the full identity nor the bare leaf;
+    - :func:`~abicheck.type_reachability._stripped_signature_spelling` for
+      the stdlib namespace and inline ABI-tag markers -- the DWARF backend
+      spells a ``std::string`` parameter as the bare ``"string"`` while
+      ``snap.typedefs``' key is the qualified ``"std::string"``, so without
+      stripping, every C++ library using a standard-library type looks
+      riddled with missing edges and can never prove an exclusion.
+    """
+    spellings: set[str] = set()
+    for key in (*record_by_name, *enum_by_name, *snap.typedefs):
+        spellings.add(key)
+        spellings.update(_namespace_suffix_spellings(key))
+        stripped = _stripped_signature_spelling(key)
+        if stripped:
+            spellings.add(stripped)
+            spellings.update(_namespace_suffix_spellings(stripped))
+    return frozenset(spellings)
+
+
+def _edge_is_unresolved(type_str: str | None, resolvable: frozenset[str]) -> set[str]:
+    """Identifiers in *type_str* that name nothing this snapshot knows.
+
+    Each ``_IDENT_RE`` token is judged on its own -- a template spelling
+    like ``Wrapper<Payload>`` carries two independent edges, and either can
+    be the missing one. Both the token as written and its bare leaf count as
+    the same edge (the token resolves if *either* spelling does), which is
+    why this does not reuse :func:`~abicheck.surface._type_identifiers`:
+    that helper flattens both readings into one set, so a qualified token
+    whose bare tail happens to be unknown would look like a second, missing
+    edge.
+    """
+    if not _is_real_type(type_str) or type_str is None:
+        return set()
+    # A *dependent* spelling names nothing until instantiation, so no
+    # snapshot can carry a node for it and scanning it can only manufacture
+    # false edges. `typename`/`template` are C++'s own explicit markers for
+    # exactly that context -- a language rule, not a naming heuristic --
+    # which is why this is keyed on them rather than on the template
+    # parameter names a particular standard library happens to use.
+    # Measured: libstdc++'s `_Bit_alloc_type` alias, whose target is
+    # `typename __gnu_cxx::__alloc_traits<_Alloc>::template rebind<...>
+    # ::other`, was the last false edge left on a real `g++`-built library.
+    if _DEPENDENT_SPELLING_RE.search(type_str):
+        return set()
+    missing: set[str] = set()
+    for tok in _IDENT_RE.findall(type_str):
+        if tok in _TYPE_NOISE:
+            continue
+        bare = _namespace_suffix_spellings(tok)[-1]
+        if tok not in resolvable and bare not in resolvable:
+            missing.add(tok)
+    return missing
+
+
+def _unresolved_type_edges(
+    snap: AbiSnapshot,
+    surface: ExportSurface,
+    reached_types: set[str],
+    resolvable: frozenset[str],
+) -> frozenset[str]:
+    """Type identifiers reachable from an export root that name nothing known.
+
+    Such an edge is a hole in the very graph traversal
+    :attr:`ExportSurface.exclusion_is_provable` claims was complete: the
+    node behind it was never walked, so whatever *it* reaches is unknown,
+    and a type absent from ``export_types`` may simply be sitting there
+    (Codex review). ``all_roots_typed`` does not cover this -- a root whose
+    every parameter is a real, non-sentinel type string still has an
+    unknown closure when one of those type strings names a record the
+    snapshot does not carry.
+
+    Scanned over the roots' own signatures plus the fields and bases of the
+    records the closure actually *reached*. A broken edge inside an
+    unreachable internal type says nothing about what an export can reach,
+    so including it would block exclusion for a graph defect that cannot
+    matter.
+
+    Typedef *targets* are deliberately **not** scanned, which costs nothing
+    against the case this guard exists for. The motivating example -- a
+    snapshot recording a parameter type ``Alias`` while omitting
+    ``typedef Alias = Internal`` -- is caught by the *signature* scan, since
+    ``Alias`` itself resolves to nothing. What target scanning would add is
+    only the narrower "alias present, its target absent" shape, and measured
+    against a real ``g++`` library it produced nothing but noise: the
+    direct-clang backend stores a typedef under its bare ``node["name"]``
+    (the producer-side scope loss ``AGENTS.md`` records), so libstdc++'s
+    *member* typedefs land under unattributable bare keys like
+    ``"allocator_type"``/``"pointer"`` whose targets are the enclosing
+    template's own parameters (``_Alloc``) -- names no snapshot can carry.
+    Telling those from a genuinely missing target needs the alias's real
+    owner, which the key no longer has.
+
+    A **toolchain-owned** record's own internals are skipped for the same
+    reason one level up. Measured against a real ``g++ -shared -g`` library
+    whose public signature takes a ``std::vector<api::Item>``: scanning
+    libstdc++'s own records reported five "missing" edges -- ``_Tp``,
+    ``_Alloc``, ``_CharT``, ``_Traits`` (template *parameter* names, spelled
+    verbatim in the generic definition's field types) and
+    ``_S_local_capacity`` (a static constant appearing in an array bound) --
+    none of which is a declaration the snapshot failed to carry, and any one
+    of which would have blocked every exclusion for every C++ library.
+    ``STDLIB_TYPE_NAMESPACE_PREFIXES`` is the repo's existing owner of
+    "whose layout is this", and the reachability closure itself is
+    unaffected: the walk still follows those fields, so nothing is hidden --
+    only the *judgment* that an unresolved spelling there is evidence about
+    the inspected library's graph is dropped.
+    """
+    unresolved: set[str] = set()
+    for fn in snap.functions:
+        if not (_symbol_keys(fn.name, fn.mangled) & surface.export_symbols):
+            continue
+        unresolved |= _edge_is_unresolved(fn.return_type, resolvable)
+        for p in fn.params:
+            unresolved |= _edge_is_unresolved(getattr(p, "type", None), resolvable)
+    for var in snap.variables:
+        if _symbol_keys(var.name, var.mangled) & surface.export_symbols:
+            unresolved |= _edge_is_unresolved(var.type, resolvable)
+    for rec in snap.types:
+        if rec.name not in reached_types and rec.qualified_name not in reached_types:
+            continue
+        if (rec.qualified_name or rec.name).startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+            continue
+        for f in rec.fields:
+            unresolved |= _edge_is_unresolved(f.type, resolvable)
+        for base in (*rec.bases, *rec.virtual_bases):
+            unresolved |= _edge_is_unresolved(base, resolvable)
+    return frozenset(unresolved)
 
 
 def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
@@ -560,13 +761,13 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         if rec.qualified_name:
             owner_seed_by_identity.setdefault(rec.qualified_name, rec.qualified_name)
 
-    seed_types = _seed_export_roots(
+    seed_types, matched_pairs = _seed_export_roots(
         snap, surface, tables, owner_seed_by_identity=owner_seed_by_identity
     )
     surface.resolvable = True
     surface.unmatched_exports = _unexplained_exports(
         tables,
-        surface.matched_exports,
+        matched_pairs,
         filter_runtime=not (
             is_cxx_runtime_library(snap.library)
             or is_cxx_runtime_library(getattr(snap.elf, "soname", ""))
@@ -575,4 +776,11 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
 
     _walk_type_closure(snap, scratch, record_by_name, enum_by_name, seed_types)
     surface.export_types = set(scratch.public_types)
+    # After the walk, so only edges the closure actually reached are scanned.
+    surface.unresolved_type_edges = _unresolved_type_edges(
+        snap,
+        surface,
+        surface.export_types,
+        _resolvable_type_spellings(snap, record_by_name, enum_by_name),
+    )
     return surface

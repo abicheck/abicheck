@@ -1688,14 +1688,18 @@ empty, and `exclusion_is_provable` was `True`. The header-scoped (castxml)
 path was not measured — no castxml in that environment — so it stays
 genuinely unknown rather than assumed either way.
 
-**Open, and the one place this domain can still over-claim: unresolvable type
-edges** (Codex review, measured rather than guessed). A signature, field, or
-base whose type string resolves to nothing in the record/enum/typedef indexes
-stops the closure silently, yet `exclusion_is_provable` stays `True` — so a
-type reachable only through that missing edge can be reported
-`PROVEN_OUT_OF_CONTRACT`. Implementing the guard faithfully is what needs a
-decision, not more code, because of what the measurement showed at each
-granularity on the same two libraries:
+**Closed — unresolvable type edges are now tracked, and the domain still
+proves exclusions.** A signature, field, or base whose type string resolves
+to nothing in the record/enum/typedef indexes stops the closure silently,
+yet `exclusion_is_provable` stayed `True` — so a type reachable only through
+that missing edge could be reported `PROVEN_OUT_OF_CONTRACT` (Codex review).
+`ExportSurface.unresolved_type_edges` records those edges and
+`exclusion_is_provable` now requires the set to be empty, alongside the
+root-level `unmatched_exports` rule it already had.
+
+What made this worth deferring once was that a *naive* implementation is
+useless, not that the guard is wrong. Measured at each granularity on two
+real `g++ -shared -g` libraries:
 
 | Granularity of "unresolved" | libmeasure | libpoly |
 |---|---|---|
@@ -1706,14 +1710,40 @@ granularity on the same two libraries:
 That last one is real: DWARF spells the field type `"string"` while the
 typedef key is `"std::string"` and the record is
 `std::__cxx11::basic_string<...>` — exactly the bare-vs-qualified gap
-`AGENTS.md` documents at length for `type_reachability.py`. So a faithful
-guard turns `exclusion_is_provable` off for **any** C++ library with a
-`std::` member, which is nearly all of them — trading a narrow false
-exclusion for a domain that can never prove anything. Resolving those
-spellings properly means reusing `type_reachability.py`'s namespace-suffix
-and typedef-alias machinery, which is its own scoped piece of work. Left
-unimplemented deliberately, with the measurement recorded here so Phase 6
-decides from data rather than repeating it.
+`AGENTS.md` documents at length for `type_reachability.py`. Resolving it is
+what the implemented guard does: `_resolvable_type_spellings` reuses that
+module's `_namespace_suffix_spellings` (partial qualification —
+direct-clang prints `api::Outer::Inner` as `"Outer::Inner"`) and
+`_stripped_signature_spelling` (the stdlib namespace and `__cxx11::`/`__1::`
+inline-ABI markers) over every record, enum, and typedef key, rather than
+matching index keys literally.
+
+Three further noise sources turned up only once the resolver was measured
+against a header-scoped (`--ast-frontend clang`) dump of a library taking a
+`std::vector<api::Item>`, and each is excluded for a stated reason rather
+than tuned away:
+
+| Reported "missing" edge | Why it is not one |
+|---|---|
+| `_Tp`, `_Alloc`, `_CharT`, `_Traits` in libstdc++ records' own fields | Template *parameter* names in a generic definition. Toolchain-owned records' internals are no longer scanned (`STDLIB_TYPE_NAMESPACE_PREFIXES`); the closure walk still follows them, so nothing is hidden |
+| `_S_local_capacity` | A static constant in an array bound, inside `basic_string` — same exclusion |
+| `_Alloc` via `allocator_type`/`pointer` | libstdc++ *member* typedefs, stored under bare unattributable keys by the direct-clang backend. Typedef *targets* are not scanned at all — see below |
+
+Typedef targets are deliberately outside the scan. The motivating example —
+a snapshot recording parameter type `Alias` while omitting
+`typedef Alias = Internal` — is caught by the *signature* scan, since `Alias`
+resolves to nothing; target scanning would add only the narrower
+"alias present, target absent" shape, and against a real library it produced
+nothing but the bare-key noise above. A dependent spelling (`typename`,
+`template` — C++'s own markers, not a naming heuristic) is likewise not an
+edge, since it names nothing until instantiation.
+
+**Result, measured after the fix:** a pure-C library and the
+`std::`-carrying C++ library both report zero unresolved edges and
+`exclusion_is_provable = True`, while a synthetic snapshot whose export
+signature names an undeclared type reports that edge and correctly degrades
+the same finding from `PROVEN_OUT_OF_CONTRACT` to `UNKNOWN_UNRESOLVED`. The
+guard is satisfiable, not vacuous.
 
 Three membership primitives shared by both domains (`_symbol_matches`,
 `_type_candidates`, `_confirmed_type_matches`) were extracted from

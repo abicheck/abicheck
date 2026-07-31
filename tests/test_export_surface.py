@@ -891,3 +891,144 @@ class TestAmbiguityAndRuntimeOwnership:
             elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN6Widget4drawEv")]),
         )
         assert {"Widget", "Pixel"} <= compute_export_surface(snap).export_types
+
+
+class TestUnresolvedTypeEdges:
+    """A hole in the walked graph is not proof of unreachability.
+
+    ``all_roots_typed`` only asks whether each root's signature *strings*
+    are real; an edge whose spelling names no node this snapshot carries
+    leaves the closure incomplete just the same (Codex review).
+    """
+
+    @staticmethod
+    def _snap(param_type, types):
+        return AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=(param_type,))],
+            types=types,
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+
+    def test_a_signature_naming_an_absent_type_blocks_exclusion(self) -> None:
+        surf = compute_export_surface(self._snap("Alias *", [_rec("Internal")]))
+        assert surf.unresolved_type_edges == frozenset({"Alias"})
+        assert not surf.exclusion_is_provable
+
+    def test_the_same_shape_resolves_once_the_type_is_declared(self) -> None:
+        surf = compute_export_surface(
+            self._snap("Alias *", [_rec("Internal"), _rec("Alias")])
+        )
+        assert not surf.unresolved_type_edges
+        assert surf.exclusion_is_provable
+
+    def test_a_reached_records_field_edge_is_scanned(self) -> None:
+        surf = compute_export_surface(
+            self._snap("Holder *", [_rec("Holder", fields=("Gone",))])
+        )
+        assert surf.unresolved_type_edges == frozenset({"Gone"})
+
+    def test_an_unreached_records_field_edge_is_not(self) -> None:
+        # A defect inside a type no export can reach says nothing about
+        # what an export reaches.
+        surf = compute_export_surface(
+            self._snap("Holder *", [_rec("Holder"), _rec("Orphan", fields=("Gone",))])
+        )
+        assert not surf.unresolved_type_edges
+        assert surf.exclusion_is_provable
+
+    def test_a_partially_qualified_spelling_still_resolves(self) -> None:
+        # direct-clang prints `api::Outer::Inner` as `"Outer::Inner"`, neither
+        # the full identity nor the bare leaf.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Outer::Inner *",))],
+            types=[
+                RecordType(
+                    name="Inner",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="api::Outer::Inner",
+                )
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert not compute_export_surface(snap).unresolved_type_edges
+
+    def test_a_stdlib_typedef_key_resolves_its_bare_signature_spelling(self) -> None:
+        # The DWARF backend spells a `std::string` parameter bare while the
+        # typedef key is qualified -- without stripping, every C++ library
+        # using a standard-library type could never prove an exclusion.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("string *",))],
+            types=[],
+            typedefs={"std::string": "basic_string<char>"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unresolved_type_edges
+        assert surf.exclusion_is_provable
+
+    def test_toolchain_owned_internals_are_not_scanned(self) -> None:
+        # Measured on a real g++ library: libstdc++'s own records spell
+        # template *parameter* names (`_Tp`, `_Alloc`) in their field types.
+        # Those are not declarations any snapshot carries, and treating them
+        # as missing edges blocked every exclusion for every C++ library.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("std::vector<int> *",))],
+            types=[
+                RecordType(
+                    name="vector",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="std::vector",
+                    fields=[TypeField(name="_M_start", type="_Tp *")],
+                )
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert not compute_export_surface(snap).unresolved_type_edges
+
+    def test_a_dependent_spelling_is_not_an_edge(self) -> None:
+        # `typename`/`template` mark a spelling that names nothing until
+        # instantiation, so no snapshot can carry a node for it.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Holder *",))],
+            types=[
+                RecordType(
+                    name="Holder",
+                    kind="struct",
+                    size_bits=64,
+                    fields=[
+                        TypeField(
+                            name="f",
+                            type="typename __alloc_traits<_Alloc>::template rebind<T>",
+                        )
+                    ],
+                )
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert not compute_export_surface(snap).unresolved_type_edges
+
+    def test_an_export_matched_in_one_table_leaves_the_other_unexplained(self) -> None:
+        # Only the Mach-O shift from `foo` matched; the ELF `_foo` is a real
+        # entry point no declaration accounts for (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("foo", "foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_foo")]),
+            macho=MachoMetadata(exports=[MachoExport(name="_foo")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unmatched_exports == frozenset({"_foo"})
+        assert not surf.exclusion_is_provable
