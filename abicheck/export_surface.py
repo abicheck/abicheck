@@ -61,6 +61,7 @@ from dataclasses import dataclass, field
 from .diff_cxx_rules import owner_class_of
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
+from .name_classification import is_cxx_runtime_library
 from .surface import (
     PublicSurface,
     _index_surface_types,
@@ -214,7 +215,7 @@ def observed_export_names(snap: AbiSnapshot) -> set[str] | None:
 
 
 def _unexplained_exports(
-    tables: dict[str, set[str]], matched: set[str]
+    tables: dict[str, set[str]], matched: set[str], *, filter_runtime: bool = True
 ) -> frozenset[str]:
     """Observed exports no declaration matched, minus toolchain artifacts.
 
@@ -227,11 +228,19 @@ def _unexplained_exports(
     since a wrongly-dropped unmatched export is exactly what would let
     :attr:`ExportSurface.exclusion_is_provable` turn true on incomplete
     evidence.
+
+    *filter_runtime* mirrors ``diff_symbols_renames._should_filter_transitive_runtime_symbols``:
+    when the snapshot *is* libstdc++/libc++, its ``_ZNSt...`` exports are the
+    inspected library's own ABI, not transitive runtime noise, so dropping
+    them would let a partial declaration set look fully accounted for (Codex
+    review).
     """
     unexplained: set[str] = set()
     for table, names in tables.items():
         for n in names - matched:
-            if table in _ELF_CONVENTION_TABLES and not is_abi_relevant_elf_symbol(n):
+            if table in _ELF_CONVENTION_TABLES and not is_abi_relevant_elf_symbol(
+                n, filter_transitive_runtime_symbols=filter_runtime
+            ):
                 continue
             unexplained.add(n)
     return frozenset(unexplained)
@@ -279,7 +288,7 @@ def _macho_shifted_spellings(identity: str) -> tuple[str, ...]:
 
 
 def _matched_export_names(
-    name: str, mangled: str, tables: dict[str, set[str]]
+    name: str, mangled: str, tables: dict[str, set[str]], exact_owners: set[str]
 ) -> set[str]:
     """Every observed export spelling this declaration is a root of.
 
@@ -296,6 +305,15 @@ def _matched_export_names(
     Takes the per-table mapping rather than a flat union so the Mach-O
     underscore tolerance (:func:`_macho_shifted_spellings`) applies only to
     Mach-O names -- see that function for why a union would be wrong.
+
+    *exact_owners* is every export name some declaration's own linker
+    identity claims exactly. A shifted spelling is refused for those: a
+    Mach-O library declaring both C functions ``foo`` and ``_foo`` while
+    exporting only ``_foo`` would otherwise root *both*, since ``foo``
+    shifts onto the export ``_foo`` that ``_foo`` already owns outright
+    (Codex review). The underscore tolerance exists for a producer spelling
+    the *same* entity differently, never to hand one declaration's export to
+    another.
     """
     identity = _linker_identity(name, mangled)
     if not identity:
@@ -303,7 +321,11 @@ def _matched_export_names(
     matched = {identity for names in tables.values() if identity in names}
     macho = tables.get("macho")
     if macho:
-        matched |= {c for c in _macho_shifted_spellings(identity) if c in macho}
+        matched |= {
+            c
+            for c in _macho_shifted_spellings(identity)
+            if c in macho and c not in exact_owners
+        }
     return matched
 
 
@@ -352,12 +374,22 @@ def _seed_export_roots(
     its own copy of the same key derivation (CodeRabbit review).
     """
     owner_seed_by_identity = owner_seed_by_identity or {}
+    # Every export name a declaration claims by exact linker identity --
+    # computed before any matching so the Mach-O shift can refuse to steal
+    # one (see `_matched_export_names`).
+    exact_owners: set[str] = set()
+    identities = [_linker_identity(f.name, f.mangled) for f in snap.functions]
+    identities += [_linker_identity(v.name, v.mangled) for v in snap.variables]
+    for ident in identities:
+        if ident and any(ident in names for names in tables.values()):
+            exact_owners.add(ident)
+
     seed_types: set[str] = set()
     nonroot_keys: set[str] = set()
     for fn in snap.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
-        matched = _matched_export_names(fn.name, fn.mangled, tables)
+        matched = _matched_export_names(fn.name, fn.mangled, tables, exact_owners)
         if not matched:
             nonroot_keys |= keys
             continue
@@ -386,7 +418,7 @@ def _seed_export_roots(
     for var in snap.variables:
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
-        matched = _matched_export_names(var.name, var.mangled, tables)
+        matched = _matched_export_names(var.name, var.mangled, tables, exact_owners)
         if not matched:
             nonroot_keys |= keys
             continue
@@ -450,8 +482,17 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # `record_by_name` index is keyed by: DWARF bakes the qualified path into
     # `name` directly, while castxml/clang keep `name` bare and put the
     # qualified form in `qualified_name`.
+    # An ambiguous target is dropped rather than seeded: `_walk_type_closure`
+    # resolves a name through `record_by_name`, which is keyed by bare names
+    # and tails, so seeding the bare `Foo` shared by `ns1::Foo` and
+    # `ns2::Foo` walks *both* and pulls fields reachable only from the
+    # unrelated one into the closure (Codex review). `ambiguous_type_names`
+    # is exactly surface.py's own record of which names resolve to more than
+    # one type.
     owner_seed_by_identity: dict[str, str] = {}
     for rec in snap.types:
+        if rec.name in surface.ambiguous_type_names:
+            continue
         owner_seed_by_identity[rec.name] = rec.name
         if rec.qualified_name:
             owner_seed_by_identity.setdefault(rec.qualified_name, rec.name)
@@ -460,7 +501,14 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         snap, surface, tables, owner_seed_by_identity=owner_seed_by_identity
     )
     surface.resolvable = True
-    surface.unmatched_exports = _unexplained_exports(tables, surface.matched_exports)
+    surface.unmatched_exports = _unexplained_exports(
+        tables,
+        surface.matched_exports,
+        filter_runtime=not (
+            is_cxx_runtime_library(snap.library)
+            or is_cxx_runtime_library(getattr(snap.elf, "soname", ""))
+        ),
+    )
 
     _walk_type_closure(snap, scratch, record_by_name, enum_by_name, seed_types)
     surface.export_types = set(scratch.public_types)

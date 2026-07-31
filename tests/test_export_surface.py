@@ -684,3 +684,99 @@ class TestMultiPlatformSpellings:
         assert surf.matched_exports == {"foo", "_foo"}
         assert not surf.unmatched_exports
         assert surf.exclusion_is_provable
+
+
+class TestAmbiguityAndRuntimeOwnership:
+    def test_an_ambiguous_owner_is_not_seeded(self) -> None:
+        # `_walk_type_closure` resolves through `record_by_name`, keyed by
+        # bare names, so seeding the `Foo` shared by `ns1::Foo`/`ns2::Foo`
+        # walks both and pulls the unrelated one's fields in (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("ns1::Foo::run", "_ZN3ns13Foo3runEv")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="ns1::Foo",
+                    fields=[TypeField(name="a", type="AOnly")],
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="ns2::Foo",
+                    fields=[TypeField(name="b", type="BOnly")],
+                ),
+                _rec("AOnly"),
+                _rec("BOnly"),
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN3ns13Foo3runEv")]),
+        )
+        assert "BOnly" not in compute_export_surface(snap).export_types
+
+    def test_an_unambiguous_owner_is_still_seeded(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("Widget::draw", "_ZN6Widget4drawEv")],
+            types=[_rec("Widget", fields=("Pixel",)), _rec("Pixel")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN6Widget4drawEv")]),
+        )
+        assert {"Widget", "Pixel"} <= compute_export_surface(snap).export_types
+
+    def test_macho_shift_does_not_steal_another_declarations_export(self) -> None:
+        # A Mach-O library declaring both `foo` and `_foo` while exporting
+        # only `_foo`: the shift must not root `foo` as well (Codex review).
+        snap = AbiSnapshot(
+            library="l.dylib",
+            version="1",
+            functions=[
+                _fn("foo", "foo", ret="AOnly *"),
+                _fn("_foo", "_foo", ret="BOnly *"),
+            ],
+            types=[_rec("AOnly"), _rec("BOnly")],
+            macho=MachoMetadata(exports=[MachoExport(name="_foo")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.export_symbols == {"_foo"}
+        assert "AOnly" not in surf.export_types
+
+    def test_the_runtime_library_own_abi_is_not_filtered(self) -> None:
+        # For libstdc++/libc++ itself, `_ZNSt...` exports are the inspected
+        # ABI, not transitive runtime noise -- dropping them would let a
+        # partial declaration set look fully accounted for (Codex review).
+        snap = AbiSnapshot(
+            library="libstdc++.so.6",
+            version="1",
+            functions=[_fn("known", "known")],
+            elf=ElfMetadata(
+                soname="libstdc++.so.6",
+                symbols=[
+                    ElfSymbol(name="known"),
+                    ElfSymbol(name="_ZNSt6vectorIiE4pushEi"),
+                ],
+            ),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unmatched_exports == frozenset({"_ZNSt6vectorIiE4pushEi"})
+        assert not surf.exclusion_is_provable
+
+    def test_an_ordinary_library_still_filters_transitive_runtime(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1",
+            functions=[_fn("known", "known")],
+            elf=ElfMetadata(
+                soname="libfoo.so",
+                symbols=[
+                    ElfSymbol(name="known"),
+                    ElfSymbol(name="_ZNSt6vectorIiE4pushEi"),
+                ],
+            ),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unmatched_exports
+        assert surf.exclusion_is_provable
