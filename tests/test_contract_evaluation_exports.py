@@ -775,3 +775,114 @@ class TestCompareRequestContractModeValidation:
     def test_omitting_the_mode_is_always_fine(self) -> None:
         errors = self._request(contract_evaluation=True).validation_errors()
         assert not [e for e in errors if "contract_mode" in e]
+
+
+class TestTrustedByConstructionUnderExports:
+    """A finding built only from already-in-contract entities is definitive.
+
+    The `public` path checks this before its resolvability and identity
+    gates; the `exports` path reached its own identity gate first, so every
+    `VISIBILITY_LEAK` — whose producer sets the synthetic
+    `symbol="<visibility>"` and which `_diff_visibility_leak` builds
+    exclusively from ELF-exported functions — was stamped
+    `UNKNOWN_UNRESOLVED` (Codex review).
+    """
+
+    @staticmethod
+    def _exports():
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1",
+            functions=[_fn("api", mangled="api")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        return compute_export_surface(snap)
+
+    def _evaluate(self, change):
+        exp = self._exports()
+        return evaluate_change_contract_relevance(
+            change,
+            _UNRESOLVABLE,
+            _UNRESOLVABLE,
+            mode=ContractMode.EXPORTS,
+            exports_old=exp,
+            exports_new=exp,
+        )
+
+    def test_a_visibility_leak_is_in_contract(self) -> None:
+        # The batch sentinel that motivated this: no real per-entity symbol,
+        # so identity resolution reduces and the gate fired.
+        c = Change(
+            kind=ChangeKind.VISIBILITY_LEAK, symbol="<visibility>", description=""
+        )
+        assert self._evaluate(c) == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="public_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+
+    @pytest.mark.parametrize(
+        ("kind", "symbol"),
+        [
+            # Trusted on the `public` path, but grounded in header/source
+            # evidence that says nothing about export membership -- so this
+            # domain must not assert them in-contract. Reusing the `public`
+            # trusted set wholesale here was the over-broad first attempt.
+            (ChangeKind.PYTHON_API_FUNCTION_REMOVED, "mod.fn"),
+            (ChangeKind.PUBLIC_MACRO_REMOVED, "MAX_LEN"),
+            (ChangeKind.CONSTANT_REMOVED, "LIMIT"),
+        ],
+    )
+    def test_a_header_grounded_trusted_kind_stays_unresolved(
+        self, kind, symbol
+    ) -> None:
+        c = Change(kind=kind, symbol=symbol, description="")
+        assert self._evaluate(c).relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_an_ordinary_finding_still_goes_through_the_gates(self) -> None:
+        # The shared predicate must not turn into a blanket bypass.
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="helper", description="")
+        assert self._evaluate(c).relevance is not ContractRelevance.IN_CONTRACT
+
+
+class TestCompareSnapshotsContractModeValidation:
+    """`compare_snapshots` is a documented Tier-2 entry point reached without
+    a `CompareRequest`, so it applies the same two rules (Codex review)."""
+
+    @staticmethod
+    def _snaps():
+        snap = AbiSnapshot(library="libfoo.so", version="1")
+        return snap, snap
+
+    def test_a_mode_without_evaluation_raises(self) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import compare_snapshots
+
+        old, new = self._snaps()
+        with pytest.raises(ValidationError, match="requires contract_evaluation"):
+            compare_snapshots(old, new, contract_mode="exports")
+
+    def test_an_unsupported_mode_raises(self) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import compare_snapshots
+
+        old, new = self._snaps()
+        with pytest.raises(ValidationError, match="unsupported contract mode"):
+            compare_snapshots(
+                old, new, contract_mode="bogus", contract_evaluation=True
+            )
+
+    def test_a_valid_pair_is_accepted(self) -> None:
+        from abicheck.service import compare_snapshots
+
+        old, new = self._snaps()
+        result = compare_snapshots(
+            old, new, contract_mode="exports", contract_evaluation=True
+        )
+        assert result.verdict is not None
+
+    def test_omitting_the_mode_is_accepted(self) -> None:
+        from abicheck.service import compare_snapshots
+
+        old, new = self._snaps()
+        assert compare_snapshots(old, new).verdict is not None

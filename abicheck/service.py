@@ -1524,6 +1524,33 @@ def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
         raise ValidationError(f"Cannot read environment matrix {path}: {e}") from e
 
 
+def _validate_contract_mode(
+    contract_mode: str | None, contract_evaluation: bool
+) -> None:
+    """Apply ADR-049 Phase 6's two ``contract_mode`` rules at a Tier-2 entry.
+
+    Same allowed values and same ``contract_evaluation`` dependency as
+    ``CompareRequest.validation_errors`` and the CLI's ``--contract``, so the
+    three front ends cannot disagree about what is accepted.
+    """
+    if contract_mode is None:
+        return
+    from .contract_relevance_types import ContractMode
+
+    allowed = {mode.value for mode in ContractMode}
+    if contract_mode not in allowed:
+        raise ValidationError(
+            f"unsupported contract mode {contract_mode!r}: "
+            f"choose from {', '.join(sorted(allowed))}"
+        )
+    if not contract_evaluation:
+        raise ValidationError(
+            "contract_mode requires contract_evaluation: it selects which "
+            "evidence domain the shadow contract evaluator judges against, "
+            "and without that flag no contract decision is computed at all"
+        )
+
+
 def compare_snapshots(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -1552,7 +1579,16 @@ def compare_snapshots(
     command with embedded build-source evidence, ``scan``, ``appcompat``) route
     through here instead of importing ``checker.compare``; the kwargs mirror the
     core verb exactly so no capability is lost.
+
+    Raises:
+        ValidationError: *contract_mode* is not one of ``public``/``exports``/
+            ``all``, or is given without *contract_evaluation*. This is a
+            documented Tier-2 entry point that direct Python callers reach
+            without building a ``CompareRequest``, so it applies the same two
+            rules that request object and the CLI do rather than silently
+            accepting a no-op or failing later inside the core (Codex review).
     """
+    _validate_contract_mode(contract_mode, contract_evaluation)
     # Centralized POST committed-wrapper recovery: when a committed-surface
     # allowlist is supplied, union the callable `pp_*` wrappers exported by the
     # old snapshot (contract_scope_allowlist's snapshot half). This keeps both

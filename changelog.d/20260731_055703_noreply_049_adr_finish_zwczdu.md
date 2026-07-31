@@ -40,8 +40,17 @@
   leaf names a node the snapshot records no scope for at all, which is the
   producer-side scope loss that makes a bare typedef key legitimate.
 
-- **`CompareRequest` validates `contract_mode`** — an unsupported value, or a
-  mode requested with `contract_evaluation` off, is now a pre-flight
-  `validation_errors()` entry with the same wording the CLI uses, instead of
-  being silently ignored or surfacing as a raw `ValueError` after input
-  resolution.
+- **`contract_mode` is validated at both service boundaries** — an
+  unsupported value, or a mode requested with `contract_evaluation` off, is a
+  pre-flight `CompareRequest.validation_errors()` entry and a
+  `ValidationError` from `service.compare_snapshots`, with the same wording
+  the CLI uses, instead of being silently ignored or surfacing as a raw
+  `ValueError` after input resolution.
+
+- **`VISIBILITY_LEAK` is in contract under `contract=exports`** — it carries
+  the producer's synthetic `symbol="<visibility>"`, which resolves to the
+  reduced identity tier, so the exports path's identity gate stamped every
+  one `UNKNOWN_UNRESOLVED` even though `_diff_visibility_leak` builds them
+  exclusively from ELF symbol-table entries — this domain's own root
+  evidence. The other kinds the `public` path trusts by construction are
+  grounded in header/source evidence and deliberately stay unresolved here.

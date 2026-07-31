@@ -981,6 +981,53 @@ def _export_root_decision() -> ContractEvaluationDecision:
     )
 
 
+def _is_trusted_by_construction(change: Change) -> bool:
+    """Whether *change* is definitive regardless of any surface evidence.
+
+    Three families, each built only from an already-proven-in-contract
+    entity, so no universe-membership or identity check can add information
+    about them -- it can only take it away. See
+    :func:`evaluate_change_contract_relevance`'s own call site for the full
+    per-family rationale.
+    """
+    return (
+        change.kind.value.startswith("python_")
+        or change.kind.value in _NEVER_FILTER_KIND_NAMES
+        or change.kind.value in _PUBLIC_SOURCE_ABI_KIND_SLUGS
+    )
+
+
+def _trusted_by_construction_decision() -> ContractEvaluationDecision:
+    return ContractEvaluationDecision(
+        relevance=ContractRelevance.IN_CONTRACT,
+        reason_code="public_root_membership",
+        assurance=ContractAssurance.COMPLETE,
+    )
+
+
+#: The trusted-by-construction kinds whose construction rests on *this*
+#: domain's own evidence -- the observed export table -- and which may
+#: therefore skip the ``exports`` resolvability/identity gates.
+#:
+#: Deliberately not the whole of the `public` path's trusted set, which an
+#: earlier revision reused wholesale and an existing test immediately caught:
+#: those families are grounded in *header*/source/Python-axis evidence, which
+#: says nothing about export membership. A `PUBLIC_MACRO_REMOVED` has no
+#: linker symbol at all, and `constant_*`/`internal_*_leaks_via_public_api`
+#: are derived from the public API surface, so under a contract defined as
+#: "exported roots and their closure" they stay `UNKNOWN_UNRESOLVED` rather
+#: than being asserted in-domain.
+#:
+#: `VISIBILITY_LEAK` qualifies because `diff_platform_elf_dynamic.
+#: _diff_visibility_leak` builds it exclusively from `Visibility.ELF_ONLY`
+#: declarations -- entries of the ELF symbol table itself. Another kind
+#: belongs here only on the same footing: its producer must draw solely from
+#: the export table.
+_EXPORT_GROUNDED_KIND_NAMES: frozenset[str] = frozenset(
+    {ChangeKind.VISIBILITY_LEAK.value}
+)
+
+
 def _exports_mode_decision(
     change: Change,
     exp_old: ExportSurface,
@@ -1028,6 +1075,16 @@ def _exports_mode_decision(
     cannot be placed in the export domain at all, which is "incomplete
     root/graph evidence", not proof of exclusion.
     """
+    # Checked before this domain's own resolvability and identity gates,
+    # exactly as the `public` path checks its own trusted-by-construction
+    # families before its equivalents (Codex review, confirmed empirically):
+    # a `VISIBILITY_LEAK` carries the producer's synthetic
+    # `symbol="<visibility>"`, which resolves to `finding_identity`'s reduced
+    # tier, so the identity gate below stamped every one of them
+    # `UNKNOWN_UNRESOLVED`.
+    if change.kind.value in _EXPORT_GROUNDED_KIND_NAMES:
+        return _trusted_by_construction_decision()
+
     auth = _authoritative_export_surface(change, exp_old, exp_new)
     if not auth.resolvable:
         return _unresolved_decision(
@@ -1270,16 +1327,8 @@ def evaluate_change_contract_relevance(
     # identity-ambiguity tiering would downgrade a definitive
     # `PUBLIC_MACRO_REMOVED`/`INLINE_FUNCTION_REMOVED`/etc. event purely
     # because of an unrelated evidence gap (Codex review, fresh evidence).
-    if (
-        change.kind.value.startswith("python_")
-        or change.kind.value in _NEVER_FILTER_KIND_NAMES
-        or change.kind.value in _PUBLIC_SOURCE_ABI_KIND_SLUGS
-    ):
-        return ContractEvaluationDecision(
-            relevance=ContractRelevance.IN_CONTRACT,
-            reason_code="public_root_membership",
-            assurance=ContractAssurance.COMPLETE,
-        )
+    if _is_trusted_by_construction(change):
+        return _trusted_by_construction_decision()
 
     # `force_public_symbols` (ADR-024 D6's widening overlay) is a
     # user-guaranteed override: `FilterNonPublicSurface._run_scope`/
