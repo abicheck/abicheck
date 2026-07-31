@@ -76,12 +76,14 @@ from abicheck.checker_policy import (  # noqa: E402
     BREAKING_KINDS,
 )
 from abicheck.checker_types import Change, DiffResult  # noqa: E402
+from abicheck.contract_context import finding_key  # noqa: E402
 from abicheck.contract_evidence_collect import validate_decision_evidence  # noqa: E402
 from abicheck.contract_relevance_types import (  # noqa: E402
     ContractMode,
     ContractRelevance,
 )
 from abicheck.export_surface import observed_exports_by_platform  # noqa: E402
+from abicheck.finding_identity import report_finding_id as _finding_id  # noqa: E402
 
 #: Every domain is measured, not only the one Phase 7 will default to: an
 #: ``exports`` run on a corpus whose snapshots carry no export table is
@@ -229,7 +231,10 @@ def measure_case(case: Case, mode: ContractMode) -> ModeMeasurement:
                 out.unresolved += 1
             _tally(out.by_provider_state, provider_state, resolved)
             _tally(out.by_platform, platform, resolved)
-            if f"{change.kind.value}:{change.symbol or ''}" not in receipt_keys:
+            # Keyed exactly as `checker` writes the receipt -- through the
+            # report's own `finding_id`, not a second spelling of the
+            # convention (a mismatch here would report every finding as lost).
+            if finding_key(change, _finding_id) not in receipt_keys:
                 out.fact_losses.append(key)
             if relevance in _CONCLUSIVE and _is_delta(legacy_state, relevance):
                 refs = change.contract_evidence_refs or ()

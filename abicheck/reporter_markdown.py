@@ -41,6 +41,7 @@ from .checker_policy import (
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
+from .finding_identity import report_finding_id
 from .report_summary import build_summary, surface_breakdown
 from .semver import recommend_release
 
@@ -498,7 +499,9 @@ def _build_impact_table(
 # ---------------------------------------------------------------------------
 
 
-def _contract_decision_text(relevance: Any, reason_code: str | None, assurance: Any) -> str:
+def _contract_decision_text(
+    relevance: Any, reason_code: str | None, assurance: Any
+) -> str:
     """Core ``<relevance> (<reason_code>), assurance: <level>`` text, shared
     by every already-stamped-``Change`` rendering site in this module
     (CodeRabbit review: the same tag-building pattern was duplicated at
@@ -655,45 +658,14 @@ def _to_markdown_leaf(
     return "\n".join(lines)
 
 
-def _finding_id(c: object) -> str:
-    """Stable per-finding fingerprint (schema 2.3, additive).
-
-    Deterministic across repeated runs of the same comparison, so a
-    consumer can tell "is this the same finding" across two report runs
-    (e.g. to correlate a suppression/waiver, or diff two CI runs' findings)
-    without relying on array order or index — neither of which abicheck
-    guarantees stays stable release to release.
-
-    Derived only from fields that identify the finding's *identity* (kind,
-    symbol, old/new value, source location, description) — deliberately
-    excluding ``severity``/``evidence_status``, which are policy-derived and
-    would make the same underlying finding hash differently under a
-    different ``--policy``.
-
-    ``description`` is included as a discriminator: two findings of the same
-    kind on the same symbol with the same old/new value and no distinct
-    source location (e.g. ``param_pointer_level_changed`` on two different
-    parameters of one function, both going from pointer-depth 1 to 2) would
-    otherwise collide on an identical id even though they are different
-    findings — ``description`` embeds the per-finding detail (parameter
-    name/index, member name, …) that disambiguates them.
-
-    Lives here (not ``reporter.py``) so this leaf module can also key
-    ``--report-mode root-cause`` markdown groups without importing back from
-    ``reporter`` (which would form an import cycle); ``reporter`` re-exports
-    it for backward compat, same as every other name in this module.
-    """
-    key = "\x1f".join(
-        [
-            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
-            str(getattr(c, "symbol", None) or ""),
-            str(getattr(c, "old_value", None) or ""),
-            str(getattr(c, "new_value", None) or ""),
-            str(getattr(c, "source_location", None) or ""),
-            str(getattr(c, "description", None) or ""),
-        ]
-    )
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+#: The report's stable per-finding fingerprint. The implementation moved to
+#: the dependency-free ``finding_identity`` leaf module so ``checker.py`` can
+#: key ADR-049's decision receipt by the *same* id the report shows without
+#: importing this module -- which would close a ``checker ->
+#: reporter_markdown -> checker`` cycle the ``import-cycle-growth`` gate
+#: rejects. Re-exported here (and, transitively, from ``reporter``) so every
+#: existing import path keeps working unchanged.
+_finding_id = report_finding_id
 
 
 def _root_cause_key_and_display(
@@ -1802,8 +1774,6 @@ def _format_change_md(c: object) -> str:
     if contract_relevance is not None:
         reason_code = getattr(c, "contract_reason_code", None)
         contract_assurance = getattr(c, "contract_assurance", None)
-        line += (
-            f"\n  > Contract: {_contract_decision_text(contract_relevance, reason_code, contract_assurance)}"
-        )
+        line += f"\n  > Contract: {_contract_decision_text(contract_relevance, reason_code, contract_assurance)}"
 
     return line

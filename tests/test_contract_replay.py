@@ -29,6 +29,7 @@ from abicheck.contract_context import (
     build_decision_receipt,
     build_persisted_context,
     domain_roots,
+    finding_key,
 )
 from abicheck.contract_context_io import (
     persisted_context_from_dict,
@@ -49,6 +50,8 @@ from abicheck.contract_replay import (
     unresolved_rate,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.export_surface import compute_export_surface
+from abicheck.finding_identity import report_finding_id as _finding_id
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -138,12 +141,48 @@ class TestVersionGate:
 
 class TestReplayOriginalDecisions:
     def test_receipt_is_returned_verbatim(self) -> None:
+        """Keyed by the report's own ``finding_id``, over every stamped bucket.
+
+        Built through ``finding_key`` rather than re-spelling the format:
+        a duplicated key convention could drift from the receipt's while this
+        test still passed (CodeRabbit review). The expected map covers the
+        demoted bucket too, since ``compare`` stamps -- and the receipt
+        records -- those as well.
+        """
         result, ctx = _run()
         original = replay_original_decisions(ctx)
         assert original == {
-            f"{c.kind.value}:{c.symbol or ''}": c.contract_relevance
-            for c in result.changes
+            finding_key(c, _finding_id): c.contract_relevance
+            for c in result.changes + result.out_of_surface_changes
+            if c.contract_relevance is not None
         }
+
+    def test_receipt_keys_separate_two_findings_on_one_symbol(self) -> None:
+        """A coarse ``kind:symbol`` key would collapse these into one entry.
+
+        Two findings of one kind on one symbol (e.g. two parameters of the
+        same function) are distinct report findings with distinct
+        ``finding_id`` values; the receipt must record a decision for each
+        (Codex review, fresh evidence).
+        """
+        evidence = ContractEvidenceBlock()
+        twins = [
+            Change(
+                kind=ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
+                symbol="api",
+                description=f"parameter {i} pointer depth 1 -> 2",
+            )
+            for i in (0, 1)
+        ]
+        for change in twins:
+            change.contract_relevance = ContractRelevance.IN_CONTRACT
+        receipt = build_persisted_context(
+            evidence,
+            mode=ContractMode.PUBLIC,
+            changes=twins,
+            finding_id=_finding_id,
+        ).decision_receipt
+        assert len(receipt.relevance_by_finding) == 2
 
     def test_replay_ignores_this_build_s_evidence(self) -> None:
         """Emptying the evidence block cannot change a replayed decision.
@@ -159,7 +198,7 @@ class TestReplayOriginalDecisions:
 class TestReevaluateFromEvidence:
     def test_reproduces_the_original_domain_by_default(self) -> None:
         result, ctx = _run()
-        replayed = reevaluate_from_evidence(ctx, result.changes)
+        replayed = reevaluate_from_evidence(ctx, result.changes, finding_id=_finding_id)
         comparison = compare_decisions(replay_original_decisions(ctx), replayed)
         assert comparison.is_sound
         assert comparison.agreed  # not vacuous: something actually matched
@@ -184,6 +223,25 @@ class TestReevaluateFromEvidence:
             and d.reason_code == "all_mode_normalized_entity"
             for d in replayed.values()
         )
+
+    def test_public_run_can_be_reevaluated_under_exports(self) -> None:
+        """The P1 case: evidence collection must not depend on the run's mode.
+
+        A comparison run under ``public`` still persists the export
+        provider, so an ``exports`` re-evaluation resolves from the same
+        block instead of answering ``UNKNOWN_UNRESOLVED`` for a pair whose
+        export tables were fully observable (Codex review, fresh evidence).
+        """
+        result, ctx = _run(mode="public", with_exports=True)
+        assert any(
+            e.record.provider == "export_table" for e in ctx.contract_evidence.providers
+        )
+        replayed = reevaluate_from_evidence(
+            ctx, result.changes, mode=ContractMode.EXPORTS
+        )
+        decision = next(iter(replayed.values()))
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "export_root_membership"
 
     def test_exports_domain_reevaluates_from_export_roots(self) -> None:
         result, ctx = _run(mode="exports", with_exports=True)
@@ -222,8 +280,9 @@ class TestReevaluateFromEvidence:
             description="Orphan size changed",
         )
 
-    def _orphan_context(self, *, with_provenance: bool):
-        origin = ScopeOrigin.PUBLIC_HEADER if with_provenance else ScopeOrigin.UNKNOWN
+    def _orphan_context(self, *, mode: ContractMode, with_exports: bool = False):
+        """A snapshot whose ``Orphan`` type is genuinely outside the closure."""
+        elf = ElfMetadata(symbols=[ElfSymbol(name="api")]) if with_exports else None
         snap = AbiSnapshot(
             library="libdemo.so.1",
             version="1",
@@ -233,39 +292,99 @@ class TestReevaluateFromEvidence:
                     mangled="api",
                     return_type="Kept *",
                     visibility=Visibility.PUBLIC,
-                    origin=origin,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
                 )
             ],
             types=[
-                RecordType(name="Kept", kind="struct", fields=[], origin=origin),
-                RecordType(name="Orphan", kind="struct", fields=[], origin=origin),
+                RecordType(
+                    name="Kept",
+                    kind="struct",
+                    fields=[],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                RecordType(
+                    name="Orphan",
+                    kind="struct",
+                    fields=[],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
             ],
+            elf=elf,
         )
         surf = compute_public_surface(snap)
+        exports = compute_export_surface(snap) if with_exports else None
         return build_persisted_context(
-            collect_contract_evidence(snap, snap, surf, surf), mode=ContractMode.PUBLIC
+            collect_contract_evidence(
+                snap, snap, surf, surf, exports_old=exports, exports_new=exports
+            ),
+            mode=mode,
         )
 
-    def test_complete_provider_proves_an_exclusion(self) -> None:
-        ctx = self._orphan_context(with_provenance=True)
+    def test_public_domain_never_proves_an_exclusion_from_the_graph(self) -> None:
+        """Graph non-membership is not the positive proof ``public`` requires.
+
+        ADR-049 Section 4.3's negative proof needs private/system-header
+        *provenance* plus every stronger-or-equal provider having completed.
+        The persisted block carries neither (it records declarations and a
+        type graph, not per-entity header origin, and
+        ``configuration_coverage`` is ``NOT_STARTED`` for every record this
+        build writes) -- so concluding ``PROVEN_OUT_OF_CONTRACT`` here would
+        claim more than the evidence supports, and this evaluator may only
+        ever weaken the live decision (Codex review, fresh evidence).
+        """
+        ctx = self._orphan_context(mode=ContractMode.PUBLIC)
+        decision = next(
+            iter(reevaluate_from_evidence(ctx, [self._orphan_finding()]).values())
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_exports_domain_proves_an_exclusion_when_the_table_is_complete(
+        self,
+    ) -> None:
+        """The one domain whose completeness *is* the ADR's terminal exclusion.
+
+        An ``export_table`` record only reaches ``COMPLETE`` when
+        ``ExportSurface.exclusion_is_provable`` does -- observed table,
+        resolved root, every root typed, no unaccounted export, no unresolved
+        type edge -- so absence from that closure is real evidence.
+        """
+        ctx = self._orphan_context(mode=ContractMode.EXPORTS, with_exports=True)
         decision = next(
             iter(reevaluate_from_evidence(ctx, [self._orphan_finding()]).values())
         )
         assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
         assert decision.reason_code == "terminal_authoritative_exclusion"
 
-    def test_incomplete_provider_cannot_prove_an_exclusion(self) -> None:
+    def test_incomplete_export_provider_cannot_prove_an_exclusion(self) -> None:
         """A ``PARTIAL`` search proves no absence.
 
-        Identical snapshot to the test above, minus declaration provenance:
-        the type is just as unreachable, but the provider that would have to
-        vouch for that did not complete, so the honest answer is unresolved.
+        Same snapshot as the test above, minus the export table: the type is
+        just as unreachable, but the provider that would have to vouch for
+        that never ran.
         """
-        ctx = self._orphan_context(with_provenance=False)
+        ctx = self._orphan_context(mode=ContractMode.EXPORTS, with_exports=False)
         decision = next(
             iter(reevaluate_from_evidence(ctx, [self._orphan_finding()]).values())
         )
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_all_mode_cites_the_declaration_parse(self) -> None:
+        """``all`` has no root provider, but its decision is not evidence-free.
+
+        An empty ``evidence_refs`` carries the *non-entity* meaning; the live
+        path cites the header provider here, so the replay must too
+        (CodeRabbit review).
+        """
+        ctx = self._orphan_context(mode=ContractMode.ALL)
+        decision = next(
+            iter(
+                reevaluate_from_evidence(
+                    ctx, [self._orphan_finding()], mode=ContractMode.ALL
+                ).values()
+            )
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.evidence_refs == ("public_header:old",)
 
 
 class TestDecisionComparison:
@@ -299,6 +418,29 @@ class TestDecisionComparison:
         )
         assert flipped.strengthened == ("a",)
         assert not flipped.is_sound
+
+    def test_not_applicable_transition_is_a_disagreement(self) -> None:
+        """``NOT_APPLICABLE`` is not a point on the strength scale.
+
+        Ranking it against an entity-axis value would be meaningless, so it
+        gets its own bucket -- but it still fails ``is_sound``: both
+        evaluators share one ``_NOT_APPLICABLE_KIND_SLUGS`` set, so a
+        disagreement means the receipt and this build classify the same
+        ``ChangeKind`` differently (CodeRabbit review).
+        """
+        into = compare_decisions(
+            {"a": ContractRelevance.IN_CONTRACT},
+            {"a": ContractRelevance.NOT_APPLICABLE},
+        )
+        assert into.disagreed == ("a",)
+        assert into.strengthened == ()
+        assert not into.is_sound
+        out_of = compare_decisions(
+            {"a": ContractRelevance.NOT_APPLICABLE},
+            {"a": ContractRelevance.UNKNOWN_UNRESOLVED},
+        )
+        assert out_of.disagreed == ("a",)
+        assert not out_of.is_sound
 
     def test_a_lost_finding_is_not_sound(self) -> None:
         lost = compare_decisions({"a": ContractRelevance.IN_CONTRACT}, {})
@@ -335,6 +477,23 @@ class TestDecisionReceipt:
             ContractMode.PUBLIC,
         )
         assert forward == backward
+
+    def test_receipt_carries_its_own_version_and_fails_closed(self) -> None:
+        """The receipt is versioned independently of its sibling blocks.
+
+        Its *keys* are their own contract (the per-finding identity a
+        consumer correlates against a report's ``finding_id``), so its shape
+        can change while observations and configuration do not -- and a
+        counter newer than this build must refuse to replay, like every other
+        block's (CodeRabbit review: the block shipped with no version at all).
+        """
+        _result, ctx = _run()
+        assert ctx.decision_receipt.schema_version >= 1
+        raw = persisted_context_to_dict(ctx)
+        raw["decision_receipt"]["schema_version"] = 99
+        future = persisted_context_from_dict(raw)
+        with pytest.raises(UnsupportedSchemaVersionError):
+            replay_original_decisions(future)
 
     def test_empty_receipt_is_valid(self) -> None:
         context = build_persisted_context(

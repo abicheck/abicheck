@@ -97,6 +97,21 @@ def _require_mapping(value: object, *, what: str) -> Mapping[str, Any]:
     return value
 
 
+def _required(m: Mapping[str, Any], key: str, *, what: str) -> Any:
+    """Read a required key, failing with the same type as :func:`_require_mapping`.
+
+    ``persisted_context_from_dict`` is a public reader for report JSON a
+    consumer may not control, so a malformed payload must fail one way rather
+    than three: a missing key would otherwise raise ``KeyError`` while a
+    non-object raised ``TypeError`` and a bad enum value ``ValueError``
+    (CodeRabbit review).
+    """
+    try:
+        return m[key]
+    except KeyError:
+        raise TypeError(f"{what} is missing the required key {key!r}.") from None
+
+
 def _sequence(value: object, *, what: str) -> Sequence[Any]:
     if value is None:
         return ()
@@ -116,7 +131,12 @@ def _identity_to_dict(identity: ImmutableIdentity) -> dict[str, Any]:
 
 def _identity_from_dict(d: object) -> ImmutableIdentity:
     m = _require_mapping(d, what="an immutable identity")
-    return ImmutableIdentity(id=m["id"], version=int(m["version"]), sha256=m["sha256"])
+    what = "an immutable identity"
+    return ImmutableIdentity(
+        id=_required(m, "id", what=what),
+        version=int(_required(m, "version", what=what)),
+        sha256=_required(m, "sha256", what=what),
+    )
 
 
 def _digested_to_dict(items: DigestedItems) -> dict[str, Any]:
@@ -127,7 +147,7 @@ def _digested_from_dict(d: object) -> DigestedItems:
     m = _require_mapping(d, what="a digested item list")
     return DigestedItems(
         items=tuple(_sequence(m.get("items"), what="digested items")),
-        sha256=m["sha256"],
+        sha256=_required(m, "sha256", what="a digested item list"),
     )
 
 
@@ -150,7 +170,7 @@ def _selected_by_from_dict(d: object) -> SelectedByEntry:
     m = _require_mapping(d, what="a selected_by hop")
     identity = m.get("identity")
     return SelectedByEntry(
-        layer=SelectorLayer(m["layer"]),
+        layer=SelectorLayer(_required(m, "layer", what="a selected_by hop")),
         option=m.get("option"),
         argument_index=m.get("argument_index"),
         path=m.get("path"),
@@ -183,7 +203,7 @@ def _provenance_from_dict(d: object) -> ValueProvenance:
     m = _require_mapping(d, what="a field provenance entry")
     shadowed = m.get("shadowed_legacy")
     return ValueProvenance(
-        layer=SelectorLayer(m["layer"]),
+        layer=SelectorLayer(_required(m, "layer", what="a field provenance entry")),
         source_kind=m.get("source_kind"),
         reference=m.get("reference"),
         version=m.get("version"),
@@ -292,12 +312,27 @@ def resolved_config_from_dict(
     reassembling the two halves.
     """
     m = _require_mapping(d, what="resolved_config")
-    contract = _require_mapping(m["contract"], what="resolved_config.contract")
-    evidence = _require_mapping(m["evidence"], what="resolved_config.evidence")
-    surface = _require_mapping(m["surface"], what="resolved_config.surface")
-    assurance = _require_mapping(m["assurance"], what="resolved_config.assurance")
-    policy = _require_mapping(m["policy"], what="resolved_config.policy")
-    gate = _require_mapping(m["gate"], what="resolved_config.gate")
+    contract = _require_mapping(
+        _required(m, "contract", what="resolved_config"),
+        what="resolved_config.contract",
+    )
+    evidence = _require_mapping(
+        _required(m, "evidence", what="resolved_config"),
+        what="resolved_config.evidence",
+    )
+    surface = _require_mapping(
+        _required(m, "surface", what="resolved_config"), what="resolved_config.surface"
+    )
+    assurance = _require_mapping(
+        _required(m, "assurance", what="resolved_config"),
+        what="resolved_config.assurance",
+    )
+    policy = _require_mapping(
+        _required(m, "policy", what="resolved_config"), what="resolved_config.policy"
+    )
+    gate = _require_mapping(
+        _required(m, "gate", what="resolved_config"), what="resolved_config.gate"
+    )
     hints = _require_mapping(surface.get("hints") or {}, what="surface.hints")
     severity = _require_mapping(gate.get("severity") or {}, what="gate.severity")
     suppressions = m.get("suppressions")
@@ -306,7 +341,9 @@ def resolved_config_from_dict(
     preset = gate.get("preset")
     return CompatibilityEvaluationConfig(
         contract=ContractConfig(
-            mode=ContractMode(contract["mode"]),
+            mode=ContractMode(
+                _required(contract, "mode", what="resolved_config.contract")
+            ),
             unresolved=contract.get("unresolved", "not_checkable"),
             overlays=tuple(_sequence(contract.get("overlays"), what="overlays")),
             packs=tuple(
@@ -317,11 +354,17 @@ def resolved_config_from_dict(
         evidence=EvidenceConfig(
             providers=tuple(
                 EvidenceProviderRequirement(
-                    capability=_require_mapping(p, what="a provider requirement")[
-                        "capability"
-                    ],
-                    required=bool(p["required"]),
-                    implementation=_identity_from_dict(p["implementation"]),
+                    capability=_required(
+                        _require_mapping(p, what="a provider requirement"),
+                        "capability",
+                        what="a provider requirement",
+                    ),
+                    required=bool(
+                        _required(p, "required", what="a provider requirement")
+                    ),
+                    implementation=_identity_from_dict(
+                        _required(p, "implementation", what="a provider requirement")
+                    ),
                 )
                 for p in _sequence(evidence.get("providers"), what="evidence.providers")
             ),
@@ -341,7 +384,9 @@ def resolved_config_from_dict(
             require_evidence=bool(assurance.get("require_evidence", True))
         ),
         policy=CompatibilityPolicyConfig(
-            base=_identity_from_dict(policy["base"]),
+            base=_identity_from_dict(
+                _required(policy, "base", what="resolved_config.policy")
+            ),
             packs=tuple(
                 _identity_from_dict(p)
                 for p in _sequence(policy.get("packs"), what="policy.packs")
@@ -371,7 +416,11 @@ def resolved_config_from_dict(
         ),
         suppressions=(
             SuppressionConfig(
-                sha256=_require_mapping(suppressions, what="suppressions")["sha256"],
+                sha256=_required(
+                    _require_mapping(suppressions, what="suppressions"),
+                    "sha256",
+                    what="suppressions",
+                ),
                 rules=tuple(
                     _sequence(
                         _require_mapping(suppressions, what="suppressions").get(
@@ -421,13 +470,14 @@ def _record_to_dict(record: EvidenceSearchRecord) -> dict[str, Any]:
 def _record_from_dict(d: object) -> EvidenceSearchRecord:
     m = _require_mapping(d, what="an evidence search record")
     input_identity = m.get("input_identity")
+    what = "an evidence search record"
     return EvidenceSearchRecord(
-        id=m["id"],
-        provider=m["provider"],
-        side=m["side"],
-        domain_kind=m["domain_kind"],
-        status=EvidenceProviderStatus(m["status"]),
-        completeness=EvidenceCompleteness(m["completeness"]),
+        id=_required(m, "id", what=what),
+        provider=_required(m, "provider", what=what),
+        side=_required(m, "side", what=what),
+        domain_kind=_required(m, "domain_kind", what=what),
+        status=EvidenceProviderStatus(_required(m, "status", what=what)),
+        completeness=EvidenceCompleteness(_required(m, "completeness", what=what)),
         entity_class=m.get("entity_class"),
         entity_scope=m.get("entity_scope"),
         domain_identity=m.get("domain_identity"),
@@ -484,7 +534,9 @@ def contract_evidence_from_dict(d: object) -> ContractEvidenceBlock:
         graph = _require_mapping(entry.get("type_graph") or {}, what="a type graph")
         entries.append(
             ProviderEvidenceEntry(
-                record=_record_from_dict(entry["record"]),
+                record=_record_from_dict(
+                    _required(entry, "record", what="a provider evidence entry")
+                ),
                 declarations=tuple(
                     _sequence(entry.get("declarations"), what="declarations")
                 ),
@@ -532,7 +584,9 @@ def evaluation_context_from_dict(d: object) -> EvaluationContextBlock:
         ).items()
     }
     return EvaluationContextBlock(
-        resolved_config=resolved_config_from_dict(m["resolved_config"], provenance),
+        resolved_config=resolved_config_from_dict(
+            _required(m, "resolved_config", what="evaluation_context"), provenance
+        ),
         schema_version=int(m.get("schema_version", 1)),
         evaluator_version=int(m.get("evaluator_version", 1)),
         identity_algorithm_version=int(m.get("identity_algorithm_version", 1)),
@@ -541,6 +595,7 @@ def evaluation_context_from_dict(d: object) -> EvaluationContextBlock:
 
 def decision_receipt_to_dict(block: DecisionReceiptBlock) -> dict[str, Any]:
     return {
+        "schema_version": block.schema_version,
         "evaluated_contract_roots": list(block.evaluated_contract_roots),
         "evaluated_type_closure": list(block.evaluated_type_closure),
         "relevance_by_finding": {
@@ -565,6 +620,11 @@ def decision_receipt_from_dict(d: object) -> DecisionReceiptBlock:
                 m.get("relevance_by_finding") or {}, what="relevance_by_finding"
             ).items()
         },
+        # Absent only in a receipt written before this counter existed; such
+        # a block is by definition version 1, and defaulting rather than
+        # rejecting is what "legacy blocks remain readable" means (the
+        # ceiling check lives in `contract_replay.load_replayable_context`).
+        schema_version=int(m.get("schema_version", 1)),
     )
 
 
@@ -586,7 +646,11 @@ def persisted_context_from_dict(d: object) -> PersistedContractContext:
     """
     m = _require_mapping(d, what="a persisted contract context")
     return PersistedContractContext(
-        contract_evidence=contract_evidence_from_dict(m["contract_evidence"]),
-        evaluation_context=evaluation_context_from_dict(m["evaluation_context"]),
+        contract_evidence=contract_evidence_from_dict(
+            _required(m, "contract_evidence", what="a persisted contract context")
+        ),
+        evaluation_context=evaluation_context_from_dict(
+            _required(m, "evaluation_context", what="a persisted contract context")
+        ),
         decision_receipt=decision_receipt_from_dict(m.get("decision_receipt") or {}),
     )

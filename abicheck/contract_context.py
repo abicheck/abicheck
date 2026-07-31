@@ -47,7 +47,9 @@ exit-code logic.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 
+from .change_registry_types import Verdict
 from .checker_types import Change
 from .compatibility_evaluation_config import (
     AssuranceConfig,
@@ -64,7 +66,9 @@ from .contract_evidence import (
     ContractEvidenceBlock,
     DecisionReceiptBlock,
     EvaluationContextBlock,
+    EvidenceSearchRecord,
     PersistedContractContext,
+    TypeGraphSnapshot,
 )
 from .contract_evidence_collect import (
     DOMAIN_ROOT_PROVIDER,
@@ -104,6 +108,7 @@ def build_evaluation_context(
     mode_provenance: ValueProvenance | None = None,
     policy: str = "strict_abi",
     internal_namespaces: Iterable[str] = (),
+    policy_overrides: Mapping[str, Verdict] | None = None,
 ) -> EvaluationContextBlock:
     """The ``evaluation_context`` block for one comparison.
 
@@ -113,23 +118,94 @@ def build_evaluation_context(
     through rather than re-deriving, so the persisted receipt says which of
     D7's layers actually selected the domain. ``None`` means the caller
     stated the mode explicitly, which is recorded as ``API_REQUEST``.
+
+    *policy_overrides* is the per-``ChangeKind`` override map a
+    ``--policy-file`` contributes (``PolicyFile.overrides``). It belongs in
+    the persisted context because it genuinely affected the comparison:
+    recording only the base-policy name would make the "resolved"
+    configuration wrong in exactly the way an audit consumer would act on
+    (Codex review, fresh evidence). Its provenance is recorded as the
+    policy-file source that supplied it.
     """
     mode = coerce_contract_mode(mode)
     from .compatibility_evaluation_frontend import builtin_policy_identity
 
+    provenance = {
+        "contract.mode": mode_provenance or _api_provenance("contract_mode"),
+        "policy.base": _api_provenance("policy"),
+    }
+    if policy_overrides:
+        provenance["policy.overrides"] = _api_provenance("policy_file")
     config = CompatibilityEvaluationConfig(
         contract=ContractConfig(mode=mode),
         evidence=EvidenceConfig(),
         surface=SurfaceConfig(internal_namespaces=tuple(internal_namespaces)),
         assurance=AssuranceConfig(),
-        policy=CompatibilityPolicyConfig(base=builtin_policy_identity(policy)),
+        policy=CompatibilityPolicyConfig(
+            base=builtin_policy_identity(policy),
+            overrides=dict(policy_overrides or {}),
+        ),
         gate=GateConfig(),
-        provenance={
-            "contract.mode": mode_provenance or _api_provenance("contract_mode"),
-            "policy.base": _api_provenance("policy"),
-        },
+        provenance=provenance,
     )
     return EvaluationContextBlock(resolved_config=config)
+
+
+@dataclass(frozen=True)
+class PersistedDomainView:
+    """One contract mode's view of a persisted evidence block, per side.
+
+    The single implementation of "which providers supply this mode's roots,
+    which entry carries the type graph, and what does the closure from those
+    roots look like." Both consumers -- the receipt builder here and
+    :class:`abicheck.contract_replay._PersistedDomain` -- read it rather than
+    each walking ``evidence.providers`` themselves, so a re-evaluated closure
+    cannot silently disagree with the persisted receipt (CodeRabbit review:
+    the two copies were the exact divergence ``finding_key`` and
+    ``authoritative_side`` were centralized to prevent).
+    """
+
+    roots_by_side: dict[str, set[str]]
+    graph_by_side: dict[str, TypeGraphSnapshot]
+    root_record_by_side: dict[str, EvidenceSearchRecord]
+    header_record_by_side: dict[str, EvidenceSearchRecord]
+    closure_by_side: dict[str, frozenset[str]]
+
+
+def persisted_domain_view(
+    evidence: ContractEvidenceBlock, mode: ContractMode
+) -> PersistedDomainView:
+    """Gather *mode*'s roots, graphs, records, and per-side closure.
+
+    The closure is walked over each side's own persisted type graph from that
+    side's own roots -- never across sides, which would let an old-side root
+    reach a new-side type that no old-side signature references.
+    """
+    mode = coerce_contract_mode(mode)
+    provider = DOMAIN_ROOT_PROVIDER[mode]
+    roots_by_side: dict[str, set[str]] = {}
+    graph_by_side: dict[str, TypeGraphSnapshot] = {}
+    root_record_by_side: dict[str, EvidenceSearchRecord] = {}
+    header_record_by_side: dict[str, EvidenceSearchRecord] = {}
+    for entry in evidence.providers:
+        side = entry.record.side
+        if provider is not None and entry.record.provider == provider:
+            roots_by_side.setdefault(side, set()).update(entry.declarations)
+            root_record_by_side[side] = entry.record
+        if entry.record.provider == PROVIDER_PUBLIC_HEADER:
+            graph_by_side[side] = entry.type_graph
+            header_record_by_side[side] = entry.record
+    closure_by_side = {
+        side: closure_from_graph(graph, roots_by_side.get(side, set()))
+        for side, graph in graph_by_side.items()
+    }
+    return PersistedDomainView(
+        roots_by_side=roots_by_side,
+        graph_by_side=graph_by_side,
+        root_record_by_side=root_record_by_side,
+        header_record_by_side=header_record_by_side,
+        closure_by_side=closure_by_side,
+    )
 
 
 def domain_roots(
@@ -142,15 +218,12 @@ def domain_roots(
     "every declaration". Reporting the full declaration set for ``all`` would
     read as a computed closure that the mode by definition never computes.
     """
-    mode = coerce_contract_mode(mode)
-    provider = DOMAIN_ROOT_PROVIDER[mode]
-    if provider is None:
-        return ()
-    roots: set[str] = set()
-    for entry in evidence.providers:
-        if entry.record.provider == provider:
-            roots |= set(entry.declarations)
-    return tuple(sorted(roots))
+    view = persisted_domain_view(evidence, mode)
+    return tuple(
+        sorted(
+            set().union(*view.roots_by_side.values()) if view.roots_by_side else set()
+        )
+    )
 
 
 def build_decision_receipt(
@@ -158,28 +231,12 @@ def build_decision_receipt(
     mode: ContractMode,
     relevance_by_finding: Mapping[str, ContractRelevance] | None = None,
 ) -> DecisionReceiptBlock:
-    """The ``decision_receipt`` block: roots, closure, per-finding relevance.
-
-    The closure is walked over each side's own persisted type graph from that
-    side's own roots, then unioned -- never across sides, which would let an
-    old-side root reach a new-side type that no old-side signature references.
-    """
-    mode = coerce_contract_mode(mode)
-    provider = DOMAIN_ROOT_PROVIDER[mode]
-    roots_by_side: dict[str, set[str]] = {}
-    if provider is not None:
-        for entry in evidence.providers:
-            if entry.record.provider == provider:
-                roots_by_side.setdefault(entry.record.side, set()).update(
-                    entry.declarations
-                )
+    """The ``decision_receipt`` block: roots, closure, per-finding relevance."""
+    view = persisted_domain_view(evidence, mode)
     closure: set[str] = set()
-    for entry in evidence.providers:
-        if entry.record.provider != PROVIDER_PUBLIC_HEADER:
-            continue
-        side_roots = roots_by_side.get(entry.record.side, set())
-        if side_roots:
-            closure |= closure_from_graph(entry.type_graph, side_roots)
+    for side, side_closure in view.closure_by_side.items():
+        if view.roots_by_side.get(side):
+            closure |= side_closure
     return DecisionReceiptBlock(
         evaluated_contract_roots=domain_roots(evidence, mode),
         evaluated_type_closure=tuple(sorted(closure)),
@@ -230,6 +287,7 @@ def build_persisted_context(
     mode_provenance: ValueProvenance | None = None,
     policy: str = "strict_abi",
     internal_namespaces: Iterable[str] = (),
+    policy_overrides: Mapping[str, Verdict] | None = None,
     changes: Sequence[Change] = (),
     finding_id: Callable[[Change], object] | None = None,
 ) -> PersistedContractContext:
@@ -241,6 +299,7 @@ def build_persisted_context(
             mode_provenance=mode_provenance,
             policy=policy,
             internal_namespaces=internal_namespaces,
+            policy_overrides=policy_overrides,
         ),
         decision_receipt=build_decision_receipt(
             evidence, mode, relevance_map(changes, finding_id)

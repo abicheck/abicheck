@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
 
 from . import (
@@ -435,11 +434,7 @@ def _run_post_processing(
     from .post_processing import DEFAULT_PIPELINE
 
     frozen_ns = list(policy_file.frozen_namespaces) if policy_file is not None else []
-    internal_ns = (
-        tuple(policy_file.internal_namespaces)
-        if policy_file is not None and policy_file.internal_namespaces
-        else None
-    )
+    internal_ns = _internal_namespaces(policy_file) or None
     pp_ctx = DEFAULT_PIPELINE.run(
         changes,
         old,
@@ -534,6 +529,22 @@ def _compute_scope_confidence(
     )
 
 
+def _internal_namespaces(policy_file: PolicyFile | None) -> tuple[str, ...]:
+    """The policy file's internal-namespace hints, or an empty tuple.
+
+    One derivation shared by post-processing's own ``internal_namespaces``
+    argument and the persisted evaluation context's ``surface`` hints
+    (CodeRabbit review: the two had independent copies, so a change to the
+    resolution rule would have silently applied to only one of them).
+    Post-processing wants ``None`` for "none configured" and converts at its
+    own call site; this returns the empty tuple, which is what the typed
+    config field takes.
+    """
+    if policy_file is None or not policy_file.internal_namespaces:
+        return ()
+    return tuple(policy_file.internal_namespaces)
+
+
 def _apply_contract_evaluation_shadow(
     kept: list[Change],
     old: AbiSnapshot,
@@ -546,7 +557,7 @@ def _apply_contract_evaluation_shadow(
     reconciled: list[Change] | None = None,
     contract_mode: str | None = None,
     policy: str = "strict_abi",
-    internal_namespaces: Sequence[str] = (),
+    policy_file: PolicyFile | None = None,
 ) -> object:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
     *kept* finding **and** every finding public-surface scoping already
@@ -635,7 +646,7 @@ def _apply_contract_evaluation_shadow(
         evidence_refs_for_change,
     )
     from .contract_evidence_collect import collect_contract_evidence
-    from .contract_relevance_types import ContractMode, coerce_contract_mode
+    from .contract_relevance_types import coerce_contract_mode
     from .export_surface import compute_export_surface
     from .surface import compute_public_surface
 
@@ -676,10 +687,18 @@ def _apply_contract_evaluation_shadow(
 
     # `exports` is rooted in the binary's own export table, so it needs its
     # own evidence provider rather than the header-derived surfaces above.
-    exports_old = exports_new = None
-    if mode is ContractMode.EXPORTS:
-        exports_old = compute_export_surface(old)
-        exports_new = compute_export_surface(new)
+    # Computed for *every* opted-in comparison, not only when `exports` is the
+    # selected mode: the persisted `contract_evidence` block is
+    # policy-independent by contract, and collecting it conditionally on the
+    # original run's mode would make a later `exports` re-evaluation
+    # (`contract_replay.reevaluate_from_evidence`) answer
+    # `UNKNOWN_UNRESOLVED` for a snapshot pair whose export tables were fully
+    # observable -- the exact "re-evaluate under a different contract without
+    # re-reading the binaries" guarantee this phase advertises (Codex review,
+    # fresh evidence). The cost is one export-table match per side, paid only
+    # under `--contract-evaluation`, which is off by default.
+    exports_old = compute_export_surface(old)
+    exports_new = compute_export_surface(new)
 
     all_changes = (
         kept
@@ -688,9 +707,7 @@ def _apply_contract_evaluation_shadow(
         + (suppressed or [])
         + (reconciled or [])
     )
-    forced_public = (
-        frozenset(force_public_symbols) if force_public_symbols else None
-    )
+    forced_public = frozenset(force_public_symbols) if force_public_symbols else None
     committed_exports = (
         frozenset(pp_ctx.public_surface_allowlist)
         if pp_ctx.public_surface_allowlist
@@ -735,13 +752,33 @@ def _apply_contract_evaluation_shadow(
             public_surface_allowlist=committed_exports,
         )
 
+    # The report's own per-finding id, taken from the dependency-free
+    # `finding_identity` leaf module rather than from `reporter_markdown`
+    # (which re-exports it): importing the renderer here would close a
+    # `checker -> reporter_markdown -> checker` cycle the
+    # `import-cycle-growth` gate rejects. Keying the receipt any other way
+    # loses findings: a coarse `kind:symbol` key is shared by two findings of
+    # one kind on one symbol (two parameters of the same function), silently
+    # dropping one recorded decision and making the receipt uncorrelatable
+    # with the report (Codex review, fresh evidence).
+    from .finding_identity import report_finding_id
+
     return build_persisted_context(
         evidence,
         mode=mode,
         mode_provenance=mode_provenance,
         policy=policy,
-        internal_namespaces=internal_namespaces,
+        internal_namespaces=_internal_namespaces(policy_file),
+        # Keyed by the ChangeKind *slug*, which is what the typed config's
+        # `overrides` field takes (and what a persisted receipt must carry --
+        # a `ChangeKind` member is not JSON).
+        policy_overrides=(
+            {kind.value: verdict for kind, verdict in policy_file.overrides.items()}
+            if policy_file is not None and policy_file.overrides
+            else None
+        ),
         changes=all_changes,
+        finding_id=report_finding_id,
     )
 
 
@@ -1189,15 +1226,18 @@ def compare(
     contract_context: object | None = None
     if contract_evaluation:
         contract_context = _apply_contract_evaluation_shadow(
-            kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx,
-            redundant=redundant_for_report, suppressed=suppressed,
-            reconciled=reconciled, contract_mode=contract_mode,
+            kept,
+            old,
+            new,
+            scope_to_public_surface,
+            force_public_symbols,
+            pp_ctx,
+            redundant=redundant_for_report,
+            suppressed=suppressed,
+            reconciled=reconciled,
+            contract_mode=contract_mode,
             policy=effective_policy,
-            internal_namespaces=(
-                tuple(policy_file.internal_namespaces)
-                if policy_file is not None and policy_file.internal_namespaces
-                else ()
-            ),
+            policy_file=policy_file,
         )
 
     return DiffResult(

@@ -1337,3 +1337,49 @@ class SymbolIdentityIndex(Mapping[str, _T]):
         if len(candidates) != 1:
             return None
         return replace(candidates[0], matched_on=alias)
+
+
+def report_finding_id(c: object) -> str:
+    """Stable per-finding fingerprint (schema 2.3, additive).
+
+    Deterministic across repeated runs of the same comparison, so a
+    consumer can tell "is this the same finding" across two report runs
+    (e.g. to correlate a suppression/waiver, or diff two CI runs' findings)
+    without relying on array order or index — neither of which abicheck
+    guarantees stays stable release to release.
+
+    Derived only from fields that identify the finding's *identity* (kind,
+    symbol, old/new value, source location, description) — deliberately
+    excluding ``severity``/``evidence_status``, which are policy-derived and
+    would make the same underlying finding hash differently under a
+    different ``--policy``.
+
+    ``description`` is included as a discriminator: two findings of the same
+    kind on the same symbol with the same old/new value and no distinct
+    source location (e.g. ``param_pointer_level_changed`` on two different
+    parameters of one function, both going from pointer-depth 1 to 2) would
+    otherwise collide on an identical id even though they are different
+    findings — ``description`` embeds the per-finding detail (parameter
+    name/index, member name, …) that disambiguates them.
+
+    Lives in this dependency-free leaf module so every producer of the id can
+    reach it without an import cycle: ``reporter_markdown`` keys
+    ``--report-mode root-cause`` groups with it (and re-exports it as
+    ``_finding_id``, which ``reporter`` re-exports in turn, so existing
+    import paths are unchanged), and ``checker`` keys ADR-049's persisted
+    decision receipt with it -- a receipt keyed any other way could not be
+    correlated with the report's own findings, and importing ``reporter_markdown``
+    from ``checker`` would close a cycle the ``import-cycle-growth``
+    AI-readiness gate rejects.
+    """
+    key = "\x1f".join(
+        [
+            str(getattr(getattr(c, "kind", None), "value", getattr(c, "kind", ""))),
+            str(getattr(c, "symbol", None) or ""),
+            str(getattr(c, "old_value", None) or ""),
+            str(getattr(c, "new_value", None) or ""),
+            str(getattr(c, "source_location", None) or ""),
+            str(getattr(c, "description", None) or ""),
+        ]
+    )
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]

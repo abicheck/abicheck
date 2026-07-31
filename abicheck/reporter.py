@@ -294,8 +294,17 @@ def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
     if ctx is None:
         return
     from .contract_context_io import persisted_context_to_dict
+    from .contract_evidence import PersistedContractContext
 
-    d["contract_context"] = persisted_context_to_dict(ctx)  # type: ignore[arg-type]
+    # `DiffResult.contract_context` is typed `object` (its real type reaches
+    # `compatibility_evaluation_config` -> `checker_policy`, which every
+    # consumer of `DiffResult` would then import), so narrow it here rather
+    # than suppressing the argument type -- an `isinstance` check is also a
+    # real guard against a caller having stuffed something else into an
+    # untyped field (CodeRabbit review).
+    if not isinstance(ctx, PersistedContractContext):
+        return
+    d["contract_context"] = persisted_context_to_dict(ctx)
 
 
 def _to_json_leaf(

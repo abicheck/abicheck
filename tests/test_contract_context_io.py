@@ -265,3 +265,66 @@ class TestResolvedConfigRoundTrip:
     def test_malformed_payload_is_rejected(self) -> None:
         with pytest.raises(TypeError):
             resolved_config_from_dict(["not", "a", "mapping"])
+
+
+class TestResolvedContextContent:
+    """What the persisted context says about the run that produced it."""
+
+    def test_policy_file_overrides_reach_the_persisted_config(self) -> None:
+        """A ``--policy-file`` override affected the comparison, so it is recorded.
+
+        Persisting only the base-policy name would make the "resolved"
+        configuration wrong in exactly the way an audit consumer would act on
+        (Codex review, fresh evidence).
+        """
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.policy_file import PolicyFile
+
+        old, new = _pair()
+        policy_file = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE},
+        )
+        result = compare(old, new, contract_evaluation=True, policy_file=policy_file)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert dict(config.policy.overrides) == {
+            ChangeKind.FUNC_REMOVED.value: Verdict.COMPATIBLE
+        }
+        assert "policy.overrides" in config.provenance
+        # And it survives the round-trip, like every other resolved field.
+        decoded = persisted_context_from_dict(
+            persisted_context_to_dict(result.contract_context)
+        )
+        assert decoded.evaluation_context.resolved_config == config
+
+
+class TestMalformedPayloads:
+    """One failure type for a malformed persisted payload.
+
+    ``persisted_context_from_dict`` reads report JSON a consumer may not
+    control, so a caller should not have to catch three unrelated exception
+    types to handle a corrupt block (CodeRabbit review).
+    """
+
+    def test_missing_required_key_raises_type_error(self) -> None:
+        ctx = _context()
+        raw = persisted_context_to_dict(ctx)
+        del raw["evaluation_context"]["resolved_config"]["policy"]["base"]
+        with pytest.raises(TypeError, match="required key"):
+            persisted_context_from_dict(raw)
+
+    def test_missing_top_level_block_raises_type_error(self) -> None:
+        ctx = _context()
+        raw = persisted_context_to_dict(ctx)
+        del raw["contract_evidence"]
+        with pytest.raises(TypeError, match="required key"):
+            persisted_context_from_dict(raw)
+
+    def test_non_object_block_raises_type_error(self) -> None:
+        ctx = _context()
+        raw = persisted_context_to_dict(ctx)
+        raw["decision_receipt"] = ["not", "a", "mapping"]
+        with pytest.raises(TypeError):
+            persisted_context_from_dict(raw)

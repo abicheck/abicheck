@@ -62,15 +62,12 @@ from dataclasses import dataclass
 from .checker_types import Change
 from .contract_context import finding_key
 from .contract_evidence import (
+    EvidenceSearchRecord,
     PersistedContractContext,
+    TypeGraphSnapshot,
     check_persisted_context_versions_supported,
 )
-from .contract_evidence_collect import (
-    DOMAIN_ROOT_PROVIDER,
-    PROVIDER_PUBLIC_HEADER,
-    closure_from_graph,
-    resolve_graph_node,
-)
+from .contract_evidence_collect import graph_node_index
 from .contract_relevance_types import (
     ContractAssurance,
     ContractMode,
@@ -116,8 +113,8 @@ class ReplayDecision:
 def _entity_spellings(change: Change) -> list[str]:
     """Every spelling of *change*'s entity to try against a persisted graph.
 
-    Symbol first, then the type identities a type-level finding carries --
-    the same two identity sources ``contract_evaluation``'s own
+    Symbol (plus its bare ``::`` tail), then ``caused_by_type`` -- the same
+    two identity sources ``contract_evaluation``'s own
     ``_symbol_matches``/``_type_candidates`` consult, reduced to plain
     spellings because the persisted graph is keyed by spelling, not by a live
     model object.
@@ -128,9 +125,8 @@ def _entity_spellings(change: Change) -> list[str]:
         out.append(symbol)
         if "::" in symbol:
             out.append(symbol.rsplit("::", 1)[1])
-    for candidate in (change.caused_by_type, getattr(change, "type_name", None)):
-        if candidate:
-            out.append(str(candidate))
+    if change.caused_by_type:
+        out.append(change.caused_by_type)
     return out
 
 
@@ -147,24 +143,37 @@ def _not_applicable(change: Change) -> bool:
 
 
 class _PersistedDomain:
-    """One side's roots, closure, and completeness, read off the block."""
+    """One side's roots, closure, and completeness, read off the block.
+
+    Built from :func:`~abicheck.contract_context.persisted_domain_view`, the
+    one implementation of "which providers supply this mode's roots, which
+    entry carries the type graph, and what does the closure from those roots
+    look like" -- shared with the receipt builder so a re-evaluated closure
+    cannot drift from the persisted one (CodeRabbit review).
+    """
 
     def __init__(self, ctx: PersistedContractContext, mode: ContractMode) -> None:
+        from .contract_context import persisted_domain_view
+
+        view = persisted_domain_view(ctx.contract_evidence, mode)
         self.mode = mode
-        provider = DOMAIN_ROOT_PROVIDER[mode]
-        self.roots: dict[str, set[str]] = {}
-        self.graph_by_side = {}
-        self.record_by_side = {}
-        for entry in ctx.contract_evidence.providers:
-            side = entry.record.side
-            if provider is not None and entry.record.provider == provider:
-                self.roots.setdefault(side, set()).update(entry.declarations)
-                self.record_by_side[side] = entry.record
-            if entry.record.provider == PROVIDER_PUBLIC_HEADER:
-                self.graph_by_side[side] = entry.type_graph
-        self.closure: dict[str, frozenset[str]] = {}
-        for side, graph in self.graph_by_side.items():
-            self.closure[side] = closure_from_graph(graph, self.roots.get(side, set()))
+        self.roots: dict[str, set[str]] = view.roots_by_side
+        self.graph_by_side: dict[str, TypeGraphSnapshot] = view.graph_by_side
+        self.record_by_side: dict[str, EvidenceSearchRecord] = view.root_record_by_side
+        self.header_record_by_side: dict[str, EvidenceSearchRecord] = (
+            view.header_record_by_side
+        )
+        self.closure: dict[str, frozenset[str]] = view.closure_by_side
+        # One spelling index per side, built once rather than per finding:
+        # `resolve_graph_node` alone rescans every node and edge on each
+        # call, which is O(findings x graph) over a graph the collector
+        # documents as whole-snapshot (CodeRabbit review).
+        self.node_index: dict[str, dict[str, set[str]]] = {
+            side: graph_node_index(graph) for side, graph in self.graph_by_side.items()
+        }
+
+    def resolve(self, side: str, spelling: str) -> set[str]:
+        return set(self.node_index.get(side, {}).get(spelling, ()))
 
     def domain_is_closed(self, side: str) -> bool:
         """Whether this side's root provider searched its domain completely.
@@ -181,9 +190,44 @@ class _PersistedDomain:
             and record.identity_coverage is EvidenceCompleteness.COMPLETE
         )
 
+    def can_prove_exclusion(self, side: str) -> bool:
+        """Whether a *negative* conclusion is supportable from this block.
+
+        Deliberately narrower than :meth:`domain_is_closed`, and only for the
+        ``exports`` domain (Codex review, fresh evidence). ADR-049 Section
+        4.3's ``out_of_contract_proof_complete`` requires either a terminal
+        exact exclusion or *positive* out-of-contract provenance plus every
+        stronger-or-equal provider having completed. The two domains differ
+        in whether the persisted block can satisfy that:
+
+        - ``exports``: the export provider's ``COMPLETE`` state *is*
+          ``ExportSurface.exclusion_is_provable`` -- an observed table, a
+          resolved root, every root typed, no unaccounted export, no
+          unresolved type edge. Absence from that closure is the terminal
+          exclusion the ADR names, so a negative conclusion is supported.
+        - ``public``: the ADR's positive proof is private/system-header
+          *provenance*, which this block does not carry (it records
+          declarations and a type graph, not per-entity header origin), and
+          ``configuration_coverage`` is ``NOT_STARTED`` for every record this
+          build writes, so no compile/generated-header variant ever
+          completed. Concluding ``PROVEN_OUT_OF_CONTRACT`` from graph
+          non-membership alone would therefore claim more than the evidence
+          supports -- and this module may only ever *weaken* the live
+          decision, never strengthen it.
+        """
+        return self.mode is ContractMode.EXPORTS and self.domain_is_closed(side)
+
     def refs(self, side: str) -> tuple[str, ...]:
         record = self.record_by_side.get(side)
-        return (record.id,) if record is not None else ()
+        if record is not None:
+            return (record.id,)
+        # `all` has no root provider (ADR-049 D2), so cite the declaration
+        # parse that placed the finding as an entity at all -- the same
+        # record `evidence_refs_for_reason` cites for this mode on the live
+        # path. An empty tuple would carry the *non-entity* meaning instead
+        # (CodeRabbit review).
+        header = self.header_record_by_side.get(side)
+        return (header.id,) if header is not None else ()
 
 
 _MODE_MEMBERSHIP_REASON: Mapping[ContractMode, str] = {
@@ -255,7 +299,7 @@ def _reevaluate_one(
         )
     nodes: set[str] = set()
     for spelling in _entity_spellings(change):
-        nodes |= resolve_graph_node(graph, spelling)
+        nodes |= domain.resolve(side, spelling)
     if not nodes:
         # The entity is not in this side's graph at all -- unplaceable, which
         # is not the same as proven outside the contract.
@@ -273,7 +317,7 @@ def _reevaluate_one(
             assurance=ContractAssurance.COMPLETE,
             evidence_refs=refs,
         )
-    if domain.domain_is_closed(side):
+    if domain.can_prove_exclusion(side):
         return ReplayDecision(
             relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
             reason_code="terminal_authoritative_exclusion",
@@ -316,14 +360,32 @@ class DecisionComparison:
     #: ``PROVEN_OUT_OF_CONTRACT``). Either is a real defect: persisted
     #: evidence may never out-claim the live evaluator that wrote it.
     strengthened: tuple[str, ...] = ()
+    #: Findings whose two decisions are not on the same scale at all: one
+    #: side says ``NOT_APPLICABLE`` (the finding is off the entity axis
+    #: entirely) and the other places it on that axis. Ranking them against
+    #: each other would be meaningless, so they are reported separately --
+    #: but they are *not* excused: the two evaluators share one
+    #: ``_NOT_APPLICABLE_KIND_SLUGS`` set, so a disagreement here means the
+    #: recorded receipt and this build classify the same ``ChangeKind``
+    #: differently, which a consumer correlating them must see (CodeRabbit
+    #: review: the ranking comment promised this bucket, and it did not
+    #: exist -- such a transition silently landed in ``strengthened``).
+    disagreed: tuple[str, ...] = ()
     #: Findings present in one map and not the other.
     only_in_original: tuple[str, ...] = ()
     only_in_replay: tuple[str, ...] = ()
 
     @property
     def is_sound(self) -> bool:
-        """True when no finding was strengthened or lost by the replay."""
-        return not self.strengthened and not self.only_in_original
+        """True when the replay neither out-claimed nor lost a finding.
+
+        Includes :attr:`disagreed`: an entity-axis mismatch is a real
+        inconsistency between the recorded decision and this build, not a
+        tolerated weakening.
+        """
+        return (
+            not self.strengthened and not self.disagreed and not self.only_in_original
+        )
 
 
 def compare_decisions(
@@ -343,6 +405,7 @@ def compare_decisions(
     agreed: list[str] = []
     weakened: list[str] = []
     strengthened: list[str] = []
+    disagreed: list[str] = []
     for key in sorted(set(original) & set(replayed_relevance)):
         was, now = original[key], replayed_relevance[key]
         if was == now:
@@ -350,7 +413,11 @@ def compare_decisions(
             continue
         old_rank = _CLAIM_STRENGTH.get(was)
         new_rank = _CLAIM_STRENGTH.get(now)
-        if old_rank is None or new_rank is None or new_rank >= old_rank:
+        if old_rank is None or new_rank is None:
+            # One side is NOT_APPLICABLE, which the strength scale
+            # deliberately does not rank -- see `disagreed`.
+            disagreed.append(key)
+        elif new_rank >= old_rank:
             strengthened.append(key)
         else:
             weakened.append(key)
@@ -358,6 +425,7 @@ def compare_decisions(
         agreed=tuple(agreed),
         weakened=tuple(weakened),
         strengthened=tuple(strengthened),
+        disagreed=tuple(disagreed),
         only_in_original=tuple(sorted(set(original) - set(replayed_relevance))),
         only_in_replay=tuple(sorted(set(replayed_relevance) - set(original))),
     )

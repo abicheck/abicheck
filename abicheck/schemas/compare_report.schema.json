@@ -342,9 +342,11 @@
         },
         "decision_receipt": {
           "type": "object",
-          "description": "The mode/root-dependent result computed *from* the evidence block: the evaluated contract roots, the type closure walked from them, and each finding's recorded relevance. Not observed evidence -- which is why it is a separate block a re-evaluation ignores.",
+          "description": "The mode/root-dependent result computed *from* the evidence block: the evaluated contract roots, the type closure walked from them, and each finding's recorded relevance (keyed by the same finding_id the report's own changes carry). Not observed evidence -- which is why it is a separate block a re-evaluation ignores. Versioned independently of its siblings: its keys are their own contract, so its shape can change while observations and configuration do not.",
+          "required": ["schema_version", "evaluated_contract_roots", "evaluated_type_closure", "relevance_by_finding"],
           "additionalProperties": true,
           "properties": {
+            "schema_version": { "type": "integer", "minimum": 1 },
             "evaluated_contract_roots": { "type": "array", "items": { "type": "string" } },
             "evaluated_type_closure": { "type": "array", "items": { "type": "string" } },
             "relevance_by_finding": { "type": "object" }

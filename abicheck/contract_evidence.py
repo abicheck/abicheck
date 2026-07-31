@@ -51,19 +51,20 @@ Three blocks, matching the plan's own split:
 plan persists together on one snapshot side.
 
 Every counter (``schema_version``/``evaluator_version``/
-``identity_algorithm_version``) is one of the four already-reserved
+``identity_algorithm_version``) is one of the five already-reserved
 constants in ``contract_relevance_types.py``
 (``CONTRACT_EVIDENCE_SCHEMA_VERSION``/``EVALUATION_CONTEXT_SCHEMA_VERSION``/
-``EVALUATOR_VERSION``/``IDENTITY_ALGORITHM_VERSION``) -- this module supplies
+``DECISION_RECEIPT_SCHEMA_VERSION``/``EVALUATOR_VERSION``/
+``IDENTITY_ALGORITHM_VERSION``) -- this module supplies
 the shape those constants describe, not new version concerns.
 :func:`check_persisted_context_versions_supported` implements ADR-049 D6's
 fail-closed rule: a version *older than or equal to* what this build
 understands is accepted (a legacy snapshot stays readable, possibly
 degraded); a version *newer* than what this build understands raises
 :class:`UnsupportedSchemaVersionError` rather than silently reinterpreting
-data it cannot correctly parse. All five version fields (backed by the four
+data it cannot correctly parse. All six version fields (backed by the five
 reserved constants above -- ``IDENTITY_ALGORITHM_VERSION`` supplies two of
-the five) are checked independently -- a mixed-version
+the six) are checked independently -- a mixed-version
 ``PersistedContractContext`` (older evidence paired with a newer evaluation
 context, the documented re-evaluation case) is not itself an error; only
 each individual field exceeding its current ceiling is.
@@ -85,6 +86,7 @@ from typing import TypeVar
 from .compatibility_evaluation_config import CompatibilityEvaluationConfig
 from .contract_relevance_types import (
     CONTRACT_EVIDENCE_SCHEMA_VERSION,
+    DECISION_RECEIPT_SCHEMA_VERSION,
     EVALUATION_CONTEXT_SCHEMA_VERSION,
     EVALUATOR_VERSION,
     IDENTITY_ALGORITHM_VERSION,
@@ -506,6 +508,7 @@ class DecisionReceiptBlock:
     evaluated_contract_roots: tuple[str, ...] = ()
     evaluated_type_closure: tuple[str, ...] = ()
     relevance_by_finding: Mapping[str, ContractRelevance] = field(default_factory=dict)
+    schema_version: int = DECISION_RECEIPT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -538,6 +541,11 @@ class DecisionReceiptBlock:
                     f"be a valid ContractRelevance, not {value!r} (for {key!r})."
                 ) from exc
         object.__setattr__(self, "relevance_by_finding", _frozen_mapping(normalized))
+        _require_version_int(
+            self.schema_version,
+            owner="DecisionReceiptBlock",
+            field_name="schema_version",
+        )
 
 
 # --------------------------------------------------------------------------
@@ -629,13 +637,14 @@ def check_persisted_context_versions_supported(ctx: PersistedContractContext) ->
     """Check every version counter in *ctx* against this build's currently
     supported ceiling, independently (ADR-049 D6).
 
-    Five fields are checked (``contract_evidence.schema_version``,
+    Six fields are checked (``contract_evidence.schema_version``,
     ``contract_evidence.identity_algorithm_version``,
     ``evaluation_context.schema_version``,
     ``evaluation_context.evaluator_version``,
-    ``evaluation_context.identity_algorithm_version``) -- backed by four
-    reserved constants, since ``IDENTITY_ALGORITHM_VERSION`` supplies both
-    of the ``identity_algorithm_version`` fields. Each is checked one at a
+    ``evaluation_context.identity_algorithm_version``,
+    ``decision_receipt.schema_version``) -- backed by five reserved
+    constants, since ``IDENTITY_ALGORITHM_VERSION`` supplies both of the
+    ``identity_algorithm_version`` fields. Each is checked one at a
     time, not required to agree with each other: a ``PersistedContractContext``
     combining older
     ``contract_evidence`` with a newer ``evaluation_context`` is the
@@ -674,4 +683,9 @@ def check_persisted_context_versions_supported(ctx: PersistedContractContext) ->
         block_name="evaluation_context.identity_algorithm_version",
         observed_version=ctx.evaluation_context.identity_algorithm_version,
         supported_version=IDENTITY_ALGORITHM_VERSION,
+    )
+    check_schema_version_supported(
+        block_name="decision_receipt.schema_version",
+        observed_version=ctx.decision_receipt.schema_version,
+        supported_version=DECISION_RECEIPT_SCHEMA_VERSION,
     )

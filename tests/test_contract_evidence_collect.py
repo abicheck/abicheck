@@ -458,6 +458,29 @@ class TestOverlayAttribution:
         assert refs["pub"] == ("post_manifest:old",)
         assert refs["priv"] == ("post_manifest:old",)
 
+    def test_private_header_declaration_is_still_a_persisted_root(self) -> None:
+        """Root selection is by *visibility*, and the receipt says so.
+
+        ``_public_header_declarations`` seeds from ``Visibility.PUBLIC``
+        exactly as ``surface._seed_public_roots`` does, so a public-visibility
+        declaration whose header origin is private is recorded as a root here
+        even though header-origin scoping would demote a finding about it.
+        That is the intended policy-independence of the evidence block, not
+        an oversight -- pinning it means a later widening (or narrowing) of
+        the root rule fails this test instead of silently changing what a
+        replay computes (CodeRabbit review).
+        """
+        from abicheck.contract_context import build_persisted_context
+        from abicheck.contract_relevance_types import ContractMode
+
+        old, _new = self._pair()
+        surf = compute_public_surface(old)
+        receipt = build_persisted_context(
+            collect_contract_evidence(old, old, surf, surf),
+            mode=ContractMode.PUBLIC,
+        ).decision_receipt
+        assert set(receipt.evaluated_contract_roots) == {"decl:pub", "decl:priv"}
+
     def test_no_overlay_configured_cites_the_domain_provider(self) -> None:
         refs = self._refs()
         assert all(

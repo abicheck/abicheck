@@ -306,6 +306,18 @@ EVALUATION_CONTEXT_SCHEMA_VERSION: int = 1
 """Version of the persisted ``evaluation_context`` block (the resolved
 ``CompatibilityEvaluationConfig`` plus field-level provenance)."""
 
+DECISION_RECEIPT_SCHEMA_VERSION: int = 1
+"""Version of the persisted ``decision_receipt`` block (evaluated roots,
+evaluated closure, per-finding relevance).
+
+Its own counter rather than a reuse of the evidence/context ones: the receipt
+is the one block whose *keys* are a separate contract (the per-finding
+identity a consumer correlates against a report's ``finding_id``), so its
+shape can change without either observation or configuration changing --
+exactly the "each counter versions one independently-evolvable concern" rule
+above (CodeRabbit review: the block shipped with no version field at all,
+while both siblings had one)."""
+
 EVALUATOR_VERSION: int = 1
 """Version of the contract-relevance/compatibility evaluation algorithm
 itself, independent of the schema versions above -- the same observed facts

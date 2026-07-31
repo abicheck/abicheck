@@ -2271,6 +2271,64 @@ baseline whose evidence a later consumer wants without the pair), moving the
 block into the snapshot is an additive schema change on top of this shape,
 not a rewrite of it.
 
+**Post-review corrections (2026-07-31, same PR).** Seven findings from the
+Codex/CodeRabbit round, each changing behaviour rather than wording:
+
+1. **Export evidence is collected for every opted-in comparison, not only
+   when `exports` is the selected mode** (Codex P1). Collecting it
+   conditionally on the *original* run's mode contradicted this phase's own
+   headline guarantee: a `public` run's persisted block could not be
+   re-evaluated under `exports` without re-reading the binaries, since
+   `_PersistedDomain` would find no export roots and answer
+   `UNKNOWN_UNRESOLVED` for a pair whose export tables were fully
+   observable. The cost is one export-table match per side, paid only under
+   `--contract-evaluation`.
+2. **A `public` graph-only exclusion is no longer `PROVEN_OUT_OF_CONTRACT`**
+   (Codex P1). Section 4.3's negative proof needs positive private/system-
+   header provenance *plus* every stronger-or-equal provider having
+   completed; the persisted block carries neither (it records declarations
+   and a type graph, not per-entity header origin, and
+   `configuration_coverage` is `NOT_STARTED` on every record this build
+   writes). Proving an exclusion from graph non-membership alone would have
+   *strengthened* the live decision — the one direction this module's own
+   contract forbids. `exports` keeps its exclusion branch, because there the
+   provider's `COMPLETE` state *is* `ExportSurface.exclusion_is_provable`,
+   which is the terminal exclusion the ADR names.
+3. **The decision receipt is keyed by the report's own `finding_id`**
+   (Codex P2). The coarse `kind:symbol` fallback collapsed two findings of
+   one kind on one symbol (two parameters of the same function) into a
+   single entry, silently dropping a recorded decision and making the
+   receipt uncorrelatable with the report. `checker` injects
+   `reporter_markdown._finding_id` as a callable — a module-level import
+   would close a `checker -> reporter_markdown -> checker` cycle.
+4. **A `--policy-file`'s per-kind overrides reach the persisted config**
+   (Codex P2). Recording only the base-policy name made the "resolved"
+   configuration wrong in exactly the way an audit consumer would act on.
+5. **`decision_receipt` gained its own `schema_version`** (CodeRabbit), a
+   fifth reserved constant checked independently by
+   `check_persisted_context_versions_supported`. Its *keys* are their own
+   contract, so its shape can change while observations and configuration do
+   not — the same "one counter per independently-evolvable concern" rule the
+   other blocks already followed.
+6. **`compare_decisions` gained a `disagreed` bucket** (CodeRabbit): a
+   transition into or out of `NOT_APPLICABLE` is not a point on the strength
+   scale, and was silently landing in `strengthened`. It is reported
+   separately but still fails `is_sound` — both evaluators share one
+   `_NOT_APPLICABLE_KIND_SLUGS` set, so disagreeing there means the receipt
+   and this build classify the same `ChangeKind` differently.
+7. **Under `all`, a replayed decision cites the header provider**
+   (CodeRabbit), matching the live attribution. `all` has no root provider,
+   so the refs were empty — which carries the *non-entity* meaning instead.
+
+Three structural cleanups landed with them: one shared
+`contract_context.persisted_domain_view()` replaces the duplicated
+provider-walk in the receipt builder and the replay domain (they could
+otherwise disagree about the same closure); `graph_node_index()` resolves
+spellings through a per-side index instead of rescanning a whole-snapshot
+graph once per spelling per finding; and every required-key read in the
+persisted-context decoder now fails as `TypeError`, so a consumer handling a
+corrupt block catches one exception type rather than three.
+
 Two smaller limits worth naming rather than discovering later. The
 `evaluation_context` this build assembles is resolved by `checker.compare`,
 which sees only its own arguments — so `contract.mode` carries the real D7

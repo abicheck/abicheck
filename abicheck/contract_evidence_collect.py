@@ -715,6 +715,32 @@ def resolve_graph_node(graph: TypeGraphSnapshot, spelling: str) -> set[str]:
     return out
 
 
+def graph_node_index(graph: TypeGraphSnapshot) -> dict[str, set[str]]:
+    """Spelling -> canonical nodes, built once for a whole persisted graph.
+
+    :func:`resolve_graph_node` answers one spelling by rescanning every node
+    and edge, which is O(nodes + edges) per call -- fine for a one-off lookup,
+    but a re-evaluation asks it once per spelling per finding over a graph
+    this module documents as whole-snapshot (CodeRabbit review). A caller
+    resolving many spellings against one graph builds this index instead; the
+    two agree by construction, since this is the same resolution rule stated
+    as a forward map rather than a search.
+    """
+    index: dict[str, set[str]] = {}
+    alias_edges: dict[str, set[str]] = {}
+    for src, dst in graph.edges:
+        if src.startswith("alias:"):
+            alias_edges.setdefault(src, set()).add(dst)
+    for node in graph.nodes:
+        kind, _, identity = node.partition(":")
+        if kind == "alias" or not identity:
+            continue
+        index.setdefault(identity, set()).add(node)
+    for alias, targets in alias_edges.items():
+        index.setdefault(alias.split(":", 1)[1], set()).update(targets)
+    return index
+
+
 def closure_from_graph(
     graph: TypeGraphSnapshot, roots: Iterable[str]
 ) -> frozenset[str]:
