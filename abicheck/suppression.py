@@ -15,6 +15,7 @@
 """Suppression — load and apply suppression rules to ABI changes."""
 from __future__ import annotations
 
+import dataclasses
 import fnmatch
 import re
 from dataclasses import dataclass, field
@@ -821,6 +822,45 @@ class SuppressionList:
     def rules_by_label(self, label: str) -> list[Suppression]:
         """Return all rules with the given label."""
         return [s for s in self._suppressions if s.label == label]
+
+    def rule_identities(self) -> tuple[str, ...]:
+        """One canonical, machine-facing identity string per loaded rule.
+
+        ADR-049 D7's effective configuration carries the selected suppression
+        source as ``{rules: [...], sha256: "..."}``
+        (:class:`~abicheck.compatibility_evaluation_config.SuppressionConfig`);
+        this is what fills ``rules``. The digest already covers the source file
+        byte-for-byte, so these strings exist for the *receipt* — so a replayed
+        decision can be read without re-opening the file — not as a second
+        integrity check.
+
+        Deliberately different from ``cli_compare_fold._suppression_rule_label``,
+        which renders a rule for a human reading an audit report (preferring its
+        ``label``/``reason`` prose and falling back to a file position):
+
+        - every populated selector/gate field is included, so two rules that
+          differ in any matching-relevant way get different identities;
+        - ``reason`` is excluded — it is prose that changes what a reviewer
+          reads, never what the rule matches, and the source digest already
+          records that it changed;
+        - fields are emitted in declaration order with no positional index, so
+          the identity depends only on the rule's own content.
+
+        Derived generically from :class:`Suppression`'s own dataclass fields
+        (skipping the compiled/resolved ``init=False`` internals), so a rule
+        field added later is covered without touching this method.
+        """
+        identities: list[str] = []
+        for rule in self._suppressions:
+            parts = [
+                f"{f.name}={getattr(rule, f.name)}"
+                for f in dataclasses.fields(rule)
+                if f.init
+                and f.name != "reason"
+                and getattr(rule, f.name) not in (None, False)
+            ]
+            identities.append("|".join(parts))
+        return tuple(identities)
 
     def audit(
         self,

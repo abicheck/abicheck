@@ -139,6 +139,7 @@ nav:
     - publish-baseline / update-main-baseline: reference/publish-baseline.md
     - Configuration File: reference/config-file.md
     - Config Keys Reference: reference/config-keys-reference.md
+    - Compatibility Evaluation Config (proposed): reference/compatibility-evaluation-config.md
     - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md

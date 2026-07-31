@@ -195,12 +195,31 @@ def _require_digested_items_or_none(value: object, *, owner: str, field: str) ->
 # module owns outright (every worked example in the ADR uses exactly one of
 # these two strings) -- unlike e.g. ValueProvenance.source_kind, which is
 # free-form text belonging to a not-yet-written resolver.
-_VALID_UNRESOLVED_BEHAVIORS = frozenset({"not_checkable", "warn"})
+VALID_UNRESOLVED_BEHAVIORS: frozenset[str] = frozenset({"not_checkable", "warn"})
+"""Canonical set of valid ``ContractConfig.unresolved`` values.
 
-# ADR-037 D12's exit-code scheme, minus "auto": cli.py's --exit-code-scheme
-# click.Choice is {"auto", "legacy", "severity"}, but "auto" is resolved to
-# one of the other two before an effective GateConfig is ever constructed.
-_VALID_EXIT_CODE_SCHEMES = frozenset({"legacy", "severity"})
+Public so a front end that validates the same vocabulary *before*
+constructing a :class:`ContractConfig` (e.g. a pack-manifest field router,
+which must reject a bad value with a manifest-shaped error rather than let
+the dataclass raise) shares one source of truth instead of re-declaring the
+two spellings -- the same ``VALID_BASE_POLICIES``/``_VALID_BASE_POLICIES``
+pattern ``policy_file.py`` already uses.
+"""
+
+VALID_EXIT_CODE_SCHEMES: frozenset[str] = frozenset({"legacy", "severity"})
+"""Canonical set of valid *resolved* ``GateConfig.exit_code_scheme`` values.
+
+ADR-037 D12's scheme, minus ``"auto"``: ``cli.py``'s ``--exit-code-scheme``
+``click.Choice`` is ``{"auto", "legacy", "severity"}``, but ``auto`` is
+resolved to one of the other two before an effective ``GateConfig`` is ever
+constructed. Public for the same reason as
+:data:`VALID_UNRESOLVED_BEHAVIORS`.
+"""
+
+# Backward-compatible private aliases (this module's own call sites and any
+# existing importer keep working unchanged).
+_VALID_UNRESOLVED_BEHAVIORS = VALID_UNRESOLVED_BEHAVIORS
+_VALID_EXIT_CODE_SCHEMES = VALID_EXIT_CODE_SCHEMES
 
 # ADR-049 D8: "An unknown ChangeKind in a custom policy is a hard load
 # error" -- policy_file.py's PolicyFile.load() already enforces this for

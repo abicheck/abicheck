@@ -894,6 +894,111 @@ separate, larger piece of work). Not called from any live command yet, same
 "land the wiring function itself, fully tested" pattern as every other
 function in this module.
 
+**Updated (2026-07-31): the phase's remaining field-wiring gap and its
+contract/gate pack-composition gap are both closed; this phase's gate is now
+an executable check rather than a description.** Everything above resolves
+*individual* fields. The missing piece was the object those fields belong to:
+a new module, `abicheck/compatibility_evaluation_frontend.py`, collects every
+setting a front end can actually state today, resolves each field through
+`resolve_field`, and assembles all seven typed namespaces plus one
+provenance-receipt entry per resolved field.
+
+- **Front ends wired** (the "wiring any other field ... to construct real
+  `FieldCandidate`s" item above): `compare_cli_inputs` takes the `compare`
+  command's real kwargs plus the set of parameters the user actually typed
+  (Click's `ctx.get_parameter_source(...)`, which a live caller supplies) —
+  needed because `--policy` and `--scope-public-headers` carry non-`None`
+  click defaults that must not be mistaken for stated values;
+  `compare_request_inputs`/`compatibility_config_from_compare_request` take a
+  typed `CompareRequest` (the service/API request model this phase named);
+  `ProjectCompatibilityInputs.from_build_config` projects a real
+  `.abicheck.yml` (`BuildConfig`) at `PROJECT_CONFIG` tier. Fields resolved
+  from real input: `contract.mode`, `contract.packs`/`policy.packs`/
+  `gate.packs`, `policy.base`, `policy.overrides`,
+  `surface.internal_namespaces`, `surface.explicit_scope`,
+  `gate.exit_code_scheme`, `gate.preset`, the four `gate.severity.*`
+  categories, and `suppressions`.
+- **Both D7 compatibility exceptions are implemented as exceptions, not
+  errors**, each retaining the shadowed input in
+  `provenance[field].shadowed_legacy`: `--policy` vs. `--policy-file` (D7
+  verbatim), and `--contract` vs. `--scope-public-headers` (the Phase 6
+  flag's own documented "an explicit value outranks those" — making that pair
+  a usage error would reject a combination the live CLI accepts today).
+- **`auto` never reaches a resolved value.** An `--exit-code-scheme auto` at
+  any layer contributes no candidate; the built-in default carries the
+  resolved answer, computed by the same "severity setting in effect?" rule
+  `cli_helpers_compare.resolve_compare_config` already applies. A test pins
+  the resolved `gate.severity` field-for-field against
+  `severity.resolve_severity_config`, so the two cannot drift.
+- **`surface.explicit_scope` is resolved as the additive field it really
+  is.** `--public-symbol` and `scope.public_symbols` *merge* today (ADR-037
+  D4), which is a genuine exception to per-field highest-layer-wins; the
+  resolved value is the union, and the receipt records the highest-precedence
+  contributor with every contributor listed in `selected_by`, so an additive
+  resolution is still exactly replayable.
+- **Contract/gate pack composition** (the "per-field router this slice does
+  not build" gap immediately above):
+  `compatibility_evaluation_wiring.resolve_pack_field_assignments` routes each
+  selected non-policy pack's assignments onto the typed fields that namespace
+  may set (`CONTRACT_PACK_FIELD_ROUTES`/`GATE_PACK_FIELD_ROUTES`), validating
+  and converting each value; an assignment naming anything else is a
+  `PackManifestError`, never a silently-ignored key. Deliberately not
+  routable: `contract.mode` (a pack switching which evidence domain a run
+  judges against is exactly the hidden preset D3 forbids), `policy.base`
+  (packs compose over a base, they don't replace it), and any `*.packs`
+  field. A pack's value applies only when *no* other layer stated the field —
+  D8's "explicit override > selected packs > base", read conservatively
+  enough that a pack can never silently override a project's own value
+  either. `resolve_field` could not express this directly: a pack tagged with
+  the layer that selected it would *tie* with an explicit value for the same
+  field and be reported as conflicting with it, which is the exact case D8
+  says the explicit value resolves.
+- **This phase's gate is executable.** `cross_front_end_differences(a, b)`
+  compares two resolved configurations modulo exactly one permitted
+  difference — which front end stated a value (`explicit_cli` vs.
+  `api_request`, and the option spelling recorded with it), the two D7 puts in
+  one precedence tier — and returns a per-field difference list.
+  `tests/test_compatibility_evaluation_frontend.py` runs a real `compare`
+  kwargs mapping against the equivalent `CompareRequest` through it, over
+  every field both front ends can state.
+- **D6 identities for the two file-less selections.** A built-in
+  `--policy` base and a `--severity-preset` are code, not files, so
+  `builtin_policy_identity`/`severity_preset_identity` digest what each
+  *resolves to* (the four `ChangeKind` sets; the four category levels) — the
+  identity then detects the drift a digest exists to detect, which a bare
+  `id`/`version` pair could not. An unknown base name raises rather than
+  minting an identity: `policy_kind_sets` falls back to `strict_abi` for a
+  typo, which is right for classification and wrong for an identity.
+- **`.abicheck.yml` schema/reference docs** (the last item on the list
+  above): the strict `BuildConfig` schema and its generated key reference
+  already existed; what was missing was the ADR-049 layer over them. New page
+  `docs/reference/compatibility-evaluation-config.md` documents the seven
+  namespaces, the precedence chain and its two exceptions, the per-field
+  input map across CLI/API/`.abicheck.yml`/pack, the pack-manifest format
+  with its per-kind assignable-field table, and the receipt.
+
+**Still not done, and deliberately out of scope here** (each is a separate
+piece of work, not a loose end of this one):
+
+- No live command constructs this object. That is intentional and unchanged
+  from every other slice of this phase — resolution that changes no verdict,
+  finding, or exit code is what Phase 1 owns; consuming it in the
+  authoritative comparison path is Phase 5's "same typed config" item, and
+  the default flip is Phase 7.
+- No `--pack` CLI flag. The composition path is real and tested, but pack
+  paths reach it from the Python API only. `cli.py` remains at its 2000-line
+  hard cap, so the flag still needs the prerequisite extraction noted above —
+  and a flag whose only effect is to feed an object nothing consumes would be
+  dead surface until Phase 5 lands.
+- `EvidenceConfig` in full (no CLI/API surface selects an evidence provider or
+  a variant set), and `contract.unresolved`/`contract.overlays`/
+  `assurance.require_evidence`, which have no flag at all — a `kind: contract`
+  pack is the only input that reaches them today.
+- `--strict-suppressions`/`--require-justification` are real inputs with no
+  field in ADR-049's own typed shape to carry them. Adding one is an ADR-level
+  shape change, not a resolver change, so they stay outside the object and are
+  documented as such rather than folded into an ill-fitting field.
+
 ### Phase 2 — canonical identity and fact conservation
 
 Build finding identity on ADR-048 principles: most specific available identity,

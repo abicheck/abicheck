@@ -217,13 +217,28 @@ Core pipeline (in order of data flow):
      usage error unless an explicit override resolves it — one generic
      field-keyed function covers both policy-pack `ChangeKind` overrides and
      contract/gate-pack field assignments). Pure resolution logic
-   - `compatibility_evaluation_wiring.py` — ADR-049 Phase 1's first real
-     front-end wiring: `resolve_legacy_contract_mode` resolves
-     `contract.mode` from the actual `--scope-public-headers`/
-     `--no-scope-public-headers` CLI flag via `resolve_field`. Not called
-     from any live command yet (deferred to the Phase 3 shadow evaluator
-     per the rollout plan) — only `cli_options.py`/service/API still don't
-     construct real `FieldCandidate`s for any other field
+   - `compatibility_evaluation_wiring.py` — ADR-049 Phase 1's per-field
+     front-end wirings: `resolve_legacy_contract_mode` (`contract.mode` from
+     the real `--scope-public-headers`/`--no-` flag),
+     `resolve_internal_namespaces` (from a real `--policy-file`),
+     `resolve_selected_packs`/`resolve_policy_pack_overrides`/
+     `resolve_pack_field_assignments` (real pack manifests → the three
+     `*.packs` fields, `policy.overrides`, and — through an explicit
+     per-kind route table — a contract/gate pack's own typed target fields;
+     an assignment outside its namespace, `contract.mode` included, is a
+     hard `PackManifestError`)
+   - `compatibility_evaluation_frontend.py` — ADR-049 Phase 1's whole-object
+     resolver: assembles one `CompatibilityEvaluationConfig` (all seven
+     namespaces + a per-field provenance receipt) from a front end's real
+     inputs — `compare`'s own CLI kwargs plus the set of parameters actually
+     typed (`--policy`/`--scope-public-headers` carry non-`None` click
+     defaults), a typed `CompareRequest`, and the project's `.abicheck.yml`.
+     `cross_front_end_differences()` is this phase's gate as an executable
+     check: equivalent CLI and API input must resolve equally, modulo only
+     which front end stated a value. Resolution only — no live command
+     constructs it (Phase 5 owns consuming it, Phase 7 the default flip), so
+     it changes no verdict, finding, or exit code. Reference:
+     `docs/reference/compatibility-evaluation-config.md`
    - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
      evaluator: one `ContractEvaluationDecision` (relevance + stable reason
      code + assurance) per already-emitted finding. Stamped onto findings
