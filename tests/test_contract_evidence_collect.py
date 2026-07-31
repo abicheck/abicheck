@@ -352,6 +352,8 @@ class TestEvidenceReferences:
         assert refs == ()
 
     def test_public_membership_cites_both_sides(self) -> None:
+        """The one genuinely two-sided decision: ``classify_change_surface``
+        runs against ``surface_unions(surf_old, surf_new)``."""
         refs = evidence_refs_for_reason(
             "public_root_membership",
             mode=ContractMode.PUBLIC,
@@ -369,14 +371,21 @@ class TestEvidenceReferences:
         )
         assert refs == ("public_header:new",)
 
-    def test_exports_domain_cites_the_export_provider(self) -> None:
+    def test_exports_domain_cites_only_the_authoritative_side(self) -> None:
+        """``_exports_mode_decision`` reads one surface, so it cites one.
+
+        Citing the other side would claim the decision rests on evidence it
+        never read -- actively misleading when that side's provider is
+        unavailable (an exported removal is conclusive from the old table
+        even if the new one failed to parse; Codex review, fresh evidence).
+        """
         refs = evidence_refs_for_reason(
             "export_root_membership",
             mode=ContractMode.EXPORTS,
             block=self._block(exports=True),
             authoritative_side="old",
         )
-        assert refs == ("export_table:old", "export_table:new")
+        assert refs == ("export_table:old",)
 
     def test_reference_is_dropped_when_the_record_is_absent(self) -> None:
         """A reference must never dangle -- see ``validate_decision_evidence``."""

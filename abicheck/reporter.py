@@ -716,7 +716,9 @@ def _scope_dict(result: DiffResult) -> dict[str, object] | None:
         "manual_review_required": not result.scope_resolved,
         "public_additions": summary.compatible_additions,
         "filtered_internal_count": result.out_of_surface_count,
-        "filtered_internal_changes": [_filtered_internal_entry(c) for c in result.out_of_surface_changes],
+        "filtered_internal_changes": [
+            _filtered_internal_entry(c) for c in result.out_of_surface_changes
+        ],
     }
 
 
@@ -1193,6 +1195,21 @@ def _add_contract_evaluation_fields(d: dict[str, object], c: object) -> None:
     contract_evidence_refs = getattr(c, "contract_evidence_refs", None)
     if contract_evidence_refs is not None:
         d["contract_evidence_refs"] = list(contract_evidence_refs)
+    # The audit-ledger serializers (`_out_of_surface_entry`,
+    # `_suppressed_change_entry`, `_add_reconciled`, `_filtered_internal_entry`)
+    # build their own compact dicts and never emitted `finding_id`, unlike an
+    # ordinary `changes` entry -- so a consumer could not join a demoted /
+    # suppressed / reconciled finding to its decision in `contract_context.
+    # decision_receipt`, which is keyed by exactly that id. Nor could it
+    # recompute one: those dicts also omit `old_value`/`new_value`, two of the
+    # id's own inputs (Codex review, fresh evidence). Emitted here rather than
+    # in each ledger so the key and the decision always travel together, and
+    # only when absent, so an ordinary entry keeps the id `_change_to_dict`
+    # already set.
+    if "finding_id" not in d:
+        from .finding_identity import report_finding_id
+
+        d["finding_id"] = report_finding_id(c)
 
 
 def _change_to_dict(

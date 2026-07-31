@@ -59,6 +59,7 @@ from .compatibility_evaluation_config import (
     EvidenceConfig,
     GateConfig,
     SelectedByEntry,
+    SuppressionConfig,
     SurfaceConfig,
     ValueProvenance,
 )
@@ -109,6 +110,7 @@ def build_evaluation_context(
     policy: str = "strict_abi",
     internal_namespaces: Iterable[str] = (),
     policy_overrides: Mapping[str, Verdict] | None = None,
+    suppressions: SuppressionConfig | None = None,
 ) -> EvaluationContextBlock:
     """The ``evaluation_context`` block for one comparison.
 
@@ -126,6 +128,12 @@ def build_evaluation_context(
     configuration wrong in exactly the way an audit consumer would act on
     (Codex review, fresh evidence). Its provenance is recorded as the
     policy-file source that supplied it.
+
+    *suppressions* is the selected suppression source, already reduced to a
+    :class:`~abicheck.compatibility_evaluation_config.SuppressionConfig` by
+    :func:`suppression_config_for`. ``None`` means no source was selected --
+    a different fact from a source that resolved to zero rules, which is
+    exactly the distinction that class exists to preserve.
     """
     mode = coerce_contract_mode(mode)
     from .compatibility_evaluation_frontend import builtin_policy_identity
@@ -136,6 +144,8 @@ def build_evaluation_context(
     }
     if policy_overrides:
         provenance["policy.overrides"] = _api_provenance("policy_file")
+    if suppressions is not None:
+        provenance["suppressions"] = _api_provenance("suppression")
     config = CompatibilityEvaluationConfig(
         contract=ContractConfig(mode=mode),
         evidence=EvidenceConfig(),
@@ -146,9 +156,36 @@ def build_evaluation_context(
             overrides=dict(policy_overrides or {}),
         ),
         gate=GateConfig(),
+        suppressions=suppressions,
         provenance=provenance,
     )
     return EvaluationContextBlock(resolved_config=config)
+
+
+def suppression_config_for(suppression: object) -> SuppressionConfig | None:
+    """Reduce a live ``SuppressionList`` to its persisted configuration.
+
+    The rules and the source digest both affected which findings this
+    comparison suppressed, so a context that left ``suppressions`` at
+    ``None`` claimed no suppression source was selected at all and could not
+    reconstruct the run (Codex review, fresh evidence). ``rule_identities()``
+    is the list's own machine-facing receipt spelling -- built for exactly
+    this field -- so nothing is re-derived here.
+
+    Returns ``None`` when no list was supplied, and also when one was
+    supplied without a ``source_sha256``: :class:`SuppressionConfig` requires
+    a digest precisely so a recorded source can be proved to be the one that
+    ran, and an in-memory list assembled by a caller (never read from a file)
+    has no content to digest. Recording it with a fabricated digest would be
+    worse than recording nothing.
+    """
+    if suppression is None:
+        return None
+    digest = getattr(suppression, "source_sha256", None)
+    identities = getattr(suppression, "rule_identities", None)
+    if not digest or not callable(identities):
+        return None
+    return SuppressionConfig(sha256=digest, rules=tuple(identities()))
 
 
 @dataclass(frozen=True)
@@ -288,6 +325,7 @@ def build_persisted_context(
     policy: str = "strict_abi",
     internal_namespaces: Iterable[str] = (),
     policy_overrides: Mapping[str, Verdict] | None = None,
+    suppressions: SuppressionConfig | None = None,
     changes: Sequence[Change] = (),
     finding_id: Callable[[Change], object] | None = None,
 ) -> PersistedContractContext:
@@ -300,6 +338,7 @@ def build_persisted_context(
             policy=policy,
             internal_namespaces=internal_namespaces,
             policy_overrides=policy_overrides,
+            suppressions=suppressions,
         ),
         decision_receipt=build_decision_receipt(
             evidence, mode, relevance_map(changes, finding_id)

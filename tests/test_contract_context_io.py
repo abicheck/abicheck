@@ -299,6 +299,38 @@ class TestResolvedContextContent:
         )
         assert decoded.evaluation_context.resolved_config == config
 
+    def test_suppression_source_reaches_the_persisted_config(self, tmp_path) -> None:
+        """A file-loaded suppression list shaped the run, so it is recorded.
+
+        Leaving ``suppressions`` at ``None`` claimed no source was selected
+        at all, which an audit consumer would read as "nothing was
+        suppressed" (Codex review, fresh evidence).
+        """
+        from abicheck.suppression import SuppressionList
+
+        rules = tmp_path / "suppress.yaml"
+        rules.write_text(
+            "version: 1\nsuppressions:\n  - symbol: gone\n    reason: known removal\n",
+            encoding="utf-8",
+        )
+        suppression = SuppressionList.load(rules)
+        old, new = _pair()
+        result = compare(old, new, suppression=suppression, contract_evaluation=True)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.suppressions is not None
+        assert config.suppressions.sha256 == suppression.source_sha256
+        assert config.suppressions.rules == suppression.rule_identities()
+        assert "suppressions" in config.provenance
+
+    def test_no_suppression_source_stays_none(self) -> None:
+        """``None`` and "a source that matched nothing" are different facts."""
+        old, new = _pair()
+        result = compare(old, new, contract_evaluation=True)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.suppressions is None
+
 
 class TestMalformedPayloads:
     """One failure type for a malformed persisted payload.

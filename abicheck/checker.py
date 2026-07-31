@@ -558,6 +558,7 @@ def _apply_contract_evaluation_shadow(
     contract_mode: str | None = None,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    suppression: SuppressionList | None = None,
 ) -> object:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
     *kept* finding **and** every finding public-surface scoping already
@@ -640,7 +641,7 @@ def _apply_contract_evaluation_shadow(
     same circular-import reason as that field.
     """
     from .compatibility_evaluation_wiring import resolve_legacy_contract_mode
-    from .contract_context import build_persisted_context
+    from .contract_context import build_persisted_context, suppression_config_for
     from .contract_evaluation import (
         evaluate_snapshot_pair_contract_relevance,
         evidence_refs_for_change,
@@ -777,6 +778,7 @@ def _apply_contract_evaluation_shadow(
             if policy_file is not None and policy_file.overrides
             else None
         ),
+        suppressions=suppression_config_for(suppression),
         changes=all_changes,
         finding_id=report_finding_id,
     )
@@ -1238,6 +1240,7 @@ def compare(
             contract_mode=contract_mode,
             policy=effective_policy,
             policy_file=policy_file,
+            suppression=suppression,
         )
 
     return DiffResult(

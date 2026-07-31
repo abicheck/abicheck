@@ -2320,6 +2320,25 @@ Codex/CodeRabbit round, each changing behaviour rather than wording:
    (CodeRabbit), matching the live attribution. `all` has no root provider,
    so the refs were empty — which carries the *non-entity* meaning instead.
 
+**A second review round on the same PR found three more, all fixed.** (1)
+The audit-ledger serializers (`out_of_surface_changes`, the suppressed and
+reconciled ledgers, `scope.filtered_internal_changes`) carried the contract
+fields but no `finding_id` — and also omit `old_value`/`new_value`, two of
+that id's own inputs — so a demoted finding could neither be joined to its
+decision in the receipt nor have its key recomputed. The id is now emitted by
+`_add_contract_evaluation_fields` itself, so the key and the decision always
+travel together. (2) `evidence_refs_for_reason` cited *both* sides for an
+`export_root_membership` decision, but `_exports_mode_decision` reads one
+`ExportSurface` (chosen by D4's side rule) and decides from it alone — so the
+second citation claimed a decision rested on evidence it never read, actively
+misleading when that side's provider is unavailable. The two-sided reason set
+is now per-domain: `public` keeps it (its membership classification really
+does run against `surface_unions`), `exports` and `all` cite one side. (3)
+The selected suppression source (rules + digest) now reaches
+`resolved_config.suppressions`; leaving it `None` claimed no source was
+selected at all. A list with no `source_sha256` (assembled in memory, never
+read from a file) still records `None` rather than a fabricated digest.
+
 Three structural cleanups landed with them: one shared
 `contract_context.persisted_domain_view()` replaces the duplicated
 provider-walk in the receipt builder and the replay domain (they could

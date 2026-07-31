@@ -177,8 +177,12 @@ class TestEndToEndJsonReport:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--contract-evaluation", "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract-evaluation",
+                "--format",
+                "json",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -196,14 +200,84 @@ class TestEndToEndJsonReport:
         # carries -- a dangling ref is indistinguishable from one that failed
         # to serialize (contract_evidence_collect.validate_decision_evidence).
         known = {
-            entry["record"]["id"]
-            for entry in context["contract_evidence"]["providers"]
+            entry["record"]["id"] for entry in context["contract_evidence"]["providers"]
         }
         stamped = [c for c in payload["changes"] if "contract_evidence_refs" in c]
         assert stamped, "fixture must produce at least one stamped finding"
         for change in stamped:
             for ref in change["contract_evidence_refs"]:
                 assert ref in known or ref.startswith("run:"), ref
+
+    def test_audit_ledger_entries_join_to_the_decision_receipt(self) -> None:
+        """A demoted finding's ledger entry must carry the receipt's key.
+
+        The receipt is keyed by ``finding_id``; the audit-ledger serializers
+        emitted only the contract fields, and also omit ``old_value``/
+        ``new_value``, so a consumer could neither read the key nor recompute
+        it (Codex review, fresh evidence).
+        """
+        import json as _json
+
+        from abicheck.checker import compare as _compare
+        from abicheck.model import (
+            AbiSnapshot as _Snap,
+            RecordType as _Rec,
+            ScopeOrigin as _Origin,
+        )
+        from abicheck.reporter import to_json as _to_json
+
+        pub = _Rec(
+            name="Pub", kind="struct", size_bits=64, origin=_Origin.PUBLIC_HEADER
+        )
+        old = _Snap(
+            library="libfoo.so.1",
+            version="1.0",
+            from_headers=True,
+            functions=[
+                Function(
+                    name="api",
+                    mangled="api",
+                    return_type="Pub *",
+                    visibility=Visibility.PUBLIC,
+                    origin=_Origin.PUBLIC_HEADER,
+                )
+            ],
+            types=[
+                pub,
+                _Rec(
+                    name="Hidden",
+                    kind="struct",
+                    size_bits=64,
+                    origin=_Origin.PRIVATE_HEADER,
+                ),
+            ],
+        )
+        new = _Snap(
+            library="libfoo.so.1",
+            version="2.0",
+            from_headers=True,
+            functions=old.functions,
+            types=[
+                pub,
+                _Rec(
+                    name="Hidden",
+                    kind="struct",
+                    size_bits=128,
+                    origin=_Origin.PRIVATE_HEADER,
+                ),
+            ],
+        )
+        result = _compare(old, new, contract_evaluation=True)
+        assert result.out_of_surface_changes, "fixture must demote a finding"
+        payload = _json.loads(_to_json(result))
+        receipt = payload["contract_context"]["decision_receipt"][
+            "relevance_by_finding"
+        ]
+        demoted = payload["surface_scope"]["out_of_surface_changes"]
+        assert demoted
+        for entry in demoted:
+            assert entry["finding_id"] in receipt
+            assert receipt[entry["finding_id"]] == entry["contract_relevance"]
 
     def test_omitted_by_default(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
@@ -262,9 +336,14 @@ class TestShowFilteredAuditLedger:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--scope-public-headers", "--show-filtered",
-                "--contract-evaluation", "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--scope-public-headers",
+                "--show-filtered",
+                "--contract-evaluation",
+                "--format",
+                "json",
             ],
         )
         assert "Filtered as non-public ABI surface" in result.output
@@ -300,9 +379,13 @@ class TestShowFilteredAuditLedger:
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old_p), str(new_p),
-                "--scope-public-headers", "--show-filtered",
-                "--format", "json",
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--scope-public-headers",
+                "--show-filtered",
+                "--format",
+                "json",
             ],
         )
         assert "InternalCache" in result.output
@@ -321,12 +404,8 @@ class TestRejectedOnSetInputs:
         old_dir.mkdir()
         new_dir.mkdir()
         old, new = _breaking_pair()
-        (old_dir / "libfoo.json").write_text(
-            snapshot_to_json(old), encoding="utf-8"
-        )
-        (new_dir / "libfoo.json").write_text(
-            snapshot_to_json(new), encoding="utf-8"
-        )
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
 
         result = CliRunner().invoke(
             main,
@@ -372,9 +451,7 @@ class TestUsedByScopingStampsExplicitEvidence:
     def _patch_scope(self, monkeypatch, result):
         import abicheck.appcompat as appcompat_mod
 
-        monkeypatch.setattr(
-            appcompat_mod, "scope_diff_to_app", lambda *a, **k: result
-        )
+        monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
 
     def test_used_by_missing_symbol_gets_contract_evaluation(
         self, tmp_path, monkeypatch
@@ -383,18 +460,27 @@ class TestUsedByScopingStampsExplicitEvidence:
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z5entryv"}, required_symbol_count=1,
-            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            missing_symbols=["_Z5entryv"],
+            verdict=Verdict.BREAKING,
         )
         self._patch_scope(monkeypatch, scoped)
 
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--used-by", str(app),
-                "--contract-evaluation", "--format", "json",
+                "compare",
+                str(old),
+                str(new),
+                "--used-by",
+                str(app),
+                "--contract-evaluation",
+                "--format",
+                "json",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -416,17 +502,26 @@ class TestUsedByScopingStampsExplicitEvidence:
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z5entryv"}, required_symbol_count=1,
-            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            missing_symbols=["_Z5entryv"],
+            verdict=Verdict.BREAKING,
         )
         self._patch_scope(monkeypatch, scoped)
 
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--used-by", str(app), "--format", "json",
+                "compare",
+                str(old),
+                str(new),
+                "--used-by",
+                str(app),
+                "--format",
+                "json",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -456,24 +551,34 @@ class TestUsedByScopingStampsExplicitEvidence:
             name=app.name,
         )
         scoped = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z5entryv"}, required_symbol_count=1,
-            breaking_for_app=[synthetic], verdict=Verdict.BREAKING,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            breaking_for_app=[synthetic],
+            verdict=Verdict.BREAKING,
         )
         self._patch_scope(monkeypatch, scoped)
 
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--used-by", str(app),
-                "--contract-evaluation", "--format", "json",
+                "compare",
+                str(old),
+                str(new),
+                "--used-by",
+                str(app),
+                "--contract-evaluation",
+                "--format",
+                "json",
             ],
         )
         assert result.exit_code == 4, result.output
         payload = json.loads(result.stdout)
         matches = [
-            c for c in payload["changes"]
+            c
+            for c in payload["changes"]
             if c["kind"] == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED.value
         ]
         assert matches
@@ -494,17 +599,25 @@ class TestUsedByScopingStampsExplicitEvidence:
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z5entryv"}, required_symbol_count=1,
-            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            missing_symbols=["_Z5entryv"],
+            verdict=Verdict.BREAKING,
         )
         self._patch_scope(monkeypatch, scoped)
 
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--used-by", str(app), "--contract-evaluation",
+                "compare",
+                str(old),
+                str(new),
+                "--used-by",
+                str(app),
+                "--contract-evaluation",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -518,9 +631,13 @@ class TestUsedByScopingStampsExplicitEvidence:
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z5entryv"}, required_symbol_count=1,
-            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            missing_symbols=["_Z5entryv"],
+            verdict=Verdict.BREAKING,
         )
         self._patch_scope(monkeypatch, scoped)
 
@@ -545,18 +662,27 @@ class TestUsedByScopingStampsExplicitEvidence:
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z5entryv"}, required_symbol_count=1,
-            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            missing_symbols=["_Z5entryv"],
+            verdict=Verdict.BREAKING,
         )
         self._patch_scope(monkeypatch, scoped)
 
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--used-by", str(app), "--contract-evaluation",
-                "--report-mode", "root-cause",
+                "compare",
+                str(old),
+                str(new),
+                "--used-by",
+                str(app),
+                "--contract-evaluation",
+                "--report-mode",
+                "root-cause",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -571,17 +697,26 @@ class TestUsedByScopingStampsExplicitEvidence:
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
-            app_path=str(app), old_lib_path=str(old), new_lib_path=str(new),
-            required_symbols={"_Z5entryv"}, required_symbol_count=1,
-            missing_symbols=["_Z5entryv"], verdict=Verdict.BREAKING,
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            missing_symbols=["_Z5entryv"],
+            verdict=Verdict.BREAKING,
         )
         self._patch_scope(monkeypatch, scoped)
 
         result = CliRunner().invoke(
             main,
             [
-                "compare", str(old), str(new),
-                "--used-by", str(app), "--report-mode", "root-cause",
+                "compare",
+                str(old),
+                str(new),
+                "--used-by",
+                str(app),
+                "--report-mode",
+                "root-cause",
             ],
         )
         assert result.exit_code == 4, result.output

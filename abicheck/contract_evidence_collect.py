@@ -774,14 +774,28 @@ def closure_from_graph(
 # --------------------------------------------------------------------------
 
 
-#: Reason codes whose decision is computed from *both* sides' surfaces (a
-#: membership classification runs against the union -- ``surface_unions`` /
-#: both ``ExportSurface`` operands), as opposed to a decision the
-#: authoritative side alone settles (an unresolvable surface, an ambiguous
-#: identity, a terminal exclusion already recorded on the finding).
-_TWO_SIDED_REASONS: frozenset[str] = frozenset(
-    {"public_root_membership", "export_root_membership", "closed_domain_no_commitment"}
-)
+#: Reason codes whose decision genuinely rests on *both* sides' evidence,
+#: keyed by the domain that produced them. Only the ``public`` domain has
+#: one: ``classify_change_surface`` runs a membership classification against
+#: ``surface_unions(surf_old, surf_new)``, so both header providers really
+#: were consulted.
+#:
+#: ``exports`` deliberately has none. ``_exports_mode_decision`` selects one
+#: :class:`~abicheck.export_surface.ExportSurface` by ADR-049 D4's side rule
+#: and decides from it alone -- so citing the other side would claim a
+#: decision rests on evidence it never read, and would be actively
+#: misleading when that side's provider is unavailable (an exported removal
+#: is conclusive from the old table even if the new one failed to parse;
+#: Codex review, fresh evidence). Every other reason -- an unresolvable
+#: surface, an ambiguous identity, a terminal exclusion already recorded on
+#: the finding -- is settled by the authoritative side alone in both domains.
+_TWO_SIDED_REASONS_BY_MODE: Mapping[ContractMode, frozenset[str]] = {
+    ContractMode.PUBLIC: frozenset(
+        {"public_root_membership", "closed_domain_no_commitment"}
+    ),
+    ContractMode.EXPORTS: frozenset(),
+    ContractMode.ALL: frozenset(),
+}
 
 
 def evidence_refs_for_reason(
@@ -807,8 +821,10 @@ def evidence_refs_for_reason(
       comparison that holds an evidence block;
     - every other entity decision cites the root provider for the selected
       domain, on the authoritative side (ADR-049 D4) -- plus the other side
-      when the decision is a membership classification, which
-      ``classify_change_surface`` genuinely computes from the union of both.
+      only where the evaluator genuinely read it, which is the ``public``
+      domain's membership classification (``classify_change_surface`` runs
+      against the union of both surfaces). See
+      :data:`_TWO_SIDED_REASONS_BY_MODE` for why ``exports`` cites one side.
 
     Two overlay-decided cases (``--public-symbol``, ``--post-manifest``) are
     indistinguishable by reason code alone and are attributed one level up,
@@ -842,7 +858,7 @@ def evidence_refs_for_reason(
         return ref(PROVIDER_PUBLIC_HEADER, authoritative_side)
     root_provider = DOMAIN_ROOT_PROVIDER[mode] or PROVIDER_PUBLIC_HEADER
     refs = ref(root_provider, authoritative_side)
-    if reason_code in _TWO_SIDED_REASONS:
+    if reason_code in _TWO_SIDED_REASONS_BY_MODE[mode]:
         refs += ref(root_provider, other_side)
     return refs
 
