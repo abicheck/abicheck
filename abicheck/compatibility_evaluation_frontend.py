@@ -460,6 +460,7 @@ def _resolve(
     default: FieldCandidate,
     pack: RoutedPackAssignment | None = None,
     pack_layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
+    pack_option: str = "--pack",
     require_legacy_alias_agreement: bool = True,
 ) -> tuple[Hashable, ValueProvenance]:
     """Resolve one field, letting a selected pack fill it only if nothing else did.
@@ -485,7 +486,7 @@ def _resolve(
             _candidate(
                 pack_layer,
                 pack.value,
-                option="--pack",
+                option=pack_option,
                 source_kind="pack_manifest",
                 reference=pack.identity.id,
                 version=pack.identity.version,
@@ -724,6 +725,7 @@ def resolve_compatibility_evaluation_config(
         ):
             pinned_gate[field_name] = _STATED_ELSEWHERE
 
+    pack_option = "--pack" if front_end is FrontEnd.CLI else "pack_paths"
     packs_by_field = resolve_selected_packs(
         pack_paths,
         explicit_overrides={
@@ -731,6 +733,12 @@ def resolve_compatibility_evaluation_config(
             PackKind.GATE: pinned_gate,
             PackKind.POLICY: policy_overrides_explicit,
         },
+        # The selecting front end's own layer/spelling: a pack selected
+        # through the typed API must not have its `*.packs` receipt claim the
+        # CLI selected it while the fields that same pack assigned claim the
+        # API did (Codex review).
+        layer=layer,
+        option=pack_option,
     )
     # Each entry carries its own pack identity/path, so a field a pack filled
     # gets a receipt naming the exact manifest revision it came from.
@@ -783,6 +791,7 @@ def resolve_compatibility_evaluation_config(
         default=_default("not_checkable"),
         pack=contract_pack_fields.get(CONTRACT_UNRESOLVED_FIELD),
         pack_layer=layer,
+        pack_option=pack_option,
     )
     overlays, prov[CONTRACT_OVERLAYS_FIELD] = _resolve(
         CONTRACT_OVERLAYS_FIELD,
@@ -790,6 +799,7 @@ def resolve_compatibility_evaluation_config(
         default=_default(()),
         pack=contract_pack_fields.get(CONTRACT_OVERLAYS_FIELD),
         pack_layer=layer,
+        pack_option=pack_option,
     )
     contract_packs, prov[CONTRACT_PACKS_FIELD] = packs_by_field[CONTRACT_PACKS_FIELD]
 
@@ -810,6 +820,7 @@ def resolve_compatibility_evaluation_config(
         default=_default(()),
         pack=contract_pack_fields.get(INTERNAL_NAMESPACES_FIELD),
         pack_layer=layer,
+        pack_option=pack_option,
     )
     explicit_scope, prov[EXPLICIT_SCOPE_FIELD] = _explicit_scope(
         explicit, project, layer
@@ -826,6 +837,7 @@ def resolve_compatibility_evaluation_config(
         default=_default(True),
         pack=contract_pack_fields.get(REQUIRE_EVIDENCE_FIELD),
         pack_layer=layer,
+        pack_option=pack_option,
     )
     assurance = AssuranceConfig(require_evidence=cast(bool, require_evidence))
 
@@ -951,6 +963,7 @@ def resolve_compatibility_evaluation_config(
             ),
             pack=gate_pack_fields.get(field_name),
             pack_layer=layer,
+            pack_option=pack_option,
         )
         levels[category] = cast(SeverityLevel, value)
 
@@ -998,6 +1011,7 @@ def resolve_compatibility_evaluation_config(
         default=_default(auto_scheme, source_kind="auto"),
         pack=gate_pack_fields.get(EXIT_CODE_SCHEME_FIELD),
         pack_layer=layer,
+        pack_option=pack_option,
     )
 
     gate_packs, prov[GATE_PACKS_FIELD] = packs_by_field[GATE_PACKS_FIELD]

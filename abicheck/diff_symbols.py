@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import bisect
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from .checker_policy import ChangeKind
@@ -88,6 +89,7 @@ from .fact_provenance import (
     func_fact_key,
     var_fact_key,
 )
+from .finding_identity import SymbolIdentityIndex
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -695,8 +697,8 @@ def _check_function_signature(
 
 
 def _check_inline_transitions(
-    old_map: dict[str, Function],
-    new_map: dict[str, Function],
+    old_map: Mapping[str, Function],
+    new_map: Mapping[str, Function],
     new_snapshot: AbiSnapshot,
 ) -> list[Change]:
     """Detect inline/non-inline transitions for functions present in both snapshots."""
@@ -735,24 +737,39 @@ def _check_inline_transitions(
     return changes
 
 
+def _is_extern_c_function(f: Function) -> bool:
+    """Eligibility predicate for the name-alias fallback below."""
+    return f.is_extern_c
+
+
 def _match_old_function(
     mangled: str,
     f_old: Function,
-    new_map: dict[str, Function],
-    new_by_name: dict[str, list[Function]],
+    new_index: SymbolIdentityIndex[Function],
     new_all: dict[str, Function],
     matched_by_name: set[str],
     elf_only_mode: bool,
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
 ) -> list[Change]:
-    """Classify a single old function: matched by mangled, extern-C fallback, or removed."""
-    if mangled in new_map:
+    """Classify a single old function: matched by mangled, extern-C fallback, or removed.
+
+    ADR-049 Phase 2: both tiers of the join run through
+    :class:`~abicheck.finding_identity.SymbolIdentityIndex` -- the exact-key
+    tier as this index's own ``Mapping`` lookup, and the ``extern "C"``
+    fallback as one ambiguity-checked alias lookup, replacing the hand-rolled
+    name multimap plus ``len(candidates) == 1`` count this function used to
+    carry. The rule is unchanged, and deliberately so: the count *was* the
+    ambiguity-safety, it just lived here instead of in the shared primitive
+    that every other flat join now uses.
+    """
+    f_new_exact = new_index.get(mangled)
+    if f_new_exact is not None:
         return list(
             _check_function_signature(
                 mangled,
                 f_old,
-                new_map[mangled],
+                f_new_exact,
                 params_unconfirmed=params_unconfirmed,
                 is_llp64=is_llp64,
             )
@@ -774,22 +791,24 @@ def _match_old_function(
     ):
         return []
 
-    # Fallback by plain name when either side uses extern "C".
-    # The name->Function mapping is a MULTIMAP: only fall back when there is
-    # EXACTLY ONE extern-C candidate for this name, to avoid mis-pairing
-    # overloaded or templated functions that share a display name.
-    candidates = new_by_name.get(f_old.name, [])
-    extern_c_candidates = [f for f in candidates if f.is_extern_c]
-    if f_old.is_extern_c:
-        # Old side is extern "C": match against the unique new extern-C peer.
-        extern_c_candidates = candidates  # any single candidate is acceptable
-    if len(extern_c_candidates) == 1:
-        f_new = extern_c_candidates[0]
+    # Fallback by plain name when either side uses extern "C". Only join when
+    # the name resolves to EXACTLY ONE eligible candidate, so an overload set
+    # or a template instantiation family sharing a display name is never
+    # mis-paired -- `unique_alias_match` answers None for "no candidate" and
+    # "several candidates" alike. Eligibility is unchanged: an extern-C old
+    # side may match any single same-named peer (its mangled name is the bare
+    # name on both sides, so a C++-mangled peer is still the same entity seen
+    # through a different producer), a C++ old side only an extern-C one.
+    name_match = new_index.unique_alias_match(
+        f"name:{f_old.name}",
+        where=None if f_old.is_extern_c else _is_extern_c_function,
+    )
+    if name_match is not None:
         result = list(
             _check_function_signature(
                 f_old.name,
                 f_old,
-                f_new,
+                name_match.declaration,
                 params_unconfirmed=params_unconfirmed,
                 is_llp64=is_llp64,
             )
@@ -881,7 +900,13 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
     old_map = _public_functions(old)
-    new_map = _public_functions(new)
+    # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
+    # same keys ``_public_functions`` returns -- so every loop below is
+    # unchanged and each function is still visited once -- plus the
+    # ambiguity-checked alias tier ``_match_old_function``'s extern-C fallback
+    # joins on. One shared primitive instead of a second hand-rolled multimap,
+    # the same way ``build_type_map`` already backs flat *type* matching.
+    new_map = SymbolIdentityIndex.for_functions(_public_functions(new))
 
     # Lookups for the virtual-method-addition check below: type records
     # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
@@ -897,13 +922,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Build a lookup of ALL functions in new snapshot (including hidden).
     new_all = new.function_map
 
-    # Build secondary index by plain name for extern-C fallback matching when
-    # mangled names differ due to C/C++ compilation mode mismatch.
-    # Use a multimap (name -> list) so overloaded/templated functions sharing a
-    # display name are not silently collapsed to one candidate.
-    new_by_name: dict[str, list[Function]] = {}
-    for f in new_map.values():
-        new_by_name.setdefault(f.name, []).append(f)
     matched_by_name: set[str] = set()
 
     for mangled, f_old in old_map.items():
@@ -912,7 +930,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 mangled,
                 f_old,
                 new_map,
-                new_by_name,
                 new_all,
                 matched_by_name,
                 elf_only_mode,
@@ -1173,10 +1190,23 @@ def _var_added(mangled: str, v_new: Variable) -> list[Change]:
 
 @registry.detector("variables")
 def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Diff public variables, joined through the shared identity index.
+
+    ADR-049 Phase 2. Unlike functions, **no alias tier is enabled here**, and
+    that is a decision rather than an omission: the only alias fallback the
+    function join uses exists for ``extern "C"``, where the same entity is
+    legitimately spelled two ways by two producers. A variable has no
+    overload set and no C++/C linkage mismatch to heal -- its map key *is* its
+    exported symbol, so a key that differs between the two sides is a
+    different export, and joining the two by display name would report a
+    genuine removal + addition as a modification instead. The index is still
+    what performs the join, so both flat symbol paths share one implementation
+    and one ambiguity contract.
+    """
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
     return diff_by_key(
-        _public_variables(old),
-        _public_variables(new),
+        SymbolIdentityIndex.for_variables(_public_variables(old)),
+        SymbolIdentityIndex.for_variables(_public_variables(new)),
         on_removed=_var_removed,
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(

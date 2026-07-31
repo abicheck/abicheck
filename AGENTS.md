@@ -181,11 +181,18 @@ Core pipeline (in order of data flow):
      `diff_symbols._diff_functions`. Mirrors the "most specific available
      identity, ambiguity-safe fallback" principle ADR-045 established for
      flat type matching (`diff_helpers.TypeMap`) and ADR-048 established for
-     L5 source-graph nodes (`buildsource/entity_identity.py`). Partially
-     wired: `diff_filtering.py`'s cross-detector dedup key now uses
-     `resolve_change_identity()`; `diff_symbols.py`'s own old/new function
-     and variable matching is deliberately still unwired — see
-     `docs/contribute/plans/public-contract-default.md`'s Phase 2 section
+     L5 source-graph nodes (`buildsource/entity_identity.py`). Fully wired:
+     `diff_filtering.py`'s cross-detector dedup key uses
+     `resolve_change_identity()`, and `diff_symbols.py`'s own old/new
+     function and variable matching joins through `SymbolIdentityIndex` —
+     the flat-symbol counterpart of `TypeMap`, a `Mapping` over the same
+     keys `_public_functions`/`_public_variables` return plus one
+     ambiguity-checked alias tier (`unique_alias_match` answers `None` for
+     "no candidate" and "several candidates" alike). Unlike `TypeMap`,
+     `__getitem__` never resolves an alias, and variables enable no alias
+     tier at all: two differing mangled names are two different exports, so
+     a display-name join would hide a real removal (the extern-C fallback is
+     the one case where one entity is legitimately spelled two ways)
 4. **Detection** — classify changes
    - `detectors.py` — individual detection rules
    - `detector_registry.py` — registry pattern for detectors

@@ -22,6 +22,8 @@ large".
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import bool_transition, make_change
@@ -72,10 +74,10 @@ def check_hidden_friend_change(
 
 
 def diff_inline_hidden_friends(
-    old_all: dict[str, Function],
-    new_all: dict[str, Function],
-    old_public: dict[str, Function],
-    new_public: dict[str, Function],
+    old_all: Mapping[str, Function],
+    new_all: Mapping[str, Function],
+    old_public: Mapping[str, Function],
+    new_public: Mapping[str, Function],
 ) -> list[Change]:
     """Pick up hidden-friend transitions that the public-symbol diff misses.
 

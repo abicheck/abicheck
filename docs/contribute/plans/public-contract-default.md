@@ -1086,6 +1086,48 @@ finding. Left deferred; a real attempt needs its own dedicated pass with
 room for that full gate re-verification, not a fold-in alongside Phase 3/1
 work.
 
+**Updated (2026-07-31): the deferred matching wiring landed; this phase's
+remaining item is closed.** Two prior passes deferred it as "a substantially
+larger, higher-risk refactor" and, on re-investigation, for a sharper reason:
+`resolve_function_identity` returns exactly one `primary_id` and has **no
+notion of "ambiguous, so don't match"** — the `extern "C"` fallback's whole
+correctness rests on the *caller* counting candidates
+(`len(extern_c_candidates) == 1`), so keying a dict by `primary_id` would
+only have moved that count behind a different key, not removed it.
+
+The fix was to supply the missing notion rather than to work around it.
+`finding_identity.SymbolIdentityIndex` is the flat-symbol counterpart of
+`diff_helpers.TypeMap` (ADR-045): a `Mapping` over the same keys
+`_public_functions`/`_public_variables` already return — so every existing
+loop is untouched and each declaration is still visited once — plus an
+ambiguity-checked alias tier (`unique_alias_match`, which answers `None` for
+"no candidate" and "several candidates" alike, with `alias_candidates` left
+available to tell those two apart). `_match_old_function`'s exact-key tier is
+now the index's own lookup and its extern-C fallback one alias lookup with an
+eligibility predicate; `_diff_variables` joins through the same index.
+
+Two deliberate departures from `TypeMap`, both documented at their call
+sites:
+
+- **`__getitem__` never resolves an alias.** A type's bare-name alias is a
+  schema-evolution accident worth healing silently; a *symbol*'s is not —
+  two differing mangled names are two different exports, and joining them by
+  display name would report a genuine removal as a modification.
+- **No alias tier for variables at all**, which is a decision rather than an
+  omission: the alias tier exists for `extern "C"`, where one entity is
+  legitimately spelled two ways by two producers. A variable has no overload
+  set and no C/C++ linkage mismatch to heal, so its key *is* its export. A
+  regression test pins that a re-mangled variable stays removal + addition.
+
+Matching behavior is unchanged by construction, and the verification is what
+the earlier deferral asked for: full unit suite including golden (21824
+passed, unchanged count), the FP-rate gate (0/0 delta), the per-tier accuracy
+gate (top-tier correct, under-call monotonic), and the `slow`
+detector-property, identity-property and fact-conservation suites. New unit
+coverage in `tests/test_symbol_identity_index.py` (the primitive in isolation
+plus each matching rule end-to-end through `checker.compare`); the module is
+at 100% line+branch.
+
 A Hypothesis property suite for the identity primitive itself
 (`tests/test_finding_identity_properties.py`, `slow`) is also done, covering
 determinism (the same declaration always resolves to the same identity),

@@ -339,6 +339,8 @@ def resolve_selected_packs(
     explicit_overrides: Mapping[PackKind, Mapping[str, Hashable]] = MappingProxyType(
         {}
     ),
+    layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
+    option: str = "--pack",
 ) -> dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]]:
     """Resolve a real ``--pack <path>``-style CLI/config input into
     ``contract.packs``/``policy.packs``/``gate.packs`` field values.
@@ -383,12 +385,18 @@ def resolve_selected_packs(
     "file order never resolves conflicts" -- two invocations naming the same
     pack set in a different order must resolve to an equal value (D7).
 
-    Every returned field is tagged
-    :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`
+    Every returned field is tagged *layer* (default
+    :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`,
+    recorded under *option*)
     when at least one path selected a pack of that kind (mirroring
     :func:`resolve_internal_namespaces`'s ``--policy-file`` case: a path the
     user passed on *this* invocation, not an implicitly-discovered project
-    file), falling through to :data:`_BUILT_IN_DEFAULT_PACKS` otherwise.
+    file), falling through to :data:`_BUILT_IN_DEFAULT_PACKS` otherwise. A
+    caller resolving for a non-CLI front end must pass its own layer and
+    selector spelling: hard-coding the CLI's made an API-selected manifest
+    produce a self-contradictory receipt, with ``contract.packs`` claiming
+    ``explicit_cli`` while the fields that same pack assigned claimed
+    ``api_request`` (Codex review).
 
     Not called from any live command yet -- see module docstring.
     """
@@ -427,12 +435,12 @@ def resolve_selected_packs(
             candidates.append(
                 FieldCandidate(
                     provenance=ValueProvenance(
-                        layer=SelectorLayer.EXPLICIT_CLI,
+                        layer=layer,
                         source_kind="pack_manifest",
                         selected_by=tuple(
                             SelectedByEntry(
-                                layer=SelectorLayer.EXPLICIT_CLI,
-                                option="--pack",
+                                layer=layer,
+                                option=option,
                                 path=first_path_by_identity[identity],
                             )
                             for identity in canonical
