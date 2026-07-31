@@ -278,14 +278,20 @@ def _macho_shifted_spellings(identity: str) -> tuple[str, ...]:
     return tuple(c for c in (shorter, "_" + identity) if c)
 
 
-def _matched_export_name(
+def _matched_export_names(
     name: str, mangled: str, tables: dict[str, set[str]]
-) -> str | None:
-    """The observed export name this declaration is a root of, or ``None``.
+) -> set[str]:
+    """Every observed export spelling this declaration is a root of.
 
-    Returns the *export table's own* spelling rather than a bool, so the
+    Returns the *export tables' own* spellings rather than a bool, so the
     caller can subtract matched names from the observed tables and see what
     was left over (see :attr:`ExportSurface.unmatched_exports`).
+
+    **All** matching spellings, not the first: one C declaration exported by
+    a multi-platform snapshot is legitimately ``foo`` in the ELF table and
+    ``_foo`` in the Mach-O one, and returning only the first would leave the
+    other sitting in ``unmatched_exports``, wrongly making
+    :attr:`ExportSurface.exclusion_is_provable` false (Codex review).
 
     Takes the per-table mapping rather than a flat union so the Mach-O
     underscore tolerance (:func:`_macho_shifted_spellings`) applies only to
@@ -293,16 +299,12 @@ def _matched_export_name(
     """
     identity = _linker_identity(name, mangled)
     if not identity:
-        return None
-    for names in tables.values():
-        if identity in names:
-            return identity
+        return set()
+    matched = {identity for names in tables.values() if identity in names}
     macho = tables.get("macho")
     if macho:
-        for cand in _macho_shifted_spellings(identity):
-            if cand in macho:
-                return cand
-    return None
+        matched |= {c for c in _macho_shifted_spellings(identity) if c in macho}
+    return matched
 
 
 def _seed_export_roots(
@@ -320,7 +322,7 @@ def _seed_export_roots(
     allocate, and inherit that class, so its layout is inside the export
     contract even when no *other* signature names it) -- with exactly one
     difference: rootness is decided by observed export-table membership
-    (:func:`_matched_export_name`), not by
+    (:func:`_matched_export_names`), not by
     :data:`~abicheck.model.Visibility.PUBLIC`.
 
     A root's *lookup* keys are still the full
@@ -355,11 +357,11 @@ def _seed_export_roots(
     for fn in snap.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
-        matched = _matched_export_name(fn.name, fn.mangled, tables)
-        if matched is None:
+        matched = _matched_export_names(fn.name, fn.mangled, tables)
+        if not matched:
             nonroot_keys |= keys
             continue
-        surface.matched_exports.add(matched)
+        surface.matched_exports |= matched
         surface.export_symbols |= keys
         surface.has_roots = True
         if fn.params or _is_real_type(fn.return_type):
@@ -384,11 +386,11 @@ def _seed_export_roots(
     for var in snap.variables:
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
-        matched = _matched_export_name(var.name, var.mangled, tables)
-        if matched is None:
+        matched = _matched_export_names(var.name, var.mangled, tables)
+        if not matched:
             nonroot_keys |= keys
             continue
-        surface.matched_exports.add(matched)
+        surface.matched_exports |= matched
         surface.export_symbols |= keys
         surface.has_roots = True
         if _is_real_type(var.type):

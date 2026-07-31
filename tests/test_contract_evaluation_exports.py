@@ -526,18 +526,64 @@ class TestExportsMode:
             ContractRelevance.IN_CONTRACT
         )
 
-    def test_a_member_level_finding_still_uses_its_owner_type(self) -> None:
+    @pytest.mark.parametrize(
+        ("kind", "symbol"),
+        [
+            # `diff_types`' field family: `symbol` is the owning type alone.
+            (ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "Foo"),
+            # `diff_platform`'s struct family: `symbol` is owner + member.
+            (ChangeKind.STRUCT_FIELD_OFFSET_CHANGED, "Foo::x"),
+        ],
+    )
+    def test_a_member_level_finding_still_uses_its_owner_type(
+        self, kind: ChangeKind, symbol: str
+    ) -> None:
         snap = self._snap(
             functions=[_fn("api", ret="Foo *", mangled="api")],
             types=[_rec("Foo")],
             elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
         )
-        c = Change(
-            kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED, symbol="Foo::x", description=""
-        )
+        c = Change(kind=kind, symbol=symbol, description="")
         assert self._evaluate(c, self._exports(snap)).relevance is (
             ContractRelevance.IN_CONTRACT
         )
+
+    def test_a_nested_type_does_not_ride_its_parents_membership(self) -> None:
+        # Offering both owner readings would confirm a finding about the
+        # nested `Outer::Helper` on `Outer`'s membership (Codex review).
+        snap = self._snap(
+            functions=[_fn("api", ret="Outer *", mangled="api")],
+            types=[_rec("Outer"), _rec("Outer::Helper")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        c = Change(
+            kind=ChangeKind.TYPE_FIELD_REMOVED, symbol="Outer::Helper", description=""
+        )
+        assert self._evaluate(c, self._exports(snap)).relevance is (
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
+
+    def test_a_qualified_finding_does_not_match_a_bare_export_root_tail(self) -> None:
+        # The binary exports a real C `foo`, so "foo" is legitimately in
+        # `export_symbols`; deriving the tail of an unrelated qualified
+        # finding must not match it (Codex review).
+        snap = self._snap(
+            functions=[
+                _fn("foo", mangled="foo"),
+                _fn("ns::foo", mangled="_ZN2ns3fooEv"),
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="foo")]),
+        )
+        exp = self._exports(snap)
+        qualified = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="ns::foo", description=""
+        )
+        assert self._evaluate(qualified, exp).relevance is (
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
+        # ... while the real C export still resolves exactly.
+        exact = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="")
+        assert self._evaluate(exact, exp).relevance is ContractRelevance.IN_CONTRACT
 
     @pytest.mark.parametrize(
         ("kind", "symbol"),

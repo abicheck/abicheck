@@ -1017,13 +1017,20 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
 
 
 class TestPublicModeMemberLevelConfirmation:
-    """A member-level finding (``TYPE_FIELD_OFFSET_CHANGED`` etc.) is
-    owner-qualified: ``symbol="Point::x"``. Confirmation must check the
-    *owner* (``Point``) against ``public_types``, mirroring
-    ``classify_change_surface``'s own owner-stripping -- passing the full
-    ``"Point::x"`` to ``_type_identifiers`` yields ``{"Point::x", "x"}``,
-    never ``"Point"``, so this previously always failed confirmation
-    (Codex review, ninth round)."""
+    """A member-level finding must be confirmed against its *owner* type.
+
+    The two producer families spell ``symbol`` differently, so
+    ``_type_candidates`` selects the shape per kind (Codex review):
+    ``diff_types``' field families record the owning type alone with the
+    member in ``detail`` (``symbol="ns::Point"``), while ``diff_platform``'s
+    ``struct_field_*`` and the enum families record owner *and* member
+    (``symbol="ns::Point::x"``).
+
+    The fixtures below use the shapes a real ``compare()`` actually emits --
+    verified by running one: a field-offset change on ``ns::Point`` produces
+    ``kind=type_field_offset_changed symbol='ns::Point'``. An earlier
+    revision of this suite asserted ``symbol="Point::x"`` for that kind,
+    which no producer emits."""
 
     def test_public_struct_field_offset_change_confirms_via_owner_type(self) -> None:
         snap = AbiSnapshot(
@@ -1043,7 +1050,7 @@ class TestPublicModeMemberLevelConfirmation:
         s = compute_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
-            symbol="Point::x",
+            symbol="Point",
             description="",
         )
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)

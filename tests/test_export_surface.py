@@ -666,3 +666,21 @@ class TestOrdinalAndOwnerAndPlatformScoping:
         surf = compute_export_surface(snap)
         assert surf.has_roots
         assert not surf.all_roots_typed
+
+
+class TestMultiPlatformSpellings:
+    def test_every_matched_platform_spelling_is_recorded(self) -> None:
+        # One C declaration exported as `foo` in ELF and `_foo` in Mach-O:
+        # recording only the first left the other in `unmatched_exports` and
+        # wrongly blocked exclusion (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("foo", "foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="foo")]),
+            macho=MachoMetadata(exports=[MachoExport(name="_foo")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.matched_exports == {"foo", "_foo"}
+        assert not surf.unmatched_exports
+        assert surf.exclusion_is_provable
