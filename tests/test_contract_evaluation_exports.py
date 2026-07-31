@@ -213,10 +213,13 @@ class TestExportsMode:
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "export_root_membership"
 
-    def test_post_manifest_exclusion_stays_terminal_under_exports(self) -> None:
-        # The one cross-domain exclusion: an exact committed-*export*
-        # manifest is direct evidence for this domain, so it still closes
-        # membership even for a symbol present in the export table.
+    def test_manifest_omission_does_not_exclude_a_real_export(self) -> None:
+        # Section 7's `exports` row is unconditional in both directions:
+        # "Roots/closure are IN_CONTRACT ... Public-header/manifest/consumer
+        # failures are unrelated and advisory". A symbol the binary
+        # demonstrably exports therefore stays in this contract even when a
+        # POST manifest omits it -- so this mode dispatches ahead of the
+        # manifest-exclusion shortcut every other mode honors (Codex review).
         import abicheck.contract_evaluation as mod
 
         snap = self._snap(
@@ -230,8 +233,26 @@ class TestExportsMode:
             surface_exclusion_reason=mod._REASON_POST_MANIFEST_NOT_COMMITTED,
         )
         decision = self._evaluate(c, self._exports(snap))
-        assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
-        assert decision.reason_code == "terminal_authoritative_exclusion"
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "export_root_membership"
+
+    def test_manifest_exclusion_is_still_terminal_under_public_mode(self) -> None:
+        # The mode dispatch moved, so pin that the *other* modes' behaviour is
+        # unchanged: the manifest exclusion is still authoritative there.
+        import abicheck.contract_evaluation as mod
+
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3apiv",
+            description="",
+            surface_exclusion_reason=mod._REASON_POST_MANIFEST_NOT_COMMITTED,
+        )
+        for mode in (ContractMode.PUBLIC, ContractMode.ALL):
+            decision = evaluate_change_contract_relevance(
+                c, _UNRESOLVABLE, _UNRESOLVABLE, mode=mode
+            )
+            assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+            assert decision.reason_code == "terminal_authoritative_exclusion"
 
     def test_not_applicable_kind_still_wins_under_exports(self) -> None:
         snap = self._snap(elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]))
@@ -274,27 +295,6 @@ class TestExportsMode:
         )
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "export_root_membership"
-
-    def test_post_manifest_exclusion_still_narrows_in_exports_mode(self) -> None:
-        # The manifest's *exclusion* half stays authoritative in every mode: a
-        # committed-export manifest can only narrow the export domain ("this
-        # observed export is not committed"), never widen it past what the
-        # binary actually exports.
-        import abicheck.contract_evaluation as mod
-
-        snap = self._snap(
-            functions=[_fn("api", mangled="_Z3apiv")],
-            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]),
-        )
-        c = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="_Z3apiv",
-            description="",
-            surface_exclusion_reason=mod._REASON_POST_MANIFEST_NOT_COMMITTED,
-        )
-        assert self._evaluate(c, self._exports(snap)).relevance is (
-            ContractRelevance.PROVEN_OUT_OF_CONTRACT
-        )
 
     def test_an_unmatched_export_blocks_every_exclusion(self) -> None:
         # An export no declaration accounted for is a real entry point whose
@@ -479,4 +479,52 @@ class TestExportsMode:
             relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
             reason_code="required_evidence_incomplete",
             assurance=ContractAssurance.PARTIAL,
+        )
+
+    def test_a_symbol_level_finding_does_not_ride_the_type_closure(self) -> None:
+        # An unexported helper whose `caused_by_type` some *other* exported
+        # signature reaches must not become IN_CONTRACT on that basis --
+        # closure membership answers a type-level question, and gating an
+        # internal function merely for using a public type is exactly the
+        # over-inclusion this domain exists to avoid (Codex review).
+        snap = self._snap(
+            functions=[
+                _fn("api", ret="Foo *", mangled="api"),
+                _fn("internal", mangled="internal"),
+            ],
+            types=[_rec("Foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        c = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED,
+            symbol="internal",
+            description="",
+            caused_by_type="Foo",
+        )
+        assert self._evaluate(c, self._exports(snap)).relevance is (
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
+
+    def test_a_type_level_finding_still_uses_the_closure(self) -> None:
+        snap = self._snap(
+            functions=[_fn("api", ret="Foo *", mangled="api")],
+            types=[_rec("Foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Foo", description="")
+        assert self._evaluate(c, self._exports(snap)).relevance is (
+            ContractRelevance.IN_CONTRACT
+        )
+
+    def test_a_member_level_finding_still_uses_its_owner_type(self) -> None:
+        snap = self._snap(
+            functions=[_fn("api", ret="Foo *", mangled="api")],
+            types=[_rec("Foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        c = Change(
+            kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED, symbol="Foo::x", description=""
+        )
+        assert self._evaluate(c, self._exports(snap)).relevance is (
+            ContractRelevance.IN_CONTRACT
         )

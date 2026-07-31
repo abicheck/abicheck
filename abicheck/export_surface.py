@@ -150,6 +150,41 @@ class ExportSurface:
         return self.resolvable and self.has_roots and not self.unmatched_exports
 
 
+def observed_exports_by_platform(snap: AbiSnapshot) -> dict[str, set[str]] | None:
+    """Observed export names keyed by the table they came from, or ``None``.
+
+    Provenance is kept rather than unioned away because the "is this export
+    an ABI-relevant entity or a toolchain artifact" filter is format-specific:
+    :func:`~abicheck.elf_symbol_filter.is_abi_relevant_elf_symbol` encodes
+    ELF/Itanium conventions (``_init``/``_fini``, ``_ZTh`` thunks, a ``__``
+    infix meaning "private C symbol"), which ``dumper.py`` also applies to
+    Mach-O exports (same mangling family) but never to PE. Applying it to a
+    PE name silently drops legitimate exports such as ``api__v2`` (Codex
+    review, confirmed empirically) -- and a dropped unmatched export is
+    exactly what would let :attr:`ExportSurface.exclusion_is_provable` turn
+    true on incomplete evidence.
+    """
+    tables: dict[str, set[str]] = {}
+    elf = getattr(snap, "elf", None)
+    if elf is not None and getattr(elf, "symbols", None):
+        tables["elf"] = {s.name for s in elf.symbols if s.name}
+    pe = getattr(snap, "pe", None)
+    if pe is not None and getattr(pe, "exports", None):
+        tables["pe"] = {e.name for e in pe.exports if e.name}
+    macho = getattr(snap, "macho", None)
+    if macho is not None and getattr(macho, "exports", None):
+        tables["macho"] = {e.name for e in macho.exports if e.name}
+    return tables or None
+
+
+#: Export tables whose names follow the ELF/Itanium conventions
+#: :func:`~abicheck.elf_symbol_filter.is_abi_relevant_elf_symbol` encodes.
+#: PE is deliberately absent: MSVC-decorated names are a different scheme, so
+#: no artifact filter is applied to them and every unmatched PE export counts
+#: as unexplained (the conservative direction).
+_ELF_CONVENTION_TABLES: frozenset[str] = frozenset({"elf", "macho"})
+
+
 def observed_export_names(snap: AbiSnapshot) -> set[str] | None:
     """Linker-symbol names in *snap*'s own export table, or ``None``.
 
@@ -166,21 +201,30 @@ def observed_export_names(snap: AbiSnapshot) -> set[str] | None:
     a wheel-derived snapshot with both ELF and Mach-O metadata), and a
     symbol exported by any of them is a real export root.
     """
-    names: set[str] = set()
-    observed = False
-    elf = getattr(snap, "elf", None)
-    if elf is not None and getattr(elf, "symbols", None):
-        observed = True
-        names |= {s.name for s in elf.symbols if s.name}
-    pe = getattr(snap, "pe", None)
-    if pe is not None and getattr(pe, "exports", None):
-        observed = True
-        names |= {e.name for e in pe.exports if e.name}
-    macho = getattr(snap, "macho", None)
-    if macho is not None and getattr(macho, "exports", None):
-        observed = True
-        names |= {e.name for e in macho.exports if e.name}
-    return names if observed else None
+    tables = observed_exports_by_platform(snap)
+    if tables is None:
+        return None
+    return set().union(*tables.values())
+
+
+def _unexplained_exports(
+    tables: dict[str, set[str]], matched: set[str]
+) -> frozenset[str]:
+    """Observed exports no declaration matched, minus toolchain artifacts.
+
+    The artifact filter is applied per table, only where its conventions
+    hold (:data:`_ELF_CONVENTION_TABLES`) -- see
+    :func:`observed_exports_by_platform` for why provenance is kept. A name
+    exported by several tables is explained if *any* table's rules accept it
+    as an artifact, since it is then the same artifact under both.
+    """
+    unexplained: set[str] = set()
+    for table, names in tables.items():
+        for n in names - matched:
+            if table in _ELF_CONVENTION_TABLES and not is_abi_relevant_elf_symbol(n):
+                continue
+            unexplained.add(n)
+    return frozenset(unexplained)
 
 
 def _export_identity_candidates(
@@ -274,6 +318,7 @@ def _seed_export_roots(
     path keeping its own copy of the same key derivation (CodeRabbit review).
     """
     seed_types: set[str] = set()
+    nonroot_keys: set[str] = set()
     for fn in snap.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
@@ -281,13 +326,22 @@ def _seed_export_roots(
             fn.name, fn.mangled, export_names, underscore_alias=underscore_alias
         )
         if matched is None:
+            nonroot_keys |= keys
             continue
         surface.matched_exports.add(matched)
         surface.export_symbols |= keys
         surface.has_roots = True
         if fn.params or _is_real_type(fn.return_type):
             surface.has_typed_roots = True
-        else:
+        # `all_roots_typed` is strict where `has_typed_roots` is permissive:
+        # a *single* parameter recorded as the `"?"` sentinel (what
+        # `dwarf_snapshot._process_param` writes for a missing `DW_AT_type`)
+        # leaves that root's closure incomplete just as surely as a wholly
+        # untyped root does, even though the root as a whole looks typed
+        # (Codex review). Every parameter and the return type must be real.
+        if not _is_real_type(fn.return_type) or not all(
+            _is_real_type(getattr(p, "type", None)) for p in fn.params
+        ):
             surface.all_roots_typed = False
         seed_types |= _type_identifiers(fn.return_type)
         for p in fn.params:
@@ -302,6 +356,7 @@ def _seed_export_roots(
             var.name, var.mangled, export_names, underscore_alias=underscore_alias
         )
         if matched is None:
+            nonroot_keys |= keys
             continue
         surface.matched_exports.add(matched)
         surface.export_symbols |= keys
@@ -311,6 +366,16 @@ def _seed_export_roots(
         else:
             surface.all_roots_typed = False
         seed_types |= _type_identifiers(var.type)
+
+    # Drop every lookup alias a *non*-root declaration also answers to: the
+    # inverse of the linker-identity fix on the rootness decision (Codex
+    # review). With `ns::foo` exported and an unrelated, unexported C `foo`
+    # also declared, `_symbol_keys` puts the bare tail `"foo"` in
+    # `export_symbols`, so a finding about the C `foo` matched the C++ root's
+    # alias. An alias shared with a non-root proves nothing about which
+    # declaration a finding names; the matched export names themselves are
+    # exempt, being unambiguous by construction.
+    surface.export_symbols -= nonroot_keys - surface.matched_exports
     return seed_types
 
 
@@ -338,7 +403,8 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     surface.all_types = set(scratch.all_types)
     surface.ambiguous_type_names = set(scratch.ambiguous_type_names)
 
-    export_names = observed_export_names(snap)
+    tables = observed_exports_by_platform(snap)
+    export_names = None if tables is None else set().union(*tables.values())
     if export_names is None:
         # No root evidence. Still populate `all_symbols` so a caller can
         # distinguish a known-but-undecidable entity from an unknown one --
@@ -354,11 +420,8 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         underscore_alias=getattr(snap, "macho", None) is not None,
     )
     surface.resolvable = True
-    surface.unmatched_exports = frozenset(
-        n
-        for n in export_names - surface.matched_exports
-        if is_abi_relevant_elf_symbol(n)
-    )
+    assert tables is not None  # export_names is None iff tables is None
+    surface.unmatched_exports = _unexplained_exports(tables, surface.matched_exports)
 
     _walk_type_closure(snap, scratch, record_by_name, enum_by_name, seed_types)
     surface.export_types = set(scratch.public_types)

@@ -465,3 +465,98 @@ class TestMachoUnderscoreDirections:
             elf=ElfMetadata(symbols=[ElfSymbol(name="foo"), ElfSymbol(name="_bar")]),
         )
         assert not compute_export_surface(snap).export_symbols
+
+
+class TestPlatformScopedRelevanceFilter:
+    def test_pe_export_is_not_filtered_by_elf_conventions(self) -> None:
+        # `is_abi_relevant_elf_symbol` encodes ELF/Itanium rules -- among them
+        # "a `__` infix means a private C symbol" -- which `dumper.py` applies
+        # to ELF and Mach-O exports but never to PE. A legitimate PE export
+        # like `api__v2` must stay counted as unexplained, or an unmatched
+        # export silently stops blocking exclusion (Codex review).
+        snap = AbiSnapshot(
+            library="l.dll",
+            version="1",
+            functions=[_fn("ok", "ok")],
+            pe=PeMetadata(exports=[PeExport(name="ok"), PeExport(name="api__v2")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unmatched_exports == frozenset({"api__v2"})
+        assert not surf.exclusion_is_provable
+
+    def test_the_same_spelling_is_still_filtered_on_elf(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("ok", "ok")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="ok"), ElfSymbol(name="api__v2")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unmatched_exports
+        assert surf.exclusion_is_provable
+
+
+class TestRootTypeCompleteness:
+    def test_one_unknown_parameter_type_makes_the_root_incomplete(self) -> None:
+        # `dwarf_snapshot._process_param` writes the "?" sentinel for a
+        # missing DW_AT_type. Such a root's parameter closure is unknown even
+        # though the root as a whole looks typed (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Known *", "?"))],
+            types=[_rec("Known")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.has_typed_roots
+        assert not surf.all_roots_typed
+
+    def test_all_real_parameter_types_keep_the_root_complete(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Known *", "int"))],
+            types=[_rec("Known")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert compute_export_surface(snap).all_roots_typed
+
+
+class TestAmbiguousLookupAliases:
+    def test_an_alias_shared_with_a_non_root_is_dropped(self) -> None:
+        # The inverse of the linker-identity rootness fix: with `ns::foo`
+        # exported and an unrelated unexported C `foo` also declared,
+        # `_symbol_keys` puts the bare tail "foo" in `export_symbols`, so a
+        # finding about the C `foo` matched the C++ root's alias (Codex
+        # review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("ns::foo", "_ZN2ns3fooEv"), _fn("foo", "foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN2ns3fooEv")]),
+        )
+        surf = compute_export_surface(snap)
+        assert "foo" not in surf.export_symbols
+        assert {"_ZN2ns3fooEv", "ns::foo"} <= surf.export_symbols
+
+    def test_an_unshared_alias_survives(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("ns::foo", "_ZN2ns3fooEv")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN2ns3fooEv")]),
+        )
+        assert "foo" in compute_export_surface(snap).export_symbols
+
+    def test_a_matched_export_name_is_never_dropped(self) -> None:
+        # An export table name is unambiguous by construction, so it stays
+        # even if some non-root declaration happens to share the spelling.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "shared"), _fn("other", "other")],
+            variables=[Variable(name="shared", mangled="unexported_var", type="int")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="shared")]),
+        )
+        assert "shared" in compute_export_surface(snap).export_symbols

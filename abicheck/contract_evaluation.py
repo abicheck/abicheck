@@ -906,12 +906,12 @@ def _exports_mode_decision(
     ``IN_CONTRACT`` under a contract defined as "only exported roots and
     their closure", and could gate on it.
 
-    The POST manifest's *exclusion* half stays authoritative in every mode
-    (it is checked ahead of the mode dispatch entirely, in the caller), which
-    is deliberate rather than inconsistent: a committed-export manifest can
-    only ever *narrow* the export domain -- "this observed export is not
-    committed" is a statement about exports -- never widen it past what the
-    binary actually exports.
+    The POST manifest's *exclusion* half does not apply here either, which is
+    why the caller dispatches this mode ahead of that shortcut too: Section
+    7's ``exports`` row is unconditional both ways -- "Roots/closure are
+    ``IN_CONTRACT`` ... Public-header/manifest/consumer failures are unrelated
+    and advisory" -- so a symbol the binary demonstrably exports stays in this
+    contract even when a manifest omits it.
 
     Never claims ``PROVEN_OUT_OF_CONTRACT`` without both an observed export
     table *and* an entity this snapshot actually knows about: an entity
@@ -933,7 +933,18 @@ def _exports_mode_decision(
     if _symbol_matches(change, auth.export_symbols):
         return _export_root_decision()
 
-    candidates = _type_candidates(change)
+    # Closure membership answers a *type-level* question only. A symbol-level
+    # finding (`FUNC_RETURN_CHANGED` on an unexported helper, say) often
+    # carries a `caused_by_type` that some *other* exported signature does
+    # reach -- classifying the helper itself `IN_CONTRACT` on that basis would
+    # gate an internal function merely for using a public type (Codex review).
+    # Its own membership is decided by its own linker symbol being a root,
+    # which the check above already answered.
+    type_scoped = (
+        change.kind.value in _TYPE_LEVEL_KIND_NAMES
+        or change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES
+    )
+    candidates = _type_candidates(change) if type_scoped else set()
     if _confirmed_type_matches(
         candidates, auth.export_types, auth.ambiguous_type_names
     ):
@@ -1063,19 +1074,33 @@ def evaluate_change_contract_relevance(
     if change.kind.value in _NOT_APPLICABLE_KIND_SLUGS:
         return _not_applicable_decision()
 
-    # `--post-manifest`'s own exclusion reason is a mode-independent,
-    # explicit-evidence exclusion (an exact, closed-domain manifest proved
-    # this concrete export was not committed), not a header-origin
-    # classification the way the rest of `_ALL_SURFACE_REASONS` is -- unlike
-    # private-header/system-header provenance (which ALL mode deliberately
-    # treats as in-domain, since that's the whole point of "no header-origin
-    # scoping"), a POST-manifest demotion is authoritative regardless of
-    # which contract mode is selected. Checked before the ALL-mode shortcut
-    # below so a change `FilterNonPublicSurface._run_allowlist` already
+    # `--post-manifest`'s own exclusion reason is an explicit-evidence
+    # exclusion (an exact, closed-domain manifest proved this concrete export
+    # was not committed), not a header-origin classification the way the rest
+    # of `_ALL_SURFACE_REASONS` is -- unlike private-header/system-header
+    # provenance (which ALL mode deliberately treats as in-domain, since
+    # that's the whole point of "no header-origin scoping"), a POST-manifest
+    # demotion is authoritative for both remaining modes. (`EXPORTS` is
+    # dispatched above, ahead of this: manifest evidence is advisory in that
+    # domain -- see `_exports_mode_decision`.) Checked before the ALL-mode
+    # shortcut below so a change `FilterNonPublicSurface._run_allowlist` already
     # demoted to `pp_ctx.out_of_surface` for this reason can't simultaneously
     # be stamped `IN_CONTRACT` by the shortcut, contradicting its own
     # presence in `surface_scope.out_of_surface_changes` (Codex review,
     # fresh evidence: `--post-manifest` + `--no-scope-public-headers`).
+    if mode is ContractMode.EXPORTS:
+        # Dispatched ahead of *every* header-domain shortcut, including the
+        # POST-manifest exclusion below. ADR-049 plan Section 7's `exports`
+        # row is unconditional -- "Roots/closure are `IN_CONTRACT` ...
+        # Public-header/manifest/consumer failures are unrelated and
+        # advisory" -- so a symbol the binary demonstrably exports stays in
+        # this contract even when a manifest omits it (Codex review; an
+        # earlier revision of this function had the manifest exclusion win,
+        # on the reasoning that a committed-export manifest can only narrow
+        # the export set, which the plan does not say).
+        assert exports_old is not None and exports_new is not None  # gated above
+        return _exports_mode_decision(change, exports_old, exports_new)
+
     if change.surface_exclusion_reason == _REASON_POST_MANIFEST_NOT_COMMITTED:
         return _decision_for_surface_reason(
             change.surface_exclusion_reason, change, surf_old, surf_new
@@ -1083,16 +1108,6 @@ def evaluate_change_contract_relevance(
 
     if mode is ContractMode.ALL:
         return _all_mode_decision()
-
-    if mode is ContractMode.EXPORTS:
-        # Dispatched *before* the `_ALL_SURFACE_REASONS` fast path below:
-        # every reason in that set is a header-origin/reachability
-        # classification, which ADR-049 plan Section 7 explicitly makes
-        # "unrelated and advisory" for this domain. Only the POST-manifest
-        # exclusion above (an exact committed-export manifest) crosses domain
-        # boundaries, which is why it is checked ahead of every mode branch.
-        assert exports_old is not None and exports_new is not None  # gated above
-        return _exports_mode_decision(change, exports_old, exports_new)
 
     # mode is ContractMode.PUBLIC from here on.
     # A finding already demoted to the audit ledger by an earlier pipeline

@@ -1520,22 +1520,43 @@ an entity absent from the snapshot's own symbol/type universe (a macro, a
 Python-API-axis finding) is unplaceable rather than proven-excluded, and
 proving a *type* unreachable additionally requires `all_roots_typed` —
 `has_typed_roots` (i.e. *some* root is typed) is not enough, since a
-partial closure proves unreachability only from the roots it covers.
+partial closure proves unreachability only from the roots it covers, and
+`all_roots_typed` is strict down to the individual parameter (one `"?"`
+sentinel, what `dwarf_snapshot._process_param` writes for a missing
+`DW_AT_type`, leaves that root's closure incomplete).
 "ABI-relevant" delegates to `elf_symbol_filter.is_abi_relevant_elf_symbol`,
 the repo's existing owner of that judgment, so `_init`/`_fini`/thunks/
-transitive stdlib exports don't count as unexplained.
+transitive stdlib exports don't count as unexplained — applied per export
+table and only where its conventions hold (ELF and Mach-O, matching what
+`dumper.py` itself does), never to PE, whose MSVC-decorated names would
+otherwise lose a legitimate export like `api__v2` to the ELF "`__` means
+private" heuristic.
 
-**Neither declared-public overlay widens this domain.** `--public-symbol`
-(`force_public_symbols`) and `--post-manifest` (`public_surface_allowlist`)
-both assert something about the *declared-public* surface; neither observes
-an export, and a user assertion cannot make an unexported declaration
-exported. Honoring them — as the `public` path rightly does, since there they
-*are* the domain's own evidence — would report an unexported declaration
-`IN_CONTRACT` under a contract defined as "only exported roots and their
-closure". The POST manifest's *exclusion* half stays authoritative in every
-mode, which is deliberate rather than inconsistent: a committed-export
-manifest can only ever narrow the export domain, never widen it past what the
-binary actually exports.
+**No declared-public evidence crosses into this domain, in either
+direction.** Section 7's `exports` row is unconditional — "Roots/closure are
+`IN_CONTRACT` ... Public-header/manifest/consumer failures are unrelated and
+advisory" — so `--public-symbol` (`force_public_symbols`) and
+`--post-manifest` (`public_surface_allowlist`) neither add an entity to this
+contract nor remove one from it: neither observes an export, and a user
+assertion can make an unexported declaration neither exported nor
+un-exported. Consequently this mode dispatches ahead of *every* header-domain
+shortcut in `evaluate_change_contract_relevance`, including the
+POST-manifest exclusion the other two modes still honor. (An earlier revision
+had the manifest exclusion win here, on the reasoning that a committed-export
+manifest can only ever narrow the export set — the plan does not say that,
+and the ADR's own table is unconditional.)
+
+A finding's own membership is decided at the right level: a symbol-level
+finding by whether its own linker symbol is an export root, a type-level or
+member-level one by the closure. Letting a symbol-level finding match the
+closure would classify an unexported internal helper `IN_CONTRACT` merely
+because its `caused_by_type` happens to be reachable from some *other*
+exported signature. Lookup aliases are ambiguity-checked in both directions:
+rootness is decided by linker identity alone (never the demangled-name or
+bare-tail aliases `_symbol_keys` adds for finding lookup), and an alias a
+*non*-root declaration also answers to is dropped from `export_symbols`
+entirely, so an exported `ns::foo` cannot lend its bare tail to an unrelated
+unexported C `foo`.
 
 Mach-O needs underscore normalization in **both** directions, because its two
 producers disagree with the export trie by one underscore each way: clang's
