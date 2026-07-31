@@ -142,6 +142,21 @@ topics:
       - abicheck/policy_file.py
       - abicheck/checker_policy.py
 
+  # ADR-049's effective compatibility configuration: the resolved object, its
+  # field-level precedence, and the pack-manifest format. Distinct from
+  # `config-keys` (which owns the `.abicheck.yml` schema itself) and from
+  # `policies` (which owns policy files as a user-facing feature): this topic
+  # is about how every input across CLI/API/config/pack resolves into one
+  # typed configuration and one provenance receipt.
+  compatibility-evaluation-config:
+    canonical_page: reference/compatibility-evaluation-config.md
+    fact_sources:
+      - abicheck/compatibility_evaluation_config.py
+      - abicheck/compatibility_evaluation_resolver.py
+      - abicheck/compatibility_evaluation_wiring.py
+      - abicheck/compatibility_evaluation_frontend.py
+      - abicheck/compatibility_evaluation_packs.py
+
   suppressions:
     canonical_page: use/suppressions.md
     fact_sources:

@@ -44,22 +44,27 @@ underlying principle -- and deliberately does not import
 ``buildsource.entity_identity`` (the optional L3-L5 layer must depend on
 this core package, never the other way around).
 
-**Partially wired.** ``diff_filtering.py``'s ``_deduplicate_cross_detector``
-now uses :func:`resolve_change_identity` as its cross-detector dedup key
-(ADR-049 Phase 2 wiring), replacing the hand-rolled ``(change_category,
-symbol)`` tuple it used before -- verified behavior-equivalent for every
-kind that dedup stage collapses (see
-``tests/test_diff_filtering_cross_detector_identity.py`` and the
-pipeline-level ``tests/test_fact_conservation_properties.py``). Still
-**not** wired: ``diff_symbols.py``'s own old/new function and variable
-*matching* (``_diff_functions``/``_match_old_function``/``_diff_variables``)
-is unchanged by this module -- that is a substantially larger, higher-risk
-refactor against extensive hand-tuned matching logic (elf-only-mode,
-unconfirmed-parameter, and LLP64 threading; extern-C ambiguity resolution;
-interaction with virtual-method-addition, inline-transition, and
-hidden-friend detection) and its golden/FP-rate/tier-accuracy test coverage
--- see ``docs/contribute/plans/public-contract-default.md``'s Phase 2
-section for that remaining, deliberately deferred work.
+**Wired.** Every flat old/new join now goes through this module:
+
+- ``diff_filtering.py``'s ``_deduplicate_cross_detector`` uses
+  :func:`resolve_change_identity` as its cross-detector dedup key,
+  replacing a hand-rolled ``(change_category, symbol)`` tuple.
+- ``diff_symbols.py``'s function and variable *matching*
+  (``_diff_functions``/``_match_old_function``/``_diff_variables``) joins
+  through :class:`SymbolIdentityIndex`, replacing a second hand-rolled name
+  multimap plus an inline ``len(candidates) == 1`` count.
+
+That second wiring waited for the piece this module was missing rather than
+for the refactor to get smaller: :func:`resolve_function_identity` resolves
+*one* declaration's identity and has no notion of "this identity is
+ambiguous within its own snapshot, so do not join on it" -- which is the
+whole of what made the ``extern "C"`` fallback safe. :class:`SymbolIdentityIndex`
+supplies it, so the matching engine states the rule instead of
+re-implementing it. Matching behavior is deliberately unchanged; the
+hand-tuned logic around the join (elf-only-mode, unconfirmed-parameter and
+LLP64 threading, virtual-method-addition, inline transitions, hidden
+friends) is untouched, and the golden/FP-rate/tier-accuracy/detector-oracle
+suites pin that.
 
 NEVER invents a fact a producer did not supply: a tier is only claimed
 when the corresponding input field is actually present.
@@ -69,14 +74,20 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from .name_classification import canonicalize_type_name
 
 if TYPE_CHECKING:
     from .checker_types import Change
     from .model import Function, Variable
+
+#: The declaration type a :class:`SymbolIdentityIndex` holds (``Function`` or
+#: ``Variable`` in this codebase; the index itself needs nothing from either
+#: beyond what its ``resolve`` callable reads).
+_T = TypeVar("_T")
 
 #: Identity-confidence tiers, matching the ``canonical``/``normalized``/
 #: ``reduced`` vocabulary ``buildsource/entity_identity.py`` (ADR-048) uses
@@ -1189,3 +1200,140 @@ def resolve_change_identity(change: Change) -> FindingIdentity:
     synthetic = f"synthetic:sha256:{digest}"
     aliases.append(synthetic)
     return FindingIdentity(synthetic, IDENTITY_TIER_REDUCED, tuple(aliases))
+
+
+# --------------------------------------------------------------------------
+# ADR-049 Phase 2: the ambiguity-safe old/new join.
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IdentityMatch(Generic[_T]):
+    """One old/new counterpart resolved by :class:`SymbolIdentityIndex`."""
+
+    #: The matched entry's own key in the map the index was built from --
+    #: what ``diff_symbols.py`` reports as the finding's ``symbol``.
+    key: str
+    declaration: _T
+    identity: FindingIdentity
+    #: ``"key"`` for an exact-key hit, otherwise the alias string that
+    #: resolved it -- so a caller can record (or assert on) *how* specific
+    #: the join that produced a finding actually was.
+    matched_on: str
+
+
+class SymbolIdentityIndex(Mapping[str, _T]):
+    """An old/new matching index over resolved :class:`FindingIdentity` values.
+
+    The flat-symbol counterpart of ``diff_helpers.TypeMap`` (ADR-045), and
+    the piece :func:`resolve_function_identity`/:func:`resolve_variable_identity`
+    were missing: those resolve *one* declaration's identity and have no
+    notion of "this identity is ambiguous within its own snapshot, so do not
+    join on it". That notion is what a matching engine actually needs, and
+    why ``diff_symbols.py`` had to hand-roll a name multimap plus a
+    ``len(candidates) == 1`` check to make its ``extern "C"`` fallback safe.
+
+    It is a ``Mapping`` over the entries' own keys, exactly like ``TypeMap``,
+    so every existing ``key in map`` / ``map.values()`` / ``map.items()``
+    loop keeps working unchanged and iteration still visits each declaration
+    once.
+
+    **Aliases are deliberately not resolved by ``__getitem__``**, which is
+    where this differs from ``TypeMap``. A type's bare-name alias is a
+    schema-evolution accident worth healing silently; a *symbol*'s bare-name
+    alias is not: two mangled names that differ are two different exports,
+    and joining them by display name would hide a genuine removal behind a
+    "modified" finding. An alias join is therefore always explicit, always
+    ambiguity-checked, and always the caller's decision --
+    :meth:`unique_alias_match`.
+    """
+
+    def __init__(
+        self,
+        entries: Mapping[str, _T],
+        resolve: Callable[[_T], FindingIdentity],
+    ) -> None:
+        self._entries: dict[str, IdentityMatch[_T]] = {}
+        self._by_alias: dict[str, list[IdentityMatch[_T]]] = {}
+        for key, declaration in entries.items():
+            identity = resolve(declaration)
+            entry = IdentityMatch(
+                key=key,
+                declaration=declaration,
+                identity=identity,
+                matched_on="key",
+            )
+            self._entries[key] = entry
+            for alias in identity.aliases:
+                self._by_alias.setdefault(alias, []).append(entry)
+
+    @classmethod
+    def for_functions(
+        cls, functions: Mapping[str, Function]
+    ) -> SymbolIdentityIndex[Function]:
+        return SymbolIdentityIndex(functions, resolve_function_identity)
+
+    @classmethod
+    def for_variables(
+        cls, variables: Mapping[str, Variable]
+    ) -> SymbolIdentityIndex[Variable]:
+        return SymbolIdentityIndex(variables, resolve_variable_identity)
+
+    # -- Mapping interface (over the entries' own keys) ---------------------
+
+    def __getitem__(self, key: str) -> _T:
+        return self._entries[key].declaration
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    # -- identity access ---------------------------------------------------
+
+    def entry(self, key: str) -> IdentityMatch[_T] | None:
+        """The full match record for *key*, or ``None``."""
+        return self._entries.get(key)
+
+    def alias_candidates(
+        self,
+        alias: str,
+        *,
+        where: Callable[[_T], bool] | None = None,
+    ) -> list[IdentityMatch[_T]]:
+        """Every entry carrying *alias* (optionally filtered by *where*).
+
+        Exposed alongside :meth:`unique_alias_match` so a caller can tell
+        "no candidate" from "several candidates" -- the two cases that
+        method deliberately collapses to one answer.
+        """
+        return [
+            entry
+            for entry in self._by_alias.get(alias, ())
+            if where is None or where(entry.declaration)
+        ]
+
+    def unique_alias_match(
+        self,
+        alias: str,
+        *,
+        where: Callable[[_T], bool] | None = None,
+    ) -> IdentityMatch[_T] | None:
+        """The single entry carrying *alias*, or ``None`` if not exactly one.
+
+        Zero candidates and two-or-more candidates both answer ``None``, on
+        purpose: "nothing to join to" and "cannot tell which to join to" are
+        equally unsafe to guess at, and guessing is what would turn an
+        overload set or a template instantiation family into a wrong pairing.
+        This is the ambiguity-safe fallback tier ADR-045 established for
+        types and ADR-048 for L5 source-graph nodes, applied to flat symbols.
+
+        *where* narrows the candidate set before counting, for a caller whose
+        fallback is only legitimate for a subset of declarations (the
+        ``extern "C"`` rule in ``diff_symbols._match_old_function``).
+        """
+        candidates = self.alias_candidates(alias, where=where)
+        if len(candidates) != 1:
+            return None
+        return replace(candidates[0], matched_on=alias)

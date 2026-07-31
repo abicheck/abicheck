@@ -15,7 +15,9 @@
 """Suppression — load and apply suppression rules to ABI changes."""
 from __future__ import annotations
 
+import dataclasses
 import fnmatch
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -665,8 +667,19 @@ class SuppressionOutcome:
 
 
 class SuppressionList:
-    def __init__(self, suppressions: list[Suppression]) -> None:
+    def __init__(
+        self,
+        suppressions: list[Suppression],
+        *,
+        source_sha256: str | None = None,
+    ) -> None:
         self._suppressions = suppressions
+        #: sha256 of the exact raw bytes :meth:`load` read, when these rules
+        #: came from a file. Captured during that one read so a consumer
+        #: never has to re-read the path to digest it: the file could have
+        #: changed in between, and the digest would then authenticate content
+        #: that did not produce these rules (Codex review, ADR-049 D6 replay).
+        self.source_sha256 = source_sha256
 
     @classmethod
     def merge(cls, a: SuppressionList, b: SuppressionList) -> SuppressionList:
@@ -685,9 +698,14 @@ class SuppressionList:
         Raises OSError if the file cannot be read.
         """
         try:
-            text = path.read_text(encoding="utf-8")
+            # Raw bytes, digested and decoded from one read: `read_text()`
+            # would translate newlines before hashing, making a CRLF file
+            # digest identically to its LF twin.
+            raw_bytes = path.read_bytes()
         except OSError as e:
             raise OSError(f"Cannot read suppression file {path}: {e}") from e
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        text = raw_bytes.decode("utf-8")
 
         try:
             data = yaml.safe_load(text)
@@ -703,7 +721,10 @@ class SuppressionList:
 
         raw_suppressions = data.get("suppressions")
         if raw_suppressions is None:
-            return cls([])
+            # A file with no `suppressions:` key is a valid, empty rule set —
+            # it still has content that can drift, so it keeps its digest
+            # (ADR-049 D6) exactly like the populated return below.
+            return cls([], source_sha256=digest)
         if not isinstance(raw_suppressions, list):
             raise ValueError("'suppressions' must be a list")
 
@@ -752,7 +773,7 @@ class SuppressionList:
                 )
             suppressions.append(sup)
 
-        return cls(suppressions)
+        return cls(suppressions, source_sha256=digest)
 
     def is_suppressed(self, change: Change, today: date | None = None) -> bool:
         """Return True if any active (non-expired) suppression rule matches the given change."""
@@ -821,6 +842,51 @@ class SuppressionList:
     def rules_by_label(self, label: str) -> list[Suppression]:
         """Return all rules with the given label."""
         return [s for s in self._suppressions if s.label == label]
+
+    def rule_identities(self) -> tuple[str, ...]:
+        """One canonical, machine-facing identity string per loaded rule.
+
+        ADR-049 D7's effective configuration carries the selected suppression
+        source as ``{rules: [...], sha256: "..."}``
+        (:class:`~abicheck.compatibility_evaluation_config.SuppressionConfig`);
+        this is what fills ``rules``. The digest already covers the source file
+        byte-for-byte, so these strings exist for the *receipt* — so a replayed
+        decision can be read without re-opening the file — not as a second
+        integrity check.
+
+        Deliberately different from ``cli_compare_fold._suppression_rule_label``,
+        which renders a rule for a human reading an audit report (preferring its
+        ``label``/``reason`` prose and falling back to a file position):
+
+        - every populated selector/gate field is included, so two rules that
+          differ in any matching-relevant way get different identities;
+        - ``reason`` is excluded — it is prose that changes what a reviewer
+          reads, never what the rule matches, and the source digest already
+          records that it changed;
+        - fields are emitted in declaration order with no positional index, so
+          the identity depends only on the rule's own content;
+        - each value is rendered with ``repr()``, so a selector that itself
+          contains the ``|`` separator or an ``=`` (routine in a regex
+          selector — ``symbol_pattern: "a|change_kind=x"``) cannot render
+          the same identity as a different rule with those as separate
+          fields, and a ``date`` reads as a date rather than as a bare
+          number triple.
+
+        Derived generically from :class:`Suppression`'s own dataclass fields
+        (skipping the compiled/resolved ``init=False`` internals), so a rule
+        field added later is covered without touching this method.
+        """
+        identities: list[str] = []
+        for rule in self._suppressions:
+            parts = [
+                f"{f.name}={getattr(rule, f.name)!r}"
+                for f in dataclasses.fields(rule)
+                if f.init
+                and f.name != "reason"
+                and getattr(rule, f.name) not in (None, False)
+            ]
+            identities.append("|".join(parts))
+        return tuple(identities)
 
     def audit(
         self,

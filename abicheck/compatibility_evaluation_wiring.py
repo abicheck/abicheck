@@ -31,6 +31,15 @@ first reaches :func:`~abicheck.compatibility_evaluation_resolver.resolve_field`:
   YAML's ``internal_namespaces`` list (``policy_file.py``'s ``PolicyFile``,
   the only front end that can set this field today -- there is no CLI flag
   for it) and produces a real ``surface.internal_namespaces`` resolution.
+- :func:`resolve_pack_field_assignments` takes the same pack paths and one
+  non-policy :class:`~abicheck.compatibility_evaluation_packs.PackKind`, and
+  routes each selected pack's own ``field name -> value`` assignments onto
+  the typed effective-config fields that namespace is allowed to set --
+  the per-field router
+  :func:`resolve_policy_pack_overrides`'s docstring names as "separate,
+  still-unwired follow-up work" for the contract/gate namespaces (they have
+  no open ``overrides``-shaped bag the way ``CompatibilityPolicyConfig``
+  does, so each assignable field needs an explicit route).
 - :func:`resolve_selected_packs` takes a real set of pack-manifest paths (the
   shape a future ``--pack <path>``-style, repeatable CLI/config option would
   supply), loads each with
@@ -46,7 +55,7 @@ first reaches :func:`~abicheck.compatibility_evaluation_resolver.resolve_field`:
   config input ... and no call site invokes ``detect_pack_conflicts`` with
   real packs during config resolution."
 
-None of the three functions is called from any live command yet. ADR-049's
+None of these functions is called from any live command yet. ADR-049's
 own rollout plan puts wiring a resolved value into an authoritative code
 path behind a later phase (Phase 3's shadow contract evaluator validates
 resolution against real traffic before it can affect a gate decision, and
@@ -59,13 +68,16 @@ input to an equal ``CompatibilityEvaluationConfig`` and provenance receipt."
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
 from .change_registry_types import Verdict
 from .compatibility_evaluation_config import (
+    VALID_EXIT_CODE_SCHEMES,
+    VALID_UNRESOLVED_BEHAVIORS,
     ImmutableIdentity,
     SelectedByEntry,
     ValueProvenance,
@@ -87,20 +99,89 @@ from .contract_relevance_types import (
     LegacyScopeFlag,
     SelectorLayer,
 )
+from .errors import PackManifestError
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile
 
-_CONTRACT_MODE_FIELD = "contract.mode"
+CONTRACT_MODE_FIELD = "contract.mode"
+_CONTRACT_MODE_FIELD = CONTRACT_MODE_FIELD  # backward-compatible alias
 
 #: What ``contract.mode`` resolves to when the legacy flag was never
 #: mentioned at all -- deliberately equal to ``--scope-public-headers``'s
 #: own CLI default (``scope_public_headers=True`` in ``cli_options.py``),
 #: so accepting ADR-049 does not, by itself, change today's real default
 #: behavior. The actual default *flip* (if any) is Phase 7's decision.
-_BUILT_IN_DEFAULT_MODE = LEGACY_SCOPE_FLAG_CONTRACT_MODE[
+BUILT_IN_DEFAULT_CONTRACT_MODE = LEGACY_SCOPE_FLAG_CONTRACT_MODE[
     LegacyScopeFlag.SCOPE_PUBLIC_HEADERS
 ]
+_BUILT_IN_DEFAULT_MODE = BUILT_IN_DEFAULT_CONTRACT_MODE  # backward-compatible alias
+
+
+def legacy_contract_mode_candidate(
+    *,
+    scope_public_headers: bool,
+    scope_public_headers_is_explicit: bool,
+    layer: SelectorLayer = SelectorLayer.LEGACY_ALIAS,
+    option: str | None = None,
+    path: str | None = None,
+    sha256: str | None = None,
+) -> FieldCandidate | None:
+    """Build the ``contract.mode`` candidate the legacy scope flag contributes.
+
+    Extracted from :func:`resolve_legacy_contract_mode` (whose behavior is
+    unchanged -- it now calls this) so a caller that resolves ``contract.mode``
+    against *more* than the legacy flag alone -- an explicit ``--contract``
+    value, a project config's own ``scope.public`` -- can reuse the exact
+    same candidate construction instead of re-deriving the D2 alias mapping
+    a second time. ``compatibility_evaluation_frontend.py`` is that caller.
+
+    Returns ``None`` when the flag was not actually typed
+    (*scope_public_headers_is_explicit* is ``False``): an untouched flag
+    contributes no candidate at all, per ADR-049 D7's "a selector layer only
+    participates when it actually selected something".
+
+    *layer* exists for the one legitimate non-CLI source of this same legacy
+    spelling: ``.abicheck.yml``'s ``scope.public`` key, which states the same
+    aliased value at :data:`~abicheck.contract_relevance_types.SelectorLayer.PROJECT_CONFIG`
+    rather than as a flag typed on this invocation. D7 resolves precedence by
+    layer, not by spelling -- but the *receipt* still has to name the real
+    source, so such a caller passes its own *option* (``scope.public``) and
+    *path* too. Defaulting those to the CLI flag's spelling with no path made
+    a project-config receipt claim a flag the user never typed, and gave a
+    replay no way to find the file it actually came from (Codex review).
+    *sha256* is that file's own content digest, which such a caller should
+    pass as well: naming the path alone leaves an edit to it undetectable on
+    replay, the very drift a digest exists to catch (Codex review, fresh
+    evidence).
+    """
+    if not scope_public_headers_is_explicit:
+        return None
+    flag = (
+        LegacyScopeFlag.SCOPE_PUBLIC_HEADERS
+        if scope_public_headers
+        else LegacyScopeFlag.NO_SCOPE_PUBLIC_HEADERS
+    )
+    selector = option or (
+        "--scope-public-headers"
+        if scope_public_headers
+        else "--no-scope-public-headers"
+    )
+    return FieldCandidate(
+        provenance=ValueProvenance(
+            layer=layer,
+            source_kind="legacy_scope_flag",
+            reference=flag.value,
+            sha256=sha256,
+            path=path,
+            selected_by=(
+                SelectedByEntry(
+                    layer=layer, option=selector, path=path, sha256=sha256
+                ),
+            ),
+        ),
+        value=LEGACY_SCOPE_FLAG_CONTRACT_MODE[flag],
+    )
 
 
 def resolve_legacy_contract_mode(
@@ -129,42 +210,21 @@ def resolve_legacy_contract_mode(
     """
     default = FieldCandidate(
         provenance=ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT),
-        value=_BUILT_IN_DEFAULT_MODE,
+        value=BUILT_IN_DEFAULT_CONTRACT_MODE,
     )
 
-    candidates: list[FieldCandidate] = []
-    if scope_public_headers_is_explicit:
-        flag = (
-            LegacyScopeFlag.SCOPE_PUBLIC_HEADERS
-            if scope_public_headers
-            else LegacyScopeFlag.NO_SCOPE_PUBLIC_HEADERS
-        )
-        option = (
-            "--scope-public-headers"
-            if scope_public_headers
-            else "--no-scope-public-headers"
-        )
-        candidates.append(
-            FieldCandidate(
-                provenance=ValueProvenance(
-                    layer=SelectorLayer.LEGACY_ALIAS,
-                    source_kind="legacy_scope_flag",
-                    reference=flag.value,
-                    selected_by=(
-                        SelectedByEntry(
-                            layer=SelectorLayer.LEGACY_ALIAS, option=option
-                        ),
-                    ),
-                ),
-                value=LEGACY_SCOPE_FLAG_CONTRACT_MODE[flag],
-            )
-        )
+    legacy = legacy_contract_mode_candidate(
+        scope_public_headers=scope_public_headers,
+        scope_public_headers_is_explicit=scope_public_headers_is_explicit,
+    )
+    candidates: list[FieldCandidate] = [] if legacy is None else [legacy]
 
-    value, provenance = resolve_field(_CONTRACT_MODE_FIELD, candidates, default=default)
+    value, provenance = resolve_field(CONTRACT_MODE_FIELD, candidates, default=default)
     return cast(ContractMode, value), provenance
 
 
-_INTERNAL_NAMESPACES_FIELD = "surface.internal_namespaces"
+INTERNAL_NAMESPACES_FIELD = "surface.internal_namespaces"
+_INTERNAL_NAMESPACES_FIELD = INTERNAL_NAMESPACES_FIELD  # backward-compatible alias
 
 #: What ``surface.internal_namespaces`` resolves to when no ``--policy-file``
 #: set it -- equal to ``SurfaceConfig.internal_namespaces``'s own default
@@ -183,13 +243,18 @@ def resolve_internal_namespaces(
     ``internal_namespaces`` has no CLI flag of its own -- ``policy_file.py``'s
     ``PolicyFile.internal_namespaces`` (populated only when a real
     ``--policy-file`` YAML sets the key) is the only front end that can set
-    it today. ``policy_file is None`` (no ``--policy-file`` given at all) or
-    an empty ``internal_namespaces`` list (indistinguishable, once parsed,
-    from the key never being set) both contribute no candidate at all and
-    fall through to :data:`_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES`, the same
-    "a selector layer only participates when it actually selected something"
-    principle :func:`resolve_legacy_contract_mode`'s untouched-flag case
-    already applies (ADR-049 D7).
+    it today. ``policy_file is None`` (no ``--policy-file`` given at all), or
+    an empty ``internal_namespaces`` list on a document that never carried
+    the key (``PolicyFile.internal_namespaces_stated`` is ``False``),
+    contribute no candidate at all and fall through to
+    :data:`_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES` -- the same "a selector
+    layer only participates when it actually selected something" principle
+    :func:`resolve_legacy_contract_mode`'s untouched-flag case already
+    applies (ADR-049 D7). A document that *did* carry the key with an empty
+    list stated something ("this project has no internal namespaces") and
+    contributes a real empty-tuple candidate, so nothing below it -- a
+    contract pack assigning the same field in particular -- fills it in over
+    that statement.
 
     Tagged :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`,
     not ``PROJECT_CONFIG`` -- ``--policy-file`` is a flag the user explicitly
@@ -222,32 +287,66 @@ def resolve_internal_namespaces(
         value=_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES,
     )
 
-    candidates: list[FieldCandidate] = []
-    if policy_file is not None and policy_file.internal_namespaces:
-        canonical = tuple(dict.fromkeys(sorted(policy_file.internal_namespaces)))
-        source_path = str(policy_file.source_path) if policy_file.source_path else None
-        candidates.append(
-            FieldCandidate(
-                provenance=ValueProvenance(
-                    layer=SelectorLayer.EXPLICIT_CLI,
-                    source_kind="policy_file",
-                    path=source_path,
-                    selected_by=(
-                        SelectedByEntry(
-                            layer=SelectorLayer.EXPLICIT_CLI,
-                            option="--policy-file",
-                            path=source_path,
-                        ),
-                    ),
-                ),
-                value=canonical,
-            )
-        )
+    candidate = internal_namespaces_candidate(policy_file=policy_file)
+    candidates: list[FieldCandidate] = [] if candidate is None else [candidate]
 
     value, provenance = resolve_field(
-        _INTERNAL_NAMESPACES_FIELD, candidates, default=default
+        INTERNAL_NAMESPACES_FIELD, candidates, default=default
     )
     return cast("tuple[str, ...]", value), provenance
+
+
+def internal_namespaces_candidate(
+    *,
+    policy_file: PolicyFile | None,
+    layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
+    sha256: str | None = None,
+    option: str = "--policy-file",
+) -> FieldCandidate | None:
+    """Build the ``surface.internal_namespaces`` candidate a ``--policy-file``
+    contributes, or ``None`` when it contributes nothing.
+
+    Extracted from :func:`resolve_internal_namespaces` (whose behavior is
+    unchanged -- it now calls this) for the same reason
+    :func:`legacy_contract_mode_candidate` was: a caller resolving this field
+    against more layers than the policy file alone reuses one candidate
+    construction rather than re-deriving the canonicalization and provenance
+    shape. *layer* mirrors that function's own parameter, for a front end
+    whose policy manifest was selected by a project config rather than typed
+    on this invocation. *sha256* is the selected file's own content digest,
+    which a caller that has it should pass so the receipt can identify the
+    exact document that supplied the value (ADR-049 D6) rather than only the
+    path it was read from. *option* is the selector spelling to record --
+    a non-CLI front end names its own field, not the CLI flag.
+    """
+    # An *explicitly* empty list still contributes: a document that carried
+    # `internal_namespaces: []` said "this project has none", and treating
+    # that as unstated let a contract pack assigning the field inject its own
+    # namespaces over the statement (Codex review, fresh evidence). A parsed
+    # empty list with no such key -- including any PolicyFile built in code --
+    # still contributes nothing, and falls through to the built-in default.
+    if policy_file is None or not (
+        policy_file.internal_namespaces or policy_file.internal_namespaces_stated
+    ):
+        return None
+    canonical = tuple(dict.fromkeys(sorted(policy_file.internal_namespaces)))
+    source_path = str(policy_file.source_path) if policy_file.source_path else None
+    return FieldCandidate(
+        provenance=ValueProvenance(
+            layer=layer,
+            source_kind="policy_file",
+            sha256=sha256,
+            path=source_path,
+            selected_by=(
+                SelectedByEntry(
+                    layer=layer,
+                    option=option,
+                    path=source_path,
+                ),
+            ),
+        ),
+        value=canonical,
+    )
 
 
 _PACKS_FIELD_BY_KIND: dict[PackKind, str] = {
@@ -265,12 +364,30 @@ _PACKS_FIELD_BY_KIND: dict[PackKind, str] = {
 _BUILT_IN_DEFAULT_PACKS: tuple[ImmutableIdentity, ...] = ()
 
 
+def load_selected_packs(
+    pack_paths: Sequence[str | Path],
+) -> list[tuple[str, LoadedPack]]:
+    """Load each manifest in *pack_paths* once, paired with its own path.
+
+    The three pack resolvers below each accept the result as ``loaded``. A
+    caller resolving one whole configuration should load here and pass the
+    same list to all of them: they would otherwise re-read, re-parse and
+    re-digest every manifest per call, and a manifest edited *between* those
+    reads would produce receipt entries carrying different identities for
+    what is meant to be one configuration (CodeRabbit review).
+    """
+    return [(str(path), load_pack_manifest(path)) for path in pack_paths]
+
+
 def resolve_selected_packs(
     pack_paths: Sequence[str | Path],
     *,
     explicit_overrides: Mapping[PackKind, Mapping[str, Hashable]] = MappingProxyType(
         {}
     ),
+    layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
+    option: str = "--pack",
+    loaded: Sequence[tuple[str, LoadedPack]] | None = None,
 ) -> dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]]:
     """Resolve a real ``--pack <path>``-style CLI/config input into
     ``contract.packs``/``policy.packs``/``gate.packs`` field values.
@@ -313,24 +430,41 @@ def resolve_selected_packs(
     ``id``/``version``/``sha256``) collapse into one contributor; the
     resolved tuple is sorted by ``(id, version, sha256)``, since D8 states
     "file order never resolves conflicts" -- two invocations naming the same
-    pack set in a different order must resolve to an equal value (D7).
+    pack set in a different order must resolve to an equal value (D7). The
+    receipt still names *every* path that selected it, in sorted order, so
+    which of two byte-identical files was passed first cannot change the
+    resolved configuration either.
 
-    Every returned field is tagged
-    :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`
+    Every returned field is tagged *layer* (default
+    :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`,
+    recorded under *option*)
     when at least one path selected a pack of that kind (mirroring
     :func:`resolve_internal_namespaces`'s ``--policy-file`` case: a path the
     user passed on *this* invocation, not an implicitly-discovered project
-    file), falling through to :data:`_BUILT_IN_DEFAULT_PACKS` otherwise.
+    file), falling through to :data:`_BUILT_IN_DEFAULT_PACKS` otherwise. A
+    caller resolving for a non-CLI front end must pass its own layer and
+    selector spelling: hard-coding the CLI's made an API-selected manifest
+    produce a self-contradictory receipt, with ``contract.packs`` claiming
+    ``explicit_cli`` while the fields that same pack assigned claimed
+    ``api_request`` (Codex review).
 
     Not called from any live command yet -- see module docstring.
     """
-    loaded = [(str(path), load_pack_manifest(path)) for path in pack_paths]
-    grouped = assignments_for_conflict_check([pack for _, pack in loaded])
+    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
+    grouped = {
+        kind: [
+            (identity, _conflict_values(kind, assignments))
+            for identity, assignments in packs
+        ]
+        for kind, packs in assignments_for_conflict_check(
+            [pack for _, pack in entries]
+        ).items()
+    }
 
     by_kind: dict[PackKind, list[tuple[str, LoadedPack]]] = {
         kind: [] for kind in PackKind
     }
-    for path, pack in loaded:
+    for path, pack in entries:
         by_kind[pack.kind].append((path, pack))
 
     result: dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]] = {}
@@ -340,12 +474,21 @@ def resolve_selected_packs(
             explicit_overrides=explicit_overrides.get(kind, MappingProxyType({})),
         )
 
-        first_path_by_identity: dict[ImmutableIdentity, str] = {}
+        # Every path that selected an identity is kept, sorted: two paths
+        # holding byte-identical manifest content collapse to one identity in
+        # the resolved *value*, but keeping only the first-seen path made the
+        # receipt order-dependent -- `--pack a.yml --pack b.yml` recorded
+        # `a.yml` and the reverse order recorded `b.yml`, so two invocations
+        # naming the same pack set resolved to unequal configurations, which
+        # is exactly what D7's "file order never resolves anything" rules out
+        # (Codex review, fresh evidence). Both files really did select it, so
+        # naming both is also the more faithful receipt.
+        paths_by_identity: dict[ImmutableIdentity, set[str]] = {}
         for path, pack in by_kind[kind]:
-            first_path_by_identity.setdefault(pack.identity, path)
+            paths_by_identity.setdefault(pack.identity, set()).add(path)
         canonical = tuple(
             sorted(
-                first_path_by_identity,
+                paths_by_identity,
                 key=lambda identity: (identity.id, identity.version, identity.sha256),
             )
         )
@@ -359,15 +502,17 @@ def resolve_selected_packs(
             candidates.append(
                 FieldCandidate(
                     provenance=ValueProvenance(
-                        layer=SelectorLayer.EXPLICIT_CLI,
+                        layer=layer,
                         source_kind="pack_manifest",
                         selected_by=tuple(
                             SelectedByEntry(
-                                layer=SelectorLayer.EXPLICIT_CLI,
-                                option="--pack",
-                                path=first_path_by_identity[identity],
+                                layer=layer,
+                                option=option,
+                                path=path,
+                                identity=identity,
                             )
                             for identity in canonical
+                            for path in sorted(paths_by_identity[identity])
                         ),
                     ),
                     value=canonical,
@@ -385,6 +530,7 @@ def resolve_policy_pack_overrides(
     pack_paths: Sequence[str | Path],
     *,
     explicit_overrides: Mapping[str, Verdict] = MappingProxyType({}),
+    loaded: Sequence[tuple[str, LoadedPack]] | None = None,
 ) -> Mapping[str, Verdict]:
     """Fold every selected ``kind: policy`` pack's ``ChangeKind`` slug ->
     :class:`~abicheck.change_registry_types.Verdict` assignments into one
@@ -399,12 +545,12 @@ def resolve_policy_pack_overrides(
     ``Mapping[str, Verdict]``, the same shape a policy pack's own
     assignments already carry post-:func:`~abicheck.compatibility_evaluation_packs.load_pack_manifest`).
     A contract/gate pack's own field assignments have no equivalent generic
-    target yet -- :class:`~abicheck.compatibility_evaluation_config.ContractConfig`/
+    target -- :class:`~abicheck.compatibility_evaluation_config.ContractConfig`/
     :class:`~abicheck.compatibility_evaluation_config.GateConfig` are typed,
     fixed-field dataclasses with no open field-name -> value bag to fold an
-    arbitrary assignment into, so composing those needs a per-field router
-    this function does not attempt to build; that is separate, still-unwired
-    follow-up work.
+    arbitrary assignment into -- so those go through
+    :func:`resolve_pack_field_assignments`'s explicit per-field route table
+    instead of this function.
 
     Runs the identical D8 conflict check :func:`resolve_selected_packs`
     already runs for the ``POLICY`` namespace
@@ -430,8 +576,8 @@ def resolve_policy_pack_overrides(
     loading the given manifests; not called from any live command yet (see
     module docstring).
     """
-    loaded = [load_pack_manifest(path) for path in pack_paths]
-    policy_packs = [pack for pack in loaded if pack.kind is PackKind.POLICY]
+    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
+    policy_packs = [pack for _, pack in entries if pack.kind is PackKind.POLICY]
 
     detect_pack_conflicts(
         [(pack.identity, pack.assignments) for pack in policy_packs],
@@ -443,3 +589,276 @@ def resolve_policy_pack_overrides(
         merged.update(cast("Mapping[str, Verdict]", pack.assignments))
     merged.update(explicit_overrides)
     return merged
+
+
+# --------------------------------------------------------------------------
+# ADR-049 D8: the contract/gate pack per-field router.
+# --------------------------------------------------------------------------
+
+
+def _route_choice(allowed: frozenset[str]) -> Callable[[Hashable, str, str], Hashable]:
+    def convert(value: Hashable, field_name: str, source: str) -> Hashable:
+        if not isinstance(value, str) or value not in allowed:
+            raise PackManifestError(
+                f"{source}: {field_name!r} must be one of {sorted(allowed)}, "
+                f"got {value!r}"
+            )
+        return value
+
+    return convert
+
+
+def _route_bool(value: Hashable, field_name: str, source: str) -> Hashable:
+    if not isinstance(value, bool):
+        raise PackManifestError(
+            f"{source}: {field_name!r} must be a bool, got {value!r}"
+        )
+    return value
+
+
+def _route_str_tuple(value: Hashable, field_name: str, source: str) -> Hashable:
+    # A one-element YAML list and a bare scalar are the same selection; both
+    # are accepted, mirroring `.abicheck.yml`'s own list-or-single-str keys.
+    items = (value,) if isinstance(value, str) else value
+    if not isinstance(items, tuple) or any(not isinstance(v, str) for v in items):
+        raise PackManifestError(
+            f"{source}: {field_name!r} must be a list of str, got {value!r}"
+        )
+    return tuple(dict.fromkeys(sorted(items)))
+
+
+def _route_severity_level(value: Hashable, field_name: str, source: str) -> Hashable:
+    from .severity import SeverityLevel
+
+    allowed = {level.value for level in SeverityLevel}
+    if not isinstance(value, str) or value not in allowed:
+        raise PackManifestError(
+            f"{source}: {field_name!r} must be one of {sorted(allowed)}, got {value!r}"
+        )
+    return SeverityLevel(value)
+
+
+#: Which effective-config field a ``kind: contract`` pack may assign, and how
+#: its raw manifest value is validated/converted (ADR-049 D8: contract/
+#: language packs "define roots, providers, and ABI closure").
+#:
+#: Deliberately *not* routable from a contract pack, each for its own reason:
+#: ``contract.mode`` (which evidence domain a run judges against is the
+#: user's own per-run selection -- a pack silently switching it is exactly
+#: the hidden ``public_contract`` preset D3 forbids), ``contract.packs``
+#: (self-reference), and ``policy.*``/``gate.*`` (a different namespace; D8
+#: keeps the three distinct precisely so a contract pack cannot move a
+#: severity or a gate scheme).
+CONTRACT_PACK_FIELD_ROUTES: Mapping[str, Callable[[Hashable, str, str], Hashable]] = (
+    MappingProxyType(
+        {
+            "contract.unresolved": _route_choice(VALID_UNRESOLVED_BEHAVIORS),
+            "contract.overlays": _route_str_tuple,
+            "surface.internal_namespaces": _route_str_tuple,
+            "assurance.require_evidence": _route_bool,
+        }
+    )
+)
+
+#: Which effective-config field a ``kind: gate`` pack may assign (ADR-049 D8:
+#: gate packs "affect ``GateDecision`` and compose with every compatibility
+#: policy"). ``gate.preset``/``gate.packs`` are not routable: a preset is an
+#: identity a pack cannot mint for itself, and packs listing packs is
+#: self-reference.
+GATE_PACK_FIELD_ROUTES: Mapping[str, Callable[[Hashable, str, str], Hashable]] = (
+    MappingProxyType(
+        {
+            "gate.exit_code_scheme": _route_choice(VALID_EXIT_CODE_SCHEMES),
+            "gate.severity.abi_breaking": _route_severity_level,
+            "gate.severity.potential_breaking": _route_severity_level,
+            "gate.severity.quality_issues": _route_severity_level,
+            "gate.severity.addition": _route_severity_level,
+        }
+    )
+)
+
+PACK_FIELD_ROUTES_BY_KIND: Mapping[
+    PackKind, Mapping[str, Callable[[Hashable, str, str], Hashable]]
+] = MappingProxyType(
+    {
+        PackKind.CONTRACT: CONTRACT_PACK_FIELD_ROUTES,
+        PackKind.GATE: GATE_PACK_FIELD_ROUTES,
+    }
+)
+
+
+def _conflict_values(
+    kind: PackKind, assignments: Mapping[str, Hashable]
+) -> Mapping[str, Hashable]:
+    """Route *assignments* before they are compared pack against pack.
+
+    D8's conflict rule is about two packs assigning *different values* to one
+    field -- not about them spelling the same value differently. A field
+    routed by :func:`_route_str_tuple` accepts a bare scalar and a
+    one-element list as the same selection (``contract.overlays: foo`` and
+    ``contract.overlays: [foo]`` both mean ``("foo",)``), so comparing the raw
+    manifest values rejected that pair as conflicting before routing ever got
+    to canonicalize them (Codex review, fresh evidence).
+
+    A value its route rejects, and a field with no route at all, are passed
+    through untouched: both are real errors, and both are already reported --
+    with the manifest path in the message -- by
+    :func:`resolve_pack_field_assignments`'s own routing pass. Reporting them
+    from here instead would only change which message a caller sees first.
+    """
+    routes = PACK_FIELD_ROUTES_BY_KIND.get(kind, {})
+    normalized: dict[str, Hashable] = {}
+    for field_name, value in assignments.items():
+        convert = routes.get(field_name)
+        if convert is None:
+            normalized[field_name] = value
+            continue
+        try:
+            normalized[field_name] = convert(value, field_name, "")
+        except PackManifestError:
+            normalized[field_name] = value
+    return normalized
+
+
+@dataclass(frozen=True)
+class RoutedPackAssignment:
+    """One effective-config field a selected pack assigns, with its source.
+
+    The *identity* and *path* travel with the value so a caller can build a
+    provenance receipt that identifies the exact manifest revision the value
+    came from (ADR-049 D6: "path, digest, manifest identity/version, and
+    field location identify the actual definition used for exact replay") --
+    a bare ``field -> value`` mapping could name the file at best, and only
+    when exactly one pack was selected.
+    """
+
+    value: Hashable
+    identity: ImmutableIdentity
+    path: str
+
+
+def resolve_pack_field_assignments(
+    pack_paths: Sequence[str | Path],
+    kind: PackKind,
+    *,
+    explicit_overrides: Mapping[str, Hashable] = MappingProxyType({}),
+    loaded: Sequence[tuple[str, LoadedPack]] | None = None,
+) -> dict[str, RoutedPackAssignment]:
+    """Fold every selected pack of *kind* into one routed, typed
+    ``field name -> assignment`` mapping.
+
+    The contract/gate counterpart of :func:`resolve_policy_pack_overrides`.
+    A policy pack folds into one open bag (``CompatibilityPolicyConfig.
+    overrides`` is literally ``Mapping[str, Verdict]``), so no routing is
+    needed there; :class:`~abicheck.compatibility_evaluation_config.ContractConfig`/
+    :class:`~abicheck.compatibility_evaluation_config.GateConfig` are typed,
+    fixed-field dataclasses, so *which* fields a pack of each kind may assign
+    -- and what a valid value for each looks like -- has to be declared
+    explicitly. That declaration is :data:`CONTRACT_PACK_FIELD_ROUTES` /
+    :data:`GATE_PACK_FIELD_ROUTES`; an assignment naming anything else is a
+    :class:`~abicheck.errors.PackManifestError`, never a silently-ignored
+    key (the same fail-loud posture ``load_pack_manifest`` already takes for
+    an unknown top-level manifest field, and ADR-049 D8's "unknown config
+    keys/enum values fail at load time").
+
+    ``kind: policy`` is rejected outright rather than silently returning
+    nothing: its assignments are ``ChangeKind`` slugs, a different vocabulary
+    that :func:`resolve_policy_pack_overrides` owns.
+
+    Runs the same D8 conflict check
+    (:func:`~abicheck.compatibility_evaluation_resolver.detect_pack_conflicts`)
+    as the other two pack functions, scoped to only the packs of *kind* among
+    *pack_paths* (packs of another kind are loaded but otherwise ignored), so
+    all three agree about which packs conflict. *explicit_overrides* is
+    forwarded verbatim to that check -- D8 exempts a field the caller already
+    states from pack-vs-pack conflict detection, since the stated value
+    resolves any disagreement about it. Only the *keys* are read, so a marker
+    value is enough for a field whose real value the caller hasn't resolved
+    yet; the keys are not route-checked either, since a caller may
+    legitimately state a field no pack of this kind could assign.
+
+    Unlike :func:`resolve_policy_pack_overrides`, the overrides are **not**
+    re-applied onto the returned mapping: that function's result *is* the
+    final ``overrides`` value, whereas this one's is an input to per-field
+    resolution, where D8's "explicit override > selected packs" is applied by
+    the stated value's own candidate outranking the pack's. Returning them
+    merged here would hand the caller back its own marker values as if a pack
+    had assigned them.
+
+    Conflicts are detected on the packs' *raw* manifest values, before
+    routing, so a manifest whose value is malformed for its field still
+    reports the pack-vs-pack disagreement first if there is one -- both are
+    hard errors, and the conflict is the more actionable of the two.
+    """
+    if kind is PackKind.POLICY:
+        raise ValueError(
+            "resolve_pack_field_assignments does not handle PackKind.POLICY: a "
+            "policy pack's assignments are ChangeKind slug -> Verdict, which "
+            "fold into CompatibilityPolicyConfig.overrides via "
+            "resolve_policy_pack_overrides() instead of a per-field route."
+        )
+    routes = PACK_FIELD_ROUTES_BY_KIND[kind]
+
+    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
+    selected = [(path, pack) for path, pack in entries if pack.kind is kind]
+
+    detect_pack_conflicts(
+        [
+            (pack.identity, _conflict_values(kind, pack.assignments))
+            for _, pack in selected
+        ],
+        explicit_overrides=explicit_overrides,
+    )
+
+    # Safe as last-write-wins only because detect_pack_conflicts already
+    # proved every pack assigning a given field assigned the identical value
+    # (the same reasoning resolve_policy_pack_overrides documents). Which of
+    # several agreeing packs is recorded as the source is therefore a choice
+    # among equals -- made deterministic by sorting on the pack identity, so
+    # the receipt never depends on the order the paths were given in ("pack
+    # order never decides semantics", D8). The path is the last sort key
+    # rather than a leftover of input order: two *byte-identical* manifests
+    # at different paths share one identity, so an identity-only sort is a
+    # tie between them and stable sorting would hand the receipt back to
+    # argument order (Codex review, fresh evidence).
+    # Every contributor is kept, not only the winner: a field another layer
+    # pins is exempt from conflict detection, so several packs may assign it
+    # with differing values and only the first would ever be routed. A
+    # malformed assignment in one of the others then reached no converter at
+    # all, and the resolver accepted a manifest it never validated (Codex
+    # review, fresh evidence). The value that gets *used* is still the first
+    # one in this order; the rest are validated and discarded.
+    merged_raw: dict[str, list[tuple[str, LoadedPack, Hashable]]] = {}
+    for path, pack in sorted(
+        selected,
+        key=lambda entry: (
+            entry[1].identity.id,
+            entry[1].identity.version,
+            entry[1].identity.sha256,
+            entry[0],
+        ),
+    ):
+        for field_name, value in pack.assignments.items():
+            merged_raw.setdefault(field_name, []).append((path, pack, value))
+
+    routed: dict[str, RoutedPackAssignment] = {}
+    for field_name in sorted(merged_raw):
+        contributors = merged_raw[field_name]
+        path, pack, value = contributors[0]
+        convert = routes.get(field_name)
+        if convert is None:
+            raise PackManifestError(
+                f"{path}: a {kind.value!r} pack may not assign {field_name!r} "
+                f"(assignable fields: {sorted(routes)}) -- ADR-049 D8 keeps the "
+                "contract/policy/gate namespaces distinct, and an effective-"
+                "config field with no route here is one no pack of this kind "
+                "is allowed to set"
+            )
+        for other_path, _, other_value in contributors[1:]:
+            convert(other_value, field_name, other_path)
+        routed[field_name] = RoutedPackAssignment(
+            value=convert(value, field_name, path),
+            identity=pack.identity,
+            path=path,
+        )
+    return routed

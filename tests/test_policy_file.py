@@ -439,6 +439,20 @@ def test_internal_namespaces_defaults_to_empty(tmp_path: Path) -> None:
     p.write_text("base_policy: strict_abi\n", encoding="utf-8")
     pf = PolicyFile.load(p)
     assert pf.internal_namespaces == []
+    assert pf.internal_namespaces_stated is False
+
+
+def test_an_explicitly_empty_internal_namespaces_list_is_recorded_as_stated(
+    tmp_path: Path,
+) -> None:
+    """`internal_namespaces: []` says "this project has none" -- a statement
+    a parsed empty list alone cannot be told apart from an absent key, and
+    one that must outrank anything that would otherwise fill the field in."""
+    p = tmp_path / "policy.yaml"
+    p.write_text("internal_namespaces: []\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    assert pf.internal_namespaces == []
+    assert pf.internal_namespaces_stated is True
 
 
 def test_internal_namespaces_rejects_non_list(tmp_path: Path) -> None:

@@ -195,12 +195,31 @@ def _require_digested_items_or_none(value: object, *, owner: str, field: str) ->
 # module owns outright (every worked example in the ADR uses exactly one of
 # these two strings) -- unlike e.g. ValueProvenance.source_kind, which is
 # free-form text belonging to a not-yet-written resolver.
-_VALID_UNRESOLVED_BEHAVIORS = frozenset({"not_checkable", "warn"})
+VALID_UNRESOLVED_BEHAVIORS: frozenset[str] = frozenset({"not_checkable", "warn"})
+"""Canonical set of valid ``ContractConfig.unresolved`` values.
 
-# ADR-037 D12's exit-code scheme, minus "auto": cli.py's --exit-code-scheme
-# click.Choice is {"auto", "legacy", "severity"}, but "auto" is resolved to
-# one of the other two before an effective GateConfig is ever constructed.
-_VALID_EXIT_CODE_SCHEMES = frozenset({"legacy", "severity"})
+Public so a front end that validates the same vocabulary *before*
+constructing a :class:`ContractConfig` (e.g. a pack-manifest field router,
+which must reject a bad value with a manifest-shaped error rather than let
+the dataclass raise) shares one source of truth instead of re-declaring the
+two spellings -- the same ``VALID_BASE_POLICIES``/``_VALID_BASE_POLICIES``
+pattern ``policy_file.py`` already uses.
+"""
+
+VALID_EXIT_CODE_SCHEMES: frozenset[str] = frozenset({"legacy", "severity"})
+"""Canonical set of valid *resolved* ``GateConfig.exit_code_scheme`` values.
+
+ADR-037 D12's scheme, minus ``"auto"``: ``cli.py``'s ``--exit-code-scheme``
+``click.Choice`` is ``{"auto", "legacy", "severity"}``, but ``auto`` is
+resolved to one of the other two before an effective ``GateConfig`` is ever
+constructed. Public for the same reason as
+:data:`VALID_UNRESOLVED_BEHAVIORS`.
+"""
+
+# Backward-compatible private aliases (this module's own call sites and any
+# existing importer keep working unchanged).
+_VALID_UNRESOLVED_BEHAVIORS = VALID_UNRESOLVED_BEHAVIORS
+_VALID_EXIT_CODE_SCHEMES = VALID_EXIT_CODE_SCHEMES
 
 # ADR-049 D8: "An unknown ChangeKind in a custom policy is a hard load
 # error" -- policy_file.py's PolicyFile.load() already enforces this for
@@ -223,6 +242,22 @@ class SelectedByEntry:
     option: str | None = None
     argument_index: int | None = None
     path: str | None = None
+    #: The exact manifest revision this hop selected, when the hop names one.
+    #: A *composed* field (``policy.overrides``, ``surface.explicit_scope``)
+    #: has no single winning source to describe in
+    #: :class:`ValueProvenance`'s own ``reference``/``version``/``sha256``, so
+    #: without this the identities of every contributor were lost and a later
+    #: edit to one of them could not be proved against the receipt (ADR-049
+    #: D6; Codex review, fresh evidence). ``None`` for a hop that selects no
+    #: manifest at all -- a typed flag, a project-config key.
+    identity: ImmutableIdentity | None = None
+    #: The digest of the file this hop named, for a source that has content
+    #: but no versioned identity -- a ``.abicheck.yml``, a policy document.
+    #: Separate from the entry-level :attr:`ValueProvenance.sha256`, which can
+    #: already be taken by *what the value is* (a preset's own identity)
+    #: while the hop still needs to say *which file selected it* (Codex
+    #: review, fresh evidence).
+    sha256: str | None = None
 
     def __post_init__(self) -> None:
         # An untyped manifest/API adapter constructing
@@ -254,6 +289,17 @@ class SelectedByEntry:
         if self.path is not None and not isinstance(self.path, str):
             raise TypeError(
                 f"SelectedByEntry.path must be a str or None, not {self.path!r}."
+            )
+        if self.identity is not None and not isinstance(
+            self.identity, ImmutableIdentity
+        ):
+            raise TypeError(
+                "SelectedByEntry.identity must be an ImmutableIdentity or None, "
+                f"not {self.identity!r}."
+            )
+        if self.sha256 is not None and not isinstance(self.sha256, str):
+            raise TypeError(
+                f"SelectedByEntry.sha256 must be a str or None, not {self.sha256!r}."
             )
 
 

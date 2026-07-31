@@ -894,6 +894,128 @@ separate, larger piece of work). Not called from any live command yet, same
 "land the wiring function itself, fully tested" pattern as every other
 function in this module.
 
+**Updated (2026-07-31): the phase's remaining field-wiring gap and its
+contract/gate pack-composition gap are both closed; this phase's gate is now
+an executable check rather than a description.** Everything above resolves
+*individual* fields. The missing piece was the object those fields belong to:
+a new module, `abicheck/compatibility_evaluation_frontend.py`, collects every
+setting a front end can actually state today, resolves each field through
+`resolve_field`, and assembles all seven typed namespaces plus one
+provenance-receipt entry per resolved field.
+
+- **Front ends wired** (the "wiring any other field ... to construct real
+  `FieldCandidate`s" item above): `compare_cli_inputs` takes the `compare`
+  command's real kwargs plus the set of parameters the user actually typed
+  (Click's `ctx.get_parameter_source(...)`, which a live caller supplies) —
+  needed because `--policy` and `--scope-public-headers` carry non-`None`
+  click defaults that must not be mistaken for stated values;
+  `compare_request_inputs`/`compatibility_config_from_compare_request` take a
+  typed `CompareRequest` (the service/API request model this phase named);
+  `ProjectCompatibilityInputs.from_build_config` projects a real
+  `.abicheck.yml` (`BuildConfig`) at `PROJECT_CONFIG` tier. Fields resolved
+  from real input: `contract.mode`, `contract.packs`/`policy.packs`/
+  `gate.packs`, `policy.base`, `policy.overrides`,
+  `surface.internal_namespaces`, `surface.explicit_scope`,
+  `gate.exit_code_scheme`, `gate.preset`, the four `gate.severity.*`
+  categories, and `suppressions`.
+- **Both D7 compatibility exceptions are implemented as exceptions, not
+  errors**, each retaining the shadowed input in
+  `provenance[field].shadowed_legacy`: `--policy` vs. `--policy-file` (D7
+  verbatim), and `--contract` vs. `--scope-public-headers` (the Phase 6
+  flag's own documented "an explicit value outranks those" — making that pair
+  a usage error would reject a combination the live CLI accepts today).
+- **`auto` never reaches a resolved value, but selecting it is still a
+  stated choice.** An explicit `--exit-code-scheme auto` contributes a
+  candidate carrying the answer to "is a severity setting in effect?", so it
+  outranks a lower layer's concrete scheme exactly as any other explicit
+  value would — matching `cli_helpers_compare.resolve_compare_config`, where
+  the CLI value wins whatever it is. (A first cut treated `auto` as "not
+  stated" at every layer, which let a project config's concrete scheme beat
+  an explicitly typed `--exit-code-scheme auto`; caught in review.) A
+  project config's own `auto` does contribute nothing, because
+  `BuildConfig`'s default for that key *is* the string `"auto"`, making a
+  stated one indistinguishable from an absent one. A test pins the resolved
+  `gate.severity` field-for-field against `severity.resolve_severity_config`,
+  so the two cannot drift.
+- **Every file-derived receipt entry carries its source's own digest**
+  (ADR-049 D6): the `--policy-file` document's bytes for the base/overrides/
+  namespaces it supplied, and the pack manifest's `id`/`version`/`sha256` for
+  a field a pack filled — `resolve_pack_field_assignments` returns a
+  `RoutedPackAssignment` (value + identity + path) rather than a bare value
+  for exactly this reason. Which of several *agreeing* packs is credited is
+  decided by sorted pack identity, so the receipt never depends on `--pack`
+  order. A composed field (`policy.overrides`, `surface.explicit_scope`)
+  credits only sources that actually contributed: a policy pack whose every
+  assignment the policy file overrode is not listed.
+- **`surface.explicit_scope` is resolved as the additive field it really
+  is.** `--public-symbol` and `scope.public_symbols` *merge* today (ADR-037
+  D4), which is a genuine exception to per-field highest-layer-wins; the
+  resolved value is the union, and the receipt records the highest-precedence
+  contributor with every contributor listed in `selected_by`, so an additive
+  resolution is still exactly replayable.
+- **Contract/gate pack composition** (the "per-field router this slice does
+  not build" gap immediately above):
+  `compatibility_evaluation_wiring.resolve_pack_field_assignments` routes each
+  selected non-policy pack's assignments onto the typed fields that namespace
+  may set (`CONTRACT_PACK_FIELD_ROUTES`/`GATE_PACK_FIELD_ROUTES`), validating
+  and converting each value; an assignment naming anything else is a
+  `PackManifestError`, never a silently-ignored key. Deliberately not
+  routable: `contract.mode` (a pack switching which evidence domain a run
+  judges against is exactly the hidden preset D3 forbids), `policy.base`
+  (packs compose over a base, they don't replace it), and any `*.packs`
+  field. A pack's value applies only when *no* other layer stated the field —
+  D8's "explicit override > selected packs > base", read conservatively
+  enough that a pack can never silently override a project's own value
+  either. `resolve_field` could not express this directly: a pack tagged with
+  the layer that selected it would *tie* with an explicit value for the same
+  field and be reported as conflicting with it, which is the exact case D8
+  says the explicit value resolves.
+- **This phase's gate is executable.** `cross_front_end_differences(a, b)`
+  compares two resolved configurations modulo exactly one permitted
+  difference — which front end stated a value (`explicit_cli` vs.
+  `api_request`, and the option spelling recorded with it), the two D7 puts in
+  one precedence tier — and returns a per-field difference list.
+  `tests/test_compatibility_evaluation_frontend.py` runs a real `compare`
+  kwargs mapping against the equivalent `CompareRequest` through it, over
+  every field both front ends can state.
+- **D6 identities for the two file-less selections.** A built-in
+  `--policy` base and a `--severity-preset` are code, not files, so
+  `builtin_policy_identity`/`severity_preset_identity` digest what each
+  *resolves to* (the four `ChangeKind` sets; the four category levels) — the
+  identity then detects the drift a digest exists to detect, which a bare
+  `id`/`version` pair could not. An unknown base name raises rather than
+  minting an identity: `policy_kind_sets` falls back to `strict_abi` for a
+  typo, which is right for classification and wrong for an identity.
+- **`.abicheck.yml` schema/reference docs** (the last item on the list
+  above): the strict `BuildConfig` schema and its generated key reference
+  already existed; what was missing was the ADR-049 layer over them. New page
+  `docs/reference/compatibility-evaluation-config.md` documents the seven
+  namespaces, the precedence chain and its two exceptions, the per-field
+  input map across CLI/API/`.abicheck.yml`/pack, the pack-manifest format
+  with its per-kind assignable-field table, and the receipt.
+
+**Still not done, and deliberately out of scope here** (each is a separate
+piece of work, not a loose end of this one):
+
+- No live command constructs this object. That is intentional and unchanged
+  from every other slice of this phase — resolution that changes no verdict,
+  finding, or exit code is what Phase 1 owns; consuming it in the
+  authoritative comparison path is Phase 5's "same typed config" item, and
+  the default flip is Phase 7.
+- No `--pack` CLI flag. The composition path is real and tested, but pack
+  paths reach it from the Python API only. `cli.py` remains at its 2000-line
+  hard cap, so the flag still needs the prerequisite extraction noted above —
+  and a flag whose only effect is to feed an object nothing consumes would be
+  dead surface until Phase 5 lands.
+- `EvidenceConfig` in full (no CLI/API surface selects an evidence provider or
+  a variant set), and `contract.unresolved`/`contract.overlays`/
+  `assurance.require_evidence`, which have no flag at all — a `kind: contract`
+  pack is the only input that reaches them today.
+- `--strict-suppressions`/`--require-justification` are real inputs with no
+  field in ADR-049's own typed shape to carry them. Adding one is an ADR-level
+  shape change, not a resolver change, so they stay outside the object and are
+  documented as such rather than folded into an ill-fitting field.
+
 ### Phase 2 — canonical identity and fact conservation
 
 Build finding identity on ADR-048 principles: most specific available identity,
@@ -963,6 +1085,48 @@ single well-scoped, independently verifiable change" case above, not a new
 finding. Left deferred; a real attempt needs its own dedicated pass with
 room for that full gate re-verification, not a fold-in alongside Phase 3/1
 work.
+
+**Updated (2026-07-31): the deferred matching wiring landed; this phase's
+remaining item is closed.** Two prior passes deferred it as "a substantially
+larger, higher-risk refactor" and, on re-investigation, for a sharper reason:
+`resolve_function_identity` returns exactly one `primary_id` and has **no
+notion of "ambiguous, so don't match"** — the `extern "C"` fallback's whole
+correctness rests on the *caller* counting candidates
+(`len(extern_c_candidates) == 1`), so keying a dict by `primary_id` would
+only have moved that count behind a different key, not removed it.
+
+The fix was to supply the missing notion rather than to work around it.
+`finding_identity.SymbolIdentityIndex` is the flat-symbol counterpart of
+`diff_helpers.TypeMap` (ADR-045): a `Mapping` over the same keys
+`_public_functions`/`_public_variables` already return — so every existing
+loop is untouched and each declaration is still visited once — plus an
+ambiguity-checked alias tier (`unique_alias_match`, which answers `None` for
+"no candidate" and "several candidates" alike, with `alias_candidates` left
+available to tell those two apart). `_match_old_function`'s exact-key tier is
+now the index's own lookup and its extern-C fallback one alias lookup with an
+eligibility predicate; `_diff_variables` joins through the same index.
+
+Two deliberate departures from `TypeMap`, both documented at their call
+sites:
+
+- **`__getitem__` never resolves an alias.** A type's bare-name alias is a
+  schema-evolution accident worth healing silently; a *symbol*'s is not —
+  two differing mangled names are two different exports, and joining them by
+  display name would report a genuine removal as a modification.
+- **No alias tier for variables at all**, which is a decision rather than an
+  omission: the alias tier exists for `extern "C"`, where one entity is
+  legitimately spelled two ways by two producers. A variable has no overload
+  set and no C/C++ linkage mismatch to heal, so its key *is* its export. A
+  regression test pins that a re-mangled variable stays removal + addition.
+
+Matching behavior is unchanged by construction, and the verification is what
+the earlier deferral asked for: full unit suite including golden (21824
+passed, unchanged count), the FP-rate gate (0/0 delta), the per-tier accuracy
+gate (top-tier correct, under-call monotonic), and the `slow`
+detector-property, identity-property and fact-conservation suites. New unit
+coverage in `tests/test_symbol_identity_index.py` (the primitive in isolation
+plus each matching rule end-to-end through `checker.compare`); the module is
+at 100% line+branch.
 
 A Hypothesis property suite for the identity primitive itself
 (`tests/test_finding_identity_properties.py`, `slow`) is also done, covering

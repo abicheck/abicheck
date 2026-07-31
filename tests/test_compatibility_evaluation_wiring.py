@@ -130,6 +130,15 @@ class TestPolicyFileSetsNamespaces:
         assert namespaces == ("detail", "impl")
         assert prov.layer is SelectorLayer.EXPLICIT_CLI
 
+    def test_a_document_that_stated_an_empty_list_is_a_real_selection(self):
+        # `internal_namespaces: []` in the file says "this project has none",
+        # which only the loader can distinguish from an absent key -- and the
+        # difference matters, since a pack may fill an unstated field.
+        pf = PolicyFile(internal_namespaces=[], internal_namespaces_stated=True)
+        namespaces, prov = resolve_internal_namespaces(policy_file=pf)
+        assert namespaces == ()
+        assert prov.layer is SelectorLayer.EXPLICIT_CLI
+
     def test_policy_file_with_empty_list_resolves_to_default_layer(self):
         # An explicit empty list is indistinguishable, once parsed, from the
         # key never being set at all -- both must fall through to the

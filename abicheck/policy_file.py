@@ -51,6 +51,7 @@ Notes:
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -383,6 +384,12 @@ class PolicyFile:
     base_policy: str = "strict_abi"
     overrides: dict[ChangeKind, Verdict] = field(default_factory=dict)
     source_path: Path | None = None
+    #: sha256 of the exact raw bytes :meth:`load` read, when it loaded this
+    #: document from a file. Captured at parse time on purpose: a consumer
+    #: that re-read ``source_path`` later would digest whatever is on disk
+    #: *then*, which for a file edited in between identifies content this
+    #: object was never built from (Codex review, ADR-049 D6 replay).
+    source_sha256: str | None = None
     # Glob patterns identifying namespaces whose symbols / types are
     # contractually frozen (e.g. a versioned internal namespace such as
     # `**::detail::r1` or `**::detail::v1`). Any finding whose symbol or caused_by_type lies in
@@ -403,6 +410,15 @@ class PolicyFile:
     # unrelated to internal-implementation-detail namespaces, despite the ADR's
     # roadmap text grouping all four steps together.
     internal_namespaces: list[str] = field(default_factory=list)
+    # Whether the document actually carried the ``internal_namespaces`` key.
+    # An explicit empty list is a *statement* ("this project has none"), which
+    # a parsed empty list alone cannot be told apart from the key being absent
+    # — and the two must not behave alike where something else would otherwise
+    # fill the field in (ADR-049 D8: a selected pack never overrides a stated
+    # value). Set by ``load()``; a directly-constructed PolicyFile leaves it
+    # False, so nothing that builds one in code starts claiming a statement it
+    # never made.
+    internal_namespaces_stated: bool = False
     # ADR-033 D7 — evidence-aware policy controls. ``None`` means "unset": the
     # finding keeps its default category (current behaviour). A set value maps
     # the whole category of build/source evidence findings to a verdict ceiling.
@@ -442,9 +458,17 @@ class PolicyFile:
         if builtin is not None:
             path = builtin
 
-        raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # Digest the *raw bytes*, then decode those same bytes to parse:
+        # `read_text()` performs universal-newline translation, so hashing its
+        # result would make a CRLF file digest identically to its LF twin --
+        # a real byte-for-byte content change the receipt could not detect
+        # (Codex review). PyYAML handles CRLF line breaks per spec, so parsing
+        # the undecoded-then-decoded text is unchanged.
+        raw_bytes = path.read_bytes()
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        raw: Any = yaml.safe_load(raw_bytes.decode("utf-8"))
         if raw is None:
-            return cls(source_path=path)
+            return cls(source_path=path, source_sha256=digest)
         if not isinstance(raw, dict):
             raise PolicyError(
                 f"Policy file must be a YAML mapping, got {type(raw).__name__}"
@@ -462,8 +486,10 @@ class PolicyFile:
             base_policy=base_policy,
             overrides=overrides,
             source_path=path,
+            source_sha256=digest,
             frozen_namespaces=frozen_namespaces,
             internal_namespaces=internal_namespaces,
+            internal_namespaces_stated="internal_namespaces" in raw,
             source_only_findings=source_only,
             build_context_drift=build_drift,
             graph_risk_findings=graph_risk,
