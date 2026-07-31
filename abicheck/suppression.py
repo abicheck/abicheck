@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import fnmatch
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -666,8 +667,19 @@ class SuppressionOutcome:
 
 
 class SuppressionList:
-    def __init__(self, suppressions: list[Suppression]) -> None:
+    def __init__(
+        self,
+        suppressions: list[Suppression],
+        *,
+        source_sha256: str | None = None,
+    ) -> None:
         self._suppressions = suppressions
+        #: sha256 of the exact raw bytes :meth:`load` read, when these rules
+        #: came from a file. Captured during that one read so a consumer
+        #: never has to re-read the path to digest it: the file could have
+        #: changed in between, and the digest would then authenticate content
+        #: that did not produce these rules (Codex review, ADR-049 D6 replay).
+        self.source_sha256 = source_sha256
 
     @classmethod
     def merge(cls, a: SuppressionList, b: SuppressionList) -> SuppressionList:
@@ -686,9 +698,14 @@ class SuppressionList:
         Raises OSError if the file cannot be read.
         """
         try:
-            text = path.read_text(encoding="utf-8")
+            # Raw bytes, digested and decoded from one read: `read_text()`
+            # would translate newlines before hashing, making a CRLF file
+            # digest identically to its LF twin.
+            raw_bytes = path.read_bytes()
         except OSError as e:
             raise OSError(f"Cannot read suppression file {path}: {e}") from e
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        text = raw_bytes.decode("utf-8")
 
         try:
             data = yaml.safe_load(text)
@@ -753,7 +770,7 @@ class SuppressionList:
                 )
             suppressions.append(sup)
 
-        return cls(suppressions)
+        return cls(suppressions, source_sha256=digest)
 
     def is_suppressed(self, change: Change, today: date | None = None) -> bool:
         """Return True if any active (non-expired) suppression rule matches the given change."""

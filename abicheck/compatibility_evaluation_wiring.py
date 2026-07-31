@@ -288,6 +288,7 @@ def internal_namespaces_candidate(
     policy_file: PolicyFile | None,
     layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
     sha256: str | None = None,
+    option: str = "--policy-file",
 ) -> FieldCandidate | None:
     """Build the ``surface.internal_namespaces`` candidate a ``--policy-file``
     contributes, or ``None`` when it contributes nothing.
@@ -302,7 +303,8 @@ def internal_namespaces_candidate(
     on this invocation. *sha256* is the selected file's own content digest,
     which a caller that has it should pass so the receipt can identify the
     exact document that supplied the value (ADR-049 D6) rather than only the
-    path it was read from.
+    path it was read from. *option* is the selector spelling to record --
+    a non-CLI front end names its own field, not the CLI flag.
     """
     if policy_file is None or not policy_file.internal_namespaces:
         return None
@@ -317,7 +319,7 @@ def internal_namespaces_candidate(
             selected_by=(
                 SelectedByEntry(
                     layer=layer,
-                    option="--policy-file",
+                    option=option,
                     path=source_path,
                 ),
             ),

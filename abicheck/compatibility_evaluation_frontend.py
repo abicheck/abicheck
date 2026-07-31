@@ -285,8 +285,10 @@ class SuppressionSource:
     ) -> SuppressionSource:
         """Read, digest, and summarize a real suppression file.
 
-        ``sha256`` digests the file's raw bytes (exact replay, ADR-049 D6);
-        ``rules`` is :meth:`~abicheck.suppression.SuppressionList.rule_identities`.
+        ``sha256`` is the digest ``SuppressionList.load`` captured over the
+        raw bytes it parsed (exact replay, ADR-049 D6); ``rules`` is
+        :meth:`~abicheck.suppression.SuppressionList.rule_identities`. One
+        read produces both, so they always describe the same content.
         *require_justification* is forwarded to the loader so a front end
         running with ``--require-justification`` gets the same hard error
         here that it gets from its own load.
@@ -294,14 +296,16 @@ class SuppressionSource:
         from .suppression import SuppressionList
 
         file_path = Path(path)
-        raw = file_path.read_bytes()
-        rules = SuppressionList.load(
+        loaded = SuppressionList.load(
             file_path, require_justification=require_justification
-        ).rule_identities()
+        )
+        # The digest comes from the same read that produced these rules --
+        # digesting the path separately could pair one content's hash with
+        # another's rules if the file changed in between (Codex review).
         return cls(
             path=str(file_path),
-            sha256=hashlib.sha256(raw).hexdigest(),
-            rules=rules,
+            sha256=loaded.source_sha256 or "",
+            rules=loaded.rule_identities(),
         )
 
 
@@ -610,6 +614,8 @@ def _explicit_scope(
     explicit: ExplicitCompatibilityInputs,
     project: ProjectCompatibilityInputs | None,
     layer: SelectorLayer,
+    *,
+    symbol_option: str = "--public-symbol",
 ) -> tuple[DigestedItems | None, ValueProvenance]:
     """Resolve ``surface.explicit_scope`` -- an *additive* overlay field.
 
@@ -637,7 +643,7 @@ def _explicit_scope(
     winning_layer = SelectorLayer.BUILT_IN_DEFAULT
     if explicit.public_symbols:
         winning_layer = layer
-        selected_by.append(SelectedByEntry(layer=layer, option="--public-symbol"))
+        selected_by.append(SelectedByEntry(layer=layer, option=symbol_option))
         merged.extend(explicit.public_symbols)
     # The list file is its own contributor, with its own path: a replay has to
     # be able to tell "these symbols were typed" from "these came from that
@@ -742,6 +748,21 @@ def resolve_compatibility_evaluation_config(
     layer = front_end.layer
     prov: dict[str, ValueProvenance] = {}
 
+    def spell(cli_option: str, api_field: str | None = None) -> str:
+        """The selector spelling for the front end that stated this value.
+
+        A receipt has to name the input a replay would actually set. Letting
+        every explicit candidate default to the CLI flag made an API-stated
+        value claim a flag the caller never passed, and
+        :func:`cross_front_end_differences` normalizes option spellings on
+        purpose, so it could not catch that (Codex review). *api_field* is
+        ``None`` for an input only the CLI can state, where the CLI spelling
+        is the only truthful one.
+        """
+        if front_end is FrontEnd.CLI or api_field is None:
+            return cli_option
+        return api_field
+
     policy_overrides_explicit = _policy_file_override_slugs(explicit.policy_file)
     policy_source = _PolicyFileSource.of(
         explicit.policy_file, explicit.policy_file_sha256
@@ -769,7 +790,7 @@ def resolve_compatibility_evaluation_config(
         ):
             pinned_gate[field_name] = _STATED_ELSEWHERE
 
-    pack_option = "--pack" if front_end is FrontEnd.CLI else "pack_paths"
+    pack_option = spell("--pack", "pack_paths")
     # Read each manifest exactly once for this whole resolution: the three
     # pack resolvers below would otherwise re-read them, and a manifest edited
     # between those reads would leave one configuration's receipt entries
@@ -809,13 +830,15 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 layer,
                 coerce_contract_mode(explicit.contract_mode),
-                option="--contract" if front_end is FrontEnd.CLI else "contract_mode",
+                option=spell("--contract", "contract_mode"),
                 source_kind="contract_mode",
             )
         )
     legacy_mode = legacy_contract_mode_candidate(
         scope_public_headers=bool(explicit.scope_public_headers),
         scope_public_headers_is_explicit=explicit.scope_public_headers is not None,
+        # An API caller set `CompareRequest.scope_public`, not a CLI flag.
+        option=None if front_end is FrontEnd.CLI else "scope_public",
     )
     if legacy_mode is not None:
         mode_candidates.append(legacy_mode)
@@ -869,7 +892,10 @@ def resolve_compatibility_evaluation_config(
 
     # ── surface ─────────────────────────────────────────────────────────────
     namespace_candidate = internal_namespaces_candidate(
-        policy_file=explicit.policy_file, layer=layer, sha256=policy_source.sha256
+        policy_file=explicit.policy_file,
+        layer=layer,
+        sha256=policy_source.sha256,
+        option=spell("--policy-file", "policy_file_path"),
     )
     internal_namespaces, prov[INTERNAL_NAMESPACES_FIELD] = _resolve(
         INTERNAL_NAMESPACES_FIELD,
@@ -880,7 +906,10 @@ def resolve_compatibility_evaluation_config(
         pack_option=pack_option,
     )
     explicit_scope, prov[EXPLICIT_SCOPE_FIELD] = _explicit_scope(
-        explicit, project, layer
+        explicit,
+        project,
+        layer,
+        symbol_option=spell("--public-symbol", "force_public_symbols"),
     )
     surface = SurfaceConfig(
         explicit_scope=explicit_scope,
@@ -905,7 +934,7 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 layer,
                 builtin_policy_identity(explicit.policy_file.base_policy),
-                option="--policy-file",
+                option=spell("--policy-file", "policy_file_path"),
                 source_kind="policy_file",
                 reference=explicit.policy_file.base_policy,
                 sha256=policy_source.sha256,
@@ -918,7 +947,7 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 SelectorLayer.LEGACY_ALIAS,
                 builtin_policy_identity(explicit.policy_base),
-                option="--policy",
+                option=spell("--policy", "policy"),
                 source_kind="builtin_policy",
                 reference=explicit.policy_base,
             )
@@ -951,6 +980,7 @@ def resolve_compatibility_evaluation_config(
         policy_source=policy_source,
         pack_contributors=override_pack_contributors,
         pack_option=pack_option,
+        policy_file_option=spell("--policy-file", "policy_file_path"),
         explicit_overrides=policy_overrides_explicit,
     )
     policy = CompatibilityPolicyConfig(
@@ -1101,7 +1131,7 @@ def resolve_compatibility_evaluation_config(
             selected_by=(
                 SelectedByEntry(
                     layer=layer,
-                    option="--suppress",
+                    option=spell("--suppress", "suppress"),
                     path=explicit.suppression.path,
                 ),
             ),
@@ -1169,6 +1199,7 @@ def _overrides_provenance(
     policy_source: _PolicyFileSource,
     pack_contributors: Sequence[tuple[str, ImmutableIdentity]],
     pack_option: str,
+    policy_file_option: str,
     explicit_overrides: Mapping[str, Verdict],
 ) -> ValueProvenance:
     """Receipt entry for the merged ``policy.overrides`` mapping.
@@ -1187,7 +1218,7 @@ def _overrides_provenance(
     if explicit_overrides:
         selected_by.append(
             SelectedByEntry(
-                layer=layer, option="--policy-file", path=policy_source.path
+                layer=layer, option=policy_file_option, path=policy_source.path
             )
         )
     selected_by.extend(
