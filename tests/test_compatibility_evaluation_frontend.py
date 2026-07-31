@@ -1440,3 +1440,46 @@ class TestOverridesReceiptNamesEachContributingPack:
         assert prov.path is None
         assert prov.reference is None
         assert len(prov.selected_by) == 2
+
+
+class TestSelectedButEmptySources:
+    def test_an_empty_symbols_list_is_still_a_selected_source(self, tmp_path):
+        # "A source was selected and resolved to zero items" is a different
+        # fact from "no source was selected" -- and the path must survive.
+        listed = tmp_path / "symbols.txt"
+        listed.write_text("# only a comment\n\n")
+        cfg = _resolve(explicit=compare_cli_inputs({"public_symbols_list": listed}))
+        assert cfg.surface.explicit_scope is not None
+        assert cfg.surface.explicit_scope.items == ()
+        prov = cfg.provenance[EXPLICIT_SCOPE_FIELD]
+        assert prov.layer is SelectorLayer.EXPLICIT_CLI
+        assert [(e.option, e.path) for e in prov.selected_by] == [
+            ("--public-symbols-list", str(listed))
+        ]
+
+    def test_no_source_at_all_stays_none(self):
+        cfg = _resolve()
+        assert cfg.surface.explicit_scope is None
+        assert (
+            cfg.provenance[EXPLICIT_SCOPE_FIELD].layer
+            is SelectorLayer.BUILT_IN_DEFAULT
+        )
+
+
+class TestPolicyDigestIsOverRawBytes:
+    def test_line_ending_only_changes_are_detected(self, tmp_path):
+        # `read_text()` translates newlines, so hashing its result would give
+        # a CRLF file and its LF twin the same digest.
+        path = tmp_path / "policy.yml"
+        path.write_bytes(b"base_policy: sdk_vendor\r\n")
+        crlf = PolicyFile.load(path)
+        path.write_bytes(b"base_policy: sdk_vendor\n")
+        lf = PolicyFile.load(path)
+        assert crlf.base_policy == lf.base_policy == "sdk_vendor"
+        assert crlf.source_sha256 != lf.source_sha256
+
+    def test_the_digest_matches_the_files_raw_bytes(self, tmp_path):
+        path = tmp_path / "policy.yml"
+        path.write_bytes(b"base_policy: plugin_abi\r\n")
+        loaded = PolicyFile.load(path)
+        assert loaded.source_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()

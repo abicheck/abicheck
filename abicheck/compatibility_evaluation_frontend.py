@@ -641,8 +641,11 @@ def _explicit_scope(
         merged.extend(explicit.public_symbols)
     # The list file is its own contributor, with its own path: a replay has to
     # be able to tell "these symbols were typed" from "these came from that
-    # file" (Codex review).
-    if explicit.public_symbols_list is not None and explicit.public_symbols_list.items:
+    # file" (Codex review). Its mere *presence* counts, empty or not -- a
+    # selected file that resolved to zero symbols is a different fact from no
+    # file at all, which is exactly the distinction `DigestedItems` documents,
+    # and dropping it would lose the path too (Codex review, second round).
+    if explicit.public_symbols_list is not None:
         winning_layer = layer
         selected_by.append(
             SelectedByEntry(
@@ -664,7 +667,10 @@ def _explicit_scope(
         )
         merged.extend(project.public_symbols)
 
-    if not merged:
+    # Keyed on whether a source was *selected*, not on whether it yielded
+    # anything: `DigestedItems` exists to tell "selected, resolved to zero"
+    # from "never selected", and only the latter is `None`.
+    if not selected_by:
         return None, ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT)
 
     items = tuple(dict.fromkeys(sorted(merged)))

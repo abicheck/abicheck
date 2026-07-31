@@ -384,7 +384,7 @@ class PolicyFile:
     base_policy: str = "strict_abi"
     overrides: dict[ChangeKind, Verdict] = field(default_factory=dict)
     source_path: Path | None = None
-    #: sha256 of the exact bytes :meth:`load` parsed, when it loaded this
+    #: sha256 of the exact raw bytes :meth:`load` read, when it loaded this
     #: document from a file. Captured at parse time on purpose: a consumer
     #: that re-read ``source_path`` later would digest whatever is on disk
     #: *then*, which for a file edited in between identifies content this
@@ -449,9 +449,15 @@ class PolicyFile:
         if builtin is not None:
             path = builtin
 
-        text = path.read_text(encoding="utf-8")
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        raw: Any = yaml.safe_load(text)
+        # Digest the *raw bytes*, then decode those same bytes to parse:
+        # `read_text()` performs universal-newline translation, so hashing its
+        # result would make a CRLF file digest identically to its LF twin --
+        # a real byte-for-byte content change the receipt could not detect
+        # (Codex review). PyYAML handles CRLF line breaks per spec, so parsing
+        # the undecoded-then-decoded text is unchanged.
+        raw_bytes = path.read_bytes()
+        digest = hashlib.sha256(raw_bytes).hexdigest()
+        raw: Any = yaml.safe_load(raw_bytes.decode("utf-8"))
         if raw is None:
             return cls(source_path=path, source_sha256=digest)
         if not isinstance(raw, dict):
