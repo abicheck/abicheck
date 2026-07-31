@@ -737,3 +737,41 @@ class TestContractModeSelection:
     def test_no_mode_stamps_nothing_without_contract_evaluation(self) -> None:
         result = self._compare(contract_mode="exports")
         assert all(c.contract_relevance is None for c in result.changes)
+
+
+class TestCompareRequestContractModeValidation:
+    """The typed boundary applies the same two rules as the CLI.
+
+    A Python API caller previously had `contract_mode` silently ignored with
+    `contract_evaluation` off, and an unsupported value only surfaced as a
+    raw `ValueError` deep in the pipeline (Codex review).
+    """
+
+    @staticmethod
+    def _request(**kw):
+        from abicheck.api_types import CompareRequest, InputSpec
+
+        return CompareRequest(
+            old=InputSpec(path="old.so"), new=InputSpec(path="new.so"), **kw
+        )
+
+    def test_a_mode_without_evaluation_is_a_validation_error(self) -> None:
+        errors = self._request(contract_mode="exports").validation_errors()
+        assert any("contract_mode requires contract_evaluation" in e for e in errors)
+
+    def test_an_unsupported_mode_is_a_validation_error(self) -> None:
+        errors = self._request(
+            contract_mode="bogus", contract_evaluation=True
+        ).validation_errors()
+        assert any("unsupported contract mode 'bogus'" in e for e in errors)
+        assert any("all, exports, public" in e for e in errors)
+
+    def test_a_valid_pair_raises_no_contract_error(self) -> None:
+        errors = self._request(
+            contract_mode="exports", contract_evaluation=True
+        ).validation_errors()
+        assert not [e for e in errors if "contract" in e]
+
+    def test_omitting_the_mode_is_always_fine(self) -> None:
+        errors = self._request(contract_evaluation=True).validation_errors()
+        assert not [e for e in errors if "contract_mode" in e]

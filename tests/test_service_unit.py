@@ -4410,3 +4410,124 @@ class TestRunDumpDependencyScope:
         sig = inspect.signature(run_dump)
         assert "include_dependencies" in sig.parameters
         assert sig.parameters["include_dependencies"].default is True
+
+
+class TestMetadataAttachFailuresAreSwallowed:
+    """Each enrichment step must never fail a dump (ADR-037).
+
+    The three ``except Exception`` handlers went untested while the block
+    lived in ``service.py``; extracting it to ``service_metadata_attach``
+    surfaced that as uncovered new lines, so they are pinned here.
+    """
+
+    @staticmethod
+    def _snap():
+        from abicheck.model import AbiSnapshot
+
+        return AbiSnapshot(library="libfoo.so", version="1")
+
+    def test_python_extension_detection_failure_attaches_nothing(
+        self, monkeypatch, caplog
+    ) -> None:
+        import abicheck.python_ext as python_ext_mod
+        from abicheck.service_metadata_attach import _try_attach_python_ext_metadata
+
+        monkeypatch.setattr(
+            python_ext_mod,
+            "detect_python_extension",
+            lambda _snap: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        snap = self._snap()
+        with caplog.at_level("DEBUG", logger="abicheck.service"):
+            _try_attach_python_ext_metadata(snap)
+        assert snap.python_ext is None
+        assert "Python extension detection skipped" in caplog.text
+
+    def test_numpy_capi_extraction_failure_attaches_nothing(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        import abicheck.numpy_capi as numpy_capi_mod
+        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
+
+        monkeypatch.setattr(
+            numpy_capi_mod,
+            "extract_numpy_capi_surface",
+            lambda _path: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        snap = self._snap()
+        with caplog.at_level("DEBUG", logger="abicheck.service"):
+            _try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
+        assert snap.numpy_capi is None
+        assert "NumPy C-API surface extraction skipped" in caplog.text
+
+    def test_python_api_recovery_failure_attaches_nothing(
+        self, monkeypatch, caplog
+    ) -> None:
+        import abicheck.python_api as python_api_mod
+        from abicheck.service_metadata_attach import _try_attach_python_api_surface
+
+        monkeypatch.setattr(
+            python_api_mod,
+            "detect_python_api",
+            lambda _snap: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        snap = self._snap()
+        with caplog.at_level("DEBUG", logger="abicheck.service"):
+            _try_attach_python_api_surface(snap)
+        assert snap.python_api is None
+        assert "Python API surface recovery skipped" in caplog.text
+
+    def test_sycl_metadata_is_attached_when_detected(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        import abicheck.sycl_metadata as sycl_mod
+        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+
+        detected = sycl_mod.SyclMetadata(implementation="dpcpp")
+        monkeypatch.setattr(sycl_mod, "parse_sycl_metadata", lambda _dir: detected)
+        snap = self._snap()
+        with caplog.at_level("INFO", logger="abicheck.service"):
+            _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+        assert snap.sycl is detected
+        assert "SYCL metadata attached" in caplog.text
+
+    def test_sycl_detection_failure_attaches_nothing(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        import abicheck.sycl_metadata as sycl_mod
+        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+
+        monkeypatch.setattr(
+            sycl_mod,
+            "parse_sycl_metadata",
+            lambda _dir: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        snap = self._snap()
+        with caplog.at_level("DEBUG", logger="abicheck.service"):
+            _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+        assert snap.sycl is None
+        assert "SYCL metadata extraction skipped" in caplog.text
+
+    def test_a_non_sycl_library_attaches_nothing_quietly(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import abicheck.sycl_metadata as sycl_mod
+        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+
+        monkeypatch.setattr(sycl_mod, "parse_sycl_metadata", lambda _dir: None)
+        snap = self._snap()
+        _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+        assert snap.sycl is None
+
+    def test_a_library_with_no_numpy_capi_attaches_nothing(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import abicheck.numpy_capi as numpy_capi_mod
+        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
+
+        monkeypatch.setattr(
+            numpy_capi_mod, "extract_numpy_capi_surface", lambda _path: None
+        )
+        snap = self._snap()
+        _try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
+        assert snap.numpy_capi is None

@@ -327,6 +327,27 @@ class CompareRequest:
             errors.append(f"policy file not found: {self.policy_file_path}")
         if self.env_matrix_path is not None and not Path(self.env_matrix_path).exists():
             errors.append(f"environment matrix file not found: {self.env_matrix_path}")
+        # ADR-049 Phase 6 (Codex review): the same two rules the CLI applies
+        # to --contract, so a typed caller fails fast and with identical text
+        # instead of having the mode silently ignored (contract_evaluation
+        # off) or raising a raw ValueError deep in the pipeline after input
+        # resolution (bad value).
+        if self.contract_mode is not None:
+            from .contract_relevance_types import ContractMode
+
+            allowed_modes = {mode.value for mode in ContractMode}
+            if self.contract_mode not in allowed_modes:
+                errors.append(
+                    f"unsupported contract mode {self.contract_mode!r}: "
+                    f"choose from {', '.join(sorted(allowed_modes))}"
+                )
+            if not self.contract_evaluation:
+                errors.append(
+                    "contract_mode requires contract_evaluation: it selects "
+                    "which evidence domain the shadow contract evaluator "
+                    "judges against, and without that flag no contract "
+                    "decision is computed at all"
+                )
         if self.depth is not None:
             from .buildsource.scan_levels import USER_DEPTHS
 

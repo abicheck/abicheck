@@ -1754,6 +1754,21 @@ whose target is undeclared, directly or through a chain — reports that edge
 and correctly degrades the same finding from `PROVEN_OUT_OF_CONTRACT` to
 `UNKNOWN_UNRESOLVED`. The guard is satisfiable, not vacuous.
 
+A token must match a registered spelling **as written**. Accepting its bare
+leaf as well — an earlier revision did — resolved a qualified edge through an
+unrelated record that merely shares the leaf: with `ns::Missing` absent and
+`other::Missing` present, the edge counted as resolved and exclusion stayed
+provable while a type reachable only through the omitted definition could be
+proven out (Codex review). The one legitimate fallback is narrower and
+keyed on what the snapshot actually records: a leaf may absorb a
+*more*-qualified token only when it is the complete identity of a node
+carrying no scope of its own — the producer-side scope loss that stores
+libstdc++'s `std::string` typedef under the bare key `string`. A node that
+does record a scope never lends its leaf to a different one. Both directions
+are measured: dropping the fallback outright made the real C++ library report
+`std::string` unresolved, and keeping it unconditional made the synthetic
+`ns::Missing` case resolve wrongly.
+
 `exclusion_is_provable` folds in every incompleteness signal rather than
 leaving some to the caller: an observed table, at least one resolved root,
 **every** root carrying real signature types (`all_roots_typed`, which the

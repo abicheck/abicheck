@@ -34,4 +34,14 @@
   are resolved through `type_reachability.py`'s namespace-suffix and
   stdlib-stripping machinery, so a partially-qualified or bare standard-library
   spelling still resolves; toolchain-owned records' internals and dependent
-  (`typename`/`template`) spellings are excluded as non-edges.
+  (`typename`/`template`) spellings are excluded as non-edges. A token must
+  match a registered spelling as written — a qualified edge no longer resolves
+  through an unrelated record that merely shares its leaf — except where the
+  leaf names a node the snapshot records no scope for at all, which is the
+  producer-side scope loss that makes a bare typedef key legitimate.
+
+- **`CompareRequest` validates `contract_mode`** — an unsupported value, or a
+  mode requested with `contract_evaluation` off, is now a pre-flight
+  `validation_errors()` entry with the same wording the CLI uses, instead of
+  being silently ignored or surfacing as a raw `ValueError` after input
+  resolution.

@@ -1136,3 +1136,44 @@ class TestUnresolvedTypeEdges:
         surf = compute_export_surface(snap)
         assert not surf.unresolved_type_edges
         assert "Mode" in surf.export_types
+
+    def test_a_qualified_token_resolves_a_scope_losing_producer_key(self) -> None:
+        # The reverse of the case above: direct-clang stores a typedef under
+        # its bare `node["name"]`, losing the namespace, while the signature
+        # spells it qualified. Nothing in the snapshot contradicts that
+        # scope, so the edge resolves.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("std::string *",))],
+            types=[],
+            typedefs={"string": "basic_string<char>"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unresolved_type_edges
+        assert surf.exclusion_is_provable
+
+    def test_a_qualified_token_does_not_resolve_through_a_rival_scope(self) -> None:
+        # `ns::Missing` is absent while an unrelated `other::Missing` exists:
+        # accepting the shared leaf would walk the wrong record and let a
+        # type reachable only through the omitted definition be proven out
+        # (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("ns::Missing *",))],
+            types=[
+                RecordType(
+                    name="Missing",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="other::Missing",
+                ),
+                _rec("Internal"),
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unresolved_type_edges == frozenset({"ns::Missing"})
+        assert not surf.exclusion_is_provable

@@ -514,8 +514,14 @@ def _resolvable_type_spellings(
     snap: AbiSnapshot,
     record_by_name: dict[str, list[RecordType]],
     enum_by_name: dict[str, list[EnumType]],
-) -> frozenset[str]:
-    """Every spelling that names a record, enum, or typedef this snapshot has.
+) -> tuple[frozenset[str], frozenset[str]]:
+    """``(spellings, unscoped_leaves)`` for this snapshot's known nodes.
+
+    *spellings* is every spelling that names a record, enum, or typedef the
+    snapshot has. *unscoped_leaves* is the subset of those that are the
+    **complete** recorded identity of a node carrying no scope of its own --
+    the only spellings a *more*-qualified token may fall back to, see
+    :func:`_edge_is_unresolved`.
 
     Membership here means "this edge lands on a node we know", which is the
     only question :func:`_unresolved_type_edges` asks -- deliberately *not*
@@ -546,20 +552,61 @@ def _resolvable_type_spellings(
         if stripped:
             spellings.add(stripped)
             spellings.update(_namespace_suffix_spellings(stripped))
-    return frozenset(spellings)
+
+    # A node whose own recorded identity carries no scope: its bare name is
+    # everything the snapshot knows about where it lives, so a token that
+    # spells it with a scope contradicts nothing. A node that *does* record
+    # a scope is excluded -- its leaf must not absorb a differently-scoped
+    # token (see `_edge_is_unresolved`).
+    # Two separately-typed comprehensions rather than one over a mixed
+    # `(*snap.types, *snap.enums)` tuple, whose element type mypy widens to
+    # `object`.
+    identities: list[tuple[str, str | None]] = [
+        (rec.name, rec.qualified_name) for rec in snap.types
+    ]
+    identities += [(en.name, en.qualified_name) for en in snap.enums]
+    scoped_leaves = {
+        _namespace_suffix_spellings(qualified)[-1]
+        for name, qualified in identities
+        if qualified and qualified != name
+    }
+    unscoped: set[str] = set()
+    for name, qualified in identities:
+        identity = qualified or name
+        if "::" not in identity and identity not in scoped_leaves:
+            unscoped.add(identity)
+    for alias in snap.typedefs:
+        if "::" not in alias and alias not in scoped_leaves:
+            unscoped.add(alias)
+    return frozenset(spellings), frozenset(unscoped)
 
 
-def _edge_is_unresolved(type_str: str | None, resolvable: frozenset[str]) -> set[str]:
+def _edge_is_unresolved(
+    type_str: str | None,
+    resolvable: frozenset[str],
+    unscoped_leaves: frozenset[str] = frozenset(),
+) -> set[str]:
     """Identifiers in *type_str* that name nothing this snapshot knows.
 
     Each ``_IDENT_RE`` token is judged on its own -- a template spelling
     like ``Wrapper<Payload>`` carries two independent edges, and either can
-    be the missing one. Both the token as written and its bare leaf count as
-    the same edge (the token resolves if *either* spelling does), which is
-    why this does not reuse :func:`~abicheck.surface._type_identifiers`:
-    that helper flattens both readings into one set, so a qualified token
-    whose bare tail happens to be unknown would look like a second, missing
-    edge.
+    be the missing one. This does not reuse
+    :func:`~abicheck.surface._type_identifiers`, which flattens a token and
+    its bare tail into one set: a qualified token whose bare tail happens to
+    be unknown would then look like a second, missing edge.
+
+    A token must match a registered spelling **as written**. An earlier
+    revision also accepted its bare leaf, which resolved a qualified edge
+    through an unrelated record that merely shares the leaf: with
+    ``ns::Missing`` absent and ``other::Missing`` present, the edge counted
+    as resolved, the closure walked the wrong record, and
+    ``exclusion_is_provable`` stayed true while a type reachable only
+    through the omitted definition could be proven out (Codex review,
+    confirmed with a minimal snapshot). Nothing legitimate needs that
+    fallback: :func:`_resolvable_type_spellings` already registers each
+    node's full identity *and* every namespace-suffix spelling of it, so a
+    backend that partially qualifies or fully bares a name still matches --
+    what it will not do is invent a scope the snapshot never recorded.
     """
     if not _is_real_type(type_str) or type_str is None:
         return set()
@@ -576,11 +623,12 @@ def _edge_is_unresolved(type_str: str | None, resolvable: frozenset[str]) -> set
         return set()
     missing: set[str] = set()
     for tok in _IDENT_RE.findall(type_str):
-        if tok in _TYPE_NOISE:
+        if tok in _TYPE_NOISE or tok in resolvable:
             continue
-        bare = _namespace_suffix_spellings(tok)[-1]
-        if tok not in resolvable and bare not in resolvable:
-            missing.add(tok)
+        leaf = _namespace_suffix_spellings(tok)[-1]
+        if leaf != tok and leaf in unscoped_leaves:
+            continue
+        missing.add(tok)
     return missing
 
 
@@ -614,6 +662,7 @@ def _unresolved_type_edges(
     surface: ExportSurface,
     reached_types: set[str],
     resolvable: frozenset[str],
+    unscoped_leaves: frozenset[str],
 ) -> frozenset[str]:
     """Type identifiers reachable from an export root that name nothing known.
 
@@ -668,7 +717,7 @@ def _unresolved_type_edges(
     seen_aliases: set[str] = set()
 
     def scan(type_str: str | None) -> None:
-        unresolved.update(_edge_is_unresolved(type_str, resolvable))
+        unresolved.update(_edge_is_unresolved(type_str, resolvable, unscoped_leaves))
         for alias in _followed_typedef_aliases(type_str, snap, surface):
             if alias in seen_aliases:
                 continue
@@ -832,6 +881,6 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         snap,
         surface,
         surface.export_types,
-        _resolvable_type_spellings(snap, record_by_name, enum_by_name),
+        *_resolvable_type_spellings(snap, record_by_name, enum_by_name),
     )
     return surface
