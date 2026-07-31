@@ -1729,21 +1729,36 @@ than tuned away:
 | `_S_local_capacity` | A static constant in an array bound, inside `basic_string` — same exclusion |
 | `_Alloc` via `allocator_type`/`pointer` | libstdc++ *member* typedefs, stored under bare unattributable keys by the direct-clang backend. Typedef *targets* are not scanned at all — see below |
 
-Typedef targets are deliberately outside the scan. The motivating example —
-a snapshot recording parameter type `Alias` while omitting
-`typedef Alias = Internal` — is caught by the *signature* scan, since `Alias`
-resolves to nothing; target scanning would add only the narrower
-"alias present, target absent" shape, and against a real library it produced
-nothing but the bare-key noise above. A dependent spelling (`typename`,
-`template` — C++'s own markers, not a naming heuristic) is likewise not an
-edge, since it names nothing until instantiation.
+A spelling that resolves to a **typedef** is followed to its target,
+transitively. The motivating example — a snapshot recording parameter type
+`Alias` while omitting `typedef Alias = Internal` — is already caught by the
+*signature* scan, since `Alias` itself resolves to nothing; following adds
+the narrower "alias present, its target absent" shape, which is invisible to
+that scan because the alias key resolves fine (CodeRabbit review). An earlier
+revision skipped targets entirely, on the measurement above — that was
+over-broad: the noise comes from *how* an alias is reached, not from
+following one. Following happens only from an already-scanned spelling,
+never over `snap.typedefs` wholesale, and an ambiguous alias key is not
+followed; together those keep libstdc++'s bare-key alias templates
+(`"vector"`, `"basic_string"`, colliding with the real records) and its
+member typedefs (reachable only by walking a toolchain record's internals,
+which the rule above already declines) out of the scan. A dependent spelling
+(`typename`, `template` — C++'s own markers, not a naming heuristic) is not
+an edge either, since it names nothing until instantiation.
 
-**Result, measured after the fix:** a pure-C library and the
-`std::`-carrying C++ library both report zero unresolved edges and
-`exclusion_is_provable = True`, while a synthetic snapshot whose export
-signature names an undeclared type reports that edge and correctly degrades
-the same finding from `PROVEN_OUT_OF_CONTRACT` to `UNKNOWN_UNRESOLVED`. The
-guard is satisfiable, not vacuous.
+**Result, measured after the fix** (re-measured with typedef following on):
+a pure-C library and the `std::`-carrying C++ library both report zero
+unresolved edges and `exclusion_is_provable = True`, while a synthetic
+snapshot whose export signature names an undeclared type — or names an alias
+whose target is undeclared, directly or through a chain — reports that edge
+and correctly degrades the same finding from `PROVEN_OUT_OF_CONTRACT` to
+`UNKNOWN_UNRESOLVED`. The guard is satisfiable, not vacuous.
+
+`exclusion_is_provable` folds in every incompleteness signal rather than
+leaving some to the caller: an observed table, at least one resolved root,
+**every** root carrying real signature types (`all_roots_typed`, which the
+evaluator used to re-check separately for the same outcome), no unaccounted
+export, and no unresolved type edge (CodeRabbit review).
 
 Three membership primitives shared by both domains (`_symbol_matches`,
 `_type_candidates`, `_confirmed_type_matches`) were extracted from
