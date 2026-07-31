@@ -103,6 +103,7 @@ from .compatibility_evaluation_wiring import (
     RoutedPackAssignment,
     internal_namespaces_candidate,
     legacy_contract_mode_candidate,
+    load_selected_packs,
     resolve_pack_field_assignments,
     resolve_policy_pack_overrides,
     resolve_selected_packs,
@@ -305,6 +306,28 @@ class SuppressionSource:
 
 
 @dataclass(frozen=True)
+class PublicSymbolsList:
+    """A selected ``--public-symbols-list`` file, already read.
+
+    Kept apart from the inline ``--public-symbol`` values rather than merged
+    into them: flattening the two lost which symbols came from the file, so
+    the receipt for ``surface.explicit_scope`` named only ``--public-symbol``
+    and no path — even for a list-file-only invocation, which a replay then
+    had no way to reproduce (Codex review).
+    """
+
+    path: str | None
+    items: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "items", tuple(self.items))
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> PublicSymbolsList:
+        return cls(path=str(path), items=read_symbols_list(path))
+
+
+@dataclass(frozen=True)
 class ExplicitCompatibilityInputs:
     """What the user stated on *this* invocation (CLI flags / API request).
 
@@ -334,7 +357,11 @@ class ExplicitCompatibilityInputs:
     policy_file_sha256: str | None = None
     #: ``--public-symbol``/``--public-symbols-list`` /
     #: ``CompareRequest.force_public_symbols`` (ADR-024 D6 widening overlay).
+    #: Inline values only -- a ``--public-symbols-list`` file is carried
+    #: separately so the receipt can name it.
     public_symbols: tuple[str, ...] = ()
+    #: An already-read ``--public-symbols-list`` file.
+    public_symbols_list: PublicSymbolsList | None = None
     #: An already-read ``--suppress`` source.
     suppression: SuppressionSource | None = None
     #: ``--exit-code-scheme``. ``"auto"`` is a stated selection whose value is
@@ -530,11 +557,17 @@ def collect_force_public_symbols(
     """
     out: set[str] = {s.strip() for s in public_symbols if s.strip()}
     if symbols_list is not None:
-        for raw in Path(symbols_list).read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if line and not line.startswith("#"):
-                out.add(line)
+        out.update(read_symbols_list(symbols_list))
     return out
+
+
+def read_symbols_list(path: str | Path) -> tuple[str, ...]:
+    """The symbols named by a ``--public-symbols-list`` file, in file order."""
+    return tuple(
+        line
+        for raw in Path(path).read_text(encoding="utf-8").splitlines()
+        if (line := raw.strip()) and not line.startswith("#")
+    )
 
 
 def file_sha256(path: str | Path) -> str | None:
@@ -589,10 +622,11 @@ def _explicit_scope(
 ) -> tuple[DigestedItems | None, ValueProvenance]:
     """Resolve ``surface.explicit_scope`` -- an *additive* overlay field.
 
-    ``--public-symbol``/``--public-symbols-list`` and ``scope.public_symbols``
+    ``--public-symbol``, ``--public-symbols-list`` and ``scope.public_symbols``
     are documented (ADR-037 D4, ``cli_helpers_compare.resolve_compare_config``)
     as merging, not overriding: the CLI list widens the project's rather than
-    replacing it. That is a genuine exception to D7's per-field
+    replacing it. Each of the three is recorded as its own ``selected_by``
+    entry, with the path of the file it came from where there is one. That is a genuine exception to D7's per-field
     highest-layer-wins rule, and it is the live behavior, so the resolved
     value is the union of every contributing layer. The receipt records the
     highest-precedence contributor as the provenance layer and lists **every**
@@ -614,6 +648,19 @@ def _explicit_scope(
         winning_layer = layer
         selected_by.append(SelectedByEntry(layer=layer, option="--public-symbol"))
         merged.extend(explicit.public_symbols)
+    # The list file is its own contributor, with its own path: a replay has to
+    # be able to tell "these symbols were typed" from "these came from that
+    # file" (Codex review).
+    if explicit.public_symbols_list is not None and explicit.public_symbols_list.items:
+        winning_layer = layer
+        selected_by.append(
+            SelectedByEntry(
+                layer=layer,
+                option="--public-symbols-list",
+                path=explicit.public_symbols_list.path,
+            )
+        )
+        merged.extend(explicit.public_symbols_list.items)
     if project is not None and project.public_symbols:
         if winning_layer is SelectorLayer.BUILT_IN_DEFAULT:
             winning_layer = SelectorLayer.PROJECT_CONFIG
@@ -726,6 +773,11 @@ def resolve_compatibility_evaluation_config(
             pinned_gate[field_name] = _STATED_ELSEWHERE
 
     pack_option = "--pack" if front_end is FrontEnd.CLI else "pack_paths"
+    # Read each manifest exactly once for this whole resolution: the three
+    # pack resolvers below would otherwise re-read them, and a manifest edited
+    # between those reads would leave one configuration's receipt entries
+    # carrying different identities for the same pack (CodeRabbit review).
+    loaded_packs = load_selected_packs(pack_paths)
     packs_by_field = resolve_selected_packs(
         pack_paths,
         explicit_overrides={
@@ -739,14 +791,18 @@ def resolve_compatibility_evaluation_config(
         # API did (Codex review).
         layer=layer,
         option=pack_option,
+        loaded=loaded_packs,
     )
     # Each entry carries its own pack identity/path, so a field a pack filled
     # gets a receipt naming the exact manifest revision it came from.
     contract_pack_fields = resolve_pack_field_assignments(
-        pack_paths, PackKind.CONTRACT, explicit_overrides=pinned_contract
+        pack_paths,
+        PackKind.CONTRACT,
+        explicit_overrides=pinned_contract,
+        loaded=loaded_packs,
     )
     gate_pack_fields = resolve_pack_field_assignments(
-        pack_paths, PackKind.GATE, explicit_overrides=pinned_gate
+        pack_paths, PackKind.GATE, explicit_overrides=pinned_gate, loaded=loaded_packs
     )
 
     # ── contract ────────────────────────────────────────────────────────────
@@ -771,6 +827,10 @@ def resolve_compatibility_evaluation_config(
             scope_public_headers=bool(project.scope_public),
             scope_public_headers_is_explicit=project.scope_public is not None,
             layer=SelectorLayer.PROJECT_CONFIG,
+            # The project's own key and file, not the CLI flag's spelling: the
+            # receipt has to name the source a replay would have to re-read.
+            option="scope.public",
+            path=project.path,
         )
         if project is not None
         else None
@@ -875,7 +935,7 @@ def resolve_compatibility_evaluation_config(
 
     policy_packs, prov[POLICY_PACKS_FIELD] = packs_by_field[POLICY_PACKS_FIELD]
     policy_overrides = resolve_policy_pack_overrides(
-        pack_paths, explicit_overrides=policy_overrides_explicit
+        pack_paths, explicit_overrides=policy_overrides_explicit, loaded=loaded_packs
     )
     prov[POLICY_OVERRIDES_FIELD] = _overrides_provenance(
         layer,
@@ -1031,6 +1091,9 @@ def resolve_compatibility_evaluation_config(
         prov[SUPPRESSIONS_FIELD] = ValueProvenance(
             layer=layer,
             source_kind="suppression_file",
+            # Same rule as every other file-derived entry: the receipt names
+            # the digest of the source, not just its path (CodeRabbit review).
+            sha256=explicit.suppression.sha256,
             path=explicit.suppression.path,
             selected_by=(
                 SelectedByEntry(
@@ -1176,22 +1239,23 @@ def compare_cli_inputs(
     the command itself carries -- silently ignoring a path the invocation
     really named would make the resolved configuration misrepresent the run.
 
-    ``--public-symbol`` and ``--public-symbols-list`` are merged the way the
-    live CLI merges them (:func:`collect_force_public_symbols`), so a
-    list-file-only invocation resolves a real ``surface.explicit_scope``.
+    ``--public-symbols-list`` is read into its own
+    :class:`PublicSymbolsList` rather than flattened into ``public_symbols``,
+    so a list-file-only invocation resolves a real ``surface.explicit_scope``
+    *and* a receipt that names the file it came from. The union itself is
+    formed in :func:`_explicit_scope`, matching what the live CLI's
+    :func:`collect_force_public_symbols` produces.
     """
     typed = set(explicit_parameters)
 
     def _defaulted(name: str) -> Any:
         return kwargs.get(name) if name in typed else None
 
-    public_symbols = tuple(
-        sorted(
-            collect_force_public_symbols(
-                tuple(kwargs.get("public_symbols") or ()),
-                kwargs.get("public_symbols_list"),
-            )
-        )
+    symbols_list_path = kwargs.get("public_symbols_list")
+    symbols_list = (
+        PublicSymbolsList.from_file(symbols_list_path)
+        if symbols_list_path is not None
+        else None
     )
     if policy_file is None and kwargs.get("policy_file_path") is not None:
         policy_file = _load_policy_file(kwargs["policy_file_path"])
@@ -1205,7 +1269,8 @@ def compare_cli_inputs(
         scope_public_headers=_defaulted("scope_public_headers"),
         policy_base=_defaulted("policy"),
         policy_file=policy_file,
-        public_symbols=public_symbols,
+        public_symbols=tuple(kwargs.get("public_symbols") or ()),
+        public_symbols_list=symbols_list,
         suppression=suppression,
         exit_code_scheme=kwargs.get("exit_code_scheme"),
         severity_preset=kwargs.get("severity_preset"),

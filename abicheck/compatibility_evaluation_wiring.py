@@ -123,6 +123,8 @@ def legacy_contract_mode_candidate(
     scope_public_headers: bool,
     scope_public_headers_is_explicit: bool,
     layer: SelectorLayer = SelectorLayer.LEGACY_ALIAS,
+    option: str | None = None,
+    path: str | None = None,
 ) -> FieldCandidate | None:
     """Build the ``contract.mode`` candidate the legacy scope flag contributes.
 
@@ -141,9 +143,12 @@ def legacy_contract_mode_candidate(
     *layer* exists for the one legitimate non-CLI source of this same legacy
     spelling: ``.abicheck.yml``'s ``scope.public`` key, which states the same
     aliased value at :data:`~abicheck.contract_relevance_types.SelectorLayer.PROJECT_CONFIG`
-    rather than as a flag typed on this invocation. The spelling is the
-    legacy one either way; the layer is what says *where* it was stated
-    (D7 resolves precedence by layer, not by spelling).
+    rather than as a flag typed on this invocation. D7 resolves precedence by
+    layer, not by spelling -- but the *receipt* still has to name the real
+    source, so such a caller passes its own *option* (``scope.public``) and
+    *path* too. Defaulting those to the CLI flag's spelling with no path made
+    a project-config receipt claim a flag the user never typed, and gave a
+    replay no way to find the file it actually came from (Codex review).
     """
     if not scope_public_headers_is_explicit:
         return None
@@ -152,7 +157,7 @@ def legacy_contract_mode_candidate(
         if scope_public_headers
         else LegacyScopeFlag.NO_SCOPE_PUBLIC_HEADERS
     )
-    option = (
+    selector = option or (
         "--scope-public-headers"
         if scope_public_headers
         else "--no-scope-public-headers"
@@ -162,7 +167,10 @@ def legacy_contract_mode_candidate(
             layer=layer,
             source_kind="legacy_scope_flag",
             reference=flag.value,
-            selected_by=(SelectedByEntry(layer=layer, option=option),),
+            path=path,
+            selected_by=(
+                SelectedByEntry(layer=layer, option=selector, path=path),
+            ),
         ),
         value=LEGACY_SCOPE_FLAG_CONTRACT_MODE[flag],
     )
@@ -333,6 +341,21 @@ _PACKS_FIELD_BY_KIND: dict[PackKind, str] = {
 _BUILT_IN_DEFAULT_PACKS: tuple[ImmutableIdentity, ...] = ()
 
 
+def load_selected_packs(
+    pack_paths: Sequence[str | Path],
+) -> list[tuple[str, LoadedPack]]:
+    """Load each manifest in *pack_paths* once, paired with its own path.
+
+    The three pack resolvers below each accept the result as ``loaded``. A
+    caller resolving one whole configuration should load here and pass the
+    same list to all of them: they would otherwise re-read, re-parse and
+    re-digest every manifest per call, and a manifest edited *between* those
+    reads would produce receipt entries carrying different identities for
+    what is meant to be one configuration (CodeRabbit review).
+    """
+    return [(str(path), load_pack_manifest(path)) for path in pack_paths]
+
+
 def resolve_selected_packs(
     pack_paths: Sequence[str | Path],
     *,
@@ -341,6 +364,7 @@ def resolve_selected_packs(
     ),
     layer: SelectorLayer = SelectorLayer.EXPLICIT_CLI,
     option: str = "--pack",
+    loaded: Sequence[tuple[str, LoadedPack]] | None = None,
 ) -> dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]]:
     """Resolve a real ``--pack <path>``-style CLI/config input into
     ``contract.packs``/``policy.packs``/``gate.packs`` field values.
@@ -400,13 +424,13 @@ def resolve_selected_packs(
 
     Not called from any live command yet -- see module docstring.
     """
-    loaded = [(str(path), load_pack_manifest(path)) for path in pack_paths]
-    grouped = assignments_for_conflict_check([pack for _, pack in loaded])
+    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
+    grouped = assignments_for_conflict_check([pack for _, pack in entries])
 
     by_kind: dict[PackKind, list[tuple[str, LoadedPack]]] = {
         kind: [] for kind in PackKind
     }
-    for path, pack in loaded:
+    for path, pack in entries:
         by_kind[pack.kind].append((path, pack))
 
     result: dict[str, tuple[tuple[ImmutableIdentity, ...], ValueProvenance]] = {}
@@ -461,6 +485,7 @@ def resolve_policy_pack_overrides(
     pack_paths: Sequence[str | Path],
     *,
     explicit_overrides: Mapping[str, Verdict] = MappingProxyType({}),
+    loaded: Sequence[tuple[str, LoadedPack]] | None = None,
 ) -> Mapping[str, Verdict]:
     """Fold every selected ``kind: policy`` pack's ``ChangeKind`` slug ->
     :class:`~abicheck.change_registry_types.Verdict` assignments into one
@@ -506,8 +531,8 @@ def resolve_policy_pack_overrides(
     loading the given manifests; not called from any live command yet (see
     module docstring).
     """
-    loaded = [load_pack_manifest(path) for path in pack_paths]
-    policy_packs = [pack for pack in loaded if pack.kind is PackKind.POLICY]
+    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
+    policy_packs = [pack for _, pack in entries if pack.kind is PackKind.POLICY]
 
     detect_pack_conflicts(
         [(pack.identity, pack.assignments) for pack in policy_packs],
@@ -639,6 +664,7 @@ def resolve_pack_field_assignments(
     kind: PackKind,
     *,
     explicit_overrides: Mapping[str, Hashable] = MappingProxyType({}),
+    loaded: Sequence[tuple[str, LoadedPack]] | None = None,
 ) -> dict[str, RoutedPackAssignment]:
     """Fold every selected pack of *kind* into one routed, typed
     ``field name -> assignment`` mapping.
@@ -695,8 +721,8 @@ def resolve_pack_field_assignments(
         )
     routes = PACK_FIELD_ROUTES_BY_KIND[kind]
 
-    loaded = [(str(path), load_pack_manifest(path)) for path in pack_paths]
-    selected = [(path, pack) for path, pack in loaded if pack.kind is kind]
+    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
+    selected = [(path, pack) for path, pack in entries if pack.kind is kind]
 
     detect_pack_conflicts(
         [(pack.identity, pack.assignments) for _, pack in selected],

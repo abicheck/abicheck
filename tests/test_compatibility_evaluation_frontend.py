@@ -49,6 +49,7 @@ from abicheck.compatibility_evaluation_frontend import (
     ProjectCompatibilityInputs,
     SuppressionSource,
     builtin_policy_identity,
+    collect_force_public_symbols,
     compare_cli_inputs,
     compare_request_inputs,
     compatibility_config_from_compare_request,
@@ -1139,10 +1140,43 @@ class TestPathInputsAreNotSilentlyIgnored:
     def test_inline_symbols_and_the_list_file_merge(self, tmp_path):
         listed = tmp_path / "symbols.txt"
         listed.write_text("from_file\n")
+        cfg = _resolve(
+            explicit=compare_cli_inputs(
+                {"public_symbols": ("inline",), "public_symbols_list": listed}
+            )
+        )
+        assert cfg.surface.explicit_scope is not None
+        assert cfg.surface.explicit_scope.items == ("from_file", "inline")
+
+    def test_the_two_symbol_sources_stay_separately_attributed(self, tmp_path):
+        # Flattening them lost which symbols came from the file, leaving a
+        # receipt that named only --public-symbol and no path.
+        listed = tmp_path / "symbols.txt"
+        listed.write_text("from_file\n")
         inputs = compare_cli_inputs(
             {"public_symbols": ("inline",), "public_symbols_list": listed}
         )
-        assert inputs.public_symbols == ("from_file", "inline")
+        assert inputs.public_symbols == ("inline",)
+        assert inputs.public_symbols_list is not None
+        assert inputs.public_symbols_list.items == ("from_file",)
+
+        cfg = _resolve(explicit=inputs)
+        entries = {
+            (e.option, e.path) for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
+        }
+        assert entries == {
+            ("--public-symbol", None),
+            ("--public-symbols-list", str(listed)),
+        }
+
+    def test_a_list_only_invocation_names_the_file_in_its_receipt(self, tmp_path):
+        listed = tmp_path / "symbols.txt"
+        listed.write_text("from_file\n")
+        cfg = _resolve(explicit=compare_cli_inputs({"public_symbols_list": listed}))
+        selected_by = cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by
+        assert [(e.option, e.path) for e in selected_by] == [
+            ("--public-symbols-list", str(listed))
+        ]
 
     def test_cli_policy_file_path_is_loaded_when_not_pre_supplied(self, tmp_path):
         path = tmp_path / "policy.yml"
@@ -1241,3 +1275,78 @@ class TestReceiptMetadataIsCompared:
             )
         )
         assert cross_front_end_differences(cli, api) == []
+
+
+class TestProjectConfigProvenanceNamesItsSource:
+    def test_contract_mode_from_a_project_config_names_the_key_and_file(self, tmp_path):
+        # A PROJECT_CONFIG receipt claiming `--scope-public-headers`, with no
+        # path, cannot identify what a replay would have to re-read.
+        cfg = _resolve(
+            project=ProjectCompatibilityInputs(
+                path=str(tmp_path / ".abicheck.yml"), scope_public=False
+            )
+        )
+        prov = cfg.provenance[CONTRACT_MODE_FIELD]
+        assert prov.layer is SelectorLayer.PROJECT_CONFIG
+        assert prov.path == str(tmp_path / ".abicheck.yml")
+        assert [(e.option, e.path) for e in prov.selected_by] == [
+            ("scope.public", str(tmp_path / ".abicheck.yml"))
+        ]
+
+    def test_the_cli_flag_still_records_its_own_spelling(self):
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(scope_public_headers=False)
+        )
+        prov = cfg.provenance[CONTRACT_MODE_FIELD]
+        assert prov.layer is SelectorLayer.LEGACY_ALIAS
+        assert prov.path is None
+        assert [e.option for e in prov.selected_by] == ["--no-scope-public-headers"]
+
+
+class TestManifestsAreReadOncePerResolution:
+    def test_each_manifest_is_loaded_exactly_once(self, tmp_path, monkeypatch):
+        # Re-reading per resolver call is wasteful, and a manifest edited
+        # between those reads would leave one configuration's receipt entries
+        # carrying different identities for the same pack.
+        import abicheck.compatibility_evaluation_wiring as wiring
+
+        pack = _write_pack(
+            tmp_path / "c.yml",
+            pack_id="p",
+            kind="contract",
+            assignments="contract.unresolved: warn\n",
+        )
+        reads: list[str] = []
+        real = wiring.load_pack_manifest
+
+        def _counting(path):
+            reads.append(str(path))
+            return real(path)
+
+        monkeypatch.setattr(wiring, "load_pack_manifest", _counting)
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
+        assert cfg.contract.unresolved == "warn"
+        assert reads == [str(pack)]
+
+    def test_the_suppression_receipt_carries_its_source_digest(self, tmp_path):
+        path = tmp_path / "s.yml"
+        path.write_text("version: 1\nsuppressions:\n  - symbol: foo\n    reason: ok\n")
+        source = SuppressionSource.from_file(path)
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(suppression=source))
+        assert cfg.provenance[SUPPRESSIONS_FIELD].sha256 == source.sha256
+
+
+class TestSymbolListParsing:
+    def test_the_shared_merge_helper_reads_both_sources(self, tmp_path):
+        # `cli_helpers_compare` re-exports this as `_collect_force_public_symbols`,
+        # so the live CLI and this resolver share one definition of the format.
+        listed = tmp_path / "symbols.txt"
+        listed.write_text("# comment\n\nfrom_file\n  spaced  \n")
+        assert collect_force_public_symbols(("inline", " ", ""), listed) == {
+            "inline",
+            "from_file",
+            "spaced",
+        }
+
+    def test_no_list_file_means_inline_symbols_only(self):
+        assert collect_force_public_symbols(("a", "b"), None) == {"a", "b"}
