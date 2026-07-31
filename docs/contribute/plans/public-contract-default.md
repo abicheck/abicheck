@@ -1615,6 +1615,34 @@ recorded in `AGENTS.md` as needing its own scoped design). The ambiguity set
 is computed from the un-augmented index, so the added keys can never make an
 existing name look ambiguous.
 
+**Known residue, deliberately not fixed here — an ambiguous bare tail is
+still enqueued alongside the qualified spelling.** `_type_identifiers` turns a
+signature type `ns1::Foo *` into *both* `ns1::Foo` and the bare `Foo`, and the
+bare one still resolves through `record_by_name`'s tail keys to every
+same-named record — so a signature naming `ns1::Foo` also pulls in whatever is
+reachable only through `ns2::Foo` (confirmed with a minimal snapshot:
+`OnlyNs2` landed in `export_types`). Now that the qualified spelling resolves
+exactly, that tail adds nothing but noise for this shape. Two things make the
+narrow patch the wrong call anyway:
+
+- The identical enqueueing happens again, one edge deeper, inside
+  `_walk_type_closure` itself, for a *kept type's own field or base* spelled
+  `ns1::Foo` (confirmed the same way). Fixing only the seed set would leave
+  the same leak reachable through any record field while making the invariant
+  look enforced — the correct fix is one shared rule in `surface.py`'s walk,
+  which is exactly the scoped design this PR does not take on.
+- Dropping the ambiguous tail key outright — the obvious local shortcut —
+  would flip the failure into the *dangerous* direction: castxml's own
+  convention lets a signature spell a namespaced record with the bare leaf
+  alone, and with no tail key that reference resolves to nothing, which
+  reports a genuinely reachable type `PROVEN_OUT_OF_CONTRACT`.
+
+Note the direction: this residue over-*includes* (an unrelated internal type
+reads `IN_CONTRACT`), the opposite of the qualified-owner bug above and of
+every other guard in this section. `surface.py`'s tail keys are deliberate
+over-keeping — "never hide a real break behind snapshot order" — which is the
+right default for the `public` domain and merely noisy for this one.
+
 **Measured, 2026-07-31 — the strictness is satisfiable on the DWARF path.**
 An earlier revision of this note guessed that the "no unmatched ABI-relevant
 export" rule would make `PROVEN_OUT_OF_CONTRACT` unreachable on a real C++

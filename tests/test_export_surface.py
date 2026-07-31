@@ -687,45 +687,10 @@ class TestMultiPlatformSpellings:
 
 
 class TestAmbiguityAndRuntimeOwnership:
-    def test_an_ambiguous_owner_is_not_seeded(self) -> None:
-        # `_walk_type_closure` resolves through `record_by_name`, keyed by
-        # bare names, so seeding the `Foo` shared by `ns1::Foo`/`ns2::Foo`
-        # walks both and pulls the unrelated one's fields in (Codex review).
-        snap = AbiSnapshot(
-            library="l",
-            version="1",
-            functions=[_fn("ns1::Foo::run", "_ZN3ns13Foo3runEv")],
-            types=[
-                RecordType(
-                    name="Foo",
-                    kind="struct",
-                    size_bits=64,
-                    qualified_name="ns1::Foo",
-                    fields=[TypeField(name="a", type="AOnly")],
-                ),
-                RecordType(
-                    name="Foo",
-                    kind="struct",
-                    size_bits=64,
-                    qualified_name="ns2::Foo",
-                    fields=[TypeField(name="b", type="BOnly")],
-                ),
-                _rec("AOnly"),
-                _rec("BOnly"),
-            ],
-            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN3ns13Foo3runEv")]),
-        )
-        assert "BOnly" not in compute_export_surface(snap).export_types
-
-    def test_an_unambiguous_owner_is_still_seeded(self) -> None:
-        snap = AbiSnapshot(
-            library="l",
-            version="1",
-            functions=[_fn("Widget::draw", "_ZN6Widget4drawEv")],
-            types=[_rec("Widget", fields=("Pixel",)), _rec("Pixel")],
-            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN6Widget4drawEv")]),
-        )
-        assert {"Widget", "Pixel"} <= compute_export_surface(snap).export_types
+    # The owner-seeding positive control lives in
+    # `test_a_real_method_owner_is_still_seeded` above; the bare-name
+    # collision cases at the tail of this class supersede an earlier
+    # negative-only test of the same snapshot (CodeRabbit review).
 
     def test_macho_shift_does_not_steal_another_declarations_export(self) -> None:
         # A Mach-O library declaring both `foo` and `_foo` while exporting

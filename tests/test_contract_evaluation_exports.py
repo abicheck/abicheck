@@ -613,7 +613,33 @@ class TestExportsMode:
             ContractRelevance.IN_CONTRACT
         )
 
-    def test_vtable_slot_change_on_an_exported_method_is_in_contract(self) -> None:
+    @pytest.mark.parametrize(
+        ("symbol", "expected"),
+        [
+            (
+                "_ZN3Foo3barEv",
+                ContractEvaluationDecision(
+                    relevance=ContractRelevance.IN_CONTRACT,
+                    reason_code="export_root_membership",
+                    assurance=ContractAssurance.COMPLETE,
+                ),
+            ),
+            # The same producer shape on an *unexported* method resolves the
+            # other way -- the exception is an exact linker-root match, not a
+            # blanket "any mangled symbol counts".
+            (
+                "_ZN3Foo6secretEv",
+                ContractEvaluationDecision(
+                    relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
+                    reason_code="terminal_authoritative_exclusion",
+                    assurance=ContractAssurance.COMPLETE,
+                ),
+            ),
+        ],
+    )
+    def test_vtable_slot_change_resolves_by_exact_linker_root(
+        self, symbol: str, expected: ContractEvaluationDecision
+    ) -> None:
         # `diff_symbols._check_vtable_index_change` reuses the *type-level*
         # `TYPE_VTABLE_CHANGED` for a moved virtual slot but sets
         # `symbol=mangled` -- the method's own linker name. The blanket
@@ -627,28 +653,8 @@ class TestExportsMode:
             types=[_rec("Foo")],
             elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN3Foo3barEv")]),
         )
-        exp = self._exports(snap)
-        exported = Change(
-            kind=ChangeKind.TYPE_VTABLE_CHANGED,
-            symbol="_ZN3Foo3barEv",
-            description="",
-        )
-        assert self._evaluate(exported, exp) == ContractEvaluationDecision(
-            relevance=ContractRelevance.IN_CONTRACT,
-            reason_code="export_root_membership",
-            assurance=ContractAssurance.COMPLETE,
-        )
-        # The same producer shape on an *unexported* method still resolves
-        # the other way -- the exception is an exact linker-root match, not a
-        # blanket "any mangled symbol counts".
-        unexported = Change(
-            kind=ChangeKind.TYPE_VTABLE_CHANGED,
-            symbol="_ZN3Foo6secretEv",
-            description="",
-        )
-        assert self._evaluate(unexported, exp).relevance is (
-            ContractRelevance.PROVEN_OUT_OF_CONTRACT
-        )
+        c = Change(kind=ChangeKind.TYPE_VTABLE_CHANGED, symbol=symbol, description="")
+        assert self._evaluate(c, self._exports(snap)) == expected
 
     def test_a_source_spelled_type_level_symbol_still_never_matches(self) -> None:
         # The narrowing must not reopen the collision the rejection exists
