@@ -57,6 +57,14 @@ def _fn(name, mangled, ret="void", params=(), vis=Visibility.PUBLIC, origin=None
     )
 
 
+def _rec_q(name, qualified_name):
+    """A record whose recorded identity and qualified spelling differ, the
+    castxml/clang shape (`name` is the bare leaf)."""
+    return RecordType(
+        name=name, qualified_name=qualified_name, kind="struct", size_bits=64
+    )
+
+
 def _rec(name, fields=(), bases=(), origin=None):
     return RecordType(
         name=name,
@@ -1061,25 +1069,32 @@ class TestUnresolvedTypeEdges:
         assert surf.unresolved_type_edges == frozenset({"Gone"})
         assert not surf.exclusion_is_provable
 
-    def test_an_alias_colliding_only_with_toolchain_records_is_not_judged(self) -> None:
-        # The same shape with the colliding record toolchain-owned is
-        # libstdc++'s bare-key alias template (`"vector"` colliding with
-        # `std::vector`, target spelling that template's own parameter names).
-        # Measured: judging those targets put four false edges back on a real
-        # g++ library, which would block every exclusion for every C++ library
-        # -- the same "whose layout is this" rule already applied to a
-        # toolchain record's own fields.
+    def test_ownership_is_judged_per_token_not_per_alias(self) -> None:
+        # libstdc++'s bare-key alias template: `"vector"` collides with the
+        # record `std::vector` and its target spells that template's own
+        # *parameter* names. Judging those put four false edges back on a
+        # real g++ library, which would block every exclusion for every C++
+        # library, so they stay suppressed.
         snap = AbiSnapshot(
             library="l",
             version="1",
-            functions=[_fn("api", "api", params=("Foo *",))],
-            types=[_rec("std::Foo")],
-            typedefs={"Foo": "Gone"},
+            functions=[_fn("api", "api", params=("vector *",))],
+            types=[_rec_q("vector", "std::vector")],
+            typedefs={"vector": "std::vector<_Tp, _Alloc>"},
             elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
         )
+        assert compute_export_surface(snap).exclusion_is_provable
+
+        # But ownership belongs to the *token*, not to the alias that carried
+        # it: a user's own `using vector = std::vector<api::Missing>` shares
+        # the bare key with that same captured record, and an alias-level
+        # rule made it inherit the exclusion and lose a real edge (Codex
+        # review). `_Tp`/`std::vector` are still suppressed in this very
+        # target; only the concrete name is reported.
+        snap.typedefs = {"vector": "std::vector<api::Missing, _Alloc>"}
         surf = compute_export_surface(snap)
-        assert not surf.unresolved_type_edges
-        assert surf.exclusion_is_provable
+        assert surf.unresolved_type_edges == frozenset({"api::Missing"})
+        assert not surf.exclusion_is_provable
 
     def test_a_long_alias_chain_does_not_exhaust_the_stack(self) -> None:
         # The alias walk used to recurse once per link, so a chain longer

@@ -553,6 +553,14 @@ def _seed_export_roots(
 #: (see :func:`_edge_is_unresolved`).
 _DEPENDENT_SPELLING_RE = re.compile(r"\b(?:typename|template)\b")
 
+#: An identifier the C++ standard reserves to the *implementation*: one
+#: beginning ``_`` followed by an uppercase letter, or containing a double
+#: underscore anywhere ([lex.name]/3). A user type cannot legally carry one,
+#: so an unresolvable token of this shape is a toolchain-internal name --
+#: never a declaration this snapshot failed to carry. A language rule, not a
+#: libstdc++ naming convention (see :func:`_edge_is_unresolved`).
+_IMPLEMENTATION_RESERVED_RE = re.compile(r"^_[A-Z]|__")
+
 
 def _dependent_spans(type_str: str) -> list[tuple[int, int]]:
     """Character ranges of *type_str* a dependent marker actually governs.
@@ -629,11 +637,6 @@ class _SpellingIndex(NamedTuple):
     #: Bare identities of nodes carrying no scope of their own -- the only
     #: ones a *more*-qualified token may fall back to naming.
     unscoped_leaves: frozenset[str]
-    #: Typedef keys every one of whose colliding records/enums is
-    #: toolchain-owned -- libstdc++'s bare-key alias templates. Their targets
-    #: are not judged, for the same reason a toolchain record's own fields
-    #: are not (see :func:`_followed_typedef_aliases`).
-    toolchain_alias_keys: frozenset[str]
 
 
 #: A typedef's node identity. Prefixed so an alias can never be confused with
@@ -742,35 +745,10 @@ def _resolvable_type_spellings(
         if "::" not in alias and alias not in scoped_leaves:
             unscoped.add(alias)
 
-    # An alias key a record or enum also owns, where *every* colliding node
-    # is toolchain-owned: libstdc++'s bare-key alias templates. Measured on a
-    # real `g++` library -- `"vector" -> "std::vector<_Tp,
-    # polymorphic_allocator<_Tp>>"` collides with the record `std::vector`,
-    # and `"basic_string"` with `std::__cxx11::basic_string`. Judging those
-    # targets reports the template *parameter* names in them (`_Tp`,
-    # `_CharT`, `_Traits`) as missing edges, which is the same
-    # toolchain-internals noise `_unresolved_type_edges` already declines one
-    # level up -- and any one of them blocks every exclusion for every C++
-    # library. "Every colliding node" rather than "any" keeps the
-    # conservative direction: a library's own record sharing the key means
-    # the alias may well be its own, so it is still followed.
-    toolchain_aliases: set[str] = set()
-    for alias in snap.typedefs:
-        colliding = [
-            *record_by_name.get(alias, ()),
-            *enum_by_name.get(alias, ()),
-        ]
-        if colliding and all(
-            (node.qualified_name or node.name).startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)
-            for node in colliding
-        ):
-            toolchain_aliases.add(alias)
-
     return _SpellingIndex(
         {k: frozenset(v) for k, v in nodes_by_spelling.items()},
         {k: frozenset(v) for k, v in nodes_by_walk_key.items()},
         frozenset(unscoped),
-        frozenset(toolchain_aliases),
     )
 
 
@@ -837,11 +815,42 @@ def _edge_is_unresolved(
     missing: set[str] = set()
     for match in _IDENT_RE.finditer(type_str):
         tok = match.group(0)
-        if tok in _TYPE_NOISE or _is_dependent_token(match.start(), spans):
+        if (
+            tok in _TYPE_NOISE
+            or _is_dependent_token(match.start(), spans)
+            or _is_toolchain_owned_token(tok)
+        ):
             continue
         if not (_named_nodes(tok, index) & _walk_reached_nodes(tok, index)):
             missing.add(tok)
     return missing
+
+
+def _is_toolchain_owned_token(tok: str) -> bool:
+    """Whether *tok* names something the toolchain owns, not this library.
+
+    Two independent signals, both ownership rules rather than heuristics:
+    an implementation-reserved identifier
+    (:data:`_IMPLEMENTATION_RESERVED_RE`), and the stdlib namespaces
+    :data:`~abicheck.name_classification.STDLIB_TYPE_NAMESPACE_PREFIXES` --
+    the same "whose layout is this" question
+    :func:`_unresolved_type_edges` already asks about a record's own fields,
+    asked one level down about a single token.
+
+    This replaced a coarser rule that excluded a *whole alias target* when
+    the alias key collided with a toolchain-owned record (Codex review,
+    confirmed empirically). That keyed ownership on the colliding record
+    rather than on the alias, so a user's own ``using vector =
+    std::vector<api::Missing>`` -- sharing the bare key ``vector`` with a
+    captured ``std::vector`` -- inherited the exclusion and its genuinely
+    missing ``api::Missing`` edge went unreported. Judging per token is
+    strictly narrower: the toolchain names inside that target
+    (``_Tp``/``_CharT``/``_Traits``, ``std::basic_string``) are still
+    suppressed, while every concrete name in it is still judged.
+    """
+    return bool(_IMPLEMENTATION_RESERVED_RE.search(tok)) or tok.startswith(
+        STDLIB_TYPE_NAMESPACE_PREFIXES
+    )
 
 
 def _named_nodes(tok: str, index: _SpellingIndex) -> frozenset[str]:
@@ -884,9 +893,7 @@ def _walk_reached_nodes(tok: str, index: _SpellingIndex) -> frozenset[str]:
     return frozenset(reached)
 
 
-def _followed_typedef_aliases(
-    type_str: str | None, snap: AbiSnapshot, index: _SpellingIndex
-) -> set[str]:
+def _followed_typedef_aliases(type_str: str | None, snap: AbiSnapshot) -> set[str]:
     """Typedef keys named by *type_str* whose target is worth scanning too.
 
     A token is resolved to the alias key the closure *actually traversed*,
@@ -915,16 +922,13 @@ def _followed_typedef_aliases(
     The libstdc++ noise that guard *was* aimed at is real, and dropping the
     ambiguity condition alone brought it straight back -- measured, not
     assumed: a real ``g++`` library went from zero unresolved edges to four
-    (``_Tp``, ``_CharT``, ``_Traits``, ``std::basic_string``). What separates
-    the two cases is not ambiguity but **whose** node the alias collides
-    with: ``"vector"``/``"basic_string"`` collide with the records
-    ``std::vector``/``std::__cxx11::basic_string``, and their targets spell
-    that template's own *parameter* names. So the exclusion is keyed on
-    :data:`~abicheck.name_classification.STDLIB_TYPE_NAMESPACE_PREFIXES`
-    (:attr:`_SpellingIndex.toolchain_alias_keys`) -- the same "whose layout
-    is this" rule :func:`_unresolved_type_edges` already applies to a
-    toolchain record's own fields, one level up -- rather than on a
-    collision the library's own types can equally cause.
+    (``_Tp``, ``_CharT``, ``_Traits``, ``std::basic_string``). Those are
+    suppressed by :func:`_is_toolchain_owned_token`, which judges each
+    *token* by whose name it is, rather than by anything about the alias
+    that carried it. An alias-level rule was tried first and was wrong in
+    both directions: keyed on the colliding record's ownership, a user's own
+    ``using vector = std::vector<api::Missing>`` inherited the exclusion and
+    lost a real edge (Codex review, confirmed empirically).
     """
     if not _is_real_type(type_str) or type_str is None:
         return set()
@@ -935,7 +939,7 @@ def _followed_typedef_aliases(
         if tok in _TYPE_NOISE or _is_dependent_token(match.start(), spans):
             continue
         for ident in _type_identifiers(tok):
-            if ident in snap.typedefs and ident not in index.toolchain_alias_keys:
+            if ident in snap.typedefs:
                 aliases.add(ident)
     return aliases
 
@@ -1024,7 +1028,7 @@ def _unresolved_type_edges(
         while pending:
             current = pending.pop()
             unresolved.update(_edge_is_unresolved(current, index))
-            for alias in _followed_typedef_aliases(current, snap, index):
+            for alias in _followed_typedef_aliases(current, snap):
                 if alias in seen_aliases:
                     continue
                 seen_aliases.add(alias)
