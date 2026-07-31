@@ -44,6 +44,7 @@ from abicheck.compatibility_evaluation_frontend import (
     ExplicitCompatibilityInputs,
     FrontEnd,
     ProjectCompatibilityInputs,
+    PublicSymbolsList,
     SuppressionSource,
     compare_cli_inputs,
     compatibility_config_from_compare_request,
@@ -532,6 +533,56 @@ class TestSelectedButEmptySources:
         assert (
             cfg.provenance[EXPLICIT_SCOPE_FIELD].layer
             is SelectorLayer.BUILT_IN_DEFAULT
+        )
+
+
+class TestExplicitScopeIdentityCoversItsSources:
+    def _scope(self, path):
+        return _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                public_symbols_list=PublicSymbolsList.from_file(path)
+            )
+        ).surface.explicit_scope
+
+    def test_an_edit_that_leaves_the_items_identical_still_changes_the_digest(
+        self, tmp_path
+    ):
+        # Reading drops comments and blank lines and the union sorts and
+        # deduplicates, so the items alone cannot stand in for the file.
+        path = tmp_path / "symbols.txt"
+        path.write_text("foo\nbar\n")
+        before = self._scope(path)
+        path.write_text("# the public surface\nbar\nfoo\nfoo\n")
+        after = self._scope(path)
+        assert before.items == after.items == ("bar", "foo")
+        assert before.sha256 != after.sha256
+
+    def test_the_list_files_digest_is_over_its_raw_bytes(self, tmp_path):
+        path = tmp_path / "symbols.txt"
+        path.write_bytes(b"foo\r\nbar\r\n")
+        listed = PublicSymbolsList.from_file(path)
+        assert listed.items == ("foo", "bar")
+        assert listed.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def test_a_project_sources_digest_reaches_the_identity(self, tmp_path):
+        one, two = (
+            _resolve(
+                project=ProjectCompatibilityInputs(
+                    public_symbols=("foo",), path=str(tmp_path / "p.yml"), sha256=d
+                )
+            ).surface.explicit_scope
+            for d in ("a" * 64, "b" * 64)
+        )
+        assert one.items == two.items
+        assert one.sha256 != two.sha256
+
+    def test_inline_symbols_alone_digest_reproducibly(self):
+        # No external source to drift: the same typed values must resolve to
+        # the same identity every time.
+        first = _resolve(explicit=ExplicitCompatibilityInputs(public_symbols=("foo",)))
+        second = _resolve(explicit=ExplicitCompatibilityInputs(public_symbols=("foo",)))
+        assert (
+            first.surface.explicit_scope.sha256 == second.surface.explicit_scope.sha256
         )
 
 

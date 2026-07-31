@@ -322,13 +322,21 @@ class PublicSymbolsList:
 
     path: str | None
     items: tuple[str, ...] = ()
+    #: The digest of the file's raw bytes. The items alone cannot stand in for
+    #: it: reading drops comments and blank lines, and the union that forms
+    #: ``surface.explicit_scope`` sorts and deduplicates, so a real edit to
+    #: this file can leave the item list identical -- exactly the drift
+    #: :class:`~abicheck.compatibility_evaluation_config.DigestedItems` says a
+    #: digest exists to catch (Codex review, fresh evidence).
+    sha256: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "items", tuple(self.items))
 
     @classmethod
     def from_file(cls, path: str | Path) -> PublicSymbolsList:
-        return cls(path=str(path), items=read_symbols_list(path))
+        items, digest = read_symbols_list_with_digest(path)
+        return cls(path=str(path), items=items, sha256=digest)
 
 
 def _normalized_symbols(values: Iterable[str]) -> tuple[str, ...]:
@@ -418,6 +426,15 @@ class ProjectCompatibilityInputs:
     """
 
     path: str | None = None
+    #: The digest of the ``.abicheck.yml`` bytes these values were parsed
+    #: from, when the caller has it. Deliberately not computed here from
+    #: *path*: this object is built from an already-loaded ``BuildConfig``,
+    #: and re-reading the file to hash it could pair one content's digest
+    #: with another's values -- the same trap the policy-file and suppression
+    #: sources were fixed for. Left ``None``, a project-contributed value is
+    #: still recorded in the receipt by path; only byte-level drift in that
+    #: file goes undetected.
+    sha256: str | None = None
     #: ``scope.public`` -- the project-config spelling of the same legacy
     #: alias ``--scope-public-headers`` is (D2), stated at ``project_config``
     #: tier rather than typed on this invocation.
@@ -442,15 +459,24 @@ class ProjectCompatibilityInputs:
 
     @classmethod
     def from_build_config(
-        cls, cfg: BuildConfig | None, *, path: str | Path | None = None
+        cls,
+        cfg: BuildConfig | None,
+        *,
+        path: str | Path | None = None,
+        sha256: str | None = None,
     ) -> ProjectCompatibilityInputs | None:
         """Project a loaded ``.abicheck.yml`` onto the fields this resolver
         understands, or ``None`` when there is no config at all.
+
+        *sha256* is the digest of the bytes *cfg* was parsed from, which a
+        caller that read the file should pass so a composed receipt can catch
+        drift in it (see the field's own note on why it is not computed here).
         """
         if cfg is None:
             return None
         return cls(
             path=str(path) if path is not None else None,
+            sha256=sha256,
             scope_public=cfg.scope_public,
             public_symbols=tuple(cfg.public_symbols),
             exit_code_scheme=cfg.exit_code_scheme,
@@ -602,10 +628,27 @@ def collect_force_public_symbols(
 
 def read_symbols_list(path: str | Path) -> tuple[str, ...]:
     """The symbols named by a ``--public-symbols-list`` file, in file order."""
+    return _parse_symbols_list(Path(path).read_bytes())
+
+
+def read_symbols_list_with_digest(path: str | Path) -> tuple[tuple[str, ...], str]:
+    """The symbols a list file names, plus the digest of the bytes they were
+    parsed from.
+
+    One read produces both, the same rule ``PolicyFile.load``/
+    ``SuppressionList.load`` follow: digesting the path in a separate read
+    could pair one content's hash with another's items. The digest is over
+    the raw bytes, so a line-ending-only change is drift, not a no-op.
+    """
+    raw = Path(path).read_bytes()
+    return _parse_symbols_list(raw), hashlib.sha256(raw).hexdigest()
+
+
+def _parse_symbols_list(raw: bytes) -> tuple[str, ...]:
     return tuple(
         line
-        for raw in Path(path).read_text(encoding="utf-8").splitlines()
-        if (line := raw.strip()) and not line.startswith("#")
+        for source in raw.decode("utf-8").splitlines()
+        if (line := source.strip()) and not line.startswith("#")
     )
 
 
@@ -665,16 +708,22 @@ def _explicit_scope(
     contributor in ``selected_by``, so an additive resolution is still exactly
     replayable.
 
-    ``sha256`` digests the canonical item list itself rather than an external
-    source: for this field the items *are* the whole content (a symbol-name
-    list, with no expansion step between the source and the items), and a
-    ``--public-symbol`` overlay typed on the command line has no external
-    source to digest at all. A future file-backed overlay that *expands* into
-    items must digest the file instead -- that is exactly the drift
-    :class:`DigestedItems` warns about, and it does not apply here.
+    ``sha256`` covers the canonical item list *and* every contributing
+    source's own digest. The items alone are not enough once a file
+    contributes: reading a ``--public-symbols-list`` drops comments and blank
+    lines and the union sorts and deduplicates, so a real edit to that file
+    can leave the items identical -- exactly the drift
+    :class:`DigestedItems` exists to catch, which an earlier version of this
+    function wrongly argued could not happen here (Codex review, fresh
+    evidence). Inline ``--public-symbol`` values have no external source, and
+    contribute only themselves. A source with no digest available (a project
+    config whose loader did not supply one) still contributes its path, so
+    the receipt names it; only byte-level drift in that one file stays
+    invisible.
     """
     selected_by: list[SelectedByEntry] = []
     merged: list[str] = []
+    sources: list[dict[str, str | None]] = []
     winning_layer = SelectorLayer.BUILT_IN_DEFAULT
     if explicit.public_symbols:
         winning_layer = layer
@@ -696,6 +745,13 @@ def _explicit_scope(
             )
         )
         merged.extend(explicit.public_symbols_list.items)
+        sources.append(
+            {
+                "option": "--public-symbols-list",
+                "path": explicit.public_symbols_list.path,
+                "sha256": explicit.public_symbols_list.sha256,
+            }
+        )
     if project is not None and project.public_symbols:
         if winning_layer is SelectorLayer.BUILT_IN_DEFAULT:
             winning_layer = SelectorLayer.PROJECT_CONFIG
@@ -707,6 +763,13 @@ def _explicit_scope(
             )
         )
         merged.extend(project.public_symbols)
+        sources.append(
+            {
+                "option": "scope.public_symbols",
+                "path": project.path,
+                "sha256": project.sha256,
+            }
+        )
 
     # Keyed on whether a source was *selected*, not on whether it yielded
     # anything: `DigestedItems` exists to tell "selected, resolved to zero"
@@ -716,7 +779,10 @@ def _explicit_scope(
 
     items = tuple(dict.fromkeys(sorted(merged)))
     return (
-        DigestedItems(sha256=_digest({"explicit_scope": list(items)}), items=items),
+        DigestedItems(
+            sha256=_digest({"explicit_scope": list(items), "sources": sources}),
+            items=items,
+        ),
         ValueProvenance(
             layer=winning_layer,
             source_kind="public_symbol_overlay",
