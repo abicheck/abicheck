@@ -782,6 +782,20 @@ def _in_surface_result_is_confirmed(
     )
 
 
+def _is_mangled_identity(sym: str) -> bool:
+    """Whether *sym* is spelled in a C++ mangling scheme rather than source form.
+
+    ``_Z`` is Itanium, ``__Z`` the extra platform underscore a Mach-O
+    direct-clang snapshot carries (``diff_cxx_rules._itanium_strip_prefix``
+    documents the same quirk), and ``?`` opens every MSVC-mangled name
+    (``diff_cxx_rules.msvc_scope_components``). All three are spellings a
+    source-level type or function name can never take -- ``?`` is not an
+    identifier character at all, and ``_Z``-prefixed identifiers are reserved
+    -- which is what makes an exact hit on one unambiguous.
+    """
+    return sym.startswith(("_Z", "__Z", "?"))
+
+
 def _symbol_matches(
     change: Change, symbols: set[str], *, allow_tail_fallback: bool = True
 ) -> bool:
@@ -799,6 +813,8 @@ def _symbol_matches(
     it" fallback -- not genuine confirmation) whose symbol happened to
     match an unrelated public function of the same name was wrongly
     confirmed via this check before gating it the same way (Codex review).
+    That gate is narrowed, not lifted, for a *mangled* symbol -- see the
+    comment on the branch itself.
 
     Shared by the ``public`` domain's :func:`_in_surface_result_is_confirmed`
     and the ``exports`` domain's :func:`_exports_mode_decision` -- both ask
@@ -816,9 +832,21 @@ def _symbol_matches(
     cases still match exactly; only the derive-a-tail-from-the-finding step,
     which cannot tell a leaf from a different symbol entirely, is dropped.
     """
-    if change.kind.value in _TYPE_LEVEL_KIND_NAMES:
-        return False
     sym = change.symbol or ""
+    if change.kind.value in _TYPE_LEVEL_KIND_NAMES:
+        # ...but a *mangled* symbol carries no such collision risk, and one
+        # type-level producer emits exactly that: `diff_symbols.
+        # _check_vtable_index_change` reuses `TYPE_VTABLE_CHANGED` for a
+        # moved virtual slot and sets `symbol=mangled`, the method's own
+        # linker name. The blanket rejection left a vtable-slot change on an
+        # observed *exported* method `UNKNOWN_UNRESOLVED` even though its
+        # exact mangled name is a root, and `_type_candidates` cannot recover
+        # the owning class from an Itanium encoding to recover via the
+        # closure either (Codex review, confirmed with a minimal snapshot).
+        # Only an *exact* hit counts: `_Z`/`__Z`/`?` are mangling-scheme
+        # prefixes no C++ type spelling can occupy, so a bare type/function
+        # name cannot reach this branch at all.
+        return bool(sym) and _is_mangled_identity(sym) and sym in symbols
     if sym in symbols:
         return True
     if not allow_tail_fallback:

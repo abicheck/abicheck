@@ -780,3 +780,67 @@ class TestAmbiguityAndRuntimeOwnership:
         surf = compute_export_surface(snap)
         assert not surf.unmatched_exports
         assert surf.exclusion_is_provable
+
+    def test_exact_qualified_owner_survives_a_bare_name_collision(self) -> None:
+        # castxml/clang record the bare leaf in `name` and the qualified form
+        # in `qualified_name`, so `ns1::Foo` and `ns2::Foo` collapse onto one
+        # ambiguous bare key. Seeding that key would walk both records; not
+        # seeding at all leaves the exported method's own class outside the
+        # closure and its layout findings provably-out (Codex review). The
+        # qualified spelling is the exact handle that resolves neither
+        # problem into the other.
+        ns1 = RecordType(
+            name="Foo",
+            kind="struct",
+            qualified_name="ns1::Foo",
+            fields=[TypeField(name="a", type="OnlyNs1")],
+        )
+        ns2 = RecordType(
+            name="Foo",
+            kind="struct",
+            qualified_name="ns2::Foo",
+            fields=[TypeField(name="b", type="OnlyNs2")],
+        )
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("ns1::Foo::bar", "_ZN3ns13Foo3barEv")],
+            types=[ns1, ns2, _rec("OnlyNs1"), _rec("OnlyNs2")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN3ns13Foo3barEv")]),
+        )
+        surf = compute_export_surface(snap)
+        # The owner is seeded (its canonical `name` is what the walk records)
+        # and its own field follows...
+        assert {"Foo", "OnlyNs1"} <= surf.export_types
+        # ...while the unrelated same-named record's field stays out.
+        assert "OnlyNs2" not in surf.export_types
+
+    def test_an_ambiguous_bare_owner_alone_still_seeds_nothing(self) -> None:
+        # Without a qualified spelling to disambiguate (a DWARF-style
+        # producer would put the namespace in `name` itself), the bare owner
+        # remains ambiguous and must not walk either record.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("Foo::bar", "_ZN3Foo3barEv")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    qualified_name="ns1::Foo",
+                    fields=[TypeField(name="a", type="OnlyNs1")],
+                ),
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    qualified_name="ns2::Foo",
+                    fields=[TypeField(name="b", type="OnlyNs2")],
+                ),
+                _rec("OnlyNs1"),
+                _rec("OnlyNs2"),
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN3Foo3barEv")]),
+        )
+        surf = compute_export_surface(snap)
+        assert "OnlyNs1" not in surf.export_types
+        assert "OnlyNs2" not in surf.export_types

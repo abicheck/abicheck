@@ -612,3 +612,54 @@ class TestExportsMode:
         assert self._evaluate(c, self._exports(snap)).relevance is (
             ContractRelevance.IN_CONTRACT
         )
+
+    def test_vtable_slot_change_on_an_exported_method_is_in_contract(self) -> None:
+        # `diff_symbols._check_vtable_index_change` reuses the *type-level*
+        # `TYPE_VTABLE_CHANGED` for a moved virtual slot but sets
+        # `symbol=mangled` -- the method's own linker name. The blanket
+        # type-level symbol rejection left that `UNKNOWN_UNRESOLVED` even
+        # though the exact mangled name is an observed root (Codex review).
+        snap = self._snap(
+            functions=[
+                _fn("Foo::bar", mangled="_ZN3Foo3barEv"),
+                _fn("Foo::secret", mangled="_ZN3Foo6secretEv"),
+            ],
+            types=[_rec("Foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN3Foo3barEv")]),
+        )
+        exp = self._exports(snap)
+        exported = Change(
+            kind=ChangeKind.TYPE_VTABLE_CHANGED,
+            symbol="_ZN3Foo3barEv",
+            description="",
+        )
+        assert self._evaluate(exported, exp) == ContractEvaluationDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code="export_root_membership",
+            assurance=ContractAssurance.COMPLETE,
+        )
+        # The same producer shape on an *unexported* method still resolves
+        # the other way -- the exception is an exact linker-root match, not a
+        # blanket "any mangled symbol counts".
+        unexported = Change(
+            kind=ChangeKind.TYPE_VTABLE_CHANGED,
+            symbol="_ZN3Foo6secretEv",
+            description="",
+        )
+        assert self._evaluate(unexported, exp).relevance is (
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
+
+    def test_a_source_spelled_type_level_symbol_still_never_matches(self) -> None:
+        # The narrowing must not reopen the collision the rejection exists
+        # for: a type "Foo" sharing a bare name with an unrelated exported
+        # function "Foo" is not evidence about the type.
+        snap = self._snap(
+            functions=[_fn("Foo", mangled="Foo")],
+            types=[_rec("Unrelated")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="Foo")]),
+        )
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Foo", description="")
+        assert self._evaluate(c, self._exports(snap)).relevance is not (
+            ContractRelevance.IN_CONTRACT
+        )

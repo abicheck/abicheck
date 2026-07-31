@@ -467,6 +467,26 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     surface.all_types = set(scratch.all_types)
     surface.ambiguous_type_names = set(scratch.ambiguous_type_names)
 
+    # `_index_surface_types` keys the closure index by `RecordType.name` and
+    # its `::` tail only. For a castxml/clang snapshot `name` is the *bare*
+    # leaf, so `ns1::Foo` and `ns2::Foo` collapse onto one ambiguous key and
+    # neither owner has an unambiguous handle at all -- an exported
+    # `ns1::Foo::bar()` with no class-typed signature then leaves its own
+    # class outside the closure, and a layout finding on that exported class
+    # is reported `PROVEN_OUT_OF_CONTRACT` (Codex review, confirmed with a
+    # minimal snapshot: `export_types` came back empty while
+    # `exclusion_is_provable` was true). Adding each record's
+    # `qualified_name` to this *local* index gives every such record an exact
+    # handle. Deliberately not done in `surface.py`'s shared indexing: that
+    # index is relied on by every other consumer of the closure walk, and
+    # AGENTS.md already records its bare-tail lookup as needing its own
+    # scoped design rather than a drive-by change. `ambiguous_type_names` is
+    # computed above, from the un-augmented index, so these added keys cannot
+    # make an existing name look ambiguous.
+    for rec in snap.types:
+        if rec.qualified_name and rec.qualified_name != rec.name:
+            record_by_name.setdefault(rec.qualified_name, []).append(rec)
+
     tables = observed_exports_by_platform(snap)
     if tables is None:
         # No root evidence. Still populate `all_symbols` so a caller can
@@ -477,25 +497,27 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         return surface
 
     # A method root's owner may only be seeded through an exact identity hit
-    # (see `_seed_export_roots`). Both spellings a producer can record are
-    # mapped to the record's own `name`, which is what the closure walk's
-    # `record_by_name` index is keyed by: DWARF bakes the qualified path into
-    # `name` directly, while castxml/clang keep `name` bare and put the
-    # qualified form in `qualified_name`.
-    # An ambiguous target is dropped rather than seeded: `_walk_type_closure`
-    # resolves a name through `record_by_name`, which is keyed by bare names
-    # and tails, so seeding the bare `Foo` shared by `ns1::Foo` and
-    # `ns2::Foo` walks *both* and pulls fields reachable only from the
-    # unrelated one into the closure (Codex review). `ambiguous_type_names`
-    # is exactly surface.py's own record of which names resolve to more than
-    # one type.
+    # (see `_seed_export_roots`). Each spelling a producer can record maps to
+    # the spelling the closure walk resolves *that same record* by: DWARF
+    # bakes the qualified path into `name` directly, while castxml/clang keep
+    # `name` bare and put the qualified form in `qualified_name` -- which the
+    # index augmentation above just made resolvable on its own.
+    # An ambiguous *bare* name is dropped rather than seeded:
+    # `_walk_type_closure` resolves a name through `record_by_name`, which is
+    # keyed by bare names and tails, so seeding the bare `Foo` shared by
+    # `ns1::Foo` and `ns2::Foo` walks *both* and pulls fields reachable only
+    # from the unrelated one into the closure (Codex review).
+    # `ambiguous_type_names` is exactly surface.py's own record of which names
+    # resolve to more than one type. A record's qualified name is kept even
+    # then, since it names exactly one record; two records genuinely sharing
+    # one qualified name are the same type (an ODR/incomplete duplicate), and
+    # walking both is `surface.py`'s own established over-keeping direction.
     owner_seed_by_identity: dict[str, str] = {}
     for rec in snap.types:
-        if rec.name in surface.ambiguous_type_names:
-            continue
-        owner_seed_by_identity[rec.name] = rec.name
+        if rec.name not in surface.ambiguous_type_names:
+            owner_seed_by_identity.setdefault(rec.name, rec.name)
         if rec.qualified_name:
-            owner_seed_by_identity.setdefault(rec.qualified_name, rec.name)
+            owner_seed_by_identity.setdefault(rec.qualified_name, rec.qualified_name)
 
     seed_types = _seed_export_roots(
         snap, surface, tables, owner_seed_by_identity=owner_seed_by_identity

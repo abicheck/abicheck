@@ -1484,10 +1484,11 @@ whose own linker symbol appears in the binary's **observed export table**
 trie — unioned, since one snapshot can legitimately carry more than one), not
 `Visibility.PUBLIC` declarations, and no header origin demotes anything
 anywhere. The closure over the raw record/enum/typedef graph reuses
-`surface.py`'s own `_index_surface_types`/`_walk_type_closure` verbatim, so
+`surface.py`'s own `_index_surface_types`/`_walk_type_closure`, so
 the two domains cannot drift apart in *how* they follow fields, bases, and
-typedef targets — only the seeds differ, which is exactly the difference
-ADR-049 D2 draws between the two modes.
+typedef targets — only the seeds differ (plus one local, additive key added to
+the returned index, described under owner seeding below), which is exactly the
+difference ADR-049 D2 draws between the two modes.
 
 `evaluate_change_contract_relevance`/`evaluate_snapshot_pair_contract_relevance`
 gained `exports_old`/`exports_new` parameters, required when and only when
@@ -1558,6 +1559,20 @@ bare-tail aliases `_symbol_keys` adds for finding lookup), and an alias a
 entirely, so an exported `ns::foo` cannot lend its bare tail to an unrelated
 unexported C `foo`.
 
+"Type-level findings never consult a symbol universe" has exactly one
+exception, and it is a producer fact rather than a relaxation:
+`diff_symbols._check_vtable_index_change` reuses the type-level
+`TYPE_VTABLE_CHANGED` for a moved virtual slot but sets `symbol` to the
+*method's mangled linker name*. Rejecting it outright left a vtable-slot
+change on an observed exported method `UNKNOWN_UNRESOLVED`, with no way back
+via the closure either (an Itanium encoding does not yield the owning class to
+`_type_candidates`). An **exact** hit on a mangled spelling is admitted for
+that reason: `_Z`/`__Z`/`?` are mangling-scheme prefixes no source-level type
+name can occupy, so the bare-name collision the blanket rejection exists to
+prevent cannot reach this branch. Nothing else about the rule changes — no
+tail fallback, and an unexported method's mangled name still resolves the
+other way.
+
 Mach-O needs underscore normalization in **both** directions, because its two
 producers disagree with the export trie by one underscore each way: clang's
 `mangledName` keeps the platform underscore (`__ZN...`) while the trie parser
@@ -1583,6 +1598,22 @@ resolve to an unrelated `other::api` and pull its whole field closure in.
 This is the same collision — and the same fix — `type_reachability.py`
 already carries (see this repo's `AGENTS.md`, "sixth finding"); `surface.py`
 still has it, deliberately, as that file documents.
+
+Exact matching alone isn't enough on the castxml/clang path, though:
+`_index_surface_types` keys its index by `RecordType.name` and its `::` tail,
+which for those producers is the *bare* leaf, so `ns1::Foo` and `ns2::Foo`
+collapse onto one ambiguous key and neither owner has an unambiguous handle at
+all. Dropping the ambiguous key (the only safe option, since seeding it walks
+both records) then left an exported `ns1::Foo::bar()` with no class-typed
+signature outside its own class's closure, and a layout finding on that
+exported class came back `PROVEN_OUT_OF_CONTRACT` — the exact failure
+direction every other guard here is aimed at. `compute_export_surface` adds
+each record's `qualified_name` to its **own local copy** of that index, which
+gives every such record an exact handle without touching `surface.py`'s shared
+indexing (relied on by every other consumer of the closure walk, and already
+recorded in `AGENTS.md` as needing its own scoped design). The ambiguity set
+is computed from the un-augmented index, so the added keys can never make an
+existing name look ambiguous.
 
 **Measured, 2026-07-31 — the strictness is satisfiable on the DWARF path.**
 An earlier revision of this note guessed that the "no unmatched ABI-relevant
