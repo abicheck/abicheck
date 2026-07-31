@@ -845,3 +845,49 @@ class TestAmbiguityAndRuntimeOwnership:
         surf = compute_export_surface(snap)
         assert "Alias" not in surf.ambiguous_type_names
         assert {"Alias", "Target"} <= surf.export_types
+
+    def test_a_namespace_fragment_does_not_match_a_bare_recorded_record(self) -> None:
+        # The exact-match owner rule closes the `api::run()` vs `other::api`
+        # collision only if the record side is a full identity too. On the
+        # castxml/clang path `name` is the bare leaf, so `other::api` is
+        # stored as `name="api"` and the namespace fragment matched it
+        # "exactly" (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api::run", "_ZN3api3runEv")],
+            types=[
+                RecordType(
+                    name="api",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="other::api",
+                    fields=[TypeField(name="s", type="Secret")],
+                ),
+                _rec("Secret"),
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN3api3runEv")]),
+        )
+        assert not compute_export_surface(snap).export_types
+
+    def test_a_bare_recorded_record_with_no_namespace_still_seeds(self) -> None:
+        # The guard keys on "the producer recorded a *differing* qualified
+        # name", so a genuinely global class -- whose bare name is its whole
+        # identity -- is unaffected.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("Widget::draw", "_ZN6Widget4drawEv")],
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="Widget",
+                    fields=[TypeField(name="p", type="Pixel")],
+                ),
+                _rec("Pixel"),
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN6Widget4drawEv")]),
+        )
+        assert {"Widget", "Pixel"} <= compute_export_surface(snap).export_types

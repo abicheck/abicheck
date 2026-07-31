@@ -531,9 +531,24 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # then, since it names exactly one record; two records genuinely sharing
     # one qualified name are the same type (an ODR/incomplete duplicate), and
     # walking both is `surface.py`'s own established over-keeping direction.
+    # A bare `name` counts as a *full* identity only when the producer did
+    # not separately record a differing `qualified_name`: on the
+    # castxml/clang path `name` is the leaf alone, so an unrelated
+    # `other::api` record is stored as `name="api"`, and registering that
+    # leaf let `owner_class_of`'s namespace fragment from an exported
+    # `api::run()` match it "exactly" -- reopening, through the record side,
+    # the very collision the exact-match rule closes on the owner side
+    # (Codex review, confirmed with a minimal snapshot: `other::api`'s own
+    # field `Secret` landed in `export_types`). Nothing real is lost by
+    # dropping the leaf there: whenever a record carries a qualified name,
+    # `owner_class_of` yields the complete scope chain too -- from an
+    # already-qualified declaration name, or from the mangled symbol's full
+    # nested-name -- so the qualified key below is what a genuine owner
+    # matches on.
     owner_seed_by_identity: dict[str, str] = {}
     for rec in snap.types:
-        if rec.name not in surface.ambiguous_type_names:
+        bare_is_leaf_only = bool(rec.qualified_name) and rec.qualified_name != rec.name
+        if not bare_is_leaf_only and rec.name not in surface.ambiguous_type_names:
             owner_seed_by_identity.setdefault(rec.name, rec.name)
         if rec.qualified_name:
             owner_seed_by_identity.setdefault(rec.qualified_name, rec.qualified_name)

@@ -1589,12 +1589,25 @@ having an empty `name` — dropping it hid a real entry point whose signature
 is unknown.
 
 A method root's owner is seeded only through an **exact** identity hit
-against a known record (both the bare `name` and any `qualified_name`, mapped
-to the spelling the closure walk resolves). `owner_class_of` cannot tell an
-enclosing *class* from an enclosing *namespace* from the string alone, so an
-exported namespace function `api::run()` yields the bare fragment `"api"`,
-which `_walk_type_closure`'s own alias-tolerant `record_by_name` lookup would
-resolve to an unrelated `other::api` and pull its whole field closure in.
+against a known record (its `qualified_name`, and its bare `name` only when
+no differing qualified spelling was recorded — see below). `owner_class_of`
+cannot tell an enclosing *class* from an enclosing *namespace* from the
+string alone, so an exported namespace function `api::run()` yields the bare
+fragment `"api"`, which `_walk_type_closure`'s own alias-tolerant
+`record_by_name` lookup would resolve to an unrelated `other::api` and pull
+its whole field closure in.
+
+Exactness has to hold on *both* sides of that match, which the first cut got
+half-right: on the castxml/clang path a record's `name` is the bare leaf, so
+`other::api` is stored as `name="api"` and the namespace fragment matched it
+"exactly" after all — the same collision, re-entered through the record side
+(confirmed with a minimal snapshot: `other::api`'s own field landed in
+`export_types`). A bare `name` therefore counts as a full identity only when
+the producer recorded no differing `qualified_name`. That loses no real
+owner: whenever a record carries a qualified name, `owner_class_of` produces
+the complete scope chain too — from an already-qualified declaration name, or
+from the mangled symbol's full nested-name — so a genuine owner matches on
+the qualified key instead.
 This is the same collision — and the same fix — `type_reachability.py`
 already carries (see this repo's `AGENTS.md`, "sixth finding"); `surface.py`
 still has it, deliberately, as that file documents.
