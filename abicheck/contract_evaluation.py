@@ -70,6 +70,7 @@ from .contract_relevance_types import (
     ContractAssurance,
     ContractMode,
     ContractRelevance,
+    coerce_contract_mode,
 )
 from .export_surface import ExportSurface
 from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
@@ -1221,12 +1222,7 @@ def evaluate_change_contract_relevance(
     # PUBLIC path for a caller that actually asked for ALL (Codex review).
     # Coercing through the enum constructor first (a no-op for an
     # already-real member) means every later `is` comparison is safe.
-    try:
-        mode = ContractMode(mode)
-    except ValueError as exc:
-        raise ValueError(
-            f"mode must be one of {sorted(m.value for m in ContractMode)}, got {mode!r}"
-        ) from exc
+    mode = coerce_contract_mode(mode)
     if mode is ContractMode.EXPORTS and (exports_old is None or exports_new is None):
         raise ValueError(
             "contract mode 'exports' requires an ExportSurface pair "

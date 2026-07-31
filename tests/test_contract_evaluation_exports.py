@@ -845,6 +845,41 @@ class TestTrustedByConstructionUnderExports:
         assert self._evaluate(c).relevance is not ContractRelevance.IN_CONTRACT
 
 
+class TestTier1ContractModeContract:
+    """`checker.compare` is deliberately thinner than its Tier-2 callers.
+
+    ADR-037 D10.1 puts request validation at the service boundary, so the
+    core verb neither rejects an inert `contract_mode` nor duplicates the
+    two usage rules every front end applies. That asymmetry is documented
+    on `compare()` itself; pinning it here keeps the documentation and the
+    behaviour from drifting apart.
+    """
+
+    @staticmethod
+    def _snaps():
+        snap = AbiSnapshot(library="libfoo.so", version="1")
+        return snap, snap
+
+    def test_a_mode_without_evaluation_is_inert_not_an_error(self) -> None:
+        from abicheck.checker import compare
+
+        old, new = self._snaps()
+        result = compare(old, new, contract_mode="exports")
+        # Accepted, and genuinely inert: no finding carries a decision,
+        # because the evaluator that reads the mode never ran.
+        assert all(c.contract_relevance is None for c in result.changes)
+
+    def test_an_unsupported_mode_raises_only_once_it_is_read(self) -> None:
+        from abicheck.checker import compare
+
+        old, new = self._snaps()
+        # Inert, so never validated -- the documented consequence of the
+        # rule above, not a separate leniency.
+        compare(old, new, contract_mode="bogus")
+        with pytest.raises(ValueError, match="mode must be one of"):
+            compare(old, new, contract_mode="bogus", contract_evaluation=True)
+
+
 class TestCompareSnapshotsContractModeValidation:
     """`compare_snapshots` is a documented Tier-2 entry point reached without
     a `CompareRequest`, so it applies the same two rules (Codex review)."""

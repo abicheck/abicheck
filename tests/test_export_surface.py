@@ -1135,6 +1135,54 @@ class TestUnresolvedTypeEdges:
         assert intact.exclusion_is_provable
         assert "Here" in intact.export_types
 
+    def test_the_named_node_and_the_walked_node_must_be_the_same(self) -> None:
+        # "Does this spelling name a node" and "did the walk reach one" were
+        # two independent string tests, so a token could satisfy each via a
+        # *different* node and still count as resolved (Codex review).
+        # `ns::Alias` names the typedef by suffix while the walk reaches only
+        # the unrelated global record `Alias`, so `Victim` -- what the
+        # typedef actually targets -- was never walked yet exclusion stayed
+        # provable. Both sides are now bound to node identities.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("ns::Alias *",))],
+            types=[_rec("Alias"), _rec("Victim")],
+            typedefs={"outer::ns::Alias": "Victim"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert "Victim" not in surf.export_types
+        assert surf.unresolved_type_edges == frozenset({"ns::Alias"})
+        assert not surf.exclusion_is_provable
+
+    def test_an_unscoped_leaf_is_a_fallback_not_a_widening(self) -> None:
+        # The leaf fallback exists for producer-side scope loss: a token
+        # spelled with a scope may name a node recorded bare, because the
+        # snapshot never said where that node lives.
+        scope_lost = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("ns::Foo *",))],
+            types=[_rec("Foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert compute_export_surface(scope_lost).exclusion_is_provable
+
+        # But it must not *add* to a token that already matched something,
+        # which is what let the unrelated record in above -- there is no gap
+        # to guess about when the token resolves outright.
+        rival = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("ns::Missing *",))],
+            types=[_rec("other::Missing")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert compute_export_surface(rival).unresolved_type_edges == frozenset(
+            {"ns::Missing"}
+        )
+
     def test_a_spelling_the_walk_cannot_follow_is_an_unresolved_edge(self) -> None:
         # Naming a known node is not enough -- the closure has to have been
         # able to *follow* the edge (Codex review). A typedef is looked up by

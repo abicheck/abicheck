@@ -616,7 +616,7 @@ def _apply_contract_evaluation_shadow(
     """
     from .compatibility_evaluation_wiring import resolve_legacy_contract_mode
     from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
-    from .contract_relevance_types import ContractMode
+    from .contract_relevance_types import ContractMode, coerce_contract_mode
     from .export_surface import compute_export_surface
     from .surface import compute_public_surface
 
@@ -640,7 +640,7 @@ def _apply_contract_evaluation_shadow(
     # here, so the two cannot drift; this is the first live caller of that
     # wiring, which Phase 1 landed and deliberately left uncalled.
     if contract_mode is not None:
-        mode = ContractMode(contract_mode)
+        mode = coerce_contract_mode(contract_mode)
     else:
         # `scope_public_headers_is_explicit=True` is unconditional on
         # purpose (CodeRabbit review): this core verb receives only the
@@ -775,6 +775,21 @@ def compare(
         ScopeMismatchError: *old* and *new* do not cover the same declared
             surface (ADR-050 D1/D2), and *diagnostic_comparison* was not
             set.
+        ValueError: *contract_mode* is not one of ``ContractMode``'s values.
+            Only raised when *contract_evaluation* is set, since the mode is
+            not consulted otherwise -- see the note below.
+
+    Note:
+        *contract_mode* is **inert unless** *contract_evaluation* is set:
+        the shadow evaluator is the only thing that reads it, and it does
+        not run otherwise. This Tier-1 verb deliberately does not reject
+        that combination, though every Tier-2 front end does
+        (``service.compare_snapshots``, ``api_types.CompareRequest.
+        validation_errors``, and the ``compare`` CLI all raise a usage
+        error) -- ADR-037 D10.1 puts request validation at the service
+        boundary, not in the core verb, so duplicating it here would give
+        two places to keep in sync for no added safety on the supported
+        paths.
     """
     mismatch = check_contracts_comparable(old, new, diagnostic=diagnostic_comparison)
     assurance: Literal["none"] | None = "none" if mismatch is not None else None

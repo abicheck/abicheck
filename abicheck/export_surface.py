@@ -608,23 +608,39 @@ def _is_dependent_token(position: int, spans: list[tuple[int, int]]) -> bool:
 
 
 class _SpellingIndex(NamedTuple):
-    """How :func:`_edge_is_unresolved` decides an edge landed somewhere."""
+    """How :func:`_edge_is_unresolved` decides an edge landed somewhere.
 
-    #: Every spelling that names a record, enum, or typedef this snapshot has.
-    spellings: frozenset[str]
-    #: Spellings that are the **complete** recorded identity of a node
-    #: carrying no scope of its own -- the only ones a *more*-qualified token
-    #: may fall back to.
+    Both maps are keyed to the **same node identities** on purpose. Keeping
+    "which node does this spelling name" and "which node does the walk
+    reach" as two independent string sets let each be satisfied by a
+    *different* node, which is a hole rather than a resolution -- see
+    :func:`_edge_is_unresolved` for the case that exposed it.
+    """
+
+    #: Spelling -> the node identities a declaration writing that spelling
+    #: could be naming. Built from each node's own identity plus every
+    #: namespace-suffix and stdlib-stripped form of it.
+    nodes_by_spelling: dict[str, frozenset[str]]
+    #: Lookup key -> the node identities
+    #: :func:`~abicheck.surface._walk_type_closure` actually reaches through
+    #: it. Exactly the walk's own indexes: a record/enum by its name or bare
+    #: ``::`` tail, a typedef by its exact key only.
+    nodes_by_walk_key: dict[str, frozenset[str]]
+    #: Bare identities of nodes carrying no scope of their own -- the only
+    #: ones a *more*-qualified token may fall back to naming.
     unscoped_leaves: frozenset[str]
-    #: The lookup keys :func:`~abicheck.surface._walk_type_closure` itself
-    #: resolves against. Naming a known node is not enough: the closure has
-    #: to have been able to *follow* the edge (see :func:`_edge_is_unresolved`).
-    walk_keys: frozenset[str]
     #: Typedef keys every one of whose colliding records/enums is
     #: toolchain-owned -- libstdc++'s bare-key alias templates. Their targets
     #: are not judged, for the same reason a toolchain record's own fields
     #: are not (see :func:`_followed_typedef_aliases`).
     toolchain_alias_keys: frozenset[str]
+
+
+#: A typedef's node identity. Prefixed so an alias can never be confused with
+#: a same-named record, which is the collision the two maps above exist to
+#: keep apart.
+def _typedef_node_id(alias: str) -> str:
+    return f"typedef:{alias}"
 
 
 def _resolvable_type_spellings(
@@ -655,14 +671,50 @@ def _resolvable_type_spellings(
       stripping, every C++ library using a standard-library type looks
       riddled with missing edges and can never prove an exclusion.
     """
-    spellings: set[str] = set()
-    for key in (*record_by_name, *enum_by_name, *snap.typedefs):
-        spellings.add(key)
-        spellings.update(_namespace_suffix_spellings(key))
-        stripped = _stripped_signature_spelling(key)
-        if stripped:
-            spellings.add(stripped)
-            spellings.update(_namespace_suffix_spellings(stripped))
+    # Spelling -> node identity. Registered per *node*, so a later lookup can
+    # ask whether the node a spelling names is the node the walk reached --
+    # a global spelling set cannot answer that (see `_edge_is_unresolved`).
+    nodes_by_spelling: dict[str, set[str]] = {}
+
+    def _register(spelling: str, node_id: str) -> None:
+        nodes_by_spelling.setdefault(spelling, set()).add(node_id)
+
+    def _register_all(identity: str, node_id: str) -> None:
+        for form in (identity, _stripped_signature_spelling(identity)):
+            if not form:
+                continue
+            _register(form, node_id)
+            for suffix in _namespace_suffix_spellings(form):
+                _register(suffix, node_id)
+
+    # A record/enum's node identity is its own `name`: that is what
+    # `_walk_type_closure` records when it reaches one, so both maps agree
+    # on what "the same node" means. Its *spellings* come from `name` and
+    # `qualified_name` alike, since backends split the two differently.
+    for rec_nodes in record_by_name.values():
+        for rec in rec_nodes:
+            _register_all(rec.name, rec.name)
+            if rec.qualified_name:
+                _register_all(rec.qualified_name, rec.name)
+    for en_nodes in enum_by_name.values():
+        for en in en_nodes:
+            _register_all(en.name, en.name)
+            if en.qualified_name:
+                _register_all(en.qualified_name, en.name)
+    for alias in snap.typedefs:
+        _register_all(alias, _typedef_node_id(alias))
+
+    # Lookup key -> node identities the walk reaches through it: the two
+    # index dicts (whose keys `_index_surface_types` builds as each node's
+    # own name plus, for a namespaced one, its bare `::` tail) and
+    # `snap.typedefs` by *exact* key, with no tail tolerance of its own.
+    nodes_by_walk_key: dict[str, set[str]] = {}
+    for key, rec_nodes in record_by_name.items():
+        nodes_by_walk_key.setdefault(key, set()).update(r.name for r in rec_nodes)
+    for key, en_nodes in enum_by_name.items():
+        nodes_by_walk_key.setdefault(key, set()).update(e.name for e in en_nodes)
+    for alias in snap.typedefs:
+        nodes_by_walk_key.setdefault(alias, set()).add(_typedef_node_id(alias))
 
     # A node whose own recorded identity carries no scope: its bare name is
     # everything the snapshot knows about where it lives, so a token that
@@ -690,12 +742,6 @@ def _resolvable_type_spellings(
         if "::" not in alias and alias not in scoped_leaves:
             unscoped.add(alias)
 
-    # Exactly what `_walk_type_closure` looks a queued name up in: the two
-    # index dicts (whose keys `_index_surface_types` builds as each node's
-    # own name plus, for a namespaced one, its bare `::` tail) and
-    # `snap.typedefs` by *exact* key, with no tail tolerance of its own.
-    walk_keys = {*record_by_name, *enum_by_name, *snap.typedefs}
-
     # An alias key a record or enum also owns, where *every* colliding node
     # is toolchain-owned: libstdc++'s bare-key alias templates. Measured on a
     # real `g++` library -- `"vector" -> "std::vector<_Tp,
@@ -721,9 +767,9 @@ def _resolvable_type_spellings(
             toolchain_aliases.add(alias)
 
     return _SpellingIndex(
-        frozenset(spellings),
+        {k: frozenset(v) for k, v in nodes_by_spelling.items()},
+        {k: frozenset(v) for k, v in nodes_by_walk_key.items()},
         frozenset(unscoped),
-        frozenset(walk_keys),
         frozenset(toolchain_aliases),
     )
 
@@ -793,17 +839,49 @@ def _edge_is_unresolved(
         tok = match.group(0)
         if tok in _TYPE_NOISE or _is_dependent_token(match.start(), spans):
             continue
-        leaf = _namespace_suffix_spellings(tok)[-1]
-        names_a_node = tok in index.spellings or (
-            leaf != tok and leaf in index.unscoped_leaves
-        )
-        # `_type_identifiers` is what the walk itself queues from a type
-        # string, so asking it for this one token is exactly "which keys
-        # would the walk have tried".
-        if names_a_node and _type_identifiers(tok) & index.walk_keys:
-            continue
-        missing.add(tok)
+        if not (_named_nodes(tok, index) & _walk_reached_nodes(tok, index)):
+            missing.add(tok)
     return missing
+
+
+def _named_nodes(tok: str, index: _SpellingIndex) -> frozenset[str]:
+    """Node identities *tok* could be naming."""
+    named = set(index.nodes_by_spelling.get(tok, ()))
+    if named:
+        return frozenset(named)
+    # Nothing matched the token as written, so fall back: a node whose own
+    # recorded identity carries no scope has a bare name that is everything
+    # the snapshot knows about where it lives, so a token spelling it *with*
+    # a scope contradicts nothing -- the producer-side scope loss
+    # ``AGENTS.md`` documents. A node that *does* record a scope never lends
+    # its leaf to a differently-scoped token, which is the
+    # ``ns::Missing``/``other::Missing`` rival-scope rule.
+    #
+    # Strictly a fallback, never an addition (Codex review, confirmed
+    # empirically): with a typedef ``outer::ns::Alias`` and an unrelated
+    # global record ``Alias``, letting the leaf widen an already-matched
+    # token made ``ns::Alias`` "name" that record too, which the walk does
+    # reach -- so the edge counted as resolved while the typedef it really
+    # names was never followed. It is only a guess where the snapshot left a
+    # gap; where the token matches outright there is no gap to guess about.
+    leaf = _namespace_suffix_spellings(tok)[-1]
+    if leaf != tok and leaf in index.unscoped_leaves:
+        named |= set(index.nodes_by_spelling.get(leaf, ()))
+    return frozenset(named)
+
+
+def _walk_reached_nodes(tok: str, index: _SpellingIndex) -> frozenset[str]:
+    """Node identities the closure walk actually reaches for *tok*.
+
+    ``_type_identifiers`` is what the walk itself queues from a type string,
+    so asking it for this one token is exactly "which keys would the walk
+    have tried" -- and each key is then resolved to the nodes behind it,
+    rather than treated as a bare "something was there" signal.
+    """
+    reached: set[str] = set()
+    for ident in _type_identifiers(tok):
+        reached |= set(index.nodes_by_walk_key.get(ident, ()))
+    return frozenset(reached)
 
 
 def _followed_typedef_aliases(
