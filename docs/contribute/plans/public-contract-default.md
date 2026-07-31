@@ -2298,9 +2298,15 @@ Codex/CodeRabbit round, each changing behaviour rather than wording:
    (Codex P2). The coarse `kind:symbol` fallback collapsed two findings of
    one kind on one symbol (two parameters of the same function) into a
    single entry, silently dropping a recorded decision and making the
-   receipt uncorrelatable with the report. `checker` injects
-   `reporter_markdown._finding_id` as a callable — a module-level import
-   would close a `checker -> reporter_markdown -> checker` cycle.
+   receipt uncorrelatable with the report. The id's implementation lives in
+   the dependency-free leaf module `finding_identity.report_finding_id`,
+   which `checker` imports directly; `reporter_markdown._finding_id` is now
+   a compatibility alias for it (moved there because importing the renderer
+   from `checker` — even function-locally, which the `import-cycle-growth`
+   gate counts — would close a `checker -> reporter_markdown -> checker`
+   cycle). Callers that hold a result rather than a comparison still inject
+   it as a callable (`contract_evaluation.stamp_scoped_result_findings`,
+   `contract_context.relevance_map`).
 4. **A `--policy-file`'s per-kind overrides reach the persisted config**
    (Codex P2). Recording only the base-policy name made the "resolved"
    configuration wrong in exactly the way an audit consumer would act on.
@@ -2348,6 +2354,50 @@ graph once per spelling per finding; and every required-key read in the
 persisted-context decoder now fails as `TypeError`, so a consumer handling a
 corrupt block catches one exception type rather than three.
 
+**A third review round found four more, all fixed.** (1) The decision
+receipt was frozen inside `compare()`, *before* `--used-by`/`--required-symbol`
+scoping overwrites already-recorded findings with the stronger explicit-scope
+`IN_CONTRACT` decision and synthesizes fresh `scoped_only_changes` — so the
+persisted receipt disagreed with the report emitted beside it, and
+`replay_original_decisions` reproduced decisions that were never the run's
+own. `contract_evaluation.refresh_contract_receipt` now re-keys the receipt
+from the two collections a scoping pass can touch, called from the same
+shared `stamp_scoped_result_findings` traversal both front ends already use
+(so neither can forget it). It *merges* rather than rebuilds: the receipt
+also covers the suppressed/redundant/out-of-surface findings that never
+reach `result.changes`. (2) The persisted type graph carried no edge from a
+method to its own enclosing class, which *both* live surfaces seed
+(`surface._seed_public_roots`, `export_surface._seed_export_roots`) precisely
+because a consumer holding an exported method can declare, allocate, and
+inherit that class. A replay walking only signature edges would find the
+owner unreachable and could turn a live `IN_CONTRACT` into
+`PROVEN_OUT_OF_CONTRACT` — the one direction `compare_decisions` treats as
+unsound. The edge uses `surface.py`'s permissive spelling resolution rather
+than `export_surface.py`'s exact-identity map: one graph serves both domains,
+and over-linking can only ever *weaken* a replayed decision. (3)
+`--public-symbol`'s forced-public set and `--post-manifest`'s committed-export
+allowlist now reach `contract.overlays`/`surface.explicit_scope`; both decide
+membership (ADR-049 D2 counts overlay-selected roots as part of the `public`
+domain's roots), so omitting them described a run that never happened. They
+are recovered from the run's own evidence ledger rather than re-read from the
+caller's arguments, so the two halves of one context cannot disagree, and the
+digest combines each overlay's own `input_identity` — a merged item list
+alone could not tell one manifest naming A and B apart from two overlays
+naming one each. (4) `graph_node_index` followed an `alias:` edge whose
+source node was absent from `nodes`, where `resolve_graph_node` does not; the
+two are documented to agree by construction, so the index now applies the
+same guard.
+
+One finding from that round was **not** taken: replacing
+`report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
+canonical-JSON encoding. The ambiguity it guards against requires a literal
+`\x1f` (ASCII unit separator) inside a kind slug, symbol, value, source
+location, or description — none of which any producer in this codebase can
+emit — while changing the encoding rehashes *every* finding id, which is a
+documented-stable, user-visible fingerprint (report schema 2.3) that
+consumers key waivers and cross-run correlation on. The cost is certain and
+the risk is not reachable, so the delimiter stays.
+
 Two smaller limits worth naming rather than discovering later. The
 `evaluation_context` this build assembles is resolved by `checker.compare`,
 which sees only its own arguments — so `contract.mode` carries the real D7
@@ -2357,10 +2407,12 @@ layer this core verb cannot observe. Phase 5, which routes every front end
 through one already-resolved config, is what replaces it; under-claiming
 until then is the honest encoding, since a wrong provenance layer is exactly
 what D7's receipts exist to make impossible. And the decision receipt's
-per-finding keys are `"<kind>:<symbol>"` unless a caller injects
-`reporter._finding_id` — injected as a callable rather than imported, since a
-direct import would close a `checker → contract_context → reporter → checker`
-cycle the `import-cycle-growth` gate rejects.
+per-finding keys fall back to `"<kind>:<symbol>"` unless a caller supplies
+the report's own id — `finding_identity.report_finding_id`, which `checker`
+imports directly and every post-`compare()` caller injects as a callable,
+since importing the renderer that re-exports it would close a
+`checker → contract_context → reporter → checker` cycle the
+`import-cycle-growth` gate rejects.
 
 ### Phase 5 — shared authoritative comparison
 

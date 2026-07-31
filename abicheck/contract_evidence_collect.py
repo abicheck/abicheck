@@ -101,7 +101,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 from .contract_evidence import (
     ContractEvidenceBlock,
@@ -116,8 +116,9 @@ from .contract_relevance_types import (
     EvidenceProviderStatus,
     coerce_contract_mode,
 )
+from .diff_cxx_rules import owner_class_of
 from .export_surface import ExportSurface, observed_exports_by_platform
-from .model import AbiSnapshot, EnumType, RecordType, Visibility
+from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .surface import (
     PublicSurface,
     _index_surface_types,
@@ -304,6 +305,7 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
         link(node, index.resolve_type_string(fn.return_type))
         for param in fn.params:
             link(node, index.resolve_type_string(getattr(param, "type", None)))
+        _link_owner_class(fn, node, index, link)
         _link_decl_aliases(fn.name, fn.mangled, node, nodes, edges)
 
     for var in snap.variables:
@@ -313,6 +315,37 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
         _link_decl_aliases(var.name, var.mangled, node, nodes, edges)
 
     return TypeGraphSnapshot(nodes=tuple(nodes), edges=tuple(edges))
+
+
+def _link_owner_class(
+    fn: Function,
+    node: str,
+    index: _TypeIndex,
+    link: Callable[[str, Iterable[str]], None],
+) -> None:
+    """Link a method declaration to its own enclosing class.
+
+    Both live surfaces seed a method root's owner class into the closure --
+    ``surface._seed_public_roots`` via ``_type_identifiers(owner)``, and
+    ``export_surface._seed_export_roots`` via its exact-identity owner map --
+    because a consumer holding an exported method can declare, allocate, and
+    inherit that class even when no *other* signature names it. Without the
+    same edge here, a replay walking only return/parameter edges would find
+    the owner unreachable and could turn the live ``IN_CONTRACT`` decision
+    into ``PROVEN_OUT_OF_CONTRACT`` -- a *strengthened* decision, which is the
+    one direction :func:`~abicheck.contract_replay.compare_decisions` treats
+    as unsound (Codex review, fresh evidence).
+
+    Uses ``surface.py``'s permissive spelling resolution rather than
+    ``export_surface.py``'s exact-identity map: over-linking makes a replayed
+    closure a superset of the live one, which can only ever *weaken* a
+    decision, while under-linking is exactly the strengthening this edge
+    exists to prevent. One graph serves both domains, so the safe direction
+    has to be the shared one.
+    """
+    owner = owner_class_of(fn)
+    if owner:
+        link(node, index.resolve_type_string(owner))
 
 
 def _link_decl_aliases(
@@ -365,8 +398,14 @@ def _link_type_aliases(
 # --------------------------------------------------------------------------
 
 
-def _digest(payload: object) -> str:
-    """A stable content digest of an already-canonicalized observation."""
+def content_digest(payload: object) -> str:
+    """A stable content digest of an already-canonicalized observation.
+
+    Public so a consumer assembling a *configuration* receipt from this
+    ledger (:mod:`abicheck.contract_context`) digests overlay content the
+    same way the ledger's own provider records do, instead of introducing a
+    second, silently-divergent convention.
+    """
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -536,7 +575,7 @@ def public_header_evidence(
         configuration_coverage=EvidenceCompleteness.NOT_STARTED,
         reason_code=reason,
         input_identity=InputIdentity(
-            sha256=_digest(
+            sha256=content_digest(
                 {
                     "declarations": sorted(set(declarations)),
                     "nodes": list(graph.nodes),
@@ -579,7 +618,7 @@ def export_table_evidence(
         configuration_coverage=EvidenceCompleteness.NOT_STARTED,
         reason_code=reason,
         input_identity=InputIdentity(
-            sha256=_digest(
+            sha256=content_digest(
                 {
                     "tables": {k: sorted(v) for k, v in sorted(tables.items())},
                     "declarations": sorted(set(declarations)),
@@ -628,7 +667,7 @@ def _overlay_evidence(
         searched_scope=(domain_kind,),
         identity_coverage=EvidenceCompleteness.COMPLETE,
         configuration_coverage=EvidenceCompleteness.NOT_STARTED,
-        input_identity=InputIdentity(sha256=_digest(items)),
+        input_identity=InputIdentity(sha256=content_digest(items)),
     )
     return ProviderEvidenceEntry(record=record, manifests=tuple(items))
 
@@ -728,8 +767,14 @@ def graph_node_index(graph: TypeGraphSnapshot) -> dict[str, set[str]]:
     """
     index: dict[str, set[str]] = {}
     alias_edges: dict[str, set[str]] = {}
+    known = set(graph.nodes)
     for src, dst in graph.edges:
-        if src.startswith("alias:"):
+        # `resolve_graph_node` follows an alias edge only when the `alias:`
+        # node itself is present, so this index must too: a hand-authored or
+        # truncated graph carrying an edge whose source node was dropped would
+        # otherwise resolve here and not there, and the two are documented to
+        # agree by construction (CodeRabbit review).
+        if src.startswith("alias:") and src in known:
             alias_edges.setdefault(src, set()).add(dst)
     for node in graph.nodes:
         kind, _, identity = node.partition(":")

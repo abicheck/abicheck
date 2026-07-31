@@ -584,6 +584,71 @@ class TestUsedByScopingStampsExplicitEvidence:
         assert matches
         for c in matches:
             assert c["contract_relevance"] == "IN_CONTRACT"
+        # The persisted receipt must agree with the report emitted beside it:
+        # `compare()` freezes it before this scoping pass runs, so a receipt
+        # that isn't refreshed afterwards makes `replay_original_decisions`
+        # reproduce decisions that were never the run's own (Codex review,
+        # fresh evidence).
+        receipt = payload["contract_context"]["decision_receipt"]
+        by_finding = receipt["relevance_by_finding"]
+        for c in matches:
+            assert by_finding[c["finding_id"]] == "IN_CONTRACT"
+
+    def test_scoped_stamping_refreshes_the_persisted_receipt(
+        self, tmp_path, monkeypatch
+    ):
+        # Every emitted finding carrying a contract decision must appear in
+        # the receipt with that same decision -- including one the scoping
+        # pass *overwrote* (the shadow evaluator had already recorded a
+        # weaker header-derived decision for it inside compare()).
+        from abicheck.appcompat import AppCompatResult
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.diff_helpers import make_change
+
+        app, old, new = self._setup(tmp_path, monkeypatch)
+        synthetic = make_change(
+            ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED,
+            symbol="_Z5entryv",
+            name=app.name,
+        )
+        scoped = AppCompatResult(
+            app_path=str(app),
+            old_lib_path=str(old),
+            new_lib_path=str(new),
+            required_symbols={"_Z5entryv"},
+            required_symbol_count=1,
+            breaking_for_app=[synthetic],
+            missing_symbols=["_Z5entryv"],
+            verdict=Verdict.BREAKING,
+        )
+        self._patch_scope(monkeypatch, scoped)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "--used-by",
+                str(app),
+                "--contract-evaluation",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        by_finding = payload["contract_context"]["decision_receipt"][
+            "relevance_by_finding"
+        ]
+        decided = [
+            c
+            for c in payload["changes"]
+            if c.get("contract_relevance") and c.get("finding_id")
+        ]
+        assert decided
+        for c in decided:
+            assert by_finding.get(c["finding_id"]) == c["contract_relevance"]
 
     def test_used_by_missing_symbol_gets_contract_evaluation_in_markdown(
         self, tmp_path, monkeypatch

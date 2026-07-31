@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 
+from abicheck.contract_evidence import TypeGraphSnapshot
 from abicheck.contract_evidence_collect import (
     EXPLICIT_SCOPE_EVIDENCE_REF,
     PROVIDER_EXPORT_TABLE,
@@ -30,6 +31,7 @@ from abicheck.contract_evidence_collect import (
     collect_contract_evidence,
     evidence_record_id,
     evidence_refs_for_reason,
+    graph_node_index,
     resolve_graph_node,
     validate_decision_evidence,
 )
@@ -181,6 +183,68 @@ class TestTypeGraph:
     def test_unknown_spelling_resolves_to_nothing(self) -> None:
         graph = build_type_graph(_snap(functions=[_public_fn("api")]))
         assert resolve_graph_node(graph, "nope") == set()
+
+    def test_method_reaches_its_owner_class(self) -> None:
+        """A method's enclosing class is reachable even with no class-typed
+        signature -- the same seed both live surfaces make.
+
+        Without this edge a replay walking the persisted graph would find the
+        owner unreachable and could turn the live ``IN_CONTRACT`` decision
+        into ``PROVEN_OUT_OF_CONTRACT`` -- a strengthened decision, which
+        ``compare_decisions`` treats as unsound.
+        """
+        snap = _snap(
+            functions=[_public_fn("Foo::bar")],
+            types=[
+                RecordType(
+                    name="Foo",
+                    kind="struct",
+                    fields=[TypeField(name="member", type="Payload")],
+                ),
+                RecordType(name="Payload", kind="struct", fields=[]),
+            ],
+        )
+        graph = build_type_graph(snap)
+        assert ("decl:Foo::bar", "record:Foo") in graph.edges
+        closure = closure_from_graph(graph, ["decl:Foo::bar"])
+        # ...and the owner's own field closure comes with it, matching what
+        # `_walk_type_closure` reaches from the same seed.
+        assert {"record:Foo", "record:Payload"} <= closure
+
+    def test_free_function_seeds_no_owner(self) -> None:
+        snap = _snap(
+            functions=[_public_fn("api")],
+            types=[RecordType(name="Unrelated", kind="struct", fields=[])],
+        )
+        closure = closure_from_graph(build_type_graph(snap), ["decl:api"])
+        assert "record:Unrelated" not in closure
+
+
+class TestGraphNodeIndex:
+    def test_index_agrees_with_the_one_shot_resolver(self) -> None:
+        snap = _snap(
+            functions=[_public_fn("ns::api", ret="Widget *")],
+            types=[RecordType(name="Widget", kind="struct", fields=[])],
+        )
+        graph = build_type_graph(snap)
+        index = graph_node_index(graph)
+        for spelling in ("ns::api", "api", "Widget"):
+            assert index.get(spelling, set()) == resolve_graph_node(graph, spelling)
+
+    def test_alias_edge_without_its_node_is_not_followed(self) -> None:
+        """An edge whose ``alias:`` source node is absent resolves nowhere.
+
+        ``resolve_graph_node`` requires the alias node itself to be present,
+        so the index must too -- a truncated or hand-authored graph is
+        exactly where the two would otherwise disagree, and they are
+        documented to agree by construction (CodeRabbit review).
+        """
+        graph = TypeGraphSnapshot(
+            nodes=("decl:ns::api",),
+            edges=(("alias:api", "decl:ns::api"),),
+        )
+        assert resolve_graph_node(graph, "api") == set()
+        assert graph_node_index(graph).get("api") is None
 
 
 class TestProviderLedger:

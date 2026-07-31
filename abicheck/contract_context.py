@@ -56,6 +56,7 @@ from .compatibility_evaluation_config import (
     CompatibilityEvaluationConfig,
     CompatibilityPolicyConfig,
     ContractConfig,
+    DigestedItems,
     EvidenceConfig,
     GateConfig,
     SelectedByEntry,
@@ -73,8 +74,11 @@ from .contract_evidence import (
 )
 from .contract_evidence_collect import (
     DOMAIN_ROOT_PROVIDER,
+    PROVIDER_FORCED_PUBLIC,
+    PROVIDER_POST_MANIFEST,
     PROVIDER_PUBLIC_HEADER,
     closure_from_graph,
+    content_digest,
 )
 from .contract_relevance_types import (
     ContractMode,
@@ -103,6 +107,73 @@ def _api_provenance(option: str) -> ValueProvenance:
     )
 
 
+#: The providers in a :class:`ContractEvidenceBlock` that are *explicit
+#: overlays* -- a run-level input asserting membership -- rather than
+#: observations of the library itself. ADR-049 D2 counts overlay-selected
+#: roots as part of the ``public`` domain's root set, so a resolved
+#: configuration that omitted them would understate what decided the run.
+_OVERLAY_PROVIDERS = (PROVIDER_POST_MANIFEST, PROVIDER_FORCED_PUBLIC)
+
+
+@dataclass(frozen=True)
+class OverlaySelection:
+    """The configuration half of whatever overlays a run applied.
+
+    ``selectors`` names which overlay sources were selected (the same
+    provider ids the evidence ledger records them under), and ``scope`` is
+    their combined, content-digested item list.
+    """
+
+    selectors: tuple[str, ...]
+    scope: DigestedItems | None
+
+
+def overlay_selection(evidence: ContractEvidenceBlock) -> OverlaySelection:
+    """Recover the run's explicit overlays from its own evidence ledger.
+
+    ``--post-manifest``'s committed-export allowlist and
+    ``--public-symbol``'s forced-public set both genuinely decide contract
+    membership, so a persisted ``evaluation_context`` that left
+    ``contract.overlays``/``surface.explicit_scope`` empty described a run
+    that never happened -- exactly the class of wrong-resolved-configuration
+    a D7 provenance receipt exists to prevent (Codex review, fresh evidence).
+
+    Derived from the already-collected block rather than from the caller's
+    own arguments so the two halves of one persisted context cannot disagree
+    about which overlays applied. The digest combines each overlay's own
+    per-provider ``input_identity`` (computed by
+    :func:`~abicheck.contract_evidence_collect.content_digest` over the same
+    items) rather than re-digesting the merged list: a combined list alone
+    could not tell "one manifest naming A and B" apart from "two overlays
+    naming A and B respectively", which is a real difference on replay.
+    Returns no ``scope`` at all when no overlay was selected -- the
+    documented difference between an unselected source and one that resolved
+    to nothing.
+    """
+    selectors: set[str] = set()
+    items: set[str] = set()
+    digests: dict[str, str] = {}
+    for entry in evidence.providers:
+        provider = entry.record.provider
+        if provider not in _OVERLAY_PROVIDERS:
+            continue
+        selectors.add(provider)
+        items.update(entry.manifests)
+        identity = entry.record.input_identity
+        if identity is not None:
+            # Both sides carry an identical record for one overlay (a
+            # run-level input applied to whichever side a finding is judged
+            # on), so keying by provider collapses the pair rather than
+            # digesting the same content twice.
+            digests[provider] = identity.sha256
+    if not selectors:
+        return OverlaySelection(selectors=(), scope=None)
+    return OverlaySelection(
+        selectors=tuple(sorted(selectors)),
+        scope=DigestedItems(sha256=content_digest(digests), items=tuple(sorted(items))),
+    )
+
+
 def build_evaluation_context(
     *,
     mode: ContractMode,
@@ -111,6 +182,7 @@ def build_evaluation_context(
     internal_namespaces: Iterable[str] = (),
     policy_overrides: Mapping[str, Verdict] | None = None,
     suppressions: SuppressionConfig | None = None,
+    overlays: OverlaySelection | None = None,
 ) -> EvaluationContextBlock:
     """The ``evaluation_context`` block for one comparison.
 
@@ -134,10 +206,14 @@ def build_evaluation_context(
     :func:`suppression_config_for`. ``None`` means no source was selected --
     a different fact from a source that resolved to zero rules, which is
     exactly the distinction that class exists to preserve.
+
+    *overlays* is what :func:`overlay_selection` recovered from the run's own
+    evidence ledger; ``None`` means no overlay was applied.
     """
     mode = coerce_contract_mode(mode)
     from .compatibility_evaluation_frontend import builtin_policy_identity
 
+    overlays = overlays or OverlaySelection(selectors=(), scope=None)
     provenance = {
         "contract.mode": mode_provenance or _api_provenance("contract_mode"),
         "policy.base": _api_provenance("policy"),
@@ -146,10 +222,17 @@ def build_evaluation_context(
         provenance["policy.overrides"] = _api_provenance("policy_file")
     if suppressions is not None:
         provenance["suppressions"] = _api_provenance("suppression")
+    if overlays.selectors:
+        provenance["contract.overlays"] = _api_provenance("overlays")
+    if overlays.scope is not None:
+        provenance["surface.explicit_scope"] = _api_provenance("overlays")
     config = CompatibilityEvaluationConfig(
-        contract=ContractConfig(mode=mode),
+        contract=ContractConfig(mode=mode, overlays=overlays.selectors),
         evidence=EvidenceConfig(),
-        surface=SurfaceConfig(internal_namespaces=tuple(internal_namespaces)),
+        surface=SurfaceConfig(
+            internal_namespaces=tuple(internal_namespaces),
+            explicit_scope=overlays.scope,
+        ),
         assurance=AssuranceConfig(),
         policy=CompatibilityPolicyConfig(
             base=builtin_policy_identity(policy),
@@ -339,6 +422,7 @@ def build_persisted_context(
             internal_namespaces=internal_namespaces,
             policy_overrides=policy_overrides,
             suppressions=suppressions,
+            overlays=overlay_selection(evidence),
         ),
         decision_receipt=build_decision_receipt(
             evidence, mode, relevance_map(changes, finding_id)

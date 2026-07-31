@@ -1689,3 +1689,47 @@ def stamp_scoped_result_findings(
                 stamp_explicit_scope_contract_evaluation(c)
     for c in getattr(result, "scoped_only_changes", ()) or ():
         stamp_explicit_scope_contract_evaluation(c)
+    refresh_contract_receipt(result, finding_id=finding_id)
+
+
+def refresh_contract_receipt(result: Any, *, finding_id: Callable[[Any], str]) -> None:
+    """Re-key *result*'s persisted decision receipt to its current decisions.
+
+    ``checker.compare`` freezes the ``decision_receipt`` block before
+    returning, but ``--used-by``/``--required-symbol`` scoping runs *after*
+    that: it overwrites already-recorded findings with the stronger
+    explicit-scope ``IN_CONTRACT`` decision and synthesizes fresh
+    ``scoped_only_changes`` the receipt never saw. Left alone, the persisted
+    receipt disagrees with the report emitted beside it, and
+    :func:`~abicheck.contract_replay.replay_original_decisions` reproduces
+    decisions that were never the run's own (Codex review, fresh evidence).
+
+    Merges rather than rebuilds: the receipt covers every finding
+    ``compare()`` classified, including the suppressed/redundant/out-of-surface
+    ones that never reach ``result.changes``, so recomputing the map from the
+    emitted collections alone would silently drop them. Only the two
+    collections a scoping pass can touch are re-derived.
+
+    A no-op when the caller never opted into ``contract_evaluation=True`` (no
+    context to refresh), and deliberately tolerant of a ``contract_context``
+    that is not a :class:`PersistedContractContext`: the field is typed
+    ``object`` on ``DiffResult`` precisely so ``checker_types`` need not
+    import this block's module.
+    """
+    from dataclasses import replace
+
+    from .contract_context import relevance_map
+    from .contract_evidence import PersistedContractContext
+
+    ctx = getattr(result, "contract_context", None)
+    if not isinstance(ctx, PersistedContractContext):
+        return
+    touched = list(result.changes) + list(
+        getattr(result, "scoped_only_changes", ()) or ()
+    )
+    merged = dict(ctx.decision_receipt.relevance_by_finding)
+    merged.update(relevance_map(touched, finding_id))
+    result.contract_context = replace(
+        ctx,
+        decision_receipt=replace(ctx.decision_receipt, relevance_by_finding=merged),
+    )

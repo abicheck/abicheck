@@ -331,6 +331,45 @@ class TestResolvedContextContent:
         config = result.contract_context.evaluation_context.resolved_config
         assert config.suppressions is None
 
+    def test_explicit_overlays_reach_the_persisted_config(self) -> None:
+        """``--public-symbol``/``--post-manifest`` decide membership, so the
+        resolved configuration records them (Codex review, fresh evidence).
+
+        ADR-049 D2 counts overlay-selected roots as part of the ``public``
+        domain's root set; a context leaving ``contract.overlays`` and
+        ``surface.explicit_scope`` empty described a run that never happened.
+        """
+        old, new = _pair()
+        result = compare(
+            old,
+            new,
+            contract_evaluation=True,
+            force_public_symbols={"api"},
+            public_surface_allowlist={"api", "other"},
+        )
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.contract.overlays == ("forced_public_symbols", "post_manifest")
+        assert config.surface.explicit_scope is not None
+        assert config.surface.explicit_scope.items == ("api", "other")
+        assert config.surface.explicit_scope.sha256
+        assert "contract.overlays" in config.provenance
+        assert "surface.explicit_scope" in config.provenance
+        decoded = persisted_context_from_dict(
+            persisted_context_to_dict(result.contract_context)
+        )
+        assert decoded.evaluation_context.resolved_config == config
+
+    def test_no_overlay_leaves_the_explicit_scope_unselected(self) -> None:
+        """No overlay is ``None``, not an empty digested list -- the same
+        selected-vs-empty distinction ``suppressions`` keeps."""
+        old, new = _pair()
+        result = compare(old, new, contract_evaluation=True)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.contract.overlays == ()
+        assert config.surface.explicit_scope is None
+
 
 class TestMalformedPayloads:
     """One failure type for a malformed persisted payload.
