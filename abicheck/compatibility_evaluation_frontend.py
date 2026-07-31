@@ -72,8 +72,8 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-from collections.abc import Collection, Hashable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Collection, Hashable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -331,6 +331,21 @@ class PublicSymbolsList:
         return cls(path=str(path), items=read_symbols_list(path))
 
 
+def _normalized_symbols(values: Iterable[str]) -> tuple[str, ...]:
+    """Inline symbol values, normalized the way the live run normalizes them.
+
+    :func:`collect_force_public_symbols` -- what the real comparison forces --
+    strips every value and drops blanks, so keeping ``--public-symbol ' foo '``
+    verbatim here resolved ``surface.explicit_scope`` to ``" foo "`` for a run
+    that actually forces ``"foo"``: an effective configuration, and a digest,
+    that misrepresent the run (Codex review, fresh evidence). Applied in the
+    input models rather than in one adapter so every front end -- and a caller
+    constructing the dataclass directly -- normalizes identically. The
+    list-file reader (:func:`read_symbols_list`) already does the same.
+    """
+    return tuple(stripped for value in values if (stripped := value.strip()))
+
+
 @dataclass(frozen=True)
 class ExplicitCompatibilityInputs:
     """What the user stated on *this* invocation (CLI flags / API request).
@@ -383,7 +398,9 @@ class ExplicitCompatibilityInputs:
     pack_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "public_symbols", tuple(self.public_symbols))
+        object.__setattr__(
+            self, "public_symbols", _normalized_symbols(self.public_symbols)
+        )
         object.__setattr__(self, "pack_paths", tuple(str(p) for p in self.pack_paths))
 
     def severity_category(self, category: str) -> str | None:
@@ -416,7 +433,9 @@ class ProjectCompatibilityInputs:
     severity_addition: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "public_symbols", tuple(self.public_symbols))
+        object.__setattr__(
+            self, "public_symbols", _normalized_symbols(self.public_symbols)
+        )
 
     def severity_category(self, category: str) -> str | None:
         return cast("str | None", getattr(self, f"severity_{category}"))
@@ -1026,23 +1045,29 @@ def resolve_compatibility_evaluation_config(
     # ── gate ────────────────────────────────────────────────────────────────
     preset_candidates: list[FieldCandidate] = []
     if explicit.severity_preset is not None:
+        explicit_preset = severity_preset_identity(explicit.severity_preset)
         preset_candidates.append(
             _candidate(
                 layer,
-                severity_preset_identity(explicit.severity_preset),
+                explicit_preset,
                 option="--severity-preset",
                 source_kind="severity_preset",
                 reference=explicit.severity_preset,
+                version=explicit_preset.version,
+                sha256=explicit_preset.sha256,
             )
         )
     if project is not None and project.severity_preset is not None:
+        project_preset = severity_preset_identity(project.severity_preset)
         preset_candidates.append(
             _candidate(
                 SelectorLayer.PROJECT_CONFIG,
-                severity_preset_identity(project.severity_preset),
+                project_preset,
                 option="severity.preset",
                 source_kind="severity_preset",
                 reference=project.severity_preset,
+                version=project_preset.version,
+                sha256=project_preset.sha256,
                 path=project.path,
             )
         )
@@ -1097,6 +1122,21 @@ def resolve_compatibility_evaluation_config(
             # detection above.
             default_is_stated=preset_stated,
         )
+        if preset_stated and prov[field_name].layer is SelectorLayer.BUILT_IN_DEFAULT:
+            # The level came from the preset, so the receipt names the preset:
+            # its layer, its selector, and the identity/digest of the exact
+            # preset revision. `resolve_field` requires the `default` slot to
+            # carry BUILT_IN_DEFAULT, and the derived level cannot become an
+            # ordinary candidate either -- at the preset's own layer it would
+            # tie with a per-category flag from that same layer, and refining
+            # a preset with one category is legal, not a conflict. So the
+            # value resolves as a default and the receipt is corrected after
+            # the fact, leaving precedence untouched (Codex review, fresh
+            # evidence: the receipt claimed BUILT_IN_DEFAULT for a level the
+            # user had chosen).
+            prov[field_name] = replace(
+                prov[GATE_PRESET_FIELD], source_kind="severity_preset"
+            )
         levels[category] = cast(SeverityLevel, value)
 
     severity_active = _severity_active(explicit, project, gate_pack_fields)

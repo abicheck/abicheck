@@ -535,6 +535,52 @@ class TestSelectedButEmptySources:
         )
 
 
+class TestPresetDerivedCategoriesNameTheirPreset:
+    def test_a_derived_level_is_attributed_to_the_cli_preset(self):
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(severity_preset="strict"))
+        prov = cfg.provenance["gate.severity.addition"]
+        assert prov.layer is SelectorLayer.EXPLICIT_CLI
+        assert prov.source_kind == "severity_preset"
+        assert prov.reference == "strict"
+        # The exact preset revision, so a replay can tell it apart from a
+        # future preset of the same name.
+        assert prov.sha256 == cfg.gate.preset.sha256
+        assert [e.option for e in prov.selected_by] == ["--severity-preset"]
+
+    def test_a_derived_level_is_attributed_to_the_project_preset(self, tmp_path):
+        cfg = _resolve(
+            project=ProjectCompatibilityInputs(
+                severity_preset="strict", path=str(tmp_path / ".abicheck.yml")
+            )
+        )
+        prov = cfg.provenance["gate.severity.abi_breaking"]
+        assert prov.layer is SelectorLayer.PROJECT_CONFIG
+        assert [(e.option, e.path) for e in prov.selected_by] == [
+            ("severity.preset", str(tmp_path / ".abicheck.yml"))
+        ]
+
+    def test_a_per_category_flag_keeps_its_own_receipt(self):
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                severity_preset="strict", severity_addition="info"
+            )
+        )
+        prov = cfg.provenance["gate.severity.addition"]
+        assert prov.source_kind == "severity_override"
+        assert [e.option for e in prov.selected_by] == ["--severity-addition"]
+        # The categories the flag did not refine still name the preset.
+        assert (
+            cfg.provenance["gate.severity.abi_breaking"].source_kind
+            == "severity_preset"
+        )
+
+    def test_without_a_preset_a_category_is_still_a_built_in_default(self):
+        cfg = _resolve()
+        prov = cfg.provenance["gate.severity.addition"]
+        assert prov.layer is SelectorLayer.BUILT_IN_DEFAULT
+        assert prov.selected_by == ()
+
+
 class TestPolicyDigestIsOverRawBytes:
     def test_line_ending_only_changes_are_detected(self, tmp_path):
         # `read_text()` translates newlines, so hashing its result would give

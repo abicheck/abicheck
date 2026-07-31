@@ -377,6 +377,27 @@ class TestExplicitScopeOverlay:
     def test_no_symbols_means_no_source_was_selected(self):
         assert _resolve().surface.explicit_scope is None
 
+    def test_inline_symbols_are_normalized_like_the_live_run(self):
+        # `collect_force_public_symbols` — what the comparison actually forces
+        # — strips and drops blanks, so keeping them verbatim would resolve a
+        # scope the run never applies.
+        raw = (" foo ", "", "   ", "bar")
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(public_symbols=raw))
+        assert cfg.surface.explicit_scope is not None
+        assert cfg.surface.explicit_scope.items == ("bar", "foo")
+        assert set(cfg.surface.explicit_scope.items) == collect_force_public_symbols(
+            raw, None
+        )
+
+    def test_project_symbols_are_normalized_the_same_way(self):
+        cfg = _resolve(project=ProjectCompatibilityInputs(public_symbols=(" foo ", "")))
+        assert cfg.surface.explicit_scope is not None
+        assert cfg.surface.explicit_scope.items == ("foo",)
+
+    def test_only_blank_inline_symbols_select_nothing(self):
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(public_symbols=("", "  ")))
+        assert cfg.surface.explicit_scope is None
+
 
 class TestInternalNamespaces:
     def test_policy_file_namespaces_reach_the_surface_config(self, tmp_path):
