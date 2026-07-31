@@ -533,6 +533,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--bundle-system-providers",
         "--collapse-versioned-symbols",
         "--config",
+        "--contract",
         "--contract-evaluation",
         "--ctf",
         "--debug-format",
@@ -910,3 +911,28 @@ def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
     assert cli_scan.run_scan_core is scan_engine.run_scan_core
     assert cli_scan._BudgetOverflow is scan_engine._BudgetOverflow
     assert cli_scan._EvidenceContractError is scan_engine._EvidenceContractError
+
+
+def test_contract_requires_contract_evaluation(tmp_path) -> None:
+    """``--contract`` alone would silently do nothing (ADR-049 Phase 6).
+
+    It selects the domain the shadow evaluator judges against; with no
+    ``--contract-evaluation`` no decision is computed at all, so accepting
+    the flag would accept a no-op. Rejected before any input is parsed, so
+    the two paths only have to exist.
+    """
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    old_path = tmp_path / "old.json"
+    new_path = tmp_path / "new.json"
+    old_path.write_text("{}", encoding="utf-8")
+    new_path.write_text("{}", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_path), str(new_path), "--contract", "exports"],
+    )
+    assert result.exit_code != 0
+    assert "--contract requires --contract-evaluation" in result.output

@@ -237,6 +237,14 @@ class CompareRequest:
     # what makes the shadow evaluator reachable through the real Tier-2
     # chokepoint at all (Codex review, fresh evidence).
     contract_evaluation: bool = False
+    # ADR-049 Phase 6: which evidence domain `contract_evaluation` judges
+    # against -- "public" (header-derived declared surface), "exports" (the
+    # binary's own export table plus the raw type closure from it), or "all"
+    # (no root/closure evidence required). `None` keeps the legacy derivation
+    # from `scope_public`; an explicit value outranks it per ADR-049 D7
+    # (`explicit_cli` > `legacy_alias`). Selects the domain only -- like
+    # `contract_evaluation` itself, non-authoritative for verdict/exit code.
+    contract_mode: str | None = None
     # ADR-055 D1: the friendly evidence-depth dial (`--depth`, same vocabulary
     # as `dump`/`scan`: binary/headers/build/source). `None` (the default)
     # infers the collect mode from whether either side sets `sources`/

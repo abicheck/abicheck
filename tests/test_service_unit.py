@@ -2922,9 +2922,12 @@ class TestContractEvaluationThreading:
         import inspect
 
         params = list(inspect.signature(run_compare).parameters)
-        assert params[-1] == "include_dependencies"
-        assert params[-2] == "contract_evaluation"
-        assert params[-3] == "diagnostic_comparison"
+        # contract_mode (ADR-049 Phase 6's --contract) was appended after
+        # include_dependencies in turn, following the same rule.
+        assert params[-1] == "contract_mode"
+        assert params[-2] == "include_dependencies"
+        assert params[-3] == "contract_evaluation"
+        assert params[-4] == "diagnostic_comparison"
 
 
 class TestParallelOldNewExtraction:

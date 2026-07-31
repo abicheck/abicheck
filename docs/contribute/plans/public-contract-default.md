@@ -1765,12 +1765,18 @@ roots, the unresolvable case) and `tests/test_contract_evaluation_exports.py`
 (see `AGENTS.md`), the same split `test_contract_evaluation_not_applicable.py`
 already is).
 
-**Still open, unchanged by this:** no front end selects `EXPORTS` yet —
-`checker._apply_contract_evaluation_shadow` still derives `PUBLIC`/`ALL` from
-`scope_to_public_surface`, so the new mode is reachable only through the
-Python-level evaluator API. Exposing it is Phase 6's `--contract
-public|exports|all` flag, which also needs the corpus validation that phase's
-gate requires; and the provider-evidence ledger this phase's own gate names
+**Phase 6's first slice landed with this:** `compare --contract
+public|exports|all` selects the domain, threaded through
+`CompareRequest.contract_mode` → `service.run_compare`/`compare_snapshots` →
+`checker.compare`. `_apply_contract_evaluation_shadow` no longer re-derives
+the D2 alias mapping inline — it calls Phase 1's own
+`compatibility_evaluation_wiring.resolve_legacy_contract_mode`, making that
+wiring's first live caller, and an explicit `--contract` outranks it per D7
+(`explicit_cli` > `legacy_alias`). The flag requires `--contract-evaluation`
+(on its own it would select a domain nothing evaluates) and is rejected for
+directory/package comparisons, matching `--contract-evaluation`'s own
+fan-out limitation. **Still open:** the corpus validation Phase 6's gate
+requires; and the provider-evidence ledger this phase's own gate names
 still does not exist for either domain (`ExportSurface.resolvable`/
 `has_typed_roots` is the same coarse per-surface signal
 `PublicSurface.resolvable`/`has_provenance` is, not a per-provider

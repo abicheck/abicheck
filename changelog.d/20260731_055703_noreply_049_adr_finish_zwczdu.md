@@ -13,6 +13,25 @@
   all three `ContractMode` values instead of raising `NotImplementedError`
   for `EXPORTS`, taking the new `exports_old`/`exports_new` surfaces —
   required for that mode rather than approximated from the header surface.
-  Still shadow-only and not selectable from any command, so no verdict, exit
-  code, or report changes, until ADR-049 Phase 6 exposes
-  `--contract public|exports|all`.
+
+- **`compare --contract public|exports|all` selects that evidence domain**
+  (ADR-049 Phase 6) — the domain `--contract-evaluation` judges each finding
+  against, which until now was derived only from
+  `--scope-public-headers`/`--no-scope-public-headers`. An explicit value
+  outranks that legacy alias (ADR-049 D7's `explicit_cli` > `legacy_alias`
+  precedence, resolved through Phase 1's own `resolve_legacy_contract_mode`
+  rather than a second copy of the mapping). Available on the Python API and
+  the typed request object too (`CompareRequest.contract_mode`,
+  `service.run_compare`/`compare_snapshots`). Requires
+  `--contract-evaluation`, and is advisory exactly like it: selecting a
+  domain never changes a verdict, an exit code, or which findings appear.
+
+- **The export surface now tracks unresolved type edges** — a root
+  signature, or a reached record's field or base, whose type string names no
+  record, enum, or typedef the snapshot carries leaves the closure
+  incomplete, so `ExportSurface.exclusion_is_provable` (and with it any
+  `PROVEN_OUT_OF_CONTRACT` decision) now requires there to be none. Spellings
+  are resolved through `type_reachability.py`'s namespace-suffix and
+  stdlib-stripping machinery, so a partially-qualified or bare standard-library
+  spelling still resolves; toolchain-owned records' internals and dependent
+  (`typename`/`template`) spellings are excluded as non-edges.

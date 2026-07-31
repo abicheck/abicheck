@@ -199,6 +199,7 @@ def _reject_set_input_flags(
     required_symbols: tuple[str, ...] = (),
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
+    contract_mode: str | None = None,
     audit_suppressions: bool = False,
     include_labels: dict[Path, str] | None = None,
 ) -> None:
@@ -260,6 +261,13 @@ def _reject_set_input_flags(
             "(release) comparisons yet: the per-library fan-out does not "
             "wire ADR-049 Phase 3's shadow contract evaluator. Compare the "
             "specific library individually to use it."
+        )
+    if contract_mode is not None:
+        raise click.UsageError(
+            "--contract is not supported for directory/package (release) "
+            "comparisons yet: it selects the evidence domain for the shadow "
+            "contract evaluator, which the per-library fan-out does not wire "
+            "either. Compare the specific library individually to use it."
         )
     if audit_suppressions:
         raise click.UsageError(
@@ -1160,6 +1168,7 @@ def run_compare(
     verify_runtime: bool = False,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
+    contract_mode: str | None = None,
     audit_suppressions: bool = False,
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: Path | None = None,
@@ -1177,6 +1186,17 @@ def run_compare(
             "secondary report to produce."
         )
     _setup_verbosity(verbose)
+
+    if contract_mode is not None and not contract_evaluation:
+        # `--contract` selects the domain the shadow evaluator judges
+        # against, so on its own it would silently do nothing: no finding
+        # carries a contract decision unless `--contract-evaluation` asked
+        # for one. Rejecting is better than accepting a flag with no effect.
+        raise click.UsageError(
+            "--contract requires --contract-evaluation: it selects which "
+            "evidence domain the shadow contract evaluator judges against, "
+            "and without that flag no contract decision is computed at all."
+        )
 
     if secondary_fmt is not None and secondary_output is None:
         raise click.UsageError(
@@ -1275,6 +1295,7 @@ def run_compare(
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
             audit_suppressions=audit_suppressions,
             include_labels=include_labels,
         )
@@ -1662,6 +1683,7 @@ def run_compare(
             reconcile_build_context=reconcile_build_context,
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)

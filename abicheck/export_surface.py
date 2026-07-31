@@ -160,16 +160,24 @@ class ExportSurface:
     def exclusion_is_provable(self) -> bool:
         """Whether an absence from the root/closure sets is real evidence.
 
-        Requires an observed export table, at least one resolved root, no
-        unexplained ABI-relevant export left over, and no unresolved type
-        edge in what the closure walked. Read this rather than the
-        individual flags: each covers a different way the traversal can be
-        incomplete, and any one of them alone permits a false
-        ``PROVEN_OUT_OF_CONTRACT``.
+        Requires an observed export table, at least one resolved root, every
+        root carrying real signature types, no unexplained ABI-relevant
+        export left over, and no unresolved type edge in what the closure
+        walked. Read this rather than the individual flags: each covers a
+        different way the traversal can be incomplete, and any one of them
+        alone permits a false ``PROVEN_OUT_OF_CONTRACT``.
+
+        ``all_roots_typed`` belongs here rather than in a separate check the
+        caller has to remember (CodeRabbit review): an untyped root's closure
+        is unknown just as surely as an unmatched export's is, so leaving it
+        out contradicted this property's own "read this, not the individual
+        flags" contract. It is vacuously ``True`` with no roots, which
+        ``has_roots`` above already rules out.
         """
         return (
             self.resolvable
             and self.has_roots
+            and self.all_roots_typed
             and not self.unmatched_exports
             and not self.unresolved_type_edges
         )
@@ -576,6 +584,31 @@ def _edge_is_unresolved(type_str: str | None, resolvable: frozenset[str]) -> set
     return missing
 
 
+def _followed_typedef_aliases(
+    type_str: str | None, snap: AbiSnapshot, surface: ExportSurface
+) -> set[str]:
+    """Typedef keys named by *type_str* whose target is worth scanning too.
+
+    An *ambiguous* key is excluded: it does not prove the spelling reached
+    this alias rather than the same-named record, the same reasoning
+    ``_confirmed_type_matches`` uses -- and it is what keeps libstdc++'s
+    bare-key alias templates (``"vector"``, ``"basic_string"``, which collide
+    with the real records) out of the scan. See
+    :func:`_unresolved_type_edges` for the full rationale.
+    """
+    if not _is_real_type(type_str) or type_str is None:
+        return set()
+    if _DEPENDENT_SPELLING_RE.search(type_str):
+        return set()
+    return {
+        tok
+        for tok in _IDENT_RE.findall(type_str)
+        if tok not in _TYPE_NOISE
+        and tok in snap.typedefs
+        and tok not in surface.ambiguous_type_names
+    }
+
+
 def _unresolved_type_edges(
     snap: AbiSnapshot,
     surface: ExportSurface,
@@ -599,20 +632,22 @@ def _unresolved_type_edges(
     so including it would block exclusion for a graph defect that cannot
     matter.
 
-    Typedef *targets* are deliberately **not** scanned, which costs nothing
-    against the case this guard exists for. The motivating example -- a
-    snapshot recording a parameter type ``Alias`` while omitting
-    ``typedef Alias = Internal`` -- is caught by the *signature* scan, since
-    ``Alias`` itself resolves to nothing. What target scanning would add is
-    only the narrower "alias present, its target absent" shape, and measured
-    against a real ``g++`` library it produced nothing but noise: the
-    direct-clang backend stores a typedef under its bare ``node["name"]``
-    (the producer-side scope loss ``AGENTS.md`` records), so libstdc++'s
-    *member* typedefs land under unattributable bare keys like
-    ``"allocator_type"``/``"pointer"`` whose targets are the enclosing
-    template's own parameters (``_Alloc``) -- names no snapshot can carry.
-    Telling those from a genuinely missing target needs the alias's real
-    owner, which the key no longer has.
+    A scanned spelling that resolves to a **typedef** is followed to its
+    target, transitively: an alias whose own target names nothing known
+    leaves the closure just as incomplete as a missing record would, and
+    unlike the "alias absent entirely" shape it is invisible to the
+    signature scan (the alias key itself resolves fine) -- CodeRabbit
+    review. Following happens only from an already-scanned spelling, never
+    over ``snap.typedefs`` wholesale, and an *ambiguous* alias key is not
+    followed. Both restrictions are what keep this usable: the direct-clang
+    backend stores a typedef under its bare ``node["name"]`` (the
+    producer-side scope loss ``AGENTS.md`` records), so libstdc++'s alias
+    *templates* land under bare keys like ``"vector"``/``"basic_string"``
+    that collide with the real records of those names, and its *member*
+    typedefs under keys like ``"allocator_type"``/``"pointer"`` whose targets
+    are the enclosing template's own parameters (``_Alloc``) -- names no
+    snapshot can carry. Reaching those requires walking a toolchain record's
+    internals, which the rule below already declines to do.
 
     A **toolchain-owned** record's own internals are skipped for the same
     reason one level up. Measured against a real ``g++ -shared -g`` library
@@ -630,24 +665,34 @@ def _unresolved_type_edges(
     the inspected library's graph is dropped.
     """
     unresolved: set[str] = set()
+    seen_aliases: set[str] = set()
+
+    def scan(type_str: str | None) -> None:
+        unresolved.update(_edge_is_unresolved(type_str, resolvable))
+        for alias in _followed_typedef_aliases(type_str, snap, surface):
+            if alias in seen_aliases:
+                continue
+            seen_aliases.add(alias)
+            scan(snap.typedefs[alias])
+
     for fn in snap.functions:
         if not (_symbol_keys(fn.name, fn.mangled) & surface.export_symbols):
             continue
-        unresolved |= _edge_is_unresolved(fn.return_type, resolvable)
+        scan(fn.return_type)
         for p in fn.params:
-            unresolved |= _edge_is_unresolved(getattr(p, "type", None), resolvable)
+            scan(getattr(p, "type", None))
     for var in snap.variables:
         if _symbol_keys(var.name, var.mangled) & surface.export_symbols:
-            unresolved |= _edge_is_unresolved(var.type, resolvable)
+            scan(var.type)
     for rec in snap.types:
         if rec.name not in reached_types and rec.qualified_name not in reached_types:
             continue
         if (rec.qualified_name or rec.name).startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             continue
         for f in rec.fields:
-            unresolved |= _edge_is_unresolved(f.type, resolvable)
+            scan(f.type)
         for base in (*rec.bases, *rec.virtual_bases):
-            unresolved |= _edge_is_unresolved(base, resolvable)
+            scan(base)
     return frozenset(unresolved)
 
 
@@ -694,6 +739,12 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     for rec in snap.types:
         if rec.qualified_name and rec.qualified_name != rec.name:
             record_by_name.setdefault(rec.qualified_name, []).append(rec)
+    # `EnumType` carries the same bare-`name`/separate-`qualified_name` split
+    # on the castxml/clang path, so a namespaced enum needs the same exact
+    # handle for the same reason (CodeRabbit review).
+    for en in snap.enums:
+        if en.qualified_name and en.qualified_name != en.name:
+            enum_by_name.setdefault(en.qualified_name, []).append(en)
 
     # `_index_surface_types` counts collisions across the record and enum
     # indexes only -- `snap.typedefs` never enters its tally -- so a typedef

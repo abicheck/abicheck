@@ -1762,6 +1762,14 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "invocation (e.g. an ad hoc audit vs. a routine CI gate), not a "
         "stable project default -- like --pattern-verdicts/--surface-metrics."
     ),
+    "--contract": (
+        "ADR-049 Phase 6: picks which evidence domain --contract-evaluation "
+        "judges each finding against (public/exports/all). Meaningful only "
+        "alongside that flag, and varies with what a given run is asking -- "
+        "'what does my declared header surface promise' vs. 'what does this "
+        "binary actually export' -- so it follows --contract-evaluation's own "
+        "per-invocation nature rather than being a stable project default."
+    ),
     "--audit-suppressions": (
         "Opts one invocation into an additional audit of the --suppress "
         "rule file (stale/high-risk/expired/near-expiry rules) against this "

@@ -1087,18 +1087,15 @@ def _exports_mode_decision(
         )
 
     known_types = candidates & auth.all_types
-    if known_types and not auth.all_roots_typed:
-        # At least one export root carries no usable signature type
-        # information (an export absent from the parsed headers, or the
-        # export-only `"?"` sentinel), so its own closure is unknown and
-        # could contain this very type. `has_typed_roots` -- *some* root is
-        # typed -- is not enough to exclude: a partial closure proves
-        # unreachability from the roots it covers, not from the ones it
-        # doesn't (ADR-024 D5.2's rule, applied to this domain; Codex
-        # review).
-        return _unresolved_decision(
-            "required_evidence_incomplete", ContractAssurance.PARTIAL
-        )
+    # An untyped export root -- one absent from the parsed headers, or
+    # recorded with the export-only `"?"` sentinel -- has an unknown closure
+    # of its own that could contain this very type, so it must not permit an
+    # exclusion either (ADR-024 D5.2's rule, applied to this domain; Codex
+    # review). That used to be a second check right here; it now lives
+    # inside `exclusion_is_provable` above, which is where the property's own
+    # docstring always claimed every incompleteness signal was (CodeRabbit
+    # review). Both paths returned the identical decision, so folding them
+    # loses nothing and leaves one place to add the next signal to.
     # An unknown symbol (a macro name, a Python-API entity, a synthetic
     # per-batch sentinel) is unplaceable, not proven-excluded. `all_symbols`
     # is keyed by `surface._symbol_keys` exactly like the root set, so the

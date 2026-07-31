@@ -32,6 +32,7 @@ from abicheck.export_surface import compute_export_surface, observed_export_name
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import (
     AbiSnapshot,
+    EnumType,
     Function,
     Param,
     RecordType,
@@ -709,6 +710,20 @@ class TestAmbiguityAndRuntimeOwnership:
         assert surf.export_symbols == {"_foo"}
         assert "AOnly" not in surf.export_types
 
+    def test_an_export_matched_in_one_table_leaves_the_other_unexplained(self) -> None:
+        # Only the Mach-O shift from `foo` matched; the ELF `_foo` is a real
+        # entry point no declaration accounts for (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("foo", "foo")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_foo")]),
+            macho=MachoMetadata(exports=[MachoExport(name="_foo")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unmatched_exports == frozenset({"_foo"})
+        assert not surf.exclusion_is_provable
+
     def test_the_runtime_library_own_abi_is_not_filtered(self) -> None:
         # For libstdc++/libc++ itself, `_ZNSt...` exports are the inspected
         # ABI, not transitive runtime noise -- dropping them would let a
@@ -1019,16 +1034,105 @@ class TestUnresolvedTypeEdges:
         )
         assert not compute_export_surface(snap).unresolved_type_edges
 
-    def test_an_export_matched_in_one_table_leaves_the_other_unexplained(self) -> None:
-        # Only the Mach-O shift from `foo` matched; the ELF `_foo` is a real
-        # entry point no declaration accounts for (Codex review).
+    def test_an_exported_variables_type_edge_is_scanned(self) -> None:
         snap = AbiSnapshot(
             library="l",
             version="1",
-            functions=[_fn("foo", "foo")],
-            elf=ElfMetadata(symbols=[ElfSymbol(name="_foo")]),
-            macho=MachoMetadata(exports=[MachoExport(name="_foo")]),
+            variables=[Variable(name="cfg", mangled="cfg", type="Gone *")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="cfg")]),
         )
         surf = compute_export_surface(snap)
-        assert surf.unmatched_exports == frozenset({"_foo"})
+        assert surf.unresolved_type_edges == frozenset({"Gone"})
         assert not surf.exclusion_is_provable
+
+    def test_a_reached_records_base_edge_is_scanned(self) -> None:
+        surf = compute_export_surface(
+            self._snap("Holder *", [_rec("Holder", bases=("GoneBase",))])
+        )
+        assert surf.unresolved_type_edges == frozenset({"GoneBase"})
+
+    def test_an_alias_whose_target_is_absent_blocks_exclusion(self) -> None:
+        # Invisible to the signature scan: `Alias` itself resolves fine, so
+        # only following the alias exposes the hole (CodeRabbit review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Alias *",))],
+            types=[_rec("Internal")],
+            typedefs={"Alias": "Gone"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.unresolved_type_edges == frozenset({"Gone"})
+        assert not surf.exclusion_is_provable
+
+    def test_an_alias_chain_is_followed_to_its_end(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Alias *",))],
+            types=[_rec("Internal")],
+            typedefs={"Alias": "Mid", "Mid": "Gone"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert compute_export_surface(snap).unresolved_type_edges == frozenset({"Gone"})
+
+    def test_a_resolved_alias_target_leaves_exclusion_provable(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Alias *",))],
+            types=[_rec("Internal"), _rec("Real")],
+            typedefs={"Alias": "Real"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unresolved_type_edges
+        assert surf.exclusion_is_provable
+
+    def test_an_untyped_root_alone_blocks_exclusion(self) -> None:
+        # `exclusion_is_provable` folds in `all_roots_typed` rather than
+        # leaving it a separate check callers must remember (CodeRabbit
+        # review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("opaque", "opaque", ret="?")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="opaque")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unresolved_type_edges
+        assert not surf.all_roots_typed
+        assert not surf.exclusion_is_provable
+
+    def test_a_cyclic_alias_chain_terminates(self) -> None:
+        # A snapshot can carry a cycle (a producer bug, or two aliases that
+        # resolve through each other); following it must stop, not recurse.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("A *",))],
+            types=[_rec("Internal")],
+            typedefs={"A": "B", "B": "A"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert not compute_export_surface(snap).unresolved_type_edges
+
+    def test_a_qualified_enum_spelling_resolves(self) -> None:
+        # `EnumType` carries the same bare-name/qualified-name split records
+        # do, so it needs the same exact handle (CodeRabbit review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("ns::Mode",))],
+            enums=[
+                EnumType(name="Mode", qualified_name="ns::Mode"),
+                # A global enum, whose bare name is its whole identity, needs
+                # no extra handle -- and must not get a duplicate one.
+                EnumType(name="Plain"),
+            ],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unresolved_type_edges
+        assert "Mode" in surf.export_types

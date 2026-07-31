@@ -543,6 +543,7 @@ def _apply_contract_evaluation_shadow(
     redundant: list[Change] | None = None,
     suppressed: list[Change] | None = None,
     reconciled: list[Change] | None = None,
+    contract_mode: str | None = None,
 ) -> None:
     """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
     *kept* finding **and** every finding public-surface scoping already
@@ -613,8 +614,10 @@ def _apply_contract_evaluation_shadow(
     ``PROVEN_OUT_OF_CONTRACT`` for a finding POST-manifest already proved
     committed (Codex review, fresh evidence).
     """
+    from .compatibility_evaluation_wiring import resolve_legacy_contract_mode
     from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
     from .contract_relevance_types import ContractMode
+    from .export_surface import compute_export_surface
     from .surface import compute_public_surface
 
     surf_old = pp_ctx.surf_old
@@ -629,10 +632,27 @@ def _apply_contract_evaluation_shadow(
         surf_old = compute_public_surface(old)
         surf_new = compute_public_surface(new)
 
-    # ADR-049 plan Section 6.1/7: --no-scope-public-headers is the exact
-    # alias for contract=all (no root/closure evidence required at all);
-    # a header-scoping run corresponds to contract=public.
-    mode = ContractMode.PUBLIC if scope_to_public_surface else ContractMode.ALL
+    # ADR-049 D7 precedence: an explicit `--contract` (EXPLICIT_CLI) outranks
+    # the legacy `--scope-public-headers`/`--no-scope-public-headers` alias
+    # (LEGACY_ALIAS), which is itself the exact alias for contract=all /
+    # contract=public per D2's table. Resolved through Phase 1's own
+    # `resolve_legacy_contract_mode` rather than re-deriving the mapping
+    # here, so the two cannot drift; this is the first live caller of that
+    # wiring, which Phase 1 landed and deliberately left uncalled.
+    if contract_mode is not None:
+        mode = ContractMode(contract_mode)
+    else:
+        mode, _provenance = resolve_legacy_contract_mode(
+            scope_public_headers=scope_to_public_surface,
+            scope_public_headers_is_explicit=True,
+        )
+
+    # `exports` is rooted in the binary's own export table, so it needs its
+    # own evidence provider rather than the header-derived surfaces above.
+    exports_old = exports_new = None
+    if mode is ContractMode.EXPORTS:
+        exports_old = compute_export_surface(old)
+        exports_new = compute_export_surface(new)
 
     all_changes = (
         kept
@@ -654,6 +674,8 @@ def _apply_contract_evaluation_shadow(
             if pp_ctx.public_surface_allowlist
             else None
         ),
+        exports_old=exports_old,
+        exports_new=exports_new,
     )
     for change, decision in zip(all_changes, decisions, strict=True):
         change.contract_relevance = decision.relevance
@@ -687,6 +709,7 @@ def compare(
     env_matrix: EnvironmentMatrix | None = None,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -727,6 +750,16 @@ def compare(
             it changes no verdict, exit code, or existing report field, and
             defaults to off so every existing caller behaves exactly as
             before.
+        contract_mode: ADR-049 Phase 6 -- which evidence domain
+            *contract_evaluation* judges against: ``"public"`` (header-derived
+            declared surface), ``"exports"`` (the binary's own export table
+            and the raw type closure from it, ``export_surface.py``), or
+            ``"all"`` (no root/closure evidence required). ``None`` keeps the
+            legacy derivation from *scope_to_public_surface* described above;
+            an explicit value outranks it, per ADR-049 D7's precedence
+            (``explicit_cli`` > ``legacy_alias``). Selects the *domain* only
+            -- like *contract_evaluation* itself, it remains
+            non-authoritative and changes no verdict or exit code.
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
@@ -1074,7 +1107,7 @@ def compare(
         _apply_contract_evaluation_shadow(
             kept, old, new, scope_to_public_surface, force_public_symbols, pp_ctx,
             redundant=redundant_for_report, suppressed=suppressed,
-            reconciled=reconciled,
+            reconciled=reconciled, contract_mode=contract_mode,
         )
 
     return DiffResult(

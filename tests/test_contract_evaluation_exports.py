@@ -669,3 +669,71 @@ class TestExportsMode:
         assert self._evaluate(c, self._exports(snap)).relevance is not (
             ContractRelevance.IN_CONTRACT
         )
+
+
+class TestContractModeSelection:
+    """ADR-049 Phase 6: ``--contract`` selects the evidence domain.
+
+    Advisory exactly like ``--contract-evaluation`` itself -- these pin the
+    selection, its precedence, and that it stays non-authoritative, never a
+    verdict or exit code.
+    """
+
+    @staticmethod
+    def _pair():
+        # `Internal` is a real public-header declaration that no export
+        # reaches -- the one shape where the three domains disagree.
+        def snap(size):
+            return AbiSnapshot(
+                library="libfoo.so",
+                version="1",
+                functions=[_fn("api", ret="Cfg *", mangled="api")],
+                types=[
+                    _rec("Cfg"),
+                    _rec("Internal", size=size, origin=ScopeOrigin.PUBLIC_HEADER),
+                ],
+                elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+            )
+
+        return snap(64), snap(128)
+
+    def _compare(self, **kw):
+        from abicheck.checker import compare
+
+        old, new = self._pair()
+        # Header scoping off, so the finding survives to be judged at all --
+        # that also makes the legacy derivation `all`, which is what the
+        # precedence test below relies on.
+        return compare(old, new, scope_to_public_surface=False, **kw)
+
+    def _relevance(self, mode):
+        result = self._compare(contract_evaluation=True, contract_mode=mode)
+        return {c.symbol: c.contract_relevance for c in result.changes}["Internal"]
+
+    def test_exports_mode_proves_an_unreached_type_out_of_contract(self) -> None:
+        assert self._relevance("exports") is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+
+    def test_all_mode_keeps_the_same_type_in_contract(self) -> None:
+        # `all` requires no root/closure evidence at all.
+        assert self._relevance("all") is ContractRelevance.IN_CONTRACT
+
+    def test_an_explicit_mode_outranks_the_legacy_scope_flag(self) -> None:
+        # `scope_to_public_surface=False` alone derives `all` (D2's exact
+        # alias), which would report IN_CONTRACT; the explicit value wins
+        # (ADR-049 D7: explicit_cli > legacy_alias).
+        assert self._relevance("exports") is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        legacy = self._compare(contract_evaluation=True)
+        assert {c.symbol: c.contract_relevance for c in legacy.changes}["Internal"] is (
+            ContractRelevance.IN_CONTRACT
+        )
+
+    def test_selecting_a_mode_changes_no_verdict(self) -> None:
+        baseline = self._compare().verdict
+        assert {
+            self._compare(contract_evaluation=True, contract_mode=mode).verdict
+            for mode in ("public", "exports", "all")
+        } == {baseline}
+
+    def test_no_mode_stamps_nothing_without_contract_evaluation(self) -> None:
+        result = self._compare(contract_mode="exports")
+        assert all(c.contract_relevance is None for c in result.changes)
