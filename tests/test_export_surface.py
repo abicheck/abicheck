@@ -390,3 +390,78 @@ class TestUnresolvableUniverseParity:
             )
         )
         assert without_table.all_symbols == with_table.all_symbols
+
+
+class TestUnmatchedExports:
+    def test_an_export_no_declaration_matched_is_recorded(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("known", "known")],
+            elf=ElfMetadata(
+                symbols=[ElfSymbol(name="known"), ElfSymbol(name="mystery")]
+            ),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.has_roots
+        assert surf.unmatched_exports == frozenset({"mystery"})
+        assert not surf.exclusion_is_provable
+
+    def test_linker_artifacts_are_not_unexplained(self) -> None:
+        # Every real ELF binary exports these; counting them would make
+        # exclusion permanently unprovable. The judgment is delegated to
+        # `elf_symbol_filter.is_abi_relevant_elf_symbol`, the repo's existing
+        # owner of it.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("known", "known")],
+            elf=ElfMetadata(
+                symbols=[
+                    ElfSymbol(name="known"),
+                    ElfSymbol(name="_init"),
+                    ElfSymbol(name="_fini"),
+                    ElfSymbol(name="_ZThn8_N3Foo3barEv"),
+                ]
+            ),
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.unmatched_exports
+        assert surf.exclusion_is_provable
+
+    def test_exclusion_needs_a_resolvable_surface(self) -> None:
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api", "_Z3apiv")])
+        assert not compute_export_surface(snap).exclusion_is_provable
+
+
+class TestMachoUnderscoreDirections:
+    def test_headerless_dump_strips_a_second_underscore(self) -> None:
+        # `dumper._dump_macho`'s `_normalize_macho_sym` strips one underscore
+        # from an export name `macho_metadata` already stripped once, so the
+        # declaration ends up one underscore *shorter* than the table entry --
+        # the opposite direction from clang's `mangledName` (Codex review).
+        snap = AbiSnapshot(
+            library="l.dylib",
+            version="1",
+            functions=[_fn("ZN3lib3addEii", "ZN3lib3addEii", ret="?")],
+            macho=MachoMetadata(exports=[MachoExport(name="_ZN3lib3addEii")]),
+        )
+        assert "ZN3lib3addEii" in compute_export_surface(snap).export_symbols
+
+    def test_clang_direction_still_matches(self) -> None:
+        snap = AbiSnapshot(
+            library="l.dylib",
+            version="1",
+            functions=[_fn("lib::add", "__ZN3lib3addEii")],
+            macho=MachoMetadata(exports=[MachoExport(name="_ZN3lib3addEii")]),
+        )
+        assert "__ZN3lib3addEii" in compute_export_surface(snap).export_symbols
+
+    def test_neither_direction_applies_on_elf(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("_foo", "_foo"), _fn("bar", "bar")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="foo"), ElfSymbol(name="_bar")]),
+        )
+        assert not compute_export_surface(snap).export_symbols

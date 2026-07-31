@@ -240,32 +240,104 @@ class TestExportsMode:
             ContractRelevance.NOT_APPLICABLE
         )
 
-    def test_force_public_symbols_uses_the_explicit_evidence_tier(self) -> None:
-        # `--public-symbol` is a user-declared required symbol, not an
-        # observed export -- honored (the pipeline keeps such a finding
-        # unconditionally) but never labeled as an observed export root.
+    def test_declared_public_overlays_cannot_widen_the_export_domain(self) -> None:
+        # `--public-symbol` and `--post-manifest` both assert something about
+        # the *declared-public* surface; neither observes an export, and a
+        # user assertion cannot make an unexported declaration exported. This
+        # domain is defined as "only exported roots and their closure", so an
+        # overlay-named-but-unexported declaration stays out of it (Codex
+        # review) -- unlike the `public` path, where these overlays *are* the
+        # domain's own evidence.
         snap = self._snap(
-            functions=[_fn("api", mangled="_Z3apiv"), _fn("forced", mangled="forced")],
+            functions=[_fn("api", mangled="_Z3apiv"), _fn("declared", mangled="d")],
             elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]),
         )
-        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="forced", description="")
-        decision = self._evaluate(
-            c, self._exports(snap), force_public_symbols=frozenset({"forced"})
-        )
-        assert decision.relevance is ContractRelevance.IN_CONTRACT
-        assert decision.reason_code == "explicit_consumer_or_required_symbol_evidence"
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="d", description="")
+        for overlay in (
+            {"force_public_symbols": frozenset({"d"})},
+            {"public_surface_allowlist": frozenset({"d"})},
+        ):
+            decision = self._evaluate(c, self._exports(snap), **overlay)
+            assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
 
-    def test_post_manifest_allowlist_membership_is_an_export_root(self) -> None:
+    def test_an_overlay_named_symbol_that_is_exported_is_still_a_root(self) -> None:
+        # The overlays are ignored, not inverted: membership still comes from
+        # the export table, so an overlay-named declaration that *is* exported
+        # resolves through the ordinary root path.
         snap = self._snap(
-            functions=[_fn("api", mangled="_Z3apiv"), _fn("committed", mangled="c")],
-            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]),
+            functions=[_fn("declared", mangled="d")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="d")]),
         )
-        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="c", description="")
+        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="d", description="")
         decision = self._evaluate(
-            c, self._exports(snap), public_surface_allowlist=frozenset({"c"})
+            c, self._exports(snap), public_surface_allowlist=frozenset({"d"})
         )
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "export_root_membership"
+
+    def test_post_manifest_exclusion_still_narrows_in_exports_mode(self) -> None:
+        # The manifest's *exclusion* half stays authoritative in every mode: a
+        # committed-export manifest can only narrow the export domain ("this
+        # observed export is not committed"), never widen it past what the
+        # binary actually exports.
+        import abicheck.contract_evaluation as mod
+
+        snap = self._snap(
+            functions=[_fn("api", mangled="_Z3apiv")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]),
+        )
+        c = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3apiv",
+            description="",
+            surface_exclusion_reason=mod._REASON_POST_MANIFEST_NOT_COMMITTED,
+        )
+        assert self._evaluate(c, self._exports(snap)).relevance is (
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
+
+    def test_an_unmatched_export_blocks_every_exclusion(self) -> None:
+        # An export no declaration accounted for is a real entry point whose
+        # own signature -- and type closure -- this snapshot knows nothing
+        # about, so an absence from the root/closure sets could just mean the
+        # missing export is what reaches the entity (Codex review).
+        snap = self._snap(
+            functions=[
+                _fn("known", mangled="known", ret="Known *"),
+                _fn("unexported_helper", mangled="unexported_helper"),
+            ],
+            types=[_rec("Known"), _rec("Maybe")],
+            elf=ElfMetadata(
+                symbols=[ElfSymbol(name="known"), ElfSymbol(name="mystery")]
+            ),
+        )
+        for symbol, kind in (
+            ("Maybe", ChangeKind.TYPE_SIZE_CHANGED),
+            ("unexported_helper", ChangeKind.FUNC_REMOVED),
+        ):
+            c = Change(kind=kind, symbol=symbol, description="")
+            assert self._evaluate(c, self._exports(snap)).relevance is not (
+                ContractRelevance.PROVEN_OUT_OF_CONTRACT
+            )
+
+    def test_linker_artifacts_do_not_count_as_unmatched_exports(self) -> None:
+        # Otherwise every real ELF binary (which always exports _init/_fini/
+        # thunks) would permanently block exclusion.
+        snap = self._snap(
+            functions=[_fn("known", mangled="known", ret="Known *")],
+            types=[_rec("Known"), _rec("Maybe")],
+            elf=ElfMetadata(
+                symbols=[
+                    ElfSymbol(name="known"),
+                    ElfSymbol(name="_init"),
+                    ElfSymbol(name="_fini"),
+                ]
+            ),
+        )
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Maybe", description="")
+        assert self._evaluate(c, self._exports(snap)).relevance is (
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
 
     def test_addition_uses_new_side_evidence(self) -> None:
         # ADR-049 D4: an addition is judged by the new side, which is the

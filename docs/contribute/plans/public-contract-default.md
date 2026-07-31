@@ -1505,16 +1505,58 @@ as "unrelated and advisory". The one cross-domain exclusion, `--post-manifest`
 (an exact committed-*export* manifest), is still checked ahead of every mode
 branch, unchanged.
 
-Deliberately conservative in three specific places, each guarding against a
-false `PROVEN_OUT_OF_CONTRACT` (the direction that would hide a real break):
-an export table that was never captured — including a captured-but-empty
-one, which is indistinguishable from a failed parse in the recorded data —
-leaves `resolvable=False`, so nothing is decided in either direction; an
-entity absent from the snapshot's own symbol/type universe (a macro, a
-Python-API-axis finding) is unplaceable rather than proven-excluded; and an
-export-table-only dump whose roots carry no real signature types
-(`has_typed_roots=False`, return type `"?"`) cannot prove a *type*
-unreachable, applying ADR-024 D5.2's existing rule to this domain.
+Deliberately conservative, every guard aimed at the same failure direction —
+a false `PROVEN_OUT_OF_CONTRACT`, the one that would hide a real break.
+`ExportSurface.exclusion_is_provable` gates the exclusion branch and requires
+all three of: an export table that was actually captured (a captured-but-empty
+one is indistinguishable from a failed parse in the recorded data, so it
+counts as absent); at least one declaration resolved to a root (an observed
+table that matched nothing is a mangling-scheme gap, not proof of emptiness);
+and **no ABI-relevant observed export left unaccounted for** — an export no
+declaration matched is a real entry point whose own signature, and therefore
+whose own type closure, the snapshot knows nothing about, so it could be
+exactly what reaches the entity being judged. Two further guards sit on top:
+an entity absent from the snapshot's own symbol/type universe (a macro, a
+Python-API-axis finding) is unplaceable rather than proven-excluded, and
+proving a *type* unreachable additionally requires `all_roots_typed` —
+`has_typed_roots` (i.e. *some* root is typed) is not enough, since a
+partial closure proves unreachability only from the roots it covers.
+"ABI-relevant" delegates to `elf_symbol_filter.is_abi_relevant_elf_symbol`,
+the repo's existing owner of that judgment, so `_init`/`_fini`/thunks/
+transitive stdlib exports don't count as unexplained.
+
+**Neither declared-public overlay widens this domain.** `--public-symbol`
+(`force_public_symbols`) and `--post-manifest` (`public_surface_allowlist`)
+both assert something about the *declared-public* surface; neither observes
+an export, and a user assertion cannot make an unexported declaration
+exported. Honoring them — as the `public` path rightly does, since there they
+*are* the domain's own evidence — would report an unexported declaration
+`IN_CONTRACT` under a contract defined as "only exported roots and their
+closure". The POST manifest's *exclusion* half stays authoritative in every
+mode, which is deliberate rather than inconsistent: a committed-export
+manifest can only ever narrow the export domain, never widen it past what the
+binary actually exports.
+
+Mach-O needs underscore normalization in **both** directions, because its two
+producers disagree with the export trie by one underscore each way: clang's
+`mangledName` keeps the platform underscore (`__ZN...`) while the trie parser
+strips one (`_ZN...`), and the headerless path (`dumper._dump_macho`'s
+`_normalize_macho_sym`) strips a *second* one from that already-stripped name
+(`ZN...`). Both shifted spellings are tried, and only when the snapshot
+actually carries Mach-O metadata — on ELF/PE the leading underscore is
+meaningful, so `foo` and `_foo` can be distinct declarations and an
+unconditional shift would invent a root.
+
+**Open, deliberately left for Phase 6's corpus run:** the
+"no unmatched ABI-relevant export" requirement is sound but strict, and on a
+real header-scoped C++ library the ELF table also carries `_ZTV`/`_ZTI`/`_ZTS`
+vtable/typeinfo entries (not filtered by `is_abi_relevant_elf_symbol`, which
+only drops `_ZTh`/`_ZTv`/`_ZTc` thunks) that no `Function`/`Variable`
+declaration matches — so `PROVEN_OUT_OF_CONTRACT` will rarely be reachable
+until that set is either matched or excluded. Choosing the right leniency is
+exactly what Phase 6's corpus validation measures, so it is deliberately not
+guessed here: being unresolved-but-sound costs nothing while the evaluator is
+shadow-only.
 
 Three membership primitives shared by both domains (`_symbol_matches`,
 `_type_candidates`, `_confirmed_type_matches`) were extracted from

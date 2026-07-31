@@ -877,9 +877,6 @@ def _exports_mode_decision(
     change: Change,
     exp_old: ExportSurface,
     exp_new: ExportSurface,
-    *,
-    force_public_symbols: frozenset[str] | None,
-    public_surface_allowlist: frozenset[str] | None,
 ) -> ContractEvaluationDecision:
     """*change*'s relevance under ADR-049's ``exports`` contract domain.
 
@@ -899,16 +896,22 @@ def _exports_mode_decision(
     real export is in this contract; a public-header declaration that is not
     exported and not reached is not.
 
-    Two overlays are still honored, for the same reason the ``public`` path
-    honors them: each is an unconditional decision the *pipeline* already
-    made for this run that a from-scratch evaluation cannot see, so ignoring
-    it would produce a decision contradicting the run's own configuration.
-    ``public_surface_allowlist`` (``--post-manifest``) is an exact committed-
-    *export* manifest, i.e. direct evidence for this very domain, so it maps
-    to ``export_root_membership``; ``force_public_symbols``
-    (``--public-symbol``) is a user-declared required symbol rather than an
-    observed export, so it maps to ADR-049 Section 4.3 item 1's explicit
-    required-symbol tier instead of claiming an export root was observed.
+    **Neither declared-public overlay can widen this domain** (Codex review).
+    ``force_public_symbols`` (``--public-symbol``) and
+    ``public_surface_allowlist`` (``--post-manifest``) both assert something
+    about the *declared-public* surface; neither observes an export, and a
+    user assertion cannot make an unexported declaration exported. Honoring
+    them here -- as the ``public`` path rightly does, since there they *are*
+    the domain's own evidence -- would report an unexported declaration
+    ``IN_CONTRACT`` under a contract defined as "only exported roots and
+    their closure", and could gate on it.
+
+    The POST manifest's *exclusion* half stays authoritative in every mode
+    (it is checked ahead of the mode dispatch entirely, in the caller), which
+    is deliberate rather than inconsistent: a committed-export manifest can
+    only ever *narrow* the export domain -- "this observed export is not
+    committed" is a statement about exports -- never widen it past what the
+    binary actually exports.
 
     Never claims ``PROVEN_OUT_OF_CONTRACT`` without both an observed export
     table *and* an entity this snapshot actually knows about: an entity
@@ -917,18 +920,6 @@ def _exports_mode_decision(
     cannot be placed in the export domain at all, which is "incomplete
     root/graph evidence", not proof of exclusion.
     """
-    if force_public_symbols and _change_matches_symbols(change, force_public_symbols):
-        return ContractEvaluationDecision(
-            relevance=ContractRelevance.IN_CONTRACT,
-            reason_code=_EXPLICIT_SCOPE_REASON_CODE,
-            assurance=ContractAssurance.COMPLETE,
-        )
-    # Exact membership, not `_change_matches_symbols`'s suffix-tolerant rule
-    # -- mirroring `FilterNonPublicSurface._run_allowlist`'s own exact-name
-    # matching (see the `public` path's identical check for why).
-    if public_surface_allowlist and (change.symbol or "") in public_surface_allowlist:
-        return _export_root_decision()
-
     auth = _authoritative_export_surface(change, exp_old, exp_new)
     if not auth.resolvable:
         return _unresolved_decision(
@@ -964,12 +955,14 @@ def _exports_mode_decision(
     if candidates & auth.export_types:
         return _unresolved_decision("identity_ambiguous", ContractAssurance.PARTIAL)
 
-    # Nothing is provable when the observed export table resolved to no roots
-    # at all: the binary demonstrably exports something none of this
-    # snapshot's declarations could be matched to (a mangling-scheme gap),
-    # so an absence from the -- empty -- root/closure sets says nothing about
-    # this entity.
-    if not auth.has_roots:
+    # Nothing is provable unless the observed export table was fully
+    # accounted for: an export no declaration matched (a mangling-scheme gap,
+    # or an entry point absent from the parsed headers) is a real entry point
+    # whose own signature -- and therefore whose own type closure -- this
+    # snapshot knows nothing about, so an absence from the root/closure sets
+    # could simply mean the missing export is what reaches this entity
+    # (`ExportSurface.exclusion_is_provable`; Codex review).
+    if not auth.exclusion_is_provable:
         return _unresolved_decision(
             "required_evidence_incomplete", ContractAssurance.PARTIAL
         )
@@ -1099,13 +1092,7 @@ def evaluate_change_contract_relevance(
         # exclusion above (an exact committed-export manifest) crosses domain
         # boundaries, which is why it is checked ahead of every mode branch.
         assert exports_old is not None and exports_new is not None  # gated above
-        return _exports_mode_decision(
-            change,
-            exports_old,
-            exports_new,
-            force_public_symbols=force_public_symbols,
-            public_surface_allowlist=public_surface_allowlist,
-        )
+        return _exports_mode_decision(change, exports_old, exports_new)
 
     # mode is ContractMode.PUBLIC from here on.
     # A finding already demoted to the audit ledger by an earlier pipeline
