@@ -1637,6 +1637,25 @@ narrow patch the wrong call anyway:
   alone, and with no tail key that reference resolves to nothing, which
   reports a genuinely reachable type `PROVEN_OUT_OF_CONTRACT`.
 
+A typedef alias colliding with a record/enum key is the same residue reached
+by a second route: `_walk_type_closure` resolves one name through
+`snap.typedefs` *and* `record_by_name`, so a global `typedef Foo` in an
+exported signature also walks an unrelated castxml-recorded `ns::Foo` (whose
+bare `name` is `"Foo"`) and pulls in what only that record reaches —
+confirmed the same way. Same location, same direction, same scoped fix.
+
+What *was* fixed locally is the ambiguity bookkeeping that collision exposed:
+`_index_surface_types` tallies collisions across the record and enum indexes
+only, never `snap.typedefs`, so the colliding name was not flagged in
+`ambiguous_type_names` at all and a finding naming it got confirmed against
+whichever node the walk happened to reach. `compute_export_surface` now adds
+every typedef alias that is also a record/enum index key to its own ambiguity
+set, so such a finding resolves `UNKNOWN_UNRESOLVED`/`identity_ambiguous` —
+the same treatment a record-vs-record collision already gets. That does not
+close the closure leak (the walk still visits both nodes, and a finding about
+a type reachable only through the unintended one has an unambiguous name of
+its own), which is why it is recorded here rather than presented as a fix.
+
 Note the direction: this residue over-*includes* (an unrelated internal type
 reads `IN_CONTRACT`), the opposite of the qualified-owner bug above and of
 every other guard in this section. `surface.py`'s tail keys are deliberate

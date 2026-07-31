@@ -487,6 +487,25 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         if rec.qualified_name and rec.qualified_name != rec.name:
             record_by_name.setdefault(rec.qualified_name, []).append(rec)
 
+    # `_index_surface_types` counts collisions across the record and enum
+    # indexes only -- `snap.typedefs` never enters its tally -- so a typedef
+    # alias sharing a name with a record/enum key is not flagged ambiguous
+    # even though `_walk_type_closure` resolves that one name through *both*
+    # (Codex review, confirmed with a minimal snapshot: a global `typedef
+    # Foo` alongside a castxml-recorded `ns::Foo`, whose bare `name` is also
+    # `"Foo"`, left `ambiguous_type_names` empty). A finding naming it was
+    # then confirmed against whichever node the walk happened to reach, with
+    # no way to tell which one it was actually about -- exactly the
+    # collision `ambiguous_type_names` exists to refuse, and the same
+    # treatment a record-vs-record or record-vs-enum collision already gets.
+    # Computed after the augmentation above so a typedef aliasing a
+    # *qualified* record identity is caught too.
+    surface.ambiguous_type_names |= {
+        alias
+        for alias in snap.typedefs
+        if alias in record_by_name or alias in enum_by_name
+    }
+
     tables = observed_exports_by_platform(snap)
     if tables is None:
         # No root evidence. Still populate `all_symbols` so a caller can

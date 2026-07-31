@@ -809,3 +809,39 @@ class TestAmbiguityAndRuntimeOwnership:
         surf = compute_export_surface(snap)
         assert "OnlyNs1" not in surf.export_types
         assert "OnlyNs2" not in surf.export_types
+
+    def test_a_typedef_colliding_with_a_record_name_is_ambiguous(self) -> None:
+        # `_index_surface_types` tallies collisions across the record and
+        # enum indexes only, so a typedef alias sharing a name with a
+        # record key went unflagged even though `_walk_type_closure`
+        # resolves that one name through both (Codex review).
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Alias",))],
+            types=[
+                RecordType(
+                    name="Alias",
+                    kind="struct",
+                    size_bits=64,
+                    qualified_name="ns::Alias",
+                ),
+                _rec("Target"),
+            ],
+            typedefs={"Alias": "Target"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        assert "Alias" in compute_export_surface(snap).ambiguous_type_names
+
+    def test_a_typedef_with_no_record_of_that_name_stays_unambiguous(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "api", params=("Alias",))],
+            types=[_rec("Target")],
+            typedefs={"Alias": "Target"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
+        )
+        surf = compute_export_surface(snap)
+        assert "Alias" not in surf.ambiguous_type_names
+        assert {"Alias", "Target"} <= surf.export_types
