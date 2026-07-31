@@ -51,6 +51,7 @@ from abicheck.compatibility_evaluation_frontend import (
 )
 from abicheck.contract_relevance_types import SelectorLayer
 from abicheck.policy_file import PolicyFile
+from abicheck.suppression import SuppressionList
 
 
 class TestReplayProvenance:
@@ -636,3 +637,23 @@ class TestSuppressionDigestAndRulesShareOneRead:
         assert source.rules == ("symbol='foo'",)
         # Raw bytes, so a CRLF file does not digest as its LF twin.
         assert source.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def test_an_empty_document_keeps_its_digest(self, tmp_path):
+        # A file with no `suppressions:` key is a valid, empty rule set, not an
+        # absent source: it still has content that can drift between the
+        # recorded run and a replay, so D6 wants its digest.
+        path = tmp_path / "s.yml"
+        path.write_text("version: 1\n")
+        loaded = SuppressionList.load(path)
+        assert loaded.source_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def test_an_empty_document_resolves_instead_of_raising(self, tmp_path):
+        # Regression: losing the digest above made this valid source fail the
+        # non-empty-digest check and raise out of both front-end adapters.
+        path = tmp_path / "s.yml"
+        path.write_text("version: 1\n")
+        source = SuppressionSource.from_file(path)
+        assert source.rules == ()
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(suppression=source))
+        assert cfg.suppressions.rules == ()
+        assert cfg.provenance[SUPPRESSIONS_FIELD].sha256 == source.sha256

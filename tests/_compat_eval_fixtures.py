@@ -26,7 +26,11 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+from abicheck.compatibility_evaluation_config import CompatibilityEvaluationConfig
 from abicheck.compatibility_evaluation_frontend import (
+    ExplicitCompatibilityInputs,
+    FrontEnd,
+    ProjectCompatibilityInputs,
     resolve_compatibility_evaluation_config,
 )
 from abicheck.policy_file import PolicyFile
@@ -51,7 +55,14 @@ def policy_file(tmp_path: Path, body: str) -> PolicyFile:
     return PolicyFile.load(path)
 
 
-def resolve(**kwargs):
-    return resolve_compatibility_evaluation_config(**kwargs)
+def resolve(
+    *,
+    front_end: FrontEnd = FrontEnd.CLI,
+    explicit: ExplicitCompatibilityInputs | None = None,
+    project: ProjectCompatibilityInputs | None = None,
+) -> CompatibilityEvaluationConfig:
+    return resolve_compatibility_evaluation_config(
+        front_end=front_end, explicit=explicit, project=project
+    )
 
 

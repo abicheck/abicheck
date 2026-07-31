@@ -721,7 +721,10 @@ class SuppressionList:
 
         raw_suppressions = data.get("suppressions")
         if raw_suppressions is None:
-            return cls([])
+            # A file with no `suppressions:` key is a valid, empty rule set —
+            # it still has content that can drift, so it keeps its digest
+            # (ADR-049 D6) exactly like the populated return below.
+            return cls([], source_sha256=digest)
         if not isinstance(raw_suppressions, list):
             raise ValueError("'suppressions' must be a list")
 
