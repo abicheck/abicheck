@@ -800,9 +800,21 @@ def resolve_compatibility_evaluation_config(
         and _stated_exit_code_scheme(project.exit_code_scheme) is not None
     ):
         pinned_gate[EXIT_CODE_SCHEME_FIELD] = _STATED_ELSEWHERE
+    # A stated preset owns *every* category it expands into, so those fields
+    # are exempt too: without this, two gate packs disagreeing about a
+    # category raised a conflict the resolution would then have ignored
+    # anyway, since the preset -- not either pack -- supplies the value
+    # (Codex review, fresh evidence). One expression decides this and the
+    # `default_is_stated` gate below, so the exemption and the precedence it
+    # anticipates cannot drift apart.
+    preset_stated = explicit.severity_preset is not None or (
+        project is not None and project.severity_preset is not None
+    )
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
-        if explicit.severity_category(category) is not None or (
-            project is not None and project.severity_category(category) is not None
+        if (
+            preset_stated
+            or explicit.severity_category(category) is not None
+            or (project is not None and project.severity_category(category) is not None)
         ):
             pinned_gate[field_name] = _STATED_ELSEWHERE
 
@@ -985,12 +997,18 @@ def resolve_compatibility_evaluation_config(
     # `--pack` list never could. Collapsing them into a single pathless hop
     # left the receipt unable to say which manifest supplied which value
     # (Codex review, two rounds).
-    override_pack_contributors = [
-        (path, pack.identity)
-        for path, pack in loaded_packs
-        if pack.kind is PackKind.POLICY
-        and set(pack.assignments) - set(policy_overrides_explicit)
-    ]
+    # Deduplicated: naming one path twice selects one pack, exactly as
+    # `resolve_selected_packs` already treats it, so repeating it must not
+    # make an otherwise identical resolution unequal (Codex review, fresh
+    # evidence).
+    override_pack_contributors = list(
+        dict.fromkeys(
+            (path, pack.identity)
+            for path, pack in loaded_packs
+            if pack.kind is PackKind.POLICY
+            and set(pack.assignments) - set(policy_overrides_explicit)
+        )
+    )
     prov[POLICY_OVERRIDES_FIELD] = _overrides_provenance(
         layer,
         policy_source=policy_source,
@@ -1074,10 +1092,10 @@ def resolve_compatibility_evaluation_config(
             pack_layer=layer,
             pack_option=pack_option,
             # A stated preset already decided every category it covers, so a
-            # gate pack may not quietly replace one of them; `gate.preset` is
-            # not a routable pack field, so a resolved preset is always the
-            # user's or the project's.
-            default_is_stated=gate_preset is not None,
+            # gate pack may not quietly replace one of them -- the same
+            # statement that exempted these fields from pack-vs-pack conflict
+            # detection above.
+            default_is_stated=preset_stated,
         )
         levels[category] = cast(SeverityLevel, value)
 

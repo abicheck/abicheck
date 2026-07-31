@@ -76,12 +76,16 @@ Rules that fall out of it:
   *derived* from a statement: choosing `--severity-preset strict` states every
   `gate.severity.*` category the preset expands into, so a gate pack cannot
   replace one of them — while a single `--severity-addition info` still refines
-  the preset, which is not a conflict.
+  the preset, which is not a conflict. A field stated this way is also exempt
+  from pack-vs-pack conflict detection: two packs disagreeing about a value the
+  resolution takes from neither of them decides nothing.
 - **Order never decides anything.** Two invocations naming the same packs, the
   same symbols, or the same namespaces in a different order resolve to an equal
   object — including the receipt: two paths holding byte-identical manifest
   content collapse to one identity in the value and are both named, in sorted
-  order, in `selected_by`.
+  order, in `selected_by`, and naming one path twice selects it once. Two packs
+  spelling one value differently (`contract.overlays: ffi` and
+  `[ffi]`) agree rather than conflict — values are compared after routing.
 
 ### Two documented exceptions
 

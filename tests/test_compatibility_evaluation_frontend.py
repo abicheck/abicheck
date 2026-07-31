@@ -507,6 +507,38 @@ class TestPackComposition:
         )
         assert cfg.gate.severity.addition is SeverityLevel.ERROR
 
+    def test_a_stated_preset_exempts_its_categories_from_pack_conflicts(
+        self, tmp_path
+    ):
+        # Two packs disagreeing about a category the preset owns is not a
+        # usage error: the resolution takes neither pack's value, so raising
+        # would report a conflict that decides nothing.
+        first = _write_pack(
+            tmp_path / "a.yml",
+            pack_id="a",
+            kind="gate",
+            assignments="gate.severity.addition: info\n",
+        )
+        second = _write_pack(
+            tmp_path / "b.yml",
+            pack_id="b",
+            kind="gate",
+            assignments="gate.severity.addition: error\n",
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                severity_preset="strict", pack_paths=(str(first), str(second))
+            )
+        )
+        assert cfg.gate.severity.addition is SeverityLevel.ERROR
+        project_cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                pack_paths=(str(first), str(second))
+            ),
+            project=ProjectCompatibilityInputs(severity_preset="strict"),
+        )
+        assert project_cfg.gate.severity.addition is SeverityLevel.ERROR
+
     def test_without_a_preset_the_pack_still_fills_the_category(self, tmp_path):
         # The suppression above is scoped to "a preset stated it", not to
         # severity categories in general.
@@ -600,6 +632,24 @@ class TestPackComposition:
         assert [
             e.path for e in forward.provenance[GATE_PACKS_FIELD].selected_by
         ] == [str(first), str(second)]
+
+    def test_naming_one_pack_twice_resolves_as_naming_it_once(self, tmp_path):
+        # A repeated path selects one pack, so the receipt must not list it
+        # twice and make two equivalent invocations resolve unequally.
+        pack = _write_pack(
+            tmp_path / "p.yml",
+            pack_id="p",
+            kind="policy",
+            assignments="soname_changed: break\n",
+        )
+        once = _resolve(explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)))
+        twice = _resolve(
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack), str(pack)))
+        )
+        assert once == twice
+        assert [
+            e.path for e in twice.provenance[POLICY_OVERRIDES_FIELD].selected_by
+        ] == [str(pack)]
 
     def test_two_gate_packs_disagreeing_on_a_field_is_a_usage_error(self, tmp_path):
         first = _write_pack(
