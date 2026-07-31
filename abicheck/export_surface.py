@@ -355,19 +355,26 @@ def _seed_export_roots(
     Records the export names actually matched on ``surface.matched_exports``,
     so the caller can see which observed exports no declaration accounted for.
 
-    *owner_seed_by_identity* maps a record's own identities (its ``name`` and,
-    when the producer recorded one, its ``qualified_name``) to the spelling
-    the closure walk resolves. A method root's owner is seeded only through an
-    **exact** hit in it: ``owner_class_of`` cannot tell an enclosing *class*
-    from an enclosing *namespace* from the string alone, so an exported
-    namespace function ``api::run()`` yields the bare fragment ``"api"``,
-    which the walk's own alias-tolerant ``record_by_name`` lookup would
-    happily resolve to an unrelated ``other::api`` and pull its whole field
-    closure in (Codex review, confirmed empirically). This mirrors the fix
-    ``type_reachability.py`` already carries for the identical collision;
-    unlike a genuine signature spelling, an owner is always either a real
-    class's complete scope chain or namespace noise, so exact matching loses
-    no real case.
+    *owner_seed_by_identity* maps a record's own *full* identities to the
+    spelling the closure walk resolves -- see :func:`compute_export_surface`,
+    which builds it and documents which spellings qualify. A method root's
+    owner is seeded only through an **exact** hit in it: ``owner_class_of``
+    cannot tell an enclosing *class* from an enclosing *namespace* from the
+    string alone, so an exported namespace function ``api::run()`` yields the
+    bare fragment ``"api"``, which the walk's own alias-tolerant
+    ``record_by_name`` lookup would happily resolve to an unrelated
+    ``other::api`` and pull its whole field closure in (Codex review,
+    confirmed empirically). This mirrors the fix ``type_reachability.py``
+    already carries for the identical collision.
+
+    Exactness must hold on *both* sides to be worth anything, which is why
+    the caller's key set is restricted rather than simply "every spelling a
+    record answers to": an owner string is always either a real class's
+    complete scope chain or namespace noise, but a *record* spelling need
+    not be a complete identity at all -- on the castxml/clang path ``name``
+    is the bare leaf, so ``other::api`` is stored as ``"api"`` and the
+    namespace fragment matched it "exactly" after all (Codex review, a
+    second time, on the record side of the same collision).
 
     Called with empty *tables* on the no-export-table path, where it fills the
     ``all_*`` universe alone (nothing can match) rather than that path keeping
