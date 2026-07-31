@@ -88,11 +88,17 @@ _UNRESOLVABLE = PublicSurface()  # resolvable defaults to False
 
 class TestUnsupportedMode:
     @pytest.mark.parametrize("mode", [ContractMode.EXPORTS, "exports"])
-    def test_exports_mode_raises_not_implemented(self, mode: object) -> None:
-        # A bare serialized value must be coerced through ContractMode(...)
-        # the same as a real enum member, not silently misrouted.
+    def test_exports_mode_without_export_surfaces_is_a_caller_error(
+        self, mode: object
+    ) -> None:
+        # `exports` roots are the binary's own export table -- evidence a
+        # PublicSurface does not carry -- so answering from the header
+        # surface would misrepresent the mode rather than implement it. A
+        # bare serialized value must be coerced through ContractMode(...)
+        # the same as a real enum member, not silently misrouted into the
+        # PUBLIC path.
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError, match="requires an ExportSurface pair"):
             evaluate_change_contract_relevance(
                 c, _UNRESOLVABLE, _UNRESOLVABLE, mode=mode
             )
@@ -135,8 +141,8 @@ class TestAllMode:
 
     def test_bare_all_string_is_coerced_to_the_real_enum_member(self) -> None:
         # Regression (Codex review): `mode="all"` (a bare str, not the
-        # ContractMode enum member) satisfied the `_SUPPORTED_MODES`
-        # membership check (equality/hash) but then failed the
+        # ContractMode enum member) compared equal to a member
+        # (equality/hash) but then failed the
         # `is ContractMode.ALL` identity check, silently falling through
         # to the PUBLIC path -- so an unresolvable-surface finding wrongly
         # came back UNKNOWN_UNRESOLVED instead of IN_CONTRACT.

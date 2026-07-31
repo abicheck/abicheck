@@ -1,0 +1,260 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-049 ``contract=exports``: tests for the export-rooted evidence provider.
+
+``export_surface.py`` answers a different question than ``surface.py``: roots
+are the binary's *observed export table*, not header-derived
+``Visibility.PUBLIC``, and no header origin ever demotes anything. These tests
+pin exactly that difference (a private-header type reached from a real export
+is inside this domain; an unexported public-header declaration is not), the
+three platforms' export tables, and the deliberately conservative
+"unresolvable rather than empty" rule for a snapshot with no export table at
+all.
+"""
+
+from __future__ import annotations
+
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.export_surface import compute_export_surface, observed_export_names
+from abicheck.macho_metadata import MachoExport, MachoMetadata
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    ScopeOrigin,
+    TypeField,
+    Variable,
+    Visibility,
+)
+from abicheck.pe_metadata import PeExport, PeMetadata
+
+
+def _fn(name, mangled, ret="void", params=(), vis=Visibility.PUBLIC, origin=None):
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=[Param(name=f"a{i}", type=t) for i, t in enumerate(params)],
+        visibility=vis,
+        origin=ScopeOrigin.UNKNOWN if origin is None else origin,
+    )
+
+
+def _rec(name, fields=(), bases=(), origin=None):
+    return RecordType(
+        name=name,
+        kind="struct",
+        size_bits=64,
+        fields=[TypeField(name=f"f{i}", type=t) for i, t in enumerate(fields)],
+        bases=list(bases),
+        origin=ScopeOrigin.UNKNOWN if origin is None else origin,
+    )
+
+
+class TestObservedExportNames:
+    def test_no_binary_metadata_is_none_not_empty(self) -> None:
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("a", "_Z1av")])
+        assert observed_export_names(snap) is None
+
+    def test_empty_export_table_is_also_none(self) -> None:
+        # An export-table-less parse and a genuinely empty export table are
+        # indistinguishable from the recorded data; claiming "exports
+        # nothing" would let a parse failure prove every entity out of
+        # contract.
+        snap = AbiSnapshot(library="l", version="1", elf=ElfMetadata(symbols=[]))
+        assert observed_export_names(snap) is None
+
+    def test_elf_pe_and_macho_tables_are_unioned(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            elf=ElfMetadata(symbols=[ElfSymbol(name="from_elf")]),
+            pe=PeMetadata(exports=[PeExport(name="from_pe")]),
+            macho=MachoMetadata(exports=[MachoExport(name="from_macho")]),
+        )
+        assert observed_export_names(snap) == {"from_elf", "from_pe", "from_macho"}
+
+
+class TestRoots:
+    def test_only_export_table_members_are_roots(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("kept", "_Z4keptv"), _fn("gone", "_Z4gonev")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z4keptv")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.resolvable
+        # Every symbol key of the root, so a finding naming either encoding
+        # resolves (mirrors surface._symbol_keys).
+        assert {"kept", "_Z4keptv"} <= surf.export_symbols
+        assert "_Z4gonev" not in surf.export_symbols
+        # ... but the non-root is still *known*, which is what lets a caller
+        # tell "proven not exported" from "never heard of it".
+        assert {"gone", "_Z4gonev"} <= surf.all_symbols
+
+    def test_declaration_visibility_does_not_make_a_root(self) -> None:
+        # The header-derived domain's own root rule (Visibility.PUBLIC) has no
+        # authority here: an unexported public declaration is not an export.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("inline_only", "_Z11inline_onlyv", vis=Visibility.PUBLIC)],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z5otherv")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.resolvable
+        assert not surf.export_symbols
+
+    def test_hidden_visibility_declaration_that_is_exported_is_a_root(self) -> None:
+        # The mirror image of the test above: this domain believes the export
+        # table, not the declaration's recorded visibility.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("h", "_Z1hv", vis=Visibility.HIDDEN)],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z1hv")]),
+        )
+        assert "_Z1hv" in compute_export_surface(snap).export_symbols
+
+    def test_exported_variable_is_a_root(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            variables=[Variable(name="g_cfg", mangled="g_cfg", type="Cfg")],
+            types=[_rec("Cfg")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="g_cfg")]),
+        )
+        surf = compute_export_surface(snap)
+        assert "g_cfg" in surf.export_symbols
+        assert "Cfg" in surf.export_types
+
+    def test_untyped_roots_are_flagged(self) -> None:
+        # An export-table-only dump records return_type "?" and no params, so
+        # the closure has no usable seeds (ADR-024 D5.2's rule for this
+        # domain) -- the caller must not read an empty closure as proof.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("opaque", "opaque", ret="?")],
+            types=[_rec("Whatever")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="opaque")]),
+        )
+        surf = compute_export_surface(snap)
+        assert surf.resolvable
+        assert surf.export_symbols
+        assert not surf.has_typed_roots
+
+    def test_method_root_seeds_its_owner_class(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("Widget::draw", "_ZN6Widget4drawEv")],
+            types=[_rec("Widget")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_ZN6Widget4drawEv")]),
+        )
+        assert "Widget" in compute_export_surface(snap).export_types
+
+
+class TestClosure:
+    def test_closure_follows_fields_bases_and_typedefs(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "_Z3api5Alias", params=("Alias",))],
+            types=[
+                _rec("Root", fields=("Field",), bases=("Base",)),
+                _rec("Field"),
+                _rec("Base"),
+                _rec("Unreached"),
+            ],
+            typedefs={"Alias": "Root"},
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3api5Alias")]),
+        )
+        surf = compute_export_surface(snap)
+        assert {"Root", "Field", "Base"} <= surf.export_types
+        assert "Unreached" not in surf.export_types
+        assert "Unreached" in surf.all_types
+
+    def test_header_origin_never_demotes_a_reached_type(self) -> None:
+        # The core difference from the `public` domain: a private-header type
+        # a real export takes by value is genuinely part of the export
+        # contract, so nothing about its origin removes it here.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "_Z3api7Private", params=("Private",))],
+            types=[_rec("Private", origin=ScopeOrigin.PRIVATE_HEADER)],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3api7Private")]),
+        )
+        assert "Private" in compute_export_surface(snap).export_types
+
+    def test_ambiguous_type_names_are_recorded(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "_Z3apiv")],
+            types=[_rec("one::Point"), _rec("two::Point")],
+            elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3apiv")]),
+        )
+        assert "Point" in compute_export_surface(snap).ambiguous_type_names
+
+
+class TestUnresolvable:
+    def test_no_export_table_leaves_the_surface_unresolvable(self) -> None:
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", "_Z3api3Foo", params=("Foo",))],
+            types=[_rec("Foo")],
+        )
+        surf = compute_export_surface(snap)
+        assert not surf.resolvable
+        assert not surf.export_symbols
+        assert not surf.export_types
+        # The universes are still populated, so a caller can still tell a
+        # known entity from an unknown one while refusing to decide
+        # membership.
+        assert {"api", "_Z3api3Foo"} <= surf.all_symbols
+        assert "Foo" in surf.all_types
+
+
+class TestMachoUnderscoreQuirk:
+    def test_double_underscore_mangled_name_matches_a_stripped_trie_export(
+        self,
+    ) -> None:
+        # clang records `__ZN3lib3addEii` on macOS while the Mach-O export
+        # trie's own names have the platform underscore stripped. A missed
+        # root here would make every C++ declaration in a Mach-O snapshot
+        # falsely PROVEN_OUT_OF_CONTRACT.
+        snap = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1",
+            functions=[_fn("lib::add", "__ZN3lib3addEii")],
+            macho=MachoMetadata(exports=[MachoExport(name="_ZN3lib3addEii")]),
+        )
+        surf = compute_export_surface(snap)
+        assert "__ZN3lib3addEii" in surf.export_symbols
+
+    def test_de_prefixing_does_not_invent_a_root(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.dylib",
+            version="1",
+            functions=[_fn("lib::other", "__ZN3lib5otherEv")],
+            macho=MachoMetadata(exports=[MachoExport(name="_ZN3lib3addEii")]),
+        )
+        assert not compute_export_surface(snap).export_symbols

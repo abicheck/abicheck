@@ -224,6 +224,20 @@ Core pipeline (in order of data flow):
      from any live command yet (deferred to the Phase 3 shadow evaluator
      per the rollout plan) — only `cli_options.py`/service/API still don't
      construct real `FieldCandidate`s for any other field
+   - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
+     evaluator: one `ContractEvaluationDecision` (relevance + stable reason
+     code + assurance) per already-emitted finding. Stamped onto findings
+     only under `compare --contract-evaluation`; never consulted by verdict,
+     policy, or exit-code logic
+   - `export_surface.py` — ADR-049 `contract=exports`'s evidence provider
+     (`compute_export_surface`): roots are the declarations present in the
+     binary's *observed* export table (ELF `.dynsym` / PE export directory /
+     Mach-O export trie), closure is the raw record/enum/typedef graph walk
+     — reusing `surface.py`'s own closure walk, so only the seeds differ.
+     Deliberately not `surface.py`'s domain: no header-origin demotion
+     applies, and an uncaptured (or empty) export table leaves the surface
+     `resolvable=False` rather than claiming "exports nothing". No front end
+     selects `EXPORTS` yet — that is Phase 6's `--contract` flag
 6. **Reporting** — output results
    - `reporter.py` — JSON/Markdown/text output
    - `html_report.py` — HTML reports

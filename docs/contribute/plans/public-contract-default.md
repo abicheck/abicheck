@@ -1006,6 +1006,8 @@ deliberately narrower than the full phase:
   export-root-closure evidence provider exists yet (`surface.py` only
   computes a header-derived public closure, not an export-symbol-rooted
   one — a real `EXPORTS` implementation is separate, scoped follow-up work).
+  **Superseded 2026-07-31** — `EXPORTS` is now implemented, see the
+  "third mode" note at the end of this phase.
 - `ContractRelevance.UNKNOWN_UNPROVEN` is never emitted (see the module's
   own docstring): that value requires a closed-world "the declared evidence
   domain was searched completely" claim this module cannot verify with
@@ -1469,6 +1471,80 @@ Measure:
 
 **Gate:** every shadow delta has evidence and stable identity; zero unexplained
 fact loss.
+
+**Updated (2026-07-31): the shadow evaluator's third mode landed — `EXPORTS`
+is implemented, backed by its own evidence provider.** Every note above says
+`EXPORTS` raises `NotImplementedError` "since no export-root-closure evidence
+provider exists yet"; that provider now exists, in one new leaf module,
+`abicheck/export_surface.py` (`ExportSurface`/`compute_export_surface`/
+`observed_export_names`). It answers a genuinely different question than
+`surface.py` rather than re-scoping the same one: roots are the declarations
+whose own linker symbol appears in the binary's **observed export table**
+(ELF `.dynsym` defined symbols, the PE export directory, the Mach-O export
+trie — unioned, since one snapshot can legitimately carry more than one), not
+`Visibility.PUBLIC` declarations, and no header origin demotes anything
+anywhere. The closure over the raw record/enum/typedef graph reuses
+`surface.py`'s own `_index_surface_types`/`_walk_type_closure` verbatim, so
+the two domains cannot drift apart in *how* they follow fields, bases, and
+typedef targets — only the seeds differ, which is exactly the difference
+ADR-049 D2 draws between the two modes.
+
+`evaluate_change_contract_relevance`/`evaluate_snapshot_pair_contract_relevance`
+gained `exports_old`/`exports_new` parameters, required when and only when
+`mode` is `EXPORTS`: omitting them is a `ValueError`, never a silent
+degradation to a header-derived answer for a domain that is not
+header-derived (that would misrepresent the mode rather than implement it).
+The decision path follows Section 7's `exports` row clause by clause — an
+export root or a closure member is `IN_CONTRACT`
+(`export_root_membership`); a *known* entity outside both, after a complete
+traversal, is `PROVEN_OUT_OF_CONTRACT`; incomplete root/graph or identity
+evidence is `UNKNOWN_UNRESOLVED` — and it is dispatched **before** the
+`public` path's own `_ALL_SURFACE_REASONS` fast path, since every reason in
+that set is a header-origin/reachability classification this domain treats
+as "unrelated and advisory". The one cross-domain exclusion, `--post-manifest`
+(an exact committed-*export* manifest), is still checked ahead of every mode
+branch, unchanged.
+
+Deliberately conservative in three specific places, each guarding against a
+false `PROVEN_OUT_OF_CONTRACT` (the direction that would hide a real break):
+an export table that was never captured — including a captured-but-empty
+one, which is indistinguishable from a failed parse in the recorded data —
+leaves `resolvable=False`, so nothing is decided in either direction; an
+entity absent from the snapshot's own symbol/type universe (a macro, a
+Python-API-axis finding) is unplaceable rather than proven-excluded; and an
+export-table-only dump whose roots carry no real signature types
+(`has_typed_roots=False`, return type `"?"`) cannot prove a *type*
+unreachable, applying ADR-024 D5.2's existing rule to this domain.
+
+Three membership primitives shared by both domains (`_symbol_matches`,
+`_type_candidates`, `_confirmed_type_matches`) were extracted from
+`_in_surface_result_is_confirmed` rather than reimplemented — the
+member-level owner-stripping and the ambiguous-bare-tail rejection this
+file's Phase 3 notes describe at length are subtle enough that a second copy
+would drift. One deliberate reason-code difference between the domains is
+documented at its own call site: an ambiguous-only closure match reports
+`identity_ambiguous` under `exports` (the registry's precise code for it)
+where `public` reports the coarser `required_evidence_incomplete`; relevance
+and assurance agree, only the reason string differs.
+
+Tests: `tests/test_export_surface.py` (the provider in isolation — the three
+platforms' tables, roots vs. declaration visibility in both directions,
+closure over fields/bases/typedefs, header origin *not* demoting, untyped
+roots, the unresolvable case) and `tests/test_contract_evaluation_exports.py`
+(the decisions — split into its own sibling file because
+`test_contract_evaluation.py` reached the AI-readiness 2000-line hard cap,
+the same split `test_contract_evaluation_not_applicable.py` already is).
+
+**Still open, unchanged by this:** no front end selects `EXPORTS` yet —
+`checker._apply_contract_evaluation_shadow` still derives `PUBLIC`/`ALL` from
+`scope_to_public_surface`, so the new mode is reachable only through the
+Python-level evaluator API. Exposing it is Phase 6's `--contract
+public|exports|all` flag, which also needs the corpus validation that phase's
+gate requires; and the provider-evidence ledger this phase's own gate names
+still does not exist for either domain (`ExportSurface.resolvable`/
+`has_typed_roots` is the same coarse per-surface signal
+`PublicSurface.resolvable`/`has_provenance` is, not a per-provider
+completeness record).
 
 ### Phase 4 — snapshot evidence/context split
 
