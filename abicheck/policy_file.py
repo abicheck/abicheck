@@ -51,6 +51,7 @@ Notes:
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -383,6 +384,12 @@ class PolicyFile:
     base_policy: str = "strict_abi"
     overrides: dict[ChangeKind, Verdict] = field(default_factory=dict)
     source_path: Path | None = None
+    #: sha256 of the exact bytes :meth:`load` parsed, when it loaded this
+    #: document from a file. Captured at parse time on purpose: a consumer
+    #: that re-read ``source_path`` later would digest whatever is on disk
+    #: *then*, which for a file edited in between identifies content this
+    #: object was never built from (Codex review, ADR-049 D6 replay).
+    source_sha256: str | None = None
     # Glob patterns identifying namespaces whose symbols / types are
     # contractually frozen (e.g. a versioned internal namespace such as
     # `**::detail::r1` or `**::detail::v1`). Any finding whose symbol or caused_by_type lies in
@@ -442,9 +449,11 @@ class PolicyFile:
         if builtin is not None:
             path = builtin
 
-        raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        raw: Any = yaml.safe_load(text)
         if raw is None:
-            return cls(source_path=path)
+            return cls(source_path=path, source_sha256=digest)
         if not isinstance(raw, dict):
             raise PolicyError(
                 f"Policy file must be a YAML mapping, got {type(raw).__name__}"
@@ -462,6 +471,7 @@ class PolicyFile:
             base_policy=base_policy,
             overrides=overrides,
             source_path=path,
+            source_sha256=digest,
             frozen_namespaces=frozen_namespaces,
             internal_namespaces=internal_namespaces,
             source_only_findings=source_only,

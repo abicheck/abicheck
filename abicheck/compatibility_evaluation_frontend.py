@@ -570,24 +570,6 @@ def read_symbols_list(path: str | Path) -> tuple[str, ...]:
     )
 
 
-def file_sha256(path: str | Path) -> str | None:
-    """Digest a selected configuration source, or ``None`` if unreadable.
-
-    ADR-049 D6 wants "path, digest, manifest identity/version, and field
-    location" on every file-derived provenance entry: without the digest, a
-    receipt naming a since-edited file cannot prove *which* content produced
-    the recorded value. Returns ``None`` rather than raising when the file
-    cannot be read -- a missing digest degrades the receipt, but refusing to
-    resolve a configuration whose policy file has become unreadable *after*
-    it was successfully loaded would be a worse failure than recording less
-    provenance.
-    """
-    try:
-        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    except OSError:
-        return None
-
-
 def _policy_file_override_slugs(policy_file: PolicyFile | None) -> dict[str, Verdict]:
     """``--policy-file`` ``overrides:`` as the slug-keyed mapping the typed
     config takes (``PolicyFile.overrides`` is keyed by ``ChangeKind``)."""
@@ -607,12 +589,21 @@ class _PolicyFileSource:
     def of(
         cls, policy_file: PolicyFile | None, override: str | None
     ) -> _PolicyFileSource:
+        """The path and digest to record for *policy_file*.
+
+        The digest is never computed by re-reading ``source_path`` here:
+        the document was parsed earlier, and hashing whatever is on disk
+        *now* would, for a file edited in between, produce a receipt whose
+        digest identifies content this resolution never applied — the exact
+        failure a digest exists to catch (Codex review). It comes from the
+        caller's explicit *override*, or from
+        :attr:`~abicheck.policy_file.PolicyFile.source_sha256`, which
+        ``PolicyFile.load`` captures over the bytes it actually parsed.
+        """
         if policy_file is None:
             return cls(path=None, sha256=None)
         path = str(policy_file.source_path) if policy_file.source_path else None
-        if override is not None:
-            return cls(path=path, sha256=override)
-        return cls(path=path, sha256=file_sha256(path) if path else None)
+        return cls(path=path, sha256=override or policy_file.source_sha256)
 
 
 def _explicit_scope(
@@ -937,17 +928,23 @@ def resolve_compatibility_evaluation_config(
     policy_overrides = resolve_policy_pack_overrides(
         pack_paths, explicit_overrides=policy_overrides_explicit, loaded=loaded_packs
     )
+    # One entry per pack that actually supplied a surviving override, each
+    # naming its own manifest: a pack whose every assignment the policy file
+    # also overrides contributed nothing, and a contract/gate pack in the same
+    # `--pack` list never could. Collapsing them into a single pathless hop
+    # left the receipt unable to say which manifest supplied which value
+    # (Codex review, two rounds).
+    override_pack_contributors = [
+        (path, pack.identity)
+        for path, pack in loaded_packs
+        if pack.kind is PackKind.POLICY
+        and set(pack.assignments) - set(policy_overrides_explicit)
+    ]
     prov[POLICY_OVERRIDES_FIELD] = _overrides_provenance(
         layer,
         policy_source=policy_source,
-        # A pack contributed only if some slug in the merged result did not
-        # come from the policy file: a selected policy pack whose every
-        # assignment the file also overrides contributed nothing to the
-        # resolved value, and a contract/gate pack in the same `--pack` list
-        # never could (Codex review: keying this off "any pack path was given"
-        # credited an unrelated pack, and off the merged mapping alone
-        # credited a fully-shadowed one).
-        has_pack_overrides=bool(set(policy_overrides) - set(policy_overrides_explicit)),
+        pack_contributors=override_pack_contributors,
+        pack_option=pack_option,
         explicit_overrides=policy_overrides_explicit,
     )
     policy = CompatibilityPolicyConfig(
@@ -1164,7 +1161,8 @@ def _overrides_provenance(
     layer: SelectorLayer,
     *,
     policy_source: _PolicyFileSource,
-    has_pack_overrides: bool,
+    pack_contributors: Sequence[tuple[str, ImmutableIdentity]],
+    pack_option: str,
     explicit_overrides: Mapping[str, Verdict],
 ) -> ValueProvenance:
     """Receipt entry for the merged ``policy.overrides`` mapping.
@@ -1172,9 +1170,11 @@ def _overrides_provenance(
     Like ``surface.explicit_scope``, this field is composed rather than
     won outright (D8: "explicit per-``ChangeKind`` override > selected packs
     > base policy" merges across sources instead of picking one), so the
-    receipt records the highest-precedence contributor and lists each source
-    that actually contributed to the resolved value in ``selected_by`` -- a
-    source whose every assignment a higher-precedence one shadowed did not
+    receipt records the highest-precedence contributor as its layer and lists
+    **each source that actually contributed** in ``selected_by`` -- one entry
+    per contributing pack, naming that pack's own manifest, so a reader can
+    tell which of several selected manifests supplied a given value. A source
+    whose every assignment a higher-precedence one shadowed did not
     contribute and is not listed.
     """
     selected_by: list[SelectedByEntry] = []
@@ -1184,15 +1184,31 @@ def _overrides_provenance(
                 layer=layer, option="--policy-file", path=policy_source.path
             )
         )
-    if has_pack_overrides:
-        selected_by.append(SelectedByEntry(layer=layer, option="--pack"))
+    selected_by.extend(
+        SelectedByEntry(layer=layer, option=pack_option, path=path)
+        for path, _identity in sorted(pack_contributors)
+    )
     if not selected_by:
         return ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT)
+    if explicit_overrides:
+        return ValueProvenance(
+            layer=layer,
+            source_kind="policy_file",
+            sha256=policy_source.sha256,
+            path=policy_source.path,
+            selected_by=tuple(selected_by),
+        )
+    # Pack-only: name the single contributing manifest outright when there is
+    # exactly one, rather than claiming a source the value did not all come
+    # from.
+    only = pack_contributors[0] if len(pack_contributors) == 1 else None
     return ValueProvenance(
         layer=layer,
-        source_kind="policy_file" if explicit_overrides else "pack_manifest",
-        sha256=policy_source.sha256 if explicit_overrides else None,
-        path=policy_source.path if explicit_overrides else None,
+        source_kind="pack_manifest",
+        reference=only[1].id if only else None,
+        version=only[1].version if only else None,
+        sha256=only[1].sha256 if only else None,
+        path=only[0] if only else None,
         selected_by=tuple(selected_by),
     )
 

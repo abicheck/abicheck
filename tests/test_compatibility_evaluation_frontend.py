@@ -55,7 +55,6 @@ from abicheck.compatibility_evaluation_frontend import (
     compatibility_config_from_compare_request,
     cross_front_end_differences,
     cross_front_end_equivalent,
-    file_sha256,
     resolve_compatibility_evaluation_config,
     severity_preset_identity,
 )
@@ -984,7 +983,7 @@ class TestReplayProvenance:
               soname_changed: warn
             """,
         )
-        expected = file_sha256(tmp_path / "policy.yml")
+        expected = pf.source_sha256
         cfg = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=pf))
         assert expected is not None and len(expected) == 64
         for field_name in (
@@ -994,11 +993,27 @@ class TestReplayProvenance:
         ):
             assert cfg.provenance[field_name].sha256 == expected, field_name
 
-    def test_editing_the_policy_file_changes_the_recorded_digest(self, tmp_path):
+    def test_the_digest_identifies_what_was_parsed_not_what_is_on_disk_now(
+        self, tmp_path
+    ):
+        # The digest is captured by PolicyFile.load over the bytes it parsed.
+        # Editing the file afterwards must NOT change what this run's receipt
+        # records: re-reading would name content the run never applied.
         pf = _policy_file(tmp_path, "base_policy: sdk_vendor\n")
         before = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=pf))
-        (tmp_path / "policy.yml").write_text("base_policy: sdk_vendor  # edited\n")
+        (tmp_path / "policy.yml").write_text("base_policy: plugin_abi\n")
         after = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=pf))
+        assert (
+            before.provenance[POLICY_BASE_FIELD].sha256
+            == after.provenance[POLICY_BASE_FIELD].sha256
+        )
+        assert after.policy.base.id == "sdk_vendor"
+
+    def test_reloading_an_edited_policy_file_does_change_the_digest(self, tmp_path):
+        pf = _policy_file(tmp_path, "base_policy: sdk_vendor\n")
+        before = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=pf))
+        reloaded = _policy_file(tmp_path, "base_policy: plugin_abi\n")
+        after = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=reloaded))
         assert (
             before.provenance[POLICY_BASE_FIELD].sha256
             != after.provenance[POLICY_BASE_FIELD].sha256
@@ -1011,8 +1026,11 @@ class TestReplayProvenance:
         )
         assert cfg.provenance[POLICY_BASE_FIELD].sha256 == "ab" * 32
 
-    def test_an_unreadable_source_degrades_to_no_digest(self, tmp_path):
-        assert file_sha256(tmp_path / "missing.yml") is None
+    def test_a_directly_constructed_policy_file_records_no_digest(self):
+        # No parse, no digest to claim -- the receipt says so rather than
+        # inventing one by reading whatever path it was handed.
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs(policy_file=PolicyFile()))
+        assert cfg.provenance[POLICY_BASE_FIELD].sha256 is None
 
     def test_a_pack_filled_field_names_the_manifest_that_filled_it(self, tmp_path):
         pack = _write_pack(
@@ -1350,3 +1368,75 @@ class TestSymbolListParsing:
 
     def test_no_list_file_means_inline_symbols_only(self):
         assert collect_force_public_symbols(("a", "b"), None) == {"a", "b"}
+
+
+class TestOverridesReceiptNamesEachContributingPack:
+    def _pack(self, tmp_path, name, assignments):
+        return _write_pack(
+            tmp_path / f"{name}.yml",
+            pack_id=name,
+            kind="policy",
+            assignments=assignments,
+        )
+
+    def test_each_contributing_pack_gets_its_own_entry_with_its_path(self, tmp_path):
+        first = self._pack(tmp_path, "a", "soname_changed: break\n")
+        second = self._pack(tmp_path, "b", "func_added: warn\n")
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                pack_paths=(str(first), str(second))
+            )
+        )
+        entries = [
+            (e.option, e.path)
+            for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by
+        ]
+        assert entries == [("--pack", str(first)), ("--pack", str(second))]
+
+    def test_a_fully_shadowed_pack_is_not_listed(self, tmp_path):
+        shadowed = self._pack(tmp_path, "a", "soname_changed: break\n")
+        contributing = self._pack(tmp_path, "b", "func_added: warn\n")
+        pf = _policy_file(
+            tmp_path,
+            """\
+            overrides:
+              soname_changed: ignore
+            """,
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                policy_file=pf, pack_paths=(str(shadowed), str(contributing))
+            )
+        )
+        entries = [
+            (e.option, e.path)
+            for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by
+        ]
+        assert entries == [
+            ("--policy-file", str(tmp_path / "policy.yml")),
+            ("--pack", str(contributing)),
+        ]
+
+    def test_a_lone_pack_source_is_named_outright(self, tmp_path):
+        only = self._pack(tmp_path, "a", "func_added: warn\n")
+        prov = _resolve(
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(only),))
+        ).provenance[POLICY_OVERRIDES_FIELD]
+        assert prov.reference == "a"
+        assert prov.version == 1
+        assert prov.path == str(only)
+        assert prov.sha256 == hashlib.sha256(only.read_bytes()).hexdigest()
+
+    def test_several_pack_sources_claim_no_single_manifest(self, tmp_path):
+        first = self._pack(tmp_path, "a", "soname_changed: break\n")
+        second = self._pack(tmp_path, "b", "func_added: warn\n")
+        prov = _resolve(
+            explicit=ExplicitCompatibilityInputs(
+                pack_paths=(str(first), str(second))
+            )
+        ).provenance[POLICY_OVERRIDES_FIELD]
+        # No one manifest supplied the whole value, so none is named as *the*
+        # source -- every contributor is in selected_by instead.
+        assert prov.path is None
+        assert prov.reference is None
+        assert len(prov.selected_by) == 2
