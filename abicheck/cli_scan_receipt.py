@@ -76,6 +76,25 @@ SCAN_CONFIG_PARAMS: tuple[str, ...] = (
     "contract_mode",
 )
 
+#: How a :class:`~abicheck.service_scan.ScanRequest` spells the inputs whose
+#: default API name comes from :class:`~abicheck.api_types.CompareRequest`.
+#: "The API" is not one namespace: resolving a ``ScanRequest`` at
+#: ``FrontEnd.API`` alone still recorded ``scope_public``/``policy_file_path``/
+#: ``suppress``, none of which that entity has, so a replay consumer could not
+#: identify the input that produced the value (Codex review).
+#:
+#: Only the three that actually differ are listed -- ``policy``,
+#: ``force_public_symbols``, and ``contract_mode`` are spelled identically on
+#: both requests, and an unmapped field keeps its default spelling.
+#: ``tests/test_scan_compare_parity.py`` pins every entry against
+#: ``ScanRequest``'s real fields, so a renamed field fails there rather than
+#: silently reintroducing a name nobody can replay.
+SCAN_REQUEST_SPELLINGS: Mapping[str, str] = {
+    "scope_public": "scope_to_public_surface",
+    "policy_file_path": "policy_file",
+    "suppress": "suppression",
+}
+
 
 def resolve_scan_config(
     params: Mapping[str, Any],
@@ -162,8 +181,12 @@ def resolve_scan_config(
                 sha256=project_sha256,
             )
         )
+    resolved_front_end = front_end if front_end is not None else FrontEnd.CLI
     return resolve_compatibility_evaluation_config(
-        front_end=front_end if front_end is not None else FrontEnd.CLI,
+        front_end=resolved_front_end,
+        api_spellings=(
+            SCAN_REQUEST_SPELLINGS if resolved_front_end is FrontEnd.API else None
+        ),
         explicit=compare_cli_inputs(
             params,
             explicit_parameters=typed,

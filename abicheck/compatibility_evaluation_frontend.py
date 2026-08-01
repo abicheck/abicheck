@@ -894,6 +894,7 @@ def resolve_compatibility_evaluation_config(
     explicit: ExplicitCompatibilityInputs | None = None,
     project: ProjectCompatibilityInputs | None = None,
     profile: RunProfileInputs | None = None,
+    api_spellings: Mapping[str, str] | None = None,
 ) -> CompatibilityEvaluationConfig:
     """Resolve one complete effective configuration plus its receipt.
 
@@ -957,10 +958,19 @@ def resolve_compatibility_evaluation_config(
         purpose, so it could not catch that (Codex review). *api_field* is
         ``None`` for an input only the CLI can state, where the CLI spelling
         is the only truthful one.
+
+        *api_field* is the :class:`~abicheck.api_types.CompareRequest`
+        spelling, because that is the typed surface this resolver was built
+        against -- but "the API" is not one namespace. ``ScanRequest`` names
+        the same three inputs ``scope_to_public_surface``/``policy_file``/
+        ``suppression``, so resolving its request at ``FrontEnd.API`` alone
+        still produced field names that entity does not have (Codex review,
+        a second round on the same receipt). *api_spellings* lets a caller
+        remap them per request type; an unmapped field keeps the default.
         """
         if front_end is FrontEnd.CLI or api_field is None:
             return cli_option
-        return api_field
+        return (api_spellings or {}).get(api_field, api_field)
 
     policy_overrides_explicit = _policy_file_override_slugs(explicit.policy_file)
     policy_source = _PolicyFileSource.of(
@@ -1057,8 +1067,11 @@ def resolve_compatibility_evaluation_config(
     legacy_mode = legacy_contract_mode_candidate(
         scope_public_headers=bool(explicit.scope_public_headers),
         scope_public_headers_is_explicit=explicit.scope_public_headers is not None,
-        # An API caller set `CompareRequest.scope_public`, not a CLI flag.
-        option=None if front_end is FrontEnd.CLI else "scope_public",
+        # An API caller set a request field, not a CLI flag -- and which
+        # field depends on the request type, so it goes through `spell()`
+        # rather than hard-coding `CompareRequest`'s own name. `None` keeps
+        # the CLI's existing "the alias names itself" behaviour.
+        option=None if front_end is FrontEnd.CLI else spell("", "scope_public"),
     )
     if legacy_mode is not None:
         mode_candidates.append(legacy_mode)
@@ -1808,20 +1821,50 @@ def cross_front_end_equivalent(
     return not cross_front_end_differences(a, b)
 
 
-def unstatable_selectors(config: CompatibilityEvaluationConfig) -> list[str]:
+#: The tiers whose hops name an input the *caller* stated, as opposed to a
+#: key inside a file the caller pointed at. Only these are checked against a
+#: request type's fields -- see :func:`unstatable_selectors`.
+_REQUEST_STATED_LAYERS = frozenset(
+    {SelectorLayer.API_REQUEST, SelectorLayer.LEGACY_ALIAS}
+)
+
+
+def unstatable_selectors(
+    config: CompatibilityEvaluationConfig, *, request_type: type | None = None
+) -> list[str]:
     """Every hop in *config* that names an input its own layer cannot state.
 
     A receipt exists so a run's inputs can be identified and replayed, so a
     hop claiming an input the caller never had is worse than a missing one:
-    it is confidently wrong. The failure has a single shape -- an
-    ``API_REQUEST`` hop labelled with a CLI flag, because a candidate was
-    built with a hard-coded ``"--flag"`` instead of going through ``spell()``
-    -- and it has now been found three separate times by review
-    (``--policy``/``--scope-public-headers`` on a ``ScanRequest``,
-    ``--severity-*`` on the MCP tool, and the original explicit-candidate
-    default that motivated ``spell()``).
+    it is confidently wrong. Four instances have now been found by review:
+    the original explicit-candidate default that motivated ``spell()``,
+    ``--policy``/``--scope-public-headers`` on a ``ScanRequest``,
+    ``--severity-*`` on the MCP tool, and -- once those were routed through
+    ``spell()`` -- a ``ScanRequest`` receipt naming ``CompareRequest``'s
+    ``scope_public``/``policy_file_path``/``suppress``, which is a *different*
+    entity's field list.
 
-    :func:`cross_front_end_differences` structurally cannot catch it:
+    Two checks, because that fourth instance proved the first insufficient
+    on its own:
+
+    * every ``API_REQUEST`` hop must not name a CLI flag (a candidate built
+      with a hard-coded ``"--flag"`` instead of going through ``spell()``);
+    * given *request_type*, every hop at a *front-end-stated* tier
+      (``API_REQUEST`` and ``LEGACY_ALIAS``) must name a real field of it.
+      Without this, "not a flag" passes for any plausible-looking
+      identifier, which is exactly how one wrong spelling was replaced by
+      another. Pass the dataclass the front end actually accepts.
+
+    ``LEGACY_ALIAS`` is included deliberately, and only under *request_type*:
+    the reported ``scope_public`` hop sat at that tier, not ``API_REQUEST``
+    (``--policy``/``scope_public`` are D7 aliases for the fields they
+    select), so a check restricted to the request tier would have passed
+    the very defect it was written for. Layers that describe a *file*
+    (``PROJECT_CONFIG``, ``RUN_RECIPE``, ``RUN_PROFILE``) are excluded:
+    those hops correctly name config keys such as ``severity.preset``,
+    which are not request fields and never should be.
+
+    :func:`cross_front_end_differences` structurally cannot catch either:
     :func:`_normalized_provenance` drops option spellings *on purpose*, since
     the same semantic input is legitimately spelled differently per front
     end. That normalization is what makes the equality gate meaningful and
@@ -1833,6 +1876,13 @@ def unstatable_selectors(config: CompatibilityEvaluationConfig) -> list[str]:
     hop carrying a bare field name is not an error, because several CLI
     inputs (a project-config key, a composed scope) genuinely have no flag.
     """
+    import dataclasses
+
+    known: frozenset[str] | None = None
+    request_name = ""
+    if request_type is not None and dataclasses.is_dataclass(request_type):
+        known = frozenset(f.name for f in dataclasses.fields(request_type))
+        request_name = request_type.__name__
     offenders: list[str] = []
     for field_name in sorted(config.provenance):
         prov = config.provenance[field_name]
@@ -1842,11 +1892,20 @@ def unstatable_selectors(config: CompatibilityEvaluationConfig) -> list[str]:
         ]
         for entry in chain:
             for hop in entry.selected_by:
-                if hop.layer is SelectorLayer.API_REQUEST and (
-                    hop.option or ""
-                ).startswith("--"):
+                option = hop.option or ""
+                if hop.layer is SelectorLayer.API_REQUEST and option.startswith("--"):
                     offenders.append(
                         f"{field_name}: api_request hop names the CLI flag "
-                        f"{hop.option!r}, which no API caller can pass"
+                        f"{option!r}, which no API caller can pass"
+                    )
+                elif (
+                    known is not None
+                    and option
+                    and hop.layer in _REQUEST_STATED_LAYERS
+                    and option not in known
+                ):
+                    offenders.append(
+                        f"{field_name}: {hop.layer.value} hop names {option!r}, "
+                        f"which is not a field of {request_name}"
                     )
     return offenders

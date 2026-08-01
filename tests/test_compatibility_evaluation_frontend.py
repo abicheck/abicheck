@@ -25,6 +25,7 @@ fields, and Phase 1's own gate: a CLI run and the equivalent typed
 from __future__ import annotations
 
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -1310,3 +1311,85 @@ class TestUnstatableSelectors:
             },
         )
         assert len(unstatable_selectors(config)) == 1
+
+
+class TestUnstatableSelectorsAgainstARequestType:
+    """"Not a CLI flag" was not enough on its own.
+
+    Routing the scan through `FrontEnd.API` replaced `--scope-public-headers`
+    with `CompareRequest`'s `scope_public` -- not a flag, and not a field of
+    `ScanRequest` either. `request_type` is what distinguishes the two.
+    """
+
+    def _api(self, **kwargs):
+        return _resolve(
+            front_end=FrontEnd.API, explicit=ExplicitCompatibilityInputs(**kwargs)
+        )
+
+    def test_a_compare_request_resolution_names_only_its_own_fields(self) -> None:
+        config = compatibility_config_from_compare_request(
+            CompareRequest(
+                old=InputSpec(path=Path("old.json")),
+                new=InputSpec(path=Path("new.json")),
+                policy="sdk_vendor",
+                scope_public=False,
+                force_public_symbols=frozenset({"kept"}),
+            )
+        )
+        assert unstatable_selectors(config, request_type=CompareRequest) == []
+
+    def test_a_foreign_field_name_is_reported(self) -> None:
+        """`scope_public` is a real `CompareRequest` field and a real API
+        spelling -- and still wrong for a request type without it."""
+
+        @dataclass
+        class OtherRequest:
+            scope_to_public_surface: bool = True
+
+        config = self._api(scope_public_headers=False)
+        offenders = unstatable_selectors(config, request_type=OtherRequest)
+        assert len(offenders) == 1
+        assert "scope_public" in offenders[0]
+        assert "OtherRequest" in offenders[0]
+
+    def test_a_legacy_alias_hop_is_checked_too(self) -> None:
+        """The reported defect sat at `legacy_alias`, not `api_request`, so a
+        check restricted to the request tier would have passed it."""
+
+        @dataclass
+        class OtherRequest:
+            policy: str = "strict_abi"
+
+        config = self._api(scope_public_headers=False)
+        prov = config.provenance[CONTRACT_MODE_FIELD]
+        assert prov.selected_by[0].layer is SelectorLayer.LEGACY_ALIAS
+        assert unstatable_selectors(config, request_type=OtherRequest)
+
+    def test_a_project_config_key_is_never_checked_against_the_request(self) -> None:
+        """A project-config hop correctly names a file key (`severity.preset`),
+        which is not a request field and never should be."""
+
+        @dataclass
+        class OtherRequest:
+            policy: str = "strict_abi"
+
+        config = _resolve(
+            front_end=FrontEnd.API,
+            project=ProjectCompatibilityInputs(severity_preset="strict"),
+        )
+        prov = config.provenance[GATE_PRESET_FIELD]
+        assert [hop.option for hop in prov.selected_by] == ["severity.preset"]
+        assert unstatable_selectors(config, request_type=OtherRequest) == []
+
+    def test_no_request_type_keeps_the_flag_only_check(self) -> None:
+        config = self._api(scope_public_headers=False)
+        assert unstatable_selectors(config) == []
+
+    def test_a_non_dataclass_request_type_checks_flags_only(self) -> None:
+        """Degrades to the weaker check rather than reporting every hop."""
+
+        class NotADataclass:
+            pass
+
+        config = self._api(scope_public_headers=False)
+        assert unstatable_selectors(config, request_type=NotADataclass) == []

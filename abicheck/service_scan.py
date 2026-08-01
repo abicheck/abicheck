@@ -1081,12 +1081,16 @@ def _scan_request_config(req: ScanRequest) -> Any:
     CLI blanks the project config's -- a scan's exit follows its verdict and
     never consults them.
 
-    Resolved at :attr:`FrontEnd.API`, so the receipt names the request's own
-    fields (``policy``, ``scope_public``) rather than the ``--policy``/
-    ``--scope-public-headers`` flags nobody typed -- the same rule the MCP
-    receipt follows, and one
+    Resolved at :attr:`FrontEnd.API`, so the receipt names this request's own
+    fields rather than the ``--policy``/``--scope-public-headers`` flags
+    nobody typed -- and through
+    :data:`~abicheck.cli_scan_receipt.SCAN_REQUEST_SPELLINGS`, so they are
+    *this* request's names: the default API spelling is ``CompareRequest``'s,
+    which calls three of the same inputs ``scope_public``/
+    ``policy_file_path``/``suppress``, none of which a ``ScanRequest`` has
+    (Codex review, twice on the same receipt).
     :func:`~abicheck.compatibility_evaluation_frontend.unstatable_selectors`
-    now checks rather than leaving to review (Codex review).
+    checks both halves now rather than leaving them to review.
     """
     if not req.contract_evaluation or req.baseline is None:
         return None

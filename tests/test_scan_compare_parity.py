@@ -1326,13 +1326,50 @@ class TestServiceScanReceipt:
         config = _scan_request_config(
             ScanRequest(binaries=[new], baseline=old, contract_evaluation=True)
         )
-        assert unstatable_selectors(config) == []
+        assert unstatable_selectors(config, request_type=ScanRequest) == []
         hops = {
             field: [hop.option for hop in prov.selected_by]
             for field, prov in config.provenance.items()
         }
         assert "policy" in hops["policy.base"]
-        assert "scope_public" in hops["contract.mode"]
+        # `ScanRequest`'s own field, not `CompareRequest`'s `scope_public`.
+        assert "scope_to_public_surface" in hops["contract.mode"]
+
+    def test_every_remapped_spelling_is_a_real_scan_request_field(self) -> None:
+        """The map is only correct while `ScanRequest` keeps those names, so a
+        rename fails here rather than silently restoring a name nobody can
+        replay."""
+        import dataclasses
+
+        from abicheck.cli_scan_receipt import SCAN_REQUEST_SPELLINGS
+        from abicheck.service_scan import ScanRequest
+
+        fields = {f.name for f in dataclasses.fields(ScanRequest)}
+        assert set(SCAN_REQUEST_SPELLINGS.values()) <= fields
+
+    def test_a_request_with_every_statable_input_names_only_real_fields(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """The narrow case passed even while the receipt named
+        `CompareRequest`'s fields, because those inputs were unset. This
+        states all of them."""
+        from abicheck.compatibility_evaluation_frontend import unstatable_selectors
+        from abicheck.policy_file import PolicyFile
+        from abicheck.service_scan import ScanRequest, _scan_request_config
+
+        old, new = mixed_pair
+        config = _scan_request_config(
+            ScanRequest(
+                binaries=[new],
+                baseline=old,
+                contract_evaluation=True,
+                policy="sdk_vendor",
+                policy_file=PolicyFile(base_policy="plugin_abi"),
+                scope_to_public_surface=False,
+                force_public_symbols={"kept"},
+            )
+        )
+        assert unstatable_selectors(config, request_type=ScanRequest) == []
 
     def test_the_api_receipt_records_the_api_request_layer(
         self, mixed_pair: tuple[Path, Path]

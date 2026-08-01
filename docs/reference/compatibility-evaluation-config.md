@@ -259,15 +259,28 @@ deliberately normalizes option spellings away and so is blind to it:
 ```python
 from abicheck.compatibility_evaluation_frontend import unstatable_selectors
 
-unstatable_selectors(api_config)   # [] when no hop names a flag nobody typed
+unstatable_selectors(api_config)                            # no CLI flag at an API tier
+unstatable_selectors(api_config, request_type=ScanRequest)  # ...and every name is a real field
 ```
 
-It reports any `api_request` hop labelled with a CLI flag. That is the one
-shape this failure takes: a candidate built with a hard-coded `"--flag"`
-instead of going through the resolver's front-end-aware spelling. The check
-is one-directional — a CLI hop carrying a bare field name is fine, since
-several CLI inputs (a project-config key, a composed scope) genuinely have no
-flag.
+Without `request_type` it reports any `api_request` hop labelled with a CLI
+flag — a candidate built with a hard-coded `"--flag"` instead of going
+through the resolver's front-end-aware spelling. That check alone is not
+enough, because "not a flag" passes for any plausible-looking identifier:
+**"the API" is not one namespace.** The default API spelling is
+`CompareRequest`'s, and `ScanRequest` names three of the same inputs
+differently (`scope_to_public_surface`, `policy_file`, `suppression`), so a
+front end resolving at `FrontEnd.API` can still record fields its own request
+type does not have. Pass `api_spellings=` to remap them per request type, and
+`request_type=` to have the check verify it.
+
+The field check covers the `api_request` **and** `legacy_alias` tiers, since
+`--policy`/`scope_public` are D7 aliases and a hop for one sits at the latter.
+Layers describing a *file* (`project_config`, `run_recipe`, `run_profile`) are
+excluded — those correctly name config keys like `severity.preset`, which are
+not request fields. The flag check stays one-directional: a CLI hop carrying a
+bare field name is fine, since several CLI inputs (a project-config key, a
+composed scope) genuinely have no flag.
 
 ## See also
 
