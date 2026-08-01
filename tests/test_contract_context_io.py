@@ -360,6 +360,31 @@ class TestResolvedContextContent:
         )
         assert decoded.evaluation_context.resolved_config == config
 
+    def test_an_empty_post_manifest_is_still_a_selected_source(self) -> None:
+        """A manifest committing to *no* exports is not an absent manifest.
+
+        ``post_manifest.parse_manifest()`` explicitly supports an empty ABI
+        surface, and that allowlist actively scopes every concrete export out
+        -- so collapsing it to "no overlay" made the persisted configuration
+        describe a run that never happened, and its exclusions cite header
+        evidence instead of the manifest that caused them (Codex review,
+        fresh evidence).
+        """
+        old, new = _pair()
+        result = compare(
+            old, new, contract_evaluation=True, public_surface_allowlist=set()
+        )
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.contract.overlays == ("post_manifest",)
+        assert config.surface.explicit_scope is not None
+        assert config.surface.explicit_scope.items == ()
+        assert [
+            e.record.provider
+            for e in result.contract_context.contract_evidence.providers
+            if e.record.provider == "post_manifest"
+        ] == ["post_manifest", "post_manifest"]
+
     def test_no_overlay_leaves_the_explicit_scope_unselected(self) -> None:
         """No overlay is ``None``, not an empty digested list -- the same
         selected-vs-empty distinction ``suppressions`` keeps."""

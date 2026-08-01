@@ -709,9 +709,17 @@ def _apply_contract_evaluation_shadow(
         + (reconciled or [])
     )
     forced_public = frozenset(force_public_symbols) if force_public_symbols else None
+    # `is not None`, not truthiness: `post_manifest.parse_manifest()`
+    # explicitly supports a manifest committing to *no* exports, and that
+    # empty allowlist actively scopes every concrete export out --
+    # `post_processing` itself branches on `is not None` for exactly that
+    # reason. Collapsing it to `None` here made the persisted ledger and
+    # configuration claim no manifest was selected at all, so the resulting
+    # exclusions cited header evidence instead of the manifest that caused
+    # them (Codex review, fresh evidence).
     committed_exports = (
         frozenset(pp_ctx.public_surface_allowlist)
-        if pp_ctx.public_surface_allowlist
+        if pp_ctx.public_surface_allowlist is not None
         else None
     )
     decisions = evaluate_snapshot_pair_contract_relevance(

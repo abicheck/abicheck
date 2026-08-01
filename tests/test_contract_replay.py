@@ -241,6 +241,70 @@ class TestReevaluateFromEvidence:
         receipt = build_decision_receipt(block, ContractMode.PUBLIC)
         assert "record:Secret" in receipt.evaluated_type_closure
 
+    def test_post_manifest_roots_stay_exact(self) -> None:
+        """A committed-export manifest matches verbatim, never through aliases.
+
+        The live allowlist is compared against ``Change.symbol`` directly, so
+        routing a bare ``foo`` through the alias tier would also root an
+        unexported ``ns::foo`` that carries the same bare tail -- turning a
+        live ``PROVEN_OUT_OF_CONTRACT`` into a replayed ``IN_CONTRACT``, the
+        flip ``compare_decisions`` rejects (Codex review, fresh evidence).
+        """
+        cxx = Function(
+            name="ns::foo",
+            mangled="_ZN2ns3fooEv",
+            return_type="int",
+            visibility=Visibility.HIDDEN,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+        )
+        snap = AbiSnapshot(library="libdemo.so.1", version="1", functions=[cxx])
+        surf = compute_public_surface(snap)
+        block = collect_contract_evidence(
+            snap, snap, surf, surf, public_surface_allowlist={"foo"}
+        )
+        roots = domain_roots(block, ContractMode.PUBLIC)
+        assert "decl:_ZN2ns3fooEv" not in roots
+        # The looser overlay keeps its own semantics: the same bare spelling
+        # under `--public-symbol` still resolves through the alias tier.
+        forced = collect_contract_evidence(
+            snap, snap, surf, surf, force_public_symbols={"foo"}
+        )
+        assert "decl:_ZN2ns3fooEv" in domain_roots(forced, ContractMode.PUBLIC)
+
+    def test_overlay_rooted_decision_cites_the_overlay_record(self) -> None:
+        """A decision resting on an overlay root names that overlay.
+
+        Citing ``public_header`` for a declaration retained solely by
+        ``--public-symbol`` names evidence the decision never used (Codex
+        review, fresh evidence).
+        """
+        hidden = Function(
+            name="hidden",
+            mangled="hidden",
+            return_type="int",
+            visibility=Visibility.HIDDEN,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+        )
+        old = AbiSnapshot(library="libdemo.so.1", version="1", functions=[hidden])
+        new = AbiSnapshot(library="libdemo.so.1", version="2")
+        result = compare(
+            old,
+            new,
+            contract_evaluation=True,
+            force_public_symbols={"hidden"},
+        )
+        assert result.contract_context is not None
+        removal = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="hidden",
+            description="hidden() removed",
+        )
+        decision = next(
+            iter(reevaluate_from_evidence(result.contract_context, [removal]).values())
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert "forced_public_symbols:old" in decision.evidence_refs
+
     def test_overlay_roots_do_not_leak_into_the_exports_domain(self) -> None:
         """Only ``public`` counts overlay-selected roots (ADR-049 D2).
 

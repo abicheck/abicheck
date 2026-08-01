@@ -164,6 +164,7 @@ class _PersistedDomain:
             view.header_record_by_side
         )
         self.closure: dict[str, frozenset[str]] = view.closure_by_side
+        self.overlay_roots: dict[str, dict[str, set[str]]] = view.overlay_roots_by_side
         # One spelling index per side, built once rather than per finding:
         # `resolve_graph_node` alone rescans every node and edge on each
         # call, which is O(findings x graph) over a graph the collector
@@ -217,10 +218,28 @@ class _PersistedDomain:
         """
         return self.mode is ContractMode.EXPORTS and self.domain_is_closed(side)
 
-    def refs(self, side: str) -> tuple[str, ...]:
+    def refs(self, side: str, nodes: set[str] | None = None) -> tuple[str, ...]:
+        # An entity rooted by an explicit overlay rests on that overlay's own
+        # record, not on the header provider that merely supplied the graph:
+        # citing `public_header` for a declaration retained solely by
+        # `--public-symbol` names evidence the decision never used (Codex
+        # review, fresh evidence). Cited *alongside* the root provider, since
+        # the closure walk that reached the entity is still the root
+        # provider's own.
+        overlay: tuple[str, ...] = ()
+        if nodes:
+            overlay = tuple(
+                sorted(
+                    record_id
+                    for record_id, roots in self.overlay_roots.get(side, {}).items()
+                    if nodes & roots
+                )
+            )
         record = self.record_by_side.get(side)
         if record is not None:
-            return (record.id,)
+            return (record.id, *overlay)
+        if overlay:
+            return overlay
         # `all` has no root provider (ADR-049 D2), so cite the declaration
         # parse that placed the finding as an entity at all -- the same
         # record `evidence_refs_for_reason` cites for this mode on the live
@@ -300,6 +319,9 @@ def _reevaluate_one(
     nodes: set[str] = set()
     for spelling in _entity_spellings(change):
         nodes |= domain.resolve(side, spelling)
+    # Re-taken now that the entity's own nodes are known, so an overlay-rooted
+    # decision cites the overlay rather than only the root provider.
+    refs = domain.refs(side, nodes)
     if not nodes:
         # The entity is not in this side's graph at all -- unplaceable, which
         # is not the same as proven outside the contract.

@@ -710,7 +710,11 @@ def collect_contract_evidence(
         entries.append(export_table_evidence(old, exports_old, "old"))
     if exports_new is not None:
         entries.append(export_table_evidence(new, exports_new, "new"))
-    if public_surface_allowlist:
+    # `is not None`: a manifest committing to zero exports is a selected
+    # source that scopes everything out, not an absent one -- the same
+    # distinction `post_processing` and `SuppressionConfig` already draw
+    # (Codex review, fresh evidence).
+    if public_surface_allowlist is not None:
         for side in _SIDES:
             entries.append(
                 _overlay_evidence(
@@ -764,7 +768,9 @@ def resolve_graph_node(graph: TypeGraphSnapshot, spelling: str) -> set[str]:
     return out
 
 
-def graph_node_index(graph: TypeGraphSnapshot) -> dict[str, set[str]]:
+def graph_node_index(
+    graph: TypeGraphSnapshot, *, follow_aliases: bool = True
+) -> dict[str, set[str]]:
     """Spelling -> canonical nodes, built once for a whole persisted graph.
 
     :func:`resolve_graph_node` answers one spelling by rescanning every node
@@ -774,6 +780,16 @@ def graph_node_index(graph: TypeGraphSnapshot) -> dict[str, set[str]]:
     resolving many spellings against one graph builds this index instead; the
     two agree by construction, since this is the same resolution rule stated
     as a forward map rather than a search.
+
+    *follow_aliases* is what a caller whose own live matching is **exact**
+    turns off. ``--post-manifest``'s committed-export allowlist is matched
+    against ``Change.symbol`` verbatim by the live evaluator, so resolving
+    its entries through the alias tier here would root a *different*
+    declaration than the run did -- an unexported ``ns::foo`` carries the
+    bare alias ``foo`` that an exported C ``foo`` also owns (Codex review,
+    fresh evidence). Alias-following stays on for every other caller,
+    including a finding's own spelling, where recognizing fewer encodings
+    than the live lookup would silently lose roots.
     """
     index: dict[str, set[str]] = {}
     alias_edges: dict[str, set[str]] = {}
@@ -791,8 +807,9 @@ def graph_node_index(graph: TypeGraphSnapshot) -> dict[str, set[str]]:
         if kind == "alias" or not identity:
             continue
         index.setdefault(identity, set()).add(node)
-    for alias, targets in alias_edges.items():
-        index.setdefault(alias.split(":", 1)[1], set()).update(targets)
+    if follow_aliases:
+        for alias, targets in alias_edges.items():
+            index.setdefault(alias.split(":", 1)[1], set()).update(targets)
     return index
 
 

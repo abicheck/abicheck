@@ -291,22 +291,41 @@ class PersistedDomainView:
     root_record_by_side: dict[str, EvidenceSearchRecord]
     header_record_by_side: dict[str, EvidenceSearchRecord]
     closure_by_side: dict[str, frozenset[str]]
+    #: ``{side: {overlay record id: the root nodes it contributed}}``. A
+    #: decision resting on one of these nodes must cite that record, not the
+    #: header provider that merely supplied the graph (Codex review).
+    overlay_roots_by_side: dict[str, dict[str, set[str]]]
+
+
+#: Whether an overlay provider's own live matching follows lookup aliases.
+#: ``--post-manifest`` is matched against ``Change.symbol`` verbatim by
+#: ``contract_evaluation``, so its persisted roots must resolve exactly:
+#: routing a bare ``foo`` through the alias tier also roots an unexported
+#: ``ns::foo`` that carries the same bare tail, turning a live
+#: ``PROVEN_OUT_OF_CONTRACT`` into a replayed ``IN_CONTRACT`` -- a flip
+#: :func:`~abicheck.contract_replay.compare_decisions` rejects (Codex review,
+#: fresh evidence). ``--public-symbol`` keeps the looser tier, matching its
+#: own live semantics.
+_OVERLAY_FOLLOWS_ALIASES: Mapping[str, bool] = {
+    PROVIDER_POST_MANIFEST: False,
+    PROVIDER_FORCED_PUBLIC: True,
+}
 
 
 def _resolved_overlay_roots(
-    graph: TypeGraphSnapshot, spellings: Iterable[str]
+    graph: TypeGraphSnapshot, spellings: Iterable[str], *, follow_aliases: bool
 ) -> set[str]:
     """Canonical node ids the overlay *spellings* name in *graph*.
 
     Built through :func:`~abicheck.contract_evidence_collect.graph_node_index`
-    so an overlay entry resolves by exactly the rule a finding's own spelling
-    does -- a second lookup convention here would let an overlay root land in
-    the closure that a finding naming the same entity could never reach.
+    so an overlay entry resolves by the same rule its own live matching uses
+    -- see :data:`_OVERLAY_FOLLOWS_ALIASES` for why that rule is per-provider
+    rather than one shared tier.
     """
     spellings = tuple(spellings)
     if not spellings:
         return set()
-    index = graph_node_index(graph)
+    index = graph_node_index(graph, follow_aliases=follow_aliases)
     out: set[str] = set()
     for spelling in spellings:
         out |= index.get(spelling, set())
@@ -338,7 +357,11 @@ def persisted_domain_view(
     graph_by_side: dict[str, TypeGraphSnapshot] = {}
     root_record_by_side: dict[str, EvidenceSearchRecord] = {}
     header_record_by_side: dict[str, EvidenceSearchRecord] = {}
-    overlay_spellings: set[str] = set()
+    # Kept per (side, record) rather than pooled: the resolution rule differs
+    # by provider, and a replayed decision must be able to cite the overlay
+    # its root actually came from instead of the header provider (Codex
+    # review, fresh evidence).
+    overlay_entries: list[tuple[str, EvidenceSearchRecord, tuple[str, ...]]] = []
     for entry in evidence.providers:
         side = entry.record.side
         if provider is not None and entry.record.provider == provider:
@@ -348,11 +371,21 @@ def persisted_domain_view(
             graph_by_side[side] = entry.type_graph
             header_record_by_side[side] = entry.record
         if mode is ContractMode.PUBLIC and entry.record.provider in _OVERLAY_PROVIDERS:
-            overlay_spellings.update(entry.manifests)
-    for side, graph in graph_by_side.items():
-        extra = _resolved_overlay_roots(graph, overlay_spellings)
-        if extra:
-            roots_by_side.setdefault(side, set()).update(extra)
+            overlay_entries.append((side, entry.record, entry.manifests))
+    overlay_roots_by_side: dict[str, dict[str, set[str]]] = {}
+    for side, record, manifests in overlay_entries:
+        graph = graph_by_side.get(side)
+        if graph is None:
+            continue
+        extra = _resolved_overlay_roots(
+            graph,
+            manifests,
+            follow_aliases=_OVERLAY_FOLLOWS_ALIASES[record.provider],
+        )
+        if not extra:
+            continue
+        roots_by_side.setdefault(side, set()).update(extra)
+        overlay_roots_by_side.setdefault(side, {})[record.id] = extra
     closure_by_side = {
         side: closure_from_graph(graph, roots_by_side.get(side, set()))
         for side, graph in graph_by_side.items()
@@ -363,6 +396,7 @@ def persisted_domain_view(
         root_record_by_side=root_record_by_side,
         header_record_by_side=header_record_by_side,
         closure_by_side=closure_by_side,
+        overlay_roots_by_side=overlay_roots_by_side,
     )
 
 
