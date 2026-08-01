@@ -3621,9 +3621,10 @@ that:
 
 `SCAN_SCHEMA_VERSION` went to `1.6` for the additive `diff`-block keys
 (`finding_id` on every finding, the optional `detectors` list, and the four
-contract keys under `--contract-evaluation`), with the entry recording that
-a run without the new flag is byte-identical to `1.5` apart from
-`finding_id`.
+contract keys under `--contract-evaluation`), with the entry recording
+exactly what a run *without* the new flag changes relative to 1.5: the
+version marker, `finding_id`, and the `detectors` list -- the last of which,
+unlike the contract keys, is emitted regardless of the flag.
 
 Two smaller things the work forced. The helper reads both reports from
 `-o` files rather than captured stdout: parsing scan's stdout works for a
@@ -3649,6 +3650,52 @@ renderer/aggregate lanes.
 
 **Gate:** zero unexplained public-break losses; reviewed FP reductions; measured
 and accepted unresolved rate; all downstream consumers understand new schema.
+
+**Updated (2026-08-01): the Gate's corpus axis closed.** The measurement's
+three zero baselines were already green, but on one corpus: the FP-rate
+corpus, which is built to exercise public-header scoping and so carries no
+export tables at all. The consequence was recorded honestly in the previous
+note and is the thing this slice fixes -- `exports` measured **100%
+unresolved on every case**, so "measured and accepted unresolved rate" was,
+for that domain, measuring the absence of evidence rather than the domain.
+
+`scripts/contract_platform_corpus.py` supplies the lanes the Gate's own list
+names and this measurement can reach without a toolchain: ELF, PE, Mach-O
+(hand-built snapshots carrying the real `.dynsym` / export-directory /
+export-trie shapes `export_surface.observed_exports_by_platform` reads, so
+the same provider code a real binary exercises runs on every host), plus
+stripped (exports with no header provenance at all), versioned (ELF symbol
+versions), and C (`extern "C"`, the name-based identity tier rather than the
+mangled-primary one). It is a separate corpus rather than more FP-rate cases
+deliberately: that corpus is a gate with its own 0/0 FP/FN baselines, and a
+Mach-O export-table shape has nothing to say about false-positive rate.
+
+Each case is tagged with its lane, and the measurement reports unresolved
+rate **by lane** alongside the existing by-domain and by-provider-state
+axes. That is what makes the number acceptable-or-not rather than merely
+reported: a domain unresolved exactly on the lanes carrying no evidence for
+it is working as designed, and one unresolved on a lane that *does* carry
+evidence is a defect the aggregate hides. Result — the gate stays at
+0/0/0/0, and `exports` goes from 100% unresolved to resolving on every lane
+with an export table (76.8% aggregate, entirely attributable to the
+evidence-free FP-rate corpus), with 2 deltas and 2 proven exclusions where
+it previously concluded nothing.
+
+One case earns its place specifically: a public-header type whose layout
+changes but which no export reaches. `public` calls it `IN_CONTRACT` (the
+header committed to it); `exports` proves it out (nothing linkable reaches
+it). Without a case where the two domains are *supposed* to disagree, the
+`exports` domain could pass every baseline while concluding nothing at all
+— the same vacuity the `public` domain already has a guard against, now
+given to `exports` too.
+
+**Bounded honestly.** Two lanes the Gate lists are named in
+`UNCOVERED_LANES` with their reason and reported in the output rather than
+silently omitted: `package` (`compare` rejects `--contract-evaluation` for
+directory/package operands, so there is no contract decision on a package
+pair to measure) and `real_binaries` (needs a compiler; covered by the
+integration lanes, `tests/test_scan_compare_parity.py` and
+`tests/test_abi_examples.py`, not by this always-on measurement).
 
 ### Phase 7 — default flip
 

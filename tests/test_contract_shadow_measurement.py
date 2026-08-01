@@ -43,6 +43,7 @@ def _load(name: str):
 
 
 _load("check_fp_rate")  # measure_contract_shadow imports the corpus from it
+platform_corpus = _load("contract_platform_corpus")
 shadow = _load("measure_contract_shadow")
 
 
@@ -144,6 +145,7 @@ def test_metrics_report_the_four_measured_quantities() -> None:
         assert "unresolved_rate" in row
         assert "unresolved_by_provider_state" in row
         assert "unresolved_by_platform" in row
+        assert "unresolved_by_lane" in row
         assert "proven_public_break_losses" in row
         assert "proven_false_positive_reductions" in row
 
@@ -217,3 +219,76 @@ def test_render_markdown_covers_every_domain() -> None:
     text = shadow.render_markdown(shadow.metrics())
     for mode in shadow.MEASURED_MODES:
         assert f"| {mode.value} |" in text
+
+
+class TestPhase6CorpusCoverage:
+    """ADR-049 Phase 6's Gate names a corpus, not just a number.
+
+    The measurement originally ran one corpus -- the FP-rate corpus, which
+    by construction carries no export tables -- so the `exports` domain was
+    100% unresolved on every case and its "measured and accepted unresolved
+    rate" measured only the absence of evidence.
+    `scripts/contract_platform_corpus.py` supplies the ELF/PE/Mach-O,
+    stripped, versioned, and C lanes the Gate names; these tests assert the
+    lanes are actually reached and actually change the answer, so a future
+    refactor cannot quietly drop them back to the single corpus.
+    """
+
+    def test_every_declared_lane_is_actually_measured(self) -> None:
+        modes = shadow.metrics()["modes"]
+        measured = {
+            lane for row in modes.values() for lane in row["unresolved_by_lane"]
+        }
+        declared = set(platform_corpus.CASE_LANE.values())
+        assert declared <= measured, sorted(declared - measured)
+        # The FP-rate corpus keeps its own row rather than being folded in:
+        # the two answer different questions and their rates must stay
+        # separable.
+        assert "fp_corpus" in measured
+
+    def test_the_exports_domain_resolves_where_an_export_table_exists(self) -> None:
+        """The reason this corpus exists. Every lane that carries a real
+        export table must resolve under `exports`; the FP-rate corpus, which
+        carries none, is the one that does not -- and that contrast is the
+        honest signal, not a number to be improved away."""
+        lanes = shadow.metrics()["modes"]["exports"]["unresolved_by_lane"]
+        for lane in ("elf", "pe", "stripped", "versioned", "c"):
+            counts = lanes[lane]
+            assert counts["resolved"], f"{lane} resolved nothing under exports"
+        assert lanes["fp_corpus"]["resolved"] == 0
+
+    def test_the_exports_domain_proves_something_out_of_contract(self) -> None:
+        """Without this the `exports` domain could pass every gate while
+        concluding nothing -- the same vacuity guard the `public` domain
+        already has, for the domain the platform corpus was added for."""
+        exports = shadow.metrics()["modes"]["exports"]
+        assert exports["proven_false_positive_reductions"], (
+            "no finding was proven out of contract under contract=exports -- "
+            "the domain's own gate would be vacuous"
+        )
+
+    def test_a_lane_the_two_domains_disagree_on_exists(self) -> None:
+        """A corpus where every case answers identically in every domain
+        would measure the plumbing, not the domains. At least one case must
+        be `IN_CONTRACT` under `public` and proven out under `exports`."""
+        modes = shadow.metrics()["modes"]
+        assert modes["public"]["deltas"] == 0  # header scoping agrees with itself
+        assert modes["exports"]["deltas"] > 0
+
+    def test_uncovered_lanes_are_named_with_a_reason(self) -> None:
+        """Phase 6's Gate lists lanes this measurement cannot reach. Naming
+        them (with why) is what keeps the coverage claim bounded by what was
+        run rather than by what the list mentions."""
+        uncovered = shadow.metrics()["uncovered_lanes"]
+        assert uncovered, "the coverage claim must state its own limits"
+        assert all(reason.strip() for reason in uncovered.values())
+        # Neither may silently become a lane name the corpus also claims to
+        # cover -- that would be two contradictory statements about one lane.
+        assert not (set(uncovered) & set(platform_corpus.CASE_LANE.values()))
+
+    def test_the_markdown_summary_renders_the_lane_table(self) -> None:
+        rendered = shadow.render_markdown(shadow.metrics())
+        assert "Unresolved rate by lane" in rendered
+        assert "Lanes not covered by this measurement" in rendered
+        for lane in sorted(set(platform_corpus.CASE_LANE.values())):
+            assert f"| {lane} " in rendered or f" {lane} |" in rendered
