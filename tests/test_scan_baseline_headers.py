@@ -88,6 +88,9 @@ def test_scan_exposes_against_config_surface_options() -> None:
         "public_symbols_list",
         "pattern_verdicts",
         "env_matrix_path",
+        # ADR-049 Phase 5 §6.4's contract-relevance half of the same parity.
+        "contract_evaluation",
+        "contract_mode",
     } <= dests
 
 
@@ -268,6 +271,8 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
         pattern_verdicts=False,
         env_matrix=None,
         collapse_versioned_symbols=False,
+        contract_evaluation=False,
+        contract_mode=None,
     ):
         captured["suppression"] = suppression
         captured["policy"] = policy
@@ -276,6 +281,8 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
         captured["force_public_symbols"] = force_public_symbols
         captured["pattern_verdicts"] = pattern_verdicts
         captured["env_matrix"] = env_matrix
+        captured["contract_evaluation"] = contract_evaluation
+        captured["contract_mode"] = contract_mode
         return _FakeDiff()
 
     monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
@@ -297,6 +304,8 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
         force_public_symbols={"foo"},
         pattern_verdicts=True,
         env_matrix=sentinel_env_matrix,
+        contract_evaluation=True,
+        contract_mode="exports",
     )
 
     assert captured["suppression"] is sentinel_suppression
@@ -306,6 +315,12 @@ def test_run_baseline_compare_threads_policy_and_scope_to_compare_snapshots(
     assert captured["force_public_symbols"] == {"foo"}
     assert captured["pattern_verdicts"] is True
     assert captured["env_matrix"] is sentinel_env_matrix
+    # ADR-049 Phase 5 §6.4: the shadow contract evaluator's own two knobs
+    # reach `compare_snapshots` the same way, so a `scan --against` finding
+    # can carry the contract relevance/reason/evidence fields the Gate wants
+    # compared against `compare`'s.
+    assert captured["contract_evaluation"] is True
+    assert captured["contract_mode"] == "exports"
 
 
 def test_run_baseline_compare_forwards_policy_file_to_embedded_build_source(

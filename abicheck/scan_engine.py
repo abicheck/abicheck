@@ -798,6 +798,8 @@ def run_scan_core(
     pattern_verdicts: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
     collapse_versioned_symbols: bool = False,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -1021,6 +1023,8 @@ def run_scan_core(
                     pattern_verdicts=pattern_verdicts,
                     env_matrix=env_matrix,
                     collapse_versioned_symbols=collapse_versioned_symbols,
+                    contract_evaluation=contract_evaluation,
+                    contract_mode=contract_mode,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start

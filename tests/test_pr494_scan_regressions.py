@@ -36,6 +36,7 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
         old, new, suppression=None, *, policy="strict_abi", policy_file=None,
         extra_changes, scope_to_public_surface, force_public_symbols=None,
         pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
+        contract_evaluation=False, contract_mode=None,
     ):  # noqa: ANN001
         calls.append(
             {
@@ -87,15 +88,19 @@ def test_scan_baseline_compare_preserves_hard_l0_elf_removal(monkeypatch) -> Non
     assert hard_l0 in calls[1]["extra_changes"]
     # The breaking finding itself is preserved, not just its count (a failing
     # `scan --baseline` must name what broke, not just report "breaking=1").
-    assert summary["findings"] == [
-        {
-            "bucket": "breaking",
-            "kind": "func_removed_elf_only",
-            "symbol": None,
-            "description": None,
-            "source_location": None,
-        }
-    ]
+    # `finding_id` is the canonical identity ADR-049 Phase 5 §6.4 added so a
+    # scan finding can be joined to its `compare` counterpart; its value is a
+    # content hash, so it is checked for presence here and pinned by
+    # `tests/test_scan_compare_parity.py` against `compare`'s own.
+    (finding,) = summary["findings"]
+    assert finding.pop("finding_id")
+    assert finding == {
+        "bucket": "breaking",
+        "kind": "func_removed_elf_only",
+        "symbol": None,
+        "description": None,
+        "source_location": None,
+    }
 
 
 def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch) -> None:
@@ -117,6 +122,7 @@ def test_scan_baseline_compare_does_not_promote_advisory_l0_findings(monkeypatch
         old, new, suppression=None, *, policy="strict_abi", policy_file=None,
         extra_changes, scope_to_public_surface, force_public_symbols=None,
         pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
+        contract_evaluation=False, contract_mode=None,
     ):  # noqa: ANN001
         if not scope_to_public_surface:
             return SimpleNamespace(
@@ -182,6 +188,7 @@ def test_scan_baseline_compare_truncates_large_finding_lists(monkeypatch) -> Non
         old, new, suppression=None, *, policy="strict_abi", policy_file=None,
         extra_changes, scope_to_public_surface, force_public_symbols=None,
         pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
+        contract_evaluation=False, contract_mode=None,
     ):  # noqa: ANN001
         return SimpleNamespace(
             breaking=many_breaks,
@@ -236,6 +243,7 @@ def test_scan_baseline_compare_truncates_large_suppressed_lists(monkeypatch) -> 
         old, new, suppression=None, *, policy="strict_abi", policy_file=None,
         extra_changes, scope_to_public_surface, force_public_symbols=None,
         pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
+        contract_evaluation=False, contract_mode=None,
     ):  # noqa: ANN001
         return SimpleNamespace(
             breaking=[],
@@ -292,6 +300,7 @@ def test_scan_baseline_compare_filters_dependency_scope_by_default(monkeypatch) 
         old, new, suppression=None, *, policy="strict_abi", policy_file=None,
         extra_changes, scope_to_public_surface, force_public_symbols=None,
         pattern_verdicts=False, env_matrix=None, collapse_versioned_symbols=False,
+        contract_evaluation=False, contract_mode=None,
     ):  # noqa: ANN001
         return SimpleNamespace(
             breaking=[], source_breaks=[], risk=[], compatible=[],

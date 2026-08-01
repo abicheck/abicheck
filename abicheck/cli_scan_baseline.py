@@ -216,7 +216,21 @@ def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, A
     ``suppression_rule`` value and whose exact shape existing tests and
     sibling modules (``cli_compare_release.py``, ``stack_report.py``) already
     pin.
+
+    **ADR-049 Phase 5 §6.4.** The Gate wants the two commands' shared
+    comparison findings compared *field by field*, and named the fields:
+    canonical identity, ``ChangeKind``, contract relevance/reason/evidence
+    side, compatibility decision, and suppression. ``kind``/``symbol``/
+    ``suppression_rule`` covered three of those; ``finding_id`` (the same
+    canonical identity ``reporter._change_to_dict`` emits, so the two are
+    joinable rather than merely both present) and the four contract fields
+    close the rest. The contract keys appear only when a finding actually
+    carries a decision -- i.e. under ``scan --against --contract-evaluation``
+    -- exactly as ``reporter._add_contract_evaluation_fields`` gates them,
+    so an ordinary scan's summary is byte-identical to before.
     """
+    from .finding_identity import report_finding_id
+
     findings = []
     for c in changes:
         kind = getattr(c, "kind", None)
@@ -226,11 +240,37 @@ def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, A
             "symbol": getattr(c, "symbol", None),
             "description": getattr(c, "description", None),
             "source_location": getattr(c, "source_location", None),
+            "finding_id": report_finding_id(c),
         }
+        _add_contract_fields(entry, c)
         if bucket == "suppressed":
             entry["suppression_rule"] = getattr(c, "suppression_rule", None)
         findings.append(entry)
     return findings
+
+
+def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
+    """Copy *c*'s shadow contract decision into *entry*, if it has one.
+
+    The projection of ``reporter._add_contract_evaluation_fields`` this
+    summary can carry: same keys, same values, same "absent means unstamped"
+    rule. Deliberately not an import of that function -- it also computes a
+    ``finding_id`` fallback and is typed against report dicts -- but the key
+    names are asserted equal to the reporter's by
+    ``tests/test_scan_compare_parity.py``, so the two cannot drift into
+    naming the same decision differently.
+    """
+    relevance = getattr(c, "contract_relevance", None)
+    if relevance is None:
+        return
+    entry["contract_relevance"] = relevance.value
+    entry["contract_reason_code"] = getattr(c, "contract_reason_code", None)
+    assurance = getattr(c, "contract_assurance", None)
+    if assurance is not None:
+        entry["contract_assurance"] = assurance.value
+    refs = getattr(c, "contract_evidence_refs", None)
+    if refs is not None:
+        entry["contract_evidence_refs"] = list(refs)
 
 
 def _baseline_is_native_library(path: Path) -> bool:
@@ -282,6 +322,8 @@ def _run_baseline_compare(
     pattern_verdicts: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
     collapse_versioned_symbols: bool = False,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -424,6 +466,8 @@ def _run_baseline_compare(
         pattern_verdicts=pattern_verdicts,
         env_matrix=env_matrix,
         collapse_versioned_symbols=collapse_versioned_symbols,
+        contract_evaluation=contract_evaluation,
+        contract_mode=contract_mode,
     )
     summary: dict[str, Any] = {
         "breaking": len(diff.breaking),
@@ -431,6 +475,27 @@ def _run_baseline_compare(
         "risk": len(diff.risk),
         "compatible": len(diff.compatible),
     }
+    # ADR-049 Phase 5 §6.4 names *detector provenance* among the fields the
+    # two commands must agree on, and `compare`'s JSON report has carried it
+    # since long before this Gate (`reporter._add_detectors`) while `scan
+    # --against`'s summary carried nothing equivalent -- so "which detector
+    # produced this comparison's findings, and did any report a coverage
+    # gap" was answerable for one command and not the other on the same
+    # inputs. Same shape and same "only detectors with findings or a
+    # coverage gap" filter as the reporter's, so the two are comparable
+    # rather than merely both non-empty.
+    detectors = [
+        {
+            "name": det.name,
+            "changes_count": det.changes_count,
+            "enabled": det.enabled,
+            "coverage_gap": det.coverage_gap,
+        }
+        for det in getattr(diff, "detector_results", None) or []
+        if det.changes_count > 0 or det.coverage_gap is not None
+    ]
+    if detectors:
+        summary["detectors"] = detectors
     # Preserve the actual findings (kind/symbol/description/location), not just
     # their counts — a failing `scan --baseline` used to report e.g.
     # "breaking=1" with no way to tell which symbol broke without a separate

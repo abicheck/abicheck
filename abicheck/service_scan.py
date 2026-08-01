@@ -229,6 +229,13 @@ class ScanRequest:
     pattern_verdicts: bool = False
     env_matrix: EnvironmentMatrix | None = None
     collapse_versioned_symbols: bool = False
+    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side
+    # among the fields the two commands must agree on -- which a
+    # `scan --against` result could not carry at all while only `compare`
+    # could ask for the shadow evaluator. Same advisory contract as
+    # `compare`: stamping a decision never changes verdict or exit code.
+    contract_evaluation: bool = False
+    contract_mode: str | None = None
     # ADR-056: options the single-binary CLI path (cli_scan.py) already
     # forwards straight to run_scan_core, bypassing ScanRequest entirely.
     # Both run_scan and run_scan_set (--artifact-set) honor these when set
@@ -1041,6 +1048,8 @@ def _reject_comparison_only_fields(req: ScanRequest) -> None:
             ("pattern_verdicts", req.pattern_verdicts),
             ("env_matrix", req.env_matrix is not None),
             ("collapse_versioned_symbols", req.collapse_versioned_symbols),
+            ("contract_evaluation", req.contract_evaluation),
+            ("contract_mode", req.contract_mode is not None),
         )
         if is_set
     ]
@@ -1203,6 +1212,8 @@ def run_scan(req: ScanRequest) -> ScanResult:
             pattern_verdicts=req.pattern_verdicts,
             env_matrix=req.env_matrix,
             collapse_versioned_symbols=req.collapse_versioned_symbols,
+            contract_evaluation=req.contract_evaluation,
+            contract_mode=req.contract_mode,
             abi3_floor=req.abi3_floor,
         )
     except _BudgetOverflow:

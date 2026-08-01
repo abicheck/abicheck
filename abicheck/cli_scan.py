@@ -589,6 +589,8 @@ _COMPARISON_ONLY_FLAGS = {
     "public_symbols_list": "--public-symbols-list",
     "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
     "env_matrix_path": "--env-matrix",
+    "contract_evaluation": "--contract-evaluation",
+    "contract_mode": "--contract",
 }
 
 
@@ -962,6 +964,29 @@ def _run_artifact_set(
     "guarantee is lost.",
 )
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract), --against only
+@click.option(
+    "--contract-evaluation",
+    "contract_evaluation",
+    is_flag=True,
+    default=False,
+    help="With --against: stamp each comparison finding with ADR-049 Phase 3's "
+    "shadow contract decision (contract_relevance / contract_reason_code / "
+    "contract_assurance / contract_evidence_refs), exactly as `compare "
+    "--contract-evaluation` does. Advisory only -- it never changes the "
+    "verdict, the exit code, or which findings appear.",
+)
+@click.option(
+    "--contract",
+    "contract_mode",
+    type=click.Choice(["public", "exports", "all"]),
+    default=None,
+    help="With --against: which evidence domain --contract-evaluation judges "
+    "against ('public' header-derived surface, 'exports' the binary's own "
+    "export table plus its type closure, 'all' every entity). Omitted, the "
+    "domain follows --scope-public-headers/--no-scope-public-headers. "
+    "Requires --contract-evaluation, and is advisory exactly like it "
+    "(mirrors `compare --contract`).",
+)
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -1012,6 +1037,8 @@ def scan_cmd(
     public_symbols_list: Path | None,
     pattern_verdicts: bool,
     env_matrix_path: Path | None,
+    contract_evaluation: bool,
+    contract_mode: str | None,
     lang: str,
     allow_build_query: bool,
     fmt: str,
@@ -1307,6 +1334,21 @@ def scan_cmd(
         public_symbols, public_symbols_list
     )
     _warn_force_public_ignored(force_public_symbols, scope_public_headers)
+
+    if contract_mode is not None and not contract_evaluation:
+        # Same rule, same wording as `compare`'s own check
+        # (`cli_compare_helpers.run_compare`) and the Tier-2 entry's
+        # (`service._validate_contract_mode`): --contract on its own would
+        # silently do nothing, since no finding carries a contract decision
+        # unless --contract-evaluation asked for one. Checked here rather
+        # than left to `compare_snapshots` so it is a clean usage error
+        # (exit 64) raised before any scanning work, matching `compare`.
+        raise click.UsageError(
+            "--contract requires --contract-evaluation: it selects which "
+            "evidence domain the shadow contract evaluator judges against, "
+            "and without that flag no contract decision is computed at all."
+        )
+
     from .errors import AbicheckError
     from .service import load_env_matrix
 
@@ -1449,6 +1491,8 @@ def scan_cmd(
             pattern_verdicts=pattern_verdicts,
             env_matrix=env_matrix,
             collapse_versioned_symbols=collapse_versioned_symbols,
+            contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,

@@ -24,10 +24,27 @@ inputs under identical suppression/policy/scope flags — not just that each
 command's own kwargs are threaded correctly in isolation (that's what
 `test_scan_baseline_headers.py`'s kwarg-capture test already covers).
 
-Deliberately narrow: this covers the concrete case ADR-049 Phase 5 names
-(a suppression rule silencing a hard breaking removal), not an exhaustive
-matrix over every flag combination -- see the Phase 5 progress note in
-`docs/contribute/plans/public-contract-default.md` for what's still open.
+Two layers, in escalating strength:
+
+1. **Exit-code agreement** (the original slice): the same inputs and flags
+   produce the same exit code from both commands. Necessary, but far from
+   §6.4's Gate -- two commands can agree on "breaking" while disagreeing
+   about *which* finding broke.
+2. **Field-for-field agreement** (`TestFieldForFieldParity`): the two
+   commands' *shared comparison findings* are compared as records, joined
+   on the canonical identity (`finding_id`) both now emit, across the §6.4
+   input/config matrix. The compared fields are exactly the ones §6.4 names
+   -- canonical identity, `ChangeKind`, detector provenance, contract
+   relevance/reason/assurance/evidence side, compatibility decision, and
+   suppression -- so a divergence in any of them fails here rather than
+   surviving because both exit codes happened to be `4`.
+
+Both layers run on the same JSON snapshot inputs through Click's
+`CliRunner`, end to end -- not on each command's kwargs in isolation
+(that's what `test_scan_baseline_headers.py`'s kwarg-capture test covers).
+`TestBinaryAndMixedInputParity` extends the same assertions to real
+compiled binaries and to a binary-vs-snapshot pair, and is `integration`
+because it needs a compiler.
 """
 
 from __future__ import annotations
@@ -567,3 +584,446 @@ def test_scan_against_cwd_discovered_config_compile_block_actually_applies(
     cc = captured["compile_context"]
     assert cc is not None, "compile_context.is_default was wrongly True"
     assert "-DFOO=1" in cc.gcc_option_tokens
+
+
+# ---------------------------------------------------------------------------
+# ADR-049 Phase 5 §6.4 Gate: field-for-field parity, not just exit codes.
+# ---------------------------------------------------------------------------
+
+#: The per-finding fields §6.4 requires the two commands to agree on, minus
+#: the compatibility decision (which the two spell differently by design --
+#: see :func:`_scan_rows`) and the canonical identity (which is the join key,
+#: so equality of the two key *sets* is what checks it).
+_SHARED_FINDING_FIELDS = (
+    "kind",
+    "symbol",
+    "contract_relevance",
+    "contract_reason_code",
+    "contract_assurance",
+    "contract_evidence_refs",
+)
+
+#: The three gating buckets `scan --against`'s summary itemizes. `compare`'s
+#: report carries compatible findings too; those are outside the shared set
+#: this Gate compares (scan's summary was never meant to itemize additions),
+#: so they are filtered out rather than counted as a divergence.
+_GATING_SEVERITIES = frozenset({"breaking", "api_break", "risk"})
+
+
+def _compare_rows(report: dict) -> dict[str, dict]:
+    """`compare`'s gating findings, keyed by canonical identity."""
+    return {
+        c["finding_id"]: {
+            **{f: c.get(f) for f in _SHARED_FINDING_FIELDS},
+            "decision": c["severity"],
+        }
+        for c in report["changes"]
+        if c["severity"] in _GATING_SEVERITIES
+    }
+
+
+def _scan_rows(diff: dict) -> dict[str, dict]:
+    """`scan --against`'s gating findings, in `_compare_rows`' shape.
+
+    The compatibility decision is the one field the two commands genuinely
+    spell differently: `compare` calls it ``severity`` (one label per
+    finding) while scan's summary calls it ``bucket`` (which of the three
+    itemized verdict lists the finding came out of). They are the same
+    value -- both are ``report_model.VERDICT_TO_SEVERITY_LABEL`` of the
+    finding's effective verdict -- so normalizing the key here is a
+    renaming, not a fudge, and
+    :func:`test_the_two_decision_spellings_are_the_same_vocabulary` pins
+    that claim independently.
+    """
+    return {
+        f["finding_id"]: {
+            **{k: f.get(k) for k in _SHARED_FINDING_FIELDS},
+            "decision": f["bucket"],
+        }
+        for f in diff.get("findings", [])
+    }
+
+
+def _both(
+    runner: CliRunner, old: Path, new: Path, extra: list[str], tmp_path: Path
+) -> tuple[dict, dict]:
+    """Run both commands on the same inputs/flags; return their JSON payloads.
+
+    Always passes ``--contract-evaluation`` so the contract fields are
+    actually populated -- an all-``None`` comparison of those four keys
+    would pass vacuously.
+    """
+    import json
+
+    report_path = tmp_path / "compare-report.json"
+    scan_path = tmp_path / "scan-report.json"
+    compare_res = runner.invoke(
+        main,
+        [
+            "compare",
+            str(old),
+            str(new),
+            "--format",
+            "json",
+            "--contract-evaluation",
+            "-o",
+            str(report_path),
+            *extra,
+        ],
+    )
+    assert compare_res.exit_code in (0, 1, 2, 4), compare_res.output
+    scan_res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new),
+            "--against",
+            str(old),
+            "--format",
+            "json",
+            "--contract-evaluation",
+            "-o",
+            str(scan_path),
+            *extra,
+        ],
+    )
+    assert scan_res.exit_code in (0, 1, 2, 4), scan_res.output
+    assert compare_res.exit_code == scan_res.exit_code, (
+        f"gate contribution diverged for {extra}: "
+        f"compare={compare_res.exit_code} scan={scan_res.exit_code}"
+    )
+    # Both read from a file rather than stdout: `scan` legitimately writes
+    # warnings/progress to stdout alongside the report, so parsing its
+    # captured output works for a snapshot pair and breaks the moment the
+    # operand is a real binary.
+    return (
+        json.loads(report_path.read_text(encoding="utf-8")),
+        json.loads(scan_path.read_text(encoding="utf-8")),
+    )
+
+
+def _mixed_snapshots(tmp_path: Path) -> tuple[Path, Path]:
+    """A pair exercising several detectors and several `ChangeKind` families.
+
+    Deliberately richer than the module's single-removal fixtures: a removal,
+    a return-type change, an addition, a reachable record whose layout grew,
+    and an enum that gained a member -- so the parity assertion covers the
+    function, type, and enum detectors at once rather than proving agreement
+    on one `func_removed` and generalizing from it.
+    """
+    from abicheck.model import EnumMember, EnumType, Param, RecordType, TypeField
+
+    def fn(name: str, mangled: str, ret: str = "void", params: tuple = ()) -> Function:
+        return Function(
+            name=name,
+            mangled=mangled,
+            return_type=ret,
+            params=[Param(name=n, type=t) for n, t in params],
+            visibility=Visibility.PUBLIC,
+            access=AccessLevel.PUBLIC,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+
+    def cfg(fields: tuple[tuple[str, str], ...], size: int) -> RecordType:
+        return RecordType(
+            name="Cfg",
+            kind="struct",
+            fields=[TypeField(name=n, type=t) for n, t in fields],
+            size_bits=size,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+
+    def mode(members: tuple[tuple[str, int], ...]) -> EnumType:
+        return EnumType(
+            name="Mode",
+            members=[EnumMember(name=n, value=v) for n, v in members],
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+
+    # `use` keeps Cfg/Mode reachable from the public surface, so their own
+    # findings survive public-surface scoping instead of being filtered as
+    # unreferenced types.
+    use = ("_Z3useP3CfgP4Mode", (("c", "Cfg*"), ("m", "Mode*")))
+    old = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        functions=[
+            fn("foo", "_Z3foov"),
+            fn("bar", "_Z3barv"),
+            fn("baz", "_Z3bazv", "int"),
+            fn("use", use[0], params=use[1]),
+        ],
+        types=[cfg((("a", "int"),), 32)],
+        enums=[mode((("M_A", 0),))],
+        elf=_elf("_Z3foov", "_Z3barv", "_Z3bazv", use[0]),
+    )
+    new = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        functions=[
+            fn("foo", "_Z3foov"),
+            fn("baz", "_Z3bazv", "long"),
+            fn("qux", "_Z3quxv"),
+            fn("use", use[0], params=use[1]),
+        ],
+        types=[cfg((("a", "int"), ("b", "int")), 64)],
+        enums=[mode((("M_A", 0), ("M_B", 1)))],
+        elf=_elf("_Z3foov", "_Z3bazv", "_Z3quxv", use[0]),
+    )
+    return (
+        _write_snapshot(tmp_path / "mixed_old.abi.json", old),
+        _write_snapshot(tmp_path / "mixed_new.abi.json", new),
+    )
+
+
+@pytest.fixture
+def mixed_pair(tmp_path: Path) -> tuple[Path, Path]:
+    return _mixed_snapshots(tmp_path)
+
+
+class TestFieldForFieldParity:
+    """§6.4's Gate as an executable check, over its own input/config matrix."""
+
+    @pytest.mark.parametrize(
+        "label,extra",
+        [
+            ("defaults", []),
+            ("policy", ["--policy", "sdk_vendor"]),
+            ("scope-off", ["--no-scope-public-headers"]),
+            ("explicit-scope", ["--scope-public-headers"]),
+            ("forced-public-symbol", ["--public-symbol", "_Z3barv"]),
+            ("contract-public", ["--contract", "public"]),
+            ("contract-exports", ["--contract", "exports"]),
+            ("contract-all", ["--contract", "all"]),
+            ("pattern-verdicts", ["--pattern-verdicts"]),
+        ],
+    )
+    def test_shared_findings_are_identical_records(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        tmp_path: Path,
+        label: str,
+        extra: list[str],
+    ) -> None:
+        old, new = mixed_pair
+        report, scan = _both(runner, old, new, extra, tmp_path)
+
+        rows_c = _compare_rows(report)
+        rows_s = _scan_rows(scan["diff"])
+        # A vacuous pass (both empty) would satisfy every assertion below,
+        # so require the matrix cell to actually have findings to compare.
+        assert rows_c, f"{label}: no gating findings to compare"
+        # Canonical identity: the same finding set, not merely the same count.
+        assert set(rows_c) == set(rows_s), label
+        # ChangeKind, contract relevance/reason/assurance/evidence side, and
+        # the compatibility decision, per finding.
+        assert rows_c == rows_s, label
+
+    @pytest.mark.parametrize(
+        "extra",
+        [[], ["--policy", "sdk_vendor"], ["--no-scope-public-headers"]],
+    )
+    def test_detector_provenance_is_identical(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        tmp_path: Path,
+        extra: list[str],
+    ) -> None:
+        # §6.4 names detector provenance among the equal fields. Both sides
+        # emit the same "detectors with findings or a coverage gap" list.
+        old, new = mixed_pair
+        report, scan = _both(runner, old, new, extra, tmp_path)
+        assert scan["diff"]["detectors"] == report["detectors"]
+        assert any(d["changes_count"] > 0 for d in report["detectors"])
+
+    def test_suppression_is_identical_field_for_field(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        suppress_bar: Path,
+        tmp_path: Path,
+    ) -> None:
+        # Suppression is one of §6.4's equal fields, and the audit trail is
+        # where a divergence would actually show: a rule can silence a
+        # finding on one side and a *different* one on the other while both
+        # commands still report "1 suppressed".
+        old, new = mixed_pair
+        report, scan = _both(
+            runner, old, new, ["--suppress", str(suppress_bar)], tmp_path
+        )
+
+        assert (
+            scan["diff"]["suppressed_count"]
+            == report["suppression"]["suppressed_count"]
+        )
+        scan_supp = {
+            (f["symbol"], f["kind"], f["suppression_rule"], f["finding_id"])
+            for f in scan["diff"]["suppressed"]
+        }
+        compare_supp = {
+            (
+                c["symbol"],
+                c["kind"],
+                c["impact_assessment"]["decision"]["suppression_rule"],
+                c["finding_id"],
+            )
+            for c in report["suppression"]["suppressed_changes"]
+        }
+        assert scan_supp == compare_supp
+        # And the silenced finding is gone from the shared set on both sides.
+        assert "_Z3barv" not in {r["symbol"] for r in _compare_rows(report).values()}
+        assert "_Z3barv" not in {r["symbol"] for r in _scan_rows(scan["diff"]).values()}
+
+    def test_scan_only_findings_are_appended_not_substituted(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        tmp_path: Path,
+    ) -> None:
+        # §6.4: "Scan-only source/cross-check findings may be appended; they
+        # cannot rewrite the shared comparison findings." Scan's own audit
+        # blocks live outside `diff`, so the shared set stays byte-identical
+        # to `compare`'s no matter what the audit found.
+        old, new = mixed_pair
+        report, scan = _both(runner, old, new, [], tmp_path)
+        assert _scan_rows(scan["diff"]) == _compare_rows(report)
+        # The scan-only material really is present, and really is separate:
+        # it lives beside `diff`, never inside it, so it structurally cannot
+        # rewrite a shared comparison finding.
+        assert "crosscheck" in scan
+        assert {"advisories", "coverage", "pattern_scan"} <= set(scan)
+        assert "crosscheck" not in scan["diff"]
+
+    def test_the_two_decision_spellings_are_the_same_vocabulary(self) -> None:
+        # `_scan_rows` normalizes scan's `bucket` onto compare's `severity`.
+        # That is only a renaming if the two really draw from one vocabulary
+        # -- pinned here so a future relabeling of either side fails loudly
+        # instead of silently making the parity comparison compare nothing.
+        from abicheck.report_model import VERDICT_TO_SEVERITY_LABEL
+
+        labels = set(VERDICT_TO_SEVERITY_LABEL.values())
+        assert _GATING_SEVERITIES < labels
+        assert labels == {"breaking", "api_break", "risk", "compatible"}
+
+    def test_scan_contract_keys_match_the_reporters(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        tmp_path: Path,
+    ) -> None:
+        # `cli_scan_baseline._add_contract_fields` deliberately re-implements
+        # `reporter._add_contract_evaluation_fields` rather than importing
+        # it. Assert the two name the same decision the same way, so the
+        # duplication cannot drift into two vocabularies for one field.
+        old, new = mixed_pair
+        report, scan = _both(runner, old, new, [], tmp_path)
+
+        def contract_keys(entries: list[dict]) -> set[frozenset[str]]:
+            return {
+                frozenset(k for k in e if k.startswith("contract_")) for e in entries
+            }
+
+        gating = [c for c in report["changes"] if c["severity"] in _GATING_SEVERITIES]
+        expected = {
+            frozenset(
+                {
+                    "contract_relevance",
+                    "contract_reason_code",
+                    "contract_assurance",
+                    "contract_evidence_refs",
+                }
+            )
+        }
+        assert contract_keys(gating) == expected
+        assert contract_keys(scan["diff"]["findings"]) == expected
+
+    def test_contract_without_contract_evaluation_is_a_usage_error_in_both(
+        self, runner: CliRunner, old_snap: Path, new_snap_breaking: Path
+    ) -> None:
+        # The one place the two commands must agree on *rejecting* an input:
+        # `--contract` alone would silently compute nothing.
+        args = ["--contract", "exports"]
+        compare_res = runner.invoke(
+            main, ["compare", str(old_snap), str(new_snap_breaking), *args]
+        )
+        scan_res = runner.invoke(
+            main, ["scan", str(new_snap_breaking), "--against", str(old_snap), *args]
+        )
+        assert compare_res.exit_code == 64, compare_res.output
+        assert scan_res.exit_code == 64, scan_res.output
+        assert "--contract requires --contract-evaluation" in scan_res.output
+
+    def test_contract_flags_without_against_are_rejected(
+        self, runner: CliRunner, new_snap_breaking: Path
+    ) -> None:
+        # Same rule the other comparison-only flags already follow: without
+        # a baseline there is no comparison for them to configure, so
+        # accepting them would silently discard the request.
+        res = runner.invoke(
+            main, ["scan", str(new_snap_breaking), "--contract-evaluation"]
+        )
+        assert res.exit_code == 64, res.output
+        assert "--contract-evaluation" in res.output
+
+
+_LIB_V1 = """
+struct Cfg { int a; };
+extern "C" void keep(void) {}
+extern "C" void drop(void) {}
+extern "C" int use(struct Cfg *c) { return c->a; }
+"""
+
+_LIB_V2 = """
+struct Cfg { int a; int b; };
+extern "C" void keep(void) {}
+extern "C" int use(struct Cfg *c) { return c->a; }
+extern "C" void added(void) {}
+"""
+
+
+@pytest.mark.integration
+class TestBinaryAndMixedInputParity:
+    """§6.4's matrix also names *binaries* and *mixed inputs*, not only
+    snapshots -- the two commands resolve their operands through different
+    code paths (``scan``'s candidate dump plus ``_run_baseline_compare``'s
+    baseline parse vs. ``compare``'s two-sided ``resolve_input``), so
+    snapshot-only parity does not imply binary parity.
+    """
+
+    @staticmethod
+    def _libs(tmp_path: Path) -> tuple[Path, Path]:
+        from tests._libabigail import compile_shared_lib
+
+        old = tmp_path / "libfoo.so.1"
+        new = tmp_path / "libfoo.so.2"
+        compile_shared_lib(_LIB_V1, old, lang="cpp", soname="libfoo.so.1")
+        compile_shared_lib(_LIB_V2, new, lang="cpp", soname="libfoo.so.1")
+        return old, new
+
+    def test_two_real_binaries_agree_field_for_field(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        old, new = self._libs(tmp_path)
+        report, scan = _both(runner, old, new, [], tmp_path)
+        assert _compare_rows(report), "no gating findings on the binary pair"
+        assert _scan_rows(scan["diff"]) == _compare_rows(report)
+        assert scan["diff"]["detectors"] == report["detectors"]
+
+    def test_snapshot_baseline_against_a_real_binary_agrees(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # The mixed case: a persisted JSON baseline on the old side, a live
+        # binary on the new side -- the shape a CI job actually runs, and the
+        # one where the two commands' operand resolution differs most.
+        old, new = self._libs(tmp_path)
+        dumped = tmp_path / "old.abi.json"
+        dump_res = runner.invoke(main, ["dump", str(old), "-o", str(dumped)])
+        assert dump_res.exit_code == 0, dump_res.output
+
+        report, scan = _both(runner, dumped, new, [], tmp_path)
+        assert _compare_rows(report), "no gating findings on the mixed pair"
+        assert _scan_rows(scan["diff"]) == _compare_rows(report)

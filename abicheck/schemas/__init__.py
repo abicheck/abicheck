@@ -356,7 +356,24 @@ REPORT_SCHEMA_VERSION = "2.25"
 #:       version collision between two structurally distinct additive
 #:       changes — reusing 1.4 here would leave a consumer unable to detect
 #:       which shape it actually received).
-SCAN_SCHEMA_VERSION = "1.5"
+#: 1.6 — the ``diff`` block became comparable field-for-field with
+#:       ``compare``'s own report (ADR-049 Phase 5 §6.4's Gate). Every
+#:       ``findings``/``suppressed`` entry gained ``finding_id`` — the same
+#:       canonical identity ``compare``'s ``changes`` entries carry
+#:       (``finding_identity.report_finding_id``), so a consumer can join a
+#:       scan finding to its ``compare`` counterpart, or to the same
+#:       finding across two runs, instead of relying on array order. The
+#:       ``diff`` block also gained an optional ``detectors`` list (same
+#:       ``name``/``changes_count``/``enabled``/``coverage_gap`` shape and
+#:       same "findings or a coverage gap" filter as ``compare``'s
+#:       top-level ``detectors``; omitted when empty). And, only under the
+#:       new ``scan --against --contract-evaluation``, each finding
+#:       additionally carries ``contract_relevance``/
+#:       ``contract_reason_code``/``contract_assurance``/
+#:       ``contract_evidence_refs``, under the same "absent means unstamped"
+#:       rule ``compare``'s report already follows — so a run without that
+#:       flag is byte-identical to 1.5 apart from ``finding_id``.
+SCAN_SCHEMA_VERSION = "1.6"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

@@ -253,10 +253,22 @@ Core pipeline (in order of data flow):
      `checker.compare`'s honest `API_REQUEST` under-claim. The gate is the
      one split: values from `resolve_compare_config` (what actually scored
      the run), provenance from this resolver, with
-     `tests/test_cli_compare_config_receipt.py` asserting the two agree. The
-     MCP `abi_compare` tool still patches its own gate rather than resolving
-     a config — the same seam, one front end over. Reference:
-     `docs/reference/compatibility-evaluation-config.md`
+     `tests/test_cli_compare_config_receipt.py` asserting the two agree.
+     Reference: `docs/reference/compatibility-evaluation-config.md`
+   - `mcp_compare_receipt.py` — the same thing for the MCP `abi_compare`
+     tool (ADR-049 Phase 5), which previously patched its own gate rather
+     than resolving a config. `resolve_tool_config` hands the tool's real
+     arguments (`policy`/`policy_file`/`suppression_file` + the four
+     severity levels) to the canonical resolver at `FrontEnd.API`;
+     `record_resolved_config` installs the result through
+     `with_resolved_config` before the report renders, keeping the CLI's
+     "values from the run, provenance from the resolver" gate split. The
+     receipt states only what this tool *has*: `abi_compare` takes no
+     scope/contract/public-symbol/exit-code-scheme parameter, so those
+     resolve as built-in defaults — honest, since `compare_snapshots`'
+     own `scope_to_public_surface` default agrees with
+     `BUILT_IN_DEFAULT_CONTRACT_MODE` by construction. A leaf; nothing
+     imports back into the server
    - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
      evaluator: one `ContractEvaluationDecision` (relevance + stable reason
      code + assurance) per already-emitted finding. Stamped onto findings

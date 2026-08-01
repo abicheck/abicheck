@@ -239,6 +239,19 @@ The only permitted difference is *which* front end stated a value
 D7 puts both in the same precedence tier. Any difference in a resolved value,
 or in any other part of the receipt, is reported.
 
+Both live front ends resolve through it: the native `compare` CLI
+(`cli_compare_receipt.py`) and the MCP `abi_compare` tool
+(`mcp_compare_receipt.py`), and
+`tests/test_mcp_compare_config_receipt.py` runs the check above across the
+two on equivalent input.
+
+A receipt only ever names inputs its front end actually has. `abi_compare`
+takes no scope, contract-mode, public-symbol, or exit-code-scheme parameter,
+so those fields resolve as `built_in_default` there rather than as an API
+request — which is the accurate answer, not a missing claim: there is
+nothing for a caller to have chosen. (Contrast `CompareRequest.scope_public`,
+whose dataclass default *is* a caller's choice and is recorded as one.)
+
 ## See also
 
 - [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md) — the normative decision

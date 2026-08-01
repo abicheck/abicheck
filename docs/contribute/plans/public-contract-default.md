@@ -3542,14 +3542,101 @@ the option that actually made the contract non-empty.
 and the file form is named only when that is non-empty — true and
 audit-carrying when it holds, the inline form otherwise.
 
-Still open in this phase, unchanged by this slice: the MCP `abi_compare`
-tool still patches its own gate (`mcp_server._record_resolved_gate`) rather
-than resolving a config through
-`compatibility_config_from_compare_request` -- the same seam, one front end
-over, and the natural next slice. `scan --against` builds no context at all
-(it has no `--contract-evaluation`). The "unsuppressible coverage ledger"
-remains undesigned, and the parity suite still covers concrete scenarios
-rather than §6.4's full matrix.
+**Updated (2026-08-01, same PR): the MCP front end closed the second half of
+Definition-of-Done item 2.** `abi_compare` patched its own gate
+(`mcp_server._record_resolved_gate`) instead of resolving a config, leaving
+the CLI as the only front end that consumed one. A new leaf,
+`mcp_compare_receipt.py`, does for the tool what `cli_compare_receipt.py`
+does for the CLI: `resolve_tool_config` hands the tool's real arguments
+(`policy`/`policy_file`/`suppression_file` and the four severity levels) to
+the same canonical resolver at `FrontEnd.API`, and `record_resolved_config`
+installs the result through `with_resolved_config` before the report is
+rendered, keeping the same "values from the run, provenance from the
+resolver" split the CLI gate documents. The 90-line `_record_resolved_gate`
+was deleted rather than left as a second path to the same block.
+
+Resolving through the shared resolver removed a real divergence, not only
+duplicated code. The deleted patch recorded `gate.exit_code_scheme`'s
+provenance as `api_request` whenever a severity argument was passed --
+but no caller ever asks for the `severity` scheme there; it is *derived*
+from a severity level being in effect, which the canonical resolver
+records as a built-in default with `source_kind: auto`, and whose real
+provenance is carried by the severity field itself. `compare`'s receipt
+for the equivalent input already read `built_in_default`/`auto`, so the
+MCP tool had been over-claiming relative to the CLI on the one field both
+front ends compute the same way.
+`test_mcp_server_coverage.TestAbiCompareResolvedGate` was updated to the
+corrected answer with that reasoning recorded in it.
+
+The receipt states only what this tool can state, which is less than the
+CLI's: `abi_compare` has no scope, contract-mode, public-symbol, or
+exit-code-scheme parameter, so those resolve as built-in defaults rather
+than as an API request. That is not an under-claim -- unlike
+`CompareRequest.scope_public`, whose dataclass default is still a caller's
+choice, there is nothing here for a caller to have chosen, and
+`compare_snapshots`' own `scope_to_public_surface` default agrees with
+`BUILT_IN_DEFAULT_CONTRACT_MODE` by construction. New:
+`tests/test_mcp_compare_config_receipt.py`, whose last test runs Phase 1's
+own gate across the two live front ends -- equivalent CLI and MCP input must
+produce zero `cross_front_end_differences`.
+
+**Updated (2026-08-01, same PR): §6.4's cross-command parity Gate is now an
+executable field-for-field check.** The suite compared exit codes only, which
+cannot tell "both commands found the same break" from "both commands found
+*a* break" -- and two of §6.4's named equal fields were not observable from
+`scan --against` at all: it emitted no detector provenance, and it had no
+`--contract-evaluation`, so no finding of its could carry a contract
+relevance/reason/assurance/evidence side to compare. Three changes closed
+that:
+
+1. `scan --against` gained `--contract-evaluation`/`--contract`, threaded
+   through `run_scan_core`/`_run_baseline_compare` into the
+   `compare_snapshots` call it already made, with matching `ScanRequest`
+   fields for the Python API. Same advisory contract as `compare`'s, same
+   `--contract requires --contract-evaluation` rejection (checked in
+   `scan_cmd` so it is a clean exit-64 usage error before any scanning
+   work), and both are in `_COMPARISON_ONLY_FLAGS` so passing them without
+   `--against` is rejected rather than silently discarded.
+2. The scan summary's per-finding dicts gained `finding_id` -- the same
+   canonical identity `reporter._change_to_dict` emits, so the two commands'
+   findings are *joinable* rather than merely both present -- plus the four
+   contract keys under the same "absent means unstamped" rule the reporter
+   uses, and the summary gained a `detectors` block with the reporter's own
+   shape and "findings or a coverage gap" filter.
+3. `tests/test_scan_compare_parity.py`'s new `TestFieldForFieldParity`
+   compares the two commands' shared gating findings as records joined on
+   `finding_id`, across a matrix of defaults / `--policy` / scope on / scope
+   off / `--public-symbol` / all three `--contract` domains /
+   `--pattern-verdicts`, on a snapshot pair rich enough to engage the
+   function, type, and enum detectors at once. Suppression is compared
+   field-for-field on both audit trails (a rule silencing a *different*
+   finding on each side would otherwise still report "1 suppressed" on
+   both), and §6.4's "scan-only findings may be appended, they cannot
+   rewrite the shared comparison findings" is its own assertion.
+   `TestBinaryAndMixedInputParity` (`integration`) extends the same
+   assertions to two real compiled binaries and to a persisted-snapshot
+   baseline against a live binary -- the two commands resolve operands
+   through different code paths, so snapshot parity does not imply binary
+   parity.
+
+`SCAN_SCHEMA_VERSION` went to `1.6` for the additive `diff`-block keys
+(`finding_id` on every finding, the optional `detectors` list, and the four
+contract keys under `--contract-evaluation`), with the entry recording that
+a run without the new flag is byte-identical to `1.5` apart from
+`finding_id`.
+
+Two smaller things the work forced. The helper reads both reports from
+`-o` files rather than captured stdout: parsing scan's stdout works for a
+snapshot pair and breaks the moment the operand is a real binary, which
+writes warnings to the same stream. And because the scan summary
+re-implements the reporter's contract-field projection rather than importing
+it, a test pins that the two name the same decision with the same keys, so
+the duplication cannot drift into two vocabularies for one field.
+
+Still open in this phase: the "unsuppressible coverage ledger" (§12's item
+6) remains undesigned -- no concept exists yet for which findings
+categorically cannot be suppressed, nor a ledger proving a run's
+suppressions never touched one.
 
 ### Phase 6 — opt-in public mode and corpus validation
 
