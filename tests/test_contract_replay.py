@@ -864,6 +864,62 @@ class TestNodeIdentitySoundness:
         assert comparison.is_sound
         assert comparison.strengthened == ()
 
+    def test_an_ambiguous_type_spelling_is_not_resolved_either_way(self) -> None:
+        """Which of two colliding records the finding is about is unknown.
+
+        With ``ns1::Foo`` reached from an export and ``ns2::Foo`` not, a
+        finding naming the shared bare leaf resolves to both nodes. Live
+        answers ``UNKNOWN_UNRESOLVED`` on exactly that ambiguity
+        (``_confirmed_type_matches``); the replay used to take the reachable
+        one and answer ``IN_CONTRACT`` (Codex review, fresh evidence).
+        """
+        from abicheck.pe_metadata import PeExport, PeMetadata
+
+        def _snap(version: str, bits: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libdemo.so.1",
+                version=version,
+                functions=[
+                    Function(
+                        name="api",
+                        mangled="api",
+                        return_type="int",
+                        params=[Param(name="f", type="Foo *")],
+                        visibility=Visibility.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ],
+                types=[
+                    RecordType(
+                        name="Foo",
+                        qualified_name="ns1::Foo",
+                        kind="struct",
+                        size_bits=64,
+                        fields=[TypeField(name="x", type="int")],
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    ),
+                    RecordType(
+                        name="Foo",
+                        qualified_name="ns2::Foo",
+                        kind="struct",
+                        size_bits=bits,
+                        fields=[TypeField(name="y", type="int")],
+                        origin=ScopeOrigin.PRIVATE_HEADER,
+                    ),
+                ],
+                pe=PeMetadata(exports=[PeExport(name="api", ordinal=1)]),
+            )
+
+        changes, comparison = self._replay(_snap("1", 64), _snap("2", 128), "exports")
+        assert [c.contract_relevance for c in changes] == [
+            ContractRelevance.UNKNOWN_UNRESOLVED
+        ]
+        assert comparison.is_sound
+        assert comparison.strengthened == ()
+        # Not merely weakened into silence: the replay reached the same
+        # "cannot tell which one" conclusion the live matcher did.
+        assert comparison.agreed
+
     def test_a_reachable_record_does_not_place_a_same_named_function(self) -> None:
         """One spelling, two node kinds, two different questions.
 

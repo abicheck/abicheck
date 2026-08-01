@@ -2667,6 +2667,46 @@ supply one: the CLI per typed flag (with `--severity-preset` counting for all
 four), the MCP tool uniformly, since one `SeverityConfig` argument genuinely
 is one layer for all four.
 
+**A thirteenth round closed the last standing item — bare `record:<name>`
+node identity — and one more provenance gap.** A record/enum node was keyed
+by `RecordType.name`, which on the castxml/clang path is the *bare leaf*, so
+`ns1::Foo` and `ns2::Foo` collapsed onto one node and their field edges were
+unioned; an export rooted in `ns1::Foo` then placed a layout finding on
+`ns2::Foo` `IN_CONTRACT` where the live evaluator answered
+`UNKNOWN_UNRESOLVED` on exactly that ambiguity. Keying on `qualified_name or
+name` (`_type_identity`) separates them, with the bare leaf demoted to an
+`alias:` spelling — which is what it honestly is once two records answer to
+it. Narrowing the graph this way cannot strengthen anything: a snapshot with
+an ambiguous bare tail already reports `identity_coverage=PARTIAL`, and
+`can_prove_exclusion` requires `COMPLETE`, so the only conclusive negative is
+off the table for precisely those snapshots.
+
+Separating the nodes was necessary but not sufficient, in two steps found in
+the same round. First, the *lookup* still resolved the shared leaf to both
+nodes and took whichever was reachable; the replay now refuses a spelling
+that lands on more than one type node, mirroring `_confirmed_type_matches`'s
+"a candidate that matched only ambiguously proves nothing in either
+direction". Second — and this is the part a per-lookup node count alone
+misses — live rejects a match on *two* clauses, the second being "a qualified
+name whose own trailing tail is ambiguous". With a global `Foo` beside a
+namespaced `ns::Foo`, a finding on `ns::Foo` resolves to exactly one node,
+yet an exported signature spelling the bare `Foo` linked *both*, so the
+closure hit proves nothing. The replay now checks that clause too, which
+required the bare `::` tail of a qualified identity to become an `alias:`
+spelling in the persisted graph — with a DWARF producer, which bakes the
+whole path into `name`, nothing else recorded it, so the collision was
+invisible on replay. Rootness is still decided *before* ambiguity, matching
+live's own order: a declaration that is a root answers its own membership by
+its own linker identity.
+
+Also fixed: a typed `--contract exports` was persisted as an `API_REQUEST`
+from `checker.compare`, since the core verb receives the value and not the
+option that supplied it. `with_field_provenance` is the value-free
+counterpart of `with_resolved_gate` for exactly this shape, and the CLI now
+refreshes `contract.mode` when — and only when — the flag was really typed,
+so the `LEGACY_ALIAS` provenance `resolve_legacy_contract_mode` records for
+`--scope-public-headers` still survives untouched.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

@@ -271,6 +271,32 @@ def build_evaluation_context(
     return EvaluationContextBlock(resolved_config=config)
 
 
+def with_field_provenance(
+    context: PersistedContractContext, updates: Mapping[str, ValueProvenance]
+) -> PersistedContractContext:
+    """Return *context* with each named field's provenance replaced.
+
+    The value-free counterpart of :func:`with_resolved_gate`, for a field
+    whose *value* the core verb resolved correctly but whose *source* only
+    the front end can name. ``contract.mode`` is the case: ``compare()``
+    receives the mode as an argument and can honestly claim no more than
+    ``API_REQUEST``, so a user who typed ``--contract exports`` had their
+    typed flag recorded as a programmatic request (Codex review, fresh
+    evidence). A front end that knows better says so here; one that does not
+    leaves the field alone, and the core verb's honest under-claim stands.
+    """
+    config = context.evaluation_context.resolved_config
+    provenance = dict(config.provenance)
+    provenance.update(updates)
+    return replace(
+        context,
+        evaluation_context=replace(
+            context.evaluation_context,
+            resolved_config=replace(config, provenance=provenance),
+        ),
+    )
+
+
 def with_resolved_gate(
     context: PersistedContractContext,
     *,

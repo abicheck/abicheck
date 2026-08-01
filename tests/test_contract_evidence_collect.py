@@ -347,9 +347,51 @@ class TestTypeGraph:
             ],
         )
         graph = build_type_graph(snap)
-        assert ("decl:ns::Widget::draw", "record:Widget") in graph.edges
+        assert ("decl:ns::Widget::draw", "record:ns::Widget") in graph.edges
+        # The record is keyed by its qualified identity; the bare leaf two
+        # namespaces could share is an alias of it, not its identity.
+        assert ("alias:Widget", "record:ns::Widget") in graph.edges
         closure = closure_from_graph(graph, ["decl:ns::Widget::draw"])
-        assert {"record:Widget", "record:Payload"} <= closure
+        assert {"record:ns::Widget", "record:Payload"} <= closure
+
+    def test_two_namespaces_sharing_a_leaf_are_two_nodes(self) -> None:
+        """``ns1::Foo`` and ``ns2::Foo`` are not one type.
+
+        A castxml/clang producer records both as the bare ``name="Foo"``, so
+        keying the node on that merged two unrelated records into one and
+        unioned their field edges -- an export rooted in ``ns1::Foo`` then
+        reached ``ns2::Foo``'s own field (Codex review, confirmed with a
+        minimal snapshot).
+        """
+        snap = _snap(
+            types=[
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns1::Foo",
+                    kind="struct",
+                    fields=[TypeField(name="a", type="Public")],
+                ),
+                RecordType(
+                    name="Foo",
+                    qualified_name="ns2::Foo",
+                    kind="struct",
+                    fields=[TypeField(name="b", type="Secret")],
+                ),
+                RecordType(name="Public", kind="struct", fields=[]),
+                RecordType(name="Secret", kind="struct", fields=[]),
+            ],
+        )
+        graph = build_type_graph(snap)
+        assert {"record:ns1::Foo", "record:ns2::Foo"} <= set(graph.nodes)
+        one = closure_from_graph(graph, ["record:ns1::Foo"])
+        assert "record:Public" in one
+        assert "record:Secret" not in one
+        # The shared leaf is an alias of *both* -- which is what makes a
+        # finding that names it ambiguous rather than resolvable.
+        assert resolve_graph_node(graph, "Foo") == {
+            "record:ns1::Foo",
+            "record:ns2::Foo",
+        }
 
     def test_a_leaf_only_bare_name_still_seeds_no_owner(self) -> None:
         """Registering the qualified spelling must not re-admit the leaf.

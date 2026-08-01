@@ -1115,8 +1115,8 @@ _SEVERITY_CATEGORIES = (
 )
 
 
-def _gate_provenance(field: str, *, from_cli: bool, from_config: bool) -> Any:
-    """Which D7 layer selected one gate field, as the CLI actually resolved it.
+def _cli_field_provenance(field: str, *, from_cli: bool, from_config: bool) -> Any:
+    """Which D7 layer selected one field, as this front end actually resolved it.
 
     ``checker.compare`` records ``API_REQUEST`` for everything it was handed
     because that is all a core verb can honestly claim (see
@@ -1162,7 +1162,23 @@ def _record_resolved_gate(
     ctx = getattr(result, "contract_context", None)
     if not isinstance(ctx, PersistedContractContext):
         return
-    from .contract_context import with_resolved_gate
+    from .contract_context import with_field_provenance, with_resolved_gate
+
+    # `checker.compare` receives the mode as an argument and can claim no
+    # more than `API_REQUEST` for it; a typed `--contract` is `EXPLICIT_CLI`,
+    # and only this front end knows which it was (Codex review). Left alone
+    # when the flag was not typed, so the legacy-alias provenance
+    # `resolve_legacy_contract_mode` produced for `--scope-public-headers`
+    # survives.
+    if _param_from_cli("contract_mode"):
+        ctx = with_field_provenance(
+            ctx,
+            {
+                "contract.mode": _cli_field_provenance(
+                    "contract", from_cli=True, from_config=False
+                )
+            },
+        )
 
     scheme_cli = _param_from_cli("exit_code_scheme")
     # Per category, not one verdict for the block: `--severity-abi-breaking`
@@ -1175,7 +1191,7 @@ def _record_resolved_gate(
         ctx,
         exit_code_scheme=resolved_cfg.exit_code_scheme,
         severity=resolved_cfg.severity,
-        scheme_provenance=_gate_provenance(
+        scheme_provenance=_cli_field_provenance(
             "exit_code_scheme",
             from_cli=scheme_cli,
             # ``auto`` is this key's own built-in default, so a config that
@@ -1183,7 +1199,7 @@ def _record_resolved_gate(
             from_config=getattr(project_cfg, "exit_code_scheme", "auto") != "auto",
         ),
         severity_provenance={
-            category: _gate_provenance(
+            category: _cli_field_provenance(
                 f"severity_{category}",
                 from_cli=preset_cli or _param_from_cli(f"severity_{category}"),
                 # `severity_active` is "set anywhere"; with no flag typed for

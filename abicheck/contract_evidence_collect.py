@@ -58,11 +58,15 @@ module owns the encoding. Every node is ``"<kind>:<identity>"``:
              refined with a signature discriminator for the one case where
              that fallback names more than one declaration (see
              :func:`_function_node_keys`)
-``record:``  one :class:`~abicheck.model.RecordType`, keyed by ``name``
-``enum:``    one :class:`~abicheck.model.EnumType`, keyed by ``name``
+``record:``  one :class:`~abicheck.model.RecordType`, keyed by
+             ``qualified_name`` when the producer recorded one, else
+             ``name`` (see :func:`_type_identity`)
+``enum:``    one :class:`~abicheck.model.EnumType`, keyed the same way
 ``typedef:`` one ``snapshot.typedefs`` alias, keyed by the alias
-``alias:``   a *lookup* spelling (demangled name, bare ``::`` tail,
-             qualified name) that resolves to a canonical node above
+``alias:``   a *lookup* spelling (demangled name, bare ``::`` tail, bare
+             leaf of a qualified type) that resolves to a canonical node
+             above -- one alias may resolve to *several*, which is what
+             makes it an alias rather than an identity
 ===========  ============================================================
 
 and every edge is a resolved reference: ``decl: -> record:/enum:/typedef:``
@@ -278,6 +282,28 @@ def _function_node_keys(snap: AbiSnapshot) -> list[str]:
     return keys
 
 
+def _type_identity(type_obj: RecordType | EnumType) -> str:
+    """The one identity a ``record:``/``enum:`` node is keyed by.
+
+    ``qualified_name`` first, for the same reason ``mangled`` comes first for
+    a declaration: it is the identity that is unique where a display name is
+    not. On the castxml/clang path ``name`` is the bare leaf, so ``ns1::Foo``
+    and ``ns2::Foo`` are *both* recorded as ``"Foo"`` -- keying the node on
+    that merged two unrelated records into one, unioning their field edges,
+    and an export rooted in ``ns1::Foo`` then placed a layout finding on
+    ``ns2::Foo`` ``IN_CONTRACT`` where the live evaluator answered
+    ``UNKNOWN_UNRESOLVED`` on exactly that ambiguity (Codex review, confirmed
+    with a minimal snapshot).
+
+    The bare name does not disappear -- it becomes an ``alias:`` spelling
+    (:func:`_link_type_aliases`), which is what it honestly is once two
+    records answer to it. A producer that records no qualified name (DWARF
+    bakes the whole path into ``name``) is unaffected: the identity is the
+    name, exactly as before.
+    """
+    return getattr(type_obj, "qualified_name", None) or type_obj.name
+
+
 class _TypeIndex:
     """Name -> canonical node resolution, mirroring the live closure walk.
 
@@ -297,11 +323,26 @@ class _TypeIndex:
         self._nodes_by_spelling: dict[str, set[str]] = {}
         for name, records in record_by_name.items():
             self._nodes_by_spelling.setdefault(name, set()).update(
-                _record_node(r.name) for r in records
+                _record_node(_type_identity(r)) for r in records
             )
         for name, enums in enum_by_name.items():
             self._nodes_by_spelling.setdefault(name, set()).update(
-                _enum_node(e.name) for e in enums
+                _enum_node(_type_identity(e)) for e in enums
+            )
+        # `_index_surface_types` keys on `name` and its `::` tail only, so a
+        # qualified identity is not a lookup key there. It has to be one here,
+        # since it is now the node's own identity -- the same local
+        # augmentation `compute_export_surface` makes to its own copy of that
+        # index, for the same reason. Nothing widens: a *reference* spelled
+        # `ns::Foo` already resolved through the tail, which
+        # `_type_identifiers` derives on both sides.
+        for rec in snap.types:
+            self._nodes_by_spelling.setdefault(_type_identity(rec), set()).add(
+                _record_node(_type_identity(rec))
+            )
+        for en in snap.enums:
+            self._nodes_by_spelling.setdefault(_type_identity(en), set()).add(
+                _enum_node(_type_identity(en))
             )
         for alias in snap.typedefs:
             self._nodes_by_spelling.setdefault(alias, set()).add(_typedef_node(alias))
@@ -355,7 +396,7 @@ class _TypeIndex:
         }
         out: dict[str, set[str]] = {}
         for rec in snap.types:
-            node = _record_node(rec.name)
+            node = _record_node(_type_identity(rec))
             leaf_only = bool(rec.qualified_name) and rec.qualified_name != rec.name
             if not leaf_only and rec.name not in ambiguous:
                 out.setdefault(rec.name, set()).update(self.resolve(rec.name) or {node})
@@ -412,7 +453,7 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
             edges.add((src, target))
 
     for rec in snap.types:
-        node = _record_node(rec.name)
+        node = _record_node(_type_identity(rec))
         nodes.add(node)
         for fld in rec.fields:
             link(node, index.resolve_type_string(fld.type))
@@ -421,7 +462,7 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
         _link_type_aliases(rec, node, nodes, edges)
 
     for en in snap.enums:
-        node = _enum_node(en.name)
+        node = _enum_node(_type_identity(en))
         nodes.add(node)
         _link_type_aliases(en, node, nodes, edges)
 
@@ -528,16 +569,32 @@ def _link_type_aliases(
     nodes: set[str],
     edges: set[tuple[str, str]],
 ) -> None:
-    """Record a type's qualified spelling as an alias of its canonical node.
+    """Record a type's *other* spelling as an alias of its canonical node.
 
-    A record/enum is keyed by ``name``, which for the castxml/clang producers
-    is the bare leaf while ``qualified_name`` carries the scope -- the
-    bare-vs-qualified split ``AGENTS.md`` documents at length. Both spellings
-    reach the same node here so a finding naming either one resolves.
+    A record/enum is keyed by :func:`_type_identity` -- ``qualified_name``
+    when the producer recorded one, else ``name`` -- so the spelling that
+    needs an alias is the bare leaf, the one two records in different
+    namespaces can share. Both spellings reach a node here so a finding
+    naming either one resolves; only the *canonical* one identifies it.
     """
-    qualified = getattr(type_obj, "qualified_name", None)
-    if qualified and qualified != type_obj.name:
-        alias = _alias_node(qualified)
+    identity = _type_identity(type_obj)
+    spellings = {type_obj.name}
+    if "::" in identity:
+        # The bare ``::`` tail is a lookup key in
+        # ``_index_surface_types``/``_type_identifiers`` on both sides, so it
+        # has to be one here too -- and not only so a finding naming it
+        # resolves: a tail shared by two records is precisely what makes a
+        # *qualified* candidate unconfirmable live (``_confirmed_type_matches``
+        # rejects "a qualified name whose own trailing tail is ambiguous"),
+        # and the replay can only see that collision if the shared tail is a
+        # spelling in the graph at all. With a DWARF producer, which bakes the
+        # whole path into ``name``, nothing else records it (Codex review,
+        # fresh evidence).
+        spellings.add(identity.rsplit("::", 1)[1])
+    for spelling in spellings:
+        if not spelling or spelling == identity:
+            continue
+        alias = _alias_node(spelling)
         nodes.add(alias)
         edges.add((alias, node))
 

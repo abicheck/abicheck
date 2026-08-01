@@ -381,6 +381,58 @@ class TestEndToEndJsonReport:
             ctx["field_provenance"]["gate.exit_code_scheme"]["layer"] == "explicit_cli"
         )
 
+    def test_a_typed_contract_flag_is_not_an_api_request(self, tmp_path):
+        """``checker.compare`` sees a value, not the option that supplied it.
+
+        The core verb can honestly claim only ``API_REQUEST`` for a mode it
+        was handed, so a user who typed ``--contract exports`` had their flag
+        recorded as a programmatic request and the audit context could not
+        tell the two apart (Codex review, fresh evidence).
+        """
+        old_p, new_p = _write_pair(tmp_path)
+        typed = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract-evaluation",
+                "--contract",
+                "exports",
+                "--format",
+                "json",
+            ],
+        )
+        ctx = json.loads(typed.output)["contract_context"]["evaluation_context"]
+        assert ctx["resolved_config"]["contract"]["mode"] == "exports"
+        provenance = ctx["field_provenance"]["contract.mode"]
+        assert provenance["layer"] == "explicit_cli"
+        assert provenance["selected_by"][0]["option"] == "--contract"
+
+    def test_an_untyped_contract_flag_keeps_the_legacy_alias_source(self, tmp_path):
+        """The refresh is opt-in per run, not a blanket overwrite.
+
+        ``--scope-public-headers`` selects the domain through D7's
+        ``LEGACY_ALIAS`` layer, which ``resolve_legacy_contract_mode``
+        already recorded correctly -- claiming ``EXPLICIT_CLI`` for it would
+        name an option the user never typed.
+        """
+        old_p, new_p = _write_pair(tmp_path)
+        legacy = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract-evaluation",
+                "--scope-public-headers",
+                "--format",
+                "json",
+            ],
+        )
+        ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
+        assert ctx["field_provenance"]["contract.mode"]["layer"] != "explicit_cli"
+
     def test_help_all_mentions_flag(self):
         result = CliRunner().invoke(main, ["compare", "--help-all"])
         assert result.exit_code == 0

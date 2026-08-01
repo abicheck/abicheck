@@ -146,6 +146,52 @@ def _symbol_may_name_a_declaration(change: Change) -> bool:
     return _is_mangled_identity(change.symbol or "")
 
 
+def _ambiguous_type_resolution(nodes: set[str]) -> bool:
+    """Whether a spelling landed on more than one distinct *type* node.
+
+    The persisted counterpart of ``PublicSurface.ambiguous_type_names``, read
+    off the graph instead of carried beside it: two records answering to one
+    spelling *are* two nodes now that each is keyed by its own identity
+    (``contract_evidence_collect._type_identity``), so the collision is
+    visible in the resolution itself and needs no extra persisted field.
+
+    ``_confirmed_type_matches`` is what this mirrors: live, a candidate that
+    matched only ambiguously "proves nothing in either direction -- which of
+    the colliding records the finding is really about decides its membership,
+    and that is exactly what is unknown". Two entries with the *same*
+    identity (an ODR/incomplete duplicate) share one node and are therefore
+    not ambiguous, which is the same call ``export_surface`` makes.
+    """
+    return len({n for n in nodes if n.startswith(_TYPE_NODE_KINDS)}) > 1
+
+
+def _type_identity_is_ambiguous(
+    domain: _PersistedDomain, side: str, spelling: str
+) -> bool:
+    """Both clauses ``_confirmed_type_matches`` rejects a match on.
+
+    It refuses when "the candidate itself is flagged in *ambiguous*" **or**
+    "when the candidate is a *qualified* name whose own trailing tail is
+    ambiguous" -- the second because ``_walk_type_closure`` reaches an
+    ambiguous bare tail from a signature by adding *every* matching record,
+    so the qualified candidate's presence in the closure does not show that
+    *it*, rather than its ambiguous sibling, is what the signature actually
+    reached.
+
+    That second clause is the one a per-lookup node count alone misses: with
+    a global ``Foo`` and a namespaced ``ns::Foo``, a finding on ``ns::Foo``
+    resolves to exactly one node, yet an exported signature spelling the bare
+    ``Foo`` linked *both*, so the closure hit proves nothing (Codex review,
+    fresh evidence, confirmed with a minimal snapshot).
+    """
+    if _ambiguous_type_resolution(domain.resolve(side, spelling)):
+        return True
+    if "::" not in spelling:
+        return False
+    tail = spelling.rsplit("::", 1)[1]
+    return _ambiguous_type_resolution(domain.resolve(side, tail))
+
+
 def _entity_lookups(
     change: Change, mode: ContractMode
 ) -> list[tuple[str, tuple[str, ...]]]:
@@ -556,10 +602,16 @@ def _reevaluate_one(
     # since both are keyed by the *symbol* live too (`_change_matches_symbols`
     # asks nothing about node kind). See `_entity_lookups`.
     member_nodes: set[str] = set()
+    ambiguous = False
     for spelling, kinds in _entity_lookups(change, mode):
         resolved = domain.resolve(side, spelling)
         nodes |= resolved
-        member_nodes |= {n for n in resolved if n.startswith(kinds)}
+        admissible = {n for n in resolved if n.startswith(kinds)}
+        member_nodes |= admissible
+        if set(_TYPE_NODE_KINDS) <= set(kinds) and _type_identity_is_ambiguous(
+            domain, side, spelling
+        ):
+            ambiguous = True
     # Re-taken now that the entity's own nodes are known, so an overlay-rooted
     # decision cites the overlay rather than only the root provider.
     refs = domain.refs(side, nodes)
@@ -599,6 +651,29 @@ def _reevaluate_one(
             evidence_refs=refs,
         )
     closure = domain.closure.get(side, frozenset())
+    # Rootness is decided before ambiguity, exactly as live: a declaration
+    # that *is* a root answers its own membership by its own linker identity,
+    # and `_exports_mode_decision` returns on that before it ever computes a
+    # type candidate. Roots are seeds of the closure, so splitting this out
+    # changes nothing for an unambiguous finding.
+    if member_nodes & domain.root_nodes.get(side, set()):
+        return ReplayDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code=_MODE_MEMBERSHIP_REASON[mode],
+            assurance=ContractAssurance.COMPLETE,
+            evidence_refs=refs,
+        )
+    if ambiguous:
+        # Which of the colliding types the finding is about is what decides
+        # membership, and that is exactly what is unknown -- so neither the
+        # closure hit below nor the exclusion after it may be claimed. The
+        # reason code is live's own for this shape.
+        return ReplayDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="identity_ambiguous",
+            assurance=ContractAssurance.PARTIAL,
+            evidence_refs=refs,
+        )
     if member_nodes & closure:
         return ReplayDecision(
             relevance=ContractRelevance.IN_CONTRACT,
