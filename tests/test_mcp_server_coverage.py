@@ -731,6 +731,100 @@ class TestAbiCompareTool:
 
 
 # ---------------------------------------------------------------------------
+# abi_compare — the persisted gate matches the gate that ran (ADR-049 Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class TestAbiCompareResolvedGate:
+    """``checker.compare`` never sees the gate, so the context it builds
+    recorded ``GateConfig()``'s defaults -- the built-in ``severity`` scheme
+    and the built-in severity levels -- for every call, including a default
+    (``legacy``-scheme) one (Codex review, fresh evidence). Same defect and
+    same fix as the CLI's, in the sibling front end.
+    """
+
+    def _breaking_pair(self, tmp_path):
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.serialization import snapshot_to_json
+
+        def fn(name: str, mangled: str) -> Function:
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+
+        old = AbiSnapshot(
+            library="lib.so.1",
+            version="1.0",
+            functions=[fn("a", "_Z1av"), fn("b", "_Z1bv")],
+            from_headers=True,
+        )
+        new = AbiSnapshot(
+            library="lib.so.1",
+            version="2.0",
+            functions=[fn("a", "_Z1av")],
+            from_headers=True,
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        return old_p, new_p
+
+    def _gate(self, payload):
+        ctx = payload["report"]["contract_context"]["evaluation_context"]
+        return ctx["resolved_config"]["gate"], ctx["field_provenance"]
+
+    def test_default_call_records_the_legacy_scheme_it_used(self, tmp_path):
+        old, new = self._breaking_pair(tmp_path)
+        payload = json.loads(
+            abi_compare(
+                old_input=str(old),
+                new_input=str(new),
+                contract_evaluation=True,
+                output_format="json",
+            )
+        )
+        gate, provenance = self._gate(payload)
+        assert payload["exit_code_scheme"] == "legacy"
+        assert gate["exit_code_scheme"] == "legacy"
+        assert gate["severity"]["abi_breaking"] == "error"
+        assert provenance["gate.exit_code_scheme"]["layer"] == "built_in_default"
+        assert provenance["gate.severity.abi_breaking"]["layer"] == "built_in_default"
+
+    def test_a_severity_argument_reaches_the_persisted_gate(self, tmp_path):
+        """A typed API argument is ``API_REQUEST`` -- D7's peer of
+        ``EXPLICIT_CLI``; this front end cannot claim a CLI option was typed.
+        """
+        old, new = self._breaking_pair(tmp_path)
+        payload = json.loads(
+            abi_compare(
+                old_input=str(old),
+                new_input=str(new),
+                contract_evaluation=True,
+                output_format="json",
+                severity_abi_breaking="warning",
+            )
+        )
+        gate, provenance = self._gate(payload)
+        assert payload["exit_code_scheme"] == "severity"
+        assert gate["exit_code_scheme"] == "severity"
+        assert gate["severity"]["abi_breaking"] == "warning"
+        assert provenance["gate.exit_code_scheme"]["layer"] == "api_request"
+        # Recorded per *argument*, under the canonical resolver's own key
+        # set: only `abi_breaking` was passed, so the other three levels came
+        # from the built-in defaults and must not name an API input the
+        # caller never supplied (Codex review).
+        assert provenance["gate.severity.abi_breaking"]["layer"] == "api_request"
+        for category in ("potential_breaking", "quality_issues", "addition"):
+            assert (
+                provenance[f"gate.severity.{category}"]["layer"] == "built_in_default"
+            )
+
+
+# ---------------------------------------------------------------------------
 # _safe_read_path — resolve error (lines 94-95)
 # ---------------------------------------------------------------------------
 

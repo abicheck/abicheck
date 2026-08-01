@@ -279,6 +279,17 @@ class Change:
     contract_relevance: ContractRelevance | None = None
     contract_reason_code: str | None = None
     contract_assurance: ContractAssurance | None = None
+    # ADR-049 Phase 3's provider-evidence ledger (plan Section 4.1): the ids
+    # of the `contract_evidence` provider records this finding's decision
+    # actually rests on (`contract_evidence_collect.evidence_refs_for_reason`),
+    # or a run-level reference (`RUN_LEVEL_EVIDENCE_REFS`) for a decision made
+    # outside `compare()` by a caller that holds no evidence block -- the
+    # `--used-by`/`--required-symbol` scoped stamp. `None` when contract
+    # evaluation was not requested; `()` is a real value, meaning "this
+    # decision consulted no provider" (a non-entity finding, whose relevance
+    # follows from its `ChangeKind` alone). Kept as a flat tuple for the same
+    # circular-import reason as the three fields above.
+    contract_evidence_refs: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -412,6 +423,19 @@ class DiffResult:
     # to the whole DiffResult (the gate failed for the pair as a whole
     # before any diff ran), not per-Change.
     assurance: Literal["none"] | None = None
+    # ADR-049 Phase 4 — the three persisted blocks (``contract_evidence`` /
+    # ``evaluation_context`` / ``decision_receipt``) for this comparison,
+    # assembled by ``contract_context.build_persisted_context``. Populated
+    # only under ``compare(..., contract_evaluation=True)``; ``None``
+    # otherwise, and omitted from the JSON report entirely rather than
+    # emitted as a null placeholder. Typed as ``object`` for the same
+    # circular-import reason as ``Change.contract_relevance``'s flat fields:
+    # ``contract_evidence.py`` reaches ``compatibility_evaluation_config.py``
+    # -> ``checker_policy.py``, which this module also imports, and a real
+    # annotation here would pull that whole chain into every consumer of
+    # ``DiffResult``. Shadow/audit data only -- never read by verdict,
+    # policy, or exit-code logic.
+    contract_context: object | None = None
 
     def _effective_kind_sets(
         self,

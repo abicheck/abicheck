@@ -99,6 +99,17 @@ class ExportSurface:
     #: name, mangled name, and the trailing ``::`` segment) of a declaration
     #: whose linker symbol appears in the observed export table.
     export_symbols: set[str] = field(default_factory=set)
+    #: The *linker identity* (:func:`_linker_identity`) of every declaration
+    #: that actually matched an observed export name. Deliberately separate
+    #: from ``export_symbols`` above, which is alias-expanded so a *finding*
+    #: naming any encoding can be looked up: a binary exporting the C symbol
+    #: ``foo`` while the headers also declare an unexported ``ns::foo`` puts
+    #: the bare tail ``"foo"`` in both declarations' key sets, so an
+    #: intersection against ``export_symbols`` calls the unexported C++
+    #: declaration a root too. Rootness is decided here, by identity --
+    #: the same rule ``_unresolved_type_edges`` already applies internally
+    #: (Codex review, fresh evidence).
+    root_identities: set[str] = field(default_factory=set)
     #: Every symbol key of every declaration, exported or not.
     all_symbols: set[str] = field(default_factory=set)
     #: Transitive closure over the raw record/enum/typedef graph from the
@@ -761,7 +772,9 @@ def _resolvable_type_spellings(
             *enum_by_name.get(alias, ()),
         ]
         if colliding and all(
-            (node.qualified_name or node.name).startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)
+            (node.qualified_name or node.name).startswith(
+                STDLIB_TYPE_NAMESPACE_PREFIXES
+            )
             for node in colliding
         ):
             toolchain_aliases.add(alias)
@@ -1171,6 +1184,7 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
         snap, surface, tables, owner_seed_by_identity=owner_seed_by_identity
     )
     surface.resolvable = True
+    surface.root_identities = set(roots.root_identities)
     surface.unmatched_exports = _unexplained_exports(
         tables,
         roots.matched_pairs,

@@ -1100,6 +1100,11 @@ def _report_not_comparable(
         _write_or_echo(output, xml)
 
 
+#: The ``compare`` parameters that can set a gate field on the command line.
+#: ``exit_code_scheme`` is its own field; the rest all feed one resolved
+#: :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed
+#: makes the resolved severity explicitly CLI-selected.
+
 def run_compare(
     ctx: click.Context,
     *,
@@ -1688,6 +1693,17 @@ def run_compare(
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
+    from .cli_compare_receipt import SEVERITY_PARAMS, record_resolved_gate
+
+    record_resolved_gate(
+        result,
+        resolved_cfg,
+        project_cfg,
+        # Only this module holds the Click context, so it answers "did the
+        # user type this?" and hands the answers over as data -- which is
+        # what keeps `cli_compare_receipt` a leaf.
+        typed={name: _param_from_cli(name) for name in SEVERITY_PARAMS},
+    )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed

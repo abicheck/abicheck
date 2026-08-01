@@ -2020,6 +2020,95 @@ still does not exist for either domain (`ExportSurface.resolvable`/
 `PublicSurface.resolvable`/`has_provenance` is, not a per-provider
 completeness record).
 
+**Closed (2026-07-31): the provider-evidence ledger and the measurement —
+this phase's two remaining pieces.** Both were named as missing in the note
+directly above; neither is now.
+
+*The ledger* (`abicheck/contract_evidence_collect.py`, a new leaf module) is
+the producer for the `EvidenceSearchRecord`/`ProviderEvidenceEntry` shapes
+Phase 4 landed with no writer. It emits one record per *(provider, side)* —
+`public_header` and `export_table` for the two domains this build actually
+has, plus `post_manifest`/`forced_public_symbols` for the explicit overlays
+when a run configures them — each carrying its own status, completeness,
+identity coverage, requested-vs-searched scope, and a content digest of what
+it observed. Three things it does deliberately, each of them a line of
+Section 4.1 or 4.2:
+
+- **Failure is scoped per provider.** An unavailable header surface leaves a
+  completed export-table search alone, and vice versa. That is why the
+  ledger reports *which* guard failed
+  (`unmatched_exports`/`untyped_export_roots`/`unresolved_type_edges`/…)
+  rather than mirroring `ExportSurface.exclusion_is_provable`'s single
+  boolean: the whole purpose of the ledger is to say why a domain was not
+  closed, which that boolean cannot.
+- **`configuration_coverage` is honestly `NOT_STARTED` everywhere.** No
+  variant source exists in this build, so the closed-world rule for
+  `UNKNOWN_UNPROVEN` (Section 4.2) cannot be satisfied — which is exactly
+  why `contract_evaluation.py` never emits that value. Recording the facet
+  as not-started rather than quietly complete is what will let a future
+  variant provider flip it *on evidence*, instead of the under-claim being
+  an unexplained constant in a module docstring.
+- **"Not consulted" ≠ "consulted and failed".** A run that never computed an
+  export surface has no `export_table` entry at all, rather than one marked
+  unavailable — Section 4.1 forbids persisting "this provider was required
+  under one policy" as though it were an observed fact.
+
+Each stamped finding now carries `Change.contract_evidence_refs`: the record
+ids its decision rests on, computed by `evidence_refs_for_reason()` from the
+reason code, the selected domain, and the authoritative side (ADR-049 D4 —
+exposed as `contract_evaluation.authoritative_side()` rather than re-derived,
+so the two cannot drift from that function's two carefully-scoped kind sets).
+A non-entity finding correctly cites *nothing*: its relevance follows from
+its `ChangeKind`, consulting no provider. A `--used-by`/`--required-symbol`
+stamp cites a run-level reference instead of a block record, because that
+decision is made after `compare()` returned, by a caller holding no block.
+`validate_decision_evidence()` rejects a reference naming neither — a
+dangling ref is worse than none, since a consumer cannot tell it apart from a
+record that failed to serialize.
+
+Two cases the reason code alone cannot distinguish get their own attribution,
+in `contract_evaluation.evidence_refs_for_change()` (there, not in the
+collector, so the matching reuses this module's own overlay rules rather than
+a second copy): an `IN_CONTRACT` decision produced by `--public-symbol`'s
+widening overlay or by a `--post-manifest` commitment carries exactly the
+same `public_root_membership` code a genuine header-derived membership does,
+and a `--post-manifest`-driven *exclusion* shares
+`terminal_authoritative_exclusion` with header-origin exclusions. In both,
+the evaluator short-circuits on the overlay before consulting the surface at
+all, so citing the header provider would be a false citation in a ledger
+whose whole purpose is evidence honesty. Matching mirrors each overlay's own
+rule exactly — suffix-tolerant for the widening overlay, exact-name for the
+manifest — and is skipped entirely under `exports`, where Section 7 makes
+manifest/consumer evidence unrelated and advisory. The refs are serialized on every finding
+entry the JSON report already stamps (`reporter._add_contract_evaluation_fields`,
+so `changes`, `out_of_surface_changes`, the suppressed/redundant/reconciled
+ledgers, and `scope.filtered_internal_changes` all inherit it).
+
+*The measurement* is `scripts/measure_contract_shadow.py`, mirrored into the
+unit lane by `tests/test_contract_shadow_measurement.py` (the same
+script-plus-mirror pattern `check_fp_rate.py`/`test_fp_rate_gate.py`
+established). It runs the FP-rate corpus — already labelled internal-noise
+vs. real-break, so the ground truth needed no new curation — through
+`compare(..., contract_evaluation=True)` in **all three** domains, and
+reports this phase's four quantities: the delta matrix (legacy kept/demoted ×
+contract relevance), unresolved rate by provider state / domain / platform,
+proven public-break losses, and proven false-positive reductions. The gate is
+three zero baselines: a proven public-break loss, a delta whose decision
+cites no resolvable evidence, and a finding with no recorded decision
+("zero unexplained fact loss", read literally).
+
+First run, 32 cases, 41 findings per domain: **0 losses, 0 unevidenced
+deltas, 0 fact losses.** `public` resolves 71% of findings and proves 7
+internal-noise findings out of contract; `all` produces 16 deltas (every
+legacy-demoted finding, by definition of the mode) and 0 unresolved;
+`exports` is 100% unresolved on this corpus, because the corpus's synthetic
+snapshots carry no export table. That last number is reported rather than
+hidden: it is the honest "unresolved rate by domain" signal the phase asks
+for, and measuring only the flattering domain would defeat the point. One
+gate test asserts the `public` domain proves *something* out of contract,
+so the loss baseline cannot pass vacuously — zero losses is trivial for an
+evaluator that never concludes anything.
+
 ### Phase 4 — snapshot evidence/context split
 
 Persist policy-independent `contract_evidence` and separate
@@ -2081,6 +2170,630 @@ persists these blocks; the original-replay and new-policy-re-evaluation
 implemented); and populating `TypeGraphSnapshot`'s nodes/edges with real
 type-graph content (they are deliberately opaque strings for now, mirroring
 `ContractEvidenceBlock`'s own "land the shape, not the producer" scope).
+
+**Closed (2026-07-31): all three, plus the round-trip the gate names.** The
+paragraph above lists exactly what was missing; each is now implemented, and
+the one place this pass deliberately departs from the plan's own wording is
+called out below rather than quietly resolved.
+
+*Real type-graph content.* `contract_evidence_collect.build_type_graph()`
+walks the snapshot's whole record/enum/typedef/declaration graph and emits it
+as `TypeGraphSnapshot` nodes/edges. The node encoding
+(`decl:`/`record:`/`enum:`/`typedef:`/`alias:`) is documented in that module,
+since `TypeGraphSnapshot` itself deliberately treats nodes as opaque. Two
+properties matter more than the encoding:
+
+- It is **policy-independent**, the block's whole contract: a private,
+  hidden-visibility declaration is walked exactly like a public one, and no
+  contract mode is consulted anywhere. That is what makes one collected block
+  valid input to a re-evaluation under a mode the original run never
+  evaluated (`test_a_different_mode_needs_no_new_evidence`).
+- References are resolved **at collection time**, through the same
+  name/bare-tail indexes `surface._index_surface_types` builds for the live
+  closure walk — which is precisely why the block carries an
+  `identity_algorithm_version`. A future matcher resolving the same raw
+  spellings differently produces a different graph from identical inputs, and
+  D6 requires that to be tellable apart rather than silently reinterpreted. A
+  spelling resolving to nothing is *not* recorded as an edge to a placeholder
+  node: there is no node to point at, and inventing one would let a replayed
+  closure claim to have walked something it never did.
+
+*The two procedures* are `abicheck/contract_replay.py`.
+`replay_original_decisions()` reads the `decision_receipt` and nothing else —
+no evidence re-walk, no live re-probe, and this build's own provider defaults
+cannot alter the answer (`test_replay_ignores_this_build_s_evidence` empties
+the entire evidence block and asserts the replayed decisions are unchanged).
+`reevaluate_from_evidence()` answers the *different* question — old
+observations, newly resolved context — by walking the persisted graph and
+never reading the receipt, so a receipt written under `public` puts no thumb
+on an `exports` re-evaluation. Both route through
+`load_replayable_context()`, so there is no path that consumes a persisted
+context without D6's fail-closed version check; a *mixed* context (older
+evidence, current evaluation context) is explicitly fine, since that is the
+ordinary re-evaluation case rather than an error.
+
+Re-evaluation is deliberately a **narrower** evaluator than the live one, and
+says so instead of pretending otherwise: it has no access to the live
+surfaces' origin maps, hidden-friend reasoning, or the pipeline's own
+`surface_exclusion_reason` annotations — none of which are observations the
+evidence block carries — so where the live evaluator would use one of those,
+this one answers `UNKNOWN_UNRESOLVED`. That is why `compare_decisions()`
+checks *directional* soundness rather than equality: a replay that weakens a
+decision is a known coverage limit, while one that strengthens it (or flips
+`IN_CONTRACT` ↔ `PROVEN_OUT_OF_CONTRACT`, equally strong but opposite) is a
+real defect — persisted evidence may never out-claim the live evaluator that
+wrote it. The same conservatism governs the exclusion branch: an entity
+absent from the graph is *unplaceable*, never proven out, and a `PARTIAL`
+provider search proves no absence at all
+(`test_incomplete_provider_cannot_prove_an_exclusion` uses the identical
+snapshot as its proven-out sibling, minus declaration provenance).
+
+*Persistence and the round-trip gate.* `abicheck/contract_context.py`
+assembles the three blocks from a real comparison and `checker.compare(...,
+contract_evaluation=True)` now returns one on `DiffResult.contract_context`;
+`abicheck/contract_context_io.py` round-trips the whole group — including the
+complete resolved `CompatibilityEvaluationConfig` and its field provenance,
+per Section 5.1's "must serialize the complete immutable resolved
+configuration" — and `reporter.py` emits it as the JSON report's
+`contract_context` block from all three report paths (full/leaf/root-cause,
+the same three `_add_surface_scope`/`_add_reconciled` already cover). The
+gate is tested as stated: round-trip through *real* `json.dumps`/`loads`
+(not dict-level, so a decoder's tuple→list conversion is actually exercised)
+is the identity, serialization is byte-stable, and a provider-order-reversed
+block serializes to identical bytes rather than merely to an equal object.
+Version counters survive a decode verbatim — re-stamping them with this
+build's constants would erase exactly the mixed-version evidence D6 requires
+a reader to act on — and the *decoder* deliberately does not enforce the
+ceiling, so a tool can read a newer-than-supported block in order to *report*
+the mismatch, while `load_replayable_context()` is what refuses to evaluate
+it.
+
+**Deliberate departure from this section's own first sentence, stated rather
+than glossed:** the blocks are persisted with the *comparison* (the JSON
+report), not inside `AbiSnapshot` via `dumper.py`/`serialization.py`. Three
+reasons, in order of weight. (1) The evidence is two-sided by construction —
+every `EvidenceSearchRecord` carries `side: old|new`, and the header/export
+providers are collected per side of one pair — so it is a fact about a
+comparison, not about either snapshot alone. (2) Everything the block records
+is *derived* from the snapshot's own already-persisted content (declarations,
+visibilities, type graph, export tables); deriving it at compare time from a
+persisted snapshot is lossless and equivalent, while storing it in the
+snapshot would duplicate that content on disk. (3) A new `AbiSnapshot` field
+means a `serialization.SCHEMA_VERSION` bump, which is part of the
+comparability contract (ADR-050) and would need its own
+`SCOPE_FIELD_KEYS`/`check_contracts_comparable` review — a materially larger
+blast radius than this phase's gate requires, since the gate is about
+round-trip *decisions*, which the comparison-level record satisfies in full.
+The replay guarantee is unaffected: the persisted comparison record carries
+the evidence, so no replayed verdict depends on re-reading a binary or a
+header. If a genuine single-side use case appears (e.g. `dump` publishing a
+baseline whose evidence a later consumer wants without the pair), moving the
+block into the snapshot is an additive schema change on top of this shape,
+not a rewrite of it.
+
+**Post-review corrections (2026-07-31, same PR).** Seven findings from the
+Codex/CodeRabbit round, each changing behaviour rather than wording:
+
+1. **Export evidence is collected for every opted-in comparison, not only
+   when `exports` is the selected mode** (Codex P1). Collecting it
+   conditionally on the *original* run's mode contradicted this phase's own
+   headline guarantee: a `public` run's persisted block could not be
+   re-evaluated under `exports` without re-reading the binaries, since
+   `_PersistedDomain` would find no export roots and answer
+   `UNKNOWN_UNRESOLVED` for a pair whose export tables were fully
+   observable. The cost is one export-table match per side, paid only under
+   `--contract-evaluation`.
+2. **A `public` graph-only exclusion is no longer `PROVEN_OUT_OF_CONTRACT`**
+   (Codex P1). Section 4.3's negative proof needs positive private/system-
+   header provenance *plus* every stronger-or-equal provider having
+   completed; the persisted block carries neither (it records declarations
+   and a type graph, not per-entity header origin, and
+   `configuration_coverage` is `NOT_STARTED` on every record this build
+   writes). Proving an exclusion from graph non-membership alone would have
+   *strengthened* the live decision — the one direction this module's own
+   contract forbids. `exports` keeps its exclusion branch, because there the
+   provider's `COMPLETE` state *is* `ExportSurface.exclusion_is_provable`,
+   which is the terminal exclusion the ADR names.
+3. **The decision receipt is keyed by the report's own `finding_id`**
+   (Codex P2). The coarse `kind:symbol` fallback collapsed two findings of
+   one kind on one symbol (two parameters of the same function) into a
+   single entry, silently dropping a recorded decision and making the
+   receipt uncorrelatable with the report. The id's implementation lives in
+   the dependency-free leaf module `finding_identity.report_finding_id`,
+   which `checker` imports directly; `reporter_markdown._finding_id` is now
+   a compatibility alias for it (moved there because importing the renderer
+   from `checker` — even function-locally, which the `import-cycle-growth`
+   gate counts — would close a `checker -> reporter_markdown -> checker`
+   cycle). Callers that hold a result rather than a comparison still inject
+   it as a callable (`contract_evaluation.stamp_scoped_result_findings`,
+   `contract_context.relevance_map`).
+4. **A `--policy-file`'s per-kind overrides reach the persisted config**
+   (Codex P2). Recording only the base-policy name made the "resolved"
+   configuration wrong in exactly the way an audit consumer would act on.
+5. **`decision_receipt` gained its own `schema_version`** (CodeRabbit), a
+   fifth reserved constant checked independently by
+   `check_persisted_context_versions_supported`. Its *keys* are their own
+   contract, so its shape can change while observations and configuration do
+   not — the same "one counter per independently-evolvable concern" rule the
+   other blocks already followed.
+6. **`compare_decisions` gained a `disagreed` bucket** (CodeRabbit): a
+   transition into or out of `NOT_APPLICABLE` is not a point on the strength
+   scale, and was silently landing in `strengthened`. It is reported
+   separately but still fails `is_sound` — both evaluators share one
+   `_NOT_APPLICABLE_KIND_SLUGS` set, so disagreeing there means the receipt
+   and this build classify the same `ChangeKind` differently.
+7. **Under `all`, a replayed decision cites the header provider**
+   (CodeRabbit), matching the live attribution. `all` has no root provider,
+   so the refs were empty — which carries the *non-entity* meaning instead.
+
+**A second review round on the same PR found three more, all fixed.** (1)
+The audit-ledger serializers (`out_of_surface_changes`, the suppressed and
+reconciled ledgers, `scope.filtered_internal_changes`) carried the contract
+fields but no `finding_id` — and also omit `old_value`/`new_value`, two of
+that id's own inputs — so a demoted finding could neither be joined to its
+decision in the receipt nor have its key recomputed. The id is now emitted by
+`_add_contract_evaluation_fields` itself, so the key and the decision always
+travel together. (2) `evidence_refs_for_reason` cited *both* sides for an
+`export_root_membership` decision, but `_exports_mode_decision` reads one
+`ExportSurface` (chosen by D4's side rule) and decides from it alone — so the
+second citation claimed a decision rested on evidence it never read, actively
+misleading when that side's provider is unavailable. The two-sided reason set
+is now per-domain: `public` keeps it (its membership classification really
+does run against `surface_unions`), `exports` and `all` cite one side. (3)
+The selected suppression source (rules + digest) now reaches
+`resolved_config.suppressions`; leaving it `None` claimed no source was
+selected at all. A list with no `source_sha256` (assembled in memory, never
+read from a file) still records `None` rather than a fabricated digest.
+
+Three structural cleanups landed with them: one shared
+`contract_context.persisted_domain_view()` replaces the duplicated
+provider-walk in the receipt builder and the replay domain (they could
+otherwise disagree about the same closure); `graph_node_index()` resolves
+spellings through a per-side index instead of rescanning a whole-snapshot
+graph once per spelling per finding; and every required-key read in the
+persisted-context decoder now fails as `TypeError`, so a consumer handling a
+corrupt block catches one exception type rather than three.
+
+**A third review round found four more, all fixed.** (1) The decision
+receipt was frozen inside `compare()`, *before* `--used-by`/`--required-symbol`
+scoping overwrites already-recorded findings with the stronger explicit-scope
+`IN_CONTRACT` decision and synthesizes fresh `scoped_only_changes` — so the
+persisted receipt disagreed with the report emitted beside it, and
+`replay_original_decisions` reproduced decisions that were never the run's
+own. `contract_evaluation.refresh_contract_receipt` now re-keys the receipt
+from the two collections a scoping pass can touch, called from the same
+shared `stamp_scoped_result_findings` traversal both front ends already use
+(so neither can forget it). It *merges* rather than rebuilds: the receipt
+also covers the suppressed/redundant/out-of-surface findings that never
+reach `result.changes`. (2) The persisted type graph carried no edge from a
+method to its own enclosing class, which *both* live surfaces seed
+(`surface._seed_public_roots`, `export_surface._seed_export_roots`) precisely
+because a consumer holding an exported method can declare, allocate, and
+inherit that class. A replay walking only signature edges would find the
+owner unreachable and could turn a live `IN_CONTRACT` into
+`PROVEN_OUT_OF_CONTRACT` — the one direction `compare_decisions` treats as
+unsound. The edge uses `surface.py`'s permissive spelling resolution rather
+than `export_surface.py`'s exact-identity map: one graph serves both domains,
+and over-linking can only ever *weaken* a replayed decision. (3)
+`--public-symbol`'s forced-public set and `--post-manifest`'s committed-export
+allowlist now reach `contract.overlays`/`surface.explicit_scope`; both decide
+membership (ADR-049 D2 counts overlay-selected roots as part of the `public`
+domain's roots), so omitting them described a run that never happened. They
+are recovered from the run's own evidence ledger rather than re-read from the
+caller's arguments, so the two halves of one context cannot disagree, and the
+digest combines each overlay's own `input_identity` — a merged item list
+alone could not tell one manifest naming A and B apart from two overlays
+naming one each. (4) `graph_node_index` followed an `alias:` edge whose
+source node was absent from `nodes`, where `resolve_graph_node` does not; the
+two are documented to agree by construction, so the index now applies the
+same guard.
+
+**A fourth round found two more, both fixed.** (1) The persisted export roots
+were derived by intersecting each declaration's alias-expanded symbol keys
+with `ExportSurface.export_symbols` — the exact trap
+`export_surface._unresolved_type_edges` already documents avoiding. A binary
+exporting the C symbol `foo` alongside an unexported `ns::foo` puts the bare
+tail `"foo"` in both declarations' key sets, so the unexported C++
+declaration was persisted as an export root and re-evaluated into a contract
+it is provably out of. `ExportSurface` now carries the `root_identities` set
+its own seeding already computed, and the collector matches on *linker
+identity* against it. (2) `public`-domain reconstruction read only the
+`public_header` provider, so an entity kept by an explicit overlay
+(`--public-symbol`, `--post-manifest`) re-evaluated to `UNKNOWN_UNRESOLVED`
+even with the overlay's own evidence entry sitting in the same block.
+`persisted_domain_view` now folds overlay manifests into the `public`
+domain's roots, as ADR-049 D2 prescribes ("roots selected by explicit
+overlays") — resolved through the same `graph_node_index` a finding's own
+spelling uses, so an overlay entry naming nothing the graph knows contributes
+no root rather than a guess. Deliberately `public`-only: `exports`' roots are
+the observed table, and a user's assertion is not an observation of the
+binary.
+
+**A fifth round found three more, all fixed — and the first two together
+settled what an overlay actually is on replay.** (1) A positive membership
+was concluded from a provider that had reported the domain unavailable —
+not that it observed nothing, but that what it observed never resolved into
+a usable domain: an `elf_only_mode` snapshot leaves `PublicSurface.resolvable`
+false, so the live evaluator answers `UNKNOWN_UNRESOLVED`/`UNAVAILABLE` at
+its `not auth.resolvable` gate — but the ledger entry still carries the
+declarations and type graph the collector had built before bailing out, and
+the closure walk reached the entity through them and answered `IN_CONTRACT`
+with `COMPLETE` assurance. `_PersistedDomain.domain_is_available` is the
+persisted counterpart of that live gate, and it is one-to-one rather than an
+approximation: `contract_evidence_collect` writes `UNAVAILABLE` on exactly
+the `resolvable` check the live path branches on. (2) An overlay root seeded
+the closure walk, so forcing `hidden_api(Secret *)` public also pulled
+`Secret` in — while live, `force_public_symbols`/`public_surface_allowlist`
+are strictly *per-finding* overrides matched against the finding's own
+symbol, leaving a `Secret` finding `PROVEN_OUT_OF_CONTRACT`. Overlay nodes
+are therefore still roots (D2's "roots selected by explicit overlays", and
+still what the receipt reports as `evaluated_contract_roots`) but no longer
+closure *seeds* — the new `PersistedDomainView.closure_seeds_by_side` is the
+root provider's own declarations alone. Those two fixes also fix each
+other's edge: because the overlay check now mirrors live's ordering — ahead
+of the resolvability gate — a user-named entity stays `IN_CONTRACT` even
+when the header provider observed nothing, which is exactly what live does.
+(3) `surface.internal_namespaces` reached the resolved config from the same
+`--policy-file` as `policy.overrides` but carried no provenance entry; a
+populated list now gets one. An empty one deliberately does not:
+`build_evaluation_context` receives a tuple, which cannot distinguish "no
+policy file" from "a policy file that stated an empty list"
+(`PolicyFile.internal_namespaces_stated` is the field that can, and it does
+not reach here), and claiming a source for a possibly-unstated value is
+worse than claiming none.
+
+**A sixth round found three more, all the same shape: the replay resolver
+was looser than the live matcher it stands in for.** Each looseness was a
+strengthening path, and each fix is "mirror what live already does":
+(1) `_entity_spellings` offered a symbol's bare `::` tail in *every* mode,
+but the live exports matcher passes `allow_tail_fallback=False` precisely so
+an unexported `ns::foo` cannot borrow an exported C `foo`'s identity — the
+tail reintroduced that collision one layer down, at node resolution. It is
+`public`-only now, matching `_symbol_matches`'s own per-mode argument.
+(2) The same function offered `caused_by_type` for every finding, while
+`_exports_mode_decision` gates it behind `type_scoped`, for the reason its
+own comment gives: closure membership answers a *type*-level question, so a
+symbol-level finding on an unexported helper must not be placed in contract
+because its `caused_by_type` is one some other exported signature reaches.
+(3) `_link_owner_class` resolved the owner permissively, on the reasoning
+that over-linking only ever weakens — wrong, because one graph serves both
+domains: an exported namespace function `api::run()` yields the owner string
+`"api"`, which permissive resolution matches against an unrelated
+`other::api` record by its bare tail and pulls into the *export* closure.
+It matches by exact record identity now, mirroring
+`export_surface._seed_export_roots`'s own `owner_seed_by_identity` map — the
+same rule, for the same reason, that `type_reachability.py`'s owner seeding
+settled on. Exact matching loses nothing real: `owner_class_of` always
+reconstructs a complete scope chain, so a real class matches exactly and a
+non-method's namespace noise correctly matches nothing.
+
+**A seventh round found two more of the same shape, one of them the exact
+inverse of the round above.** (1) `exports`-mode node resolution still went
+through the persisted graph's `alias:` edges, and `compute_export_surface`
+prunes exactly those: an exported `ns::foo` contributes the bare alias `foo`
+that an unrelated *unexported* C `foo` also answers to, so live drops the
+shared key from `export_symbols` and returns `PROVEN_OUT_OF_CONTRACT` for a
+finding on the C declaration. Replay resolved that spelling to the exported
+node and reported `IN_CONTRACT`. The resolver now applies the same pruning —
+an export root reached only through a spelling that a *declaration* outside
+the root set also answers to is dropped, unless the spelling is a root's own
+canonical node identity, which is the same pair of exemptions live keeps
+(record/enum nodes never prune, because live's `nonroot_keys` is built from
+declarations alone). Note that round six's fix and this one are the two
+halves of one collision: there the finding was qualified and the root bare,
+here the finding is bare and the root qualified.
+(2) `all` mode returned `IN_CONTRACT` unconditionally, bypassing a persisted
+`--post-manifest`. ADR-049 D2's `all` row drops *header-origin* scoping, not
+every provider — the live evaluator checks the manifest's exclusion ahead of
+its own `all`-mode shortcut, because a committed-export manifest is an exact,
+closed-domain observation rather than a header-origin classification — so a
+concrete export the manifest omits is `PROVEN_OUT_OF_CONTRACT` live and was
+`IN_CONTRACT` replayed, including with a deliberately empty manifest (which
+`collect_contract_evidence` records as a selected source, not an absent one).
+The manifest's spellings are now read in every mode, and an `all`-mode
+finding the manifest could not have admitted answers `UNKNOWN_UNRESOLVED`
+rather than the live `PROVEN_OUT_OF_CONTRACT`: the replay reproduces
+`_run_allowlist`'s keep conditions only approximately. Two of them are
+deliberately left out, both in the weakening direction — the
+concrete-export test (the persisted export provider's declarations are not
+`_snapshot_export_ids`, so consulting it could wrongly conclude "kept") and
+`--public-symbol`'s rescue (which live honors only when header scoping is
+also on, a flag the persisted context does not record).
+
+**An eighth round found two joinability gaps rather than soundness ones.**
+(1) A missing `--used-by`/`--required-symbol` contract member has no backing
+`Change` at all — each report format synthesizes its own entry for it — so it
+reached neither collection `refresh_contract_receipt` merges, yet every format
+stamps that synthetic entry `IN_CONTRACT`. The emitted finding therefore had a
+decision the receipt had no key for, and the entry carried no `finding_id` a
+consumer could have joined with anyway (it never routed through
+`_change_to_dict`). Both halves are fixed by one identity:
+`finding_identity.missing_contract_finding()` builds the `Change`-shaped
+identity — including the description, one of `report_finding_id`'s own hash
+inputs — that the CLI JSON fold, the MCP tool, and the receipt refresh now all
+key from, so they agree by construction instead of by three hand-copied
+literals. `missing_contract_kind()` joins it there for the same reason, folding
+the four independent `gate_scope` → slug derivations into one.
+(2) `decision_receipt.relevance_by_finding` was defaulted to `{}` when absent,
+which made a truncated receipt indistinguishable from a comparison that
+genuinely recorded no decisions — the same fail-closed rule the enclosing
+`decision_receipt` block already got a round earlier, one level down.
+(`schema_version` stays defaulted, deliberately: an absent counter has a
+defined meaning — version 1 — where an absent decision map does not.)
+(3) A third absent-vs-empty slip, same shape one layer over:
+`evidence_refs_for_change` gated its `--post-manifest` attribution on the
+allowlist's *truthiness*, so a manifest that validly commits to zero exports
+scoped everything out and then had the resulting exclusions cite
+`public_header` — the provider that decided nothing here. It tests
+`is not None` now, matching what `collect_contract_evidence` already records.
+
+**A ninth round found the same absent-vs-fabricated defect in the resolved
+configuration itself, on the two fields the run's *gating* rests on.**
+(1) `checker.compare` never sees the gate — the exit-code scheme and the
+severity levels are resolved by the front end and applied to the returned
+result *after* the core verb finishes — so `build_evaluation_context`
+recorded a default `GateConfig()`. That is not an omission but a wrong
+claim: it asserts the built-in `severity` scheme and the built-in severity
+levels for every run, including a `legacy`-scheme one (confirmed: a run
+exiting 4 on the legacy floor persisted `exit_code_scheme: "severity"`) and
+one whose `--severity-abi-breaking warning` genuinely moved a category. The
+front end now calls `contract_context.with_resolved_gate()` once, before any
+report is rendered, with the values it actually resolved *and* the D7 layer
+it resolved each from — which, unlike the core verb's `API_REQUEST`
+under-claim above, is really observable here: a typed flag is
+`EXPLICIT_CLI`, a value only `.abicheck.yml` supplied is `PROJECT_CONFIG`,
+and an `auto` scheme that resolved itself is `BUILT_IN_DEFAULT`. Nothing
+about a relevance decision, a closure, or the receipt's per-finding map
+changes; the gate stays `NOT_APPLICABLE` to contract membership.
+(2) `suppression_config_for` returned `None` for any `SuppressionList`
+without a `source_sha256` — but the public constructor and `merge()` both
+produce exactly that digest-less, fully *active* form (`compat/_helpers.py`
+builds every ABICC `-skip-*` list that way, and `merge()` drops both halves'
+digests even when each was file-loaded), so a run whose findings were being
+suppressed persisted "no suppression source was selected at all." The digest
+now falls back to a content digest of the rule identities the same block
+persists. That is not a fabricated stand-in for the file digest: it
+authenticates the rules that actually ran, computed with the ledger's own
+`content_digest`, and nothing in this codebase re-reads a suppression file
+to check this field against its bytes.
+
+**A tenth round found the ninth round's own two fixes each had a sibling
+one module over.** (1) The gate fix landed in the CLI front end only —
+`mcp_server.abi_compare` resolves its own scheme and severity the same way
+(any `severity_*` argument opts into the severity-aware scheme) and rendered
+the context without refreshing it, so `report.contract_context`'s gate stayed
+`GateConfig()`'s defaults there too. It now calls the same
+`with_resolved_gate()`, recording `API_REQUEST` rather than `EXPLICIT_CLI`
+for a stated value (a typed API caller, not a typed flag) and resolving a
+`"scoped"` scheme back to the `legacy`/`severity` one it came from, since
+that is not a value `GateConfig` accepts. (2) `measure_contract_shadow.py`
+walked only `changes`/`out_of_surface_changes`, while `checker` stamps and
+records five collections — a dropped decision or a missing receipt entry for
+a *suppressed*, *redundant*, or *reconciled* finding left the `fact_losses`
+gate at zero. All five are measured now, the three audit buckets under their
+own rows; `_is_delta` answers `False` for them deliberately, since a
+suppression, a display dedup, and a build-context reconciliation are
+policy/presentation decisions about an already-decided finding, not claims
+about contract membership. Not done: adding corpus cases that populate those
+buckets. A suppression case would mean threading a `SuppressionList` through
+the *shared* FP-rate corpus (`check_fp_rate.CASES`, whose own gate would
+have to be re-validated against the changed fixture shape), and redundancy
+and reconciliation are produced by the pipeline rather than selected by
+corpus input — so the three rows stay empty on today's corpus, and the gate
+becomes live for them the moment such a case exists rather than the moment
+someone remembers to add the collection.
+
+**An eleventh round found two identity defects in the persisted type graph
+itself, both of them the same "a string is not an identity" mistake at
+opposite ends of an edge.** (1) `decl:` nodes were keyed by *linker*
+identity, whose fallback for a producer that recorded no mangled symbol is
+the bare display name — which every overload of a name shares. A public
+`over()` and a private `over(Secret *)` therefore landed on one node, the
+public root inherited the private overload's edge to `Secret`, and a
+re-evaluation answered `IN_CONTRACT` for a private `Secret` layout change
+the live evaluator — which walks each declaration object separately —
+proved out of contract. The node key now falls back to
+`name + "(params)->return"` for the one case where the plain name names
+more than one unmangled declaration, the same "most specific available
+identity, ambiguity-safe" tiering `finding_identity.py` and
+`diff_helpers.TypeMap` already use. Deliberately a tie-break rather than a
+new encoding: `_without_shared_export_aliases` exempts a spelling that is a
+root's *own* node identity from its alias pruning, so refining an
+unambiguous name would prune a genuine export root — the same strengthening,
+one corner over. Two unmangled declarations agreeing on name, parameters
+*and* return type still share a node, which is lossless (their signature
+edges and their `owner_class_of` result are derived from exactly those
+fields), so no ledger-level ambiguity flag is needed for a residual case.
+Rootness still keys on linker identity, which is what the export table
+matched — every member of an unmangled overload group shares one, so they
+are rooted or not as a group, exactly as live roots them. (2) The owner-class
+identity set was keyed on `RecordType.name` alone, while `owner_class_of`
+answers with whatever complete scope chain the producer recorded — for a
+castxml/clang class stored as `name="Widget"`/`qualified_name="ns::Widget"`
+that is the qualified spelling, which the set never contained, so the
+method-to-owner edge was dropped and a live `IN_CONTRACT` replayed as
+`PROVEN_OUT_OF_CONTRACT`. The set is now a field-for-field mirror of
+`export_surface.compute_export_surface`'s own `owner_seed_by_identity` map
+— the map the live exports closure actually seeds through — rather than a
+re-derivation of it, which fixed a *third*, unreported defect in the same
+stroke: the old set also registered a leaf-only bare `name`, letting an
+`api::run()` namespace fragment match an unrelated `other::api` "exactly"
+after all, the very collision the exact-match rule exists to close, from the
+record side. Both were reproduced end-to-end against a live run before
+fixing and re-checked as `compare_decisions(...).strengthened == ()` after.
+
+Observed while mirroring that map, and **not** fixed here: the graph's
+general *type-reference* resolution still goes through
+`surface._index_surface_types`'s un-augmented index, which keys on `name`
+and its `::` tail only, while `compute_export_surface` augments its own copy
+with every `qualified_name`. A field spelled `ns::Widget` on the
+castxml/clang path therefore reaches the record live-in-`exports` but
+produces no edge here. Fixing it means changing the closure for the
+`public` domain too, whose live index is *not* augmented — over-linking
+there flips a live `PROVEN_OUT_OF_CONTRACT` to a replayed `IN_CONTRACT`,
+which `compare_decisions` counts as strengthening just as under-linking
+does. Getting both domains right at once needs its own scoped design
+(per-domain resolution, or an audit of what `surface.py`'s own bare-tail
+lookup would have to become), not a drive-by extension of an owner-edge fix.
+
+**A twelfth round found one more soundness defect of the same shape and two
+receipts naming the wrong input.** (1) The persisted graph resolves every
+spelling through one flat index, while the live evaluator asks two separate
+questions of two different node kinds — "is this symbol an export root"
+(declarations) and "is this type in the closure" (types). With an exported
+`api(foo *)`, a reachable `struct foo` and an unexported function `foo`, the
+spelling `foo` landed on both `decl:foo` and `record:foo`, and the reachable
+*record* placed the *function* removal `IN_CONTRACT` against a live
+`PROVEN_OUT_OF_CONTRACT`. `_entity_lookups` now carries the admissible node
+kinds alongside each spelling: a symbol may reach a declaration node only
+under `_symbol_matches`'s own rule (a type-level kind needs a *mangled*
+symbol), a type node only when the finding is type-scoped at all, and
+`caused_by_type` — a type name by construction — reaches type nodes alone.
+Membership is decided on that filtered set; the overlay override and evidence
+attribution stay on the full resolution, since both are keyed by the symbol
+live too (`_change_matches_symbols` asks nothing about node kind).
+(2) `policy.base` attributed the resolved value to `checker.compare`'s
+`policy` argument even when a `PolicyFile`'s own `base_policy` had *replaced*
+it (`effective_policy`) — naming an input the run ignored. It now records the
+policy file, the same rule `policy.overrides` and `surface.internal_namespaces`
+already follow from the same file. (3) `gate.severity` was one aggregate
+entry for four independently-resolved categories, so
+`--severity-abi-breaking` beside an `addition` level only `.abicheck.yml`
+supplied labelled both `EXPLICIT_CLI` — and used a key the canonical resolver
+does not have (it tracks `gate.severity.<category>`,
+`compatibility_evaluation_frontend.SEVERITY_CATEGORY_FIELDS`).
+`with_resolved_gate` now takes a per-category mapping, and both front ends
+supply one: the CLI per typed flag (with `--severity-preset` counting for all
+four), the MCP tool uniformly, since one `SeverityConfig` argument genuinely
+is one layer for all four.
+
+**A thirteenth round closed the last standing item — bare `record:<name>`
+node identity — and one more provenance gap.** A record/enum node was keyed
+by `RecordType.name`, which on the castxml/clang path is the *bare leaf*, so
+`ns1::Foo` and `ns2::Foo` collapsed onto one node and their field edges were
+unioned; an export rooted in `ns1::Foo` then placed a layout finding on
+`ns2::Foo` `IN_CONTRACT` where the live evaluator answered
+`UNKNOWN_UNRESOLVED` on exactly that ambiguity. Keying on `qualified_name or
+name` (`_type_identity`) separates them, with the bare leaf demoted to an
+`alias:` spelling — which is what it honestly is once two records answer to
+it. Narrowing the graph this way cannot strengthen anything: a snapshot with
+an ambiguous bare tail already reports `identity_coverage=PARTIAL`, and
+`can_prove_exclusion` requires `COMPLETE`, so the only conclusive negative is
+off the table for precisely those snapshots.
+
+Separating the nodes was necessary but not sufficient, in two steps found in
+the same round. First, the *lookup* still resolved the shared leaf to both
+nodes and took whichever was reachable; the replay now refuses a spelling
+that lands on more than one type node, mirroring `_confirmed_type_matches`'s
+"a candidate that matched only ambiguously proves nothing in either
+direction". Second — and this is the part a per-lookup node count alone
+misses — live rejects a match on *two* clauses, the second being "a qualified
+name whose own trailing tail is ambiguous". With a global `Foo` beside a
+namespaced `ns::Foo`, a finding on `ns::Foo` resolves to exactly one node,
+yet an exported signature spelling the bare `Foo` linked *both*, so the
+closure hit proves nothing. The replay now checks that clause too, which
+required the bare `::` tail of a qualified identity to become an `alias:`
+spelling in the persisted graph — with a DWARF producer, which bakes the
+whole path into `name`, nothing else recorded it, so the collision was
+invisible on replay. Rootness is still decided *before* ambiguity, matching
+live's own order: a declaration that is a root answers its own membership by
+its own linker identity.
+
+Also fixed: a typed `--contract exports` was persisted as an `API_REQUEST`
+from `checker.compare`, since the core verb receives the value and not the
+option that supplied it. `with_field_provenance` is the value-free
+counterpart of `with_resolved_gate` for exactly this shape, and the CLI now
+refreshes `contract.mode` when — and only when — the flag was really typed,
+so the `LEGACY_ALIAS` provenance `resolve_legacy_contract_mode` records for
+`--scope-public-headers` still survives untouched.
+
+**A fourteenth round replaced an inference with an observation.** Twice now
+the replay had re-derived "is this spelling ambiguous" from the persisted
+graph, and twice a case slipped through that the live evaluator's own
+`ambiguous_type_names` states outright — first a qualified candidate whose
+*tail* collides, then two records sharing one canonical identity, which are
+one node in the graph but two entries in `_index_surface_types`'s own count
+(it tallies record *objects* per name, not distinct identities — a detail an
+earlier docstring here got wrong, and the reason a graph-derived count can
+never be equivalent). The provider record now persists
+`ambiguous_identities` directly, and `_type_identity_is_ambiguous` answers
+both of `_confirmed_type_matches`'s clauses from that set. The inference
+helper is deleted. The general lesson, worth stating because it recurred:
+an observation the replay needs is cheaper to persist than to reconstruct,
+and a reconstruction that is *nearly* faithful reads exactly like a correct
+one until a reviewer finds the case it drops.
+
+Two provenance receipts were also naming inputs that did not exist. The CLI
+derived every category's severity layer from `ResolvedCompareConfig.
+severity_active`, which is deliberately run-wide ("a level was set
+*anywhere*") — so a run whose only input was `--severity-abi-breaking`, with
+no `.abicheck.yml` at all, recorded the other three categories as
+`PROJECT_CONFIG`. `BuildConfig` carries the four levels separately, so the
+honest per-field answer was already available. The MCP tool had the same
+shape one layer over: `severity_config is not None` marked all four
+`API_REQUEST` when the caller had supplied one. Both now record per
+category. Notably, *both* were pinned by tests written in the immediately
+preceding round — the tests asserted the wrong behaviour as intended, which
+is the failure mode a test written from the implementation rather than from
+the contract always has.
+
+**A fifteenth round closed the reason all of the previous ones were found by
+reviewers rather than by CI.** Every soundness defect this feature has had
+was a *replay* that out-claimed the live decision, and there was no
+corpus-level gate on that path at all — only hand-written unit cases. The
+shadow measurement now re-evaluates each corpus case through the real wire
+format and reports `replay_strengthenings`, with baseline 0.
+
+Standing that gate up immediately proved it *vacuous*: two deliberate
+regressions (dropping the node-kind filter, then the ambiguity refusal) both
+still passed, because no corpus pair had an ambiguous identity — 0 of 32
+snapshots had a colliding bare tail, so no replay decision could differ
+whatever the implementation did. One case was added (`ambiguous_namespaced_leaf`:
+a real break on `ns1::Cache` beside an unrelated `ns2::Cache`, both spelled
+bare `Cache` the way castxml records them), after which the same regressions
+fail the gate. Both facts are pinned as their own assertions, because "the
+gate is green" and "the gate can fail" are different claims.
+
+Two real gaps were found by finally giving the `enum:` node kind any test
+coverage — this suite had never constructed an `EnumType`, though enums are
+keyed by the same `_type_identity`, aliased the same way, and share the same
+ambiguity set. First, every **member-level** finding degraded to
+`UNKNOWN_UNRESOLVED`: `_type_candidates` strips `Mode::B` to its owner
+`Mode` for the owner-plus-member kinds and the replay did not, so an
+`enum_member_added` on an exported enum resolved to nothing. Sound (a
+weakening), but it made the replay useless for that whole family. Second,
+a fallback declaration key collides across the two identity *tiers*, not
+only within its own: a private header-only `foo(Secret *)` beside a public
+declaration whose recorded `mangled` is literally `foo` merged onto one
+node, and the public root inherited the private overload's edge to `Secret`.
+Every recorded linker identity is now reserved, so a display-name fallback
+yields to one whichever tier it came from.
+
+One finding from an earlier round was **not** taken: replacing
+`report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
+canonical-JSON encoding. The ambiguity it guards against requires a literal
+`\x1f` (ASCII unit separator) inside a kind slug, symbol, value, source
+location, or description — none of which any producer in this codebase can
+emit — while changing the encoding rehashes *every* finding id, which is a
+documented-stable, user-visible fingerprint (report schema 2.3) that
+consumers key waivers and cross-run correlation on. The cost is certain and
+the risk is not reachable, so the delimiter stays.
+
+Two smaller limits worth naming rather than discovering later. The
+`evaluation_context` this build assembles is resolved by `checker.compare`,
+which sees only its own arguments — so `contract.mode` carries the real D7
+`LEGACY_ALIAS`/explicit provenance, while `policy.base` records
+`API_REQUEST` (a typed caller stated it) rather than claiming a CLI/recipe
+layer this core verb cannot observe. Phase 5, which routes every front end
+through one already-resolved config, is what replaces it; under-claiming
+until then is the honest encoding, since a wrong provenance layer is exactly
+what D7's receipts exist to make impossible. And the decision receipt's
+per-finding keys fall back to `"<kind>:<symbol>"` unless a caller supplies
+the report's own id — `finding_identity.report_finding_id`, which `checker`
+imports directly and every post-`compare()` caller injects as a callable,
+since importing the renderer that re-exports it would close a
+`checker → contract_context → reporter → checker` cycle the
+`import-cycle-growth` gate rejects.
 
 ### Phase 5 — shared authoritative comparison
 

@@ -1814,9 +1814,14 @@ def _embed_inline_source_side(
                    "top-impacted-symbols list predates this field), except for the "
                    "--used-by/--required-symbol scoped-gate appendix, which renders it "
                    "under json/markdown/review alike. Not yet rendered in sarif/junit/"
-                   "html. Advisory only: it never changes verdict, exit_code, or which "
-                   "findings appear. Default off; the report is unchanged unless this "
-                   "is set.")
+                   "html. --format json additionally carries contract_evidence_refs "
+                   "per finding (which evidence records its decision rests on) and a "
+                   "top-level contract_context block (the observed provider evidence, "
+                   "the resolved evaluation context, and the decision receipt), so a "
+                   "decision can be replayed or re-evaluated later without re-reading "
+                   "the binaries. Advisory only: it never changes verdict, exit_code, "
+                   "or which findings appear. Default off; the report is unchanged "
+                   "unless this is set.")
 @click.option("--contract", "contract_mode",
               type=click.Choice(["public", "exports", "all"]), default=None,
               help="Which evidence domain --contract-evaluation judges each finding "

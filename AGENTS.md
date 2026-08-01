@@ -257,6 +257,39 @@ Core pipeline (in order of data flow):
      alias via `compatibility_evaluation_wiring.resolve_legacy_contract_mode`
      (D7 precedence). Selecting a domain is as advisory as the evaluator
      itself — no verdict, exit code, or finding set changes
+   - `contract_evidence_collect.py` — ADR-049 Phase 3's *observed provider
+     ledger* (plan §4.1) and the raw type graph Phase 4 persists. Produces
+     one `EvidenceSearchRecord` per (provider, side) — `public_header`,
+     `export_table`, plus the `post_manifest`/`forced_public_symbols`
+     overlays when a run configures them — each with its own status,
+     completeness, identity coverage, requested-vs-searched scope and
+     content digest, so a provider failure stays scoped to its own domain.
+     Also owns the `decl:`/`record:`/`enum:`/`typedef:`/`alias:` node
+     encoding of `TypeGraphSnapshot` and the closure walk over it, and maps
+     a decision's reason code to the records it rests on
+     (`evidence_refs_for_reason` → `Change.contract_evidence_refs`). "Not
+     consulted" is deliberately encoded as an absent entry, never as a
+     failed one
+   - `contract_context.py` / `contract_context_io.py` / `contract_replay.py`
+     — ADR-049 Phase 4's assembly, JSON round-trip, and the two procedures
+     D6 names. `checker.compare(..., contract_evaluation=True)` returns a
+     `PersistedContractContext` on `DiffResult.contract_context`, which
+     `reporter.py` emits as the report's `contract_context` block (all three
+     JSON paths). `replay_original_decisions()` reproduces a recorded
+     decision from the receipt *alone* — this build's provider defaults
+     cannot alter it — while `reevaluate_from_evidence()` re-decides
+     findings from the same persisted, policy-independent observations under
+     a *different* contract mode, with no re-collection and no live
+     re-probe. Both fail closed on a version counter newer than this build
+     (`load_replayable_context`); a mixed-version context is the ordinary
+     re-evaluation case, not an error. The replay evaluator is deliberately
+     narrower than the live one and may only ever *weaken* a decision —
+     `compare_decisions()` checks that direction rather than equality. Note
+     the blocks are persisted with the *comparison*, not inside
+     `AbiSnapshot`: the evidence is two-sided by construction, is derived
+     from content the snapshot already carries, and a snapshot field would
+     mean a `SCHEMA_VERSION` bump inside the ADR-050 comparability contract
+     (reasoning recorded in the plan's Phase 4 section)
    - `export_surface.py` — ADR-049 `contract=exports`'s evidence provider
      (`compute_export_surface`): roots are the declarations present in the
      binary's *observed* export table (ELF `.dynsym` / PE export directory /

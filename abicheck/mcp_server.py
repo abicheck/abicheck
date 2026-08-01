@@ -31,7 +31,7 @@ import logging
 import platform
 import sys
 import time as _time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -546,6 +546,91 @@ def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
 _stamp_explicit_scope_contract_evaluation = stamp_explicit_scope_contract_evaluation
 
 
+def _record_resolved_gate(
+    result: Any,
+    exit_code_scheme: str,
+    severity_config: SeverityConfig | None,
+    severity_stated: Mapping[str, bool] | None = None,
+) -> None:
+    """Replace the persisted context's placeholder gate with this tool's own.
+
+    Same defect and same fix as ``cli_compare_helpers._record_resolved_gate``,
+    in the sibling front end: ``checker.compare`` never sees the gate, so the
+    context it builds records a default :class:`GateConfig` -- the built-in
+    ``severity`` scheme and the built-in severity levels -- for every call,
+    including a default (``legacy``-scheme) one and one whose ``severity_*``
+    arguments genuinely moved a category (Codex review, fresh evidence).
+
+    A no-op unless ``contract_evaluation`` produced a context. Runs before the
+    report is rendered, so ``response["report"]["contract_context"]`` describes
+    the gate ``response["exit_code"]`` was actually computed under.
+    """
+    from .contract_evidence import PersistedContractContext
+
+    ctx = getattr(result, "contract_context", None)
+    if not isinstance(ctx, PersistedContractContext):
+        return
+    from .compatibility_evaluation_config import SelectedByEntry, ValueProvenance
+    from .contract_context import with_resolved_gate
+    from .contract_relevance_types import SelectorLayer
+    from .severity import SeverityConfig as _SeverityConfig
+
+    # A `--used-by`/`--required-symbol` scope reports its own `"scoped"`
+    # scheme, which is not one of the two resolved values `GateConfig`
+    # accepts; the underlying scheme it resolved from is recorded instead.
+    scheme = exit_code_scheme
+    if scheme == "scoped":
+        scheme = getattr(result, "scoped_exit_code_scheme", "legacy")
+    # This front end is a typed API caller, so a stated value is
+    # `API_REQUEST` (D7's peer of `EXPLICIT_CLI`) -- it cannot claim a CLI
+    # option was typed. No severity argument means the built-in default
+    # resolved the scheme too.
+    stated = severity_config is not None
+
+    def _provenance(field: str, *, from_caller: bool) -> ValueProvenance:
+        layer = (
+            SelectorLayer.API_REQUEST if from_caller else SelectorLayer.BUILT_IN_DEFAULT
+        )
+        return ValueProvenance(
+            layer=layer,
+            source_kind="api_argument" if from_caller else None,
+            reference="mcp.abi_compare" if from_caller else None,
+            field_location=field,
+            selected_by=(SelectedByEntry(layer=layer, option=field),),
+        )
+
+    result.contract_context = with_resolved_gate(
+        ctx,
+        exit_code_scheme=scheme,
+        severity=severity_config if severity_config is not None else _SeverityConfig(),
+        scheme_provenance=_provenance("exit_code_scheme", from_caller=stated),
+        # Per category, matching the canonical resolver's own
+        # `gate.severity.<category>` keys. Unlike the CLI's four independent
+        # flags, this front end takes one `SeverityConfig` object, so all
+        # four categories genuinely share one layer -- but they are still
+        # recorded separately, since the receipt's key set is the resolver's,
+        # not this caller's (Codex review).
+        # Per *argument*, not per call: `abi_compare` takes the four levels
+        # separately, so a caller passing only `severity_abi_breaking` left
+        # the other three at their built-in defaults -- recording all four as
+        # `API_REQUEST` named three inputs the caller never supplied (Codex
+        # review). A `severity_preset` counts for every category, since that
+        # is what it sets.
+        severity_provenance={
+            category: _provenance(
+                f"severity_{category}",
+                from_caller=bool((severity_stated or {}).get(category, stated)),
+            )
+            for category in (
+                "abi_breaking",
+                "potential_breaking",
+                "quality_issues",
+                "addition",
+            )
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
@@ -760,7 +845,14 @@ def abi_compare(
             ``UNKNOWN_UNPROVEN``/``UNKNOWN_UNRESOLVED``/``NOT_APPLICABLE``),
             ``contract_reason_code``, and — when resolved — ``contract_assurance``
             field, reflecting whether the finding falls inside the library's
-            declared public contract. This is advisory only: it never
+            declared public contract. Each finding also gains
+            ``contract_evidence_refs`` (which evidence records its decision
+            rests on), and — for ``output_format="json"`` only, since every
+            other format returns a rendered report *string* — the response's
+            ``report`` gains a ``contract_context`` block: the observed
+            provider evidence, the resolved evaluation context, and the
+            decision receipt, so a decision can be replayed or re-evaluated
+            later without re-reading the binaries. This is advisory only: it never
             changes ``verdict``, ``exit_code``, or which findings appear.
             Default False; the response is unchanged from today's shape
             unless this is set.
@@ -1171,6 +1263,20 @@ def abi_compare(
         # below, which serializes result.changes as-is.
         if contract_evaluation:
             stamp_scoped_result_findings(result, finding_id=_finding_id)
+            _record_resolved_gate(
+                result,
+                exit_code_scheme,
+                severity_config,
+                {
+                    category: severity_preset is not None or level is not None
+                    for category, level in (
+                        ("abi_breaking", severity_abi_breaking),
+                        ("potential_breaking", severity_potential_breaking),
+                        ("quality_issues", severity_quality_issues),
+                        ("addition", severity_addition),
+                    )
+                },
+            )
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):
@@ -1213,25 +1319,26 @@ def abi_compare(
             for c in scoped_only:
                 if _finding_id(c) not in existing_ids:
                     response["changes"].append(_mcp_change_entry(c, active_policy))
+            from .finding_identity import missing_contract_kind
             from .severity import missing_contract_exit_code
 
-            missing_kind = (
-                "used_by_missing_symbol"
-                if getattr(result, "gate_scope", None) == "used_by"
-                else "required_symbol_missing"
-            )
+            missing_kind = missing_contract_kind(getattr(result, "gate_scope", None))
             blocks = (
                 severity_config is None
                 or missing_contract_exit_code(severity_config) != 0
             )
             for label in getattr(result, "scoped_missing_labels", ()) or ():
+                from .finding_identity import missing_contract_finding
+
+                identity = missing_contract_finding(missing_kind, label)
                 missing_entry: dict[str, object] = {
                     "kind": missing_kind,
                     "symbol": label,
-                    "description": (
-                        f"Required symbol/version '{label}' is missing "
-                        "from the new library."
-                    ),
+                    "description": identity.description,
+                    # Same join key the CLI JSON fold emits, for the same
+                    # reason: the decision stamped below is keyed by it in
+                    # ADR-049's `decision_receipt` (Codex review).
+                    "finding_id": _finding_id(identity),
                     # A missing-contract label has no ChangeKind to run
                     # through _impact_category, but its severity is known
                     # (blocks_gate) -- reuse the same "breaking"/

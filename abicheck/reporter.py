@@ -272,6 +272,41 @@ def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
     }
 
 
+def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
+    """Attach ADR-049 Phase 4's persisted contract blocks to a JSON dict.
+
+    Emits ``contract_context`` -- the ``contract_evidence`` /
+    ``evaluation_context`` / ``decision_receipt`` sibling group (plan
+    Section 5.1) -- whenever ``compare(..., contract_evaluation=True)``
+    assembled one, and nothing at all otherwise (never a null placeholder).
+    Serialized through :mod:`abicheck.contract_context_io` rather than
+    hand-built here, so the block a report writes is byte-for-byte the one
+    :func:`~abicheck.contract_replay.replay_original_decisions` reads back --
+    a second, report-local encoding is exactly how a round-trip guarantee
+    stops holding.
+
+    Called from all three JSON paths (full, leaf, root-cause) for the same
+    reason ``_add_surface_scope``/``_add_reconciled`` are: each builds its own
+    dict, so a ledger added to only one of them silently disappears under
+    ``--report-mode``.
+    """
+    ctx = result.contract_context
+    if ctx is None:
+        return
+    from .contract_context_io import persisted_context_to_dict
+    from .contract_evidence import PersistedContractContext
+
+    # `DiffResult.contract_context` is typed `object` (its real type reaches
+    # `compatibility_evaluation_config` -> `checker_policy`, which every
+    # consumer of `DiffResult` would then import), so narrow it here rather
+    # than suppressing the argument type -- an `isinstance` check is also a
+    # real guard against a caller having stuffed something else into an
+    # untyped field (CodeRabbit review).
+    if not isinstance(ctx, PersistedContractContext):
+        return
+    d["contract_context"] = persisted_context_to_dict(ctx)
+
+
 def _to_json_leaf(
     result: DiffResult,
     indent: int = 2,
@@ -461,6 +496,7 @@ def _to_json_leaf(
         d["coverage_warnings"] = list(result.coverage_warnings)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
+    _add_contract_context(d, result)
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
@@ -638,6 +674,7 @@ def _to_json_root_cause(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
+    _add_contract_context(d, result)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -679,7 +716,9 @@ def _scope_dict(result: DiffResult) -> dict[str, object] | None:
         "manual_review_required": not result.scope_resolved,
         "public_additions": summary.compatible_additions,
         "filtered_internal_count": result.out_of_surface_count,
-        "filtered_internal_changes": [_filtered_internal_entry(c) for c in result.out_of_surface_changes],
+        "filtered_internal_changes": [
+            _filtered_internal_entry(c) for c in result.out_of_surface_changes
+        ],
     }
 
 
@@ -1013,6 +1052,7 @@ def to_json(
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
+    _add_contract_context(d, result)
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
     _add_policy_overrides(d, result)
@@ -1147,6 +1187,29 @@ def _add_contract_evaluation_fields(d: dict[str, object], c: object) -> None:
     contract_assurance = getattr(c, "contract_assurance", None)
     if contract_assurance is not None:
         d["contract_assurance"] = contract_assurance.value
+    # ADR-049 Phase 3's provider-evidence ledger: which `contract_evidence`
+    # provider records this decision rests on. Emitted even when empty --
+    # `[]` is the real answer for a non-entity finding (its relevance follows
+    # from the ChangeKind, consulting no provider), and omitting the key
+    # there would be indistinguishable from an unstamped finding.
+    contract_evidence_refs = getattr(c, "contract_evidence_refs", None)
+    if contract_evidence_refs is not None:
+        d["contract_evidence_refs"] = list(contract_evidence_refs)
+    # The audit-ledger serializers (`_out_of_surface_entry`,
+    # `_suppressed_change_entry`, `_add_reconciled`, `_filtered_internal_entry`)
+    # build their own compact dicts and never emitted `finding_id`, unlike an
+    # ordinary `changes` entry -- so a consumer could not join a demoted /
+    # suppressed / reconciled finding to its decision in `contract_context.
+    # decision_receipt`, which is keyed by exactly that id. Nor could it
+    # recompute one: those dicts also omit `old_value`/`new_value`, two of the
+    # id's own inputs (Codex review, fresh evidence). Emitted here rather than
+    # in each ledger so the key and the decision always travel together, and
+    # only when absent, so an ordinary entry keeps the id `_change_to_dict`
+    # already set.
+    if "finding_id" not in d:
+        from .finding_identity import report_finding_id
+
+        d["finding_id"] = report_finding_id(c)
 
 
 def _change_to_dict(

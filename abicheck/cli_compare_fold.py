@@ -241,13 +241,23 @@ def _fold_scoped_compat_into_text(
                 )
                 root_cause_entries.append((key, root_display, entry))
             for label in missing_labels:
+                from .finding_identity import (
+                    missing_contract_finding,
+                    report_finding_id,
+                )
+
+                identity = missing_contract_finding(missing_kind, label)
                 entry = {
                     "kind": missing_kind,
                     "symbol": label,
-                    "description": (
-                        f"Required symbol/version '{label}' is missing "
-                        "from the new library."
-                    ),
+                    "description": identity.description,
+                    # A missing-contract label has no backing Change, so this
+                    # entry never routed through `_change_to_dict` and carried
+                    # no id at all -- leaving the decision this same loop
+                    # stamps below unjoinable to ADR-049's own
+                    # `decision_receipt`, which is keyed by exactly this id
+                    # (Codex review, fresh evidence).
+                    "finding_id": report_finding_id(identity),
                     "old_value": None,
                     "new_value": None,
                     "severity": "breaking" if blocks else "compatible",
@@ -532,8 +542,14 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
     parts = [
         f"{field}={value}"
         for field in (
-            "symbol", "symbol_pattern", "type_pattern", "member_name",
-            "change_kind", "source_location", "namespace", "entity_namespace",
+            "symbol",
+            "symbol_pattern",
+            "type_pattern",
+            "member_name",
+            "change_kind",
+            "source_location",
+            "namespace",
+            "entity_namespace",
             "cause_namespace",
             # ADR-044 D2 reachability gates (Codex review, fresh evidence):
             # these affect which findings a rule matches exactly like the
@@ -543,7 +559,9 @@ def _suppression_rule_label(rule: Any, index: int) -> str:
             # render identically. allow_public_break/allow_unknown_reachability
             # default False, so they're omitted (same "if truthy" convention
             # as every other field here) unless a rule actually opted in.
-            "reachability", "allow_public_break", "allow_unknown_reachability",
+            "reachability",
+            "allow_public_break",
+            "allow_unknown_reachability",
         )
         if (value := getattr(rule, field, None))
     ]

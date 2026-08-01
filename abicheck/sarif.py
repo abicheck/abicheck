@@ -41,6 +41,7 @@ from abicheck.checker_policy import (
     impact_for,
     policy_for,
 )
+from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import _finding_id, apply_show_only
@@ -432,11 +433,7 @@ def _missing_contract_result(
     SARIF/code-scanning consumer flag/block a finding the gate itself passed
     (Codex review).
     """
-    rule_id = (
-        "used_by_missing_symbol"
-        if gate_scope == "used_by"
-        else "required_symbol_missing"
-    )
+    rule_id = missing_contract_kind(gate_scope)
     blocks = severity_config is None or missing_contract_exit_code(severity_config) != 0
     properties: dict[str, Any] = {
         "relevantToGate": True,
@@ -711,11 +708,7 @@ def to_sarif(
         )
         if not show_only_severities or missing_severity in show_only_severities:
             for label in getattr(result, "scoped_missing_labels", ()) or ():
-                rule_id = (
-                    "used_by_missing_symbol"
-                    if gate_scope == "used_by"
-                    else "required_symbol_missing"
-                )
+                rule_id = missing_contract_kind(gate_scope)
                 if rule_id not in rules_seen:
                     rules_seen[rule_id] = _missing_contract_rule(rule_id)
                 sarif_results.append(
