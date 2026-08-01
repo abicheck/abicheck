@@ -218,3 +218,52 @@ class TestPolicyFileOverride:
         )
         resolved = result.contract_context.evaluation_context.resolved_config
         assert resolved.policy.base.id == "sdk_vendor"
+
+
+class TestSeveritySelectorsNameApiFields:
+    """`abi_compare` takes `severity_preset`/`severity_*` as tool arguments,
+    never as CLI flags -- so a receipt naming `--severity-preset` describes an
+    input the caller could not have passed and a replay could not set (Codex
+    review). The resolver's own `spell()` helper exists for this; the severity
+    candidates were the two sites that bypassed it.
+    """
+
+    def test_a_stated_preset_names_the_tool_argument(self):
+        from abicheck.compatibility_evaluation_frontend import unstatable_selectors
+
+        config = resolve_tool_config(policy="strict_abi", severity_preset="strict")
+        hops = [hop.option for hop in config.provenance["gate.preset"].selected_by]
+        assert hops == ["severity_preset"]
+        assert unstatable_selectors(config) == []
+
+    @pytest.mark.parametrize(
+        "category", ["abi_breaking", "potential_breaking", "quality_issues", "addition"]
+    )
+    def test_a_stated_category_override_names_the_tool_argument(self, category):
+        from abicheck.compatibility_evaluation_frontend import unstatable_selectors
+
+        config = resolve_tool_config(
+            policy="strict_abi", **{f"severity_{category}": "error"}
+        )
+        prov = config.provenance[f"gate.severity.{category}"]
+        assert [hop.option for hop in prov.selected_by] == [f"severity_{category}"]
+        assert unstatable_selectors(config) == []
+
+    def test_the_compare_cli_still_names_its_own_flags(self):
+        """One-directional: the CLI receipt must keep naming a real flag."""
+        from abicheck.compatibility_evaluation_frontend import (
+            ExplicitCompatibilityInputs,
+            FrontEnd,
+            resolve_compatibility_evaluation_config,
+        )
+
+        config = resolve_compatibility_evaluation_config(
+            front_end=FrontEnd.CLI,
+            explicit=ExplicitCompatibilityInputs(
+                severity_preset="strict", severity_addition="error"
+            ),
+        )
+        preset = config.provenance["gate.preset"].selected_by
+        addition = config.provenance["gate.severity.addition"].selected_by
+        assert [hop.option for hop in preset] == ["--severity-preset"]
+        assert [hop.option for hop in addition] == ["--severity-addition"]

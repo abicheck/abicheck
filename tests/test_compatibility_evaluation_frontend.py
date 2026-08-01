@@ -61,6 +61,7 @@ from abicheck.compatibility_evaluation_frontend import (
     cross_front_end_differences,
     cross_front_end_equivalent,
     severity_preset_identity,
+    unstatable_selectors,
 )
 from abicheck.compatibility_evaluation_packs import PackKind
 from abicheck.compatibility_evaluation_resolver import (
@@ -1219,3 +1220,93 @@ class TestSymbolListParsing:
 
     def test_no_list_file_means_inline_symbols_only(self):
         assert collect_force_public_symbols(("a", "b"), None) == {"a", "b"}
+
+
+class TestUnstatableSelectors:
+    """The gate for "a receipt names an input its caller never had".
+
+    `cross_front_end_differences` structurally cannot catch this class:
+    `_normalized_provenance` drops option spellings on purpose, because the
+    same semantic input is legitimately spelled differently per front end.
+    That blindness is why the same bug was found three separate times by
+    review before this check existed.
+    """
+
+    def _api(self, **kwargs):
+        return _resolve(
+            front_end=FrontEnd.API, explicit=ExplicitCompatibilityInputs(**kwargs)
+        )
+
+    def test_a_clean_api_resolution_reports_nothing(self) -> None:
+        assert unstatable_selectors(self._api(policy_base="strict_abi")) == []
+
+    def test_every_api_statable_input_resolves_without_a_cli_spelling(self) -> None:
+        config = self._api(
+            policy_base="strict_abi",
+            scope_public_headers=False,
+            contract_mode="exports",
+            public_symbols=("foo",),
+            severity_preset="strict",
+            severity_abi_breaking="error",
+            severity_potential_breaking="warning",
+            severity_quality_issues="info",
+            severity_addition="error",
+        )
+        assert unstatable_selectors(config) == []
+
+    def test_a_cli_resolution_is_never_flagged(self) -> None:
+        """One-directional by design: a CLI hop naming a flag is correct, and
+        several CLI inputs genuinely have no flag at all."""
+        config = _resolve(
+            front_end=FrontEnd.CLI,
+            explicit=ExplicitCompatibilityInputs(
+                policy_base="strict_abi", severity_preset="strict"
+            ),
+        )
+        assert unstatable_selectors(config) == []
+
+    def test_an_api_hop_naming_a_flag_is_reported_with_its_field(self) -> None:
+        """The check has to actually fire -- built by hand, since no front end
+        can produce this shape any more."""
+        from dataclasses import replace
+
+        from abicheck.compatibility_evaluation_config import SelectedByEntry
+
+        config = self._api(policy_base="strict_abi")
+        prov = config.provenance["policy.base"]
+        broken = replace(
+            prov,
+            selected_by=(
+                SelectedByEntry(layer=SelectorLayer.API_REQUEST, option="--policy"),
+            ),
+        )
+        config = replace(config, provenance={**config.provenance, "policy.base": broken})
+        offenders = unstatable_selectors(config)
+        assert len(offenders) == 1
+        assert "policy.base" in offenders[0]
+        assert "'--policy'" in offenders[0]
+
+    def test_a_shadowed_legacy_candidate_is_checked_too(self) -> None:
+        """D7's `--policy`/`--policy-file` exception parks a suppressed
+        candidate's own provenance under `shadowed_legacy`; a replay reads it
+        the same way, so it cannot claim an unstatable input either."""
+        from dataclasses import replace
+
+        from abicheck.compatibility_evaluation_config import SelectedByEntry
+
+        config = self._api(policy_base="strict_abi")
+        prov = config.provenance["policy.base"]
+        shadowed = replace(
+            prov,
+            selected_by=(
+                SelectedByEntry(layer=SelectorLayer.API_REQUEST, option="--policy"),
+            ),
+        )
+        config = replace(
+            config,
+            provenance={
+                **config.provenance,
+                "policy.base": replace(prov, shadowed_legacy=shadowed),
+            },
+        )
+        assert len(unstatable_selectors(config)) == 1

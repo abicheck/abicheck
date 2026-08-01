@@ -1234,7 +1234,7 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 layer,
                 explicit_preset,
-                option="--severity-preset",
+                option=spell("--severity-preset", "severity_preset"),
                 source_kind="severity_preset",
                 reference=explicit.severity_preset,
                 version=explicit_preset.version,
@@ -1274,7 +1274,10 @@ def resolve_compatibility_evaluation_config(
                 _candidate(
                     layer,
                     SeverityLevel(stated),
-                    option=f"--severity-{category.replace('_', '-')}",
+                    option=spell(
+                        f"--severity-{category.replace('_', '-')}",
+                        f"severity_{category}",
+                    ),
                     source_kind="severity_override",
                 )
             )
@@ -1803,3 +1806,47 @@ def cross_front_end_equivalent(
 ) -> bool:
     """``True`` when :func:`cross_front_end_differences` finds nothing."""
     return not cross_front_end_differences(a, b)
+
+
+def unstatable_selectors(config: CompatibilityEvaluationConfig) -> list[str]:
+    """Every hop in *config* that names an input its own layer cannot state.
+
+    A receipt exists so a run's inputs can be identified and replayed, so a
+    hop claiming an input the caller never had is worse than a missing one:
+    it is confidently wrong. The failure has a single shape -- an
+    ``API_REQUEST`` hop labelled with a CLI flag, because a candidate was
+    built with a hard-coded ``"--flag"`` instead of going through ``spell()``
+    -- and it has now been found three separate times by review
+    (``--policy``/``--scope-public-headers`` on a ``ScanRequest``,
+    ``--severity-*`` on the MCP tool, and the original explicit-candidate
+    default that motivated ``spell()``).
+
+    :func:`cross_front_end_differences` structurally cannot catch it:
+    :func:`_normalized_provenance` drops option spellings *on purpose*, since
+    the same semantic input is legitimately spelled differently per front
+    end. That normalization is what makes the equality gate meaningful and
+    also what makes it blind here, so this is a separate check rather than a
+    stricter setting of that one.
+
+    Returns human-readable descriptions so a failure names the field and the
+    spelling, not merely that one exists. Deliberately one-directional: a CLI
+    hop carrying a bare field name is not an error, because several CLI
+    inputs (a project-config key, a composed scope) genuinely have no flag.
+    """
+    offenders: list[str] = []
+    for field_name in sorted(config.provenance):
+        prov = config.provenance[field_name]
+        chain = [
+            prov,
+            *([] if prov.shadowed_legacy is None else [prov.shadowed_legacy]),
+        ]
+        for entry in chain:
+            for hop in entry.selected_by:
+                if hop.layer is SelectorLayer.API_REQUEST and (
+                    hop.option or ""
+                ).startswith("--"):
+                    offenders.append(
+                        f"{field_name}: api_request hop names the CLI flag "
+                        f"{hop.option!r}, which no API caller can pass"
+                    )
+    return offenders

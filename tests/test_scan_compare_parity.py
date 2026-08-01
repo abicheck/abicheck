@@ -1312,3 +1312,60 @@ class TestServiceScanReceipt:
         old, new = mixed_pair
         result = run_scan(ScanRequest(binaries=[new], baseline=old))
         assert "contract_context" not in result.report["diff"]
+
+    def test_the_api_receipt_names_request_fields_not_cli_flags(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """A `ScanRequest` sets `policy`/`scope_to_public_surface` as typed
+        fields; recording them as `--policy`/`--scope-public-headers`
+        describes a command line nobody ran (Codex review)."""
+        from abicheck.compatibility_evaluation_frontend import unstatable_selectors
+        from abicheck.service_scan import ScanRequest, _scan_request_config
+
+        old, new = mixed_pair
+        config = _scan_request_config(
+            ScanRequest(binaries=[new], baseline=old, contract_evaluation=True)
+        )
+        assert unstatable_selectors(config) == []
+        hops = {
+            field: [hop.option for hop in prov.selected_by]
+            for field, prov in config.provenance.items()
+        }
+        assert "policy" in hops["policy.base"]
+        assert "scope_public" in hops["contract.mode"]
+
+    def test_the_api_receipt_records_the_api_request_layer(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """`contract.mode`, not `policy.base`: `--policy`/`policy` is D7's
+        legacy alias for the base and resolves at `legacy_alias` on every
+        front end, so it says nothing about which one stated it."""
+        from abicheck.compatibility_evaluation_config import SelectorLayer
+        from abicheck.service_scan import ScanRequest, _scan_request_config
+
+        old, new = mixed_pair
+        config = _scan_request_config(
+            ScanRequest(
+                binaries=[new],
+                baseline=old,
+                contract_evaluation=True,
+                contract_mode="exports",
+            )
+        )
+        prov = config.provenance["contract.mode"]
+        assert prov.layer is SelectorLayer.API_REQUEST
+        assert [hop.option for hop in prov.selected_by] == ["contract_mode"]
+
+    def test_the_cli_scan_still_names_its_own_flags(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """The default front end is unchanged: only `run_scan` opts into API
+        spellings, so the CLI receipt still names a replayable command."""
+        from abicheck.cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
+
+        params = dict.fromkeys(SCAN_CONFIG_PARAMS)
+        params["policy"] = "strict_abi"
+        params["public_symbols"] = ()
+        config = resolve_scan_config(params, typed={"policy"})
+        hops = [hop.option for hop in config.provenance["policy.base"].selected_by]
+        assert "--policy" in hops

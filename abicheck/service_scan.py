@@ -1080,10 +1080,18 @@ def _scan_request_config(req: ScanRequest) -> Any:
     dataclass default. The gate fields are blanked for the same reason the
     CLI blanks the project config's -- a scan's exit follows its verdict and
     never consults them.
+
+    Resolved at :attr:`FrontEnd.API`, so the receipt names the request's own
+    fields (``policy``, ``scope_public``) rather than the ``--policy``/
+    ``--scope-public-headers`` flags nobody typed -- the same rule the MCP
+    receipt follows, and one
+    :func:`~abicheck.compatibility_evaluation_frontend.unstatable_selectors`
+    now checks rather than leaving to review (Codex review).
     """
     if not req.contract_evaluation or req.baseline is None:
         return None
     from .cli_scan_receipt import resolve_scan_config
+    from .compatibility_evaluation_frontend import FrontEnd
 
     return resolve_scan_config(
         {
@@ -1098,6 +1106,7 @@ def _scan_request_config(req: ScanRequest) -> Any:
         typed={"policy", "scope_public_headers"},
         policy_file=req.policy_file,
         suppression=req.suppression,
+        front_end=FrontEnd.API,
     )
 
 

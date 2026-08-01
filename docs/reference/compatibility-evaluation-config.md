@@ -252,6 +252,23 @@ request — which is the accurate answer, not a missing claim: there is
 nothing for a caller to have chosen. (Contrast `CompareRequest.scope_public`,
 whose dataclass default *is* a caller's choice and is recorded as one.)
 
+The complement of that rule — a receipt must not name an input its front end
+*cannot* have — needs its own check, because the equality gate above
+deliberately normalizes option spellings away and so is blind to it:
+
+```python
+from abicheck.compatibility_evaluation_frontend import unstatable_selectors
+
+unstatable_selectors(api_config)   # [] when no hop names a flag nobody typed
+```
+
+It reports any `api_request` hop labelled with a CLI flag. That is the one
+shape this failure takes: a candidate built with a hard-coded `"--flag"`
+instead of going through the resolver's front-end-aware spelling. The check
+is one-directional — a CLI hop carrying a bare field name is fine, since
+several CLI inputs (a project-config key, a composed scope) genuinely have no
+flag.
+
 ## See also
 
 - [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md) — the normative decision

@@ -88,12 +88,22 @@ def resolve_scan_config(
     suppression: Any = None,
     suppress_path: Path | None = None,
     symbols_list: Any = None,
+    front_end: Any = None,
 ) -> Any:
     """Resolve one :class:`CompatibilityEvaluationConfig` for this scan.
 
     *params* is ``scan_cmd``'s own parameter mapping; *typed* names the
     parameters Click reports the user actually typed, which matters for the
     ones whose click default is indistinguishable from a stated value.
+
+    *front_end* defaults to the ``scan`` CLI. ``service_scan.run_scan``
+    passes :attr:`FrontEnd.API`, because a receipt may only name inputs its
+    caller really has: a ``ScanRequest`` sets ``policy`` and
+    ``scope_to_public_surface`` as typed fields, and recording those as
+    ``--policy``/``--scope-public-headers`` describes a command line nobody
+    ran, so the receipt could not identify the input that selected the
+    value (Codex review). Only the selector *spelling* and layer differ --
+    the normalization below is shared deliberately, see *params*.
 
     The normalization itself is :func:`compare_cli_inputs`, **reused rather
     than re-implemented**: ``scan``'s shared config surface deliberately uses
@@ -153,7 +163,7 @@ def resolve_scan_config(
             )
         )
     return resolve_compatibility_evaluation_config(
-        front_end=FrontEnd.CLI,
+        front_end=front_end if front_end is not None else FrontEnd.CLI,
         explicit=compare_cli_inputs(
             params,
             explicit_parameters=typed,
