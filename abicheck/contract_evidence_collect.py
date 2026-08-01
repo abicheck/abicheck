@@ -784,6 +784,7 @@ def public_header_evidence(
         # the record as a completed search.
         searched_scope=(("declarations", "types") if surf.resolvable else ()),
         identity_coverage=_identity_coverage(surf.ambiguous_type_names),
+        ambiguous_identities=tuple(sorted(surf.ambiguous_type_names)),
         # No variant source is declared anywhere in this build (no
         # ``--variant``/generated-header variant set exists yet), so the
         # configuration-coverage facet Section 4.2's closed-world rule
@@ -836,6 +837,7 @@ def export_table_evidence(
         requested_scope=("export_table",),
         searched_scope=("export_table",) if exports.resolvable else (),
         identity_coverage=_identity_coverage(exports.ambiguous_type_names),
+        ambiguous_identities=tuple(sorted(exports.ambiguous_type_names)),
         configuration_coverage=EvidenceCompleteness.NOT_STARTED,
         reason_code=reason,
         input_identity=InputIdentity(

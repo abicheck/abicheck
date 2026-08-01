@@ -318,7 +318,7 @@
       "properties": {
         "contract_evidence": {
           "type": "object",
-          "description": "Observed, policy-independent provider evidence: one entry per (provider, side) with its own EvidenceSearchRecord (status/completeness/identity coverage/requested-vs-searched scope/input digest), the declarations it rooted, any manifests it read, and the raw record/enum/typedef/declaration type graph. Independent of which contract mode was selected -- that is what makes it valid input to a later re-evaluation under a different one.",
+          "description": "Observed, policy-independent provider evidence: one entry per (provider, side) with its own EvidenceSearchRecord (status/completeness/identity coverage/the spellings it found ambiguous/requested-vs-searched scope/input digest), the declarations it rooted, any manifests it read, and the raw record/enum/typedef/declaration type graph. Independent of which contract mode was selected -- that is what makes it valid input to a later re-evaluation under a different one.",
           "required": ["providers", "schema_version", "identity_algorithm_version"],
           "additionalProperties": true,
           "properties": {

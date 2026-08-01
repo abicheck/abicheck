@@ -352,11 +352,12 @@ class TestEndToEndJsonReport:
         assert gate["severity"]["abi_breaking"] == "warning"
         prov = ctx["field_provenance"]
         assert prov["gate.severity.abi_breaking"]["layer"] == "explicit_cli"
-        # ...and only that category. The other three were not typed, so
-        # labelling them `explicit_cli` too would name an input that never
-        # existed (Codex review): with a severity flag in play at all, the
-        # remaining levels resolve from the project-config layer.
-        assert prov["gate.severity.addition"]["layer"] == "project_config"
+        # ...and only that category. The other three were not typed *and* no
+        # project config supplied them, so they are the built-in defaults --
+        # `severity_active` is run-wide ("set anywhere"), and using it per
+        # category named a `.abicheck.yml` that does not exist here (Codex
+        # review).
+        assert prov["gate.severity.addition"]["layer"] == "built_in_default"
 
     def test_explicit_exit_code_scheme_records_its_own_provenance(self, tmp_path):
         """A typed ``--exit-code-scheme`` is ``EXPLICIT_CLI``, not the

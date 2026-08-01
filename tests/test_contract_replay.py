@@ -864,6 +864,57 @@ class TestNodeIdentitySoundness:
         assert comparison.is_sound
         assert comparison.strengthened == ()
 
+    def test_duplicate_records_sharing_one_identity_stay_unresolved(self) -> None:
+        """One node in the graph, two entries in the live index.
+
+        ``_index_surface_types`` counts record *objects* per name, so two
+        ``Foo`` declarations make the spelling ambiguous live even though
+        they share a canonical identity and therefore one persisted node.
+        Re-deriving ambiguity from the graph could not see that collision at
+        all, which is why the provider now persists the set outright (Codex
+        review, fresh evidence).
+        """
+
+        def _snap(version: str, bits: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libdemo.so.1",
+                version=version,
+                functions=[
+                    Function(
+                        name="api",
+                        mangled="api",
+                        return_type="int",
+                        params=[Param(name="f", type="Foo *")],
+                        visibility=Visibility.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ],
+                types=[
+                    RecordType(
+                        name="Foo",
+                        kind="struct",
+                        size_bits=64,
+                        fields=[TypeField(name="x", type="int")],
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    ),
+                    RecordType(
+                        name="Foo",
+                        kind="struct",
+                        size_bits=bits,
+                        fields=[TypeField(name="y", type="int")],
+                        origin=ScopeOrigin.PRIVATE_HEADER,
+                    ),
+                ],
+            )
+
+        changes, comparison = self._replay(_snap("1", 64), _snap("2", 128), "public")
+        assert [c.contract_relevance for c in changes] == [
+            ContractRelevance.UNKNOWN_UNRESOLVED
+        ]
+        assert comparison.is_sound
+        assert comparison.strengthened == ()
+        assert comparison.agreed
+
     def test_an_ambiguous_type_spelling_is_not_resolved_either_way(self) -> None:
         """Which of two colliding records the finding is about is unknown.
 

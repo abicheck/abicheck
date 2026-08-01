@@ -454,6 +454,7 @@ def _record_to_dict(record: EvidenceSearchRecord) -> dict[str, Any]:
         "searched_scope": list(record.searched_scope),
         "identity_coverage": record.identity_coverage.value,
         "configuration_coverage": record.configuration_coverage.value,
+        "ambiguous_identities": list(record.ambiguous_identities),
     }
     for name in ("entity_class", "entity_scope", "domain_identity", "reason_code"):
         value = getattr(record, name)
@@ -490,6 +491,9 @@ def _record_from_dict(d: object) -> EvidenceSearchRecord:
         ),
         configuration_coverage=EvidenceCompleteness(
             m.get("configuration_coverage", EvidenceCompleteness.NOT_STARTED.value)
+        ),
+        ambiguous_identities=tuple(
+            _sequence(m.get("ambiguous_identities"), what="ambiguous_identities")
         ),
         reason_code=m.get("reason_code"),
         input_identity=(

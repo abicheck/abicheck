@@ -813,14 +813,15 @@ class TestAbiCompareResolvedGate:
         assert gate["exit_code_scheme"] == "severity"
         assert gate["severity"]["abi_breaking"] == "warning"
         assert provenance["gate.exit_code_scheme"]["layer"] == "api_request"
-        # Recorded per category, under the canonical resolver's own key set.
-        for category in (
-            "abi_breaking",
-            "potential_breaking",
-            "quality_issues",
-            "addition",
-        ):
-            assert provenance[f"gate.severity.{category}"]["layer"] == "api_request"
+        # Recorded per *argument*, under the canonical resolver's own key
+        # set: only `abi_breaking` was passed, so the other three levels came
+        # from the built-in defaults and must not name an API input the
+        # caller never supplied (Codex review).
+        assert provenance["gate.severity.abi_breaking"]["layer"] == "api_request"
+        for category in ("potential_breaking", "quality_issues", "addition"):
+            assert (
+                provenance[f"gate.severity.{category}"]["layer"] == "built_in_default"
+            )
 
 
 # ---------------------------------------------------------------------------

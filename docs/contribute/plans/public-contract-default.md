@@ -2707,6 +2707,36 @@ refreshes `contract.mode` when — and only when — the flag was really typed,
 so the `LEGACY_ALIAS` provenance `resolve_legacy_contract_mode` records for
 `--scope-public-headers` still survives untouched.
 
+**A fourteenth round replaced an inference with an observation.** Twice now
+the replay had re-derived "is this spelling ambiguous" from the persisted
+graph, and twice a case slipped through that the live evaluator's own
+`ambiguous_type_names` states outright — first a qualified candidate whose
+*tail* collides, then two records sharing one canonical identity, which are
+one node in the graph but two entries in `_index_surface_types`'s own count
+(it tallies record *objects* per name, not distinct identities — a detail an
+earlier docstring here got wrong, and the reason a graph-derived count can
+never be equivalent). The provider record now persists
+`ambiguous_identities` directly, and `_type_identity_is_ambiguous` answers
+both of `_confirmed_type_matches`'s clauses from that set. The inference
+helper is deleted. The general lesson, worth stating because it recurred:
+an observation the replay needs is cheaper to persist than to reconstruct,
+and a reconstruction that is *nearly* faithful reads exactly like a correct
+one until a reviewer finds the case it drops.
+
+Two provenance receipts were also naming inputs that did not exist. The CLI
+derived every category's severity layer from `ResolvedCompareConfig.
+severity_active`, which is deliberately run-wide ("a level was set
+*anywhere*") — so a run whose only input was `--severity-abi-breaking`, with
+no `.abicheck.yml` at all, recorded the other three categories as
+`PROJECT_CONFIG`. `BuildConfig` carries the four levels separately, so the
+honest per-field answer was already available. The MCP tool had the same
+shape one layer over: `severity_config is not None` marked all four
+`API_REQUEST` when the caller had supplied one. Both now record per
+category. Notably, *both* were pinned by tests written in the immediately
+preceding round — the tests asserted the wrong behaviour as intended, which
+is the failure mode a test written from the implementation rather than from
+the contract always has.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

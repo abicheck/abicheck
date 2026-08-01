@@ -31,7 +31,7 @@ import logging
 import platform
 import sys
 import time as _time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -547,7 +547,10 @@ _stamp_explicit_scope_contract_evaluation = stamp_explicit_scope_contract_evalua
 
 
 def _record_resolved_gate(
-    result: Any, exit_code_scheme: str, severity_config: SeverityConfig | None
+    result: Any,
+    exit_code_scheme: str,
+    severity_config: SeverityConfig | None,
+    severity_stated: Mapping[str, bool] | None = None,
 ) -> None:
     """Replace the persisted context's placeholder gate with this tool's own.
 
@@ -583,13 +586,15 @@ def _record_resolved_gate(
     # option was typed. No severity argument means the built-in default
     # resolved the scheme too.
     stated = severity_config is not None
-    layer = SelectorLayer.API_REQUEST if stated else SelectorLayer.BUILT_IN_DEFAULT
 
-    def _provenance(field: str) -> ValueProvenance:
+    def _provenance(field: str, *, from_caller: bool) -> ValueProvenance:
+        layer = (
+            SelectorLayer.API_REQUEST if from_caller else SelectorLayer.BUILT_IN_DEFAULT
+        )
         return ValueProvenance(
             layer=layer,
-            source_kind="api_argument" if stated else None,
-            reference="mcp.abi_compare" if stated else None,
+            source_kind="api_argument" if from_caller else None,
+            reference="mcp.abi_compare" if from_caller else None,
             field_location=field,
             selected_by=(SelectedByEntry(layer=layer, option=field),),
         )
@@ -598,15 +603,24 @@ def _record_resolved_gate(
         ctx,
         exit_code_scheme=scheme,
         severity=severity_config if severity_config is not None else _SeverityConfig(),
-        scheme_provenance=_provenance("exit_code_scheme"),
+        scheme_provenance=_provenance("exit_code_scheme", from_caller=stated),
         # Per category, matching the canonical resolver's own
         # `gate.severity.<category>` keys. Unlike the CLI's four independent
         # flags, this front end takes one `SeverityConfig` object, so all
         # four categories genuinely share one layer -- but they are still
         # recorded separately, since the receipt's key set is the resolver's,
         # not this caller's (Codex review).
+        # Per *argument*, not per call: `abi_compare` takes the four levels
+        # separately, so a caller passing only `severity_abi_breaking` left
+        # the other three at their built-in defaults -- recording all four as
+        # `API_REQUEST` named three inputs the caller never supplied (Codex
+        # review). A `severity_preset` counts for every category, since that
+        # is what it sets.
         severity_provenance={
-            category: _provenance(f"severity_{category}")
+            category: _provenance(
+                f"severity_{category}",
+                from_caller=bool((severity_stated or {}).get(category, stated)),
+            )
             for category in (
                 "abi_breaking",
                 "potential_breaking",
@@ -1249,7 +1263,20 @@ def abi_compare(
         # below, which serializes result.changes as-is.
         if contract_evaluation:
             stamp_scoped_result_findings(result, finding_id=_finding_id)
-            _record_resolved_gate(result, exit_code_scheme, severity_config)
+            _record_resolved_gate(
+                result,
+                exit_code_scheme,
+                severity_config,
+                {
+                    category: severity_preset is not None or level is not None
+                    for category, level in (
+                        ("abi_breaking", severity_abi_breaking),
+                        ("potential_breaking", severity_potential_breaking),
+                        ("quality_issues", severity_quality_issues),
+                        ("addition", severity_addition),
+                    )
+                },
+            )
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):

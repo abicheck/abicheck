@@ -285,6 +285,16 @@ class EvidenceSearchRecord:
     searched_scope: tuple[str, ...] = ()
     identity_coverage: EvidenceCompleteness = EvidenceCompleteness.NOT_STARTED
     configuration_coverage: EvidenceCompleteness = EvidenceCompleteness.NOT_STARTED
+    #: The spellings whose identity is ambiguous -- ``PublicSurface``/
+    #: ``ExportSurface``'s own ``ambiguous_type_names``, persisted rather
+    #: than summarized away. ``identity_coverage`` says *whether* this
+    #: search had an ambiguity; a consumer deciding one finding needs to
+    #: know *which* spelling, since live rejects a type match on exactly
+    #: that set (``_confirmed_type_matches``). Recomputing it from the
+    #: persisted graph is not equivalent: two records sharing one identity
+    #: are one node there but two entries live, so the collision is
+    #: invisible downstream (Codex review, fresh evidence).
+    ambiguous_identities: tuple[str, ...] = ()
     reason_code: str | None = None
     input_identity: InputIdentity | None = None
 

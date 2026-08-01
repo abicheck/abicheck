@@ -146,25 +146,6 @@ def _symbol_may_name_a_declaration(change: Change) -> bool:
     return _is_mangled_identity(change.symbol or "")
 
 
-def _ambiguous_type_resolution(nodes: set[str]) -> bool:
-    """Whether a spelling landed on more than one distinct *type* node.
-
-    The persisted counterpart of ``PublicSurface.ambiguous_type_names``, read
-    off the graph instead of carried beside it: two records answering to one
-    spelling *are* two nodes now that each is keyed by its own identity
-    (``contract_evidence_collect._type_identity``), so the collision is
-    visible in the resolution itself and needs no extra persisted field.
-
-    ``_confirmed_type_matches`` is what this mirrors: live, a candidate that
-    matched only ambiguously "proves nothing in either direction -- which of
-    the colliding records the finding is really about decides its membership,
-    and that is exactly what is unknown". Two entries with the *same*
-    identity (an ODR/incomplete duplicate) share one node and are therefore
-    not ambiguous, which is the same call ``export_surface`` makes.
-    """
-    return len({n for n in nodes if n.startswith(_TYPE_NODE_KINDS)}) > 1
-
-
 def _type_identity_is_ambiguous(
     domain: _PersistedDomain, side: str, spelling: str
 ) -> bool:
@@ -178,18 +159,21 @@ def _type_identity_is_ambiguous(
     *it*, rather than its ambiguous sibling, is what the signature actually
     reached.
 
-    That second clause is the one a per-lookup node count alone misses: with
-    a global ``Foo`` and a namespaced ``ns::Foo``, a finding on ``ns::Foo``
-    resolves to exactly one node, yet an exported signature spelling the bare
-    ``Foo`` linked *both*, so the closure hit proves nothing (Codex review,
-    fresh evidence, confirmed with a minimal snapshot).
+    Both are answered from the provider's own persisted
+    ``ambiguous_identities`` -- the same set live consults -- rather than
+    re-derived from the graph. Two earlier attempts inferred it from the
+    resolution instead, and each missed a case the set states outright: a
+    qualified candidate whose *tail* collides, and then two records sharing
+    one canonical identity, which are one node in the graph but two entries
+    in ``_index_surface_types``'s own count (Codex review, twice). An
+    observation this module needs is cheaper to persist than to reconstruct.
     """
-    if _ambiguous_type_resolution(domain.resolve(side, spelling)):
-        return True
-    if "::" not in spelling:
+    ambiguous = domain.ambiguous_identities(side)
+    if not ambiguous:
         return False
-    tail = spelling.rsplit("::", 1)[1]
-    return _ambiguous_type_resolution(domain.resolve(side, tail))
+    if spelling in ambiguous:
+        return True
+    return "::" in spelling and spelling.rsplit("::", 1)[1] in ambiguous
 
 
 def _entity_lookups(
@@ -385,6 +369,21 @@ class _PersistedDomain:
         """
         record = self.record_by_side.get(side)
         return record is not None and record.status is EvidenceProviderStatus.AVAILABLE
+
+    def ambiguous_identities(self, side: str) -> frozenset[str]:
+        """The spellings this side's provider recorded as ambiguous.
+
+        Taken from the domain's own root provider, falling back to the
+        header record -- ``all`` has no root provider (ADR-049 D2) but its
+        findings are still placed against the declaration parse, which is
+        the search that observed the collision.
+        """
+        record = self.record_by_side.get(side) or self.header_record_by_side.get(side)
+        return (
+            frozenset(record.ambiguous_identities)
+            if record is not None
+            else frozenset()
+        )
 
     def domain_is_closed(self, side: str) -> bool:
         """Whether this side's root provider searched its domain completely.
