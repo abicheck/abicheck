@@ -883,6 +883,15 @@ def to_junit_xml_multi(
         root.append(ts)
         total_tests += int(ts.get("tests", "0"))
         total_failures += int(ts.get("failures", "0"))
+        # Per result, not once for the document: each library carries its own
+        # contract context, so a multi-library run can have one uncheckable
+        # comparison beside several closed ones. Wiring only the single-result
+        # renderer left a multi-result document reporting errors="0" with no
+        # coverage suite at all, so a consumer could read an uncheckable
+        # comparison as having no coverage errors (Codex review).
+        coverage_errors = _append_coverage_suite(root, result)
+        total_tests += coverage_errors
+        total_errors += coverage_errors
 
     for entry in error_libraries or []:
         ts = _build_error_testsuite(

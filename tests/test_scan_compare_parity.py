@@ -1262,3 +1262,53 @@ class TestScanResolvesTheSameTypedConfig:
         diff = json.loads(out.read_text(encoding="utf-8"))["diff"]
         assert "contract_context" not in diff
         assert "contract_coverage_failures" not in diff
+
+
+class TestServiceScanReceipt:
+    """The Python API path resolves a config too (Codex review).
+
+    `run_scan` was left behind when the CLI was wired: its persisted context
+    kept `GateConfig`'s defaults, so the receipt claimed the `severity`
+    scheme while `run_scan` computed its 0/2/4 exit straight from the
+    compatibility verdict.
+    """
+
+    def _result(self, old: Path, new: Path, **kwargs):
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        return run_scan(
+            ScanRequest(
+                binaries=[new], baseline=old, contract_evaluation=True, **kwargs
+            )
+        )
+
+    def test_the_api_receipt_does_not_claim_a_gate_it_never_used(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        old, new = mixed_pair
+        result = self._result(old, new)
+        ctx = result.report["diff"]["contract_context"]
+        gate = ctx["evaluation_context"]["resolved_config"]["gate"]
+        # A scan's exit follows its verdict; nothing selected a severity gate.
+        assert gate["exit_code_scheme"] == "legacy"
+        assert result.exit_code == 4
+
+    def test_a_request_field_is_read_as_stated(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """A typed request has no "unset", so a caller constructing one chose
+        those values -- the same rule `compare_request_inputs` follows."""
+        old, new = mixed_pair
+        result = self._result(old, new, contract_mode="exports")
+        ctx = result.report["diff"]["contract_context"]
+        config = ctx["evaluation_context"]["resolved_config"]
+        assert config["contract"]["mode"] == "exports"
+
+    def test_no_config_is_resolved_without_contract_evaluation(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        old, new = mixed_pair
+        result = run_scan(ScanRequest(binaries=[new], baseline=old))
+        assert "contract_context" not in result.report["diff"]

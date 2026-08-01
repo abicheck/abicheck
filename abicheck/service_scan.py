@@ -1062,6 +1062,45 @@ def _reject_comparison_only_fields(req: ScanRequest) -> None:
         )
 
 
+def _scan_request_config(req: ScanRequest) -> Any:
+    """This request's resolved configuration, or ``None`` when unused.
+
+    The API counterpart of ``cli_scan``'s own resolution. Without it a
+    ``run_scan(ScanRequest(..., contract_evaluation=True))`` persisted the
+    context ``checker.compare`` reconstructs from its arguments -- which
+    keeps :class:`GateConfig`'s defaults, so the receipt claimed the
+    ``severity`` scheme while ``run_scan`` computed its 0/2/4 exit straight
+    from the compatibility verdict (Codex review). The CLI was wired first
+    and this path was left behind.
+
+    Every field is read as *stated*, matching
+    :func:`~abicheck.compatibility_evaluation_frontend.compare_request_inputs`:
+    a typed request has no "unset" representation, so a caller constructing
+    one chose those values whether deliberately or by accepting the
+    dataclass default. The gate fields are blanked for the same reason the
+    CLI blanks the project config's -- a scan's exit follows its verdict and
+    never consults them.
+    """
+    if not req.contract_evaluation or req.baseline is None:
+        return None
+    from .cli_scan_receipt import resolve_scan_config
+
+    return resolve_scan_config(
+        {
+            "policy": req.policy,
+            "policy_file_path": None,
+            "suppress": None,
+            "scope_public_headers": req.scope_to_public_surface,
+            "public_symbols": tuple(sorted(req.force_public_symbols or ())),
+            "public_symbols_list": None,
+            "contract_mode": req.contract_mode,
+        },
+        typed={"policy", "scope_public_headers"},
+        policy_file=req.policy_file,
+        suppression=req.suppression,
+    )
+
+
 def run_scan(req: ScanRequest) -> ScanResult:
     """Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
 
@@ -1225,6 +1264,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             collapse_versioned_symbols=req.collapse_versioned_symbols,
             contract_evaluation=req.contract_evaluation,
             contract_mode=req.contract_mode,
+            resolved_config=_scan_request_config(req),
             abi3_floor=req.abi3_floor,
         )
     except _BudgetOverflow:

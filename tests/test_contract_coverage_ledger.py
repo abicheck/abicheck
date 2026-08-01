@@ -458,3 +458,119 @@ def to_junit_xml_of(result):
     from abicheck.junit_report import to_junit_xml
 
     return to_junit_xml(result)
+
+
+class TestGuardsAndEdges:
+    """The defensive paths a happy-path run never reaches.
+
+    Each is a real state, not a hypothetical: a search that never started, a
+    context missing one of the two inputs the derivation needs, and a
+    suppression object that answers the matcher call at all.
+    """
+
+    def test_a_search_that_never_started_is_its_own_reason(self) -> None:
+        """Distinct from `search_incomplete`: "we did not look" and "we
+        looked and did not finish" need different fixes."""
+        block = _block(
+            _record(
+                "public_header",
+                "old",
+                completeness=EvidenceCompleteness.NOT_STARTED,
+            )
+        )
+        (failure,) = coverage_failures(block, ContractMode.PUBLIC)
+        assert failure.reason == "search_not_started"
+
+    def test_a_context_without_a_resolved_mode_derives_nothing(self) -> None:
+        """Both inputs are required. A context carrying evidence but no
+        selected domain cannot be answered *for* a domain, and guessing one
+        would invent the policy the derivation exists to read."""
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(
+            contract_evidence=_block(_record("export_table", "old")),
+            evaluation_context=SimpleNamespace(
+                resolved_config=SimpleNamespace(contract=SimpleNamespace(mode=None))
+            ),
+        )
+        assert coverage_failures_for_context(ctx) == ()
+
+    def test_a_context_without_evidence_derives_nothing(self) -> None:
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(
+            contract_evidence=None,
+            evaluation_context=SimpleNamespace(
+                resolved_config=SimpleNamespace(
+                    contract=SimpleNamespace(mode=ContractMode.EXPORTS)
+                )
+            ),
+        )
+        assert coverage_failures_for_context(ctx) == ()
+
+    def test_a_suppression_without_the_predicate_reaches_nothing(self) -> None:
+        """A duck-typed object that is not a `SuppressionList` has no
+        `is_suppressed`; that is "nothing matched", not an error."""
+
+        class _NotASuppressionList:
+            pass
+
+        block = _block(
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED)
+        )
+        (failure,) = coverage_failures(block, ContractMode.EXPORTS)
+        assert (
+            suppression_reaches_coverage_failures([failure], _NotASuppressionList())
+            == ()
+        )
+
+    def test_a_matcher_that_answers_true_would_be_reported(self) -> None:
+        """The proof function must be capable of reporting a hit, or its
+        empty answer everywhere else would prove nothing. A deliberately
+        indiscriminate matcher is the only way to reach that branch --
+        `SuppressionList.is_suppressed` itself cannot, which is the point.
+        """
+        block = _block(
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED)
+        )
+        (failure,) = coverage_failures(block, ContractMode.EXPORTS)
+
+        class _SaysYesToAnything:
+            def is_suppressed(self, _change) -> bool:
+                return True
+
+        assert suppression_reaches_coverage_failures(
+            [failure], _SaysYesToAnything()
+        ) == ("old:export_table",)
+
+
+def test_junit_multi_result_documents_carry_the_coverage_suite() -> None:
+    """`to_junit_xml_multi` renders one document for several libraries, and
+    each carries its own contract context — so a run can have one uncheckable
+    comparison beside several closed ones. Wiring only the single-result
+    renderer left the multi document reporting `errors="0"` with no coverage
+    suite, letting a consumer read an uncheckable comparison as clean (Codex
+    review).
+    """
+    import xml.etree.ElementTree as ET
+
+    from abicheck.junit_report import to_junit_xml_multi
+
+    old, new = _pair_without_export_table()
+    result = compare(
+        old,
+        new,
+        scope_to_public_surface=True,
+        contract_evaluation=True,
+        contract_mode="exports",
+    )
+    root = ET.fromstring(to_junit_xml_multi([(result, old)]))
+    suites = [
+        s
+        for s in root.findall("testsuite")
+        if s.get("name") == "abicheck.contract_coverage"
+    ]
+    assert len(suites) == 1
+    assert suites[0].get("errors") == "2"
+    # And the document totals see them, not just the nested suite.
+    assert int(root.get("errors")) >= 2
