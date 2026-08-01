@@ -101,8 +101,16 @@ def contract_options(f: F) -> F:
 
 
 def pack_option(f: F) -> F:
-    """Attach the repeatable ``--pack`` manifest selector."""
-    return click.option(
+    """Attach the repeatable ``--pack`` manifest selector.
+
+    Assigns then returns, rather than returning the decorator call directly,
+    for the same reason every other decorator in ``cli_options`` does: the
+    ``ai-readiness`` CI job installs *only* mypy, so ``click`` is unresolved
+    there and a direct return is ``Any`` -> ``no-any-return``. A local run
+    with the package installed never sees it, which is exactly how it slipped
+    through. Rebinding the parameter keeps the declared ``F``.
+    """
+    f = click.option(
         "--pack",
         "pack_paths",
         multiple=True,
@@ -114,3 +122,4 @@ def pack_option(f: F) -> F:
         "values to the same field or ChangeKind is a usage error unless an "
         "explicit flag resolves it.",
     )(f)
+    return f
