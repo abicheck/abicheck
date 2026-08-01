@@ -440,17 +440,27 @@ def _export_table_declarations(snap: AbiSnapshot, exports: ExportSurface) -> lis
 
     Derived by asking which declarations
     :func:`~abicheck.export_surface.compute_export_surface` actually matched --
-    via its own ``export_symbols`` alias set, the one place that answer lives
-    -- rather than re-implementing the platform-specific underscore/mangling
+    via its own ``root_identities`` set, the one place that answer lives --
+    rather than re-implementing the platform-specific underscore/mangling
     normalization that produced it.
+
+    Keyed by *linker identity*, never by intersecting the alias-expanded
+    ``export_symbols``: a binary exporting the C symbol ``foo`` alongside an
+    unexported ``ns::foo`` puts the bare tail ``"foo"`` in both declarations'
+    alias sets, so an intersection persists the unexported C++ declaration as
+    an export root and a re-evaluation then reports it in a contract it is
+    provably out of (Codex review, fresh evidence -- the identical trap
+    ``export_surface._unresolved_type_edges`` already documents avoiding).
     """
     out: list[str] = []
     for fn in snap.functions:
-        if _symbol_keys(fn.name, fn.mangled) & exports.export_symbols:
-            out.append(_decl_node(_canonical_decl_key(fn.name, fn.mangled)))
+        identity = _canonical_decl_key(fn.name, fn.mangled)
+        if identity and identity in exports.root_identities:
+            out.append(_decl_node(identity))
     for var in snap.variables:
-        if _symbol_keys(var.name, var.mangled) & exports.export_symbols:
-            out.append(_decl_node(_canonical_decl_key(var.name, var.mangled)))
+        identity = _canonical_decl_key(var.name, var.mangled)
+        if identity and identity in exports.root_identities:
+            out.append(_decl_node(identity))
     return out
 
 

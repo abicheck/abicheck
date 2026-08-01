@@ -79,6 +79,7 @@ from .contract_evidence_collect import (
     PROVIDER_PUBLIC_HEADER,
     closure_from_graph,
     content_digest,
+    graph_node_index,
 )
 from .contract_relevance_types import (
     ContractMode,
@@ -292,6 +293,26 @@ class PersistedDomainView:
     closure_by_side: dict[str, frozenset[str]]
 
 
+def _resolved_overlay_roots(
+    graph: TypeGraphSnapshot, spellings: Iterable[str]
+) -> set[str]:
+    """Canonical node ids the overlay *spellings* name in *graph*.
+
+    Built through :func:`~abicheck.contract_evidence_collect.graph_node_index`
+    so an overlay entry resolves by exactly the rule a finding's own spelling
+    does -- a second lookup convention here would let an overlay root land in
+    the closure that a finding naming the same entity could never reach.
+    """
+    spellings = tuple(spellings)
+    if not spellings:
+        return set()
+    index = graph_node_index(graph)
+    out: set[str] = set()
+    for spelling in spellings:
+        out |= index.get(spelling, set())
+    return out
+
+
 def persisted_domain_view(
     evidence: ContractEvidenceBlock, mode: ContractMode
 ) -> PersistedDomainView:
@@ -300,6 +321,16 @@ def persisted_domain_view(
     The closure is walked over each side's own persisted type graph from that
     side's own roots -- never across sides, which would let an old-side root
     reach a new-side type that no old-side signature references.
+
+    An explicit overlay (``--public-symbol``/``--post-manifest``) contributes
+    roots to the ``public`` domain, exactly as ADR-049 D2 says ("roots
+    selected by explicit overlays"). Without folding them in here, an entity
+    the live run kept *because* the user named it re-evaluated to
+    ``UNKNOWN_UNRESOLVED`` even though the overlay's own evidence entry sits
+    in the same block (Codex review, fresh evidence). The overlay's manifest
+    holds spellings, not node ids, so each is resolved through the persisted
+    graph the same way a finding's own spelling is; one naming nothing the
+    graph knows contributes no root rather than a guess.
     """
     mode = coerce_contract_mode(mode)
     provider = DOMAIN_ROOT_PROVIDER[mode]
@@ -307,6 +338,7 @@ def persisted_domain_view(
     graph_by_side: dict[str, TypeGraphSnapshot] = {}
     root_record_by_side: dict[str, EvidenceSearchRecord] = {}
     header_record_by_side: dict[str, EvidenceSearchRecord] = {}
+    overlay_spellings: set[str] = set()
     for entry in evidence.providers:
         side = entry.record.side
         if provider is not None and entry.record.provider == provider:
@@ -315,6 +347,12 @@ def persisted_domain_view(
         if entry.record.provider == PROVIDER_PUBLIC_HEADER:
             graph_by_side[side] = entry.type_graph
             header_record_by_side[side] = entry.record
+        if mode is ContractMode.PUBLIC and entry.record.provider in _OVERLAY_PROVIDERS:
+            overlay_spellings.update(entry.manifests)
+    for side, graph in graph_by_side.items():
+        extra = _resolved_overlay_roots(graph, overlay_spellings)
+        if extra:
+            roots_by_side.setdefault(side, set()).update(extra)
     closure_by_side = {
         side: closure_from_graph(graph, roots_by_side.get(side, set()))
         for side, graph in graph_by_side.items()

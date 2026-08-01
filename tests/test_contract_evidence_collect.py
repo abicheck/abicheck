@@ -311,6 +311,43 @@ class TestProviderLedger:
         assert entry.manifests == ("elf",)
         assert entry.record.domain_kind == "exports"
 
+    def test_export_roots_are_matched_by_linker_identity(self) -> None:
+        """An unexported ``ns::foo`` is not rooted by an exported C ``foo``.
+
+        ``_symbol_keys`` gives the C++ declaration the bare tail ``"foo"``,
+        which the exported C symbol also owns, so intersecting the
+        alias-expanded ``export_symbols`` persisted both as export roots --
+        and a re-evaluation then placed the unexported one inside a contract
+        it is provably out of (Codex review, fresh evidence).
+        """
+        elf = ElfMetadata(symbols=[ElfSymbol(name="foo")])
+        cxx = Function(
+            name="ns::foo",
+            mangled="_ZN2ns3fooEv",
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+        snap = _snap(
+            functions=[_public_fn("foo", ret="int"), cxx],
+            elf=elf,
+        )
+        exports = compute_export_surface(snap)
+        block = collect_contract_evidence(
+            snap,
+            snap,
+            compute_public_surface(snap),
+            compute_public_surface(snap),
+            exports_old=exports,
+            exports_new=exports,
+        )
+        entry = next(
+            e
+            for e in block.providers
+            if e.record.provider == PROVIDER_EXPORT_TABLE and e.record.side == "old"
+        )
+        assert entry.declarations == ("decl:foo",)
+
     def test_export_provider_reports_which_guard_failed(self) -> None:
         """An export no declaration accounts for is reported by name.
 

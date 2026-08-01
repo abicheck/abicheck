@@ -210,6 +210,67 @@ class TestReevaluateFromEvidence:
         assert decision.reason_code == "public_root_membership"
         assert decision.evidence_refs == ("public_header:old",)
 
+    def test_forced_public_overlay_roots_survive_reevaluation(self) -> None:
+        """An overlay-selected root is a ``public``-domain root on replay too.
+
+        ADR-049 D2 counts "roots selected by explicit overlays" in the
+        ``public`` domain. Reading only the ``public_header`` provider made an
+        entity the live run kept *because* the user named it re-evaluate to
+        ``UNKNOWN_UNRESOLVED``, even though the overlay's own evidence entry
+        sits in the same block (Codex review, fresh evidence).
+        """
+        hidden = Function(
+            name="hidden",
+            mangled="hidden",
+            return_type="Secret *",
+            visibility=Visibility.HIDDEN,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+        )
+        secret = RecordType(name="Secret", kind="struct", fields=[])
+        snap = AbiSnapshot(
+            library="libdemo.so.1", version="1", functions=[hidden], types=[secret]
+        )
+        surf = compute_public_surface(snap)
+        block = collect_contract_evidence(
+            snap, snap, surf, surf, force_public_symbols={"hidden"}
+        )
+        roots = domain_roots(block, ContractMode.PUBLIC)
+        assert "decl:hidden" in roots
+        # ...and the overlay root's own closure comes with it, so a finding on
+        # a type only that root reaches resolves instead of going unknown.
+        receipt = build_decision_receipt(block, ContractMode.PUBLIC)
+        assert "record:Secret" in receipt.evaluated_type_closure
+
+    def test_overlay_roots_do_not_leak_into_the_exports_domain(self) -> None:
+        """Only ``public`` counts overlay-selected roots (ADR-049 D2).
+
+        ``exports``' roots are the observed export table, and nothing else --
+        an assertion by the user is not an observation of the binary.
+        """
+        hidden = Function(
+            name="hidden",
+            mangled="hidden",
+            return_type="int",
+            visibility=Visibility.HIDDEN,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+        )
+        elf = ElfMetadata(symbols=[ElfSymbol(name="other")])
+        snap = AbiSnapshot(
+            library="libdemo.so.1", version="1", functions=[hidden], elf=elf
+        )
+        surf = compute_public_surface(snap)
+        exports = compute_export_surface(snap)
+        block = collect_contract_evidence(
+            snap,
+            snap,
+            surf,
+            surf,
+            exports_old=exports,
+            exports_new=exports,
+            force_public_symbols={"hidden"},
+        )
+        assert "decl:hidden" not in domain_roots(block, ContractMode.EXPORTS)
+
     def test_a_different_mode_needs_no_new_evidence(self) -> None:
         """The whole point of a policy-independent block.
 

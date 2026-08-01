@@ -2388,7 +2388,28 @@ source node was absent from `nodes`, where `resolve_graph_node` does not; the
 two are documented to agree by construction, so the index now applies the
 same guard.
 
-One finding from that round was **not** taken: replacing
+**A fourth round found two more, both fixed.** (1) The persisted export roots
+were derived by intersecting each declaration's alias-expanded symbol keys
+with `ExportSurface.export_symbols` — the exact trap
+`export_surface._unresolved_type_edges` already documents avoiding. A binary
+exporting the C symbol `foo` alongside an unexported `ns::foo` puts the bare
+tail `"foo"` in both declarations' key sets, so the unexported C++
+declaration was persisted as an export root and re-evaluated into a contract
+it is provably out of. `ExportSurface` now carries the `root_identities` set
+its own seeding already computed, and the collector matches on *linker
+identity* against it. (2) `public`-domain reconstruction read only the
+`public_header` provider, so an entity kept by an explicit overlay
+(`--public-symbol`, `--post-manifest`) re-evaluated to `UNKNOWN_UNRESOLVED`
+even with the overlay's own evidence entry sitting in the same block.
+`persisted_domain_view` now folds overlay manifests into the `public`
+domain's roots, as ADR-049 D2 prescribes ("roots selected by explicit
+overlays") — resolved through the same `graph_node_index` a finding's own
+spelling uses, so an overlay entry naming nothing the graph knows contributes
+no root rather than a guess. Deliberately `public`-only: `exports`' roots are
+the observed table, and a user's assertion is not an observation of the
+binary.
+
+One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal
 `\x1f` (ASCII unit separator) inside a kind slug, symbol, value, source
