@@ -30,6 +30,7 @@ from abicheck.contract_context import (
     build_persisted_context,
     domain_roots,
     finding_key,
+    relevance_map,
 )
 from abicheck.contract_context_io import (
     persisted_context_from_dict,
@@ -236,10 +237,25 @@ class TestReevaluateFromEvidence:
         )
         roots = domain_roots(block, ContractMode.PUBLIC)
         assert "decl:hidden" in roots
-        # ...and the overlay root's own closure comes with it, so a finding on
-        # a type only that root reaches resolves instead of going unknown.
+        ctx = build_persisted_context(block, mode=ContractMode.PUBLIC)
+        forced = Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol="hidden", description="hidden removed"
+        )
+        decision = next(iter(reevaluate_from_evidence(ctx, [forced]).values()))
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        # ...but *only* the named entity. `force_public_symbols` is a
+        # per-finding override live -- it never widens the surface -- so what
+        # the overlaid declaration's signature happens to reference is not
+        # forced public along with it (Codex review, fresh evidence).
         receipt = build_decision_receipt(block, ContractMode.PUBLIC)
-        assert "record:Secret" in receipt.evaluated_type_closure
+        assert "record:Secret" not in receipt.evaluated_type_closure
+        secret = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Secret",
+            description="Secret size changed",
+        )
+        collateral = next(iter(reevaluate_from_evidence(ctx, [secret]).values()))
+        assert collateral.relevance is not ContractRelevance.IN_CONTRACT
 
     def test_post_manifest_roots_stay_exact(self) -> None:
         """A committed-export manifest matches verbatim, never through aliases.
@@ -417,6 +433,34 @@ class TestReevaluateFromEvidence:
             for d in replayed.values()
         )
         assert unresolved_rate(replayed.values()) == 1.0
+
+    def test_unavailable_provider_cannot_root_a_replayed_membership(self) -> None:
+        """An unusable search proves no membership, graph attached or not.
+
+        ``elf_only_mode`` leaves the header surface unresolvable, so the live
+        evaluator answers ``UNKNOWN_UNRESOLVED``/``UNAVAILABLE`` -- but the
+        provider entry still carries the declarations and type graph it had
+        collected before bailing out, and the closure walk happily reached the
+        entity through them and answered ``IN_CONTRACT``/``COMPLETE``. That is
+        a strengthening ``compare_decisions`` rejects (Codex review, fresh
+        evidence).
+        """
+        old, new = _pair()
+        for snap in (old, new):
+            snap.elf_only_mode = True
+        result = compare(old, new, contract_evaluation=True, contract_mode="public")
+        assert result.contract_context is not None
+        assert result.changes
+        replayed = reevaluate_from_evidence(
+            result.contract_context, result.changes, finding_id=_finding_id
+        )
+        assert all(
+            d.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+            for d in replayed.values()
+        )
+        original = relevance_map(result.changes, _finding_id)
+        assert original  # the live run did decide these findings
+        assert compare_decisions(original, replayed).is_sound
 
     def test_unknown_entity_is_unresolved_not_proven_out(self) -> None:
         """Absence from the graph is unplaceable, never proof of exclusion."""

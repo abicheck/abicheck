@@ -2409,6 +2409,38 @@ no root rather than a guess. Deliberately `public`-only: `exports`' roots are
 the observed table, and a user's assertion is not an observation of the
 binary.
 
+**A fifth round found three more, all fixed — and the first two together
+settled what an overlay actually is on replay.** (1) A positive membership
+was concluded from a provider that had reported it never observed the
+domain at all: an `elf_only_mode` snapshot leaves `PublicSurface.resolvable`
+false, so the live evaluator answers `UNKNOWN_UNRESOLVED`/`UNAVAILABLE` at
+its `not auth.resolvable` gate — but the ledger entry still carries the
+declarations and type graph the collector had built before bailing out, and
+the closure walk reached the entity through them and answered `IN_CONTRACT`
+with `COMPLETE` assurance. `_PersistedDomain.domain_is_available` is the
+persisted counterpart of that live gate, and it is one-to-one rather than an
+approximation: `contract_evidence_collect` writes `UNAVAILABLE` on exactly
+the `resolvable` check the live path branches on. (2) An overlay root seeded
+the closure walk, so forcing `hidden_api(Secret *)` public also pulled
+`Secret` in — while live, `force_public_symbols`/`public_surface_allowlist`
+are strictly *per-finding* overrides matched against the finding's own
+symbol, leaving a `Secret` finding `PROVEN_OUT_OF_CONTRACT`. Overlay nodes
+are therefore still roots (D2's "roots selected by explicit overlays", and
+still what the receipt reports as `evaluated_contract_roots`) but no longer
+closure *seeds* — the new `PersistedDomainView.closure_seeds_by_side` is the
+root provider's own declarations alone. Those two fixes also fix each
+other's edge: because the overlay check now mirrors live's ordering — ahead
+of the resolvability gate — a user-named entity stays `IN_CONTRACT` even
+when the header provider observed nothing, which is exactly what live does.
+(3) `surface.internal_namespaces` reached the resolved config from the same
+`--policy-file` as `policy.overrides` but carried no provenance entry; a
+populated list now gets one. An empty one deliberately does not:
+`build_evaluation_context` receives a tuple, which cannot distinguish "no
+policy file" from "a policy file that stated an empty list"
+(`PolicyFile.internal_namespaces_stated` is the field that can, and it does
+not reach here), and claiming a source for a possibly-unstated value is
+worse than claiming none.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

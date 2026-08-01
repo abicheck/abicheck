@@ -73,6 +73,7 @@ from .contract_relevance_types import (
     ContractMode,
     ContractRelevance,
     EvidenceCompleteness,
+    EvidenceProviderStatus,
     coerce_contract_mode,
 )
 
@@ -175,6 +176,41 @@ class _PersistedDomain:
 
     def resolve(self, side: str, spelling: str) -> set[str]:
         return set(self.node_index.get(side, {}).get(spelling, ()))
+
+    def overlay_names(self, side: str, nodes: set[str]) -> bool:
+        """Whether an explicit overlay names one of *nodes* itself.
+
+        The persisted counterpart of the live evaluator's two per-finding
+        overlay overrides (``force_public_symbols`` and
+        ``public_surface_allowlist``), which return ``IN_CONTRACT`` before its
+        own resolvability gate and independently of any closure. Membership
+        here is direct only -- what an overlaid declaration's signature
+        happens to reference is not itself overlaid.
+        """
+        return any(nodes & roots for roots in self.overlay_roots.get(side, {}).values())
+
+    def domain_is_available(self, side: str) -> bool:
+        """Whether this side's root provider observed its domain *at all*.
+
+        Weaker than :meth:`domain_is_closed` (which asks whether the search
+        was *complete*) and checked before any conclusion, positive or
+        negative. An ``UNAVAILABLE`` record is the ledger's spelling of the
+        live evaluator's own ``not auth.resolvable`` gate -- one-to-one, since
+        ``contract_evidence_collect`` writes ``UNAVAILABLE`` exactly when
+        ``PublicSurface.resolvable``/``ExportSurface.resolvable`` is ``False``
+        -- and that gate returns ``UNKNOWN_UNRESOLVED`` live.
+
+        Without this check a replay could claim membership from evidence the
+        producing run had already declared unusable (Codex review, fresh
+        evidence): an ``elf_only_mode`` snapshot leaves the header surface
+        unresolvable, yet the provider entry still carries the declarations
+        and the type graph it collected before bailing out, so the closure
+        walk happily reached the entity and answered ``IN_CONTRACT`` with
+        ``COMPLETE`` assurance against a live ``UNKNOWN_UNRESOLVED`` -- a
+        strengthening :func:`compare_decisions` rejects.
+        """
+        record = self.record_by_side.get(side)
+        return record is not None and record.status is EvidenceProviderStatus.AVAILABLE
 
     def domain_is_closed(self, side: str) -> bool:
         """Whether this side's root provider searched its domain completely.
@@ -322,6 +358,30 @@ def _reevaluate_one(
     # Re-taken now that the entity's own nodes are known, so an overlay-rooted
     # decision cites the overlay rather than only the root provider.
     refs = domain.refs(side, nodes)
+    if domain.overlay_names(side, nodes):
+        # The user named this entity itself. Live, that is an unconditional
+        # override checked *ahead* of the resolvability gate below, so it
+        # holds here too even when the root provider observed nothing.
+        return ReplayDecision(
+            relevance=ContractRelevance.IN_CONTRACT,
+            reason_code=_MODE_MEMBERSHIP_REASON[ContractMode.PUBLIC],
+            assurance=ContractAssurance.COMPLETE,
+            evidence_refs=refs,
+        )
+    if not domain.domain_is_available(side):
+        # The root provider itself reported it never observed this domain --
+        # the persisted counterpart of the live evaluator's `not
+        # auth.resolvable` branch, which returns exactly this. Checked after
+        # the graph rather than instead of it, because a provider can record
+        # an unusable search and still have attached the declarations and
+        # graph it collected on the way to that conclusion (see
+        # `domain_is_available`).
+        return ReplayDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.UNAVAILABLE,
+            evidence_refs=refs,
+        )
     if not nodes:
         # The entity is not in this side's graph at all -- unplaceable, which
         # is not the same as proven outside the contract.

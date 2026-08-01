@@ -208,6 +208,17 @@ def build_evaluation_context(
     a different fact from a source that resolved to zero rules, which is
     exactly the distinction that class exists to preserve.
 
+    *internal_namespaces* is the same ``--policy-file`` list
+    (``PolicyFile.internal_namespaces``) that shaped which declarations the
+    comparison treated as internal, so a populated one gets a provenance entry
+    of its own rather than sitting in the resolved config with no recorded
+    source (Codex review) -- the identical rule *policy_overrides* follows,
+    for the identical reason and from the identical file. An empty tuple gets
+    none: this parameter cannot tell "no policy file" from "a policy file that
+    stated an empty list" (``PolicyFile.internal_namespaces_stated`` is the
+    field that can, and it does not reach here), and claiming a source for a
+    value that may never have been stated is worse than claiming none.
+
     *overlays* is what :func:`overlay_selection` recovered from the run's own
     evidence ledger; ``None`` means no overlay was applied.
     """
@@ -215,10 +226,13 @@ def build_evaluation_context(
     from .compatibility_evaluation_frontend import builtin_policy_identity
 
     overlays = overlays or OverlaySelection(selectors=(), scope=None)
+    resolved_namespaces = tuple(internal_namespaces)
     provenance = {
         "contract.mode": mode_provenance or _api_provenance("contract_mode"),
         "policy.base": _api_provenance("policy"),
     }
+    if resolved_namespaces:
+        provenance["surface.internal_namespaces"] = _api_provenance("policy_file")
     if policy_overrides:
         provenance["policy.overrides"] = _api_provenance("policy_file")
     if suppressions is not None:
@@ -231,7 +245,7 @@ def build_evaluation_context(
         contract=ContractConfig(mode=mode, overlays=overlays.selectors),
         evidence=EvidenceConfig(),
         surface=SurfaceConfig(
-            internal_namespaces=tuple(internal_namespaces),
+            internal_namespaces=resolved_namespaces,
             explicit_scope=overlays.scope,
         ),
         assurance=AssuranceConfig(),
@@ -286,14 +300,26 @@ class PersistedDomainView:
     ``authoritative_side`` were centralized to prevent).
     """
 
+    #: Every node this mode counts as a root, overlay-named ones included --
+    #: what the receipt reports as ``evaluated_contract_roots``.
     roots_by_side: dict[str, set[str]]
+    #: The subset of :attr:`roots_by_side` the type closure is actually walked
+    #: from: the *root provider's* own declarations, never an overlay's. Being
+    #: named by ``--public-symbol``/``--post-manifest`` puts an entity in
+    #: contract; it does not make that entity's signature types roots too (see
+    #: :func:`persisted_domain_view`).
+    closure_seeds_by_side: dict[str, set[str]]
     graph_by_side: dict[str, TypeGraphSnapshot]
     root_record_by_side: dict[str, EvidenceSearchRecord]
     header_record_by_side: dict[str, EvidenceSearchRecord]
     closure_by_side: dict[str, frozenset[str]]
-    #: ``{side: {overlay record id: the root nodes it contributed}}``. A
-    #: decision resting on one of these nodes must cite that record, not the
-    #: header provider that merely supplied the graph (Codex review).
+    #: ``{side: {overlay record id: the nodes that overlay names}}``. A
+    #: *direct-match* set, not a closure seed: an entity whose own nodes land
+    #: here is in contract because the user said so, mirroring the live
+    #: evaluator's own per-finding overlay overrides -- but nothing reachable
+    #: *from* it is (see :func:`persisted_domain_view`). A decision resting on
+    #: one of these nodes must also cite that record, not the header provider
+    #: that merely supplied the graph (Codex review).
     overlay_roots_by_side: dict[str, dict[str, set[str]]]
 
 
@@ -343,13 +369,23 @@ def persisted_domain_view(
 
     An explicit overlay (``--public-symbol``/``--post-manifest``) contributes
     roots to the ``public`` domain, exactly as ADR-049 D2 says ("roots
-    selected by explicit overlays"). Without folding them in here, an entity
-    the live run kept *because* the user named it re-evaluated to
-    ``UNKNOWN_UNRESOLVED`` even though the overlay's own evidence entry sits
-    in the same block (Codex review, fresh evidence). The overlay's manifest
-    holds spellings, not node ids, so each is resolved through the persisted
-    graph the same way a finding's own spelling is; one naming nothing the
-    graph knows contributes no root rather than a guess.
+    selected by explicit overlays"). Without them, an entity the live run kept
+    *because* the user named it re-evaluated to ``UNKNOWN_UNRESOLVED`` even
+    though the overlay's own evidence entry sits in the same block (Codex
+    review, fresh evidence). The overlay's manifest holds spellings, not node
+    ids, so each is resolved through the persisted graph the same way a
+    finding's own spelling is; one naming nothing the graph knows contributes
+    no root rather than a guess.
+
+    They are roots, but they are **not closure seeds** -- hence the separate
+    ``closure_seeds_by_side``. Both live overlay checks are per-finding
+    overrides (``force_public_symbols`` matches the finding's own symbol,
+    ``public_surface_allowlist`` matches it exactly) and neither widens the
+    surface the walk starts from. Seeding the walk with an overlay node pulled
+    that declaration's whole signature closure in with it, so forcing
+    ``hidden_api(Secret *)`` public turned a live ``PROVEN_OUT_OF_CONTRACT``
+    on ``Secret`` into a replayed ``IN_CONTRACT`` (Codex review, fresh
+    evidence).
     """
     mode = coerce_contract_mode(mode)
     provider = DOMAIN_ROOT_PROVIDER[mode]
@@ -399,14 +435,20 @@ def persisted_domain_view(
         )
         if not extra:
             continue
-        roots_by_side.setdefault(side, set()).update(extra)
         overlay_roots_by_side.setdefault(side, {})[record.id] = extra
+    # Snapshotted before the overlay nodes are folded in: the walk starts from
+    # the root provider's own declarations only.
+    closure_seeds_by_side = {side: set(nodes) for side, nodes in roots_by_side.items()}
+    for side, by_record in overlay_roots_by_side.items():
+        for extra in by_record.values():
+            roots_by_side.setdefault(side, set()).update(extra)
     closure_by_side = {
-        side: closure_from_graph(graph, roots_by_side.get(side, set()))
+        side: closure_from_graph(graph, closure_seeds_by_side.get(side, set()))
         for side, graph in graph_by_side.items()
     }
     return PersistedDomainView(
         roots_by_side=roots_by_side,
+        closure_seeds_by_side=closure_seeds_by_side,
         graph_by_side=graph_by_side,
         root_record_by_side=root_record_by_side,
         header_record_by_side=header_record_by_side,
@@ -442,7 +484,7 @@ def build_decision_receipt(
     view = persisted_domain_view(evidence, mode)
     closure: set[str] = set()
     for side, side_closure in view.closure_by_side.items():
-        if view.roots_by_side.get(side):
+        if view.closure_seeds_by_side.get(side):
             closure |= side_closure
     return DecisionReceiptBlock(
         evaluated_contract_roots=domain_roots(evidence, mode),

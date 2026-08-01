@@ -299,6 +299,34 @@ class TestResolvedContextContent:
         )
         assert decoded.evaluation_context.resolved_config == config
 
+    def test_policy_file_internal_namespaces_carry_their_provenance(self) -> None:
+        """A resolved field with no recorded source is an audit gap.
+
+        ``surface.internal_namespaces`` reached the resolved config from the
+        same ``--policy-file`` as ``policy.overrides``, but only the latter
+        got a provenance entry (Codex review).
+        """
+        from abicheck.policy_file import PolicyFile
+
+        old, new = _pair()
+        policy_file = PolicyFile(
+            base_policy="strict_abi", internal_namespaces=["detail"]
+        )
+        result = compare(old, new, contract_evaluation=True, policy_file=policy_file)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.surface.internal_namespaces == ("detail",)
+        assert "surface.internal_namespaces" in config.provenance
+
+    def test_unstated_internal_namespaces_claim_no_source(self) -> None:
+        """An empty list may never have been stated at all, so claim nothing."""
+        old, new = _pair()
+        result = compare(old, new, contract_evaluation=True)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.surface.internal_namespaces == ()
+        assert "surface.internal_namespaces" not in config.provenance
+
     def test_suppression_source_reaches_the_persisted_config(self, tmp_path) -> None:
         """A file-loaded suppression list shaped the run, so it is recorded.
 
