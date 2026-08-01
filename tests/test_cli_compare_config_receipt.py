@@ -163,6 +163,41 @@ class TestCanonicalResolverIsWhatRuns:
         prov = ctx["field_provenance"]["policy.base"]
         assert prov["selected_by"][0]["option"] == "--required-symbol"
 
+    def test_a_symbols_file_contract_names_the_file_option_and_the_file(self, tmp_path):
+        """A `--required-symbols FILE` run never passes `--required-symbol`.
+
+        Naming the inline flag would fabricate a selector and leave the list
+        that really chose `plugin_abi` unidentifiable (Codex review, fresh
+        evidence).
+        """
+        listed = tmp_path / "required.txt"
+        listed.write_text("# contract\napi_b\n", encoding="utf-8")
+        ctx = _context(tmp_path, "--required-symbols", str(listed))
+
+        assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
+        prov = ctx["field_provenance"]["policy.base"]
+        assert prov["path"] == str(listed)
+        hop = prov["selected_by"][0]
+        assert hop["option"] == "--required-symbols"
+        assert hop["path"] == str(listed)
+        # The digest is over the file's raw bytes, from the same read that
+        # parsed the symbols.
+        import hashlib
+
+        assert hop["sha256"] == hashlib.sha256(listed.read_bytes()).hexdigest()
+
+    def test_project_config_provenance_carries_its_digest(self, tmp_path):
+        """Naming the `.abicheck.yml` is not enough: edited after the run, the
+        receipt could no longer prove which content produced the value."""
+        import hashlib
+
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  public: false\n", encoding="utf-8")
+        ctx = _context(tmp_path, "--config", str(cfg))
+
+        hop = ctx["field_provenance"]["contract.mode"]["selected_by"][0]
+        assert hop["sha256"] == hashlib.sha256(cfg.read_bytes()).hexdigest()
+
     def test_typed_policy_still_wins_over_the_required_symbol_default(self, tmp_path):
         """The derivation is gated on the flag being untouched, so a typed
         ``--policy`` must be reported as the selector, not overwritten."""

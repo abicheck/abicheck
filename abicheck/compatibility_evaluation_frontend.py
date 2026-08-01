@@ -383,6 +383,13 @@ class ExplicitCompatibilityInputs:
     #: leaving it unstated made the receipt claim ``strict_abi`` for a run
     #: that used ``plugin_abi`` (Codex review, fresh evidence).
     policy_base_option: str | None = None
+    #: The file that option named, when it has one
+    #: (``--required-symbols FILE``), and the digest of the bytes read from
+    #: it. Without them the receipt can say a symbol list selected the policy
+    #: but not *which* list, which is the same gap the policy-file and
+    #: suppression sources carry digests to close (Codex review).
+    policy_base_path: str | None = None
+    policy_base_sha256: str | None = None
     #: An already-loaded ``--policy-file`` document.
     policy_file: PolicyFile | None = None
     #: Digest of that file's own bytes, for the receipt (ADR-049 D6). Left
@@ -1156,6 +1163,12 @@ def resolve_compatibility_evaluation_config(
                 option=explicit.policy_base_option or spell("--policy", "policy"),
                 source_kind="builtin_policy",
                 reference=explicit.policy_base,
+                # The file that selected it, when the selecting option named
+                # one -- `source_sha256`, not `sha256`: the digest identifies
+                # the *source*, while the value is a file-less built-in
+                # policy identity with a digest of its own.
+                path=explicit.policy_base_path,
+                source_sha256=explicit.policy_base_sha256,
             )
         )
     policy_base, prov[POLICY_BASE_FIELD] = _resolve(
@@ -1549,6 +1562,8 @@ def compare_cli_inputs(
     policy_file: PolicyFile | None = None,
     suppression: SuppressionSource | None = None,
     policy_base_option: str | None = None,
+    policy_base_path: str | None = None,
+    policy_base_sha256: str | None = None,
 ) -> ExplicitCompatibilityInputs:
     """Normalize the ``compare`` command's real kwargs into resolver inputs.
 
@@ -1567,9 +1582,12 @@ def compare_cli_inputs(
 
     *policy_base_option* names the option that selected ``policy`` when it was
     not ``--policy``: ``compare`` switches an untouched ``--policy`` to
-    ``plugin_abi`` for a ``--required-symbol`` contract, and that value is
-    read as stated regardless of *explicit_parameters* (it was not typed, but
-    it was chosen -- see :attr:`ExplicitCompatibilityInputs.policy_base_option`).
+    ``plugin_abi`` for a ``--required-symbol``/``--required-symbols``
+    contract, and that value is read as stated regardless of
+    *explicit_parameters* (it was not typed, but it was chosen -- see
+    :attr:`ExplicitCompatibilityInputs.policy_base_option`).
+    *policy_base_path*/*policy_base_sha256* identify the list file when that
+    option is the file form.
 
     ``--public-symbols-list`` is read into its own
     :class:`PublicSymbolsList` rather than flattened into ``public_symbols``,
@@ -1603,6 +1621,8 @@ def compare_cli_inputs(
             kwargs.get("policy") if policy_base_option else _defaulted("policy")
         ),
         policy_base_option=policy_base_option,
+        policy_base_path=policy_base_path,
+        policy_base_sha256=policy_base_sha256,
         policy_file=policy_file,
         public_symbols=tuple(kwargs.get("public_symbols") or ()),
         public_symbols_list=symbols_list,

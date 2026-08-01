@@ -3480,6 +3480,29 @@ rules — the ledger's value (what applied), the resolver's entry with the
 observed hop appended (what selected it), and the core's entry alone only when
 the front end modelled no scope at all (a `--post-manifest`-only run).
 
+**Two more Codex findings on the same slice, both about a receipt that names
+a source it cannot prove.** (3) The `--required-symbol`-derived policy fix
+above hardcoded `--required-symbol` as the selector, but a
+`--required-symbols FILE` run never passes that flag — the receipt named an
+option the user did not use and left the list that really chose `plugin_abi`
+unidentifiable. The file form is now named whenever a file was given, with
+its path and a digest taken from `_load_required_symbols`' own single read.
+(4) `ProjectCompatibilityInputs` was built with a path and no `sha256`, so
+every project-derived entry could name `.abicheck.yml` but not prove which
+revision of it supplied the value — unlike the policy and suppression
+sources, which carry digests for exactly that reason.
+`load_build_config_with_digest` returns the config and the digest of the
+bytes it parsed from one read (over raw bytes, so a CRLF file matches what is
+on disk rather than its newline-normalized rendering), and
+`_resolve_compare_config` threads it through. It landed in a new leaf,
+`buildsource/build_config_io.py`, rather than beside `load_build_config`:
+`inline.py` is at its 2000-line hard cap, and the dependency runs one way
+(the new module imports `BuildConfig`; `inline` does not import it back), so
+no cycle forms and every values-only caller keeps using `load_build_config`
+unchanged. Hashing the path at the call site instead was rejected —
+`ProjectCompatibilityInputs.sha256`'s own docstring refuses to compute the
+digest from a path for exactly the pairing reason a second read reintroduces.
+
 Still open in this phase, unchanged by this slice: the MCP `abi_compare`
 tool still patches its own gate (`mcp_server._record_resolved_gate`) rather
 than resolving a config through

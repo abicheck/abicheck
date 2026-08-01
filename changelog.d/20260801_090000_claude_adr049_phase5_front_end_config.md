@@ -45,3 +45,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   provenance too dropped the option, path, and digest of the file that
   selected the scope. The receipt now keeps the resolver's entry and appends
   the observed hop, so both the selection and its application are recorded.
+- **A `--required-symbols FILE` contract named a flag the user never passed.**
+  The receipt attributed the derived `plugin_abi` base policy to
+  `--required-symbol` even when the symbols came only from the file form, and
+  recorded no path for the list that chose it. It now names whichever option
+  really supplied the contract, with the file's path and digest when that is
+  the file form.
+- **A project-config-supplied value could not be tied to a file revision.**
+  `.abicheck.yml`-derived provenance entries recorded the path but no digest,
+  so a file edited after the run left the receipt unable to prove which
+  content produced the persisted values — unlike the policy and suppression
+  sources. The digest is now captured by the same read that parses the
+  config.

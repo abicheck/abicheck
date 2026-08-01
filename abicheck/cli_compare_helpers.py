@@ -140,19 +140,27 @@ def _resolve_compare_config(
     debuginfod: bool,
     debuginfod_url: str | None,
     show_redundant: bool,
-) -> tuple[Path | None, object, ResolvedCompareConfig]:
+) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
     ADR-037 D4: resolved *before* dispatch so both the single-file and the
     directory/package fan-out paths share one resolution. Auto-discovered from the
     current directory upward, overridable with ``--config``.
+
+    The fourth element is the digest of the bytes the config was parsed from
+    (``None`` when there is no config), captured by the same read so an
+    ADR-049 receipt can prove *which revision* of the file supplied a value
+    rather than only naming its path (Codex review, fresh evidence).
     """
-    from .buildsource.inline import load_build_config
+    from .buildsource.build_config_io import load_build_config_with_digest
     from .cli_helpers_compare import discover_project_config, resolve_compare_config
 
     cfg_path = config if config is not None else discover_project_config()
+    cfg_sha: str | None = None
     try:
-        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
+        project_cfg = None
+        if cfg_path is not None:
+            project_cfg, cfg_sha = load_build_config_with_digest(cfg_path)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 
@@ -187,7 +195,7 @@ def _resolve_compare_config(
         cli_debuginfod_url=debuginfod_url,
         cli_show_redundant=_cli_flag("show_redundant", show_redundant),
     )
-    return cfg_path, project_cfg, resolved_cfg
+    return cfg_path, project_cfg, resolved_cfg, cfg_sha
 
 
 def _reject_set_input_flags(
@@ -936,20 +944,32 @@ def _apply_required_symbol_scoping(
 
 def _load_required_symbols(
     symbols: tuple[str, ...], symbols_file: Path | None,
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], str | None]:
     """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
 
     The file format is one symbol per line; blank lines and ``#`` comments are
     ignored (ADR-043, folds the removed ``plugin-check`` command's manifest).
+
+    Also returns the digest of the file's bytes (``None`` when no file was
+    given), from the same read that produced the symbols -- a required-symbol
+    contract selects the base policy (ADR-043), so an ADR-049 receipt has to
+    identify the exact list that did it, not just name the flag (Codex
+    review, fresh evidence). The digest is over raw bytes, so it matches the
+    file on disk rather than a newline-normalized rendering of it.
     """
     combined = list(symbols)
+    digest: str | None = None
     if symbols_file is not None:
-        for line in symbols_file.read_text(encoding="utf-8").splitlines():
+        import hashlib
+
+        data = symbols_file.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        for line in data.decode("utf-8").splitlines():
             stripped = line.strip()
             if stripped and not stripped.startswith("#"):
                 combined.append(stripped)
     # De-duplicate while preserving first-seen order.
-    return tuple(dict.fromkeys(combined))
+    return tuple(dict.fromkeys(combined)), digest
 
 
 def _render_compare_dry_run(
@@ -1225,7 +1245,9 @@ def run_compare(
             "report with the secondary one."
         )
 
-    required_symbols = _load_required_symbols(required_symbols_opt, required_symbols_file)
+    required_symbols, required_symbols_sha = _load_required_symbols(
+        required_symbols_opt, required_symbols_file
+    )
     if used_by_apps and required_symbols:
         raise click.UsageError(
             "--used-by and --required-symbol/--required-symbols are mutually "
@@ -1239,15 +1261,29 @@ def run_compare(
     # `--required-symbol` rather than by `--policy` or a built-in default
     # (Codex review, fresh evidence -- the receipt claimed `strict_abi` for a
     # run that used `plugin_abi`).
+    # Which of the two spellings actually supplied the contract decides what
+    # the receipt names: a `--required-symbols FILE` run never passed
+    # `--required-symbol`, and naming it would be the same fabricated selector
+    # this whole receipt exists to prevent (Codex review, fresh evidence). The
+    # file form is named whenever a file was given -- it is a real option the
+    # user passed either way, and it is the one carrying a path and digest to
+    # audit.
     policy_selected_by: str | None = None
+    policy_selected_path: Path | None = None
+    policy_selected_sha: str | None = None
     if required_symbols and ctx.get_parameter_source("policy") != click.core.ParameterSource.COMMANDLINE:
         policy = "plugin_abi"
-        policy_selected_by = "--required-symbol"
+        if required_symbols_file is not None:
+            policy_selected_by = "--required-symbols"
+            policy_selected_path = required_symbols_file
+            policy_selected_sha = required_symbols_sha
+        else:
+            policy_selected_by = "--required-symbol"
 
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    cfg_path, project_cfg, resolved_cfg = _resolve_compare_config(
+    cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
         config=config,
         severity_preset=severity_preset,
         severity_abi_breaking=severity_abi_breaking,
@@ -1746,6 +1782,9 @@ def run_compare(
             suppress_path=suppress,
             run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
             policy_option=policy_selected_by,
+            policy_path=policy_selected_path,
+            policy_sha256=policy_selected_sha,
+            project_sha256=cfg_sha,
         )
     except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
         # A D7 same-tier conflict / D8 pack conflict / malformed manifest is a

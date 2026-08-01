@@ -160,12 +160,19 @@ def resolve_cli_config(
     suppress_path: Path | None = None,
     run_profile: Mapping[str, Any] | None = None,
     policy_option: str | None = None,
+    policy_path: Path | None = None,
+    policy_sha256: str | None = None,
+    project_sha256: str | None = None,
 ) -> Any:
     """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
 
     *policy_option* names the flag that selected ``policy`` when it was not
-    ``--policy`` -- ``--required-symbol``, whose contract switches an
-    untouched ``--policy`` to ``plugin_abi``.
+    ``--policy`` -- ``--required-symbol``/``--required-symbols``, whose
+    contract switches an untouched ``--policy`` to ``plugin_abi``, with
+    *policy_path*/*policy_sha256* identifying the list file when that is the
+    form used. *project_sha256* is the digest of the ``.abicheck.yml`` bytes
+    *project_cfg* was parsed from, so a project-supplied value names a
+    revision rather than only a path.
 
     Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
     D8 pack conflict, a malformed pack manifest); mapping those onto an exit
@@ -195,9 +202,11 @@ def resolve_cli_config(
             policy_file=policy_file,
             suppression=_suppression_source(suppression, suppress_path),
             policy_base_option=policy_option,
+            policy_base_path=str(policy_path) if policy_path is not None else None,
+            policy_base_sha256=policy_sha256,
         ),
         project=ProjectCompatibilityInputs.from_build_config(
-            project_cfg, path=project_path
+            project_cfg, path=project_path, sha256=project_sha256
         ),
         profile=_profile_inputs(run_profile),
     )
@@ -216,6 +225,9 @@ def record_resolved_config(
     suppress_path: Path | None = None,
     run_profile: Mapping[str, Any] | None = None,
     policy_option: str | None = None,
+    policy_path: Path | None = None,
+    policy_sha256: str | None = None,
+    project_sha256: str | None = None,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
@@ -246,6 +258,9 @@ def record_resolved_config(
         suppress_path=suppress_path,
         run_profile=run_profile,
         policy_option=policy_option,
+        policy_path=policy_path,
+        policy_sha256=policy_sha256,
+        project_sha256=project_sha256,
     )
     ctx = with_resolved_config(ctx, config)
     # The values the run was scored with, with the canonical resolver's
