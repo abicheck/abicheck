@@ -1497,7 +1497,15 @@ def evidence_refs_for_change(
             and _change_matches_symbols(change, force_public_symbols)
         ):
             overlay = PROVIDER_FORCED_PUBLIC
-        elif public_surface_allowlist and (
+        # `is not None`, not truthiness: a manifest that validly commits to
+        # zero exports is a *selected* source that scopes everything out, and
+        # it is exactly what a resulting exclusion rests on. Skipping the
+        # attribution for it cited `public_header` for a decision the empty
+        # manifest alone produced -- the same absent-vs-empty distinction
+        # `collect_contract_evidence` already draws (Codex review, fresh
+        # evidence). The `IN_CONTRACT` half below is unaffected either way:
+        # nothing is a member of an empty set.
+        elif public_surface_allowlist is not None and (
             (
                 decision.relevance is ContractRelevance.IN_CONTRACT
                 and (change.symbol or "") in public_surface_allowlist

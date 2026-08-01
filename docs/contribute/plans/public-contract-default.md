@@ -2520,6 +2520,12 @@ genuinely recorded no decisions — the same fail-closed rule the enclosing
 `decision_receipt` block already got a round earlier, one level down.
 (`schema_version` stays defaulted, deliberately: an absent counter has a
 defined meaning — version 1 — where an absent decision map does not.)
+(3) A third absent-vs-empty slip, same shape one layer over:
+`evidence_refs_for_change` gated its `--post-manifest` attribution on the
+allowlist's *truthiness*, so a manifest that validly commits to zero exports
+scoped everything out and then had the resulting exclusions cite
+`public_header` — the provider that decided nothing here. It tests
+`is not None` now, matching what `collect_contract_evidence` already records.
 
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or

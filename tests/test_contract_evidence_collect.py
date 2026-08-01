@@ -587,6 +587,17 @@ class TestOverlayAttribution:
         assert refs["pub"] == ("post_manifest:old",)
         assert refs["priv"] == ("post_manifest:old",)
 
+    def test_an_empty_manifest_still_owns_its_exclusions(self) -> None:
+        """Committing to zero exports is a selection, not an absence.
+
+        A truthiness check on the allowlist skipped the attribution for it,
+        so an exclusion the empty manifest alone produced cited
+        ``public_header`` instead (Codex review, fresh evidence).
+        """
+        refs = self._refs(public_surface_allowlist=set())
+        assert refs["pub"] == ("post_manifest:old",)
+        assert refs["priv"] == ("post_manifest:old",)
+
     def test_private_header_declaration_is_still_a_persisted_root(self) -> None:
         """Root selection is by *visibility*, and the receipt says so.
 
