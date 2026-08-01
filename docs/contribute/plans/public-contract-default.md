@@ -2442,6 +2442,31 @@ policy file" from "a policy file that stated an empty list"
 not reach here), and claiming a source for a possibly-unstated value is
 worse than claiming none.
 
+**A sixth round found three more, all the same shape: the replay resolver
+was looser than the live matcher it stands in for.** Each looseness was a
+strengthening path, and each fix is "mirror what live already does":
+(1) `_entity_spellings` offered a symbol's bare `::` tail in *every* mode,
+but the live exports matcher passes `allow_tail_fallback=False` precisely so
+an unexported `ns::foo` cannot borrow an exported C `foo`'s identity — the
+tail reintroduced that collision one layer down, at node resolution. It is
+`public`-only now, matching `_symbol_matches`'s own per-mode argument.
+(2) The same function offered `caused_by_type` for every finding, while
+`_exports_mode_decision` gates it behind `type_scoped`, for the reason its
+own comment gives: closure membership answers a *type*-level question, so a
+symbol-level finding on an unexported helper must not be placed in contract
+because its `caused_by_type` is one some other exported signature reaches.
+(3) `_link_owner_class` resolved the owner permissively, on the reasoning
+that over-linking only ever weakens — wrong, because one graph serves both
+domains: an exported namespace function `api::run()` yields the owner string
+`"api"`, which permissive resolution matches against an unrelated
+`other::api` record by its bare tail and pulls into the *export* closure.
+It matches by exact record identity now, mirroring
+`export_surface._seed_export_roots`'s own `owner_seed_by_identity` map — the
+same rule, for the same reason, that `type_reachability.py`'s owner seeding
+settled on. Exact matching loses nothing real: `owner_class_of` always
+reconstructs a complete scope chain, so a real class matches exactly and a
+non-method's namespace noise correctly matches nothing.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

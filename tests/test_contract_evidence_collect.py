@@ -211,6 +211,25 @@ class TestTypeGraph:
         # `_walk_type_closure` reaches from the same seed.
         assert {"record:Foo", "record:Payload"} <= closure
 
+    def test_owner_edges_require_an_exact_record_identity(self) -> None:
+        """A namespace function does not link to a same-tailed record.
+
+        ``owner_class_of`` returns ``"api"`` for a namespace function
+        ``api::run()`` -- namespace noise, not a class. Resolving that
+        permissively matched an unrelated ``other::api`` record by its bare
+        tail and pulled it into the *export* closure, turning a live
+        ``PROVEN_OUT_OF_CONTRACT`` into a replayed ``IN_CONTRACT`` (Codex
+        review, fresh evidence). ``export_surface`` seeds owners by exact
+        identity for exactly this reason; the graph mirrors it.
+        """
+        snap = _snap(
+            functions=[_public_fn("api::run")],
+            types=[RecordType(name="other::api", kind="struct", fields=[])],
+        )
+        graph = build_type_graph(snap)
+        assert ("decl:api::run", "record:other::api") not in graph.edges
+        assert "record:other::api" not in closure_from_graph(graph, ["decl:api::run"])
+
     def test_free_function_seeds_no_owner(self) -> None:
         snap = _snap(
             functions=[_public_fn("api")],

@@ -248,11 +248,31 @@ class _TypeIndex:
                 self._nodes_by_spelling.setdefault(tail, set()).add(
                     _typedef_node(alias)
                 )
+        # A record's *own* identity, as opposed to every spelling that
+        # resolves to it -- what an exact-identity match needs (see
+        # `resolve_exact_record`).
+        self._record_identities: set[str] = {
+            r.name for records in record_by_name.values() for r in records
+        }
         self.ambiguous_type_names = set(scratch.ambiguous_type_names)
         self.all_types = set(scratch.all_types)
 
     def resolve(self, spelling: str) -> set[str]:
         return set(self._nodes_by_spelling.get(spelling, ()))
+
+    def resolve_exact_record(self, identity: str) -> set[str]:
+        """The record node whose own identity *is* ``identity``, if any.
+
+        Deliberately not :meth:`resolve`: that one answers a bare ``::``
+        tail too, which is right for a genuine type *reference* (a backend
+        may legitimately spell a reachable type unqualified) and wrong for
+        an owner-class name, which `owner_class_of` always returns as a
+        complete scope chain -- or as namespace noise when the function is
+        not a method at all. See :func:`_link_owner_class`.
+        """
+        return (
+            {_record_node(identity)} if identity in self._record_identities else set()
+        )
 
     def resolve_type_string(self, type_str: str | None) -> set[str]:
         """Every canonical node a type *string* references."""
@@ -336,16 +356,28 @@ def _link_owner_class(
     one direction :func:`~abicheck.contract_replay.compare_decisions` treats
     as unsound (Codex review, fresh evidence).
 
-    Uses ``surface.py``'s permissive spelling resolution rather than
-    ``export_surface.py``'s exact-identity map: over-linking makes a replayed
-    closure a superset of the live one, which can only ever *weaken* a
-    decision, while under-linking is exactly the strengthening this edge
-    exists to prevent. One graph serves both domains, so the safe direction
-    has to be the shared one.
+    Matched by **exact** record identity, mirroring
+    ``export_surface._seed_export_roots``'s own ``owner_seed_by_identity``
+    map rather than ``surface.py``'s permissive spelling resolution. An
+    earlier version of this edge used the permissive one on the reasoning
+    that over-linking only ever *weakens* a decision -- which is wrong,
+    because one graph serves both domains: an exported namespace function
+    ``api::run()`` yields the owner string ``"api"``, which permissive
+    resolution happily matches against an unrelated record whose bare tail
+    is ``api`` (``other::api``), pulling it into the *export* closure and
+    turning a live ``PROVEN_OUT_OF_CONTRACT`` into a replayed
+    ``IN_CONTRACT`` (Codex review, fresh evidence). Exact matching loses
+    nothing real: ``owner_class_of`` reconstructs a complete scope chain
+    from a qualified name or an Itanium/MSVC mangling, never a partially
+    elided one, so when the owner is a real class its identity matches
+    exactly -- and when the function is not a method, what it returns is
+    namespace noise that *should* match nothing. This is the same rule, for
+    the same reason, that ``type_reachability.py``'s owner seeding settled
+    on.
     """
     owner = owner_class_of(fn)
     if owner:
-        link(node, index.resolve_type_string(owner))
+        link(node, index.resolve_exact_record(owner))
 
 
 def _link_decl_aliases(

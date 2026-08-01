@@ -465,6 +465,114 @@ class TestReevaluateFromEvidence:
         assert original  # the live run did decide these findings
         assert compare_decisions(original, replayed).is_sound
 
+    def test_exports_replay_keeps_qualified_symbols_exact(self) -> None:
+        """An unexported ``ns::foo`` cannot borrow an exported C ``foo``.
+
+        The live exports matcher passes ``allow_tail_fallback=False`` for
+        exactly this collision. Offering the bare tail as a replay spelling
+        reintroduced it one layer down: the unexported declaration resolved
+        to the exported ``decl:foo`` node and landed in its closure (Codex
+        review, fresh evidence).
+        """
+        elf = ElfMetadata(symbols=[ElfSymbol(name="foo")])
+        snap = AbiSnapshot(
+            library="libdemo.so.1",
+            version="1",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="foo",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                Function(
+                    name="ns::foo",
+                    mangled="_ZN2ns3fooEv",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+            elf=elf,
+        )
+        surf = compute_public_surface(snap)
+        exports = compute_export_surface(snap)
+        ctx = build_persisted_context(
+            collect_contract_evidence(
+                snap, snap, surf, surf, exports_old=exports, exports_new=exports
+            ),
+            mode=ContractMode.EXPORTS,
+        )
+        removal = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="ns::foo",
+            description="ns::foo() removed",
+        )
+        decision = next(
+            iter(
+                reevaluate_from_evidence(
+                    ctx, [removal], mode=ContractMode.EXPORTS
+                ).values()
+            )
+        )
+        assert decision.relevance is not ContractRelevance.IN_CONTRACT
+
+    def test_symbol_level_findings_ignore_their_caused_type(self) -> None:
+        """Closure membership answers a *type*-level question only.
+
+        A symbol-level finding on an unexported helper carries a
+        ``caused_by_type`` that an exported signature may well reach --
+        placing the helper in contract on that basis gates an internal
+        function for merely using a public type, which the live evaluator's
+        own ``type_scoped`` gate refuses (Codex review, fresh evidence).
+        """
+        elf = ElfMetadata(symbols=[ElfSymbol(name="api")])
+        snap = AbiSnapshot(
+            library="libdemo.so.1",
+            version="1",
+            functions=[
+                Function(
+                    name="api",
+                    mangled="api",
+                    return_type="Shared *",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                Function(
+                    name="helper",
+                    mangled="helper",
+                    return_type="Shared *",
+                    visibility=Visibility.HIDDEN,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+            types=[RecordType(name="Shared", kind="struct", fields=[])],
+            elf=elf,
+        )
+        surf = compute_public_surface(snap)
+        exports = compute_export_surface(snap)
+        ctx = build_persisted_context(
+            collect_contract_evidence(
+                snap, snap, surf, surf, exports_old=exports, exports_new=exports
+            ),
+            mode=ContractMode.EXPORTS,
+        )
+        symbol_level = Change(
+            kind=ChangeKind.FUNC_RETURN_CHANGED,
+            symbol="helper",
+            caused_by_type="Shared",
+            description="helper() return type changed",
+        )
+        decision = next(
+            iter(
+                reevaluate_from_evidence(
+                    ctx, [symbol_level], mode=ContractMode.EXPORTS
+                ).values()
+            )
+        )
+        assert decision.relevance is not ContractRelevance.IN_CONTRACT
+
     def test_unknown_entity_is_unresolved_not_proven_out(self) -> None:
         """Absence from the graph is unplaceable, never proof of exclusion."""
         result, ctx = _run()

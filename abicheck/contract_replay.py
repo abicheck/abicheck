@@ -111,22 +111,45 @@ class ReplayDecision:
     evidence_refs: tuple[str, ...] = ()
 
 
-def _entity_spellings(change: Change) -> list[str]:
+def _type_scoped(change: Change) -> bool:
+    from .surface import _MEMBER_LEVEL_TYPE_KIND_NAMES, _TYPE_LEVEL_KIND_NAMES
+
+    return (
+        change.kind.value in _TYPE_LEVEL_KIND_NAMES
+        or change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES
+    )
+
+
+def _entity_spellings(change: Change, mode: ContractMode) -> list[str]:
     """Every spelling of *change*'s entity to try against a persisted graph.
 
-    Symbol (plus its bare ``::`` tail), then ``caused_by_type`` -- the same
-    two identity sources ``contract_evaluation``'s own
-    ``_symbol_matches``/``_type_candidates`` consult, reduced to plain
-    spellings because the persisted graph is keyed by spelling, not by a live
-    model object.
+    Symbol, its bare ``::`` tail, and ``caused_by_type`` -- reduced to plain
+    spellings, because the persisted graph is keyed by spelling rather than
+    by a live model object. Which of the three apply is **per mode**, because
+    the live evaluator's own matching differs by mode and a looser resolver
+    here is a strengthening path (Codex review, fresh evidence):
+
+    - the bare tail is `public`-only. ``_symbol_matches`` takes
+      ``allow_tail_fallback=False`` on the ``exports`` path, precisely so an
+      unexported ``ns::foo`` cannot borrow an exported C ``foo``'s identity;
+      offering the tail here reintroduced exactly that collision, one layer
+      down.
+    - ``caused_by_type`` is consulted for a type- or member-level finding
+      only, mirroring ``_exports_mode_decision``'s own ``type_scoped`` gate
+      and its stated reason: closure membership answers a *type*-level
+      question, so a symbol-level finding on an unexported helper must not
+      be placed in contract merely because its ``caused_by_type`` is one
+      some *other* exported signature reaches. Applied in both modes --
+      `public` reaches the same closure through the same node set, and
+      being stricter than the live matcher can only weaken.
     """
     out: list[str] = []
     symbol = change.symbol or ""
     if symbol:
         out.append(symbol)
-        if "::" in symbol:
+        if mode is not ContractMode.EXPORTS and "::" in symbol:
             out.append(symbol.rsplit("::", 1)[1])
-    if change.caused_by_type:
+    if change.caused_by_type and _type_scoped(change):
         out.append(change.caused_by_type)
     return out
 
@@ -353,7 +376,7 @@ def _reevaluate_one(
             evidence_refs=refs,
         )
     nodes: set[str] = set()
-    for spelling in _entity_spellings(change):
+    for spelling in _entity_spellings(change, mode):
         nodes |= domain.resolve(side, spelling)
     # Re-taken now that the entity's own nodes are known, so an overlay-rooted
     # decision cites the overlay rather than only the root provider.
