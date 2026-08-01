@@ -564,6 +564,36 @@ class TestOverlayProvenanceEdges:
             == twice.evaluation_context.resolved_config.provenance[key].selected_by
         )
 
+    def test_an_entry_already_carrying_the_observed_hop_is_returned_unchanged(self):
+        """The dedup itself, at the helper level.
+
+        The end-to-end idempotence check above never reaches this branch: on a
+        second pass the *stated* entry is still the resolver's one-hop one, so
+        there is always an extra hop to append. Nothing exercised the case the
+        docstring actually promises — an entry that already carries every
+        observed hop is returned as-is, not rebuilt.
+        """
+        from abicheck.compatibility_evaluation_config import (
+            SelectedByEntry,
+            ValueProvenance,
+        )
+        from abicheck.contract_context import _merged_overlay_provenance
+        from abicheck.contract_relevance_types import SelectorLayer
+
+        hop = SelectedByEntry(layer=SelectorLayer.API_REQUEST, option="overlays")
+        observed = ValueProvenance(layer=SelectorLayer.API_REQUEST, selected_by=(hop,))
+        stated = ValueProvenance(
+            layer=SelectorLayer.EXPLICIT_CLI,
+            selected_by=(
+                SelectedByEntry(
+                    layer=SelectorLayer.EXPLICIT_CLI, option="--public-symbol"
+                ),
+                hop,
+            ),
+        )
+
+        assert _merged_overlay_provenance(stated=stated, observed=observed) is stated
+
 
 class TestWiringContract:
     def test_typed_parameter_names_mirrors_the_resolver_constant(self):
