@@ -391,6 +391,38 @@ class TestTypeGraph:
         closure = closure_from_graph(graph, ["decl:ns::Widget::draw"])
         assert {"record:ns::Widget", "record:Payload"} <= closure
 
+    def test_a_qualified_typedef_resolves_only_by_its_exact_key(self) -> None:
+        """A typedef has no bare-tail spelling, unlike a record or an enum.
+
+        ``_walk_type_closure`` follows one with ``snap.typedefs.get(name)`` --
+        a plain dict lookup, no tail fallback -- so registering the tail let
+        a signature spelling bare ``Alias`` reach a qualified
+        ``ns::Alias -> Secret``, and a private ``Secret`` change the live
+        evaluator proved out of contract replayed as ``IN_CONTRACT`` (Codex
+        review, fresh evidence).
+        """
+        snap = _snap(
+            functions=[_public_fn("api", ret="Alias")],
+            typedefs={"ns::Alias": "Secret"},
+            types=[RecordType(name="Secret", kind="struct", fields=[])],
+        )
+        # Both nodes are asserted, not just the target: `record:Secret` alone
+        # would pass just as well if the typedef node *were* reached and only
+        # its own edge to the target were broken -- a different bug with the
+        # same symptom (CodeRabbit review).
+        bare_closure = closure_from_graph(build_type_graph(snap), ["decl:api"])
+        assert "typedef:ns::Alias" not in bare_closure
+        assert "record:Secret" not in bare_closure
+        # The exact key still resolves, which is what live matches on.
+        exact = _snap(
+            functions=[_public_fn("api", ret="ns::Alias")],
+            typedefs={"ns::Alias": "Secret"},
+            types=[RecordType(name="Secret", kind="struct", fields=[])],
+        )
+        exact_closure = closure_from_graph(build_type_graph(exact), ["decl:api"])
+        assert "typedef:ns::Alias" in exact_closure
+        assert "record:Secret" in exact_closure
+
     def test_an_enum_is_keyed_and_aliased_like_a_record(self) -> None:
         """``enum:`` is a first-class node kind, not a record afterthought.
 

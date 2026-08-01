@@ -178,15 +178,23 @@ class TestContractReasonCodes:
 
 
 class TestSchemaVersionStrategy:
-    def test_all_version_counters_start_at_one(self):
+    def test_each_counter_pins_its_current_value(self):
+        # Not "they all start at one" any more: `IDENTITY_ALGORITHM_VERSION`
+        # has since bumped on its own (the qualified-typedef tail fix changed
+        # the produced type graph without changing any block's shape), which
+        # is the whole point of keeping four counters. Pin each one so a
+        # future change to a persisted format or algorithm has to state which
+        # concern it moved.
         assert CONTRACT_EVIDENCE_SCHEMA_VERSION == 1
         assert EVALUATION_CONTEXT_SCHEMA_VERSION == 1
         assert EVALUATOR_VERSION == 1
-        assert IDENTITY_ALGORITHM_VERSION == 1
+        assert IDENTITY_ALGORITHM_VERSION == 2
 
     def test_version_counters_are_independent_objects(self):
         # Each concern must be able to bump independently -- guard against a
-        # future refactor collapsing them into one shared constant.
+        # future refactor collapsing them into one shared constant. The
+        # identity counter having actually diverged from the other three is
+        # the executable proof of that, not just the key count.
         counters = {
             "contract_evidence": CONTRACT_EVIDENCE_SCHEMA_VERSION,
             "evaluation_context": EVALUATION_CONTEXT_SCHEMA_VERSION,
@@ -194,3 +202,4 @@ class TestSchemaVersionStrategy:
             "identity_algorithm": IDENTITY_ALGORITHM_VERSION,
         }
         assert len(counters) == 4
+        assert counters["identity_algorithm"] != counters["contract_evidence"]

@@ -354,13 +354,16 @@ class _TypeIndex:
             self._nodes_by_spelling.setdefault(_type_identity(en), set()).add(
                 _enum_node(_type_identity(en))
             )
+        # A typedef resolves by its **exact** key and nothing else, because
+        # that is all `_walk_type_closure` does with one: `snap.typedefs.get(
+        # name)`, a plain dict lookup with no tail fallback. Records and enums
+        # get a bare tail above only because `_index_surface_types` gives them
+        # one. Registering a tail here too let a signature spelling the bare
+        # `Alias` reach a qualified `ns::Alias -> Secret`, so a private
+        # `Secret` layout change the live evaluator proved out of contract
+        # re-evaluated as `IN_CONTRACT` (Codex review, fresh evidence).
         for alias in snap.typedefs:
             self._nodes_by_spelling.setdefault(alias, set()).add(_typedef_node(alias))
-            if "::" in alias:
-                tail = alias.rsplit("::", 1)[1]
-                self._nodes_by_spelling.setdefault(tail, set()).add(
-                    _typedef_node(alias)
-                )
         self.ambiguous_type_names = set(scratch.ambiguous_type_names)
         self.all_types = set(scratch.all_types)
         self._owner_seed_nodes = self._build_owner_seed_index(

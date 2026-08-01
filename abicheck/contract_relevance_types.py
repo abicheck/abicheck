@@ -323,6 +323,24 @@ EVALUATOR_VERSION: int = 1
 itself, independent of the schema versions above -- the same observed facts
 can classify differently under a new evaluator."""
 
-IDENTITY_ALGORITHM_VERSION: int = 1
+IDENTITY_ALGORITHM_VERSION: int = 2
 """Version of the canonical entity-identity/join algorithm (ADR-048) that
-produced the persisted evidence and decision receipt."""
+produced the persisted evidence and decision receipt.
+
+Bumped to 2 when ``contract_evidence_collect._TypeIndex`` stopped registering
+a qualified typedef's bare ``::`` tail as a spelling of that typedef: the
+same ``AbiSnapshot`` now yields a *different* ``TypeGraphSnapshot`` -- a
+signature spelling bare ``Alias`` no longer reaches a qualified
+``ns::Alias -> Secret`` -- so a context persisted before the fix and one
+persisted after it are not interchangeable evidence, even though the block's
+*shape* (and therefore ``CONTRACT_EVIDENCE_SCHEMA_VERSION``) is unchanged.
+That is exactly the split this counter exists for, and leaving it at 1 would
+have left both formats advertising one algorithm while resolving typedefs
+differently -- a consumer could neither tell them apart nor fail closed on
+the newer semantics (Codex review).
+
+The bump does not reject the older graphs: ADR-049 D6's rule is that a
+version *older than or equal to* this build's is accepted (possibly
+degraded) and only a *newer* one is refused, so a v1 context still replays
+here while a v2 context is refused by a build that predates the fix -- the
+fail-closed direction that matters."""
