@@ -186,6 +186,27 @@ class TestCanonicalResolverIsWhatRuns:
 
         assert hop["sha256"] == hashlib.sha256(listed.read_bytes()).hexdigest()
 
+    def test_a_symbols_file_that_contributed_nothing_is_not_the_selector(
+        self, tmp_path
+    ):
+        """Passing a file is not the same as the file supplying the contract.
+
+        With `--required-symbol api_b --required-symbols empty.txt` the file
+        parses to nothing, so naming it omits the option that actually made
+        the contract non-empty (Codex review, fresh evidence — the sharper
+        half of the file-attribution fix).
+        """
+        empty = tmp_path / "required.txt"
+        empty.write_text("# nothing but a comment\n", encoding="utf-8")
+        ctx = _context(
+            tmp_path, "--required-symbol", "api_b", "--required-symbols", str(empty)
+        )
+
+        assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
+        prov = ctx["field_provenance"]["policy.base"]
+        assert prov["selected_by"][0]["option"] == "--required-symbol"
+        assert prov.get("path") is None
+
     def test_project_config_provenance_carries_its_digest(self, tmp_path):
         """Naming the `.abicheck.yml` is not enough: edited after the run, the
         receipt could no longer prove which content produced the value."""

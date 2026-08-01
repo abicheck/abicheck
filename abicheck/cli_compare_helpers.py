@@ -63,6 +63,7 @@ from .cli_helpers_compare import (
     _resolve_per_side_options,
     _warn_ignored_flags,
     fold_l0_hard_removals,
+    load_required_symbols,
     resolve_force_public_scope,
 )
 from .cli_options import resolve_compile_context
@@ -942,36 +943,6 @@ def _apply_required_symbol_scoping(
     return exit_code
 
 
-def _load_required_symbols(
-    symbols: tuple[str, ...], symbols_file: Path | None,
-) -> tuple[tuple[str, ...], str | None]:
-    """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
-
-    The file format is one symbol per line; blank lines and ``#`` comments are
-    ignored (ADR-043, folds the removed ``plugin-check`` command's manifest).
-
-    Also returns the digest of the file's bytes (``None`` when no file was
-    given), from the same read that produced the symbols -- a required-symbol
-    contract selects the base policy (ADR-043), so an ADR-049 receipt has to
-    identify the exact list that did it, not just name the flag (Codex
-    review, fresh evidence). The digest is over raw bytes, so it matches the
-    file on disk rather than a newline-normalized rendering of it.
-    """
-    combined = list(symbols)
-    digest: str | None = None
-    if symbols_file is not None:
-        import hashlib
-
-        data = symbols_file.read_bytes()
-        digest = hashlib.sha256(data).hexdigest()
-        for line in data.decode("utf-8").splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                combined.append(stripped)
-    # De-duplicate while preserving first-seen order.
-    return tuple(dict.fromkeys(combined)), digest
-
-
 def _render_compare_dry_run(
     *,
     old_input: Path, new_input: Path,
@@ -1245,8 +1216,8 @@ def run_compare(
             "report with the secondary one."
         )
 
-    required_symbols, required_symbols_sha = _load_required_symbols(
-        required_symbols_opt, required_symbols_file
+    required_symbols, required_symbols_from_file, required_symbols_sha = (
+        load_required_symbols(required_symbols_opt, required_symbols_file)
     )
     if used_by_apps and required_symbols:
         raise click.UsageError(
@@ -1261,19 +1232,20 @@ def run_compare(
     # `--required-symbol` rather than by `--policy` or a built-in default
     # (Codex review, fresh evidence -- the receipt claimed `strict_abi` for a
     # run that used `plugin_abi`).
-    # Which of the two spellings actually supplied the contract decides what
-    # the receipt names: a `--required-symbols FILE` run never passed
-    # `--required-symbol`, and naming it would be the same fabricated selector
-    # this whole receipt exists to prevent (Codex review, fresh evidence). The
-    # file form is named whenever a file was given -- it is a real option the
-    # user passed either way, and it is the one carrying a path and digest to
-    # audit.
+    # Which spelling actually *contributed* decides what the receipt names --
+    # not merely which was passed. A `--required-symbols FILE` run never
+    # passed `--required-symbol`, so naming the inline flag fabricates a
+    # selector; but a file that parsed to nothing selected nothing either, so
+    # naming it for a `--required-symbol api_b --required-symbols empty.txt`
+    # run omits the option that really made the contract non-empty (Codex
+    # review, two rounds). The file form wins when it contributed, since it is
+    # then both true and the one carrying a path and digest to audit.
     policy_selected_by: str | None = None
     policy_selected_path: Path | None = None
     policy_selected_sha: str | None = None
     if required_symbols and ctx.get_parameter_source("policy") != click.core.ParameterSource.COMMANDLINE:
         policy = "plugin_abi"
-        if required_symbols_file is not None:
+        if required_symbols_from_file:
             policy_selected_by = "--required-symbols"
             policy_selected_path = required_symbols_file
             policy_selected_sha = required_symbols_sha

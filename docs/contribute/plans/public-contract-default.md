@@ -3533,6 +3533,15 @@ out: `with_field_provenance` lost its last caller when the resolver took over
 seam; and `cli_compare_helpers.py` crossed its cap again, which the helper's
 new home in `cli_helpers_compare.py` resolved.
 
+**A ninth finding sharpened the file-attribution rule itself.** "Name the
+file form whenever a file was given" was still a claim about what was
+*passed*, not what *contributed*: for `--required-symbol api_b
+--required-symbols empty.txt` the file parses to nothing, so naming it omits
+the option that actually made the contract non-empty.
+`_load_required_symbols` now also returns what the file itself contributed,
+and the file form is named only when that is non-empty — true and
+audit-carrying when it holds, the inline form otherwise.
+
 Still open in this phase, unchanged by this slice: the MCP `abi_compare`
 tool still patches its own gate (`mcp_server._record_resolved_gate`) rather
 than resolving a config through
