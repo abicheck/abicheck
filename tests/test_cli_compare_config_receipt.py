@@ -410,6 +410,34 @@ class TestObservedOverlaysSurvive:
         # The value stays the ledger's: it is what actually applied.
         assert ctx["resolved_config"]["surface"]["explicit_scope"]["items"] == ["api_b"]
 
+    def test_a_symbols_list_deleted_mid_run_does_not_fail_the_comparison(
+        self, tmp_path, monkeypatch
+    ):
+        """The receipt must reuse the read that built the live force-public
+        set, not re-read the path.
+
+        A second read pairs the persisted digest with content that may not
+        have scored the run, and — worse — a file removed after the
+        comparison started would fail an otherwise-finished run during
+        receipt generation (Codex review, fresh evidence). Simulated by
+        deleting the file at the moment the receipt is recorded.
+        """
+        import abicheck.cli_compare_receipt as receipt
+
+        listed = tmp_path / "public.txt"
+        listed.write_text("api_b\n", encoding="utf-8")
+        real = receipt.record_resolved_config
+
+        def _delete_then_record(*args, **kwargs):
+            listed.unlink()
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(receipt, "record_resolved_config", _delete_then_record)
+        ctx = _context(tmp_path, "--public-symbols-list", str(listed))
+
+        prov = ctx["field_provenance"]["surface.explicit_scope"]
+        assert str(listed) in [hop.get("path") for hop in prov["selected_by"]]
+
     def test_no_overlay_leaves_the_resolved_scope_alone(self, tmp_path):
         ctx = _context(tmp_path)
         assert ctx["resolved_config"]["contract"]["overlays"] == []

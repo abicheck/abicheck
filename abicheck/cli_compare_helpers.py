@@ -59,11 +59,11 @@ from .cli_compare_fold import (
 )
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
-    _collect_force_public_symbols,
     _pair_wide_dialect_override,
     _resolve_per_side_options,
     _warn_ignored_flags,
     fold_l0_hard_removals,
+    resolve_force_public_scope,
 )
 from .cli_options import resolve_compile_context
 from .cli_params import _load_suppression_and_policy
@@ -1676,7 +1676,9 @@ def run_compare(
     # returns None here when suppress itself was None, so suppression is
     # guaranteed non-None at this point too.
 
-    force_public = _collect_force_public_symbols(
+    # One read for both consumers -- the live overlay and the ADR-049 receipt
+    # that names this file with its digest (see the helper for why).
+    force_public, symbols_list = resolve_force_public_scope(
         resolved_cfg.public_symbols, public_symbols_list
     )
     _warn_force_public_ignored(force_public, scope_public_headers)
@@ -1785,6 +1787,7 @@ def run_compare(
             policy_path=policy_selected_path,
             policy_sha256=policy_selected_sha,
             project_sha256=cfg_sha,
+            symbols_list=symbols_list,
         )
     except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
         # A D7 same-tier conflict / D8 pack conflict / malformed manifest is a

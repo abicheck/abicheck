@@ -57,3 +57,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   content produced the persisted values — unlike the policy and suppression
   sources. The digest is now captured by the same read that parses the
   config.
+- **A `--public-symbols-list` deleted mid-run could fail a finished
+  comparison.** The file was read twice — once for the live forced-public
+  overlay, once again while building the resolved configuration — so a file
+  edited or removed after the comparison started either paired the receipt's
+  digest with content that did not score the run, or aborted it during
+  receipt generation. Both consumers now share one read.

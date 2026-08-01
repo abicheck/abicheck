@@ -305,6 +305,33 @@ from .compatibility_evaluation_frontend import (  # noqa: E402
 _collect_force_public_symbols = collect_force_public_symbols
 
 
+def resolve_force_public_scope(
+    public_symbols: tuple[str, ...], symbols_list_path: object
+) -> tuple[set[str], object]:
+    """The forced-public set, and the list file it was read from -- one read.
+
+    ``--public-symbols-list`` feeds two consumers: the live comparison's
+    forced-public overlay, and the ADR-049 receipt that names the file with
+    its digest. Reading it once for both is what keeps the receipt honest --
+    a second read could pair the persisted digest with content that did not
+    score the run, and a file deleted mid-run would fail an otherwise
+    finished comparison during receipt generation (Codex review, fresh
+    evidence). Returns ``None`` for the list when no file was given, which
+    is a different fact from a file that named no symbols.
+    """
+    from pathlib import Path
+
+    from .compatibility_evaluation_frontend import PublicSymbolsList
+
+    listed = (
+        PublicSymbolsList.from_file(Path(str(symbols_list_path)))
+        if symbols_list_path is not None
+        else None
+    )
+    forced = collect_force_public_symbols(public_symbols, None, already_read=listed)
+    return forced, listed
+
+
 def _collect_additions(result: DiffResult) -> list[object]:
     """Collect additive changes in a policy-independent way."""
     from .checker_policy import COMPATIBLE_KINDS

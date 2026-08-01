@@ -684,6 +684,8 @@ _STATED_ELSEWHERE: Hashable = "<stated by another layer>"
 def collect_force_public_symbols(
     public_symbols: tuple[str, ...],
     symbols_list: Path | None,
+    *,
+    already_read: PublicSymbolsList | None = None,
 ) -> set[str]:
     """Merge ``--public-symbol`` values with a ``--public-symbols-list`` file.
 
@@ -697,9 +699,19 @@ def collect_force_public_symbols(
     importing a CLI-layer module. Reading only the inline tuple made a
     list-file-only invocation resolve to no explicit scope at all, and a
     mixed one silently drop every symbol the file supplied (Codex review).
+
+    *already_read* lets a caller that will *also* build a receipt from this
+    file supply the one read both need. Reading it twice pairs the receipt's
+    digest with content that may not be what scored the run, and lets a file
+    deleted mid-run fail an otherwise-finished comparison during receipt
+    generation (Codex review, fresh evidence) -- the same single-read rule
+    the policy, suppression, project-config, and required-symbol sources
+    already follow.
     """
     out: set[str] = {s.strip() for s in public_symbols if s.strip()}
-    if symbols_list is not None:
+    if already_read is not None:
+        out.update(already_read.items)
+    elif symbols_list is not None:
         out.update(read_symbols_list(symbols_list))
     return out
 
@@ -1564,6 +1576,7 @@ def compare_cli_inputs(
     policy_base_option: str | None = None,
     policy_base_path: str | None = None,
     policy_base_sha256: str | None = None,
+    public_symbols_list: PublicSymbolsList | None = None,
 ) -> ExplicitCompatibilityInputs:
     """Normalize the ``compare`` command's real kwargs into resolver inputs.
 
@@ -1589,6 +1602,12 @@ def compare_cli_inputs(
     *policy_base_path*/*policy_base_sha256* identify the list file when that
     option is the file form.
 
+    *public_symbols_list* is the same "pass what you already read" affordance
+    as *policy_file*/*suppression*: the CLI reads this file to build the live
+    force-public set, so re-reading it here could pair the receipt's digest
+    with content that did not score the run -- and a file deleted mid-run
+    would fail an otherwise-finished comparison (Codex review).
+
     ``--public-symbols-list`` is read into its own
     :class:`PublicSymbolsList` rather than flattened into ``public_symbols``,
     so a list-file-only invocation resolves a real ``surface.explicit_scope``
@@ -1602,11 +1621,9 @@ def compare_cli_inputs(
         return kwargs.get(name) if name in typed else None
 
     symbols_list_path = kwargs.get("public_symbols_list")
-    symbols_list = (
-        PublicSymbolsList.from_file(symbols_list_path)
-        if symbols_list_path is not None
-        else None
-    )
+    if public_symbols_list is None and symbols_list_path is not None:
+        public_symbols_list = PublicSymbolsList.from_file(symbols_list_path)
+    symbols_list = public_symbols_list
     if policy_file is None and kwargs.get("policy_file_path") is not None:
         policy_file = _load_policy_file(kwargs["policy_file_path"])
     if suppression is None and kwargs.get("suppress") is not None:

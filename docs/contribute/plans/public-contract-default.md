@@ -3517,6 +3517,22 @@ that a renamed option should fail loudly, but nothing checked the caller's
 mapping against it — `resolve_cli_config` now rejects a partial one instead
 of letting a dropped key resolve as "not stated".
 
+**An eighth finding closed the last re-read.** `--public-symbols-list` was
+read twice: once by `_collect_force_public_symbols` for the live overlay, and
+again by `compare_cli_inputs` for the receipt. Beyond the digest-pairing risk
+every other source was already fixed for, this one had a worse failure mode —
+a file deleted after the comparison started failed an *otherwise finished*
+run during receipt generation. `resolve_force_public_scope`
+(`cli_helpers_compare.py`) now does the one read both consumers share, and
+`collect_force_public_symbols`/`compare_cli_inputs` each accept the
+already-read list. Test:
+`test_a_symbols_list_deleted_mid_run_does_not_fail_the_comparison`, which
+deletes the file at the moment the receipt is recorded. Two cleanups fell
+out: `with_field_provenance` lost its last caller when the resolver took over
+`contract.mode` provenance, so it was deleted rather than left as an uncalled
+seam; and `cli_compare_helpers.py` crossed its cap again, which the helper's
+new home in `cli_helpers_compare.py` resolved.
+
 Still open in this phase, unchanged by this slice: the MCP `abi_compare`
 tool still patches its own gate (`mcp_server._record_resolved_gate`) rather
 than resolving a config through

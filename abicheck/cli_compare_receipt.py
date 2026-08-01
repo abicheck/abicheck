@@ -163,6 +163,7 @@ def resolve_cli_config(
     policy_path: Path | None = None,
     policy_sha256: str | None = None,
     project_sha256: str | None = None,
+    symbols_list: Any = None,
 ) -> Any:
     """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
 
@@ -216,6 +217,7 @@ def resolve_cli_config(
             policy_base_option=policy_option,
             policy_base_path=str(policy_path) if policy_path is not None else None,
             policy_base_sha256=policy_sha256,
+            public_symbols_list=symbols_list,
         ),
         project=ProjectCompatibilityInputs.from_build_config(
             project_cfg, path=project_path, sha256=project_sha256
@@ -240,6 +242,7 @@ def record_resolved_config(
     policy_path: Path | None = None,
     policy_sha256: str | None = None,
     project_sha256: str | None = None,
+    symbols_list: Any = None,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
@@ -273,6 +276,7 @@ def record_resolved_config(
         policy_path=policy_path,
         policy_sha256=policy_sha256,
         project_sha256=project_sha256,
+        symbols_list=symbols_list,
     )
     ctx = with_resolved_config(ctx, config)
     # The values the run was scored with, with the canonical resolver's
