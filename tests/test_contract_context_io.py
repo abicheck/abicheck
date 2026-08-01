@@ -467,6 +467,18 @@ class TestMalformedPayloads:
         with pytest.raises(TypeError, match="required key"):
             persisted_context_from_dict(raw)
 
+    def test_missing_relevance_map_raises_type_error(self) -> None:
+        """A truncated receipt must not read as "recorded no decisions".
+
+        Defaulting the map to ``{}`` made a lost audit block indistinguishable
+        from a real, decision-free comparison (Codex review, fresh evidence).
+        """
+        ctx = _context()
+        raw = persisted_context_to_dict(ctx)
+        del raw["decision_receipt"]["relevance_by_finding"]
+        with pytest.raises(TypeError, match="required key"):
+            persisted_context_from_dict(raw)
+
     def test_non_object_block_raises_type_error(self) -> None:
         ctx = _context()
         raw = persisted_context_to_dict(ctx)

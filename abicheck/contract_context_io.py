@@ -614,10 +614,16 @@ def decision_receipt_from_dict(d: object) -> DecisionReceiptBlock:
         evaluated_type_closure=tuple(
             _sequence(m.get("evaluated_type_closure"), what="evaluated closure")
         ),
+        # Required, not defaulted: an absent map and an empty one would both
+        # read as "this comparison recorded no decisions", so a truncated
+        # receipt would replay as a real, decision-free run instead of
+        # failing closed -- the same rule the whole `decision_receipt` block
+        # already follows (Codex review, fresh evidence).
         relevance_by_finding={
             key: ContractRelevance(value)
             for key, value in _require_mapping(
-                m.get("relevance_by_finding") or {}, what="relevance_by_finding"
+                _required(m, "relevance_by_finding", what="a decision receipt"),
+                what="relevance_by_finding",
             ).items()
         },
         # Absent only in a receipt written before this counter existed; such

@@ -41,7 +41,7 @@ from .checker_policy import (
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
-from .finding_identity import report_finding_id
+from .finding_identity import missing_contract_kind, report_finding_id
 from .report_summary import build_summary, surface_breakdown
 from .semver import recommend_release
 
@@ -846,11 +846,7 @@ def _resolve_scoped_gate_findings(
     scoped_only = [c for c in scoped_only if _finding_id(c) not in existing_ids]
 
     gate_scope = getattr(result, "gate_scope", None)
-    missing_kind = (
-        "used_by_missing_symbol"
-        if gate_scope == "used_by"
-        else "required_symbol_missing"
-    )
+    missing_kind = missing_contract_kind(gate_scope)
     blocks = severity_config is None or missing_contract_exit_code(severity_config) != 0
     # A missing-contract label has no backing Change/ChangeKind, so it can't
     # run through apply_show_only -- but --show-only's severity dimension

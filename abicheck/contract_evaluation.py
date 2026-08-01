@@ -1692,6 +1692,22 @@ def stamp_scoped_result_findings(
     refresh_contract_receipt(result, finding_id=finding_id)
 
 
+def _missing_contract_findings(result: Any) -> list[Any]:
+    """Every ``scoped_missing_labels`` entry, in ``Change``-compatible shape.
+
+    One place that turns a run's missing-contract labels into the identity
+    every report format's synthesized entry carries, so the receipt and the
+    emitted findings key alike.
+    """
+    from .finding_identity import missing_contract_finding, missing_contract_kind
+
+    kind = missing_contract_kind(getattr(result, "gate_scope", None))
+    return [
+        missing_contract_finding(kind, label)
+        for label in getattr(result, "scoped_missing_labels", ()) or ()
+    ]
+
+
 def refresh_contract_receipt(result: Any, *, finding_id: Callable[[Any], str]) -> None:
     """Re-key *result*'s persisted decision receipt to its current decisions.
 
@@ -1707,8 +1723,18 @@ def refresh_contract_receipt(result: Any, *, finding_id: Callable[[Any], str]) -
     Merges rather than rebuilds: the receipt covers every finding
     ``compare()`` classified, including the suppressed/redundant/out-of-surface
     ones that never reach ``result.changes``, so recomputing the map from the
-    emitted collections alone would silently drop them. Only the two
-    collections a scoping pass can touch are re-derived.
+    emitted collections alone would silently drop them. Only what a scoping
+    pass can touch is re-derived.
+
+    ``scoped_missing_labels`` is covered too, and needs its own step: a
+    missing contract member has no backing ``Change``, so it is in neither
+    collection above, yet every report format synthesizes an entry for it and
+    stamps that entry ``IN_CONTRACT``. Without this the emitted finding had a
+    decision and the receipt had no matching key, so
+    :func:`~abicheck.contract_replay.replay_original_decisions` could not
+    reproduce the whole report (Codex review, fresh evidence). It is keyed
+    through :func:`~abicheck.finding_identity.missing_contract_finding`, the
+    same identity the synthesized entries carry.
 
     A no-op when the caller never opted into ``contract_evaluation=True`` (no
     context to refresh), and deliberately tolerant of a ``contract_context``
@@ -1729,6 +1755,12 @@ def refresh_contract_receipt(result: Any, *, finding_id: Callable[[Any], str]) -
     )
     merged = dict(ctx.decision_receipt.relevance_by_finding)
     merged.update(relevance_map(touched, finding_id))
+    merged.update(
+        {
+            finding_id(missing): ContractRelevance.IN_CONTRACT
+            for missing in _missing_contract_findings(result)
+        }
+    )
     result.contract_context = replace(
         ctx,
         decision_receipt=replace(ctx.decision_receipt, relevance_by_finding=merged),

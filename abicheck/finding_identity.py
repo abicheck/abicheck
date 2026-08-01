@@ -1383,3 +1383,60 @@ def report_finding_id(c: object) -> str:
         ]
     )
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def missing_contract_kind(gate_scope: object) -> str:
+    """The synthetic finding kind a missing contract member is reported under.
+
+    ``--used-by`` and ``--required-symbol`` report the same event -- "this
+    label is required and the new library does not have it" -- under two
+    different kind slugs, and every report format derives the slug from
+    ``DiffResult.gate_scope`` the same way. Centralized here, alongside
+    :func:`missing_contract_finding`, because the slug is part of that
+    synthetic finding's *identity*: two producers disagreeing on it would
+    hash to two different ids for one event.
+    """
+    return (
+        "used_by_missing_symbol"
+        if gate_scope == "used_by"
+        else "required_symbol_missing"
+    )
+
+
+@dataclass(frozen=True)
+class MissingContractFinding:
+    """A missing contract member's identity, in ``Change``-compatible shape.
+
+    A missing ``--used-by``/``--required-symbol`` label has no backing
+    ``Change`` at all -- each report format synthesizes its own entry for it
+    -- so there was nothing for :func:`report_finding_id` to read, and the
+    emitted entry carried no ``finding_id`` a consumer could join to
+    ADR-049's ``decision_receipt`` (Codex review, fresh evidence). This
+    carries exactly the six fields that function hashes, so the synthesized
+    entry and the receipt agree by construction rather than by two
+    hand-copied literals happening to match.
+    """
+
+    kind: str
+    symbol: str
+    description: str
+    old_value: None = None
+    new_value: None = None
+    source_location: None = None
+
+
+def missing_contract_finding(kind: str, label: str) -> MissingContractFinding:
+    """The identity of the missing-contract finding for *label* under *kind*.
+
+    The description is built here, not by each caller, for the reason
+    :class:`MissingContractFinding` gives: it is one of
+    :func:`report_finding_id`'s own inputs, so a producer spelling it
+    differently would silently mint a different id for the same event.
+    """
+    return MissingContractFinding(
+        kind=kind,
+        symbol=label,
+        description=(
+            f"Required symbol/version '{label}' is missing from the new library."
+        ),
+    )

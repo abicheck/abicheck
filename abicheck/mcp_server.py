@@ -1220,25 +1220,26 @@ def abi_compare(
             for c in scoped_only:
                 if _finding_id(c) not in existing_ids:
                     response["changes"].append(_mcp_change_entry(c, active_policy))
+            from .finding_identity import missing_contract_kind
             from .severity import missing_contract_exit_code
 
-            missing_kind = (
-                "used_by_missing_symbol"
-                if getattr(result, "gate_scope", None) == "used_by"
-                else "required_symbol_missing"
-            )
+            missing_kind = missing_contract_kind(getattr(result, "gate_scope", None))
             blocks = (
                 severity_config is None
                 or missing_contract_exit_code(severity_config) != 0
             )
             for label in getattr(result, "scoped_missing_labels", ()) or ():
+                from .finding_identity import missing_contract_finding
+
+                identity = missing_contract_finding(missing_kind, label)
                 missing_entry: dict[str, object] = {
                     "kind": missing_kind,
                     "symbol": label,
-                    "description": (
-                        f"Required symbol/version '{label}' is missing "
-                        "from the new library."
-                    ),
+                    "description": identity.description,
+                    # Same join key the CLI JSON fold emits, for the same
+                    # reason: the decision stamped below is keyed by it in
+                    # ADR-049's `decision_receipt` (Codex review).
+                    "finding_id": _finding_id(identity),
                     # A missing-contract label has no ChangeKind to run
                     # through _impact_category, but its severity is known
                     # (blocks_gate) -- reuse the same "breaking"/

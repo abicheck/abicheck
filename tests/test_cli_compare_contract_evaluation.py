@@ -595,12 +595,15 @@ class TestUsedByScopingStampsExplicitEvidence:
             assert by_finding[c["finding_id"]] == "IN_CONTRACT"
 
     def test_scoped_stamping_refreshes_the_persisted_receipt(
-        self, tmp_path, monkeypatch
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Every emitted finding carrying a contract decision must appear in
         # the receipt with that same decision -- including one the scoping
         # pass *overwrote* (the shadow evaluator had already recorded a
-        # weaker header-derived decision for it inside compare()).
+        # weaker header-derived decision for it inside compare()), and the
+        # synthesized missing-contract entry, which has no backing Change
+        # and so reached neither collection the refresh used to merge
+        # (Codex review, fresh evidence).
         from abicheck.appcompat import AppCompatResult
         from abicheck.checker_policy import ChangeKind
         from abicheck.diff_helpers import make_change
@@ -615,10 +618,14 @@ class TestUsedByScopingStampsExplicitEvidence:
             app_path=str(app),
             old_lib_path=str(old),
             new_lib_path=str(new),
-            required_symbols={"_Z5entryv"},
-            required_symbol_count=1,
+            required_symbols={"_Z5entryv", "_Z6absentv"},
+            required_symbol_count=2,
             breaking_for_app=[synthetic],
-            missing_symbols=["_Z5entryv"],
+            # `_Z6absentv` is covered by no Change, so it survives
+            # `uncovered_missing_symbols`' dedup and becomes the synthetic
+            # missing-contract entry this test is about; `_Z5entryv` is
+            # covered by `synthetic` and is correctly deduped away.
+            missing_symbols=["_Z5entryv", "_Z6absentv"],
             verdict=Verdict.BREAKING,
         )
         self._patch_scope(monkeypatch, scoped)
@@ -641,13 +648,13 @@ class TestUsedByScopingStampsExplicitEvidence:
         by_finding = payload["contract_context"]["decision_receipt"][
             "relevance_by_finding"
         ]
-        decided = [
-            c
-            for c in payload["changes"]
-            if c.get("contract_relevance") and c.get("finding_id")
-        ]
+        decided = [c for c in payload["changes"] if c.get("contract_relevance")]
         assert decided
+        # No `finding_id` filter: an entry that carries a decision but no id
+        # is exactly the unjoinable case, so skipping it here would hide it.
+        assert any(c["kind"] == "used_by_missing_symbol" for c in decided)
         for c in decided:
+            assert c.get("finding_id"), c
             assert by_finding.get(c["finding_id"]) == c["contract_relevance"]
 
     def test_used_by_missing_symbol_gets_contract_evaluation_in_markdown(

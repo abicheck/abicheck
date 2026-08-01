@@ -516,7 +516,7 @@ class TestReevaluateFromEvidence:
                 ).values()
             )
         )
-        assert decision.relevance is not ContractRelevance.IN_CONTRACT
+        assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
 
     def test_symbol_level_findings_ignore_their_caused_type(self) -> None:
         """Closure membership answers a *type*-level question only.
@@ -571,7 +571,7 @@ class TestReevaluateFromEvidence:
                 ).values()
             )
         )
-        assert decision.relevance is not ContractRelevance.IN_CONTRACT
+        assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
 
     def test_exported_alias_cannot_root_an_unexported_namesake(self) -> None:
         """A bare alias shared with a non-root proves nothing about either.
@@ -627,7 +627,7 @@ class TestReevaluateFromEvidence:
                 ).values()
             )
         )
-        assert decision.relevance is not ContractRelevance.IN_CONTRACT
+        assert decision.relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
 
     def test_all_mode_honors_a_persisted_post_manifest(self) -> None:
         """``all`` drops header-origin scoping, not an exact manifest.
