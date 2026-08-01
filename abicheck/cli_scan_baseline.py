@@ -259,15 +259,21 @@ def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
     names are asserted equal to the reporter's by
     ``tests/test_scan_compare_parity.py``, so the two cannot drift into
     naming the same decision differently.
+
+    Enum values are read the same tolerant way ``_baseline_finding_dicts``
+    reads ``kind`` -- that function's whole contract is that it stays safe
+    against the lightweight fakes the surrounding tests and sibling modules
+    build, and requiring a real enum here would have broken it for exactly
+    those callers (CodeRabbit review).
     """
     relevance = getattr(c, "contract_relevance", None)
     if relevance is None:
         return
-    entry["contract_relevance"] = relevance.value
+    entry["contract_relevance"] = getattr(relevance, "value", str(relevance))
     entry["contract_reason_code"] = getattr(c, "contract_reason_code", None)
     assurance = getattr(c, "contract_assurance", None)
     if assurance is not None:
-        entry["contract_assurance"] = assurance.value
+        entry["contract_assurance"] = getattr(assurance, "value", str(assurance))
     refs = getattr(c, "contract_evidence_refs", None)
     if refs is not None:
         entry["contract_evidence_refs"] = list(refs)

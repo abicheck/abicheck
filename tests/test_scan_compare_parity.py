@@ -813,6 +813,12 @@ class TestFieldForFieldParity:
 
         rows_c = _compare_rows(report)
         rows_s = _scan_rows(scan["diff"])
+        # Scan's summary caps its itemized findings (`_MAX_BASELINE_FINDINGS`);
+        # a truncated cell would fail the set comparison below for a reason
+        # that has nothing to do with parity, so name that cause directly
+        # rather than leaving a future fixture to produce an opaque set diff
+        # (CodeRabbit review).
+        assert not scan["diff"].get("findings_truncated"), label
         # A vacuous pass (both empty) would satisfy every assertion below,
         # so require the matrix cell to actually have findings to compare.
         assert rows_c, f"{label}: no gating findings to compare"
@@ -1027,3 +1033,65 @@ class TestBinaryAndMixedInputParity:
         report, scan = _both(runner, dumped, new, [], tmp_path)
         assert _compare_rows(report), "no gating findings on the mixed pair"
         assert _scan_rows(scan["diff"]) == _compare_rows(report)
+
+
+class TestServiceLayerContractValidation:
+    """`ScanRequest`'s own half of the `--contract` rule (ADR-049 Phase 6).
+
+    `service.compare_snapshots` has always rejected the combination at the
+    Tier-2 boundary, so it was never silently accepted -- but reaching that
+    check means a whole scan runs first and then fails, while `scan_cmd`
+    rejects the same request before any work. `run_scan` now applies the
+    identical rule up front (CodeRabbit review).
+    """
+
+    def _request(self, new: Path, old: Path, **kwargs):
+        from abicheck.service_scan import ScanRequest
+
+        return ScanRequest(binaries=[new], baseline=old, **kwargs)
+
+    def test_a_mode_without_evaluation_is_rejected_before_scanning(
+        self, old_snap: Path, new_snap_breaking: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service_scan import run_scan
+
+        called: list[object] = []
+        monkeypatch.setattr(
+            "abicheck.scan_engine.run_scan_core",
+            lambda **kw: called.append(kw),
+        )
+        with pytest.raises(ValidationError, match="contract_mode requires"):
+            run_scan(
+                self._request(new_snap_breaking, old_snap, contract_mode="exports")
+            )
+        # The point of moving the check: no scanning happened first.
+        assert called == []
+
+    def test_a_mode_with_evaluation_is_accepted(
+        self, old_snap: Path, new_snap_breaking: Path
+    ) -> None:
+        from abicheck.service_scan import run_scan
+
+        result = run_scan(
+            self._request(
+                new_snap_breaking,
+                old_snap,
+                contract_mode="exports",
+                contract_evaluation=True,
+            )
+        )
+        assert result.exit_code == 4
+
+    def test_the_no_baseline_rejection_still_names_both_fields(
+        self, new_snap_breaking: Path
+    ) -> None:
+        # Without a baseline these configure nothing, so they keep going
+        # through the existing comparison-only guard rather than the new one.
+        from abicheck.errors import ValidationError
+        from abicheck.service_scan import ScanRequest, run_scan
+
+        with pytest.raises(ValidationError, match="contract_evaluation"):
+            run_scan(
+                ScanRequest(binaries=[new_snap_breaking], contract_evaluation=True)
+            )

@@ -371,8 +371,13 @@ REPORT_SCHEMA_VERSION = "2.25"
 #:       additionally carries ``contract_relevance``/
 #:       ``contract_reason_code``/``contract_assurance``/
 #:       ``contract_evidence_refs``, under the same "absent means unstamped"
-#:       rule ``compare``'s report already follows — so a run without that
-#:       flag is byte-identical to 1.5 apart from ``finding_id``.
+#:       rule ``compare``'s report already follows. So a run *without*
+#:       ``--contract-evaluation`` differs from a 1.5 one in exactly three
+#:       places: this version marker itself, the new ``finding_id`` on each
+#:       finding, and the ``detectors`` list — which, unlike the contract
+#:       keys, does not depend on that flag (CodeRabbit review: the earlier
+#:       wording claimed byte-identity apart from ``finding_id``, which
+#:       understated both).
 SCAN_SCHEMA_VERSION = "1.6"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent

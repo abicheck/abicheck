@@ -1104,6 +1104,17 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
         _reject_comparison_only_fields(req)
+    else:
+        # ADR-049 Phase 6's own rule, applied where the CLI applies it: up
+        # front, not after the scan. `compare_snapshots` already rejects the
+        # combination at the Tier-2 boundary (`service._validate_contract_mode`,
+        # which this reuses rather than restating), so it was never silently
+        # accepted -- but reaching that check means a full scan runs first and
+        # then fails, where `scan_cmd` rejects the same request before any work
+        # (CodeRabbit review).
+        from .service import _validate_contract_mode
+
+        _validate_contract_mode(req.contract_mode, req.contract_evaluation)
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
 
