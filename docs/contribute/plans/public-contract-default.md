@@ -2557,6 +2557,32 @@ authenticates the rules that actually ran, computed with the ledger's own
 `content_digest`, and nothing in this codebase re-reads a suppression file
 to check this field against its bytes.
 
+**A tenth round found the ninth round's own two fixes each had a sibling
+one module over.** (1) The gate fix landed in the CLI front end only —
+`mcp_server.abi_compare` resolves its own scheme and severity the same way
+(any `severity_*` argument opts into the severity-aware scheme) and rendered
+the context without refreshing it, so `report.contract_context`'s gate stayed
+`GateConfig()`'s defaults there too. It now calls the same
+`with_resolved_gate()`, recording `API_REQUEST` rather than `EXPLICIT_CLI`
+for a stated value (a typed API caller, not a typed flag) and resolving a
+`"scoped"` scheme back to the `legacy`/`severity` one it came from, since
+that is not a value `GateConfig` accepts. (2) `measure_contract_shadow.py`
+walked only `changes`/`out_of_surface_changes`, while `checker` stamps and
+records five collections — a dropped decision or a missing receipt entry for
+a *suppressed*, *redundant*, or *reconciled* finding left the `fact_losses`
+gate at zero. All five are measured now, the three audit buckets under their
+own rows; `_is_delta` answers `False` for them deliberately, since a
+suppression, a display dedup, and a build-context reconciliation are
+policy/presentation decisions about an already-decided finding, not claims
+about contract membership. Not done: adding corpus cases that populate those
+buckets. A suppression case would mean threading a `SuppressionList` through
+the *shared* FP-rate corpus (`check_fp_rate.CASES`, whose own gate would
+have to be re-validated against the changed fixture shape), and redundancy
+and reconciliation are produced by the pipeline rather than selected by
+corpus input — so the three rows stay empty on today's corpus, and the gate
+becomes live for them the moment such a case exists rather than the moment
+someone remembers to add the collection.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

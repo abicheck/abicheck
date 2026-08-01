@@ -133,6 +133,57 @@ def test_public_domain_proves_some_internal_noise_out_of_contract() -> None:
     )
 
 
+def test_audit_bucket_findings_are_measured_too(monkeypatch) -> None:
+    """``checker`` stamps and records five collections, not two.
+
+    ``measure_case`` walked only ``changes``/``out_of_surface_changes``, so a
+    regression dropping a decision (or a receipt entry) for a *suppressed*,
+    *redundant*, or *reconciled* finding still reported zero fact losses --
+    the gate was blind to three of the five buckets it claims to cover
+    (Codex review, fresh evidence). The corpus supplies no case that
+    populates them, so this drives the buckets directly.
+    """
+    from abicheck.contract_relevance_types import ContractRelevance
+
+    case = next(c for c in shadow.CORPUS if not c.internal_noise)
+    mode = shadow.MEASURED_MODES[0]
+    real = shadow.measure_case(case, mode)
+    assert real.findings, "fixture must produce at least one decided finding"
+
+    for bucket in ("suppressed_changes", "redundant_changes", "reconciled_changes"):
+        captured: list = []
+
+        def _relocating_compare(*args, _bucket=bucket, _seen=captured, **kwargs):
+            from abicheck.checker import compare as _compare
+
+            result = _compare(*args, **kwargs)
+            source = result.changes or result.out_of_surface_changes
+            moved = source.pop()
+            _seen.append(moved)
+            getattr(result, _bucket).append(moved)
+            return result
+
+        monkeypatch.setattr(shadow, "compare", _relocating_compare)
+        measurement = shadow.measure_case(case, mode)
+        assert captured, bucket
+        # Relocating a finding must not lose it: same total, still no fact
+        # loss, and its decision now counted under the bucket's own row.
+        assert measurement.findings == real.findings, bucket
+        assert measurement.fact_losses == [], bucket
+        relocated = captured[0]
+        assert relocated.contract_relevance is not None, bucket
+        state = {
+            "suppressed_changes": shadow.LEGACY_SUPPRESSED,
+            "redundant_changes": shadow.LEGACY_REDUNDANT,
+            "reconciled_changes": shadow.LEGACY_RECONCILED,
+        }[bucket]
+        assert measurement.delta_matrix.get(state), bucket
+        # An audit bucket carries no legacy contract claim, so a decision
+        # there is never a delta -- not even a conclusive one.
+        assert not shadow._is_delta(state, ContractRelevance.IN_CONTRACT)
+        assert not shadow._is_delta(state, ContractRelevance.PROVEN_OUT_OF_CONTRACT)
+
+
 def test_render_markdown_covers_every_domain() -> None:
     text = shadow.render_markdown(shadow.metrics())
     for mode in shadow.MEASURED_MODES:

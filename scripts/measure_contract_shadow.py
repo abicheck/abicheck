@@ -111,6 +111,21 @@ _UNRESOLVED = (
 
 LEGACY_KEPT = "kept"
 LEGACY_OUT_OF_SURFACE = "out_of_surface"
+#: The three remaining collections `checker._apply_contract_evaluation_shadow`
+#: stamps and records in the receipt (Codex review, fresh evidence). Measuring
+#: only `kept`/`out_of_surface` left the `fact_losses` gate blind to them: a
+#: regression dropping a decision or a receipt entry for an audit-bucket
+#: finding would still have reported zero.
+#:
+#: They get their own rows rather than being folded into `out_of_surface`, and
+#: `_is_delta` deliberately answers `False` for them: a suppression, a display
+#: dedup, and a build-context reconciliation are policy/presentation decisions
+#: about an *already-decided* finding, not statements about contract
+#: membership, so a shadow decision on one is never a delta against legacy
+#: scoping the way a demoted-but-`IN_CONTRACT` finding is.
+LEGACY_SUPPRESSED = "suppressed"
+LEGACY_REDUNDANT = "redundant"
+LEGACY_RECONCILED = "reconciled"
 
 
 def _is_breaking_kind(change: Change) -> bool:
@@ -216,6 +231,9 @@ def measure_case(case: Case, mode: ContractMode) -> ModeMeasurement:
     for legacy_state, changes in (
         (LEGACY_KEPT, result.changes),
         (LEGACY_OUT_OF_SURFACE, result.out_of_surface_changes),
+        (LEGACY_SUPPRESSED, result.suppressed_changes),
+        (LEGACY_REDUNDANT, result.redundant_changes),
+        (LEGACY_RECONCILED, result.reconciled_changes),
     ):
         for change in changes:
             relevance = change.contract_relevance
@@ -258,7 +276,13 @@ def measure_case(case: Case, mode: ContractMode) -> ModeMeasurement:
 def _is_delta(legacy_state: str, relevance: ContractRelevance) -> bool:
     if legacy_state == LEGACY_KEPT:
         return relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
-    return relevance is ContractRelevance.IN_CONTRACT
+    if legacy_state == LEGACY_OUT_OF_SURFACE:
+        return relevance is ContractRelevance.IN_CONTRACT
+    # An audit-bucket finding was moved there by policy or presentation, not
+    # by contract scoping -- there is no legacy contract claim for a shadow
+    # decision to differ from. Measured (so a lost decision still fails the
+    # `fact_losses` gate), never counted as a delta.
+    return False
 
 
 def _refs_resolve(refs: Sequence[str], block: object) -> bool:

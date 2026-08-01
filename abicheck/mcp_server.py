@@ -546,6 +546,63 @@ def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
 _stamp_explicit_scope_contract_evaluation = stamp_explicit_scope_contract_evaluation
 
 
+def _record_resolved_gate(
+    result: Any, exit_code_scheme: str, severity_config: SeverityConfig | None
+) -> None:
+    """Replace the persisted context's placeholder gate with this tool's own.
+
+    Same defect and same fix as ``cli_compare_helpers._record_resolved_gate``,
+    in the sibling front end: ``checker.compare`` never sees the gate, so the
+    context it builds records a default :class:`GateConfig` -- the built-in
+    ``severity`` scheme and the built-in severity levels -- for every call,
+    including a default (``legacy``-scheme) one and one whose ``severity_*``
+    arguments genuinely moved a category (Codex review, fresh evidence).
+
+    A no-op unless ``contract_evaluation`` produced a context. Runs before the
+    report is rendered, so ``response["report"]["contract_context"]`` describes
+    the gate ``response["exit_code"]`` was actually computed under.
+    """
+    from .contract_evidence import PersistedContractContext
+
+    ctx = getattr(result, "contract_context", None)
+    if not isinstance(ctx, PersistedContractContext):
+        return
+    from .compatibility_evaluation_config import SelectedByEntry, ValueProvenance
+    from .contract_context import with_resolved_gate
+    from .contract_relevance_types import SelectorLayer
+    from .severity import SeverityConfig as _SeverityConfig
+
+    # A `--used-by`/`--required-symbol` scope reports its own `"scoped"`
+    # scheme, which is not one of the two resolved values `GateConfig`
+    # accepts; the underlying scheme it resolved from is recorded instead.
+    scheme = exit_code_scheme
+    if scheme == "scoped":
+        scheme = getattr(result, "scoped_exit_code_scheme", "legacy")
+    # This front end is a typed API caller, so a stated value is
+    # `API_REQUEST` (D7's peer of `EXPLICIT_CLI`) -- it cannot claim a CLI
+    # option was typed. No severity argument means the built-in default
+    # resolved the scheme too.
+    stated = severity_config is not None
+    layer = SelectorLayer.API_REQUEST if stated else SelectorLayer.BUILT_IN_DEFAULT
+
+    def _provenance(field: str) -> ValueProvenance:
+        return ValueProvenance(
+            layer=layer,
+            source_kind="api_argument" if stated else None,
+            reference="mcp.abi_compare" if stated else None,
+            field_location=field,
+            selected_by=(SelectedByEntry(layer=layer, option=field),),
+        )
+
+    result.contract_context = with_resolved_gate(
+        ctx,
+        exit_code_scheme=scheme,
+        severity=severity_config if severity_config is not None else _SeverityConfig(),
+        scheme_provenance=_provenance("exit_code_scheme"),
+        severity_provenance=_provenance("severity"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
@@ -1178,6 +1235,7 @@ def abi_compare(
         # below, which serializes result.changes as-is.
         if contract_evaluation:
             stamp_scoped_result_findings(result, finding_id=_finding_id)
+            _record_resolved_gate(result, exit_code_scheme, severity_config)
 
         # Build structured response. When a used_by/required_symbols scope is in
         # effect, mirror the CLI JSON contract (`_fold_scoped_compat_into_text`):
