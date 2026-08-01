@@ -1693,17 +1693,58 @@ def run_compare(
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
-    from .cli_compare_receipt import SEVERITY_PARAMS, record_resolved_gate
-
-    record_resolved_gate(
-        result,
-        resolved_cfg,
-        project_cfg,
-        # Only this module holds the Click context, so it answers "did the
-        # user type this?" and hands the answers over as data -- which is
-        # what keeps `cli_compare_receipt` a leaf.
-        typed={name: _param_from_cli(name) for name in SEVERITY_PARAMS},
+    from .cli_compare_receipt import record_resolved_config, typed_parameter_names
+    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
+    from .compatibility_evaluation_resolver import (
+        FieldResolutionError,
+        PackConflictError,
     )
+    from .errors import PackManifestError
+
+    try:
+        record_resolved_config(
+            result,
+            resolved_cfg,
+            project_cfg,
+            # The raw CLI values, not the already-merged ones several of
+            # these locals were overwritten with above: the resolver's whole
+            # job is to merge them itself, from each layer's own inputs, and
+            # handing it a pre-merged value would make every field look
+            # CLI-stated.
+            params={
+                "contract_mode": contract_mode,
+                "scope_public_headers": scope_public_headers,
+                "policy": policy,
+                "policy_file_path": policy_file_path,
+                "public_symbols": public_symbols,
+                "public_symbols_list": public_symbols_list,
+                "suppress": suppress,
+                "require_justification": require_justification,
+                "exit_code_scheme": exit_code_scheme,
+                "severity_preset": severity_preset,
+                "severity_abi_breaking": severity_abi_breaking,
+                "severity_potential_breaking": severity_potential_breaking,
+                "severity_quality_issues": severity_quality_issues,
+                "severity_addition": severity_addition,
+            },
+            # Only this module holds the Click context, so it answers "did the
+            # user type this?" and hands the answers over as data -- which is
+            # what keeps `cli_compare_receipt` a leaf.
+            typed={n for n in typed_parameter_names() if _param_from_cli(n)},
+            project_path=cfg_path,
+            # Both already loaded for the comparison itself; re-reading them
+            # here could pair one content's digest with another's rules.
+            policy_file=pf,
+            suppression=suppression,
+            suppress_path=suppress,
+            run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
+        )
+    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+        # A D7 same-tier conflict / D8 pack conflict / malformed manifest is a
+        # usage error, the exit code the resolver's own docstring leaves to
+        # its front end. Only reachable under --contract-evaluation, which is
+        # the only thing that builds a context to record onto.
+        raise click.UsageError(str(exc)) from exc
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed

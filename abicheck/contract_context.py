@@ -23,16 +23,20 @@ binds all three:
 
 - ``evaluation_context`` -- the resolved
   :class:`~abicheck.compatibility_evaluation_config.CompatibilityEvaluationConfig`
-  that produced the decisions, with field-level provenance. Built from what
-  ``checker.compare`` itself resolved, which is deliberately narrower than
-  what a front end resolves (Phase 1's
+  that produced the decisions, with field-level provenance. Built here from
+  what ``checker.compare`` itself resolved, which is deliberately narrower
+  than what a front end resolves (Phase 1's
   :mod:`abicheck.compatibility_evaluation_frontend` sees CLI/API/project
   inputs this core verb never receives): the provenance therefore records
   ``API_REQUEST`` for a value that arrived as a ``compare()`` argument,
-  rather than claiming a CLI/recipe layer it cannot observe. Phase 5 is what
-  replaces this with the front end's own already-resolved object;
-  under-claiming until then is the honest encoding, since a wrong provenance
-  layer is exactly what D7's precedence receipts exist to make impossible.
+  rather than claiming a CLI/recipe layer it cannot observe. A front end
+  that has resolved the canonical object hands it over through
+  :func:`with_resolved_config` (Phase 5), and what this module builds is
+  what a front end that has not still gets -- under-claiming, since a wrong
+  provenance layer is exactly what D7's precedence receipts exist to make
+  impossible. The native ``compare`` CLI does hand one over
+  (:mod:`abicheck.cli_compare_receipt`); the MCP ``abi_compare`` tool does
+  not yet.
 - ``decision_receipt`` -- the mode/root-dependent closure and the per-finding
   relevance map. Computed *from the evidence block's own persisted graph*
   (:func:`~abicheck.contract_evidence_collect.closure_from_graph`), not from
@@ -294,6 +298,67 @@ def with_field_provenance(
             context.evaluation_context,
             resolved_config=replace(config, provenance=provenance),
         ),
+    )
+
+
+def with_resolved_config(
+    context: PersistedContractContext,
+    config: CompatibilityEvaluationConfig,
+) -> PersistedContractContext:
+    """Return *context* carrying the front end's own already-resolved config.
+
+    ADR-049 Phase 5's "every front end consumes one
+    :class:`CompatibilityEvaluationConfig`", as the one seam where that
+    object replaces the narrower one ``checker.compare`` reconstructs from
+    its own arguments. The core verb sees values, not the inputs that chose
+    them, so it can claim no more than ``API_REQUEST`` for any of them (see
+    this module's docstring);
+    :func:`~abicheck.compatibility_evaluation_frontend.resolve_compatibility_evaluation_config`
+    sees the CLI flags, the project config, and the selected packs, and
+    resolves the real D7 layer per field.
+
+    **Two fields are kept from the core's version regardless.**
+    ``contract.overlays`` and ``surface.explicit_scope`` are not resolved
+    from stated inputs at all: :func:`overlay_selection` recovers them from
+    the run's *own evidence ledger*, so they name the overlays that actually
+    applied -- including ``--post-manifest``, which no front-end input model
+    describes. An observation of what ran outranks a resolution of what was
+    asked for, so when the ledger recorded any overlay, both fields and both
+    provenance entries survive. With no overlay observed there is nothing to
+    preserve and the incoming config's own values stand.
+
+    What this deliberately does *not* touch: the gate. Its values are
+    resolved after ``compare()`` returns and are written by
+    :func:`with_resolved_gate` from the configuration the run was really
+    scored with -- see that function, and
+    ``cli_compare_receipt.record_resolved_config`` for why the two are
+    written from different sources.
+    """
+    from .compatibility_evaluation_frontend import (
+        CONTRACT_OVERLAYS_FIELD,
+        EXPLICIT_SCOPE_FIELD,
+    )
+
+    observed = context.evaluation_context.resolved_config
+    if observed.contract.overlays:
+        provenance = dict(config.provenance)
+        for field in (CONTRACT_OVERLAYS_FIELD, EXPLICIT_SCOPE_FIELD):
+            entry = observed.provenance.get(field)
+            if entry is None:
+                provenance.pop(field, None)
+            else:
+                provenance[field] = entry
+        config = replace(
+            config,
+            contract=replace(config.contract, overlays=observed.contract.overlays),
+            surface=replace(
+                config.surface, explicit_scope=observed.surface.explicit_scope
+            ),
+            provenance=provenance,
+        )
+    return replace(
+        context,
+        evaluation_context=replace(context.evaluation_context, resolved_config=config),
     )
 
 

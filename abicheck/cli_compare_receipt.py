@@ -13,35 +13,64 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-049: what the ``compare`` CLI, and only it, knows about its own run.
+"""ADR-049 Phase 5: the ``compare`` CLI's own resolved configuration.
 
-``checker.compare`` builds the persisted contract context from the arguments
-it was handed, so it can honestly claim no more than ``API_REQUEST`` for any
-of them. Two things are resolved *after* it returns, by this front end: the
-gate (exit-code scheme and the four severity levels) and which D7 layer
-actually selected the contract mode. This module refreshes both onto the
-context before any report is rendered.
+``checker.compare`` builds a persisted contract context from the arguments it
+was handed, so it can honestly claim no more than ``API_REQUEST`` for any of
+them (see :mod:`abicheck.contract_context`). This module is where the
+``compare`` command hands over what it -- and only it -- knows: which flags
+the user really typed, which ``.abicheck.yml`` supplied a value, which
+``--profile`` filled one in, and the exit-code scheme and severity levels the
+run was actually scored with.
+
+Those inputs go through Phase 1's canonical resolver
+(:func:`~abicheck.compatibility_evaluation_frontend.resolve_compatibility_evaluation_config`),
+and the resulting object *replaces* the core verb's narrower reconstruction.
+That is the whole point of the phase: one resolver decides D7 precedence for
+every front end, instead of each one patching the fields it happens to know
+about after the fact.
+
+**Values and provenance come from different places for the gate, on purpose.**
+The scheme and the four severity levels are resolved by
+``cli_helpers_compare.resolve_compare_config`` *before* this runs, and that
+resolution is what the run's verdict and exit code were computed from -- so
+those are the values a receipt must report, and they are written through
+:func:`~abicheck.contract_context.with_resolved_gate` unchanged. The
+canonical resolver re-derives the same two from the same inputs and is used
+for their *provenance*. The two agreeing is a real, checkable claim rather
+than an assumption: ``tests/test_cli_compare_config_receipt.py`` asserts it
+across the input matrix, so a divergence surfaces as a failing parity test
+instead of a receipt that quietly describes a different run.
 
 Split out of :mod:`abicheck.cli_compare_helpers` when that file reached the
 2000-line hard cap -- a cohesive unit (one concern, one caller) rather than
 an arbitrary cut. Deliberately a **leaf**: it imports nothing from its
 caller, so no cycle forms. "Which parameters did the user actually type" is
 the caller's question to answer (it holds the Click context), so the answers
-arrive here as data (*typed*) rather than this module reaching back for
-them, and ``resolved_cfg``/``project_cfg`` stay ``Any`` for the same reason
--- typing them would import the very module this one is split out of.
+arrive here as data (*typed*) rather than this module reaching back for them,
+and ``resolved_cfg``/``project_cfg`` stay ``Any`` for the same reason --
+typing them would import the very module this one is split out of.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
+from pathlib import Path
 from typing import Any
 
-#: Every Click parameter whose "was it typed?" answer this module needs. The
-#: caller reads them from its own Click context (see ``record_resolved_gate``'s
-#: *typed*), which is what keeps this module free of any import back into it.
-SEVERITY_PARAMS: tuple[str, ...] = (
+#: The ``compare`` kwargs that feed the compatibility configuration. Named
+#: here so the caller forwards exactly the mapping
+#: ``compare_cli_inputs`` reads, and an option renamed on one side fails
+#: loudly on the other rather than resolving to "not stated".
+COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
     "contract_mode",
+    "scope_public_headers",
+    "policy",
+    "policy_file_path",
+    "public_symbols",
+    "public_symbols_list",
+    "suppress",
+    "require_justification",
     "exit_code_scheme",
     "severity_preset",
     "severity_abi_breaking",
@@ -61,118 +90,166 @@ _SEVERITY_CATEGORIES = (
 )
 
 
-def _cli_field_provenance(field: str, *, from_cli: bool, from_config: bool) -> Any:
-    """Which D7 layer selected one field, as this front end actually resolved it.
+def typed_parameter_names() -> tuple[str, ...]:
+    """The parameters the caller must answer "was this typed?" for.
 
-    ``checker.compare`` records ``API_REQUEST`` for everything it was handed
-    because that is all a core verb can honestly claim (see
-    :mod:`abicheck.contract_context`). The gate is different: it is resolved
-    here, by the front end, so the real layer *is* observable — a typed flag
-    is ``EXPLICIT_CLI``, a value that only ``.abicheck.yml`` supplied is
-    ``PROJECT_CONFIG``, and neither is ``BUILT_IN_DEFAULT``.
+    Read off the resolver's own
+    :data:`~abicheck.compatibility_evaluation_frontend.DEFAULTED_COMPARE_PARAMETERS`
+    rather than restated here: those are exactly the options whose click
+    default (``--policy strict_abi``, ``--scope-public-headers``) is
+    indistinguishable from a value the user chose, and a second copy of that
+    list is a second thing to keep in sync. Every other option already
+    spells "not given" as ``None``/``()``.
     """
-    from .compatibility_evaluation_config import SelectedByEntry, ValueProvenance
-    from .contract_relevance_types import SelectorLayer
+    from .compatibility_evaluation_frontend import DEFAULTED_COMPARE_PARAMETERS
 
-    layer = (
-        SelectorLayer.EXPLICIT_CLI
-        if from_cli
-        else SelectorLayer.PROJECT_CONFIG
-        if from_config
-        else SelectorLayer.BUILT_IN_DEFAULT
-    )
-    return ValueProvenance(
-        layer=layer,
-        source_kind=(
-            "cli_option" if from_cli else "project_config" if from_config else None
-        ),
-        field_location=field,
-        selected_by=(
-            SelectedByEntry(layer=layer, option=f"--{field.replace('_', '-')}"),
-        ),
-    )
+    return tuple(sorted(DEFAULTED_COMPARE_PARAMETERS))
 
 
-def _severity_from_config(project_cfg: Any, category: str) -> bool:
-    """Whether ``.abicheck.yml`` supplied *category*'s level specifically.
+def _suppression_source(suppression: Any, path: Any) -> Any:
+    """The already-loaded ``--suppress`` list, as a resolver input.
 
-    ``ResolvedCompareConfig.severity_active`` is deliberately run-wide ("a
-    severity level was set *anywhere*"), so using it per category recorded
-    the three untouched categories as ``PROJECT_CONFIG`` for a run whose only
-    input was ``--severity-abi-breaking`` and which had no project config at
-    all (Codex review, fresh evidence). ``BuildConfig`` carries the four
-    levels separately, so the honest answer is available per field --
-    ``severity.preset`` counts for every category, since that is what it
-    sets.
+    Built from the list the run really used rather than re-reading *path*:
+    a second read could pair one content's digest with another's rules, the
+    trap :meth:`SuppressionSource.from_file` documents for its own single
+    read. A list with no ``source_sha256`` (``merge()`` drops it, and the
+    ABICC front end constructs several without one) still selected a source,
+    so it is reported as one -- the same absent-vs-empty rule
+    ``contract_context.suppression_config_for`` follows.
     """
-    if project_cfg is None:
-        return False
-    if getattr(project_cfg, "severity_preset", None) is not None:
-        return True
-    return getattr(project_cfg, f"severity_{category}", None) is not None
+    if suppression is None:
+        return None
+    from .compatibility_evaluation_frontend import SuppressionSource
+
+    return SuppressionSource(
+        path=str(path) if path is not None else None,
+        sha256=getattr(suppression, "source_sha256", None) or "",
+        rules=tuple(suppression.rule_identities()),
+    )
 
 
-def record_resolved_gate(
+def _profile_inputs(run_profile: Mapping[str, Any] | None) -> Any:
+    """A ``--profile``'s injected values, as a resolver input.
+
+    *run_profile* is what ``cli_options.apply_compare_profile`` recorded:
+    ``{"name": ..., "injected": {dest: value}}``. Only the keys the
+    configuration actually has a field for are read; the rest of a profile
+    (depth, format, ``--recommend``, ``--stat``) is execution/report surface
+    with nothing to resolve here.
+    """
+    from .compatibility_evaluation_frontend import RunProfileInputs
+
+    if not run_profile:
+        return None
+    injected = run_profile.get("injected") or {}
+    scheme = injected.get("exit_code_scheme")
+    return RunProfileInputs(
+        name=run_profile.get("name"),
+        exit_code_scheme=str(scheme) if scheme is not None else None,
+    )
+
+
+def resolve_cli_config(
+    params: Mapping[str, Any],
+    *,
+    typed: Collection[str],
+    project_cfg: Any,
+    project_path: Path | None,
+    policy_file: Any = None,
+    suppression: Any = None,
+    suppress_path: Path | None = None,
+    run_profile: Mapping[str, Any] | None = None,
+) -> Any:
+    """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
+
+    Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
+    D8 pack conflict, a malformed pack manifest); mapping those onto an exit
+    code is the caller's job, as that module documents.
+    """
+    from .compatibility_evaluation_frontend import (
+        FrontEnd,
+        ProjectCompatibilityInputs,
+        compare_cli_inputs,
+        resolve_compatibility_evaluation_config,
+    )
+
+    # A profile injects its values *into the command's kwargs*, so by the time
+    # they reach here they are indistinguishable from typed ones -- and read
+    # as `EXPLICIT_CLI`, the one layer a profile must never claim. Blanked
+    # here and re-contributed at the `run_profile` tier below, which is both
+    # the honest source and the precedence D7 gives it.
+    injected = (run_profile or {}).get("injected") or {}
+    params = {
+        name: (None if name in injected else value) for name, value in params.items()
+    }
+    return resolve_compatibility_evaluation_config(
+        front_end=FrontEnd.CLI,
+        explicit=compare_cli_inputs(
+            params,
+            explicit_parameters=typed,
+            policy_file=policy_file,
+            suppression=_suppression_source(suppression, suppress_path),
+        ),
+        project=ProjectCompatibilityInputs.from_build_config(
+            project_cfg, path=project_path
+        ),
+        profile=_profile_inputs(run_profile),
+    )
+
+
+def record_resolved_config(
     result: Any,
     resolved_cfg: Any,
     project_cfg: Any,
     *,
-    typed: Mapping[str, bool],
+    params: Mapping[str, Any],
+    typed: Collection[str],
+    project_path: Path | None = None,
+    policy_file: Any = None,
+    suppression: Any = None,
+    suppress_path: Path | None = None,
+    run_profile: Mapping[str, Any] | None = None,
 ) -> None:
-    """Replace the persisted context's placeholder gate with the real one.
+    """Install this front end's resolved configuration onto the context.
 
     A no-op unless ``--contract-evaluation`` produced a context. Runs before
-    any report is rendered, so every output path sees the gate the run was
-    actually scored with rather than :class:`GateConfig`'s built-in defaults
-    (Codex review, fresh evidence).
+    any report is rendered, so every output path sees one configuration
+    resolved by the canonical resolver rather than the core verb's
+    argument-shaped reconstruction, and sees the gate the run was actually
+    scored with rather than :class:`GateConfig`'s built-in defaults.
     """
     from .contract_evidence import PersistedContractContext
 
     ctx = getattr(result, "contract_context", None)
     if not isinstance(ctx, PersistedContractContext):
         return
-    from .contract_context import with_field_provenance, with_resolved_gate
+    from .compatibility_evaluation_frontend import (
+        EXIT_CODE_SCHEME_FIELD,
+        SEVERITY_CATEGORY_FIELDS,
+    )
+    from .contract_context import with_resolved_config, with_resolved_gate
 
-    # `checker.compare` receives the mode as an argument and can claim no
-    # more than `API_REQUEST` for it; a typed `--contract` is `EXPLICIT_CLI`,
-    # and only this front end knows which it was (Codex review). Left alone
-    # when the flag was not typed, so the legacy-alias provenance
-    # `resolve_legacy_contract_mode` produced for `--scope-public-headers`
-    # survives.
-    if typed.get("contract_mode"):
-        ctx = with_field_provenance(
-            ctx,
-            {
-                "contract.mode": _cli_field_provenance(
-                    "contract", from_cli=True, from_config=False
-                )
-            },
-        )
-
-    scheme_cli = typed.get("exit_code_scheme", False)
-    # Per category, not one verdict for the block: `--severity-abi-breaking`
-    # beside an `addition` level only `.abicheck.yml` supplied are two
-    # different layers, and the old `any(...)` labelled both `EXPLICIT_CLI`
-    # (Codex review, fresh evidence). `--severity-preset` sets all four, so
-    # it counts as a typed flag for each.
-    preset_cli = typed.get("severity_preset", False)
+    config = resolve_cli_config(
+        params,
+        typed=typed,
+        project_cfg=project_cfg,
+        project_path=project_path,
+        policy_file=policy_file,
+        suppression=suppression,
+        suppress_path=suppress_path,
+        run_profile=run_profile,
+    )
+    ctx = with_resolved_config(ctx, config)
+    # The values the run was scored with, with the canonical resolver's
+    # provenance -- see this module's docstring for why the two halves come
+    # from different resolutions, and which test holds them to agreeing.
     result.contract_context = with_resolved_gate(
         ctx,
         exit_code_scheme=resolved_cfg.exit_code_scheme,
         severity=resolved_cfg.severity,
-        scheme_provenance=_cli_field_provenance(
-            "exit_code_scheme",
-            from_cli=scheme_cli,
-            # ``auto`` is this key's own built-in default, so a config that
-            # left it alone did not select the resolved concrete scheme.
-            from_config=getattr(project_cfg, "exit_code_scheme", "auto") != "auto",
-        ),
+        scheme_provenance=config.provenance[EXIT_CODE_SCHEME_FIELD],
         severity_provenance={
-            category: _cli_field_provenance(
-                f"severity_{category}",
-                from_cli=preset_cli or typed.get(f"severity_{category}", False),
-                from_config=_severity_from_config(project_cfg, category),
-            )
+            category: config.provenance[SEVERITY_CATEGORY_FIELDS[category]]
             for category in _SEVERITY_CATEGORIES
         },
     )

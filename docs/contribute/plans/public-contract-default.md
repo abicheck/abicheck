@@ -3393,6 +3393,84 @@ include the now-appended `expires=2000-01-01`, and added
 only by `expires`, asserting distinct `near_expiry_rules` labels each
 containing their own date).
 
+**Updated (2026-08-01): the phase's headline item landed for `compare` --
+"every front end consumes one `CompatibilityEvaluationConfig`" (§12's
+Definition-of-Done item 2) is now true of the native CLI.** Phase 1 built
+the canonical resolver and Phase 4 persisted an `evaluation_context` block,
+but nothing joined them: the block carried what `checker.compare`
+reconstructed from its own arguments, and the CLI patched the two fields it
+happened to know about afterwards (`cli_compare_receipt.record_resolved_gate`
+for the gate, `with_field_provenance` for a typed `--contract`). Because a
+core verb sees values and not the inputs that chose them, every other field
+was recorded at `API_REQUEST` -- honest, but useless to an audit consumer
+asking *which* layer selected a value. `run_compare` now resolves its own
+inputs through `resolve_compatibility_evaluation_config` -- the raw CLI
+values (not the already-merged locals several of them are overwritten with),
+the set of parameters Click reports as really typed, the discovered
+`.abicheck.yml`, and the already-loaded `--policy-file`/`--suppress`
+documents (passed in rather than re-read, so one content's digest cannot be
+paired with another's rules) -- and installs the result through a new
+`contract_context.with_resolved_config`. Every field's provenance is now the
+real D7 layer with the path and digest a replay would re-read.
+
+Two seams needed a decision rather than plumbing. **The gate** is resolved
+by `resolve_compare_config` *after* `compare()` returns and is what the
+verdict and exit code were actually computed from, so its *values* are still
+written by `with_resolved_gate` from that resolution, while its *provenance*
+comes from the canonical resolver. That split is only sound while the two
+agree, so it is asserted rather than assumed:
+`tests/test_cli_compare_config_receipt.py::TestGateParityWithTheLiveRun`
+resolves both from the same inputs across a parametrized matrix and compares
+the scheme and all four severity levels. **Observed overlays** go the other
+way: `contract.overlays`/`surface.explicit_scope` are recovered from the
+run's own evidence ledger (`overlay_selection`) and name what actually
+applied, including `--post-manifest`, which no front-end input model
+describes -- so `with_resolved_config` keeps both from the core's version
+whenever the ledger recorded any overlay, and takes the resolver's otherwise.
+
+**A real bug fell out of the wiring, in `--profile`.** `apply_compare_profile`
+fills a profile's values into the command's own kwargs wherever the user left
+the option alone and deliberately does *not* stamp a parameter source
+("nothing downstream needs the source" -- its own docstring). Once a receipt
+resolves D7 layers, that stopped being true in the worst way: the injected
+value is indistinguishable from a typed one, so `--profile ci-gate` first
+resolved `gate.exit_code_scheme` as `EXPLICIT_CLI`, and blanking it there
+resolved it to `legacy` -- a *wrong value* for a run that really scored under
+`severity`, not merely an unnamed source. The profile now records what it
+injected in `ctx.meta` (`RUN_PROFILE_META_KEY`), the receipt blanks those
+keys from the explicit tier, and a new `RunProfileInputs` re-contributes them
+at D7's own `run_profile` layer -- below an explicit flag, above the project
+config.
+
+That layer carries **a deliberate ADR deviation, recorded rather than
+smoothed over**: D7 scopes `run_profile` to execution fields (depth, format,
+budget, workflow) and puts the exit-code scheme in the *gate* namespace, yet
+the pre-existing `ci-gate` bundle really does select it. Encoding what the
+bundle does today is the honest receipt; both ways to remove the deviation
+(move the key out of `ci-gate` into a gate pack, or amend D7) change
+user-visible behavior or the ADR, so neither belongs in the wiring change
+that found it. Only that one field passes `allow_run_profile=True`, so a
+profile assigning any other field still raises -- which is what keeps the
+deviation from spreading.
+
+`cli_options.py` crossed the 2000-line hard cap on the way, so ADR-040
+Lever 3's run-profile *data* (the table, its `--profile` option, the meta
+key) moved to a new leaf, `cli_profiles.py`, re-exported from its former
+home. `apply_compare_profile`/`_profile_targets_set_input` deliberately
+stayed behind: they reach `cli_resolve`, and moving them would have made the
+new module a fresh member of the CLI-registration import cycle -- exactly
+what the `import-cycle-growth` gate exists to catch, and unnecessary, since
+the split works without one.
+
+Still open in this phase, unchanged by this slice: the MCP `abi_compare`
+tool still patches its own gate (`mcp_server._record_resolved_gate`) rather
+than resolving a config through
+`compatibility_config_from_compare_request` -- the same seam, one front end
+over, and the natural next slice. `scan --against` builds no context at all
+(it has no `--contract-evaluation`). The "unsuppressible coverage ledger"
+remains undesigned, and the parity suite still covers concrete scenarios
+rather than §6.4's full matrix.
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve

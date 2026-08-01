@@ -12,14 +12,18 @@ generated: false
 
 # Compatibility evaluation configuration (ADR-049)
 
-!!! warning "Proposed — resolved, not yet applied"
+!!! warning "Resolved and reported — not yet applied"
 
     Everything on this page is implemented as *configuration resolution*
-    (`abicheck.compatibility_evaluation_frontend`) and is fully tested, but no
-    command consumes the resolved object yet: it changes no verdict, no
-    finding, and no exit code. Applying it in the authoritative comparison path
-    is [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
-    Phase 5 work, and the default flip is Phase 7. Pack manifests (below) have
+    (`abicheck.compatibility_evaluation_frontend`) and is fully tested.
+    `abicheck compare --contract-evaluation` resolves one such object per run
+    and reports it, as the `contract_context.evaluation_context` block of its
+    JSON report — but only as an audit record: it changes no verdict, no
+    finding, and no exit code. Every other command, and every `compare` run
+    without that flag, resolves nothing. Applying the object in the
+    authoritative comparison path is the rest of
+    [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
+    Phase 5, and the default flip is Phase 7. Pack manifests (below) have
     no CLI flag yet either — they are reachable from the Python API only.
     Today's live behaviour is documented in
     [Configuration File](config-file.md) and [Exit Codes](exit-codes.md).
@@ -113,7 +117,7 @@ the shadowed input is retained in the receipt
 | `policy.base` | `--policy-file` `base_policy`; legacy `--policy` | `policy` | — | — |
 | `policy.overrides` | `--policy-file` `overrides:` | — | — | `policy` |
 | `policy.packs` | *(pack paths)* | — | — | — |
-| `gate.exit_code_scheme` | `--exit-code-scheme` | — | `exit_code_scheme` | `gate` |
+| `gate.exit_code_scheme` | `--exit-code-scheme`; `--profile` (see below) | — | `exit_code_scheme` | `gate` |
 | `gate.preset` | `--severity-preset` | — | `severity.preset` | — |
 | `gate.severity.*` | `--severity-abi-breaking`, … | — | `severity.*` | `gate` |
 | `gate.packs` | *(pack paths)* | — | — | — |
@@ -134,6 +138,25 @@ is `BuildConfig`'s default for it, so it contributes nothing.)
 
 `--strict-suppressions` and `--require-justification` are real inputs with no
 field in ADR-049's typed shape; they stay outside this object.
+
+### The `run_profile` tier and `--profile ci-gate`
+
+`--profile` fills each setting its bundle declares only where you left the
+corresponding flag alone, so it sits at D7's `run_profile` tier: below an
+explicit flag, above `.abicheck.yml`. Exactly one field of this object is
+reachable that way — `gate.exit_code_scheme`, which `ci-gate` sets to
+`severity`. The bundle's other keys (`depth`, the report format,
+`--recommend`, `--stat`) are execution and report settings with no field
+here.
+
+That one field is a **known deviation** from D7, which scopes the
+`run_profile` tier to execution fields and puts the exit-code scheme in the
+`gate` namespace. It is recorded as what it is rather than smoothed over:
+`ci-gate` predates ADR-049 and really does select the scheme, so resolving
+the field without the profile would report a value the run was not scored
+with. Removing the deviation means either moving the key out of `ci-gate`
+into a gate pack or amending D7 — both user-visible changes in their own
+right. Any *other* field a future profile tried to assign is rejected.
 
 ## Pack manifests
 

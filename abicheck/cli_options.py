@@ -1805,45 +1805,28 @@ def count_visible_options(cmd: object) -> int:
     return n
 
 
-#: ADR-040 Lever 3 — named run profiles for ``compare``. Each maps a profile
-#: name to a bundle of ``{option-dest: value}`` defaults for the documented
-#: workflows. A profile is a *default layer*: an explicitly-passed flag always
-#: wins (see :func:`apply_compare_profile`), mirroring the config < CLI rule and
-#: the way ``--severity-preset`` collapses four severity flags into one token.
-#: Values are in each option's *resolved* form (``depth`` uses the canonical
-#: ``USER_DEPTHS`` rungs, ``fmt``/``exit_code_scheme`` the ``Choice`` strings,
-#: booleans as ``bool``) so they can be injected without re-running conversion.
-COMPARE_PROFILES: dict[str, dict[str, object]] = {
-    # CI gate: fast header-depth check, compact review digest, severity-aware
-    # exit codes — the "block the PR" workflow. (Public-surface scoping is the
-    # default, so the profile does not restate it — a project's .abicheck.yml
-    # scope choice stays authoritative.)
-    "ci-gate": {
-        "depth": "headers",
-        "fmt": "review",
-        "exit_code_scheme": "severity",
-    },
-    # Release cut: deepest evidence, full Markdown report with a semver/SONAME
-    # recommendation appended — the "should I bump?" flow. Named "release-cut"
-    # rather than bare "release" (CLI audit finding): compare's directory/
-    # package fan-out mode is *also* informally branded "release" throughout
-    # (compare_release_cmd, release_options, the "Release (directory/package
-    # inputs)" help panel) -- an unrelated concept that shares only the word.
-    # `_profile_targets_set_input` already rejects `--profile` on a directory/
-    # package operand with a clear error, so the collision was never a live
-    # bug, but a user skimming --help could reasonably (and wrongly) assume
-    # the two are related.
-    "release-cut": {
-        "depth": "source",
-        "fmt": "markdown",
-        "recommend": True,
-    },
-    # Quick look: symbols-only, one-line summary — the "just tell me" flow.
-    "quick": {
-        "depth": "binary",
-        "stat": True,
-    },
-}
+#: ADR-040 Lever 3's run-profile *data* (the profile table, its ``--profile``
+#: option, and the receipt key) moved to ``cli_profiles.py`` when this module
+#: reached the 2000-line hard cap. Re-exported here so every existing caller
+#: — ``cli.py``'s ``compare`` wrapper and the profile tests — keeps its
+#: import path, the same pattern ``cli_helpers_compare`` already uses for its
+#: own moved helpers.
+#:
+#: The two *functions* below stayed: ``_profile_targets_set_input`` needs
+#: ``cli_resolve.classify_compare_operand``, so moving them would have made
+#: ``cli_profiles`` a new member of the CLI-registration import cycle rather
+#: than the leaf it is — a fresh SCC member for a size-cap split is exactly
+#: what the ``import-cycle-growth`` gate exists to catch, and the split works
+#: without one.
+#
+# Spelled ``X as X`` (an explicit re-export) rather than declared in an
+# ``__all__``: this module has never had one, and adding a three-name list
+# would quietly narrow what ``import *`` gives every other consumer.
+from .cli_profiles import (  # noqa: E402
+    COMPARE_PROFILES as COMPARE_PROFILES,
+    RUN_PROFILE_META_KEY as RUN_PROFILE_META_KEY,
+    profile_option as profile_option,
+)
 
 
 def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
@@ -1867,31 +1850,6 @@ def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
         except Exception:  # noqa: BLE001 - classification is best-effort here
             continue
     return bool(kinds & {"directory", "package"})
-
-
-def profile_option(func: F) -> F:
-    """The ``--profile`` option (ADR-040 Lever 3): one token for a workflow.
-
-    Kept here so ``cli.py`` stays under its size cap and any future front-end
-    shares one spelling/help. The value is validated against
-    :data:`COMPARE_PROFILES`; application (default-layering under explicit flags)
-    happens in :func:`apply_compare_profile`.
-    """
-    func = click.option(
-        "--profile",
-        "profile",
-        type=click.Choice(list(COMPARE_PROFILES), case_sensitive=True),
-        default=None,
-        help="Run-profile preset bundling workflow defaults (ADR-040): "
-        "'ci-gate' (headers depth, review digest, severity exit codes), "
-        "'release-cut' (source depth, recommendation, Markdown -- the "
-        "'should I bump semver?' flow; distinct from directory/package "
-        "'release' comparisons, which this profile does not apply to), "
-        "'quick' (symbols-only, one-line summary). Explicit flags override "
-        "the profile; single-pair compares only (configure release defaults "
-        "in .abicheck.yml).",
-    )(func)
-    return func
 
 
 def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
@@ -1942,12 +1900,24 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         ParameterSource.COMMANDLINE,
         ParameterSource.ENVIRONMENT,
     }
+    injected: dict[str, object] = {}
     for dest, value in profile.items():
         src = get_source(dest) if get_source is not None else None
         # Only fill a value the user did not set explicitly (DEFAULT / DEFAULT_MAP
         # / unknown). An explicit --flag or a mapped env var stays untouched.
         if src not in explicit:
             kwargs[dest] = value
+            injected[dest] = value
+    # ADR-049 D7 gives a run profile its own precedence layer, so "nothing
+    # downstream needs the source" (above) stopped being true: an injected
+    # value is indistinguishable from a built-in default once it is in
+    # *kwargs*, and a receipt resolved without this recorded a profile's
+    # choice as a default nobody made (`cli_compare_receipt`). Recorded on
+    # the context rather than stamped as a command-line source, which would
+    # make a profile outrank the explicit flags it is documented to yield to.
+    meta = getattr(ctx, "meta", None)
+    if meta is not None:
+        meta[RUN_PROFILE_META_KEY] = {"name": str(name), "injected": injected}
 
 
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``

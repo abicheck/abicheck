@@ -488,6 +488,45 @@ class ProjectCompatibilityInputs:
         )
 
 
+@dataclass(frozen=True)
+class RunProfileInputs:
+    """What a selected ``--profile`` filled in, at D7's ``run_profile`` tier.
+
+    ``cli_options.apply_compare_profile`` folds a profile's defaults into the
+    command's kwargs only where the user left the option alone, so by the
+    time the live run reads them a profile-selected value is
+    indistinguishable from a built-in default. Resolving the receipt without
+    this layer therefore did not merely under-claim the source -- it produced
+    a *wrong* value: ``--profile ci-gate`` runs with
+    ``exit_code_scheme="severity"``, while a resolution that never saw the
+    profile answers ``"legacy"`` for a run stating no severity flag.
+
+    **A deliberate deviation from D7, recorded rather than smoothed over.**
+    ADR-049 scopes ``run_profile`` to execution fields (depth, format,
+    budget, workflow) and assigns the exit-code scheme to the *gate*
+    namespace -- yet the pre-existing ``ci-gate`` bundle
+    (:data:`~abicheck.cli_options.COMPARE_PROFILES`) really does select it.
+    Encoding what the bundle does today is the honest receipt; the two ways
+    to remove the deviation (move the key out of ``ci-gate`` into a gate
+    pack, or amend D7) both change user-visible behavior or the ADR, so
+    neither belongs in the wiring change that found it. Only this one field
+    passes ``allow_run_profile=True``; a profile assigning any other field
+    still raises, which is what keeps the deviation from spreading.
+
+    The remaining ``ci-gate``/``release-cut``/``quick`` keys (``depth``,
+    ``fmt``, ``recommend``, ``stat``) are execution/report concerns with no
+    field in this configuration at all, so they are not modelled here.
+    """
+
+    #: The profile's own name (``ci-gate``/``release-cut``/``quick``), for
+    #: the receipt's ``reference``.
+    name: str | None = None
+    #: ``exit_code_scheme``, only when the profile actually supplied it --
+    #: an explicitly typed flag is filtered out by ``apply_compare_profile``
+    #: before it ever reaches here.
+    exit_code_scheme: str | None = None
+
+
 # --------------------------------------------------------------------------
 # Candidate construction helpers.
 # --------------------------------------------------------------------------
@@ -556,6 +595,7 @@ def _resolve(
     pack_option: str = "--pack",
     default_is_stated: bool = False,
     require_legacy_alias_agreement: bool = True,
+    allow_run_profile: bool = False,
 ) -> tuple[Hashable, ValueProvenance]:
     """Resolve one field, letting a selected pack fill it only if nothing else did.
 
@@ -588,6 +628,11 @@ def _resolve(
     that same layer -- and refining a preset with one category flag
     (``--severity-preset strict --severity-addition info``) is legal, not a
     conflict.
+
+    *allow_run_profile* is forwarded to :func:`resolve_field`, which rejects a
+    ``RUN_PROFILE`` candidate for any field the caller has not opted in --
+    D7 scopes that layer to execution fields. See :class:`RunProfileInputs`
+    for the one field this module opts in, and why.
     """
     all_candidates = list(candidates)
     if not all_candidates and pack is not None and not default_is_stated:
@@ -609,6 +654,7 @@ def _resolve(
         all_candidates,
         default=default,
         require_legacy_alias_agreement=require_legacy_alias_agreement,
+        allow_run_profile=allow_run_profile,
     )
 
 
@@ -820,6 +866,7 @@ def resolve_compatibility_evaluation_config(
     front_end: FrontEnd = FrontEnd.CLI,
     explicit: ExplicitCompatibilityInputs | None = None,
     project: ProjectCompatibilityInputs | None = None,
+    profile: RunProfileInputs | None = None,
 ) -> CompatibilityEvaluationConfig:
     """Resolve one complete effective configuration plus its receipt.
 
@@ -844,6 +891,11 @@ def resolve_compatibility_evaluation_config(
       the Phase 6 flag's own documented contract ("an explicit value outranks
       those"). Making that pair an error would reject a combination the live
       CLI accepts today.
+
+    *profile* is what a selected ``--profile`` filled in; it contributes at
+    D7's ``run_profile`` tier, between the explicit and project-config
+    layers. See :class:`RunProfileInputs` for the one field it can state and
+    the ADR deviation that field records.
 
     ``"auto"`` never reaches a resolved *value*: ADR-037 D12's third
     ``--exit-code-scheme`` choice means "decide from whether a severity
@@ -904,9 +956,13 @@ def resolve_compatibility_evaluation_config(
     ):
         pinned_contract[INTERNAL_NAMESPACES_FIELD] = _STATED_ELSEWHERE
     pinned_gate: dict[str, Hashable] = {}
-    if explicit.exit_code_scheme is not None or (
-        project is not None
-        and _stated_exit_code_scheme(project.exit_code_scheme) is not None
+    if (
+        explicit.exit_code_scheme is not None
+        or (profile is not None and profile.exit_code_scheme is not None)
+        or (
+            project is not None
+            and _stated_exit_code_scheme(project.exit_code_scheme) is not None
+        )
     ):
         pinned_gate[EXIT_CODE_SCHEME_FIELD] = _STATED_ELSEWHERE
     # A stated preset owns *every* category it expands into, so those fields
@@ -1253,6 +1309,23 @@ def resolve_compatibility_evaluation_config(
                 reference=explicit.exit_code_scheme,
             )
         )
+    # A `--profile` fills this in only where the user left the flag alone, so
+    # it never ties with the explicit candidate above -- it sits between that
+    # and the project config, exactly where D7 puts `run_profile`. See
+    # `RunProfileInputs` for why a gate field accepts that layer at all.
+    profile_scheme = (
+        _stated_exit_code_scheme(profile.exit_code_scheme) if profile else None
+    )
+    if profile_scheme is not None:
+        scheme_candidates.append(
+            _candidate(
+                SelectorLayer.RUN_PROFILE,
+                profile_scheme,
+                option="--profile",
+                source_kind="run_profile",
+                reference=profile.name if profile is not None else None,
+            )
+        )
     # A project config's own `exit_code_scheme:` defaults to the *string*
     # "auto" when the key is absent (`BuildConfig.exit_code_scheme`), so
     # unlike the CLI flag, "auto" there is indistinguishable from unset and
@@ -1278,6 +1351,7 @@ def resolve_compatibility_evaluation_config(
         pack=gate_pack_fields.get(EXIT_CODE_SCHEME_FIELD),
         pack_layer=layer,
         pack_option=pack_option,
+        allow_run_profile=True,
     )
 
     gate_packs, prov[GATE_PACKS_FIELD] = packs_by_field[GATE_PACKS_FIELD]

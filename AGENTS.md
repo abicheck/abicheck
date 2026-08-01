@@ -242,9 +242,20 @@ Core pipeline (in order of data flow):
      defaults), a typed `CompareRequest`, and the project's `.abicheck.yml`.
      `cross_front_end_differences()` is this phase's gate as an executable
      check: equivalent CLI and API input must resolve equally, modulo only
-     which front end stated a value. Resolution only — no live command
-     constructs it (Phase 5 owns consuming it, Phase 7 the default flip), so
-     it changes no verdict, finding, or exit code. Reference:
+     which front end stated a value. Resolution only — it changes no verdict,
+     finding, or exit code (Phase 7 owns the default flip). ADR-049 Phase 5
+     wired the native `compare` CLI to it: `cli_compare_receipt.py` resolves
+     one object per invocation from the raw CLI values + which parameters
+     Click reports as typed + the discovered `.abicheck.yml` + a selected
+     `--profile` (`RunProfileInputs`, D7's `run_profile` tier), and installs
+     it via `contract_context.with_resolved_config` so the persisted
+     `evaluation_context` carries real per-field D7 provenance instead of
+     `checker.compare`'s honest `API_REQUEST` under-claim. The gate is the
+     one split: values from `resolve_compare_config` (what actually scored
+     the run), provenance from this resolver, with
+     `tests/test_cli_compare_config_receipt.py` asserting the two agree. The
+     MCP `abi_compare` tool still patches its own gate rather than resolving
+     a config — the same seam, one front end over. Reference:
      `docs/reference/compatibility-evaluation-config.md`
    - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
      evaluator: one `ContractEvaluationDecision` (relevance + stable reason
