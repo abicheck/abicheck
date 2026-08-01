@@ -189,6 +189,10 @@ class _PersistedDomain:
         )
         self.closure: dict[str, frozenset[str]] = view.closure_by_side
         self.overlay_roots: dict[str, dict[str, set[str]]] = view.overlay_roots_by_side
+        self.root_nodes: dict[str, set[str]] = view.closure_seeds_by_side
+        self.post_manifest: dict[str, tuple[EvidenceSearchRecord, frozenset[str]]] = (
+            view.post_manifest_by_side
+        )
         # One spelling index per side, built once rather than per finding:
         # `resolve_graph_node` alone rescans every node and edge on each
         # call, which is O(findings x graph) over a graph the collector
@@ -196,9 +200,59 @@ class _PersistedDomain:
         self.node_index: dict[str, dict[str, set[str]]] = {
             side: graph_node_index(graph) for side, graph in self.graph_by_side.items()
         }
+        # Only `exports` needs the alias-free view (see `resolve`), and it
+        # costs a second pass over every node -- so it is built for that mode
+        # alone rather than for every re-evaluation.
+        self.exact_node_index: dict[str, dict[str, set[str]]] = (
+            {
+                side: graph_node_index(graph, follow_aliases=False)
+                for side, graph in self.graph_by_side.items()
+            }
+            if mode is ContractMode.EXPORTS
+            else {}
+        )
 
     def resolve(self, side: str, spelling: str) -> set[str]:
-        return set(self.node_index.get(side, {}).get(spelling, ()))
+        nodes = set(self.node_index.get(side, {}).get(spelling, ()))
+        if self.mode is not ContractMode.EXPORTS:
+            return nodes
+        return self._without_shared_export_aliases(side, spelling, nodes)
+
+    def _without_shared_export_aliases(
+        self, side: str, spelling: str, nodes: set[str]
+    ) -> set[str]:
+        """*nodes*, minus export roots reached only through a shared alias.
+
+        ``compute_export_surface`` prunes its own root set the same way, and
+        for the same reason: with an exported ``ns::foo`` and an unrelated,
+        unexported C ``foo`` both declared, ``_symbol_keys`` gives the C++
+        root the bare alias ``foo`` that the C declaration also answers to,
+        and "an alias shared with a non-root proves nothing about which
+        declaration a finding names". Live therefore answers
+        ``PROVEN_OUT_OF_CONTRACT`` for a finding on the unexported ``foo``;
+        resolving that spelling here through the persisted graph's own alias
+        edges reached the exported node and replayed ``IN_CONTRACT`` -- the
+        inverse collision of the tail-fallback one ``_entity_spellings``
+        already closed, and the same strengthening (Codex review, fresh
+        evidence).
+
+        Only *declaration* nodes count as the sharing non-root: live's
+        ``nonroot_keys`` is built from declarations alone, so a record or
+        enum answering to the same spelling must not prune a genuine export
+        root. A spelling that is itself a root's own canonical node identity
+        is exempt for the same reason it is exempt live -- only the derived
+        aliases around an identity can be shared.
+        """
+        roots = self.root_nodes.get(side, set())
+        rooted = nodes & roots
+        if not rooted:
+            return nodes
+        sharing = {n for n in nodes if n.startswith("decl:")} - roots
+        if not sharing:
+            return nodes
+        if self.exact_node_index.get(side, {}).get(spelling, set()) & roots:
+            return nodes
+        return nodes - rooted
 
     def overlay_names(self, side: str, nodes: set[str]) -> bool:
         """Whether an explicit overlay names one of *nodes* itself.
@@ -345,6 +399,80 @@ def reevaluate_from_evidence(
     return out
 
 
+def _manifest_could_admit(change: Change, committed: frozenset[str]) -> bool:
+    """Whether a ``--post-manifest`` run could have kept *change* in surface.
+
+    ``post_processing.FilterNonPublicSurface._run_allowlist``'s own keep
+    conditions, minus the one this module cannot reproduce. It demotes a
+    finding only when the finding is symbol-level, carries a symbol, is not a
+    hidden-friend finding, *and* that symbol is a concrete export of either
+    snapshot -- and it matches the committed set exactly, never through the
+    suffix-tolerant matcher.
+
+    The concrete-export test is deliberately not reproduced here. The
+    persisted export provider's declarations are not the same set as
+    ``_snapshot_export_ids`` (which reads the raw platform tables), so
+    consulting it could answer "not a concrete export, therefore kept" for a
+    symbol the live run did demote -- a strengthening. Omitting the test
+    weakens instead: a symbol-level finding on a non-exported symbol
+    re-evaluates ``UNKNOWN_UNRESOLVED`` where live said ``IN_CONTRACT``,
+    which is this module's documented direction.
+
+    ``--public-symbol``'s widening rescue is omitted for the same reason: it
+    applies live only when header scoping is *also* on, and the persisted
+    context records the resolved contract mode rather than that flag, so
+    honoring it unconditionally would strengthen exactly the
+    ``--no-scope-public-headers --post-manifest --public-symbol`` case the
+    live pipeline refuses to rescue.
+    """
+    from .surface import is_hidden_friend_finding, is_symbol_level_finding
+
+    symbol = change.symbol or ""
+    if (
+        not symbol
+        or not is_symbol_level_finding(change)
+        or is_hidden_friend_finding(change)
+    ):
+        return True
+    return symbol in committed
+
+
+def _all_mode_decision(
+    change: Change, domain: _PersistedDomain, side: str, refs: tuple[str, ...]
+) -> ReplayDecision:
+    """``all``'s decision, which an exact manifest still narrows.
+
+    ADR-049 D2's ``all`` row drops *header-origin* scoping, not every
+    provider: the live evaluator checks ``--post-manifest``'s own exclusion
+    ahead of its ``all``-mode shortcut, precisely because a committed-export
+    manifest is an exact, closed-domain observation rather than a
+    header-origin classification. Replaying ``IN_CONTRACT`` unconditionally
+    contradicted a live ``PROVEN_OUT_OF_CONTRACT`` for a concrete export the
+    manifest omits -- a flip :func:`compare_decisions` rejects (Codex review,
+    fresh evidence).
+
+    The narrowed answer is ``UNKNOWN_UNRESOLVED``, not the live
+    ``PROVEN_OUT_OF_CONTRACT``: this module reproduces the manifest's keep
+    conditions only approximately (see :func:`_manifest_could_admit`), so it
+    knows the finding is not *demonstrably* in contract without being able to
+    prove the exclusion the live pipeline proved.
+    """
+    manifest = domain.post_manifest.get(side)
+    if manifest is not None and not _manifest_could_admit(change, manifest[1]):
+        return ReplayDecision(
+            relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
+            reason_code="required_evidence_incomplete",
+            assurance=ContractAssurance.PARTIAL,
+            evidence_refs=(*refs, manifest[0].id),
+        )
+    return ReplayDecision(
+        relevance=ContractRelevance.IN_CONTRACT,
+        reason_code="all_mode_normalized_entity",
+        assurance=ContractAssurance.COMPLETE,
+        evidence_refs=refs,
+    )
+
+
 def _reevaluate_one(
     change: Change, domain: _PersistedDomain, mode: ContractMode
 ) -> ReplayDecision:
@@ -357,12 +485,7 @@ def _reevaluate_one(
     side = _side_of(change)
     refs = domain.refs(side)
     if mode is ContractMode.ALL:
-        return ReplayDecision(
-            relevance=ContractRelevance.IN_CONTRACT,
-            reason_code="all_mode_normalized_entity",
-            assurance=ContractAssurance.COMPLETE,
-            evidence_refs=refs,
-        )
+        return _all_mode_decision(change, domain, side, refs)
     graph = domain.graph_by_side.get(side)
     if graph is None:
         # A legacy or one-sided context: the facts this domain needs for the

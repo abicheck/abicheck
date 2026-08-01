@@ -2467,6 +2467,39 @@ settled on. Exact matching loses nothing real: `owner_class_of` always
 reconstructs a complete scope chain, so a real class matches exactly and a
 non-method's namespace noise correctly matches nothing.
 
+**A seventh round found two more of the same shape, one of them the exact
+inverse of the round above.** (1) `exports`-mode node resolution still went
+through the persisted graph's `alias:` edges, and `compute_export_surface`
+prunes exactly those: an exported `ns::foo` contributes the bare alias `foo`
+that an unrelated *unexported* C `foo` also answers to, so live drops the
+shared key from `export_symbols` and returns `PROVEN_OUT_OF_CONTRACT` for a
+finding on the C declaration. Replay resolved that spelling to the exported
+node and reported `IN_CONTRACT`. The resolver now applies the same pruning —
+an export root reached only through a spelling that a *declaration* outside
+the root set also answers to is dropped, unless the spelling is a root's own
+canonical node identity, which is the same pair of exemptions live keeps
+(record/enum nodes never prune, because live's `nonroot_keys` is built from
+declarations alone). Note that round six's fix and this one are the two
+halves of one collision: there the finding was qualified and the root bare,
+here the finding is bare and the root qualified.
+(2) `all` mode returned `IN_CONTRACT` unconditionally, bypassing a persisted
+`--post-manifest`. ADR-049 D2's `all` row drops *header-origin* scoping, not
+every provider — the live evaluator checks the manifest's exclusion ahead of
+its own `all`-mode shortcut, because a committed-export manifest is an exact,
+closed-domain observation rather than a header-origin classification — so a
+concrete export the manifest omits is `PROVEN_OUT_OF_CONTRACT` live and was
+`IN_CONTRACT` replayed, including with a deliberately empty manifest (which
+`collect_contract_evidence` records as a selected source, not an absent one).
+The manifest's spellings are now read in every mode, and an `all`-mode
+finding the manifest could not have admitted answers `UNKNOWN_UNRESOLVED`
+rather than the live `PROVEN_OUT_OF_CONTRACT`: the replay reproduces
+`_run_allowlist`'s keep conditions only approximately. Two of them are
+deliberately left out, both in the weakening direction — the
+concrete-export test (the persisted export provider's declarations are not
+`_snapshot_export_ids`, so consulting it could wrongly conclude "kept") and
+`--public-symbol`'s rescue (which live honors only when header scoping is
+also on, a flag the persisted context does not record).
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

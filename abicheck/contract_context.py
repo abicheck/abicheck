@@ -325,6 +325,17 @@ class PersistedDomainView:
     #: one of these nodes must also cite that record, not the header provider
     #: that merely supplied the graph (Codex review).
     overlay_roots_by_side: dict[str, dict[str, set[str]]]
+    #: ``{side: (the manifest's record, the exact spellings it commits)}`` for
+    #: a run configured with ``--post-manifest``, collected **in every mode**
+    #: -- unlike :attr:`overlay_roots_by_side`, which is a ``public``-domain
+    #: root contribution. The manifest's *exclusion* half also binds ``all``
+    #: (the live evaluator checks it ahead of its own ``all``-mode shortcut),
+    #: and spellings rather than resolved nodes are what that check needs,
+    #: since it compares against ``Change.symbol`` verbatim. Absent for a run
+    #: with no manifest; present with an empty spelling set for a manifest
+    #: that commits to nothing, which is a selected source scoping everything
+    #: out rather than an absent one.
+    post_manifest_by_side: dict[str, tuple[EvidenceSearchRecord, frozenset[str]]]
 
 
 #: Whether an overlay provider's own live matching follows lookup aliases.
@@ -390,6 +401,11 @@ def persisted_domain_view(
     ``hidden_api(Secret *)`` public turned a live ``PROVEN_OUT_OF_CONTRACT``
     on ``Secret`` into a replayed ``IN_CONTRACT`` (Codex review, fresh
     evidence).
+
+    A ``--post-manifest`` run's own spellings are additionally reported in
+    :attr:`~PersistedDomainView.post_manifest_by_side` for **every** mode,
+    root contribution or not: the manifest's exclusion half binds ``all`` too
+    (Codex review, fresh evidence -- see that attribute).
     """
     mode = coerce_contract_mode(mode)
     provider = DOMAIN_ROOT_PROVIDER[mode]
@@ -402,6 +418,7 @@ def persisted_domain_view(
     # its root actually came from instead of the header provider (Codex
     # review, fresh evidence).
     overlay_entries: list[tuple[str, EvidenceSearchRecord, tuple[str, ...]]] = []
+    post_manifest_by_side: dict[str, tuple[EvidenceSearchRecord, frozenset[str]]] = {}
     for entry in evidence.providers:
         side = entry.record.side
         if provider is not None and entry.record.provider == provider:
@@ -410,6 +427,8 @@ def persisted_domain_view(
         if entry.record.provider == PROVIDER_PUBLIC_HEADER:
             graph_by_side[side] = entry.type_graph
             header_record_by_side[side] = entry.record
+        if entry.record.provider == PROVIDER_POST_MANIFEST:
+            post_manifest_by_side[side] = (entry.record, frozenset(entry.manifests))
         if mode is ContractMode.PUBLIC and entry.record.provider in _OVERLAY_PROVIDERS:
             overlay_entries.append((side, entry.record, entry.manifests))
     # A ``--post-manifest`` overlay *narrows*: the manifest states the whole
@@ -458,6 +477,7 @@ def persisted_domain_view(
         header_record_by_side=header_record_by_side,
         closure_by_side=closure_by_side,
         overlay_roots_by_side=overlay_roots_by_side,
+        post_manifest_by_side=post_manifest_by_side,
     )
 
 

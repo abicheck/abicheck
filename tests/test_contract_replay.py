@@ -573,6 +573,107 @@ class TestReevaluateFromEvidence:
         )
         assert decision.relevance is not ContractRelevance.IN_CONTRACT
 
+    def test_exported_alias_cannot_root_an_unexported_namesake(self) -> None:
+        """A bare alias shared with a non-root proves nothing about either.
+
+        The inverse collision of ``test_exports_replay_keeps_qualified_symbols
+        _exact``: an exported ``ns::foo`` contributes the bare alias ``foo`` to
+        the persisted graph, which an unrelated *unexported* C ``foo`` also
+        answers to. ``compute_export_surface`` prunes exactly this alias from
+        ``export_symbols``, so the live matcher answers
+        ``PROVEN_OUT_OF_CONTRACT``; resolving the finding's own spelling
+        through the alias tier here reached the exported node and replayed
+        ``IN_CONTRACT`` (Codex review, fresh evidence).
+        """
+        elf = ElfMetadata(symbols=[ElfSymbol(name="_ZN2ns3fooEv")])
+        snap = AbiSnapshot(
+            library="libdemo.so.1",
+            version="1",
+            functions=[
+                Function(
+                    name="ns::foo",
+                    mangled="_ZN2ns3fooEv",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                Function(
+                    name="foo",
+                    mangled="foo",
+                    return_type="int",
+                    visibility=Visibility.HIDDEN,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+            elf=elf,
+        )
+        surf = compute_public_surface(snap)
+        exports = compute_export_surface(snap)
+        ctx = build_persisted_context(
+            collect_contract_evidence(
+                snap, snap, surf, surf, exports_old=exports, exports_new=exports
+            ),
+            mode=ContractMode.EXPORTS,
+        )
+        removal = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="foo",
+            description="foo() removed",
+        )
+        decision = next(
+            iter(
+                reevaluate_from_evidence(
+                    ctx, [removal], mode=ContractMode.EXPORTS
+                ).values()
+            )
+        )
+        assert decision.relevance is not ContractRelevance.IN_CONTRACT
+
+    def test_all_mode_honors_a_persisted_post_manifest(self) -> None:
+        """``all`` drops header-origin scoping, not an exact manifest.
+
+        The live evaluator checks ``--post-manifest``'s own exclusion *before*
+        its ``all``-mode shortcut, so a concrete export the manifest omits is
+        ``PROVEN_OUT_OF_CONTRACT`` even under ``--contract all``. Returning
+        ``IN_CONTRACT`` unconditionally here flipped that (Codex review, fresh
+        evidence).
+        """
+        elf = ElfMetadata(symbols=[ElfSymbol(name="api")])
+        old = AbiSnapshot(
+            library="libdemo.so.1",
+            version="1",
+            functions=[
+                Function(
+                    name="api",
+                    mangled="api",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            elf=elf,
+        )
+        new = AbiSnapshot(library="libdemo.so.1", version="2", elf=elf)
+        result = compare(
+            old,
+            new,
+            contract_evaluation=True,
+            contract_mode="all",
+            public_surface_allowlist=set(),
+        )
+        assert result.contract_context is not None
+        findings = [*result.changes, *result.out_of_surface_changes]
+        assert findings
+        original = relevance_map(findings, _finding_id)
+        assert ContractRelevance.PROVEN_OUT_OF_CONTRACT in original.values()
+        replayed = reevaluate_from_evidence(
+            result.contract_context,
+            findings,
+            mode=ContractMode.ALL,
+            finding_id=_finding_id,
+        )
+        assert compare_decisions(original, replayed).is_sound
+
     def test_unknown_entity_is_unresolved_not_proven_out(self) -> None:
         """Absence from the graph is unplaceable, never proof of exclusion."""
         result, ctx = _run()
