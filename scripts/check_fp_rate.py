@@ -165,6 +165,42 @@ class Case:
     build: Callable[[], tuple[AbiSnapshot, AbiSnapshot]]
 
 
+def _ambiguous_namespaced_leaf() -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A real break on a type whose bare leaf two namespaces share.
+
+    castxml/clang record the bare leaf in ``name`` and the scope separately,
+    so ``ns1::Cache`` and ``ns2::Cache`` are both spelled ``Cache``. The
+    public API reaches ``ns1::Cache`` and its layout really changes, so the
+    verdict must stay breaking -- this is an FN sentinel, not a scoping case.
+
+    Its reason for existing is one level down: it is the only corpus pair
+    whose *identity* is ambiguous, so it is what gives ADR-049's contract
+    evaluator and its replay any corpus-level signal at all on that path.
+    Every soundness defect that feature has had was on it, and a deliberate
+    regression check confirmed the replay gate could not fire without a case
+    like this (self-review).
+    """
+
+    def _cache(ns: str, size: int) -> RecordType:
+        return RecordType(
+            name="Cache",
+            qualified_name=f"{ns}::Cache",
+            kind="struct",
+            size_bits=size,
+            fields=[TypeField(name="slot", type="int")],
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+
+    def _side(version: str, reached_size: int) -> AbiSnapshot:
+        return _snap(
+            version,
+            functions=[_fn("api", ret="Cache *", origin=ScopeOrigin.PUBLIC_HEADER)],
+            types=[_cache("ns1", reached_size), _cache("ns2", 64)],
+        )
+
+    return _side("1", 64), _side("2", 128)
+
+
 # --- internal-noise cases (a breaking verdict here is a FALSE POSITIVE) -------
 
 
@@ -832,6 +868,7 @@ def _python_api_function_dropped() -> tuple[AbiSnapshot, AbiSnapshot]:
 
 CORPUS: list[Case] = [
     Case("internal_struct_size", True, _internal_struct_size),
+    Case("ambiguous_namespaced_leaf", False, _ambiguous_namespaced_leaf),
     # G23 Python-surface oracle: internal native churn scoped away (FP guard);
     # a real Python-API break stays breaking (FN sentinel / authority rule).
     Case("python_ext_internal_symbol_churn", True, _python_ext_internal_symbol_churn),
@@ -1297,6 +1334,7 @@ def evaluate(corpus: list[Case] = CORPUS) -> Outcome:
 CASE_CATEGORY: dict[str, str] = {
     # struct/record layout reachability
     "internal_struct_size": "struct-layout",
+    "ambiguous_namespaced_leaf": "struct-layout",
     "internal_field_type_changed": "struct-layout",
     "public_struct_size": "struct-layout",
     "leaked_internal_via_public_api": "struct-layout",

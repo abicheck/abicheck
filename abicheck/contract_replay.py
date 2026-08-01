@@ -232,7 +232,37 @@ def _entity_lookups(
                 out.append((symbol.rsplit("::", 1)[1], kinds))
     if change.caused_by_type and type_scoped:
         out.append((change.caused_by_type, _TYPE_NODE_KINDS))
+    owner = _member_owner(change)
+    if owner:
+        out.append((owner, _TYPE_NODE_KINDS))
     return out
+
+
+def _member_owner(change: Change) -> str | None:
+    """A member-level finding's owning *type*, as ``_type_candidates`` reads it.
+
+    The member-level families disagree on what ``symbol`` carries, and live
+    selects per kind rather than guessing: ``_OWNER_PLUS_MEMBER_KINDS``
+    record ``"{owner}::{member}"``, so the owner is the ``"::"``-stripped
+    prefix, while ``_OWNER_IS_SYMBOL_KINDS`` record the owning type alone
+    (stripping there would turn ``ns::Foo`` into the namespace fragment
+    ``ns``). Only the first shape needs deriving here -- the second is
+    already offered as the symbol spelling.
+
+    Without it every member-level finding resolved to nothing: an
+    ``enum_member_added`` on an exported enum carries ``symbol="Mode::B"``
+    and no ``caused_by_type``, so the replay answered
+    ``UNKNOWN_UNRESOLVED`` against a live ``IN_CONTRACT`` -- soundly, since
+    that is a weakening, but it made the replay useless for the whole
+    member-level family (found while adding the enum coverage this file's
+    tests never had).
+    """
+    from .contract_evaluation import _OWNER_PLUS_MEMBER_KINDS
+
+    symbol = change.symbol or ""
+    if change.kind.value not in _OWNER_PLUS_MEMBER_KINDS or "::" not in symbol:
+        return None
+    return symbol.rsplit("::", 1)[0]
 
 
 def _side_of(change: Change) -> str:

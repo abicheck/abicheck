@@ -2737,6 +2737,38 @@ preceding round — the tests asserted the wrong behaviour as intended, which
 is the failure mode a test written from the implementation rather than from
 the contract always has.
 
+**A fifteenth round closed the reason all of the previous ones were found by
+reviewers rather than by CI.** Every soundness defect this feature has had
+was a *replay* that out-claimed the live decision, and there was no
+corpus-level gate on that path at all — only hand-written unit cases. The
+shadow measurement now re-evaluates each corpus case through the real wire
+format and reports `replay_strengthenings`, with baseline 0.
+
+Standing that gate up immediately proved it *vacuous*: two deliberate
+regressions (dropping the node-kind filter, then the ambiguity refusal) both
+still passed, because no corpus pair had an ambiguous identity — 0 of 32
+snapshots had a colliding bare tail, so no replay decision could differ
+whatever the implementation did. One case was added (`ambiguous_namespaced_leaf`:
+a real break on `ns1::Cache` beside an unrelated `ns2::Cache`, both spelled
+bare `Cache` the way castxml records them), after which the same regressions
+fail the gate. Both facts are pinned as their own assertions, because "the
+gate is green" and "the gate can fail" are different claims.
+
+Two real gaps were found by finally giving the `enum:` node kind any test
+coverage — this suite had never constructed an `EnumType`, though enums are
+keyed by the same `_type_identity`, aliased the same way, and share the same
+ambiguity set. First, every **member-level** finding degraded to
+`UNKNOWN_UNRESOLVED`: `_type_candidates` strips `Mode::B` to its owner
+`Mode` for the owner-plus-member kinds and the replay did not, so an
+`enum_member_added` on an exported enum resolved to nothing. Sound (a
+weakening), but it made the replay useless for that whole family. Second,
+a fallback declaration key collides across the two identity *tiers*, not
+only within its own: a private header-only `foo(Secret *)` beside a public
+declaration whose recorded `mangled` is literally `foo` merged onto one
+node, and the public root inherited the private overload's edge to `Secret`.
+Every recorded linker identity is now reserved, so a display-name fallback
+yields to one whichever tier it came from.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

@@ -271,11 +271,21 @@ def _function_node_keys(snap: AbiSnapshot) -> list[str]:
     for fn in snap.functions:
         if not fn.mangled:
             signatures.setdefault(fn.name, set()).add(_declaration_signature(fn))
+    # A fallback collides across the two identity *tiers* too, not only within
+    # its own: a private header-only `foo(Secret *)` beside a public
+    # declaration whose recorded linker identity is literally `foo` merged the
+    # two, and the public root inherited the private overload's edge to
+    # `Secret` (Codex review, fresh evidence). Every recorded linker identity
+    # is therefore reserved -- a name is only unambiguous if nothing else
+    # already answers to it, whichever tier that something came from.
+    reserved = {fn.mangled for fn in snap.functions if fn.mangled}
+    reserved |= {var.mangled for var in snap.variables if var.mangled}
+    reserved |= {var.name for var in snap.variables if not var.mangled}
     keys: list[str] = []
     for fn in snap.functions:
         if fn.mangled:
             keys.append(fn.mangled)
-        elif len(signatures.get(fn.name, ())) > 1:
+        elif len(signatures.get(fn.name, ())) > 1 or fn.name in reserved:
             keys.append(fn.name + _declaration_signature(fn))
         else:
             keys.append(fn.name)

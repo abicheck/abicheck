@@ -864,6 +864,56 @@ class TestNodeIdentitySoundness:
         assert comparison.is_sound
         assert comparison.strengthened == ()
 
+    def test_a_member_level_finding_resolves_through_its_owner(self) -> None:
+        """``symbol="Mode::B"`` names a member; the contract is about ``Mode``.
+
+        ``_type_candidates`` strips the member for the owner-plus-member
+        kinds, and the replay did not -- so an ``enum_member_added`` on an
+        *exported* enum resolved to nothing and answered
+        ``UNKNOWN_UNRESOLVED`` against a live ``IN_CONTRACT``. Sound (a
+        weakening), but it made the replay useless for the whole member-level
+        family. Found while adding the enum coverage this suite never had
+        (self-review).
+        """
+        from abicheck.model import EnumMember, EnumType
+        from abicheck.pe_metadata import PeExport, PeMetadata
+
+        def _snap(version: str, members: list[tuple[str, int]]) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libdemo.so.1",
+                version=version,
+                functions=[
+                    Function(
+                        name="api",
+                        mangled="api",
+                        return_type="Mode",
+                        visibility=Visibility.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ],
+                enums=[
+                    EnumType(
+                        name="Mode",
+                        qualified_name="ns::Mode",
+                        members=[EnumMember(name=n, value=v) for n, v in members],
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ],
+                pe=PeMetadata(exports=[PeExport(name="api", ordinal=1)]),
+            )
+
+        changes, comparison = self._replay(
+            _snap("1", [("A", 0)]), _snap("2", [("A", 0), ("B", 1)]), "exports"
+        )
+        assert [c.symbol for c in changes] == ["Mode::B"]
+        assert [c.contract_relevance for c in changes] == [
+            ContractRelevance.IN_CONTRACT
+        ]
+        assert comparison.is_sound
+        # The point of the fix: the replay reaches the same conclusion rather
+        # than degrading to unresolved.
+        assert comparison.agreed and comparison.weakened == ()
+
     def test_duplicate_records_sharing_one_identity_stay_unresolved(self) -> None:
         """One node in the graph, two entries in the live index.
 

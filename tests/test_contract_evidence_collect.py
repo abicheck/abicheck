@@ -44,6 +44,7 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.export_surface import compute_export_surface
 from abicheck.model import (
     AbiSnapshot,
+    EnumType,
     Function,
     Param,
     RecordType,
@@ -61,6 +62,7 @@ def _snap(
     functions: list[Function] | None = None,
     variables: list[Variable] | None = None,
     types: list[RecordType] | None = None,
+    enums: list[EnumType] | None = None,
     typedefs: dict[str, str] | None = None,
     elf: ElfMetadata | None = None,
 ) -> AbiSnapshot:
@@ -70,6 +72,7 @@ def _snap(
         functions=functions or [],
         variables=variables or [],
         types=types or [],
+        enums=enums or [],
         typedefs=typedefs or {},
         elf=elf,
     )
@@ -272,6 +275,40 @@ class TestTypeGraph:
         # linker identity recorded it genuinely names either one.
         assert resolve_graph_node(graph, "over") == {public_root, private_root}
 
+    def test_a_fallback_key_yields_to_a_recorded_linker_identity(self) -> None:
+        """The two identity tiers can collide with each other, not just within.
+
+        A private header-only ``foo(Secret *)`` beside a public declaration
+        whose recorded ``mangled`` is literally ``foo`` both fell on
+        ``decl:foo``, so the public root inherited the private overload's
+        edge to ``Secret`` -- the same merge as the all-unmangled case, one
+        tier over (Codex review, fresh evidence).
+        """
+        snap = _snap(
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="foo",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                Function(
+                    name="foo",
+                    mangled="",
+                    return_type="int",
+                    params=[Param(name="s", type="Secret *")],
+                    visibility=Visibility.HIDDEN,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+            types=[RecordType(name="Secret", kind="struct", fields=[])],
+        )
+        graph = build_type_graph(snap)
+        assert "decl:foo" in graph.nodes  # the one with a linker identity
+        assert "record:Secret" not in closure_from_graph(graph, ["decl:foo"])
+        assert "decl:foo(Secret *)->int" in graph.nodes
+
     def test_a_lone_unmangled_declaration_keeps_its_plain_name(self) -> None:
         """The discriminator is a tie-break, not a new encoding.
 
@@ -353,6 +390,58 @@ class TestTypeGraph:
         assert ("alias:Widget", "record:ns::Widget") in graph.edges
         closure = closure_from_graph(graph, ["decl:ns::Widget::draw"])
         assert {"record:ns::Widget", "record:Payload"} <= closure
+
+    def test_an_enum_is_keyed_and_aliased_like_a_record(self) -> None:
+        """``enum:`` is a first-class node kind, not a record afterthought.
+
+        It carries the same bare-vs-qualified split (``EnumType`` has its own
+        ``qualified_name``), is keyed by the same :func:`_type_identity`, and
+        participates in the same ambiguity rule -- but nothing in this file
+        constructed one, so every enum path shipped untested (self-review).
+        """
+        snap = _snap(
+            functions=[_public_fn("api", ret="ns::Mode")],
+            enums=[
+                EnumType(
+                    name="Mode",
+                    qualified_name="ns::Mode",
+                    members={"A": 0, "B": 1},
+                )
+            ],
+        )
+        graph = build_type_graph(snap)
+        assert "enum:ns::Mode" in graph.nodes
+        # Keyed by the qualified identity, with the bare leaf as an alias --
+        # exactly the record rule.
+        assert ("alias:Mode", "enum:ns::Mode") in graph.edges
+        assert resolve_graph_node(graph, "Mode") == {"enum:ns::Mode"}
+        assert "enum:ns::Mode" in closure_from_graph(graph, ["decl:api"])
+
+    def test_a_record_and_an_enum_sharing_a_leaf_both_resolve(self) -> None:
+        """Ambiguity spans the two kinds, which is why they share a set.
+
+        ``_index_surface_types`` tallies record and enum entries into one
+        count, so ``ns1::Mode`` (a record) and ``ns2::Mode`` (an enum)
+        collide on the bare leaf exactly as two records would.
+        """
+        snap = _snap(
+            types=[RecordType(name="Mode", qualified_name="ns1::Mode", kind="struct")],
+            enums=[EnumType(name="Mode", qualified_name="ns2::Mode", members={"A": 0})],
+        )
+        graph = build_type_graph(snap)
+        assert resolve_graph_node(graph, "Mode") == {
+            "record:ns1::Mode",
+            "enum:ns2::Mode",
+        }
+        surf = compute_public_surface(snap)
+        assert "Mode" in surf.ambiguous_type_names
+        # ...and the collision reaches the persisted record, which is what a
+        # replay consults instead of re-deriving it.
+        block = collect_contract_evidence(snap, snap, surf, surf)
+        header = next(
+            e for e in block.providers if e.record.provider == PROVIDER_PUBLIC_HEADER
+        )
+        assert "Mode" in header.record.ambiguous_identities
 
     def test_two_namespaces_sharing_a_leaf_are_two_nodes(self) -> None:
         """``ns1::Foo`` and ``ns2::Foo`` are not one type.

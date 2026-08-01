@@ -76,7 +76,7 @@ from abicheck.checker_policy import (  # noqa: E402
     BREAKING_KINDS,
 )
 from abicheck.checker_types import Change, DiffResult  # noqa: E402
-from abicheck.contract_context import finding_key  # noqa: E402
+from abicheck.contract_context import finding_key, relevance_map  # noqa: E402
 from abicheck.contract_evidence_collect import validate_decision_evidence  # noqa: E402
 from abicheck.contract_relevance_types import (  # noqa: E402
     ContractMode,
@@ -99,6 +99,12 @@ MEASURED_MODES: tuple[ContractMode, ...] = (
 PROVEN_LOSS_BASELINE = 0
 UNEVIDENCED_DELTA_BASELINE = 0
 FACT_LOSS_BASELINE = 0
+#: A replayed decision that out-claims the live one that wrote it. The
+#: persisted evaluator may only ever *weaken*, so this baseline is 0 and is
+#: the corpus-level counterpart of `test_contract_replay.py`'s hand-written
+#: soundness cases -- the path every soundness defect in this feature has
+#: been on.
+REPLAY_STRENGTHENING_BASELINE = 0
 
 _CONCLUSIVE = (
     ContractRelevance.IN_CONTRACT,
@@ -157,6 +163,12 @@ class ModeMeasurement:
     fp_reductions: list[str] = field(default_factory=list)
     unevidenced_deltas: list[str] = field(default_factory=list)
     fact_losses: list[str] = field(default_factory=list)
+    #: Findings whose *replay* out-claims the live decision that wrote it --
+    #: `compare_decisions`'s `strengthened`/`disagreed` buckets, measured
+    #: over the whole corpus. Every soundness defect this feature has had
+    #: lived on that path, and until this gate existed the only signal for
+    #: it was hand-written unit tests (self-review).
+    replay_strengthenings: list[str] = field(default_factory=list)
 
     @property
     def unresolved_rate(self) -> float:
@@ -270,7 +282,49 @@ def measure_case(case: Case, mode: ContractMode) -> ModeMeasurement:
                 and relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
             ):
                 out.fp_reductions.append(key)
+    out.replay_strengthenings.extend(_replay_strengthenings(case, mode, result, ctx))
     return out
+
+
+def _replay_strengthenings(
+    case: Case, mode: ContractMode, result: object, ctx: object
+) -> list[str]:
+    """Findings a re-evaluation decides more strongly than the live run did.
+
+    The persisted evaluator is deliberately narrower than the live one, so a
+    *weakening* is an expected coverage limit; a strengthening -- or a flip
+    between the two equally-strong-but-opposite conclusions -- means the
+    replay out-claimed the evidence that produced it, which is the one
+    direction :func:`~abicheck.contract_replay.compare_decisions` treats as
+    a defect.
+
+    Run through the real wire format (dict round-trip), because that is what
+    a consumer replays from: an object that only survives in-process proves
+    nothing about a persisted report.
+    """
+    if ctx is None:
+        return []
+    from abicheck.contract_context_io import (
+        persisted_context_from_dict,
+        persisted_context_to_dict,
+    )
+    from abicheck.contract_replay import compare_decisions, reevaluate_from_evidence
+
+    changes = [
+        *result.changes,  # type: ignore[attr-defined]
+        *result.out_of_surface_changes,  # type: ignore[attr-defined]
+    ]
+    if not changes:
+        return []
+    reloaded = persisted_context_from_dict(persisted_context_to_dict(ctx))  # type: ignore[arg-type]
+    replayed = reevaluate_from_evidence(
+        reloaded, changes, mode=mode, finding_id=_finding_id
+    )
+    comparison = compare_decisions(relevance_map(changes, _finding_id), replayed)
+    return [
+        f"{case.name}:{mode.value}:{key}"
+        for key in (*comparison.strengthened, *comparison.disagreed)
+    ]
 
 
 def _is_delta(legacy_state: str, relevance: ContractRelevance) -> bool:
@@ -310,6 +364,7 @@ def _merge(into: ModeMeasurement, other: ModeMeasurement) -> None:
     into.fp_reductions.extend(other.fp_reductions)
     into.unevidenced_deltas.extend(other.unevidenced_deltas)
     into.fact_losses.extend(other.fact_losses)
+    into.replay_strengthenings.extend(other.replay_strengthenings)
 
 
 def measure(
@@ -365,9 +420,13 @@ def metrics(
                 len(m.unevidenced_deltas) for m in measurements.values()
             ),
             "fact_losses": sum(len(m.fact_losses) for m in measurements.values()),
+            "replay_strengthenings": sum(
+                len(m.replay_strengthenings) for m in measurements.values()
+            ),
             "proven_loss_baseline": PROVEN_LOSS_BASELINE,
             "unevidenced_delta_baseline": UNEVIDENCED_DELTA_BASELINE,
             "fact_loss_baseline": FACT_LOSS_BASELINE,
+            "replay_strengthening_baseline": REPLAY_STRENGTHENING_BASELINE,
         },
     }
 
@@ -399,7 +458,8 @@ def render_markdown(m: dict[str, object]) -> str:
         "",
         f"Gate: {gate['proven_public_break_losses']} proven public-break loss(es), "
         f"{gate['unevidenced_deltas']} unevidenced delta(s), "
-        f"{gate['fact_losses']} unexplained fact loss(es) "
+        f"{gate['fact_losses']} unexplained fact loss(es), "
+        f"{gate['replay_strengthenings']} replay strengthening(s) "
         "(all baselines 0)",
         "",
         "| Domain | Findings | Deltas | Unresolved | Unresolved rate | FP reductions |",
@@ -446,6 +506,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
         ("unevidenced deltas", "unevidenced_deltas", UNEVIDENCED_DELTA_BASELINE),
         ("unexplained fact losses", "fact_losses", FACT_LOSS_BASELINE),
+        (
+            "replay strengthenings",
+            "replay_strengthenings",
+            REPLAY_STRENGTHENING_BASELINE,
+        ),
     ):
         count = gate[key]
         assert isinstance(count, int)

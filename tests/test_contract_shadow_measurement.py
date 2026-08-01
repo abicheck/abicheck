@@ -101,6 +101,35 @@ def test_no_unexplained_fact_loss(case, mode) -> None:
     )
 
 
+@pytest.mark.parametrize("case,mode", _CASES)
+def test_replay_never_out_claims_the_live_decision(case, mode) -> None:
+    """The corpus-level counterpart of the replay soundness unit tests.
+
+    Every soundness defect this feature has had was a *replay* that decided
+    more strongly than the live run that wrote it, and until this gate the
+    only signal was hand-written cases -- so a regression was found by
+    reviewers rather than by CI. Verified non-vacuous by deliberately
+    regressing the ambiguity gate, which makes it fire (self-review).
+    """
+    measurement = shadow.measure_case(case, mode)
+    assert measurement.replay_strengthenings == [], (
+        f"replay out-claimed the live decision in {case.name!r} under "
+        f"contract={mode.value}: {measurement.replay_strengthenings}"
+    )
+
+
+def test_the_corpus_contains_an_ambiguous_identity_case() -> None:
+    """The soundness gate above needs a pair whose identity is ambiguous.
+
+    Without one it passes for every implementation, correct or not: the
+    other 32 cases resolve unambiguously, so no replay decision can differ.
+    Pinned as its own assertion because "the gate is green" and "the gate
+    can fail" are different claims (self-review).
+    """
+    names = {case.name for case in shadow.CORPUS}
+    assert "ambiguous_namespaced_leaf" in names
+
+
 def test_metrics_report_the_four_measured_quantities() -> None:
     """The measurement itself is part of the deliverable, not just the gate.
 
