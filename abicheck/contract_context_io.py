@@ -652,5 +652,14 @@ def persisted_context_from_dict(d: object) -> PersistedContractContext:
         evaluation_context=evaluation_context_from_dict(
             _required(m, "evaluation_context", what="a persisted contract context")
         ),
-        decision_receipt=decision_receipt_from_dict(m.get("decision_receipt") or {}),
+        # Required, like its two siblings: the report schema always writes
+        # this block, so an absent one means a truncated or hand-edited
+        # payload -- and defaulting it to an empty version-1 receipt made
+        # `replay_original_decisions` return `{}`, which is indistinguishable
+        # from a comparison that genuinely recorded no decisions (Codex
+        # review). Failing closed is the same rule the version ceiling
+        # follows: never reinterpret missing audit data as a real answer.
+        decision_receipt=decision_receipt_from_dict(
+            _required(m, "decision_receipt", what="a persisted contract context")
+        ),
     )

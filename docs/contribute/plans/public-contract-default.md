@@ -2411,8 +2411,9 @@ binary.
 
 **A fifth round found three more, all fixed — and the first two together
 settled what an overlay actually is on replay.** (1) A positive membership
-was concluded from a provider that had reported it never observed the
-domain at all: an `elf_only_mode` snapshot leaves `PublicSurface.resolvable`
+was concluded from a provider that had reported the domain unavailable —
+not that it observed nothing, but that what it observed never resolved into
+a usable domain: an `elf_only_mode` snapshot leaves `PublicSurface.resolvable`
 false, so the live evaluator answers `UNKNOWN_UNRESOLVED`/`UNAVAILABLE` at
 its `not auth.resolvable` gate — but the ledger entry still carries the
 declarations and type graph the collector had built before bailing out, and

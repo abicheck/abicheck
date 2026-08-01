@@ -778,6 +778,13 @@ def _apply_contract_evaluation_shadow(
         mode_provenance=mode_provenance,
         policy=policy,
         internal_namespaces=_internal_namespaces(policy_file),
+        # `PolicyFile` is the one place that can tell "no policy file" from
+        # "a policy file that wrote `internal_namespaces: []`" -- the tuple
+        # above collapses both to `()`. Forwarded so the provenance receipt
+        # keeps that distinction (CodeRabbit review).
+        internal_namespaces_stated=bool(
+            policy_file is not None and policy_file.internal_namespaces_stated
+        ),
         # Keyed by the ChangeKind *slug*, which is what the typed config's
         # `overrides` field takes (and what a persisted receipt must carry --
         # a `ChangeKind` member is not JSON).

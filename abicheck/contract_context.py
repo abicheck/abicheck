@@ -181,6 +181,7 @@ def build_evaluation_context(
     mode_provenance: ValueProvenance | None = None,
     policy: str = "strict_abi",
     internal_namespaces: Iterable[str] = (),
+    internal_namespaces_stated: bool = False,
     policy_overrides: Mapping[str, Verdict] | None = None,
     suppressions: SuppressionConfig | None = None,
     overlays: OverlaySelection | None = None,
@@ -210,14 +211,17 @@ def build_evaluation_context(
 
     *internal_namespaces* is the same ``--policy-file`` list
     (``PolicyFile.internal_namespaces``) that shaped which declarations the
-    comparison treated as internal, so a populated one gets a provenance entry
-    of its own rather than sitting in the resolved config with no recorded
-    source (Codex review) -- the identical rule *policy_overrides* follows,
-    for the identical reason and from the identical file. An empty tuple gets
-    none: this parameter cannot tell "no policy file" from "a policy file that
-    stated an empty list" (``PolicyFile.internal_namespaces_stated`` is the
-    field that can, and it does not reach here), and claiming a source for a
-    value that may never have been stated is worse than claiming none.
+    comparison treated as internal, so it gets a provenance entry of its own
+    rather than sitting in the resolved config with no recorded source (Codex
+    review) -- the identical rule *policy_overrides* follows, for the
+    identical reason and from the identical file. *internal_namespaces_stated*
+    is what keeps an explicitly empty list ("this project has none") from
+    reading as an absent one: the tuple alone collapses both to ``()``, so a
+    caller that can tell them apart -- ``PolicyFile.internal_namespaces_stated``
+    -- forwards the distinction here, and a stated empty list keeps its
+    provenance (CodeRabbit review). Neither stated nor populated means no
+    policy file contributed, and claiming a source then would be a fabricated
+    receipt.
 
     *overlays* is what :func:`overlay_selection` recovered from the run's own
     evidence ledger; ``None`` means no overlay was applied.
@@ -231,7 +235,7 @@ def build_evaluation_context(
         "contract.mode": mode_provenance or _api_provenance("contract_mode"),
         "policy.base": _api_provenance("policy"),
     }
-    if resolved_namespaces:
+    if resolved_namespaces or internal_namespaces_stated:
         provenance["surface.internal_namespaces"] = _api_provenance("policy_file")
     if policy_overrides:
         provenance["policy.overrides"] = _api_provenance("policy_file")
@@ -536,6 +540,7 @@ def build_persisted_context(
     mode_provenance: ValueProvenance | None = None,
     policy: str = "strict_abi",
     internal_namespaces: Iterable[str] = (),
+    internal_namespaces_stated: bool = False,
     policy_overrides: Mapping[str, Verdict] | None = None,
     suppressions: SuppressionConfig | None = None,
     changes: Sequence[Change] = (),
@@ -549,6 +554,7 @@ def build_persisted_context(
             mode_provenance=mode_provenance,
             policy=policy,
             internal_namespaces=internal_namespaces,
+            internal_namespaces_stated=internal_namespaces_stated,
             policy_overrides=policy_overrides,
             suppressions=suppressions,
             overlays=overlay_selection(evidence),

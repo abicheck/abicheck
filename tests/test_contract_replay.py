@@ -249,13 +249,16 @@ class TestReevaluateFromEvidence:
         # forced public along with it (Codex review, fresh evidence).
         receipt = build_decision_receipt(block, ContractMode.PUBLIC)
         assert "record:Secret" not in receipt.evaluated_type_closure
-        secret = Change(
+        secret_change = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="Secret",
             description="Secret size changed",
         )
-        collateral = next(iter(reevaluate_from_evidence(ctx, [secret]).values()))
-        assert collateral.relevance is not ContractRelevance.IN_CONTRACT
+        collateral = next(iter(reevaluate_from_evidence(ctx, [secret_change]).values()))
+        # The exact value matters: `PROVEN_OUT_OF_CONTRACT` would also be
+        # "not IN_CONTRACT" while claiming more than a `public`-domain block
+        # can support (CodeRabbit review).
+        assert collateral.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
 
     def test_post_manifest_roots_stay_exact(self) -> None:
         """A committed-export manifest matches verbatim, never through aliases.

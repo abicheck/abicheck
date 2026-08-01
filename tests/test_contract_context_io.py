@@ -319,13 +319,34 @@ class TestResolvedContextContent:
         assert "surface.internal_namespaces" in config.provenance
 
     def test_unstated_internal_namespaces_claim_no_source(self) -> None:
-        """An empty list may never have been stated at all, so claim nothing."""
+        """With no policy file, nothing selected the value, so claim nothing."""
         old, new = _pair()
         result = compare(old, new, contract_evaluation=True)
         assert result.contract_context is not None
         config = result.contract_context.evaluation_context.resolved_config
         assert config.surface.internal_namespaces == ()
         assert "surface.internal_namespaces" not in config.provenance
+
+    def test_an_explicitly_empty_namespace_list_keeps_its_provenance(self) -> None:
+        """``internal_namespaces: []`` is a stated value, not an absent one.
+
+        Both resolve to ``()``, so the tuple alone cannot tell them apart --
+        ``PolicyFile.internal_namespaces_stated`` is forwarded precisely so
+        the receipt still records which one this was (CodeRabbit review).
+        """
+        from abicheck.policy_file import PolicyFile
+
+        old, new = _pair()
+        policy_file = PolicyFile(
+            base_policy="strict_abi",
+            internal_namespaces=[],
+            internal_namespaces_stated=True,
+        )
+        result = compare(old, new, contract_evaluation=True, policy_file=policy_file)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.surface.internal_namespaces == ()
+        assert "surface.internal_namespaces" in config.provenance
 
     def test_suppression_source_reaches_the_persisted_config(self, tmp_path) -> None:
         """A file-loaded suppression list shaped the run, so it is recorded.
@@ -407,11 +428,11 @@ class TestResolvedContextContent:
         assert config.contract.overlays == ("post_manifest",)
         assert config.surface.explicit_scope is not None
         assert config.surface.explicit_scope.items == ()
-        assert [
-            e.record.provider
+        assert sorted(
+            e.record.side
             for e in result.contract_context.contract_evidence.providers
             if e.record.provider == "post_manifest"
-        ] == ["post_manifest", "post_manifest"]
+        ) == ["new", "old"]
 
     def test_no_overlay_leaves_the_explicit_scope_unselected(self) -> None:
         """No overlay is ``None``, not an empty digested list -- the same
