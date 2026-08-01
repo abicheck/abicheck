@@ -394,7 +394,18 @@ REPORT_SCHEMA_VERSION = "2.26"
 #:       keys, does not depend on that flag (CodeRabbit review: the earlier
 #:       wording claimed byte-identity apart from ``finding_id``, which
 #:       understated both).
-SCAN_SCHEMA_VERSION = "1.6"
+#: 1.7 — the ``diff`` block gained three keys under ``scan --against
+#:       --contract-evaluation`` (ADR-049 Phase 5): ``contract_context``
+#:       (the same three-block sibling group ``compare``'s report carries at
+#:       its top level, serialized by the same encoder, so a scan receipt
+#:       replays identically), plus the sibling
+#:       ``contract_coverage_failures``/``contract_coverage_exit_contribution``
+#:       ledger (report schema 2.26's equivalents). Before this the scan
+#:       *computed* a contract context — its findings were stamped from one —
+#:       and then dropped it, so the evidence those decisions rest on was
+#:       unobservable from a scan. All three are absent without the flag, so
+#:       an ordinary scan is unchanged from 1.6.
+SCAN_SCHEMA_VERSION = "1.7"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

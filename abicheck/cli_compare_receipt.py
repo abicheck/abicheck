@@ -77,6 +77,7 @@ COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
     "severity_potential_breaking",
     "severity_quality_issues",
     "severity_addition",
+    "pack_paths",
 )
 
 #: The four :class:`~abicheck.severity.SeverityConfig` categories, in the

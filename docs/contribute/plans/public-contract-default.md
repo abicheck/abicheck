@@ -3681,6 +3681,70 @@ with the packaged JSON Schema extended and republished. `[]` is emitted
 rather than omitted: it is the checkable answer "this domain closed", which
 an absent key could not be told apart from "not computed".
 
+**Updated (2026-08-01, same PR): Phase 5's remaining three items closed --
+"same typed config" for the third front end, the `packs` parity axis, and
+the Gate's downstream-consumer clause.** A re-read of the phase's own
+sentences turned up three things the earlier rounds had not done:
+
+1. **`scan --against` resolved no typed config, and emitted no receipt.**
+   Phase 5's body is "route both direct compare and scan baseline compare
+   through the same core *and same typed config*"; only the core half was
+   done. Worse, the command *computed* a contract context under
+   `--contract-evaluation` (its findings were stamped from one) and then
+   dropped it, so fixing only the resolution would have changed nothing
+   observable. `cli_scan_receipt.py` is the third and last front-end
+   receipt: it resolves through the canonical resolver -- reusing
+   `compare_cli_inputs` rather than re-implementing normalization, since
+   `scan` deliberately shares `compare`'s option destinations and two
+   normalizers is exactly how the two would stop agreeing -- and the scan's
+   `diff` block now carries `contract_context` plus the coverage ledger,
+   serialized by the same encoder `compare` uses. Real D7 layers now
+   appear where `API_REQUEST` used to: `--contract` reads `explicit_cli`,
+   `--policy` reads `legacy_alias`, `--public-symbol` reads `explicit_cli`.
+   A parity test asserts the two commands' *receipts* are byte-identical
+   for the same inputs, one level below the findings §6.4 already compared.
+   `SCAN_SCHEMA_VERSION` → `1.7`.
+
+2. **Nothing selected packs.** The Gate lists `packs` among the parity axes,
+   but `pack_paths` was only ever `()` in practice -- no front end had a
+   `--pack` option at all, so D8's pack-conflict resolution (built and unit
+   tested in Phase 1 slice 2) had no live caller and the axis could not be
+   exercised through either command. `--pack` is now on both, from one
+   shared decorator, spelled exactly as `resolve_selected_packs` already
+   records it (a second spelling would make a receipt name an option that
+   does not exist). New parity tests cover a contract pack, a policy pack
+   landing in its own namespace, pack identity by digest, and -- the part
+   that matters most -- that two conflicting packs and a malformed manifest
+   are usage errors in *both* commands, since agreeing on rejection is as
+   much a parity claim as agreeing on acceptance.
+
+   Adding one option pushed `cli.py` past its 2000-line hard limit, and
+   moving the three ADR-049 contract options out pushed `cli_options.py`
+   past the same limit, so both now live in a new leaf,
+   `cli_contract_options.py`, re-exported for compatibility -- the same
+   split, for the same reason, as `cli_profiles.py` before it. Trimming the
+   options' help text to buy space was the alternative and was rejected: it
+   would have cut a feature's user-facing documentation to make room for its
+   own code.
+
+3. **No downstream consumer understood the new schema** (Phase 6's Gate).
+   §6.1 names two specifically. SARIF now emits the coverage ledger as
+   `invocations[].toolExecutionNotifications` -- SARIF's own channel for a
+   tool-level statement, rather than more `results[]` entries a consumer
+   would count as findings -- with `executionSuccessful`/`exitCode`
+   deliberately untouched, since the independent coverage exit is Phase 7's.
+   JUnit emits an `abicheck.contract_coverage` suite whose every case is an
+   `<error>`, which is precisely JUnit's error-vs-failure distinction ("the
+   test could not run" vs "it ran and failed") and satisfies "never as a
+   passed compatibility test"; the errors roll into the document totals so a
+   dashboard reading only the root counts still sees them. Both are absent
+   -- not empty -- without `--contract-evaluation`, and both emit an *empty*
+   ledger when the domain closed, because "checked, nothing missing" and
+   "never checked" are different states. `aggregate` needed no change: it
+   already keeps ADR-042's three orthogonal axes, and folding the advisory
+   contract ledger into its coverage axis would *apply* an exit contribution
+   the plan reserves for Phase 7.
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve

@@ -330,6 +330,7 @@ def _run_baseline_compare(
     collapse_versioned_symbols: bool = False,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    resolved_config: Any = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -542,6 +543,35 @@ def _run_baseline_compare(
         )
         if len(suppressed_changes) > _MAX_BASELINE_FINDINGS:
             summary["suppressed_truncated"] = True
+
+    # ADR-049 Phase 5: install this front end's own resolved configuration
+    # over the narrower object `checker.compare` reconstructs from its
+    # arguments, then emit the whole persisted context -- which `scan
+    # --against --contract-evaluation` computed and then dropped, so the
+    # receipt its per-finding decisions rest on was unobservable. Same
+    # encoder `reporter._add_contract_context` uses, so the block is
+    # byte-for-byte the one `compare` writes and `replay_original_decisions`
+    # reads back.
+    from .cli_scan_receipt import context_block, record_resolved_config
+
+    if resolved_config is not None:
+        record_resolved_config(diff, resolved_config)
+    context = context_block(diff)
+    if context is not None:
+        summary["contract_context"] = context
+        from .contract_coverage_ledger import (
+            coverage_exit_contribution,
+            coverage_failures_for_context,
+        )
+
+        # The sibling unsuppressible ledger, on the same terms `compare`
+        # reports it (plan Section 6.1) -- a coverage failure is not a
+        # finding, so it belongs beside the diff's findings, not among them.
+        failures = coverage_failures_for_context(diff.contract_context)
+        summary["contract_coverage_failures"] = [f.to_dict() for f in failures]
+        summary["contract_coverage_exit_contribution"] = coverage_exit_contribution(
+            failures
+        )
 
     from .cli_compare_helpers import _verdict_exit_code
 

@@ -1095,3 +1095,323 @@ class TestServiceLayerContractValidation:
             run_scan(
                 ScanRequest(binaries=[new_snap_breaking], contract_evaluation=True)
             )
+
+
+class TestScanResolvesTheSameTypedConfig:
+    """Phase 5's other half: "route both direct compare and scan baseline
+    compare through the same core **and same typed config**".
+
+    Routing through the same core landed first. Until this, `scan --against`
+    resolved no `CompatibilityEvaluationConfig` at all -- its persisted
+    `evaluation_context` carried `checker.compare`'s argument-shaped
+    reconstruction, so every field read `api_request` regardless of which
+    flag actually chose it -- *and* never emitted the context, so the receipt
+    its per-finding decisions rest on was computed and dropped.
+    """
+
+    def _scan_context(
+        self, runner: CliRunner, old: Path, new: Path, extra: list[str], tmp_path: Path
+    ) -> dict:
+        import json
+
+        out = tmp_path / "scan-ctx.json"
+        res = runner.invoke(
+            main,
+            [
+                "scan",
+                str(new),
+                "--against",
+                str(old),
+                "--format",
+                "json",
+                "--contract-evaluation",
+                "-o",
+                str(out),
+                *extra,
+            ],
+        )
+        assert res.exit_code in (0, 1, 2, 4), res.output
+        return json.loads(out.read_text(encoding="utf-8"))["diff"]["contract_context"]
+
+    def test_the_scan_emits_a_contract_context_at_all(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        old, new = mixed_pair
+        ctx = self._scan_context(runner, old, new, [], tmp_path)
+        assert set(ctx) >= {
+            "contract_evidence",
+            "evaluation_context",
+            "decision_receipt",
+        }
+
+    @pytest.mark.parametrize(
+        "flag,field,layer",
+        [
+            (["--contract", "exports"], "contract.mode", "explicit_cli"),
+            (["--policy", "sdk_vendor"], "policy.base", "legacy_alias"),
+            (["--public-symbol", "_Z3barv"], "surface.explicit_scope", "explicit_cli"),
+        ],
+    )
+    def test_a_typed_flag_gets_its_real_d7_layer(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        tmp_path: Path,
+        flag: list[str],
+        field: str,
+        layer: str,
+    ) -> None:
+        """The whole point: a receipt that says `api_request` for a value a
+        CLI flag chose is honest but useless to an audit consumer asking
+        *which* layer selected it."""
+        old, new = mixed_pair
+        ctx = self._scan_context(runner, old, new, flag, tmp_path)
+        prov = ctx["evaluation_context"]["field_provenance"][field]
+        assert prov["layer"] == layer, prov
+
+    def test_an_unstated_field_is_a_default_not_a_claim(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        old, new = mixed_pair
+        ctx = self._scan_context(runner, old, new, [], tmp_path)
+        prov = ctx["evaluation_context"]["field_provenance"]
+        assert prov["policy.base"]["layer"] == "built_in_default"
+        # `scan` has no severity or exit-code-scheme flags, so the gate
+        # resolves entirely from built-in defaults -- accurate rather than an
+        # under-claim, the same shape the MCP receipt documents.
+        assert prov["gate.exit_code_scheme"]["layer"] == "built_in_default"
+
+    def test_the_scan_context_is_byte_identical_to_compares(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """§6.4 again, one level below the findings: the two commands'
+        *receipts* for the same inputs must agree too, not just their
+        findings. Both go through `contract_context_io`, so a divergence
+        here would mean one of them resolved a different configuration."""
+        import json
+
+        old, new = mixed_pair
+        report_path = tmp_path / "compare-ctx.json"
+        res = runner.invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "--format",
+                "json",
+                "--contract-evaluation",
+                "-o",
+                str(report_path),
+            ],
+        )
+        assert res.exit_code == 4, res.output
+        compare_ctx = json.loads(report_path.read_text(encoding="utf-8"))[
+            "contract_context"
+        ]
+        scan_ctx = self._scan_context(runner, old, new, [], tmp_path)
+        assert scan_ctx == compare_ctx
+
+    def test_the_coverage_ledger_travels_with_the_scan_receipt(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        import json
+
+        old, new = mixed_pair
+        out = tmp_path / "scan-cov.json"
+        res = runner.invoke(
+            main,
+            [
+                "scan",
+                str(new),
+                "--against",
+                str(old),
+                "--format",
+                "json",
+                "--contract-evaluation",
+                "-o",
+                str(out),
+            ],
+        )
+        assert res.exit_code == 4, res.output
+        diff = json.loads(out.read_text(encoding="utf-8"))["diff"]
+        assert diff["contract_coverage_failures"] == []
+        assert diff["contract_coverage_exit_contribution"] == 0
+
+    def test_no_context_without_contract_evaluation(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        import json
+
+        old, new = mixed_pair
+        out = tmp_path / "plain-scan.json"
+        res = runner.invoke(
+            main,
+            [
+                "scan",
+                str(new),
+                "--against",
+                str(old),
+                "--format",
+                "json",
+                "-o",
+                str(out),
+            ],
+        )
+        assert res.exit_code == 4, res.output
+        diff = json.loads(out.read_text(encoding="utf-8"))["diff"]
+        assert "contract_context" not in diff
+        assert "contract_coverage_failures" not in diff
+
+
+class TestPackParityAxis:
+    """§6.4's Gate lists *packs* among the axes the two commands must agree
+    on. Until this, no front end selected packs at all -- `pack_paths` was
+    only ever `()`, so D8's pack-conflict resolution (Phase 1 slice 2) had no
+    live caller and the axis could not be exercised through either command.
+    `--pack` is the missing front-end half, added to both from one shared
+    decorator so the two cannot spell it differently.
+    """
+
+    @pytest.fixture
+    def contract_pack(self, tmp_path: Path) -> Path:
+        pack = tmp_path / "ffi.yaml"
+        pack.write_text(
+            "id: ffi_boundary\nversion: 2\nkind: contract\n"
+            "assignments:\n  contract.overlays: [extern_c, ffi_root]\n",
+            encoding="utf-8",
+        )
+        return pack
+
+    @pytest.fixture
+    def policy_pack(self, tmp_path: Path) -> Path:
+        pack = tmp_path / "verdicts.yaml"
+        pack.write_text(
+            "id: rust_c_ffi\nversion: 1\nkind: policy\n"
+            "assignments:\n  func_removed: break\n",
+            encoding="utf-8",
+        )
+        return pack
+
+    def _configs(
+        self, runner: CliRunner, old: Path, new: Path, pack: Path, tmp_path: Path
+    ) -> tuple[dict, dict]:
+        report, scan = _both(runner, old, new, ["--pack", str(pack)], tmp_path)
+        return (
+            report["contract_context"]["evaluation_context"],
+            scan["diff"]["contract_context"]["evaluation_context"],
+        )
+
+    def test_a_contract_pack_resolves_identically_in_both_commands(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        contract_pack: Path,
+        tmp_path: Path,
+    ) -> None:
+        old, new = mixed_pair
+        compare_ec, scan_ec = self._configs(runner, old, new, contract_pack, tmp_path)
+        assert compare_ec == scan_ec
+        assert compare_ec["resolved_config"]["contract"]["overlays"] == [
+            "extern_c",
+            "ffi_root",
+        ]
+
+    def test_a_selected_pack_is_identified_by_its_own_digest(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        contract_pack: Path,
+        tmp_path: Path,
+    ) -> None:
+        """D6: a pack the receipt names must be identifiable by content, so a
+        manifest edited after the run cannot pass for the one that ran."""
+        old, new = mixed_pair
+        compare_ec, scan_ec = self._configs(runner, old, new, contract_pack, tmp_path)
+        (identity,) = compare_ec["resolved_config"]["contract"]["packs"]
+        assert identity["id"] == "ffi_boundary"
+        assert identity["version"] == 2
+        assert len(identity["sha256"]) == 64
+        assert scan_ec["resolved_config"]["contract"]["packs"] == [identity]
+
+    def test_a_policy_pack_lands_in_its_own_namespace_in_both(
+        self,
+        runner: CliRunner,
+        mixed_pair: tuple[Path, Path],
+        policy_pack: Path,
+        tmp_path: Path,
+    ) -> None:
+        """D8 keeps the pack kinds distinct: a `kind: policy` manifest fills
+        `policy.overrides`/`policy.packs`, never a contract field."""
+        old, new = mixed_pair
+        compare_ec, scan_ec = self._configs(runner, old, new, policy_pack, tmp_path)
+        assert compare_ec == scan_ec
+        policy = compare_ec["resolved_config"]["policy"]
+        assert [p["id"] for p in policy["packs"]] == ["rust_c_ffi"]
+        assert compare_ec["resolved_config"]["contract"]["packs"] == []
+
+    def test_two_conflicting_packs_are_a_usage_error_in_both_commands(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """D8: two selected packs assigning different values to the same
+        field is a deterministic usage error, not a silent last-wins. The
+        commands must agree on rejecting, not only on accepting."""
+        old, new = mixed_pair
+        first = tmp_path / "a.yaml"
+        second = tmp_path / "b.yaml"
+        first.write_text(
+            "id: pack_a\nversion: 1\nkind: contract\n"
+            "assignments:\n  contract.overlays: [one]\n",
+            encoding="utf-8",
+        )
+        second.write_text(
+            "id: pack_b\nversion: 1\nkind: contract\n"
+            "assignments:\n  contract.overlays: [two]\n",
+            encoding="utf-8",
+        )
+        args = ["--pack", str(first), "--pack", str(second)]
+        compare_res = runner.invoke(
+            main,
+            ["compare", str(old), str(new), "--contract-evaluation", *args],
+        )
+        scan_res = runner.invoke(
+            main,
+            [
+                "scan",
+                str(new),
+                "--against",
+                str(old),
+                "--contract-evaluation",
+                *args,
+            ],
+        )
+        assert compare_res.exit_code == 64, compare_res.output
+        assert scan_res.exit_code == 64, scan_res.output
+
+    def test_a_malformed_manifest_is_a_usage_error_in_both_commands(
+        self, runner: CliRunner, mixed_pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        old, new = mixed_pair
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("id: broken\nversion: 1\nkind: nonsense\n", encoding="utf-8")
+        args = ["--pack", str(bad)]
+        compare_res = runner.invoke(
+            main, ["compare", str(old), str(new), "--contract-evaluation", *args]
+        )
+        scan_res = runner.invoke(
+            main,
+            ["scan", str(new), "--against", str(old), "--contract-evaluation", *args],
+        )
+        assert compare_res.exit_code == 64, compare_res.output
+        assert scan_res.exit_code == 64, scan_res.output
+
+    def test_packs_without_against_are_rejected_by_scan(
+        self, runner: CliRunner, new_snap_breaking: Path, contract_pack: Path
+    ) -> None:
+        # Same rule as every other comparison-only flag: without a baseline
+        # there is no comparison for a pack to configure.
+        res = runner.invoke(
+            main, ["scan", str(new_snap_breaking), "--pack", str(contract_pack)]
+        )
+        assert res.exit_code == 64, res.output
+        assert "--pack" in res.output

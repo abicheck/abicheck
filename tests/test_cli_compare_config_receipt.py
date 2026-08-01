@@ -360,6 +360,7 @@ class TestGateParityWithTheLiveRun:
             "severity_potential_breaking": None,
             "severity_quality_issues": None,
             "severity_addition": None,
+            "pack_paths": (),
             **params,
         }
         live = resolve_compare_config(

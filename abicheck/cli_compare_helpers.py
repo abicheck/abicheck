@@ -210,6 +210,8 @@ def _reject_set_input_flags(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     audit_suppressions: bool = False,
+    pack_paths: tuple[Path, ...] = (),  # ADR-049 D8 --pack manifests
+
     include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
@@ -1166,6 +1168,8 @@ def run_compare(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     audit_suppressions: bool = False,
+    pack_paths: tuple[Path, ...] = (),  # ADR-049 D8 --pack manifests
+
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
@@ -1743,6 +1747,7 @@ def run_compare(
                 "severity_potential_breaking": severity_potential_breaking,
                 "severity_quality_issues": severity_quality_issues,
                 "severity_addition": severity_addition,
+                "pack_paths": pack_paths,
             },
             # Only this module holds the Click context, so it answers "did the
             # user type this?" and hands the answers over as data -- which is

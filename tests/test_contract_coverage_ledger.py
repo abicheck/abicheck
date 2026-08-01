@@ -354,3 +354,107 @@ class TestReportIntegration:
         derived = coverage_failures_for_context(result.contract_context)
         report = self._report(tmp_path, "exports")
         assert [f.to_dict() for f in derived] == report["contract_coverage_failures"]
+
+
+class TestDownstreamConsumers:
+    """ADR-049 Phase 6's Gate ends with "all downstream consumers understand
+    new schema", and plan §6.1 is specific about two of them: SARIF emits a
+    tool-level coverage notification; JUnit represents the state "could not
+    be checked" per its coverage/error contract, "never as a passed
+    compatibility test". Neither handled any ADR-049 field before.
+    """
+
+    def _result(self, mode: str = "exports"):
+        old, new = _pair_without_export_table()
+        return compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            contract_mode=mode,
+        )
+
+    def test_sarif_emits_one_notification_per_coverage_failure(self) -> None:
+        from abicheck.sarif import to_sarif
+
+        doc = to_sarif(self._result())
+        invocation = doc["runs"][0]["invocations"][0]
+        notifications = invocation["toolExecutionNotifications"]
+        assert {n["properties"]["provider"] for n in notifications} == {"export_table"}
+        assert {n["properties"]["side"] for n in notifications} == {"old", "new"}
+        assert all(n["properties"]["suppressible"] is False for n in notifications)
+        assert all(n["level"] == "error" for n in notifications)
+
+    def test_sarif_leaves_the_gate_alone(self) -> None:
+        """The notification describes the evidence, not the gate: the
+        independent coverage exit is Phase 7's, so this run's own
+        `executionSuccessful`/`exitCode` must be untouched."""
+        from abicheck.sarif import to_sarif
+
+        with_ctx = to_sarif(self._result())["runs"][0]["invocations"][0]
+        old, new = _pair_without_export_table()
+        plain = to_sarif(compare(old, new))["runs"][0]["invocations"][0]
+        assert with_ctx["executionSuccessful"] == plain["executionSuccessful"]
+        assert with_ctx["exitCode"] == plain["exitCode"]
+
+    def test_sarif_omits_the_key_entirely_without_contract_evaluation(self) -> None:
+        """Absent, not empty: a run that never checked and one that checked
+        and found nothing are different states."""
+        from abicheck.sarif import to_sarif
+
+        old, new = _pair_without_export_table()
+        doc = to_sarif(compare(old, new))
+        assert "toolExecutionNotifications" not in doc["runs"][0]["invocations"][0]
+
+    def test_sarif_emits_an_empty_list_when_the_domain_closed(self) -> None:
+        from abicheck.sarif import to_sarif
+
+        doc = to_sarif(self._result(mode="public"))
+        assert doc["runs"][0]["invocations"][0]["toolExecutionNotifications"] == []
+
+    def test_junit_reports_coverage_as_errors_never_as_passes(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        from abicheck.junit_report import to_junit_xml
+
+        root = ET.fromstring(to_junit_xml(self._result()))
+        (suite,) = [
+            s
+            for s in root.findall("testsuite")
+            if s.get("name") == "abicheck.contract_coverage"
+        ]
+        assert suite.get("errors") == "2"
+        assert suite.get("failures") == "0"
+        cases = suite.findall("testcase")
+        assert len(cases) == 2
+        # Every case carries an <error>; none is a bare (passing) testcase.
+        assert all(case.find("error") is not None for case in cases)
+        assert {case.find("error").get("type") for case in cases} == {
+            "provider_unavailable"
+        }
+
+    def test_junit_rolls_the_errors_into_the_document_totals(self) -> None:
+        """A dashboard reading only the root counts must still see them."""
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(to_junit_xml_of(self._result()))
+        assert root.get("errors") == "2"
+
+    def test_junit_has_no_coverage_suite_without_contract_evaluation(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        from abicheck.junit_report import to_junit_xml
+
+        old, new = _pair_without_export_table()
+        root = ET.fromstring(to_junit_xml(compare(old, new)))
+        assert not [
+            s
+            for s in root.findall("testsuite")
+            if s.get("name") == "abicheck.contract_coverage"
+        ]
+
+
+def to_junit_xml_of(result):
+    from abicheck.junit_report import to_junit_xml
+
+    return to_junit_xml(result)

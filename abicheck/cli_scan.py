@@ -85,13 +85,13 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
 )
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_compare_helpers import _cli_flag, _warn_force_public_ignored
-from .cli_helpers_compare import _collect_force_public_symbols
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
     env_matrix_option,
     lang_option,
     merge_compile_config,
+    pack_option,
     policy_options,
     resolve_compile_context,
     scope_options,
@@ -591,6 +591,7 @@ _COMPARISON_ONLY_FLAGS = {
     "env_matrix_path": "--env-matrix",
     "contract_evaluation": "--contract-evaluation",
     "contract_mode": "--contract",
+    "pack_paths": "--pack",
 }
 
 
@@ -987,6 +988,7 @@ def _run_artifact_set(
     "Requires --contract-evaluation, and is advisory exactly like it "
     "(mirrors `compare --contract`).",
 )
+@pack_option  # ADR-049 D8: --pack manifests, same decorator `compare` uses
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -1039,6 +1041,7 @@ def scan_cmd(
     env_matrix_path: Path | None,
     contract_evaluation: bool,
     contract_mode: str | None,
+    pack_paths: tuple[Path, ...],
     lang: str,
     allow_build_query: bool,
     fmt: str,
@@ -1199,7 +1202,7 @@ def scan_cmd(
     # only flags without --against" guard above, only attempted for an
     # actual `--against` comparison -- a plain one-build audit never needs
     # any of this, so it must not even try the cwd-upward walk.
-    from .buildsource.inline import discover_build_config, load_build_config
+    from .buildsource.inline import discover_build_config
 
     explicit_config = build_config is not None
     cfg_path = build_config if explicit_config else discover_build_config(sources)
@@ -1208,9 +1211,16 @@ def scan_cmd(
 
         cfg_path = discover_project_config()
     project_cfg = None
+    # ADR-049 D6: a project-derived receipt entry must name the path *and*
+    # prove which revision supplied the value, from the same read that
+    # parsed it -- so the digest comes from `load_build_config_with_digest`
+    # rather than a second read at receipt time.
+    _project_sha256: str | None = None
     if cfg_path is not None:
         try:
-            project_cfg = load_build_config(cfg_path)
+            from .buildsource.build_config_io import load_build_config_with_digest
+
+            project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
         except ValueError as exc:
             if explicit_config:
                 raise click.UsageError(
@@ -1330,7 +1340,9 @@ def scan_cmd(
     # (--env-matrix) config surface, both of which `compare_snapshots` already
     # accepts as plain kwargs (`force_public_symbols`/`env_matrix`) -- no new
     # engine capability, just CLI/service plumbing parity.
-    force_public_symbols = _collect_force_public_symbols(
+    from .cli_helpers_compare import resolve_force_public_scope
+
+    force_public_symbols, _symbols_list = resolve_force_public_scope(
         public_symbols, public_symbols_list
     )
     _warn_force_public_ignored(force_public_symbols, scope_public_headers)
@@ -1356,6 +1368,47 @@ def scan_cmd(
         env_matrix = load_env_matrix(env_matrix_path)
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
+
+    # ADR-049 Phase 5's "same typed config", for the third and last front
+    # end. `checker.compare` can only claim `API_REQUEST` for arguments it
+    # was handed, so without this the scan's persisted `evaluation_context`
+    # carried the core verb's reconstruction rather than real D7 provenance
+    # -- the same defect already fixed for `compare` and the MCP tool.
+    # Resolved here because this is where the Click context is: which flags
+    # the user actually typed is a question only the front end can answer.
+    resolved_config = None
+    if against is not None and contract_evaluation:
+        from .cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
+        from .compatibility_evaluation_resolver import (
+            FieldResolutionError,
+            PackConflictError,
+        )
+        from .errors import PackManifestError
+
+        _ctx = click.get_current_context()
+        _params = {name: _ctx.params.get(name) for name in SCAN_CONFIG_PARAMS}
+        _typed = {
+            name
+            for name in SCAN_CONFIG_PARAMS
+            if _ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+        }
+        try:
+            resolved_config = resolve_scan_config(
+                _params,
+                typed=_typed,
+                project_cfg=project_cfg,
+                project_path=cfg_path,
+                project_sha256=_project_sha256,
+                policy_file=policy_file,
+                suppression=suppression,
+                suppress_path=suppress,
+                symbols_list=_symbols_list,
+            )
+        except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+            # A D7 same-tier conflict or a D8 pack conflict is a usage error,
+            # exactly as it is for `compare` -- not a traceback out of a
+            # command that had already validated its own flags.
+            raise click.UsageError(str(exc)) from exc
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
@@ -1493,6 +1546,7 @@ def scan_cmd(
             collapse_versioned_symbols=collapse_versioned_symbols,
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
+            resolved_config=resolved_config,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,

@@ -927,6 +927,12 @@ def output_options(
     return deco
 
 
+#: ADR-049 D8 pack selection, shared by `compare` and `scan --against`.
+#: One decorator rather than a copy per command: `tests/test_cli_contract.py`
+#: pins that a shared concept uses one canonical spelling, and the resolver
+#: already records `--pack` as the selecting option
+#: (`resolve_selected_packs`'s own default), so a second spelling would make
+#: the receipt name an option that does not exist.
 def verbose_option(func: F) -> F:
     """The universal ``-v/--verbose`` flag, defined once (ADR-037 D3).
 
@@ -1666,6 +1672,18 @@ COMPARE_FLAG_BUDGET_BASE = 57
 #: ``compare`` option, so demoting one to hidden/config means removing its entry
 #: (and lowering ``BASE`` if it belonged to the base surface).
 COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
+    "--pack": (
+        "Selects ADR-049 D8 pack manifests for this run. A per-run analysis "
+        "input rather than a project setting demotable to config, for two "
+        "reasons the design already commits to: D7 places pack selection at "
+        "the explicit-CLI tier precisely so one run can override what the "
+        "project resolved, and D8's conflict rules exist only because a "
+        "single invocation may select several manifests whose assignments "
+        "disagree. A project-level `packs:` key is the natural home for the "
+        "stable case and does not exist yet; when it does, this flag stays "
+        "as the per-run override, the same relationship --policy already has "
+        "with the config's own policy setting."
+    ),
     "--allow-ast-frontend-fallback": (
         "Explicitly permits a per-run semantic fallback from CastXML to Clang "
         "when the selected CastXML toolchain cannot parse the headers. This is "
@@ -1966,3 +1984,15 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     # ADR-049 Phase 3: the shadow contract evaluator.
     "contract_evaluation": "--contract-evaluation",
 }
+
+
+#: ADR-049's contract-evaluation and pack option decorators moved to
+#: ``cli_contract_options.py`` when this module reached its own 2000-line
+#: hard limit -- the same split, for the same reason, as ``cli_profiles.py``
+#: before it. Re-exported here (``X as X``, so the re-export is explicit to
+#: mypy) because both are shared decorators callers already reach through
+#: this module, and a leaf holding option definitions never imports back.
+from .cli_contract_options import (  # noqa: E402
+    contract_options as contract_options,
+    pack_option as pack_option,
+)

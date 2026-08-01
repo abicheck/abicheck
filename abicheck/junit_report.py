@@ -793,12 +793,57 @@ def to_junit_xml(
     )
     root.append(ts)
 
+    # ADR-049 plan Section 6.1: "JUnit represents NOT_CHECKABLE according to
+    # its coverage/error contract, never as a passed compatibility test."
+    # A contract-coverage failure is not a compatibility result at all -- it
+    # says the evidence needed to decide was missing -- so it is an <error>
+    # in its own suite, which is exactly what JUnit's error-vs-failure split
+    # means (an error is "the test could not run", a failure is "it ran and
+    # the assertion failed"). Emitting it as a passing testcase, or omitting
+    # it, would let a CI dashboard read "no evidence" as "compatible".
+    errors = _append_coverage_suite(root, result)
+
     # Roll up counts
-    root.set("tests", ts.get("tests", "0"))
+    root.set("tests", str(int(ts.get("tests", "0")) + errors))
     root.set("failures", ts.get("failures", "0"))
-    root.set("errors", "0")
+    root.set("errors", str(errors))
 
     return _to_xml_string(root)
+
+
+def _append_coverage_suite(root: ET.Element, result: DiffResult) -> int:
+    """Append the contract-coverage suite, returning how many errors it holds.
+
+    Nothing at all when the run computed no contract context (the default),
+    so an ordinary report is unchanged. A run whose selected contract domain
+    *closed* gets an empty suite rather than no suite: "checked, nothing
+    missing" and "never checked" are different states, and a consumer must be
+    able to tell them apart.
+    """
+    from .contract_coverage_ledger import coverage_failures_for_context
+
+    ctx = getattr(result, "contract_context", None)
+    if ctx is None:
+        return 0
+    failures = coverage_failures_for_context(ctx)
+    suite = ET.SubElement(root, "testsuite")
+    suite.set("name", "abicheck.contract_coverage")
+    suite.set("tests", str(len(failures)))
+    suite.set("failures", "0")
+    suite.set("errors", str(len(failures)))
+    for failure in failures:
+        case = ET.SubElement(suite, "testcase")
+        case.set("classname", "abicheck.contract_coverage")
+        case.set("name", f"{failure.provider}:{failure.side}")
+        error = ET.SubElement(case, "error")
+        error.set("type", failure.reason)
+        error.set(
+            "message",
+            f"contract coverage: {failure.provider} ({failure.side}) could not "
+            f"close the {failure.mode} domain ({failure.reason}); this finding "
+            "cannot be suppressed",
+        )
+    return len(failures)
 
 
 def to_junit_xml_multi(
