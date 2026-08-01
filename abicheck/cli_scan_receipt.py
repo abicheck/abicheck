@@ -74,7 +74,6 @@ SCAN_CONFIG_PARAMS: tuple[str, ...] = (
     "public_symbols",
     "public_symbols_list",
     "contract_mode",
-    "pack_paths",
 )
 
 
@@ -146,10 +145,12 @@ def resolve_scan_config(
         )
     project = None
     if project_cfg is not None:
-        project = ProjectCompatibilityInputs.from_build_config(
-            project_cfg,
-            path=str(project_path) if project_path is not None else None,
-            sha256=project_sha256,
+        project = _without_gate_settings(
+            ProjectCompatibilityInputs.from_build_config(
+                project_cfg,
+                path=str(project_path) if project_path is not None else None,
+                sha256=project_sha256,
+            )
         )
     return resolve_compatibility_evaluation_config(
         front_end=FrontEnd.CLI,
@@ -161,6 +162,37 @@ def resolve_scan_config(
             public_symbols_list=symbols_list,
         ),
         project=project,
+    )
+
+
+def _without_gate_settings(project: Any) -> Any:
+    """*project* with its gate fields blanked, for a front end that ignores them.
+
+    A ``scan``'s exit code follows its compatibility verdict directly: it has
+    no severity or exit-code-scheme flags, and it never consults the project
+    config's ``severity``/``exit_code_scheme`` either. Passing them through
+    anyway produced a receipt that *claimed* a gate the run did not use --
+    an ``info-only`` preset in ``.abicheck.yml`` would be recorded with every
+    level at ``info`` while the scan still exited 4 on a breaking diff
+    (Codex review).
+
+    Blanked rather than left out of the receipt entirely: the fields still
+    resolve, to their built-in defaults, which is the true statement --
+    nothing selected them for this run. That is the same answer the MCP
+    receipt gives for the parameters ``abi_compare`` does not have.
+    """
+    if project is None:
+        return None
+    from dataclasses import replace
+
+    return replace(
+        project,
+        exit_code_scheme=None,
+        severity_preset=None,
+        severity_abi_breaking=None,
+        severity_potential_breaking=None,
+        severity_quality_issues=None,
+        severity_addition=None,
     )
 
 

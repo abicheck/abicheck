@@ -37,7 +37,6 @@ cannot pull a new member into the CLI-registration import cycle the
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, TypeVar
 
 import click
@@ -97,29 +96,4 @@ def contract_options(f: F) -> F:
                        "the binaries. Advisory only: it never changes verdict, exit_code, "
                        "or which findings appear. Default off; the report is unchanged "
                        "unless this is set.")(f)
-    return f
-
-
-def pack_option(f: F) -> F:
-    """Attach the repeatable ``--pack`` manifest selector.
-
-    Assigns then returns, rather than returning the decorator call directly,
-    for the same reason every other decorator in ``cli_options`` does: the
-    ``ai-readiness`` CI job installs *only* mypy, so ``click`` is unresolved
-    there and a direct return is ``Any`` -> ``no-any-return``. A local run
-    with the package installed never sees it, which is exactly how it slipped
-    through. Rebinding the parameter keeps the declared ``F``.
-    """
-    f = click.option(
-        "--pack",
-        "pack_paths",
-        multiple=True,
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="ADR-049 D8 pack manifest to apply (YAML: id/version/kind/"
-        "assignments). Repeatable. A `kind: policy` pack overrides per-"
-        "ChangeKind verdicts; `kind: contract` and `kind: gate` packs assign "
-        "their namespace's own fields. Two selected packs assigning different "
-        "values to the same field or ChangeKind is a usage error unless an "
-        "explicit flag resolves it.",
-    )(f)
     return f

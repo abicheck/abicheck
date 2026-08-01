@@ -1672,18 +1672,6 @@ COMPARE_FLAG_BUDGET_BASE = 57
 #: ``compare`` option, so demoting one to hidden/config means removing its entry
 #: (and lowering ``BASE`` if it belonged to the base surface).
 COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
-    "--pack": (
-        "Selects ADR-049 D8 pack manifests for this run. A per-run analysis "
-        "input rather than a project setting demotable to config, for two "
-        "reasons the design already commits to: D7 places pack selection at "
-        "the explicit-CLI tier precisely so one run can override what the "
-        "project resolved, and D8's conflict rules exist only because a "
-        "single invocation may select several manifests whose assignments "
-        "disagree. A project-level `packs:` key is the natural home for the "
-        "stable case and does not exist yet; when it does, this flag stays "
-        "as the per-run override, the same relationship --policy already has "
-        "with the config's own policy setting."
-    ),
     "--allow-ast-frontend-fallback": (
         "Explicitly permits a per-run semantic fallback from CastXML to Clang "
         "when the selected CastXML toolchain cannot parse the headers. This is "
@@ -1994,5 +1982,4 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
 #: this module, and a leaf holding option definitions never imports back.
 from .cli_contract_options import (  # noqa: E402
     contract_options as contract_options,
-    pack_option as pack_option,
 )

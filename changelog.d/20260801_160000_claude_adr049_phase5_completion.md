@@ -1,11 +1,5 @@
 ### Added
 
-- `compare` and `scan --against` accept `--pack` (repeatable), selecting
-  ADR-049 D8 pack manifests: a `kind: policy` pack overrides per-`ChangeKind`
-  verdicts, `kind: contract` and `kind: gate` packs assign their namespace's
-  own fields. Two selected packs assigning different values to the same field
-  or `ChangeKind`, and a malformed manifest, are usage errors (exit 64) in
-  both commands.
 - `scan --against --contract-evaluation` now emits `contract_context` and the
   contract-coverage ledger in its JSON `diff` block, serialized by the same
   encoder `compare`'s report uses — previously the scan computed a contract

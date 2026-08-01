@@ -3705,27 +3705,37 @@ sentences turned up three things the earlier rounds had not done:
    for the same inputs, one level below the findings §6.4 already compared.
    `SCAN_SCHEMA_VERSION` → `1.7`.
 
-2. **Nothing selected packs.** The Gate lists `packs` among the parity axes,
-   but `pack_paths` was only ever `()` in practice -- no front end had a
-   `--pack` option at all, so D8's pack-conflict resolution (built and unit
-   tested in Phase 1 slice 2) had no live caller and the axis could not be
-   exercised through either command. `--pack` is now on both, from one
-   shared decorator, spelled exactly as `resolve_selected_packs` already
-   records it (a second spelling would make a receipt name an option that
-   does not exist). New parity tests cover a contract pack, a policy pack
-   landing in its own namespace, pack identity by digest, and -- the part
-   that matters most -- that two conflicting packs and a malformed manifest
-   are usage errors in *both* commands, since agreeing on rejection is as
-   much a parity claim as agreeing on acceptance.
+2. **Nothing selects packs, and this round did not change that.** The Gate
+   lists `packs` among the parity axes, but `pack_paths` is only ever `()`:
+   no front end has a `--pack` option, so D8's pack-conflict resolution
+   (built and unit tested in Phase 1 slice 2) still has no live caller and
+   the axis remains untestable end to end.
 
-   Adding one option pushed `cli.py` past its 2000-line hard limit, and
-   moving the three ADR-049 contract options out pushed `cli_options.py`
-   past the same limit, so both now live in a new leaf,
-   `cli_contract_options.py`, re-exported for compatibility -- the same
-   split, for the same reason, as `cli_profiles.py` before it. Trimming the
-   options' help text to buy space was the alternative and was rejected: it
-   would have cut a feature's user-facing documentation to make room for its
-   own code.
+   A `--pack` flag *was* added on both commands in this round and then
+   removed before merge, because a Codex review round caught what it
+   actually shipped: pack assignments reached the resolved configuration and
+   the persisted receipt, but never the engine. A `kind: policy` pack
+   overriding `func_removed` would have been recorded as active
+   configuration while leaving the verdict and exit code untouched, and
+   without `--contract-evaluation` the manifest was not even loaded, so a
+   malformed one was silently accepted. The parity tests written alongside
+   it passed precisely because they asserted the two commands *resolve*
+   packs identically and never that a pack changes a result — a flag that
+   does nothing satisfies that.
+
+   Exposing configuration that does not configure is worse than not
+   exposing it, so the flag is gone rather than papered over. Making packs
+   real means feeding `policy.overrides` into the verdict path (the
+   `PolicyFile`-shaped overrides `compare_snapshots` already consumes),
+   with D8's precedence against an explicit `--policy-file` decided, and
+   re-verification against the FP-rate and tier-accuracy gates — its own
+   scoped slice, not a drive-by extension of a receipt change. **The
+   `packs` axis of the Phase 5 Gate is therefore still open**, and is the
+   one item this round did not close.
+
+   The `cli.py`/`cli_options.py` hard-limit split it forced is kept:
+   `cli_contract_options.py` now holds the three ADR-049 contract options,
+   which is a real improvement independent of packs.
 
 3. **No downstream consumer understood the new schema** (Phase 6's Gate).
    §6.1 names two specifically. SARIF now emits the coverage ledger as

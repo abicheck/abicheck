@@ -589,7 +589,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--old-ast-frontend",
         "--output",
         "--output-dir",
-        "--pack",
         "--pattern-verdicts",
         "--pdb-path",
         "--policy",

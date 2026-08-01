@@ -91,7 +91,6 @@ from .cli_options import (
     env_matrix_option,
     lang_option,
     merge_compile_config,
-    pack_option,
     policy_options,
     resolve_compile_context,
     scope_options,
@@ -591,7 +590,6 @@ _COMPARISON_ONLY_FLAGS = {
     "env_matrix_path": "--env-matrix",
     "contract_evaluation": "--contract-evaluation",
     "contract_mode": "--contract",
-    "pack_paths": "--pack",
 }
 
 
@@ -988,7 +986,6 @@ def _run_artifact_set(
     "Requires --contract-evaluation, and is advisory exactly like it "
     "(mirrors `compare --contract`).",
 )
-@pack_option  # ADR-049 D8: --pack manifests, same decorator `compare` uses
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -1041,7 +1038,6 @@ def scan_cmd(
     env_matrix_path: Path | None,
     contract_evaluation: bool,
     contract_mode: str | None,
-    pack_paths: tuple[Path, ...],
     lang: str,
     allow_build_query: bool,
     fmt: str,
