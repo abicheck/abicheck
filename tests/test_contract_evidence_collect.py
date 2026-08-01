@@ -406,17 +406,22 @@ class TestTypeGraph:
             typedefs={"ns::Alias": "Secret"},
             types=[RecordType(name="Secret", kind="struct", fields=[])],
         )
-        graph = build_type_graph(snap)
-        assert "record:Secret" not in closure_from_graph(graph, ["decl:api"])
+        # Both nodes are asserted, not just the target: `record:Secret` alone
+        # would pass just as well if the typedef node *were* reached and only
+        # its own edge to the target were broken -- a different bug with the
+        # same symptom (CodeRabbit review).
+        bare_closure = closure_from_graph(build_type_graph(snap), ["decl:api"])
+        assert "typedef:ns::Alias" not in bare_closure
+        assert "record:Secret" not in bare_closure
         # The exact key still resolves, which is what live matches on.
         exact = _snap(
             functions=[_public_fn("api", ret="ns::Alias")],
             typedefs={"ns::Alias": "Secret"},
             types=[RecordType(name="Secret", kind="struct", fields=[])],
         )
-        assert "record:Secret" in closure_from_graph(
-            build_type_graph(exact), ["decl:api"]
-        )
+        exact_closure = closure_from_graph(build_type_graph(exact), ["decl:api"])
+        assert "typedef:ns::Alias" in exact_closure
+        assert "record:Secret" in exact_closure
 
     def test_an_enum_is_keyed_and_aliased_like_a_record(self) -> None:
         """``enum:`` is a first-class node kind, not a record afterthought.

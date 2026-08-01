@@ -127,6 +127,12 @@ class TestVersionGate:
 
         Only an individual counter *above* this build's ceiling fails; a
         mixed pair below it is exactly what plan Section 5.1 describes.
+
+        The pinned ``identity_algorithm_version=1`` is now genuinely *below*
+        this build's ceiling (the qualified-typedef tail fix bumped it to 2),
+        so this exercises the real older-evidence path rather than an
+        equal-to-current one, which is all it could assert while every
+        counter still sat at 1.
         """
         _result, ctx = _run()
         mixed = replace(

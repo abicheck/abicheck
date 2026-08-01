@@ -11,3 +11,9 @@
   strengthened replay decision, which `compare_decisions()` treats as a
   defect. Affects only `compare --contract-evaluation`, which is advisory:
   no verdict, exit code, or finding set changes.
+
+  Because the same snapshot now produces a different persisted type graph,
+  `IDENTITY_ALGORITHM_VERSION` bumps to 2 so the two formats are
+  distinguishable. Older (v1) contexts still load and replay; a v2 context
+  is refused by a build that predates the fix, which is the fail-closed
+  direction ADR-049 D6 specifies.

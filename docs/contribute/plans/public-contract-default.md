@@ -2783,6 +2783,25 @@ this is the third distinct place where "resolve it the way the neighbouring
 kind is resolved" was wrong because the live walk treats the kinds
 differently — the mirror has to be per kind, not per intuition.
 
+**A seventeenth round asked what that fix owes the persisted format, and
+the answer was a version bump.** Removing the tail registration means the
+same `AbiSnapshot` now yields a *different* `TypeGraphSnapshot` — the
+graph is persisted evidence a later build re-walks, so a context written
+before the fix and one written after it are not interchangeable, even
+though every block's *shape* is identical and no schema counter moved.
+Leaving `IDENTITY_ALGORITHM_VERSION` at 1 would have had both formats
+advertise one identity algorithm while resolving typedefs differently: a
+consumer could neither tell them apart nor refuse the newer semantics.
+Bumped to 2, which is precisely the concern this counter was split out to
+carry (the schema counters version a block's shape; this one versions the
+algorithm that filled it). The bump does not reject the older graphs —
+D6's rule accepts a version older than or equal to this build's, possibly
+degraded, and refuses only a newer one, so a v1 context still replays here
+while a v2 context is refused by a build that predates the fix. That is
+the direction that matters, and it is also the first time these four
+counters have actually diverged, which the version-strategy test now pins
+as executable proof that they can.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal
