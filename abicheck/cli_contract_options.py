@@ -13,21 +13,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-049's shared CLI option decorators (contract evaluation, packs).
+"""ADR-049's shared contract-evaluation CLI options.
 
-A leaf under :mod:`abicheck.cli_options`, which re-exports both names so
-existing import paths are unchanged. Split out for the ordinary reason this
-repo splits modules: `cli.py` reached its 2000-line hard limit when `--pack`
-was added, moving these 41 lines of option definitions into `cli_options.py`
-pushed *that* file over the same limit, and shrinking their help text to buy
-space would have cut the user-facing documentation of a feature to make room
-for its own code.
+A leaf under :mod:`abicheck.cli_options`, which re-exports the name so
+existing import paths are unchanged.
 
-Both decorators are shared on purpose rather than copied per command:
-`tests/test_cli_contract.py` pins that one concept uses one canonical
-spelling, and for `--pack` the resolver already records that exact option
-name as the selector (`resolve_selected_packs`'s own default), so a second
-spelling would make a receipt name an option that does not exist.
+The split happened while a since-removed ``--pack`` flag pushed ``cli.py``
+past its 2000-line hard limit, and moving these 41 lines into
+``cli_options.py`` pushed *that* file over the same limit. With ``--pack``
+gone, inlining them again would put ``cli.py`` at exactly 2000 -- passing,
+but with zero headroom, so the next option added anywhere in that file
+fails the gate. Kept split for that reason rather than the original one:
+41 lines of option definitions for one cohesive concept is what this module
+is for, and the alternative both times -- trimming their help text to buy
+space -- would shrink a feature's user-facing documentation to make room for
+its own code.
+
+One decorator rather than a copy per command: `tests/test_cli_contract.py`
+pins that a shared concept uses one canonical spelling.
 
 Imports nothing from any `cli*` module, so registering these on a command
 cannot pull a new member into the CLI-registration import cycle the
@@ -47,12 +50,8 @@ import click
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-#: ADR-049's three contract-evaluation options, as one decorator. Extracted
-#: from ``cli.py`` when adding ``--pack`` pushed that file past the
-#: 2000-line hard limit: 41 lines of option definitions for one cohesive
-#: concept is exactly what this module holds, and the alternative --
-#: trimming their help text to buy space -- would have shrunk the
-#: user-facing documentation of a feature to make room for its own code.
+#: ADR-049's three contract-evaluation options, as one decorator -- see this
+#: module's docstring for why they live here rather than in ``cli.py``.
 def contract_options(f: F) -> F:
     """Attach ``--contract-evaluation`` / ``--contract`` / ``--audit-suppressions``."""
     f = click.option("--audit-suppressions", "audit_suppressions", is_flag=True, default=False,

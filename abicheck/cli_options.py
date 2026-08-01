@@ -1974,12 +1974,12 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
 }
 
 
-#: ADR-049's contract-evaluation and pack option decorators moved to
+#: ADR-049's contract-evaluation option decorator moved to
 #: ``cli_contract_options.py`` when this module reached its own 2000-line
 #: hard limit -- the same split, for the same reason, as ``cli_profiles.py``
 #: before it. Re-exported here (``X as X``, so the re-export is explicit to
-#: mypy) because both are shared decorators callers already reach through
-#: this module, and a leaf holding option definitions never imports back.
+#: mypy) because it is a shared decorator callers already reach through this
+#: module, and a leaf holding option definitions never imports back.
 from .cli_contract_options import (  # noqa: E402
     contract_options as contract_options,
 )
