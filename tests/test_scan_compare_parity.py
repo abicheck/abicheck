@@ -1406,3 +1406,51 @@ class TestServiceScanReceipt:
         config = resolve_scan_config(params, typed={"policy"})
         hops = [hop.option for hop in config.provenance["policy.base"].selected_by]
         assert "--policy" in hops
+
+
+class TestApiRequestValidationErrors:
+    """A request the resolver rejects must reach the caller as
+    `ValidationError`, which is what every other request-validation failure
+    in `run_scan` raises — not as the resolver's own `ValueError`, which a
+    caller guarding with `except ValidationError` would not catch
+    (CodeRabbit review).
+    """
+
+    def _request(self, mixed_pair: tuple[Path, Path], **kwargs):
+        from abicheck.service_scan import ScanRequest
+
+        old, new = mixed_pair
+        return ScanRequest(
+            binaries=[new], baseline=old, contract_evaluation=True, **kwargs
+        )
+
+    def test_an_unknown_policy_is_a_validation_error(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """Unreachable from the CLI, whose `--policy` is a `click.Choice`, but
+        a typed request's `policy` is a free string."""
+        from abicheck.errors import ValidationError
+        from abicheck.service_scan import _scan_request_config
+
+        with pytest.raises(ValidationError, match="unknown base policy"):
+            _scan_request_config(self._request(mixed_pair, policy="not_a_policy"))
+
+    def test_run_scan_surfaces_it_rather_than_the_raw_resolver_error(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """End to end: the mapping has to hold through `run_scan`, since that
+        is the entry point a caller actually guards."""
+        from abicheck.errors import ValidationError
+        from abicheck.service_scan import run_scan
+
+        with pytest.raises(ValidationError, match="unknown base policy"):
+            run_scan(self._request(mixed_pair, policy="not_a_policy"))
+
+    def test_a_valid_request_still_resolves(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """The mapping must not swallow a good request: `ValueError` is a wide
+        net, so this pins that the happy path still returns a config."""
+        from abicheck.service_scan import _scan_request_config
+
+        assert _scan_request_config(self._request(mixed_pair)) is not None

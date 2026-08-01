@@ -116,3 +116,12 @@ class TestInstallation:
     def test_no_block_is_serialized_without_a_context(self):
         assert context_block(SimpleNamespace(contract_context=None)) is None
         assert context_block(SimpleNamespace()) is None
+
+
+class TestNoProjectConfig:
+    def test_blanking_a_missing_project_config_yields_nothing(self) -> None:
+        """The common case: a scan with no `.abicheck.yml` has no project
+        inputs to blank, and must not fabricate an empty one."""
+        from abicheck.cli_scan_receipt import _without_gate_settings
+
+        assert _without_gate_settings(None) is None
