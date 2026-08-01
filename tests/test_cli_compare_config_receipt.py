@@ -287,7 +287,8 @@ class TestRunProfileLayer:
         from abicheck.cli_options import RUN_PROFILE_META_KEY, apply_compare_profile
 
         class _Ctx:
-            meta: dict = {}
+            def __init__(self) -> None:
+                self.meta: dict = {}
 
         ctx = _Ctx()
         apply_compare_profile(ctx, {"profile": None})
@@ -472,14 +473,16 @@ class TestOverlayProvenanceEdges:
         )
 
     def _resolved(self):
-        from abicheck.cli_compare_receipt import resolve_cli_config
-
-        return resolve_cli_config(
-            {"public_symbols": ("api_b",)},
-            typed=(),
-            project_cfg=None,
-            project_path=None,
+        from abicheck.cli_compare_receipt import (
+            COMPARE_CONFIG_PARAMS,
+            resolve_cli_config,
         )
+
+        # Every declared key, since `resolve_cli_config` rejects a partial
+        # mapping outright -- an absent one would resolve as "not stated".
+        params = dict.fromkeys(COMPARE_CONFIG_PARAMS)
+        params["public_symbols"] = ("api_b",)
+        return resolve_cli_config(params, typed=(), project_cfg=None, project_path=None)
 
     def test_missing_observed_entries_are_dropped_not_inherited(self):
         from abicheck.contract_context import with_resolved_config
@@ -491,6 +494,32 @@ class TestOverlayProvenanceEdges:
         # The stated scope entry survives on its own — there is no observed
         # hop to append, which is the one-sided case the merge allows.
         assert provenance["surface.explicit_scope"].selected_by
+
+    def test_a_stated_overlay_selector_survives_alongside_the_observed_one(self):
+        """A `kind: contract` pack can assign `contract.overlays`, and those
+        selectors are a different set from the providers the ledger observed.
+
+        Replacing one with the other dropped a real selection and its receipt
+        (CodeRabbit review), so the value is their union and the entries
+        merge — the same rule `surface.explicit_scope` already follows.
+        """
+        from dataclasses import replace
+
+        from abicheck.contract_context import with_resolved_config
+
+        ctx = self._context_with_overlays(scope_entry=True, overlay_entry=True)
+        resolved = self._resolved()
+        stated = replace(
+            resolved,
+            contract=replace(resolved.contract, overlays=("ffi",)),
+        )
+        out = with_resolved_config(ctx, stated)
+        config = out.evaluation_context.resolved_config
+        assert config.contract.overlays == ("ffi", "forced_public_symbols")
+        options = [
+            hop.option for hop in config.provenance["contract.overlays"].selected_by
+        ]
+        assert "overlays" in options
 
     def test_observed_hop_is_appended_once(self):
         """A merge that re-appended an already-present hop would report one
@@ -562,6 +591,21 @@ class TestWiringContract:
         )
         assert result.exit_code == 64, result.output
         assert "two explicit values" in result.output
+
+    def test_a_dropped_config_param_fails_loudly(self):
+        """The tuple's whole point: a renamed or forgotten key would resolve
+        as "not stated", which reads exactly like a flag the user never
+        passed (CodeRabbit review — the contract was documented, not
+        enforced)."""
+        from abicheck.cli_compare_receipt import (
+            COMPARE_CONFIG_PARAMS,
+            resolve_cli_config,
+        )
+
+        params = dict.fromkeys(COMPARE_CONFIG_PARAMS)
+        del params["policy"]
+        with pytest.raises(KeyError, match="policy"):
+            resolve_cli_config(params, typed=(), project_cfg=None, project_path=None)
 
     def test_recording_is_a_noop_without_a_context(self):
         """Every run that did not ask for ``--contract-evaluation`` has no

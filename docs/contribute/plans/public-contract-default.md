@@ -3503,6 +3503,20 @@ unchanged. Hashing the path at the call site instead was rejected —
 `ProjectCompatibilityInputs.sha256`'s own docstring refuses to compute the
 digest from a path for exactly the pairing reason a second read reintroduces.
 
+**Three more findings, one of them a CI break.** (5) The new module reads
+YAML, and `pyproject.toml`'s stubless-PyYAML mypy override lists modules
+explicitly — omitting it broke the zero-error typecheck gate in any
+environment without `types-PyYAML`. Added to the existing override rather
+than an inline ignore, per this file's own rule. (6) `contract.overlays` is
+routable from a `kind: contract` pack, so "no front-end input" was wrong:
+with a pack assignment *and* an observed overlay, replacing the value
+dropped the pack's selection and its provenance. The value is now the union
+of both sets and the entries merge, the same rule `surface.explicit_scope`
+already followed (CodeRabbit review). (7) `COMPARE_CONFIG_PARAMS` declared
+that a renamed option should fail loudly, but nothing checked the caller's
+mapping against it — `resolve_cli_config` now rejects a partial one instead
+of letting a dropped key resolve as "not stated".
+
 Still open in this phase, unchanged by this slice: the MCP `abi_compare`
 tool still patches its own gate (`mcp_server._record_resolved_gate`) rather
 than resolving a config through

@@ -185,6 +185,18 @@ def resolve_cli_config(
         resolve_compatibility_evaluation_config,
     )
 
+    # The declared contract, enforced rather than only documented: every one
+    # of these keys is read below, and a caller that renamed or dropped one
+    # would have it resolve silently to "not stated" -- indistinguishable
+    # from a user who did not pass the flag (CodeRabbit review).
+    missing = [name for name in COMPARE_CONFIG_PARAMS if name not in params]
+    if missing:
+        raise KeyError(
+            f"compare config params missing {missing}; every name in "
+            "COMPARE_CONFIG_PARAMS must be forwarded, since an absent one "
+            "resolves as unstated rather than failing"
+        )
+
     # A profile injects its values *into the command's kwargs*, so by the time
     # they reach here they are indistinguishable from typed ones -- and read
     # as `EXPLICIT_CLI`, the one layer a profile must never claim. Blanked
