@@ -826,14 +826,20 @@ def _append_coverage_suite(root: ET.Element, result: DiffResult) -> int:
     if ctx is None:
         return 0
     failures = coverage_failures_for_context(ctx)
+    # Qualified by library: a multi-library document appends one of these per
+    # result, and a coverage failure identifies only its provider and side.
+    # Two libraries failing the same provider on the same side produced two
+    # indistinguishable suites, so a consumer could not attribute either
+    # error to a library (CodeRabbit review).
+    library = getattr(result, "library", "") or "unknown"
     suite = ET.SubElement(root, "testsuite")
-    suite.set("name", "abicheck.contract_coverage")
+    suite.set("name", f"abicheck.contract_coverage.{library}")
     suite.set("tests", str(len(failures)))
     suite.set("failures", "0")
     suite.set("errors", str(len(failures)))
     for failure in failures:
         case = ET.SubElement(suite, "testcase")
-        case.set("classname", "abicheck.contract_coverage")
+        case.set("classname", f"abicheck.contract_coverage.{library}")
         case.set("name", f"{failure.provider}:{failure.side}")
         error = ET.SubElement(case, "error")
         error.set("type", failure.reason)

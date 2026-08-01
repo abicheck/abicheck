@@ -252,7 +252,11 @@ class TestPhase6CorpusCoverage:
         carries none, is the one that does not -- and that contrast is the
         honest signal, not a number to be improved away."""
         lanes = shadow.metrics()["modes"]["exports"]["unresolved_by_lane"]
-        for lane in ("elf", "pe", "macho", "stripped", "versioned", "c"):
+        # Derived from `CASE_LANE`, not hardcoded: a lane added there would
+        # otherwise keep passing this invariant without ever being checked
+        # against it (CodeRabbit review) -- the same source of truth the
+        # neighbouring declared-lane test already uses.
+        for lane in sorted(set(platform_corpus.CASE_LANE.values())):
             counts = lanes[lane]
             assert counts["resolved"], f"{lane} resolved nothing under exports"
             # And nothing *un*resolved: a lane carrying a complete export

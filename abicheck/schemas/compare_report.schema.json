@@ -967,6 +967,8 @@
           "side",
           "record_id",
           "reason",
+          "status",
+          "completeness",
           "mode",
           "suppressible"
         ]

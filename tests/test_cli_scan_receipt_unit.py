@@ -24,6 +24,7 @@ rule in isolation.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -34,10 +35,11 @@ from abicheck.cli_scan_receipt import (
     record_resolved_config,
     resolve_scan_config,
 )
+from abicheck.contract_relevance_types import ContractMode
 
 
-def _params(**overrides):
-    base = dict.fromkeys(SCAN_CONFIG_PARAMS)
+def _params(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = dict.fromkeys(SCAN_CONFIG_PARAMS)
     base["public_symbols"] = ()
     base.update(overrides)
     return base
@@ -59,7 +61,7 @@ class TestParamsContract:
 
 
 class TestGateBlanking:
-    def test_a_project_gate_is_not_claimed_by_a_scan(self, tmp_path):
+    def test_a_project_gate_is_not_claimed_by_a_scan(self, tmp_path: Path) -> None:
         """A scan's exit follows its verdict and never reads these keys, so
         recording them would make the receipt describe a gate the run did
         not use."""
@@ -81,7 +83,7 @@ class TestGateBlanking:
         prov = config.provenance["gate.exit_code_scheme"]
         assert prov.layer.value == "built_in_default"
 
-    def test_a_project_scope_setting_is_still_honored(self, tmp_path):
+    def test_a_project_scope_setting_is_still_honored(self, tmp_path: Path) -> None:
         """Only the *gate* fields are blanked. A project's scope choice is
         real configuration the scan does apply, so it must survive."""
         from abicheck.buildsource.inline import load_build_config
@@ -94,7 +96,10 @@ class TestGateBlanking:
             project_cfg=load_build_config(cfg),
             project_path=cfg,
         )
+        # Both halves: a regression could keep the provenance while resolving
+        # the default mode (CodeRabbit review).
         assert config.provenance["contract.mode"].layer.value == "project_config"
+        assert config.contract.mode is ContractMode.ALL
 
 
 class TestInstallation:

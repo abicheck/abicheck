@@ -50,6 +50,7 @@ from abicheck.compatibility_evaluation_frontend import (
     POLICY_OVERRIDES_FIELD,
     REQUIRE_EVIDENCE_FIELD,
     SUPPRESSIONS_FIELD,
+    CompatibilityEvaluationConfig,
     ExplicitCompatibilityInputs,
     FrontEnd,
     ProjectCompatibilityInputs,
@@ -1233,7 +1234,7 @@ class TestUnstatableSelectors:
     review before this check existed.
     """
 
-    def _api(self, **kwargs):
+    def _api(self, **kwargs: object) -> CompatibilityEvaluationConfig:
         return _resolve(
             front_end=FrontEnd.API, explicit=ExplicitCompatibilityInputs(**kwargs)
         )
@@ -1321,7 +1322,7 @@ class TestUnstatableSelectorsAgainstARequestType:
     `ScanRequest` either. `request_type` is what distinguishes the two.
     """
 
-    def _api(self, **kwargs):
+    def _api(self, **kwargs: object) -> CompatibilityEvaluationConfig:
         return _resolve(
             front_end=FrontEnd.API, explicit=ExplicitCompatibilityInputs(**kwargs)
         )

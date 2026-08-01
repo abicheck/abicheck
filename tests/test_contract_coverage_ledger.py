@@ -421,7 +421,7 @@ class TestDownstreamConsumers:
         (suite,) = [
             s
             for s in root.findall("testsuite")
-            if s.get("name") == "abicheck.contract_coverage"
+            if (s.get("name") or "").startswith("abicheck.contract_coverage")
         ]
         assert suite.get("errors") == "2"
         assert suite.get("failures") == "0"
@@ -450,7 +450,7 @@ class TestDownstreamConsumers:
         assert not [
             s
             for s in root.findall("testsuite")
-            if s.get("name") == "abicheck.contract_coverage"
+            if (s.get("name") or "").startswith("abicheck.contract_coverage")
         ]
 
 
@@ -568,9 +568,49 @@ def test_junit_multi_result_documents_carry_the_coverage_suite() -> None:
     suites = [
         s
         for s in root.findall("testsuite")
-        if s.get("name") == "abicheck.contract_coverage"
+        if (s.get("name") or "").startswith("abicheck.contract_coverage")
     ]
     assert len(suites) == 1
     assert suites[0].get("errors") == "2"
     # And the document totals see them, not just the nested suite.
     assert int(root.get("errors")) >= 2
+
+
+def test_junit_coverage_suites_stay_attributable_per_library() -> None:
+    """Two libraries failing the same provider on the same side produced two
+    suites named alike, whose cases identify only provider and side — so a
+    consumer could not tell which library either error belonged to
+    (CodeRabbit review). The library qualifies both the suite name and the
+    testcase classname.
+    """
+    import xml.etree.ElementTree as ET
+
+    from abicheck.junit_report import to_junit_xml_multi
+
+    old, new = _pair_without_export_table()
+    results = []
+    for name in ("liba.so", "libb.so"):
+        result = compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            contract_mode="exports",
+        )
+        result.library = name
+        results.append((result, old))
+    root = ET.fromstring(to_junit_xml_multi(results))
+    suites = [
+        s
+        for s in root.findall("testsuite")
+        if (s.get("name") or "").startswith("abicheck.contract_coverage")
+    ]
+    assert len(suites) == 2
+    # The identical failures no longer collapse into indistinguishable suites.
+    assert {s.get("name") for s in suites} == {
+        "abicheck.contract_coverage.liba.so",
+        "abicheck.contract_coverage.libb.so",
+    }
+    for suite in suites:
+        classnames = {c.get("classname") for c in suite.findall("testcase")}
+        assert classnames == {suite.get("name")}

@@ -1091,12 +1091,45 @@ def _scan_request_config(req: ScanRequest) -> Any:
     (Codex review, twice on the same receipt).
     :func:`~abicheck.compatibility_evaluation_frontend.unstatable_selectors`
     checks both halves now rather than leaving them to review.
+
+    A D7 same-tier conflict or a D8 pack conflict is a *usage* error about
+    the request, but the resolver raises its own :class:`ValueError`
+    subclasses for those. Unmapped, they escaped ``run_scan`` raw -- past a
+    ``try`` that catches only the budget and evidence-contract signals -- so
+    a caller guarding it with ``except ValidationError``, which every other
+    request-validation failure here raises, would not catch them.
+    ``cli_scan.py`` already maps the same failures to ``click.UsageError``;
+    this is the API's equivalent, so a bad request is reported the same way
+    on both front ends (CodeRabbit review). Mapped here rather than at the
+    one call site so a second caller cannot reintroduce the gap.
+
+    ``ValueError`` broadly, rather than only the two resolver subclasses the
+    CLI names: an unknown ``ScanRequest.policy`` reaches
+    ``builtin_policy_identity`` and raises a *plain* ``ValueError``, which
+    leaked identically. The CLI cannot hit that one -- ``--policy`` is a
+    ``click.Choice`` -- but a typed request's ``policy`` is a free string, so
+    the API needs the wider net. Every ``ValueError`` out of this resolver is
+    a statement about the request's own values, which is exactly what
+    ``ValidationError`` means here; ``PackManifestError`` is listed
+    separately because it is not one.
     """
     if not req.contract_evaluation or req.baseline is None:
         return None
     from .cli_scan_receipt import resolve_scan_config
     from .compatibility_evaluation_frontend import FrontEnd
+    from .errors import PackManifestError, ValidationError
 
+    try:
+        return _resolve_scan_request(req, resolve_scan_config, FrontEnd)
+    except (ValueError, PackManifestError) as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _resolve_scan_request(
+    req: ScanRequest, resolve_scan_config: Any, FrontEnd: Any
+) -> Any:
+    """The resolver call itself, split out so its exception mapping reads as
+    one statement in :func:`_scan_request_config`."""
     return resolve_scan_config(
         {
             "policy": req.policy,

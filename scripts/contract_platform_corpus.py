@@ -375,6 +375,18 @@ CASE_LANE: dict[str, str] = {
     "macho_exported_break": LANE_MACHO,
 }
 
+# `lane_of` falls back to the FP-corpus lane for any unmapped name, which is
+# right for a case that really comes from there and wrong for one added to
+# `PLATFORM_CORPUS` without a lane -- it would silently inflate the
+# FP-corpus bucket instead of failing (CodeRabbit review). Checked at import
+# so the omission surfaces the moment the corpus is loaded, rather than as a
+# quietly mis-attributed rate.
+_UNMAPPED = {case.name for case in PLATFORM_CORPUS} - set(CASE_LANE)
+if _UNMAPPED:
+    raise AssertionError(
+        f"PLATFORM_CORPUS cases missing a CASE_LANE entry: {sorted(_UNMAPPED)}"
+    )
+
 
 def lane_of(name: str) -> str:
     """The lane *name* belongs to; ``"fp_corpus"`` for a case from that corpus.

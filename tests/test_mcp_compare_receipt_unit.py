@@ -168,7 +168,11 @@ class TestRecordResolvedConfig:
         """Mapping a D7/D8 failure to a tool error is the caller's job, so
         this module must not swallow one."""
         result = self._result_with_context()
-        with pytest.raises(Exception):
+        # `ValueError`, not the resolver's own `FieldResolutionError`: an
+        # unknown base reaches `builtin_policy_identity`, which raises plain.
+        # Narrowed from a bare `Exception`, which an unrelated `AttributeError`
+        # would have satisfied just as well (CodeRabbit review).
+        with pytest.raises(ValueError, match="unknown base policy"):
             record_resolved_config(
                 result, exit_code_scheme="legacy", policy="no_such_policy_base"
             )
