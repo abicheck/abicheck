@@ -47,7 +47,7 @@ exit-code logic.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .change_registry_types import Verdict
 from .checker_types import Change
@@ -87,6 +87,7 @@ from .contract_relevance_types import (
     SelectorLayer,
     coerce_contract_mode,
 )
+from .severity import SeverityConfig
 
 _API_REQUEST_REFERENCE = "checker.compare"
 
@@ -264,6 +265,59 @@ def build_evaluation_context(
     return EvaluationContextBlock(resolved_config=config)
 
 
+def with_resolved_gate(
+    context: PersistedContractContext,
+    *,
+    exit_code_scheme: str,
+    severity: SeverityConfig,
+    scheme_provenance: ValueProvenance,
+    severity_provenance: ValueProvenance,
+) -> PersistedContractContext:
+    """Return *context* with the front end's real gate configuration recorded.
+
+    :func:`build_evaluation_context` runs inside ``checker.compare``, which
+    never sees the gate: the exit-code scheme and severity levels are
+    resolved by the front end and applied to the returned result *after* the
+    core verb finishes. So it recorded a default :class:`GateConfig` --
+    which claims the built-in ``severity`` scheme and the built-in severity
+    levels for *every* run, including a ``legacy``-scheme one and one whose
+    ``--severity-*`` flags moved a category (Codex review, fresh evidence).
+    The persisted ``evaluation_context`` is documented as the *complete*
+    resolved configuration, so that default is a false receipt of the same
+    kind a fabricated digest would be, not a harmless omission.
+
+    A front end that has resolved its gate calls this once, before the
+    context is serialized, and supplies the provenance layer it actually
+    resolved each field from -- which the core verb cannot know and this
+    function therefore does not guess.
+
+    The gate is still ``NOT_APPLICABLE`` to contract membership
+    (:class:`GateConfig`): nothing here changes a relevance decision, a
+    closure, or the receipt's per-finding map. It changes only what the
+    audit record says about how the run was gated.
+    """
+    config = context.evaluation_context.resolved_config
+    provenance = dict(config.provenance)
+    provenance["gate.exit_code_scheme"] = scheme_provenance
+    provenance["gate.severity"] = severity_provenance
+    return replace(
+        context,
+        evaluation_context=replace(
+            context.evaluation_context,
+            resolved_config=replace(
+                config,
+                gate=GateConfig(
+                    exit_code_scheme=exit_code_scheme,
+                    preset=config.gate.preset,
+                    packs=config.gate.packs,
+                    severity=severity,
+                ),
+                provenance=provenance,
+            ),
+        ),
+    )
+
+
 def suppression_config_for(suppression: object) -> SuppressionConfig | None:
     """Reduce a live ``SuppressionList`` to its persisted configuration.
 
@@ -274,20 +328,37 @@ def suppression_config_for(suppression: object) -> SuppressionConfig | None:
     is the list's own machine-facing receipt spelling -- built for exactly
     this field -- so nothing is re-derived here.
 
-    Returns ``None`` when no list was supplied, and also when one was
-    supplied without a ``source_sha256``: :class:`SuppressionConfig` requires
-    a digest precisely so a recorded source can be proved to be the one that
-    ran, and an in-memory list assembled by a caller (never read from a file)
-    has no content to digest. Recording it with a fabricated digest would be
-    worse than recording nothing.
+    Returns ``None`` only when no list was supplied at all.
+
+    A list *without* a ``source_sha256`` is still a selected source: the
+    public constructor and :meth:`~abicheck.suppression.SuppressionList.merge`
+    both produce this digest-less but fully active form -- the ABICC
+    compatibility front end (``compat/_helpers.py``) builds every one of its
+    ``-skip-symbols``/``-skip-internal-*`` lists that way, and ``merge()``
+    drops both inputs' digests even when each half *was* read from a file.
+    Returning ``None`` for those recorded "no suppression source was selected
+    at all" while rules were actively suppressing findings (Codex review,
+    fresh evidence) -- the same absent-vs-empty conflation
+    :class:`SuppressionConfig` exists to prevent, one layer up.
+
+    So the digest falls back to a content digest of :meth:`rule_identities`
+    itself. That is not a fabricated stand-in for the file digest: those
+    identities are the canonical spelling of the rules that actually ran, are
+    persisted verbatim in the same block, and the digest is computed over
+    them with :func:`~abicheck.contract_evidence_collect.content_digest`, the
+    ledger's own convention. Nothing in this codebase re-reads a suppression
+    file to verify this field against its bytes, so the two cases differ only
+    in *what content* the digest authenticates -- and in both cases it
+    authenticates content the receipt itself carries.
     """
     if suppression is None:
         return None
-    digest = getattr(suppression, "source_sha256", None)
     identities = getattr(suppression, "rule_identities", None)
-    if not digest or not callable(identities):
+    if not callable(identities):
         return None
-    return SuppressionConfig(sha256=digest, rules=tuple(identities()))
+    rules = tuple(identities())
+    digest = getattr(suppression, "source_sha256", None) or content_digest(list(rules))
+    return SuppressionConfig(sha256=digest, rules=rules)
 
 
 @dataclass(frozen=True)

@@ -1100,6 +1100,91 @@ def _report_not_comparable(
         _write_or_echo(output, xml)
 
 
+#: The ``compare`` parameters that can set a gate field on the command line.
+#: ``exit_code_scheme`` is its own field; the rest all feed one resolved
+#: :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed
+#: makes the resolved severity explicitly CLI-selected.
+_SEVERITY_PARAMS = (
+    "severity_preset",
+    "severity_abi_breaking",
+    "severity_potential_breaking",
+    "severity_quality_issues",
+    "severity_addition",
+)
+
+
+def _gate_provenance(field: str, *, from_cli: bool, from_config: bool) -> Any:
+    """Which D7 layer selected one gate field, as the CLI actually resolved it.
+
+    ``checker.compare`` records ``API_REQUEST`` for everything it was handed
+    because that is all a core verb can honestly claim (see
+    :mod:`abicheck.contract_context`). The gate is different: it is resolved
+    here, by the front end, so the real layer *is* observable — a typed flag
+    is ``EXPLICIT_CLI``, a value that only ``.abicheck.yml`` supplied is
+    ``PROJECT_CONFIG``, and neither is ``BUILT_IN_DEFAULT``.
+    """
+    from .compatibility_evaluation_config import SelectedByEntry, ValueProvenance
+    from .contract_relevance_types import SelectorLayer
+
+    layer = (
+        SelectorLayer.EXPLICIT_CLI
+        if from_cli
+        else SelectorLayer.PROJECT_CONFIG
+        if from_config
+        else SelectorLayer.BUILT_IN_DEFAULT
+    )
+    return ValueProvenance(
+        layer=layer,
+        source_kind=(
+            "cli_option" if from_cli else "project_config" if from_config else None
+        ),
+        field_location=field,
+        selected_by=(
+            SelectedByEntry(layer=layer, option=f"--{field.replace('_', '-')}"),
+        ),
+    )
+
+
+def _record_resolved_gate(
+    result: Any, resolved_cfg: ResolvedCompareConfig, project_cfg: Any
+) -> None:
+    """Replace the persisted context's placeholder gate with the real one.
+
+    A no-op unless ``--contract-evaluation`` produced a context. Runs before
+    any report is rendered, so every output path sees the gate the run was
+    actually scored with rather than :class:`GateConfig`'s built-in defaults
+    (Codex review, fresh evidence).
+    """
+    from .contract_evidence import PersistedContractContext
+
+    ctx = getattr(result, "contract_context", None)
+    if not isinstance(ctx, PersistedContractContext):
+        return
+    from .contract_context import with_resolved_gate
+
+    scheme_cli = _param_from_cli("exit_code_scheme")
+    severity_cli = any(_param_from_cli(name) for name in _SEVERITY_PARAMS)
+    result.contract_context = with_resolved_gate(
+        ctx,
+        exit_code_scheme=resolved_cfg.exit_code_scheme,
+        severity=resolved_cfg.severity,
+        scheme_provenance=_gate_provenance(
+            "exit_code_scheme",
+            from_cli=scheme_cli,
+            # ``auto`` is this key's own built-in default, so a config that
+            # left it alone did not select the resolved concrete scheme.
+            from_config=getattr(project_cfg, "exit_code_scheme", "auto") != "auto",
+        ),
+        severity_provenance=_gate_provenance(
+            "severity",
+            from_cli=severity_cli,
+            # `severity_active` is "set anywhere"; with no flag typed, that
+            # can only have been the project config.
+            from_config=resolved_cfg.severity_active,
+        ),
+    )
+
+
 def run_compare(
     ctx: click.Context,
     *,
@@ -1688,6 +1773,7 @@ def run_compare(
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
+    _record_resolved_gate(result, resolved_cfg, project_cfg)
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed

@@ -2527,6 +2527,36 @@ scoped everything out and then had the resulting exclusions cite
 `public_header` — the provider that decided nothing here. It tests
 `is not None` now, matching what `collect_contract_evidence` already records.
 
+**A ninth round found the same absent-vs-fabricated defect in the resolved
+configuration itself, on the two fields the run's *gating* rests on.**
+(1) `checker.compare` never sees the gate — the exit-code scheme and the
+severity levels are resolved by the front end and applied to the returned
+result *after* the core verb finishes — so `build_evaluation_context`
+recorded a default `GateConfig()`. That is not an omission but a wrong
+claim: it asserts the built-in `severity` scheme and the built-in severity
+levels for every run, including a `legacy`-scheme one (confirmed: a run
+exiting 4 on the legacy floor persisted `exit_code_scheme: "severity"`) and
+one whose `--severity-abi-breaking warning` genuinely moved a category. The
+front end now calls `contract_context.with_resolved_gate()` once, before any
+report is rendered, with the values it actually resolved *and* the D7 layer
+it resolved each from — which, unlike the core verb's `API_REQUEST`
+under-claim above, is really observable here: a typed flag is
+`EXPLICIT_CLI`, a value only `.abicheck.yml` supplied is `PROJECT_CONFIG`,
+and an `auto` scheme that resolved itself is `BUILT_IN_DEFAULT`. Nothing
+about a relevance decision, a closure, or the receipt's per-finding map
+changes; the gate stays `NOT_APPLICABLE` to contract membership.
+(2) `suppression_config_for` returned `None` for any `SuppressionList`
+without a `source_sha256` — but the public constructor and `merge()` both
+produce exactly that digest-less, fully *active* form (`compat/_helpers.py`
+builds every ABICC `-skip-*` list that way, and `merge()` drops both halves'
+digests even when each was file-loaded), so a run whose findings were being
+suppressed persisted "no suppression source was selected at all." The digest
+now falls back to a content digest of the rule identities the same block
+persists. That is not a fabricated stand-in for the file digest: it
+authenticates the rules that actually ran, computed with the ledger's own
+`content_digest`, and nothing in this codebase re-reads a suppression file
+to check this field against its bytes.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

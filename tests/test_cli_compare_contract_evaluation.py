@@ -294,6 +294,83 @@ class TestEndToEndJsonReport:
             assert "contract_assurance" not in c
             assert "contract_evidence_refs" not in c
 
+    def test_persisted_gate_is_the_one_the_run_was_scored_with(self, tmp_path):
+        """``checker.compare`` never sees the gate -- the front end resolves it
+        and applies it after the core verb returns -- so the persisted context
+        recorded ``GateConfig()``'s built-in defaults for every run: the
+        ``severity`` scheme and the default severity levels, even for a
+        ``legacy``-scheme run or one that moved a category with a flag (Codex
+        review, fresh evidence). The block is documented as the *complete*
+        resolved configuration, so those defaults were a false receipt.
+        """
+        old_p, new_p = _write_pair(tmp_path)
+        legacy = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract-evaluation",
+                "--format",
+                "json",
+            ],
+        )
+        assert legacy.exit_code == 4, legacy.output
+        ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
+        gate = ctx["resolved_config"]["gate"]
+        # No --severity-* flag and no config: `auto` resolved to `legacy`.
+        assert gate["exit_code_scheme"] == "legacy"
+        assert gate["severity"]["abi_breaking"] == "error"
+        assert (
+            ctx["field_provenance"]["gate.exit_code_scheme"]["layer"]
+            == "built_in_default"
+        )
+        assert ctx["field_provenance"]["gate.severity"]["layer"] == "built_in_default"
+
+        scored = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract-evaluation",
+                "--format",
+                "json",
+                "--severity-abi-breaking",
+                "warning",
+            ],
+        )
+        ctx = json.loads(scored.output)["contract_context"]["evaluation_context"]
+        gate = ctx["resolved_config"]["gate"]
+        # A severity setting flips `auto` to the severity-aware scheme, and the
+        # typed flag is what selected the level.
+        assert gate["exit_code_scheme"] == "severity"
+        assert gate["severity"]["abi_breaking"] == "warning"
+        assert ctx["field_provenance"]["gate.severity"]["layer"] == "explicit_cli"
+
+    def test_explicit_exit_code_scheme_records_its_own_provenance(self, tmp_path):
+        """A typed ``--exit-code-scheme`` is ``EXPLICIT_CLI``, not the
+        ``built_in_default`` layer an ``auto`` resolution gets."""
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract-evaluation",
+                "--format",
+                "json",
+                "--exit-code-scheme",
+                "legacy",
+            ],
+        )
+        ctx = json.loads(result.output)["contract_context"]["evaluation_context"]
+        assert ctx["resolved_config"]["gate"]["exit_code_scheme"] == "legacy"
+        assert (
+            ctx["field_provenance"]["gate.exit_code_scheme"]["layer"] == "explicit_cli"
+        )
+
     def test_help_all_mentions_flag(self):
         result = CliRunner().invoke(main, ["compare", "--help-all"])
         assert result.exit_code == 0

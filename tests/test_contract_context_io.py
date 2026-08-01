@@ -380,6 +380,46 @@ class TestResolvedContextContent:
         config = result.contract_context.evaluation_context.resolved_config
         assert config.suppressions is None
 
+    def test_a_digestless_suppression_list_is_still_a_selected_source(self) -> None:
+        """A programmatically built list has no ``source_sha256`` -- and still
+        suppresses findings, so recording ``None`` said no source was selected
+        (Codex review, fresh evidence).
+
+        ``compat/_helpers.py`` builds every ABICC ``-skip-*`` list this way.
+        The digest falls back to a content digest of the rule identities the
+        same block persists, which is what the run actually applied.
+        """
+        from abicheck.suppression import Suppression, SuppressionList
+
+        suppression = SuppressionList([Suppression(symbol="gone")])
+        assert suppression.source_sha256 is None
+        old, new = _pair()
+        result = compare(old, new, suppression=suppression, contract_evaluation=True)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.suppressions is not None
+        assert config.suppressions.rules == suppression.rule_identities()
+        assert config.suppressions.sha256
+        assert "suppressions" in config.provenance
+
+    def test_a_merged_suppression_list_keeps_its_rules(self, tmp_path) -> None:
+        """``SuppressionList.merge`` drops both halves' digests even when each
+        was file-loaded, so the merged list hit the same digest-less path."""
+        from abicheck.suppression import Suppression, SuppressionList
+
+        merged = SuppressionList.merge(
+            SuppressionList([Suppression(symbol="gone")], source_sha256="a" * 64),
+            SuppressionList([Suppression(symbol="other")], source_sha256="b" * 64),
+        )
+        assert merged.source_sha256 is None
+        old, new = _pair()
+        result = compare(old, new, suppression=merged, contract_evaluation=True)
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.suppressions is not None
+        assert config.suppressions.rules == merged.rule_identities()
+        assert len(config.suppressions.rules) == 2
+
     def test_explicit_overlays_reach_the_persisted_config(self) -> None:
         """``--public-symbol``/``--post-manifest`` decide membership, so the
         resolved configuration records them (Codex review, fresh evidence).
