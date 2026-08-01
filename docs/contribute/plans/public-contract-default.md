@@ -2583,6 +2583,59 @@ corpus input — so the three rows stay empty on today's corpus, and the gate
 becomes live for them the moment such a case exists rather than the moment
 someone remembers to add the collection.
 
+**An eleventh round found two identity defects in the persisted type graph
+itself, both of them the same "a string is not an identity" mistake at
+opposite ends of an edge.** (1) `decl:` nodes were keyed by *linker*
+identity, whose fallback for a producer that recorded no mangled symbol is
+the bare display name — which every overload of a name shares. A public
+`over()` and a private `over(Secret *)` therefore landed on one node, the
+public root inherited the private overload's edge to `Secret`, and a
+re-evaluation answered `IN_CONTRACT` for a private `Secret` layout change
+the live evaluator — which walks each declaration object separately —
+proved out of contract. The node key now falls back to
+`name + "(params)->return"` for the one case where the plain name names
+more than one unmangled declaration, the same "most specific available
+identity, ambiguity-safe" tiering `finding_identity.py` and
+`diff_helpers.TypeMap` already use. Deliberately a tie-break rather than a
+new encoding: `_without_shared_export_aliases` exempts a spelling that is a
+root's *own* node identity from its alias pruning, so refining an
+unambiguous name would prune a genuine export root — the same strengthening,
+one corner over. Two unmangled declarations agreeing on name, parameters
+*and* return type still share a node, which is lossless (their signature
+edges and their `owner_class_of` result are derived from exactly those
+fields), so no ledger-level ambiguity flag is needed for a residual case.
+Rootness still keys on linker identity, which is what the export table
+matched — every member of an unmangled overload group shares one, so they
+are rooted or not as a group, exactly as live roots them. (2) The owner-class
+identity set was keyed on `RecordType.name` alone, while `owner_class_of`
+answers with whatever complete scope chain the producer recorded — for a
+castxml/clang class stored as `name="Widget"`/`qualified_name="ns::Widget"`
+that is the qualified spelling, which the set never contained, so the
+method-to-owner edge was dropped and a live `IN_CONTRACT` replayed as
+`PROVEN_OUT_OF_CONTRACT`. The set is now a field-for-field mirror of
+`export_surface.compute_export_surface`'s own `owner_seed_by_identity` map
+— the map the live exports closure actually seeds through — rather than a
+re-derivation of it, which fixed a *third*, unreported defect in the same
+stroke: the old set also registered a leaf-only bare `name`, letting an
+`api::run()` namespace fragment match an unrelated `other::api` "exactly"
+after all, the very collision the exact-match rule exists to close, from the
+record side. Both were reproduced end-to-end against a live run before
+fixing and re-checked as `compare_decisions(...).strengthened == ()` after.
+
+Observed while mirroring that map, and **not** fixed here: the graph's
+general *type-reference* resolution still goes through
+`surface._index_surface_types`'s un-augmented index, which keys on `name`
+and its `::` tail only, while `compute_export_surface` augments its own copy
+with every `qualified_name`. A field spelled `ns::Widget` on the
+castxml/clang path therefore reaches the record live-in-`exports` but
+produces no edge here. Fixing it means changing the closure for the
+`public` domain too, whose live index is *not* augmented — over-linking
+there flips a live `PROVEN_OUT_OF_CONTRACT` to a replayed `IN_CONTRACT`,
+which `compare_decisions` counts as strengthening just as under-linking
+does. Getting both domains right at once needs its own scoped design
+(per-domain resolution, or an audit of what `surface.py`'s own bare-tail
+lookup would have to become), not a drive-by extension of an owner-edge fix.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

@@ -796,6 +796,116 @@ class TestReevaluateFromEvidence:
         assert decision.evidence_refs == ("public_header:old",)
 
 
+class TestNodeIdentitySoundness:
+    """Two graph-identity collisions, each end-to-end against a live run.
+
+    Both are the same defect shape from opposite sides: a persisted node key
+    that merges two declarations the live evaluator keeps apart, and an
+    identity set that misses the spelling ``owner_class_of`` actually
+    answers with. Asserted through ``compare_decisions`` rather than on the
+    graph alone, because "strengthened" is the property that matters and it
+    is only observable against the live decision.
+    """
+
+    @staticmethod
+    def _replay(old: AbiSnapshot, new: AbiSnapshot, mode: str):
+        result = compare(old, new, contract_evaluation=True, contract_mode=mode)
+        assert result.contract_context is not None
+        ctx = persisted_context_from_dict(
+            json.loads(json.dumps(persisted_context_to_dict(result.contract_context)))
+        )
+        changes = list(result.changes) + list(result.out_of_surface_changes)
+        assert changes
+        return changes, compare_decisions(
+            relevance_map(changes), reevaluate_from_evidence(ctx, changes)
+        )
+
+    def test_an_unmangled_private_overload_stays_out_of_the_public_contract(
+        self,
+    ) -> None:
+        """The public root must not inherit a same-named overload's edges."""
+
+        def _snap(version: str, bits: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libdemo.so.1",
+                version=version,
+                functions=[
+                    Function(
+                        name="over",
+                        mangled="",
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    ),
+                    Function(
+                        name="over",
+                        mangled="",
+                        return_type="int",
+                        params=[Param(name="s", type="Secret *")],
+                        visibility=Visibility.HIDDEN,
+                        origin=ScopeOrigin.PRIVATE_HEADER,
+                    ),
+                ],
+                types=[
+                    RecordType(
+                        name="Secret",
+                        kind="struct",
+                        size_bits=bits,
+                        fields=[TypeField(name="x", type="int")],
+                        origin=ScopeOrigin.PRIVATE_HEADER,
+                    )
+                ],
+            )
+
+        changes, comparison = self._replay(_snap("1", 64), _snap("2", 128), "public")
+        assert [c.contract_relevance for c in changes] == [
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        ]
+        assert comparison.is_sound
+        assert comparison.strengthened == ()
+
+    def test_a_qualified_owner_class_stays_in_the_export_contract(self) -> None:
+        """The owner edge must survive a producer's bare/qualified split."""
+        mangled = "_ZN2ns6Widget4drawEv"
+        elf = ElfMetadata(symbols=[ElfSymbol(name=mangled)])
+
+        def _snap(version: str, bits: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libdemo.so.1",
+                version=version,
+                functions=[
+                    Function(
+                        name="ns::Widget::draw",
+                        mangled=mangled,
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ],
+                types=[
+                    RecordType(
+                        name="Widget",
+                        qualified_name="ns::Widget",
+                        kind="struct",
+                        size_bits=bits,
+                        fields=[TypeField(name="x", type="int")],
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ],
+                elf=elf,
+            )
+
+        changes, comparison = self._replay(_snap("1", 64), _snap("2", 128), "exports")
+        assert [c.contract_relevance for c in changes] == [
+            ContractRelevance.IN_CONTRACT
+        ]
+        assert comparison.is_sound
+        assert comparison.strengthened == ()
+        # Not vacuously sound: the replay reached the same conclusion, it did
+        # not merely decline to decide.
+        assert comparison.agreed
+
+
 class TestDecisionComparison:
     def test_weakening_is_sound_strengthening_is_not(self) -> None:
         original = {

@@ -54,7 +54,10 @@ module owns the encoding. Every node is ``"<kind>:<identity>"``:
 
 ===========  ============================================================
 ``decl:``    one function/variable declaration, keyed by its canonical
-             linker identity (``mangled`` when recorded, else ``name``)
+             linker identity (``mangled`` when recorded, else ``name``) --
+             refined with a signature discriminator for the one case where
+             that fallback names more than one declaration (see
+             :func:`_function_node_keys`)
 ``record:``  one :class:`~abicheck.model.RecordType`, keyed by ``name``
 ``enum:``    one :class:`~abicheck.model.EnumType`, keyed by ``name``
 ``typedef:`` one ``snapshot.typedefs`` alias, keyed by the alias
@@ -205,15 +208,74 @@ def _alias_node(key: str) -> str:
 
 
 def _canonical_decl_key(name: str, mangled: str) -> str:
-    """The one node key a declaration is recorded under.
+    """A declaration's *linker identity*.
 
     ``mangled`` first: it is the linker identity, unique where a demangled
     display name is not (two overloads share a display name, never a mangled
     one). Falls back to ``name`` for a producer that recorded no mangled
     symbol at all (a header-only declaration, or an ``extern "C"`` entry a
     backend spells identically either way).
+
+    This is what ``export_surface._linker_identity`` computes and what
+    :attr:`~abicheck.export_surface.ExportSurface.root_identities` is keyed
+    by, so it stays the right question for "is this declaration an export
+    root". It is *not* always the graph's node key -- see
+    :func:`_function_node_keys` for the one case where the fallback is
+    ambiguous and the node key refines it.
     """
     return mangled or name
+
+
+def _declaration_signature(fn: Function) -> str:
+    """The part of a function's identity a display name does not carry."""
+    params = ",".join((getattr(p, "type", None) or "?") for p in fn.params)
+    return f"({params})->{fn.return_type or '?'}"
+
+
+def _function_node_keys(snap: AbiSnapshot) -> list[str]:
+    """One node key per entry of ``snap.functions``, in order.
+
+    :func:`_canonical_decl_key`'s display-name fallback is unique for a
+    linker identity but *not* for a declaration: a header-only producer that
+    recorded no mangled symbol gives every overload of one name the same
+    fallback, so a public ``over()`` and a private ``over(Secret *)`` merge
+    into one ``decl:`` node and the public root inherits the private
+    overload's edge to ``Secret``. A re-evaluation then answers
+    ``IN_CONTRACT`` for a private ``Secret`` layout change the live evaluator
+    -- which walks each declaration object separately -- answered
+    ``PROVEN_OUT_OF_CONTRACT`` for (Codex review, fresh evidence, confirmed
+    with a minimal snapshot).
+
+    The fix is the same "most specific available identity, ambiguity-safe"
+    tiering ``finding_identity.py`` and ``diff_helpers.TypeMap`` already use:
+    the plain display name is kept whenever it names exactly one unmangled
+    declaration, and only a name shared by two unmangled declarations with
+    *differing* signatures is refined with :func:`_declaration_signature`.
+    Two unmangled declarations agreeing on name, parameters and return type
+    still share a node, which is lossless -- their signature edges and their
+    ``owner_class_of`` result are derived from exactly those fields, so
+    nothing a closure walk could reach differs between them.
+
+    Deliberately not applied unconditionally: the ``exports`` domain exempts
+    a spelling that is a root's *own* node identity from
+    ``contract_replay._without_shared_export_aliases``'s alias pruning, so
+    refining an unambiguous ``over`` to ``over()->int`` for every unmangled
+    declaration would lose that exemption and prune a genuine root -- the
+    same strengthening, one corner over.
+    """
+    signatures: dict[str, set[str]] = {}
+    for fn in snap.functions:
+        if not fn.mangled:
+            signatures.setdefault(fn.name, set()).add(_declaration_signature(fn))
+    keys: list[str] = []
+    for fn in snap.functions:
+        if fn.mangled:
+            keys.append(fn.mangled)
+        elif len(signatures.get(fn.name, ())) > 1:
+            keys.append(fn.name + _declaration_signature(fn))
+        else:
+            keys.append(fn.name)
+    return keys
 
 
 class _TypeIndex:
@@ -248,20 +310,71 @@ class _TypeIndex:
                 self._nodes_by_spelling.setdefault(tail, set()).add(
                     _typedef_node(alias)
                 )
-        # A record's *own* identity, as opposed to every spelling that
-        # resolves to it -- what an exact-identity match needs (see
-        # `resolve_exact_record`).
-        self._record_identities: set[str] = {
-            r.name for records in record_by_name.values() for r in records
-        }
         self.ambiguous_type_names = set(scratch.ambiguous_type_names)
         self.all_types = set(scratch.all_types)
+        self._owner_seed_nodes = self._build_owner_seed_index(
+            snap, set(record_by_name) | set(enum_by_name)
+        )
+
+    def _build_owner_seed_index(
+        self, snap: AbiSnapshot, type_keys: set[str]
+    ) -> dict[str, set[str]]:
+        """Which *exact* owner identities seed which record nodes.
+
+        A mirror of ``export_surface.compute_export_surface``'s own
+        ``owner_seed_by_identity`` map, field for field, because that map is
+        what the live exports closure seeds a method root's owner through --
+        and a graph recognizing fewer identities than it does drops the edge
+        and lets a replay prove a live ``IN_CONTRACT`` owner out of contract
+        (see :func:`_link_owner_class`).
+
+        The rule mirrored, not re-invented: a record's ``qualified_name`` is
+        always an exact identity (it names exactly one record; two records
+        sharing one are the same type), while its bare ``name`` counts only
+        when the producer did not separately record a differing qualified
+        spelling -- on the castxml/clang path ``name`` is the leaf alone, so
+        registering it lets an ``api::run()`` namespace fragment match an
+        unrelated ``other::api`` "exactly" after all -- and only when that
+        name is unambiguous.
+
+        Keying the identity set on ``name`` alone was the gap: a producer
+        storing ``name="Widget", qualified_name="ns::Widget"`` makes
+        ``owner_class_of`` return the qualified identity, which the bare-only
+        set never contained, so the method-to-owner edge was dropped and a
+        live ``IN_CONTRACT`` replayed as ``PROVEN_OUT_OF_CONTRACT`` (Codex
+        review, fresh evidence, confirmed with a minimal snapshot).
+        """
+        # `compute_export_surface` folds typedef-alias collisions into its
+        # ambiguity set *before* building the owner map, since the closure
+        # walk resolves one spelling through both indexes; mirrored here so
+        # the same bare name is refused on both sides.
+        keys = type_keys | {r.qualified_name for r in snap.types if r.qualified_name}
+        keys |= {e.qualified_name for e in snap.enums if e.qualified_name}
+        ambiguous = self.ambiguous_type_names | {
+            alias for alias in snap.typedefs if alias in keys
+        }
+        out: dict[str, set[str]] = {}
+        for rec in snap.types:
+            node = _record_node(rec.name)
+            leaf_only = bool(rec.qualified_name) and rec.qualified_name != rec.name
+            if not leaf_only and rec.name not in ambiguous:
+                out.setdefault(rec.name, set()).update(self.resolve(rec.name) or {node})
+            if rec.qualified_name:
+                # The qualified spelling is not in `_index_surface_types`'s
+                # own index (it keys on `name` and its `::` tail), which is
+                # exactly the augmentation `compute_export_surface` makes
+                # locally for the same reason -- so the record's own node is
+                # added directly rather than looked up.
+                out.setdefault(rec.qualified_name, set()).update(
+                    self.resolve(rec.qualified_name) | {node}
+                )
+        return out
 
     def resolve(self, spelling: str) -> set[str]:
         return set(self._nodes_by_spelling.get(spelling, ()))
 
-    def resolve_exact_record(self, identity: str) -> set[str]:
-        """The record node whose own identity *is* ``identity``, if any.
+    def resolve_owner_class(self, identity: str) -> set[str]:
+        """The record node(s) an owner-class *identity* exactly names.
 
         Deliberately not :meth:`resolve`: that one answers a bare ``::``
         tail too, which is right for a genuine type *reference* (a backend
@@ -270,9 +383,7 @@ class _TypeIndex:
         complete scope chain -- or as namespace noise when the function is
         not a method at all. See :func:`_link_owner_class`.
         """
-        return (
-            {_record_node(identity)} if identity in self._record_identities else set()
-        )
+        return set(self._owner_seed_nodes.get(identity, ()))
 
     def resolve_type_string(self, type_str: str | None) -> set[str]:
         """Every canonical node a type *string* references."""
@@ -319,8 +430,8 @@ def build_type_graph(snap: AbiSnapshot) -> TypeGraphSnapshot:
         nodes.add(node)
         link(node, index.resolve_type_string(target))
 
-    for fn in snap.functions:
-        node = _decl_node(_canonical_decl_key(fn.name, fn.mangled))
+    for fn, key in zip(snap.functions, _function_node_keys(snap), strict=True):
+        node = _decl_node(key)
         nodes.add(node)
         link(node, index.resolve_type_string(fn.return_type))
         for param in fn.params:
@@ -374,10 +485,16 @@ def _link_owner_class(
     namespace noise that *should* match nothing. This is the same rule, for
     the same reason, that ``type_reachability.py``'s owner seeding settled
     on.
+
+    *Which* spellings count as an exact identity is
+    :meth:`_TypeIndex._build_owner_seed_index`'s subject -- the qualified
+    name included, since a producer recording ``name="Widget"`` beside
+    ``qualified_name="ns::Widget"`` makes ``owner_class_of`` answer with the
+    qualified one.
     """
     owner = owner_class_of(fn)
     if owner:
-        link(node, index.resolve_exact_record(owner))
+        link(node, index.resolve_owner_class(owner))
 
 
 def _link_decl_aliases(
@@ -396,7 +513,7 @@ def _link_decl_aliases(
     than the live one would silently lose roots and report findings out of a
     contract they are actually in.
     """
-    canonical = _canonical_decl_key(name, mangled)
+    canonical = node.partition(":")[2]
     for key in _symbol_keys(name, mangled):
         if key == canonical:
             continue
@@ -458,9 +575,9 @@ def _public_header_declarations(snap: AbiSnapshot, surf: PublicSurface) -> list[
     mode-dependent closure in the decision receipt.
     """
     out: list[str] = []
-    for fn in snap.functions:
+    for fn, key in zip(snap.functions, _function_node_keys(snap), strict=True):
         if fn.visibility == Visibility.PUBLIC:
-            out.append(_decl_node(_canonical_decl_key(fn.name, fn.mangled)))
+            out.append(_decl_node(key))
     for var in snap.variables:
         if var.visibility == Visibility.PUBLIC:
             out.append(_decl_node(_canonical_decl_key(var.name, var.mangled)))
@@ -485,10 +602,15 @@ def _export_table_declarations(snap: AbiSnapshot, exports: ExportSurface) -> lis
     ``export_surface._unresolved_type_edges`` already documents avoiding).
     """
     out: list[str] = []
-    for fn in snap.functions:
+    for fn, key in zip(snap.functions, _function_node_keys(snap), strict=True):
+        # Rootness is decided by *linker* identity (what the export table
+        # matched), while the node recorded is the graph's own key for that
+        # declaration -- the two differ only for an unmangled overload, where
+        # every member of the group shares one linker identity and so is
+        # rooted or not as a group, exactly as live roots them.
         identity = _canonical_decl_key(fn.name, fn.mangled)
         if identity and identity in exports.root_identities:
-            out.append(_decl_node(identity))
+            out.append(_decl_node(key))
     for var in snap.variables:
         identity = _canonical_decl_key(var.name, var.mangled)
         if identity and identity in exports.root_identities:

@@ -230,6 +230,151 @@ class TestTypeGraph:
         assert ("decl:api::run", "record:other::api") not in graph.edges
         assert "record:other::api" not in closure_from_graph(graph, ["decl:api::run"])
 
+    def test_unmangled_overloads_do_not_share_one_node(self) -> None:
+        """A display name is not a declaration identity.
+
+        With no mangled symbol recorded, a public ``over()`` and a private
+        ``over(Secret *)`` fell onto one ``decl:`` node, so the public root
+        inherited the private overload's edge to ``Secret`` and a
+        re-evaluation answered ``IN_CONTRACT`` where the live evaluator --
+        which walks each declaration object separately -- proved it out of
+        contract (Codex review, fresh evidence).
+        """
+        snap = _snap(
+            functions=[
+                Function(
+                    name="over",
+                    mangled="",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+                Function(
+                    name="over",
+                    mangled="",
+                    return_type="int",
+                    params=[Param(name="s", type="Secret *")],
+                    visibility=Visibility.HIDDEN,
+                    origin=ScopeOrigin.PRIVATE_HEADER,
+                ),
+            ],
+            types=[RecordType(name="Secret", kind="struct", fields=[])],
+        )
+        graph = build_type_graph(snap)
+        public_root, private_root = (
+            "decl:over()->int",
+            "decl:over(Secret *)->int",
+        )
+        assert {public_root, private_root} <= set(graph.nodes)
+        assert "record:Secret" not in closure_from_graph(graph, [public_root])
+        assert "record:Secret" in closure_from_graph(graph, [private_root])
+        # The shared display name still resolves -- to both, since with no
+        # linker identity recorded it genuinely names either one.
+        assert resolve_graph_node(graph, "over") == {public_root, private_root}
+
+    def test_a_lone_unmangled_declaration_keeps_its_plain_name(self) -> None:
+        """The discriminator is a tie-break, not a new encoding.
+
+        ``contract_replay._without_shared_export_aliases`` exempts a spelling
+        that is a root's *own* node identity from its alias pruning, so
+        refining an unambiguous name would prune a genuine export root --
+        the same strengthening, one corner over.
+        """
+        snap = _snap(
+            functions=[
+                Function(
+                    name="solo",
+                    mangled="",
+                    return_type="int",
+                    params=[Param(name="s", type="Secret *")],
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[RecordType(name="Secret", kind="struct", fields=[])],
+        )
+        graph = build_type_graph(snap)
+        assert "decl:solo" in graph.nodes
+        assert resolve_graph_node(graph, "solo") == {"decl:solo"}
+
+    def test_identical_unmangled_declarations_still_share_a_node(self) -> None:
+        """Merging is only wrong when it merges *different* declarations.
+
+        Two entries agreeing on name, parameters and return type reach the
+        same types and the same owner class, so one node loses nothing.
+        """
+
+        def _decl() -> Function:
+            return Function(
+                name="dup",
+                mangled="",
+                return_type="int",
+                params=[Param(name="s", type="Secret *")],
+                visibility=Visibility.PUBLIC,
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
+
+        graph = build_type_graph(
+            _snap(
+                functions=[_decl(), _decl()],
+                types=[RecordType(name="Secret", kind="struct", fields=[])],
+            )
+        )
+        assert "decl:dup" in graph.nodes
+        assert [n for n in graph.nodes if n.startswith("decl:")] == ["decl:dup"]
+
+    def test_a_qualified_record_identity_seeds_its_owner_edge(self) -> None:
+        """``owner_class_of`` answers with the *qualified* identity.
+
+        A castxml/clang producer stores a class as ``name="Widget"`` with
+        ``qualified_name="ns::Widget"``, so a method ``ns::Widget::draw``
+        yields the owner ``"ns::Widget"`` -- which an identity set keyed on
+        ``name`` alone never contained, dropping the edge and letting a
+        replay prove a live ``IN_CONTRACT`` owner out of contract (Codex
+        review, fresh evidence). ``export_surface``'s own owner map registers
+        the qualified spelling; the graph mirrors it.
+        """
+        snap = _snap(
+            functions=[_public_fn("ns::Widget::draw")],
+            types=[
+                RecordType(
+                    name="Widget",
+                    qualified_name="ns::Widget",
+                    kind="struct",
+                    fields=[TypeField(name="member", type="Payload")],
+                ),
+                RecordType(name="Payload", kind="struct", fields=[]),
+            ],
+        )
+        graph = build_type_graph(snap)
+        assert ("decl:ns::Widget::draw", "record:Widget") in graph.edges
+        closure = closure_from_graph(graph, ["decl:ns::Widget::draw"])
+        assert {"record:Widget", "record:Payload"} <= closure
+
+    def test_a_leaf_only_bare_name_still_seeds_no_owner(self) -> None:
+        """Registering the qualified spelling must not re-admit the leaf.
+
+        The bare ``name`` of a record carrying a differing ``qualified_name``
+        is the leaf alone, so registering it lets an ``api::run()`` namespace
+        fragment match ``other::api`` "exactly" -- the collision the exact
+        rule exists to close, from the record side.
+        """
+        snap = _snap(
+            functions=[_public_fn("api::run")],
+            types=[
+                RecordType(
+                    name="api",
+                    qualified_name="other::api",
+                    kind="struct",
+                    fields=[TypeField(name="secret", type="Secret")],
+                ),
+                RecordType(name="Secret", kind="struct", fields=[]),
+            ],
+        )
+        closure = closure_from_graph(build_type_graph(snap), ["decl:api::run"])
+        assert "record:api" not in closure
+        assert "record:Secret" not in closure
+
     def test_free_function_seeds_no_owner(self) -> None:
         snap = _snap(
             functions=[_public_fn("api")],
