@@ -301,6 +301,30 @@ def with_field_provenance(
     )
 
 
+def _merged_scope_provenance(
+    *, stated: ValueProvenance | None, observed: ValueProvenance | None
+) -> ValueProvenance | None:
+    """The receipt for an explicit scope that was both stated and observed.
+
+    *stated* is the front end's entry (which option, which file, which
+    digest); *observed* is the ledger's (that an overlay really applied).
+    Neither subsumes the other, and a run can have only one of them -- a
+    ``--post-manifest`` scope the front end cannot model, or a resolved scope
+    on a run whose ledger recorded no overlay -- so the merge keeps the
+    richer entry and appends the other's hops rather than choosing between
+    them. Duplicate hops are dropped, since a merged receipt naming the same
+    selector twice would misreport one selection as two.
+    """
+    if stated is None:
+        return observed
+    if observed is None:
+        return stated
+    extra = tuple(h for h in observed.selected_by if h not in stated.selected_by)
+    if not extra:
+        return stated
+    return replace(stated, selected_by=stated.selected_by + extra)
+
+
 def with_resolved_config(
     context: PersistedContractContext,
     config: CompatibilityEvaluationConfig,
@@ -317,15 +341,26 @@ def with_resolved_config(
     sees the CLI flags, the project config, and the selected packs, and
     resolves the real D7 layer per field.
 
-    **Two fields are kept from the core's version regardless.**
+    **Two overlay fields keep their observed values.**
     ``contract.overlays`` and ``surface.explicit_scope`` are not resolved
     from stated inputs at all: :func:`overlay_selection` recovers them from
     the run's *own evidence ledger*, so they name the overlays that actually
     applied -- including ``--post-manifest``, which no front-end input model
     describes. An observation of what ran outranks a resolution of what was
-    asked for, so when the ledger recorded any overlay, both fields and both
-    provenance entries survive. With no overlay observed there is nothing to
-    preserve and the incoming config's own values stand.
+    asked for, so when the ledger recorded any overlay, both values survive.
+
+    Their *provenance* follows a different rule, because value and receipt
+    answer different questions. The core's entry for
+    ``surface.explicit_scope`` is a contentless ``API_REQUEST`` hop, while
+    the resolver's names the layer, the option, and -- for
+    ``--public-symbols-list`` -- the file and digest that selected the scope.
+    Taking the core's wholesale therefore dropped exactly the identification
+    a replay needs (Codex review, fresh evidence). So when the front end
+    really resolved a scope of its own, its entry is kept and the observed
+    hop is appended to it, leaving both recorded; when it did not (a
+    ``--post-manifest``-only run, which it cannot model), the core's stands
+    alone. ``contract.overlays`` has no front-end input at all, so its entry
+    is always the core's.
 
     What this deliberately does *not* touch: the gate. Its values are
     resolved after ``compare()`` returns and are written by
@@ -342,12 +377,23 @@ def with_resolved_config(
     observed = context.evaluation_context.resolved_config
     if observed.contract.overlays:
         provenance = dict(config.provenance)
-        for field in (CONTRACT_OVERLAYS_FIELD, EXPLICIT_SCOPE_FIELD):
-            entry = observed.provenance.get(field)
-            if entry is None:
-                provenance.pop(field, None)
-            else:
-                provenance[field] = entry
+        observed_overlays = observed.provenance.get(CONTRACT_OVERLAYS_FIELD)
+        if observed_overlays is None:
+            provenance.pop(CONTRACT_OVERLAYS_FIELD, None)
+        else:
+            provenance[CONTRACT_OVERLAYS_FIELD] = observed_overlays
+        scope_entry = _merged_scope_provenance(
+            stated=(
+                config.provenance.get(EXPLICIT_SCOPE_FIELD)
+                if config.surface.explicit_scope is not None
+                else None
+            ),
+            observed=observed.provenance.get(EXPLICIT_SCOPE_FIELD),
+        )
+        if scope_entry is None:
+            provenance.pop(EXPLICIT_SCOPE_FIELD, None)
+        else:
+            provenance[EXPLICIT_SCOPE_FIELD] = scope_entry
         config = replace(
             config,
             contract=replace(config.contract, overlays=observed.contract.overlays),

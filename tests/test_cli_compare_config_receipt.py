@@ -150,6 +150,29 @@ class TestCanonicalResolverIsWhatRuns:
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "strict_abi"
         assert ctx["field_provenance"]["policy.base"]["layer"] == "built_in_default"
 
+    def test_required_symbol_contract_records_the_policy_it_really_used(self, tmp_path):
+        """``--required-symbol`` switches an untouched ``--policy`` to
+        ``plugin_abi`` (ADR-043), and that value is not typed, not a project
+        setting, and not the built-in default -- so a resolution reading only
+        typed flags reported ``strict_abi`` for a run that used ``plugin_abi``
+        (Codex review, fresh evidence). The receipt names the flag that really
+        selected it.
+        """
+        ctx = _context(tmp_path, "--required-symbol", "api_b")
+        assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
+        prov = ctx["field_provenance"]["policy.base"]
+        assert prov["selected_by"][0]["option"] == "--required-symbol"
+
+    def test_typed_policy_still_wins_over_the_required_symbol_default(self, tmp_path):
+        """The derivation is gated on the flag being untouched, so a typed
+        ``--policy`` must be reported as the selector, not overwritten."""
+        ctx = _context(tmp_path, "--required-symbol", "api_b", "--policy", "sdk_vendor")
+        assert ctx["resolved_config"]["policy"]["base"]["id"] == "sdk_vendor"
+        assert (
+            ctx["field_provenance"]["policy.base"]["selected_by"][0]["option"]
+            == "--policy"
+        )
+
     def test_typed_policy_is_reported_as_a_choice(self, tmp_path):
         ctx = _context(tmp_path, "--policy", "sdk_vendor")
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "sdk_vendor"
@@ -328,10 +351,126 @@ class TestObservedOverlaysSurvive:
         assert surface["explicit_scope"] is not None
         assert surface["explicit_scope"]["sha256"]
 
+    def test_a_symbols_list_file_is_still_named_in_the_receipt(self, tmp_path):
+        """The observed value must not cost the receipt its identification.
+
+        The ledger's own entry for `surface.explicit_scope` is a contentless
+        `api_request` hop; taking it wholesale dropped the layer, option,
+        path, and digest of the file that selected the scope, leaving a
+        replay unable to find it (Codex review, fresh evidence).
+        """
+        listed = tmp_path / "public.txt"
+        listed.write_text("api_b\n", encoding="utf-8")
+        ctx = _context(tmp_path, "--public-symbols-list", str(listed))
+
+        prov = ctx["field_provenance"]["surface.explicit_scope"]
+        assert prov["layer"] == "explicit_cli"
+        options = [hop.get("option") for hop in prov["selected_by"]]
+        paths = [hop.get("path") for hop in prov["selected_by"]]
+        assert "--public-symbols-list" in options
+        assert str(listed) in paths
+        # ...and the observed overlay hop is still recorded alongside it.
+        assert "overlays" in options
+        # The value stays the ledger's: it is what actually applied.
+        assert ctx["resolved_config"]["surface"]["explicit_scope"]["items"] == ["api_b"]
+
     def test_no_overlay_leaves_the_resolved_scope_alone(self, tmp_path):
         ctx = _context(tmp_path)
         assert ctx["resolved_config"]["contract"]["overlays"] == []
         assert ctx["resolved_config"]["surface"]["explicit_scope"] is None
+
+
+class TestOverlayProvenanceEdges:
+    """`with_resolved_config`'s defensive branches, at the unit level.
+
+    An overlay recorded with no provenance entry cannot arise from
+    ``build_evaluation_context`` (it writes the entry under exactly the
+    condition that populates the value), but this function is a public seam
+    any front end may call with a context it assembled itself — so
+    "overlays present, entry missing" must drop the stale entry rather than
+    leave the resolver's, which would attribute an observed overlay to a
+    flag.
+    """
+
+    def _context_with_overlays(self, *, scope_entry, overlay_entry):
+        from dataclasses import replace
+
+        from abicheck.compatibility_evaluation_config import (
+            DigestedItems,
+            SelectedByEntry,
+            ValueProvenance,
+        )
+        from abicheck.contract_context import build_evaluation_context
+        from abicheck.contract_evidence import (
+            ContractEvidenceBlock,
+            DecisionReceiptBlock,
+            PersistedContractContext,
+        )
+        from abicheck.contract_relevance_types import ContractMode, SelectorLayer
+
+        block = build_evaluation_context(mode=ContractMode.PUBLIC)
+        config = block.resolved_config
+        provenance = dict(config.provenance)
+        api = ValueProvenance(
+            layer=SelectorLayer.API_REQUEST,
+            selected_by=(
+                SelectedByEntry(layer=SelectorLayer.API_REQUEST, option="overlays"),
+            ),
+        )
+        if overlay_entry:
+            provenance["contract.overlays"] = api
+        if scope_entry:
+            provenance["surface.explicit_scope"] = api
+        config = replace(
+            config,
+            contract=replace(config.contract, overlays=("forced_public_symbols",)),
+            surface=replace(
+                config.surface,
+                explicit_scope=DigestedItems(sha256="deadbeef", items=("api_b",)),
+            ),
+            provenance=provenance,
+        )
+        return PersistedContractContext(
+            contract_evidence=ContractEvidenceBlock(),
+            evaluation_context=replace(block, resolved_config=config),
+            decision_receipt=DecisionReceiptBlock(),
+        )
+
+    def _resolved(self):
+        from abicheck.cli_compare_receipt import resolve_cli_config
+
+        return resolve_cli_config(
+            {"public_symbols": ("api_b",)},
+            typed=(),
+            project_cfg=None,
+            project_path=None,
+        )
+
+    def test_missing_observed_entries_are_dropped_not_inherited(self):
+        from abicheck.contract_context import with_resolved_config
+
+        ctx = self._context_with_overlays(scope_entry=False, overlay_entry=False)
+        out = with_resolved_config(ctx, self._resolved())
+        provenance = out.evaluation_context.resolved_config.provenance
+        assert "contract.overlays" not in provenance
+        # The stated scope entry survives on its own — there is no observed
+        # hop to append, which is the one-sided case the merge allows.
+        assert provenance["surface.explicit_scope"].selected_by
+
+    def test_observed_hop_is_appended_once(self):
+        """A merge that re-appended an already-present hop would report one
+        selection as two."""
+        from abicheck.contract_context import with_resolved_config
+
+        ctx = self._context_with_overlays(scope_entry=True, overlay_entry=True)
+        resolved = self._resolved()
+        once = with_resolved_config(ctx, resolved)
+        twice = with_resolved_config(once, resolved)
+        key = "surface.explicit_scope"
+        assert (
+            once.evaluation_context.resolved_config.provenance[key].selected_by
+            == twice.evaluation_context.resolved_config.provenance[key].selected_by
+        )
 
 
 class TestWiringContract:
@@ -362,6 +501,32 @@ class TestWiringContract:
             main, ["compare", str(old_p), str(new_p), "--format", "json"]
         )
         assert set(seen["params"]) == set(COMPARE_CONFIG_PARAMS)
+
+    def test_a_resolution_usage_error_becomes_exit_64(self, tmp_path, monkeypatch):
+        """The resolver documents mapping its errors to an exit code as the
+        front end's job; a D7 same-tier conflict or a malformed pack manifest
+        is a usage error like any other bad flag combination."""
+        import abicheck.cli_compare_receipt as receipt
+        from abicheck.compatibility_evaluation_resolver import FieldResolutionError
+
+        def _boom(*args, **kwargs):
+            raise FieldResolutionError("contract.mode: two explicit values")
+
+        monkeypatch.setattr(receipt, "record_resolved_config", _boom)
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract-evaluation",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "two explicit values" in result.output
 
     def test_recording_is_a_noop_without_a_context(self):
         """Every run that did not ask for ``--contract-evaluation`` has no

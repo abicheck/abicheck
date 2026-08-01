@@ -32,3 +32,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   records what it injected on the Click context, and the resolver contributes
   it at D7's own `run_profile` layer (below an explicit flag, above the
   project config).
+- **A `--required-symbol` run's receipt named the wrong base policy.** That
+  contract switches an untouched `--policy` to `plugin_abi` (ADR-043), a value
+  that is neither typed nor configured nor the built-in default — so the
+  resolved configuration reported `strict_abi` for a run that used
+  `plugin_abi`. The receipt now records the value and names
+  `--required-symbol` as what selected it; an explicit `--policy-file` still
+  outranks it, as it does live.
+- **`--public-symbols-list` was not identifiable in the resolved
+  configuration.** `surface.explicit_scope` keeps the value recovered from the
+  run's evidence ledger (what actually applied), but taking that entry's
+  provenance too dropped the option, path, and digest of the file that
+  selected the scope. The receipt now keeps the resolver's entry and appends
+  the observed hop, so both the selection and its application are recorded.

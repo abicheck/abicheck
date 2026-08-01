@@ -3462,6 +3462,24 @@ new module a fresh member of the CLI-registration import cycle -- exactly
 what the `import-cycle-growth` gate exists to catch, and unnecessary, since
 the split works without one.
 
+**Two Codex review findings on this slice, both real, both fixed.** (1) A
+`--required-symbol` contract switches an untouched `--policy` to `plugin_abi`
+(ADR-043) — a value that is neither typed, nor a project setting, nor the
+built-in default, so a resolution reading only typed flags recorded
+`strict_abi` while the run scored under `plugin_abi`, exactly the wrong-receipt
+class this wiring exists to remove. `ExplicitCompatibilityInputs` gained
+`policy_base_option`: the value is read as stated, and the receipt names
+`--required-symbol` rather than a `--policy` nobody passed. It stays in the
+`LEGACY_ALIAS` slot, so an explicit `--policy-file` still outranks it — which
+is what `effective_policy` does live. (2) Keeping the *observed*
+`surface.explicit_scope` provenance wholesale dropped what the resolver had
+just captured for `--public-symbols-list`: the layer, the option, the path and
+the digest of the file that selected the scope, leaving a replay unable to find
+it. Value and receipt answer different questions, so they now follow different
+rules — the ledger's value (what applied), the resolver's entry with the
+observed hop appended (what selected it), and the core's entry alone only when
+the front end modelled no scope at all (a `--post-manifest`-only run).
+
 Still open in this phase, unchanged by this slice: the MCP `abi_compare`
 tool still patches its own gate (`mcp_server._record_resolved_gate`) rather
 than resolving a config through

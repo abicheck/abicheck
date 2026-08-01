@@ -375,6 +375,14 @@ class ExplicitCompatibilityInputs:
     scope_public_headers: bool | None = None
     #: ``--policy`` / ``CompareRequest.policy``.
     policy_base: str | None = None
+    #: Which option selected *policy_base*, when it was not ``--policy``
+    #: itself. ``compare`` switches an untouched ``--policy`` to
+    #: ``plugin_abi`` for a ``--required-symbol`` contract (ADR-043), so the
+    #: value really was selected -- by a different typed flag. Recording it
+    #: as ``--policy`` would name an option the user never passed, and
+    #: leaving it unstated made the receipt claim ``strict_abi`` for a run
+    #: that used ``plugin_abi`` (Codex review, fresh evidence).
+    policy_base_option: str | None = None
     #: An already-loaded ``--policy-file`` document.
     policy_file: PolicyFile | None = None
     #: Digest of that file's own bytes, for the receipt (ADR-049 D6). Left
@@ -1141,7 +1149,11 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 SelectorLayer.LEGACY_ALIAS,
                 builtin_policy_identity(explicit.policy_base),
-                option=spell("--policy", "policy"),
+                # Same slot whichever option supplied it: an explicit
+                # `--policy-file` outranks a `--required-symbol`-derived base
+                # exactly as it outranks a typed `--policy`, which is what the
+                # live run does too (`effective_policy`).
+                option=explicit.policy_base_option or spell("--policy", "policy"),
                 source_kind="builtin_policy",
                 reference=explicit.policy_base,
             )
@@ -1536,6 +1548,7 @@ def compare_cli_inputs(
     explicit_parameters: Collection[str] = (),
     policy_file: PolicyFile | None = None,
     suppression: SuppressionSource | None = None,
+    policy_base_option: str | None = None,
 ) -> ExplicitCompatibilityInputs:
     """Normalize the ``compare`` command's real kwargs into resolver inputs.
 
@@ -1551,6 +1564,12 @@ def compare_cli_inputs(
     unset, they are loaded from the ``policy_file_path``/``suppress`` kwargs
     the command itself carries -- silently ignoring a path the invocation
     really named would make the resolved configuration misrepresent the run.
+
+    *policy_base_option* names the option that selected ``policy`` when it was
+    not ``--policy``: ``compare`` switches an untouched ``--policy`` to
+    ``plugin_abi`` for a ``--required-symbol`` contract, and that value is
+    read as stated regardless of *explicit_parameters* (it was not typed, but
+    it was chosen -- see :attr:`ExplicitCompatibilityInputs.policy_base_option`).
 
     ``--public-symbols-list`` is read into its own
     :class:`PublicSymbolsList` rather than flattened into ``public_symbols``,
@@ -1580,7 +1599,10 @@ def compare_cli_inputs(
     return ExplicitCompatibilityInputs(
         contract_mode=kwargs.get("contract_mode"),
         scope_public_headers=_defaulted("scope_public_headers"),
-        policy_base=_defaulted("policy"),
+        policy_base=(
+            kwargs.get("policy") if policy_base_option else _defaulted("policy")
+        ),
+        policy_base_option=policy_base_option,
         policy_file=policy_file,
         public_symbols=tuple(kwargs.get("public_symbols") or ()),
         public_symbols_list=symbols_list,

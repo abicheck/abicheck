@@ -159,8 +159,13 @@ def resolve_cli_config(
     suppression: Any = None,
     suppress_path: Path | None = None,
     run_profile: Mapping[str, Any] | None = None,
+    policy_option: str | None = None,
 ) -> Any:
     """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
+
+    *policy_option* names the flag that selected ``policy`` when it was not
+    ``--policy`` -- ``--required-symbol``, whose contract switches an
+    untouched ``--policy`` to ``plugin_abi``.
 
     Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
     D8 pack conflict, a malformed pack manifest); mapping those onto an exit
@@ -189,6 +194,7 @@ def resolve_cli_config(
             explicit_parameters=typed,
             policy_file=policy_file,
             suppression=_suppression_source(suppression, suppress_path),
+            policy_base_option=policy_option,
         ),
         project=ProjectCompatibilityInputs.from_build_config(
             project_cfg, path=project_path
@@ -209,6 +215,7 @@ def record_resolved_config(
     suppression: Any = None,
     suppress_path: Path | None = None,
     run_profile: Mapping[str, Any] | None = None,
+    policy_option: str | None = None,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
@@ -238,6 +245,7 @@ def record_resolved_config(
         suppression=suppression,
         suppress_path=suppress_path,
         run_profile=run_profile,
+        policy_option=policy_option,
     )
     ctx = with_resolved_config(ctx, config)
     # The values the run was scored with, with the canonical resolver's

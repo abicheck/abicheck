@@ -1234,8 +1234,15 @@ def run_compare(
         )
     # Required-symbol contracts default to the plugin-oriented policy unless the
     # user explicitly picked one -- an explicit --policy always wins (ADR-043).
+    # Recorded, not just applied: the ADR-049 receipt has to name whatever
+    # really selected `policy.base`, and this value was chosen by a typed
+    # `--required-symbol` rather than by `--policy` or a built-in default
+    # (Codex review, fresh evidence -- the receipt claimed `strict_abi` for a
+    # run that used `plugin_abi`).
+    policy_selected_by: str | None = None
     if required_symbols and ctx.get_parameter_source("policy") != click.core.ParameterSource.COMMANDLINE:
         policy = "plugin_abi"
+        policy_selected_by = "--required-symbol"
 
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
@@ -1738,6 +1745,7 @@ def run_compare(
             suppression=suppression,
             suppress_path=suppress,
             run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
+            policy_option=policy_selected_by,
         )
     except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
         # A D7 same-tier conflict / D8 pack conflict / malformed manifest is a
