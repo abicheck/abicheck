@@ -2769,6 +2769,20 @@ node, and the public root inherited the private overload's edge to `Secret`.
 Every recorded linker identity is now reserved, so a display-name fallback
 yields to one whichever tier it came from.
 
+**A sixteenth round found the same over-resolution one type kind over.** A
+typedef was registered under its bare `::` tail as well as its exact key,
+the way records and enums are — but `_walk_type_closure` follows a typedef
+with `snap.typedefs.get(name)`, a plain dict lookup with no tail fallback at
+all. Records and enums get a tail only because `_index_surface_types` gives
+them one; a typedef has no such spelling. So a public signature spelling the
+bare `Alias` reached a qualified `ns::Alias -> Secret`, and a private
+`Secret` layout change the live evaluator proved out of contract
+re-evaluated as `IN_CONTRACT`. The tail registration is removed; the exact
+key still resolves, which is what live matches on. Worth noting the shape:
+this is the third distinct place where "resolve it the way the neighbouring
+kind is resolved" was wrong because the live walk treats the kinds
+differently — the mirror has to be per kind, not per intuition.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal

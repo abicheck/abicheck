@@ -391,6 +391,33 @@ class TestTypeGraph:
         closure = closure_from_graph(graph, ["decl:ns::Widget::draw"])
         assert {"record:ns::Widget", "record:Payload"} <= closure
 
+    def test_a_qualified_typedef_resolves_only_by_its_exact_key(self) -> None:
+        """A typedef has no bare-tail spelling, unlike a record or an enum.
+
+        ``_walk_type_closure`` follows one with ``snap.typedefs.get(name)`` --
+        a plain dict lookup, no tail fallback -- so registering the tail let
+        a signature spelling bare ``Alias`` reach a qualified
+        ``ns::Alias -> Secret``, and a private ``Secret`` change the live
+        evaluator proved out of contract replayed as ``IN_CONTRACT`` (Codex
+        review, fresh evidence).
+        """
+        snap = _snap(
+            functions=[_public_fn("api", ret="Alias")],
+            typedefs={"ns::Alias": "Secret"},
+            types=[RecordType(name="Secret", kind="struct", fields=[])],
+        )
+        graph = build_type_graph(snap)
+        assert "record:Secret" not in closure_from_graph(graph, ["decl:api"])
+        # The exact key still resolves, which is what live matches on.
+        exact = _snap(
+            functions=[_public_fn("api", ret="ns::Alias")],
+            typedefs={"ns::Alias": "Secret"},
+            types=[RecordType(name="Secret", kind="struct", fields=[])],
+        )
+        assert "record:Secret" in closure_from_graph(
+            build_type_graph(exact), ["decl:api"]
+        )
+
     def test_an_enum_is_keyed_and_aliased_like_a_record(self) -> None:
         """``enum:`` is a first-class node kind, not a record afterthought.
 
