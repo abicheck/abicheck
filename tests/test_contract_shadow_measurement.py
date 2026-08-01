@@ -252,9 +252,14 @@ class TestPhase6CorpusCoverage:
         carries none, is the one that does not -- and that contrast is the
         honest signal, not a number to be improved away."""
         lanes = shadow.metrics()["modes"]["exports"]["unresolved_by_lane"]
-        for lane in ("elf", "pe", "stripped", "versioned", "c"):
+        for lane in ("elf", "pe", "macho", "stripped", "versioned", "c"):
             counts = lanes[lane]
             assert counts["resolved"], f"{lane} resolved nothing under exports"
+            # And nothing *un*resolved: a lane carrying a complete export
+            # table has no excuse for an unresolved finding, and one
+            # appearing means the fixture invented a spelling no real
+            # snapshot can hold (Codex review found exactly that on macho).
+            assert counts["unresolved"] == 0, f"{lane} left findings unresolved"
         assert lanes["fp_corpus"]["resolved"] == 0
 
     def test_the_exports_domain_proves_something_out_of_contract(self) -> None:

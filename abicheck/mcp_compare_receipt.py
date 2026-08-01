@@ -76,6 +76,32 @@ def _suppression_source(suppression: Any, path: Any) -> Any:
     )
 
 
+def _stated_policy_base(policy: Any, policy_file: Any) -> Any:
+    """*policy*, unless a ``policy_file`` overrode it with a value this
+    resolver would reject.
+
+    ``abi_compare`` validates ``policy`` **only when no ``policy_file`` is
+    given** ("policy_file takes precedence over the base policy name",
+    `mcp_server.py`), so an unknown ``policy`` alongside a valid file is an
+    accepted request whose comparison completes under the file's own base.
+    Handing that ignored value to the resolver made ``builtin_policy_identity``
+    raise, and the tool's outer handler then replaced a *finished* comparison
+    with an error response -- a receipt turning a successful run into a
+    failure, which is the one thing a receipt must never do (Codex review).
+
+    Dropped rather than repaired: the value did not choose anything, so
+    naming it in the receipt would be false either way, and the resolver
+    reads the base off ``policy_file`` exactly as the comparison did. With
+    no file present the value is passed through unchanged, so a genuinely
+    unknown policy still fails loudly at the tool's own validation.
+    """
+    if policy_file is None or policy is None:
+        return policy
+    from .checker_policy import VALID_BASE_POLICIES
+
+    return policy if policy in VALID_BASE_POLICIES else None
+
+
 def resolve_tool_config(
     *,
     policy: str,
@@ -108,7 +134,7 @@ def resolve_tool_config(
     return resolve_compatibility_evaluation_config(
         front_end=FrontEnd.API,
         explicit=ExplicitCompatibilityInputs(
-            policy_base=policy,
+            policy_base=_stated_policy_base(policy, policy_file),
             policy_file=policy_file,
             suppression=_suppression_source(suppression, suppression_path),
             severity_preset=severity_preset,

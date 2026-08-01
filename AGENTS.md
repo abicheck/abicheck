@@ -293,6 +293,21 @@ Core pipeline (in order of data flow):
      (`evidence_refs_for_reason` → `Change.contract_evidence_refs`). "Not
      consulted" is deliberately encoded as an absent entry, never as a
      failed one
+   - `contract_coverage_ledger.py` — ADR-049 Phase 5's *unsuppressible*
+     sibling ledger (plan §6.1/§6.2, Definition-of-done item 6). Derives
+     `contract_coverage_failures` from the observed provider records **for
+     the selected `--contract` domain** — the same record is a failure under
+     one domain and advisory under another (§7), so it is answered per mode
+     rather than recorded at collection time, which would also go stale under
+     `reevaluate_from_evidence`. Unsuppressibility is structural: a
+     `CoverageFailure` is not a `Change` (no `ChangeKind`, no symbol, never
+     in `DiffResult.changes`), so `checker._filter_suppressed_changes` — the
+     one place suppression is applied — cannot see one;
+     `suppression_reaches_coverage_failures()` is the executable *proof* of
+     that, not its enforcement. `coverage_exit_contribution()` states §6.1's
+     `0`/`1`; nothing applies it, since the independent coverage exit is
+     Phase 7's. Emitted by `reporter.py` under `--contract-evaluation`
+     (report schema 2.26), `[]` rather than omitted when a domain closed
    - `contract_context.py` / `contract_context_io.py` / `contract_replay.py`
      — ADR-049 Phase 4's assembly, JSON round-trip, and the two procedures
      D6 names. `checker.compare(..., contract_evaluation=True)` returns a

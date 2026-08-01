@@ -172,3 +172,49 @@ class TestRecordResolvedConfig:
             record_resolved_config(
                 result, exit_code_scheme="legacy", policy="no_such_policy_base"
             )
+
+
+class TestPolicyFileOverride:
+    """`abi_compare` validates `policy` only when no `policy_file` is given
+    ("policy_file takes precedence over the base policy name"), so an unknown
+    `policy` alongside a valid file is an accepted request whose comparison
+    completes under the file's own base. The receipt must not then reject
+    what the tool accepted (Codex review).
+    """
+
+    def _policy_file(self):
+        from abicheck.policy_file import PolicyFile
+
+        return PolicyFile(base_policy="sdk_vendor")
+
+    def test_an_overridden_unknown_policy_does_not_fail_the_receipt(self):
+        config = resolve_tool_config(
+            policy="not_a_real_policy", policy_file=self._policy_file()
+        )
+        # The file's base is what ran, and what the receipt names.
+        assert config.policy.base.id == "sdk_vendor"
+
+    def test_a_valid_policy_alongside_a_file_still_resolves_to_the_file(self):
+        config = resolve_tool_config(
+            policy="strict_abi", policy_file=self._policy_file()
+        )
+        assert config.policy.base.id == "sdk_vendor"
+
+    def test_an_unknown_policy_with_no_file_still_fails_loudly(self):
+        # Unreachable through the tool (its own validation returns an error
+        # response first), but the receipt must not paper over it either.
+        with pytest.raises(ValueError, match="unknown base policy"):
+            resolve_tool_config(policy="not_a_real_policy")
+
+    def test_the_completed_comparison_survives_an_overridden_policy(self):
+        """The actual regression: a finished comparison must not be turned
+        into an error by its own receipt."""
+        result = TestRecordResolvedConfig()._result_with_context()
+        record_resolved_config(
+            result,
+            exit_code_scheme="legacy",
+            policy="not_a_real_policy",
+            policy_file=self._policy_file(),
+        )
+        resolved = result.contract_context.evaluation_context.resolved_config
+        assert resolved.policy.base.id == "sdk_vendor"

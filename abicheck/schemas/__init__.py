@@ -301,7 +301,23 @@ from typing import Any
 #:       (``contract_replay.load_replayable_context``). Purely additive and
 #:       shadow, same as 2.23: absent by default, and never affects
 #:       ``verdict``, ``severity``, or any exit code.
-REPORT_SCHEMA_VERSION = "2.25"
+#: 2.26 — added two additive top-level keys, present only under
+#:       ``--contract-evaluation`` alongside 2.25's ``contract_context``:
+#:       ``contract_coverage_failures`` (ADR-049 plan Section 6.1's sibling
+#:       ledger — one entry per provider/domain coverage failure *for the
+#:       selected contract domain*, each with ``provider``/``side``/
+#:       ``record_id``/``reason``/``status``/``completeness``/``mode`` and a
+#:       ``suppressible: false`` marker) and
+#:       ``contract_coverage_exit_contribution`` (``0`` or ``1``). ``[]`` is a
+#:       real value meaning "this domain closed", so the key is emitted
+#:       rather than omitted. The ledger is **derived** from
+#:       ``contract_context``, not a second observation: the same provider
+#:       record is a failure under one domain and advisory under another
+#:       (Section 7), so it is answered per selected mode. Purely additive
+#:       and advisory, same as 2.23/2.25: the exit contribution is *stated*,
+#:       never applied — the independent coverage exit is ADR-049 Phase 7's,
+#:       alongside the default flip.
+REPORT_SCHEMA_VERSION = "2.26"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

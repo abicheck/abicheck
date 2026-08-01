@@ -3634,10 +3634,52 @@ re-implements the reporter's contract-field projection rather than importing
 it, a test pins that the two name the same decision with the same keys, so
 the duplication cannot drift into two vocabularies for one field.
 
-Still open in this phase: the "unsuppressible coverage ledger" (§12's item
-6) remains undesigned -- no concept exists yet for which findings
-categorically cannot be suppressed, nor a ledger proving a run's
-suppressions never touched one.
+**Updated (2026-08-01, same PR): the unsuppressible coverage ledger landed
+-- §12's item 6 and this phase's last open piece.** Item 6 is two claims,
+"suppression is explicit and coverage failures are unsuppressible". The
+first was already true (the ADR-013 audit trail, extended to `scan
+--against` earlier in this phase); the second had no implementation at all.
+
+`abicheck/contract_coverage_ledger.py` (a new leaf) *derives* §6.1's
+`contract_coverage_failures` from what Phase 3's provider ledger already
+observed: one entry per provider/domain coverage failure, carrying which
+provider and side failed, the record it came from, and **why** -- the
+provider's own status (four distinct ways of not having the fact, kept
+distinct because they need different fixes), an incomplete search, or
+partial identity coverage, which §4.2 requires separately from overall
+completeness. `contract_coverage_exit_contribution` states the `0`/`1` §6.1
+gives the ledger; it is reported, not applied, since the independent
+coverage exit is Phase 7's alongside the default flip.
+
+**Derived, not observed.** A provider record is a fact about what was
+searched; whether it is a *failure* depends on the selected domain, which is
+policy. §7 is explicit that the two disagree -- under `exports`,
+"public-header/manifest/consumer failures are unrelated and advisory" --
+so recording a failure at collection time would bake one domain's policy
+into a policy-independent block, and would go stale the moment
+`reevaluate_from_evidence` re-decides under a different mode. Both inputs
+the derivation needs are already in the persisted context, so it answers per
+mode instead. Verified end to end: a header-only pair yields two
+`export_table` failures and contribution `1` under `--contract exports`, and
+none under `public`/`all`, from the identical records.
+
+**Unsuppressibility is structural, not a flag.** §6.2 says an ordinary
+change suppression "cannot ... suppress a provider/domain coverage failure".
+That holds here because a coverage failure is not a `Change`: no
+`ChangeKind`, no symbol, never in `DiffResult.changes`, so
+`checker._filter_suppressed_changes` -- the single place suppression is
+applied -- cannot see one. `suppression_reaches_coverage_failures()` is the
+executable proof rather than the enforcement: it hands each failure to
+`SuppressionList.is_suppressed`, the same predicate the filter itself
+consults, and reports what matched. A test calls it with a wildcard
+`symbol: '.*'` rule -- one that matches every real finding -- and asserts the
+answer is still empty; a second asserts the failure carries none of the
+attributes suppression selects on.
+
+`REPORT_SCHEMA_VERSION` went to `2.26` for the two additive top-level keys,
+with the packaged JSON Schema extended and republished. `[]` is emitted
+rather than omitted: it is the checkable answer "this domain closed", which
+an absent key could not be told apart from "not computed".
 
 ### Phase 6 — opt-in public mode and corpus validation
 

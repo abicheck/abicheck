@@ -328,17 +328,23 @@ def _macho(*names: str) -> MachoMetadata:
 def _macho_exported_break() -> tuple[AbiSnapshot, AbiSnapshot]:
     """A Mach-O export-trie entry removed.
 
-    Mach-O names carry the platform's extra leading underscore, so the entity
-    a declaration names and the export root spelling it appears under are not
-    literally equal -- the third of the three tables the provider reads, and
-    the one where that mismatch is the interesting part.
+    The third of the three tables the provider reads. Names are stored
+    **without** the platform's extra leading underscore: both real readers
+    (`macho_metadata`'s export-trie walk and its symbol-table fallback) strip
+    it before constructing a `MachoExport`, so a `__Z...` spelling is one no
+    real snapshot can contain. An earlier version of this fixture used the
+    on-disk spelling and thereby invented a second, impossible export --
+    which the measurement duly reported as an extra unresolved finding,
+    corrupting the very lane result this case exists to produce (Codex
+    review, confirmed against `macho_metadata.py`'s own stripping and by
+    re-running the measurement).
     """
     old = _snap(
         "1.0",
         [_fn("pub_a", "_Z5pub_av"), _fn("pub_b", "_Z5pub_bv")],
-        macho=_macho("__Z5pub_av", "__Z5pub_bv"),
+        macho=_macho("_Z5pub_av", "_Z5pub_bv"),
     )
-    new = _snap("2.0", [_fn("pub_a", "_Z5pub_av")], macho=_macho("__Z5pub_av"))
+    new = _snap("2.0", [_fn("pub_a", "_Z5pub_av")], macho=_macho("_Z5pub_av"))
     return old, new
 
 
