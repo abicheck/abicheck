@@ -120,8 +120,36 @@ def _type_scoped(change: Change) -> bool:
     )
 
 
-def _entity_spellings(change: Change, mode: ContractMode) -> list[str]:
-    """Every spelling of *change*'s entity to try against a persisted graph.
+#: ``decl:``/type node-kind prefixes, as :mod:`contract_evidence_collect`
+#: spells them. A spelling resolves through one flat index, so the *kind* of
+#: node it lands on is what separates the two questions the live evaluator
+#: asks separately -- see :func:`_entity_lookups`.
+_DECL_NODE_KINDS: tuple[str, ...] = ("decl:",)
+_TYPE_NODE_KINDS: tuple[str, ...] = ("record:", "enum:", "typedef:")
+
+
+def _symbol_may_name_a_declaration(change: Change) -> bool:
+    """Whether *change*'s own symbol may be matched against a declaration.
+
+    Mirrors ``_symbol_matches``'s first branch: for a **type-level** kind the
+    live matcher accepts the symbol as a declaration identity only when it is
+    *mangled*, because a bare type spelling colliding with a real export name
+    proves nothing about which of the two a finding is on. Every other kind
+    (symbol-level, and the member-level families whose ``symbol`` is the
+    owning type) is matched by plain membership there, so it is here too.
+    """
+    from .contract_evaluation import _is_mangled_identity
+    from .surface import _TYPE_LEVEL_KIND_NAMES
+
+    if change.kind.value not in _TYPE_LEVEL_KIND_NAMES:
+        return True
+    return _is_mangled_identity(change.symbol or "")
+
+
+def _entity_lookups(
+    change: Change, mode: ContractMode
+) -> list[tuple[str, tuple[str, ...]]]:
+    """``(spelling, admissible node kinds)`` to try against a persisted graph.
 
     Symbol, its bare ``::`` tail, and ``caused_by_type`` -- reduced to plain
     spellings, because the persisted graph is keyed by spelling rather than
@@ -142,15 +170,38 @@ def _entity_spellings(change: Change, mode: ContractMode) -> list[str]:
       some *other* exported signature reaches. Applied in both modes --
       `public` reaches the same closure through the same node set, and
       being stricter than the live matcher can only weaken.
+
+    The node *kind* each spelling may land on is the same distinction one
+    level down, and it needs stating separately because this module resolves
+    every spelling through one flat index while the live evaluator asks two
+    separate questions -- "is this symbol an export root" (declarations only)
+    and "is this type in the closure" (types only). One spelling can answer
+    to both: with an exported ``api(foo *)``, a reachable ``struct foo`` and
+    an unexported function ``foo``, the spelling ``foo`` resolved to
+    ``{decl:foo, record:foo}``, and the reachable *record* placed the
+    *function* removal ``IN_CONTRACT`` against a live
+    ``PROVEN_OUT_OF_CONTRACT`` (Codex review, fresh evidence, confirmed with
+    a minimal snapshot). So a symbol may reach a declaration node only under
+    the rule ``_symbol_matches`` uses (:func:`_symbol_may_name_a_declaration`)
+    and a type node only when the finding is type-scoped at all, and
+    ``caused_by_type`` -- a type name by construction -- reaches type nodes
+    alone.
     """
-    out: list[str] = []
+    out: list[tuple[str, tuple[str, ...]]] = []
     symbol = change.symbol or ""
+    type_scoped = _type_scoped(change)
     if symbol:
-        out.append(symbol)
-        if mode is not ContractMode.EXPORTS and "::" in symbol:
-            out.append(symbol.rsplit("::", 1)[1])
-    if change.caused_by_type and _type_scoped(change):
-        out.append(change.caused_by_type)
+        kinds: tuple[str, ...] = ()
+        if _symbol_may_name_a_declaration(change):
+            kinds += _DECL_NODE_KINDS
+        if type_scoped:
+            kinds += _TYPE_NODE_KINDS
+        if kinds:
+            out.append((symbol, kinds))
+            if mode is not ContractMode.EXPORTS and "::" in symbol:
+                out.append((symbol.rsplit("::", 1)[1], kinds))
+    if change.caused_by_type and type_scoped:
+        out.append((change.caused_by_type, _TYPE_NODE_KINDS))
     return out
 
 
@@ -232,7 +283,7 @@ class _PersistedDomain:
         ``PROVEN_OUT_OF_CONTRACT`` for a finding on the unexported ``foo``;
         resolving that spelling here through the persisted graph's own alias
         edges reached the exported node and replayed ``IN_CONTRACT`` -- the
-        inverse collision of the tail-fallback one ``_entity_spellings``
+        inverse collision of the tail-fallback one ``_entity_lookups``
         already closed, and the same strengthening (Codex review, fresh
         evidence).
 
@@ -499,8 +550,16 @@ def _reevaluate_one(
             evidence_refs=refs,
         )
     nodes: set[str] = set()
-    for spelling in _entity_spellings(change, mode):
-        nodes |= domain.resolve(side, spelling)
+    # Kept apart from `nodes`: membership is decided only on nodes of a kind
+    # this finding's own spelling may legitimately name, while the overlay
+    # override and evidence attribution below stay on the full resolution,
+    # since both are keyed by the *symbol* live too (`_change_matches_symbols`
+    # asks nothing about node kind). See `_entity_lookups`.
+    member_nodes: set[str] = set()
+    for spelling, kinds in _entity_lookups(change, mode):
+        resolved = domain.resolve(side, spelling)
+        nodes |= resolved
+        member_nodes |= {n for n in resolved if n.startswith(kinds)}
     # Re-taken now that the entity's own nodes are known, so an overlay-rooted
     # decision cites the overlay rather than only the root provider.
     refs = domain.refs(side, nodes)
@@ -528,9 +587,11 @@ def _reevaluate_one(
             assurance=ContractAssurance.UNAVAILABLE,
             evidence_refs=refs,
         )
-    if not nodes:
+    if not member_nodes:
         # The entity is not in this side's graph at all -- unplaceable, which
-        # is not the same as proven outside the contract.
+        # is not the same as proven outside the contract. Judged on the
+        # kind-admissible set: a spelling that landed only on a node kind it
+        # may not name has told us nothing about *this* entity.
         return ReplayDecision(
             relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
             reason_code="required_evidence_incomplete",
@@ -538,7 +599,7 @@ def _reevaluate_one(
             evidence_refs=refs,
         )
     closure = domain.closure.get(side, frozenset())
-    if nodes & closure:
+    if member_nodes & closure:
         return ReplayDecision(
             relevance=ContractRelevance.IN_CONTRACT,
             reason_code=_MODE_MEMBERSHIP_REASON[mode],

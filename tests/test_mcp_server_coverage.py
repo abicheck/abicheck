@@ -792,7 +792,7 @@ class TestAbiCompareResolvedGate:
         assert gate["exit_code_scheme"] == "legacy"
         assert gate["severity"]["abi_breaking"] == "error"
         assert provenance["gate.exit_code_scheme"]["layer"] == "built_in_default"
-        assert provenance["gate.severity"]["layer"] == "built_in_default"
+        assert provenance["gate.severity.abi_breaking"]["layer"] == "built_in_default"
 
     def test_a_severity_argument_reaches_the_persisted_gate(self, tmp_path):
         """A typed API argument is ``API_REQUEST`` -- D7's peer of
@@ -813,7 +813,14 @@ class TestAbiCompareResolvedGate:
         assert gate["exit_code_scheme"] == "severity"
         assert gate["severity"]["abi_breaking"] == "warning"
         assert provenance["gate.exit_code_scheme"]["layer"] == "api_request"
-        assert provenance["gate.severity"]["layer"] == "api_request"
+        # Recorded per category, under the canonical resolver's own key set.
+        for category in (
+            "abi_breaking",
+            "potential_breaking",
+            "quality_issues",
+            "addition",
+        ):
+            assert provenance[f"gate.severity.{category}"]["layer"] == "api_request"
 
 
 # ---------------------------------------------------------------------------

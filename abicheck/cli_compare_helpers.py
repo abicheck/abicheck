@@ -1104,12 +1104,14 @@ def _report_not_comparable(
 #: ``exit_code_scheme`` is its own field; the rest all feed one resolved
 #: :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed
 #: makes the resolved severity explicitly CLI-selected.
-_SEVERITY_PARAMS = (
-    "severity_preset",
-    "severity_abi_breaking",
-    "severity_potential_breaking",
-    "severity_quality_issues",
-    "severity_addition",
+#: The four :class:`~abicheck.severity.SeverityConfig` categories, in the
+#: spelling ``compatibility_evaluation_frontend.SEVERITY_CATEGORY_FIELDS``
+#: keys its ``gate.severity.<category>`` provenance entries by.
+_SEVERITY_CATEGORIES = (
+    "abi_breaking",
+    "potential_breaking",
+    "quality_issues",
+    "addition",
 )
 
 
@@ -1163,7 +1165,12 @@ def _record_resolved_gate(
     from .contract_context import with_resolved_gate
 
     scheme_cli = _param_from_cli("exit_code_scheme")
-    severity_cli = any(_param_from_cli(name) for name in _SEVERITY_PARAMS)
+    # Per category, not one verdict for the block: `--severity-abi-breaking`
+    # beside an `addition` level only `.abicheck.yml` supplied are two
+    # different layers, and the old `any(...)` labelled both `EXPLICIT_CLI`
+    # (Codex review, fresh evidence). `--severity-preset` sets all four, so
+    # it counts as a typed flag for each.
+    preset_cli = _param_from_cli("severity_preset")
     result.contract_context = with_resolved_gate(
         ctx,
         exit_code_scheme=resolved_cfg.exit_code_scheme,
@@ -1175,13 +1182,16 @@ def _record_resolved_gate(
             # left it alone did not select the resolved concrete scheme.
             from_config=getattr(project_cfg, "exit_code_scheme", "auto") != "auto",
         ),
-        severity_provenance=_gate_provenance(
-            "severity",
-            from_cli=severity_cli,
-            # `severity_active` is "set anywhere"; with no flag typed, that
-            # can only have been the project config.
-            from_config=resolved_cfg.severity_active,
-        ),
+        severity_provenance={
+            category: _gate_provenance(
+                f"severity_{category}",
+                from_cli=preset_cli or _param_from_cli(f"severity_{category}"),
+                # `severity_active` is "set anywhere"; with no flag typed for
+                # this category, that can only have been the project config.
+                from_config=resolved_cfg.severity_active,
+            )
+            for category in _SEVERITY_CATEGORIES
+        },
     )
 
 

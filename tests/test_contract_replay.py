@@ -864,6 +864,69 @@ class TestNodeIdentitySoundness:
         assert comparison.is_sound
         assert comparison.strengthened == ()
 
+    def test_a_reachable_record_does_not_place_a_same_named_function(self) -> None:
+        """One spelling, two node kinds, two different questions.
+
+        The live evaluator asks "is this symbol an export root" of
+        declarations and "is this type in the closure" of types. This module
+        resolves every spelling through one flat index, so with an exported
+        ``api(foo *)``, a reachable ``struct foo`` and an unexported function
+        ``foo``, the spelling ``foo`` landed on both ``decl:foo`` and
+        ``record:foo`` -- and the reachable *record* placed the *function*
+        removal ``IN_CONTRACT`` against a live ``PROVEN_OUT_OF_CONTRACT``
+        (Codex review, fresh evidence).
+        """
+        from abicheck.pe_metadata import PeExport, PeMetadata
+
+        pe = PeMetadata(exports=[PeExport(name="api", ordinal=1)])
+
+        def _snap(version: str, *, with_helper: bool) -> AbiSnapshot:
+            functions = [
+                Function(
+                    name="api",
+                    mangled="api",
+                    return_type="int",
+                    params=[Param(name="f", type="foo *")],
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ]
+            if with_helper:
+                functions.append(
+                    Function(
+                        name="foo",
+                        mangled="foo",
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                )
+            return AbiSnapshot(
+                library="libdemo.so.1",
+                version=version,
+                functions=functions,
+                types=[
+                    RecordType(
+                        name="foo",
+                        kind="struct",
+                        size_bits=64,
+                        fields=[TypeField(name="x", type="int")],
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ],
+                pe=pe,
+            )
+
+        changes, comparison = self._replay(
+            _snap("1", with_helper=True), _snap("2", with_helper=False), "exports"
+        )
+        assert [c.contract_relevance for c in changes] == [
+            ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        ]
+        assert comparison.is_sound
+        assert comparison.strengthened == ()
+        assert comparison.agreed
+
     def test_a_qualified_owner_class_stays_in_the_export_contract(self) -> None:
         """The owner edge must survive a producer's bare/qualified split."""
         mangled = "_ZN2ns6Widget4drawEv"

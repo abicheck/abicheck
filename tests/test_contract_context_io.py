@@ -299,6 +299,39 @@ class TestResolvedContextContent:
         )
         assert decoded.evaluation_context.resolved_config == config
 
+    def test_a_policy_files_base_names_the_file_not_the_api_argument(self) -> None:
+        """``base_policy`` *replaces* the ``policy`` argument, so say so.
+
+        ``checker.compare`` resolves ``effective_policy`` to the policy
+        file's own ``base_policy`` whenever one is supplied, ignoring the
+        ``policy`` argument entirely -- yet the receipt attributed the
+        resolved value to that ignored argument (Codex review, fresh
+        evidence).
+        """
+        from abicheck.policy_file import PolicyFile
+
+        old, new = _pair()
+        result = compare(
+            old,
+            new,
+            contract_evaluation=True,
+            policy="strict_abi",
+            policy_file=PolicyFile(base_policy="sdk_vendor"),
+        )
+        assert result.contract_context is not None
+        config = result.contract_context.evaluation_context.resolved_config
+        assert config.policy.base.id == "sdk_vendor"
+        assert config.provenance["policy.base"].field_location == "policy_file"
+        # ...and with no file, the argument really is what selected it.
+        plain = compare(old, new, contract_evaluation=True, policy="sdk_vendor")
+        assert plain.contract_context is not None
+        assert (
+            plain.contract_context.evaluation_context.resolved_config.provenance[
+                "policy.base"
+            ].field_location
+            == "policy"
+        )
+
     def test_policy_file_internal_namespaces_carry_their_provenance(self) -> None:
         """A resolved field with no recorded source is an audit gap.
 

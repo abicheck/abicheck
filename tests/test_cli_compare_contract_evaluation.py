@@ -325,7 +325,11 @@ class TestEndToEndJsonReport:
             ctx["field_provenance"]["gate.exit_code_scheme"]["layer"]
             == "built_in_default"
         )
-        assert ctx["field_provenance"]["gate.severity"]["layer"] == "built_in_default"
+        for category in ("abi_breaking", "potential_breaking", "addition"):
+            assert (
+                ctx["field_provenance"][f"gate.severity.{category}"]["layer"]
+                == "built_in_default"
+            )
 
         scored = CliRunner().invoke(
             main,
@@ -346,7 +350,13 @@ class TestEndToEndJsonReport:
         # typed flag is what selected the level.
         assert gate["exit_code_scheme"] == "severity"
         assert gate["severity"]["abi_breaking"] == "warning"
-        assert ctx["field_provenance"]["gate.severity"]["layer"] == "explicit_cli"
+        prov = ctx["field_provenance"]
+        assert prov["gate.severity.abi_breaking"]["layer"] == "explicit_cli"
+        # ...and only that category. The other three were not typed, so
+        # labelling them `explicit_cli` too would name an input that never
+        # existed (Codex review): with a severity flag in play at all, the
+        # remaining levels resolve from the project-config layer.
+        assert prov["gate.severity.addition"]["layer"] == "project_config"
 
     def test_explicit_exit_code_scheme_records_its_own_provenance(self, tmp_path):
         """A typed ``--exit-code-scheme`` is ``EXPLICIT_CLI``, not the

@@ -599,7 +599,21 @@ def _record_resolved_gate(
         exit_code_scheme=scheme,
         severity=severity_config if severity_config is not None else _SeverityConfig(),
         scheme_provenance=_provenance("exit_code_scheme"),
-        severity_provenance=_provenance("severity"),
+        # Per category, matching the canonical resolver's own
+        # `gate.severity.<category>` keys. Unlike the CLI's four independent
+        # flags, this front end takes one `SeverityConfig` object, so all
+        # four categories genuinely share one layer -- but they are still
+        # recorded separately, since the receipt's key set is the resolver's,
+        # not this caller's (Codex review).
+        severity_provenance={
+            category: _provenance(f"severity_{category}")
+            for category in (
+                "abi_breaking",
+                "potential_breaking",
+                "quality_issues",
+                "addition",
+            )
+        },
     )
 
 

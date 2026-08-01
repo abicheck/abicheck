@@ -777,6 +777,10 @@ def _apply_contract_evaluation_shadow(
         mode=mode,
         mode_provenance=mode_provenance,
         policy=policy,
+        # `policy` here is already `effective_policy` -- the policy file's own
+        # `base_policy` when one was supplied, which *replaces* the `policy`
+        # argument rather than merging with it. Say which input it came from.
+        policy_from_file=policy_file is not None,
         internal_namespaces=_internal_namespaces(policy_file),
         # `PolicyFile` is the one place that can tell "no policy file" from
         # "a policy file that wrote `internal_namespaces: []`" -- the tuple

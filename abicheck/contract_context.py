@@ -181,6 +181,7 @@ def build_evaluation_context(
     mode: ContractMode,
     mode_provenance: ValueProvenance | None = None,
     policy: str = "strict_abi",
+    policy_from_file: bool = False,
     internal_namespaces: Iterable[str] = (),
     internal_namespaces_stated: bool = False,
     policy_overrides: Mapping[str, Verdict] | None = None,
@@ -234,7 +235,12 @@ def build_evaluation_context(
     resolved_namespaces = tuple(internal_namespaces)
     provenance = {
         "contract.mode": mode_provenance or _api_provenance("contract_mode"),
-        "policy.base": _api_provenance("policy"),
+        # A policy file's own `base_policy` *overrides* the `policy` argument
+        # in `checker.compare` (`effective_policy`), so attributing the
+        # resolved value to `policy` would name an input the run ignored
+        # (Codex review, fresh evidence). Same rule, same file, as
+        # `policy.overrides` and `surface.internal_namespaces` below.
+        "policy.base": _api_provenance("policy_file" if policy_from_file else "policy"),
     }
     if resolved_namespaces or internal_namespaces_stated:
         provenance["surface.internal_namespaces"] = _api_provenance("policy_file")
@@ -271,7 +277,7 @@ def with_resolved_gate(
     exit_code_scheme: str,
     severity: SeverityConfig,
     scheme_provenance: ValueProvenance,
-    severity_provenance: ValueProvenance,
+    severity_provenance: Mapping[str, ValueProvenance],
 ) -> PersistedContractContext:
     """Return *context* with the front end's real gate configuration recorded.
 
@@ -291,15 +297,30 @@ def with_resolved_gate(
     resolved each field from -- which the core verb cannot know and this
     function therefore does not guess.
 
+    *severity_provenance* is keyed **per category**, not one entry for the
+    whole block, because the four categories are resolved independently and
+    routinely come from different layers: ``--severity-abi-breaking error``
+    on the command line beside an ``addition`` level only ``.abicheck.yml``
+    supplied. Collapsing them into a single ``gate.severity`` entry labelled
+    the project-config category as CLI-selected, and used a key the canonical
+    resolver does not have -- it tracks ``gate.severity.<category>``
+    (``compatibility_evaluation_frontend.SEVERITY_CATEGORY_FIELDS``), which
+    is what this writes (Codex review, fresh evidence). An unsupplied
+    category simply gets no entry, the same "absent, not defaulted" rule the
+    rest of this receipt follows.
+
     The gate is still ``NOT_APPLICABLE`` to contract membership
     (:class:`GateConfig`): nothing here changes a relevance decision, a
     closure, or the receipt's per-finding map. It changes only what the
     audit record says about how the run was gated.
     """
+    from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
+
     config = context.evaluation_context.resolved_config
     provenance = dict(config.provenance)
     provenance["gate.exit_code_scheme"] = scheme_provenance
-    provenance["gate.severity"] = severity_provenance
+    for category, entry in severity_provenance.items():
+        provenance[SEVERITY_CATEGORY_FIELDS[category]] = entry
     return replace(
         context,
         evaluation_context=replace(
@@ -630,6 +651,7 @@ def build_persisted_context(
     mode: ContractMode,
     mode_provenance: ValueProvenance | None = None,
     policy: str = "strict_abi",
+    policy_from_file: bool = False,
     internal_namespaces: Iterable[str] = (),
     internal_namespaces_stated: bool = False,
     policy_overrides: Mapping[str, Verdict] | None = None,
@@ -644,6 +666,7 @@ def build_persisted_context(
             mode=mode,
             mode_provenance=mode_provenance,
             policy=policy,
+            policy_from_file=policy_from_file,
             internal_namespaces=internal_namespaces,
             internal_namespaces_stated=internal_namespaces_stated,
             policy_overrides=policy_overrides,

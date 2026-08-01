@@ -2636,6 +2636,37 @@ does. Getting both domains right at once needs its own scoped design
 (per-domain resolution, or an audit of what `surface.py`'s own bare-tail
 lookup would have to become), not a drive-by extension of an owner-edge fix.
 
+**A twelfth round found one more soundness defect of the same shape and two
+receipts naming the wrong input.** (1) The persisted graph resolves every
+spelling through one flat index, while the live evaluator asks two separate
+questions of two different node kinds — "is this symbol an export root"
+(declarations) and "is this type in the closure" (types). With an exported
+`api(foo *)`, a reachable `struct foo` and an unexported function `foo`, the
+spelling `foo` landed on both `decl:foo` and `record:foo`, and the reachable
+*record* placed the *function* removal `IN_CONTRACT` against a live
+`PROVEN_OUT_OF_CONTRACT`. `_entity_lookups` now carries the admissible node
+kinds alongside each spelling: a symbol may reach a declaration node only
+under `_symbol_matches`'s own rule (a type-level kind needs a *mangled*
+symbol), a type node only when the finding is type-scoped at all, and
+`caused_by_type` — a type name by construction — reaches type nodes alone.
+Membership is decided on that filtered set; the overlay override and evidence
+attribution stay on the full resolution, since both are keyed by the symbol
+live too (`_change_matches_symbols` asks nothing about node kind).
+(2) `policy.base` attributed the resolved value to `checker.compare`'s
+`policy` argument even when a `PolicyFile`'s own `base_policy` had *replaced*
+it (`effective_policy`) — naming an input the run ignored. It now records the
+policy file, the same rule `policy.overrides` and `surface.internal_namespaces`
+already follow from the same file. (3) `gate.severity` was one aggregate
+entry for four independently-resolved categories, so
+`--severity-abi-breaking` beside an `addition` level only `.abicheck.yml`
+supplied labelled both `EXPLICIT_CLI` — and used a key the canonical resolver
+does not have (it tracks `gate.severity.<category>`,
+`compatibility_evaluation_frontend.SEVERITY_CATEGORY_FIELDS`).
+`with_resolved_gate` now takes a per-category mapping, and both front ends
+supply one: the CLI per typed flag (with `--severity-preset` counting for all
+four), the MCP tool uniformly, since one `SeverityConfig` argument genuinely
+is one layer for all four.
+
 One finding from an earlier round was **not** taken: replacing
 `report_finding_id`'s `"\x1f"` field delimiter with a length-prefixed or
 canonical-JSON encoding. The ambiguity it guards against requires a literal
