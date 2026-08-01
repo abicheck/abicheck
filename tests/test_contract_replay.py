@@ -271,6 +271,34 @@ class TestReevaluateFromEvidence:
         )
         assert "decl:_ZN2ns3fooEv" in domain_roots(forced, ContractMode.PUBLIC)
 
+    def test_post_manifest_narrows_the_public_roots(self) -> None:
+        """A manifest states the whole committed surface, not an addition.
+
+        With public ``api`` and ``kept`` and a manifest naming only ``kept``,
+        the live evaluator scopes ``api`` out; unioning the manifest into the
+        header roots left ``decl:api`` rooted, replaying a live
+        ``PROVEN_OUT_OF_CONTRACT`` as ``IN_CONTRACT`` (Codex review, fresh
+        evidence).
+        """
+        fns = [
+            Function(
+                name=name,
+                mangled=name,
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
+            for name in ("api", "kept")
+        ]
+        snap = AbiSnapshot(library="libdemo.so.1", version="1", functions=fns)
+        surf = compute_public_surface(snap)
+        block = collect_contract_evidence(
+            snap, snap, surf, surf, public_surface_allowlist={"kept"}
+        )
+        roots = domain_roots(block, ContractMode.PUBLIC)
+        assert "decl:kept" in roots
+        assert "decl:api" not in roots
+
     def test_overlay_rooted_decision_cites_the_overlay_record(self) -> None:
         """A decision resting on an overlay root names that overlay.
 

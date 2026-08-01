@@ -372,6 +372,21 @@ def persisted_domain_view(
             header_record_by_side[side] = entry.record
         if mode is ContractMode.PUBLIC and entry.record.provider in _OVERLAY_PROVIDERS:
             overlay_entries.append((side, entry.record, entry.manifests))
+    # A ``--post-manifest`` overlay *narrows*: the manifest states the whole
+    # committed-export surface, and `post_processing` treats a public
+    # declaration missing from it as scoped out. Unioning it into the header
+    # roots modelled it as purely additive, so a public symbol the manifest
+    # deliberately omits stayed rooted and a live
+    # ``PROVEN_OUT_OF_CONTRACT`` replayed as ``IN_CONTRACT`` (Codex review,
+    # fresh evidence). When one is present, it *replaces* the header roots;
+    # ``--public-symbol`` still only ever widens whatever remains.
+    narrowing = {
+        side
+        for side, record, _ in overlay_entries
+        if record.provider == PROVIDER_POST_MANIFEST
+    }
+    for side in narrowing:
+        roots_by_side[side] = set()
     overlay_roots_by_side: dict[str, dict[str, set[str]]] = {}
     for side, record, manifests in overlay_entries:
         graph = graph_by_side.get(side)
