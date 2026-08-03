@@ -647,6 +647,18 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, without `--severity-*` flags): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with any `--severity-*` flag): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE
+- **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
+  `scan --against` alike:** under `--contract-evaluation`, a selected
+  `--contract` domain whose required evidence is incomplete contributes
+  **1**, folded with `max` (`contract_coverage_exit.py`). It raises a clean
+  `0` to `1` and never lowers a `2`/`4`, and it never rewrites a finding's
+  compatibility decision or gate contribution. Without
+  `--contract-evaluation` the contribution is always `0`, so every
+  pre-existing invocation is unchanged. Every consumer that publishes an
+  exit status folds it and explains it — the two CLIs, the MCP
+  `abi_compare` tool (top-level `contract_coverage` block), and the
+  composite Action (`verdict: COVERAGE_INCOMPLETE`)
 - `compat` command: 0 = compatible, 1 = BREAKING, 2 = API_BREAK (source-level), 3-11 = errors (see `compat/cli.py:_classify_compat_error_exit_code`)
 - `64` = usage error (bad flags/inputs; `cli._EXIT_USAGE_ERROR`) — applies across commands
 - Full per-command matrix: `docs/reference/exit-codes.md`

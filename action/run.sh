@@ -814,15 +814,30 @@ _json_report_src() {
 # renderer — which omits the ledger — the same fact is announced on stderr.
 # Absent both (no --contract-evaluation), the field defaults to 0 and the
 # mapping below is exactly what it was.
+#
+# The two modes nest it differently and BOTH reach here: `compare` writes the
+# ledger at the top level, while `ScanOutcome.to_dict()` puts the comparison
+# summary under `diff`. Reading only the top level meant a coverage-gated
+# `mode: scan` with `format: json` -- whose JSON renderer also suppresses the
+# stderr notice, since its report carries the ledger -- had neither signal and
+# published ERROR (Codex review). `//` is the right joiner: jq treats only
+# null/false as absent, so a real top-level `0` still wins over the nested
+# lookup instead of falling through to it.
+_COVERAGE_CONTRIBUTION_Q='.contract_coverage_exit_contribution // .diff.contract_coverage_exit_contribution // 0'
 _coverage_gated() {
   local _src
   _src=$(_json_report_src)
   if [[ -n "$_src" ]] && command -v jq >/dev/null 2>&1 \
-     && [[ "$(jq -r '.contract_coverage_exit_contribution // 0' "$_src" 2>/dev/null)" == "1" ]]; then
+     && [[ "$(jq -r "$_COVERAGE_CONTRIBUTION_Q" "$_src" 2>/dev/null)" == "1" ]]; then
     return 0
   fi
   echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete'
 }
+
+#: The failure list, from whichever of the two shapes this run produced. Same
+#: reasoning as above, and the same both-modes reachability: COVERAGE_INCOMPLETE
+#: is published by the scan branch as well as the compare one.
+_COVERAGE_FAILURES_Q='[((.contract_coverage_failures // .diff.contract_coverage_failures) // [])[] | "\(.side)/\(.provider)"] | unique | join(", ")'
 
 # The compatibility axis's own exit code, from the JSON report's severity gate
 # (`severity.exit_code`, schema 2.3). Computed by abicheck *before* the
@@ -842,6 +857,13 @@ _coverage_gated() {
 # cannot parse, in which case jq exits non-zero and prints nothing. That is
 # the genuine "cannot tell", and the caller keeps its established verdict
 # rather than guessing.
+#
+# Top-level only, deliberately, unlike the coverage queries above: this is
+# reached from the compare branch alone (a scan's exit code follows its
+# verdict directly, so it has no severity gate to read), and `compare` writes
+# `severity` at the top level. Same for the SEVERITY_ERROR summary's
+# `blocking_categories` lookup, which only runs for a verdict the compare
+# branch alone can set.
 _severity_gate_exit() {
   local _src
   _src=$(_json_report_src)
@@ -1051,7 +1073,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         _coverage_where=""
         _json_src=$(_json_report_src)
         if [[ -n "$_json_src" ]] && command -v jq >/dev/null 2>&1; then
-          _coverage_where=$(jq -r '[(.contract_coverage_failures // [])[] | "\(.side)/\(.provider)"] | unique | join(", ")' "$_json_src" 2>/dev/null)
+          _coverage_where=$(jq -r "$_COVERAGE_FAILURES_Q" "$_json_src" 2>/dev/null)
         fi
         if [[ -n "$_coverage_where" ]]; then
           echo "> **Verdict: COVERAGE_INCOMPLETE** ⚠️ — The selected \`--contract\` domain could not be closed on the available evidence: \`$_coverage_where\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\` (which keeps the findings reported, and only zeroes this contribution)."

@@ -60,6 +60,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   no pack parameter, so it is a `compare`/`scan` control today and the tool
   says so rather than recommending one its callers cannot reach.
 
+  `compare --help`, `scan --help`, and both commands' `--dry-run` exit-code
+  summaries now list the orthogonal coverage exit alongside the scheme they
+  already documented, so a CI integration reading a command's own exit-code
+  contract does not meet exit 1 as an undocumented failure — or, under the
+  severity scheme, mistake it for a severity error.
+
 ### Added
 
 - **`contract.unresolved` is now an applied `kind: contract` pack field.** It

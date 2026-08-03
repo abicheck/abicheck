@@ -438,6 +438,7 @@ def render_scan_dry_run(
         f"format: {fmt}",
         "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
         "64 usage error (a real scan run's exit codes are 0 compatible, "
+        "1 incomplete contract coverage (--contract-evaluation only), "
         "2 API break, 4 ABI break, 5 budget overflow, "
         "6 not_comparable)",
     )
@@ -1111,6 +1112,11 @@ def scan_cmd(
     \b
     Exit codes:
       0  compatible (or advisory-only findings)
+      1  incomplete contract coverage (ADR-049 Phase 7): with
+         --contract-evaluation, the selected --contract domain's required
+         evidence could not be closed. Orthogonal — folded with max, so it
+         raises a clean 0 and never lowers a 2/4, and it never changes the
+         compatibility verdict. Only reachable with --contract-evaluation
       2  source-level / API break (incl. API_BREAK cross-source findings)
       4  ABI break (from the --against comparison)
       5  --budget overflow

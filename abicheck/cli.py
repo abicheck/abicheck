@@ -1159,7 +1159,9 @@ def _announce_exit_scheme(
         )
     else:
         click.echo(
-            "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break). "
+            "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break; "
+            "with --contract-evaluation, 1=incomplete contract coverage, an "
+            "orthogonal axis that never lowers a 2/4). "
             "Pass --exit-code-scheme severity (or a --severity-* setting) for the "
             "severity-aware scheme.",
             err=True,
@@ -1837,6 +1839,14 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       1  Error-level findings in addition or quality_issues only
       2  Error-level findings in potential_breaking (but not abi_breaking)
       4  Error-level findings in abi_breaking
+    \b
+    Orthogonal to both tables (ADR-049 Phase 7): with --contract-evaluation,
+    incomplete contract coverage of the selected --contract domain
+    contributes exit 1. It is folded with max, so it raises a clean 0 to 1
+    and never lowers a 2/4 — under the legacy scheme, 1 can only mean this.
+    Without --contract-evaluation there is no domain to be short of evidence
+    for and the tables above are exhaustive. Set contract.unresolved=warn
+    (via a `kind: contract` --pack) to accept incomplete coverage.
     \b
     Invalid invocation (bad arguments/options, unreadable or unrecognised
     input) exits 64, outside the result space above, so it is never mistaken

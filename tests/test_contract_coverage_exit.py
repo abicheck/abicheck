@@ -410,6 +410,30 @@ class TestEveryFrontEndFoldsTheAxis:
         assert "contract_coverage" not in result, result
 
 
+class TestTheExitCodeContractIsDocumented:
+    """A command's own `--help` is the exit-code contract a CI integration is
+    written against. Both commands gained a new meaning for exit 1 while their
+    help still enumerated 0/2/4, so a real coverage result read as an
+    undocumented failure -- or, under the severity scheme, as a severity error
+    (Codex review)."""
+
+    @pytest.mark.parametrize("command", ["compare", "scan"])
+    def test_the_command_help_documents_the_coverage_exit(self, command: str) -> None:
+        help_text = CliRunner().invoke(main, [command, "--help"]).output
+        assert "contract coverage" in help_text.lower(), help_text
+        # ...and says it is orthogonal, since the whole point is that it does
+        # not displace the compatibility verdict it sits beside.
+        assert "--contract-evaluation" in help_text, help_text
+
+    def test_the_dry_run_scheme_banner_says_it_too(self, tmp_path: Path) -> None:
+        """`compare --dry-run`'s banner states the legacy scheme's codes. It
+        is the same contract in a second place, so it cannot say 0/2/4 alone
+        while the run beside it can exit 1."""
+        result = _compare(tmp_path, _compatible_pair(), "--dry-run")
+        assert result.exit_code == 0, result.output
+        assert "contract coverage" in result.output.lower(), result.output
+
+
 class TestTheProgrammaticApiStaysQuiet:
     """`fold_coverage_exit` is on `service_scan.run_scan()`'s path, so it must
     stay pure. A library call that writes to stderr is an unexpected side

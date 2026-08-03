@@ -203,6 +203,42 @@ class TestScanMapsTheCoverageExit:
         # part and a bare "coverage incomplete" is not.
         assert "old/export_table" in outputs["_summary"], outputs["_summary"]
 
+    def test_the_scan_report_nests_the_ledger_under_diff(
+        self, tmp_path: Path
+    ) -> None:
+        """`ScanOutcome.to_dict()` puts the comparison summary under `diff`,
+        so the ledger is not where a compare report keeps it.
+
+        With `format: json` the stderr notice is suppressed too -- the report
+        carries the ledger, so the CLI does not repeat it -- leaving the
+        mapping with neither signal and publishing ERROR (Codex review).
+        """
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report={
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "diff": {
+                    "contract_coverage_exit_contribution": 1,
+                    "contract_coverage_failures": [COVERAGE_FAILURE],
+                },
+            },
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
+        # ...and the summary names the provider from the same nested place.
+        assert "old/export_table" in outputs["_summary"], outputs["_summary"]
+
     def test_a_crash_still_maps_to_error(self, tmp_path: Path) -> None:
         """A traceback also exits 1. Claiming the coverage axis for any exit 1
         would turn every scan crash into a reassuring warning, so the mapping

@@ -1014,7 +1014,7 @@ def _render_compare_dry_run(
     result.add(
         "Output and exit-code behavior",
         f"format: {fmt}",
-        f"exit-code scheme: {exit_code_scheme or 'legacy (0/2/4)'}",
+        f"exit-code scheme: {exit_code_scheme or 'legacy (0/2/4)'}; contract coverage adds an orthogonal 1 under --contract-evaluation",
     )
     if {old_kind, new_kind} & {"directory", "package"}:
         result.add("Consumer/contract scoping", "dispatch: per-library release fan-out")
