@@ -175,7 +175,7 @@ assignments:
 
 | `kind` | Assignable fields | Applied today |
 |---|---|---|
-| `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` | `surface.internal_namespaces` only |
+| `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` | `surface.internal_namespaces` and `contract.unresolved` |
 | `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` | all |
 | `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare` only) |
 

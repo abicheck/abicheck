@@ -489,10 +489,18 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     # those keys, so without this the command prints "Verdict: NO_CHANGE"
     # and then fails with no explanation (Codex review).
     if fmt != "json":
+        from .cli_compare_helpers import _verdict_exit_code
         from .contract_coverage_exit import coverage_diagnostic_from_summary
 
+        # `outcome.exit_code` has ALREADY had the coverage floor folded in
+        # by `_run_baseline_compare`, so passing it would make the notice
+        # say "contributes 1 to an exit that was already 1" for a run where
+        # coverage is exactly what raised 0 to 1 (Codex review). The
+        # pre-coverage value is the verdict's own code, which is what that
+        # fold took as its base.
         notice = coverage_diagnostic_from_summary(
-            outcome.diff_summary, base_exit=outcome.exit_code
+            outcome.diff_summary,
+            base_exit=_verdict_exit_code(outcome.verdict),
         )
         if notice is not None:
             click.echo(notice, err=True)

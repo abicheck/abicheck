@@ -280,6 +280,12 @@ class TestTheGatingConditionIsVisible:
         assert result.exit_code == 1, result.output
         assert "Contract coverage incomplete" in result.output
         assert "export_table" in result.output
+        # It must say coverage RAISED the exit. `outcome.exit_code` has
+        # already had the floor folded in, so passing that as the base made
+        # the notice claim the exit "was already 1" for the very case where
+        # coverage is what made it 1 (Codex review).
+        assert "floored to 1" in result.output
+        assert "already" not in result.output
 
     def test_a_run_the_axis_does_not_gate_stays_quiet(self, tmp_path: Path) -> None:
         """No notice when there is nothing to explain -- otherwise the message
