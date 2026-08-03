@@ -170,6 +170,8 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 | `pattern_verdicts` | `bool` | `False` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
+| `contract_evaluation` | `bool` | `False` |
+| `contract_mode` | `str \| None` | `None` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
 | `enabled_checks` | `frozenset[str] \| None` | `None` |
 | `severities` | `dict[str, str]` | `{}` |

@@ -305,6 +305,27 @@ def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
     if not isinstance(ctx, PersistedContractContext):
         return
     d["contract_context"] = persisted_context_to_dict(ctx)
+    # ADR-049 Phase 5's *sibling* ledger (plan Section 6.1). It sits beside
+    # the findings, not among them, because that is what makes it
+    # unsuppressible: a coverage failure is not a `Change`, so
+    # `checker._filter_suppressed_changes` -- the one place suppression is
+    # applied -- can never see one, and "ordinary change suppressions ...
+    # cannot suppress a provider/domain coverage failure" (Section 6.2) is a
+    # structural fact rather than a rule something has to remember to
+    # enforce. Emitted as `[]` rather than omitted when there are none: an
+    # empty ledger is the real, checkable answer "this domain closed", which
+    # an absent key could not distinguish from "not computed".
+    from .contract_coverage_ledger import (
+        coverage_exit_contribution,
+        coverage_failures_for_context,
+    )
+
+    failures = coverage_failures_for_context(ctx)
+    d["contract_coverage_failures"] = [f.to_dict() for f in failures]
+    # What the ledger *would* contribute to the exit code. Reported, not
+    # applied: the independent coverage exit is Phase 7's, alongside the
+    # default flip, and seeing the number before it bites is the point.
+    d["contract_coverage_exit_contribution"] = coverage_exit_contribution(failures)
 
 
 def _to_json_leaf(

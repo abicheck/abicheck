@@ -812,7 +812,18 @@ class TestAbiCompareResolvedGate:
         assert payload["exit_code_scheme"] == "severity"
         assert gate["exit_code_scheme"] == "severity"
         assert gate["severity"]["abi_breaking"] == "warning"
-        assert provenance["gate.exit_code_scheme"]["layer"] == "api_request"
+        # The *scheme* is derived, not stated: no caller anywhere asked for
+        # `severity`, it follows from a severity level being in effect. The
+        # canonical resolver records that as a built-in default with
+        # `source_kind: auto`, and the caller's actual contribution is
+        # carried by the severity field below. This front end used to claim
+        # `api_request` here from its own hand-rolled gate patch, which
+        # over-claimed relative to `compare`, whose receipt for the exact
+        # same input reads `built_in_default`/`auto` -- one of the
+        # divergences resolving through the shared resolver removes
+        # (ADR-049 Phase 5).
+        assert provenance["gate.exit_code_scheme"]["layer"] == "built_in_default"
+        assert provenance["gate.exit_code_scheme"]["source_kind"] == "auto"
         # Recorded per *argument*, under the canonical resolver's own key
         # set: only `abi_breaking` was passed, so the other three levels came
         # from the built-in defaults and must not name an API input the

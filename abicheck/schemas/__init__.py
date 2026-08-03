@@ -301,7 +301,23 @@ from typing import Any
 #:       (``contract_replay.load_replayable_context``). Purely additive and
 #:       shadow, same as 2.23: absent by default, and never affects
 #:       ``verdict``, ``severity``, or any exit code.
-REPORT_SCHEMA_VERSION = "2.25"
+#: 2.26 — added two additive top-level keys, present only under
+#:       ``--contract-evaluation`` alongside 2.25's ``contract_context``:
+#:       ``contract_coverage_failures`` (ADR-049 plan Section 6.1's sibling
+#:       ledger — one entry per provider/domain coverage failure *for the
+#:       selected contract domain*, each with ``provider``/``side``/
+#:       ``record_id``/``reason``/``status``/``completeness``/``mode`` and a
+#:       ``suppressible: false`` marker) and
+#:       ``contract_coverage_exit_contribution`` (``0`` or ``1``). ``[]`` is a
+#:       real value meaning "this domain closed", so the key is emitted
+#:       rather than omitted. The ledger is **derived** from
+#:       ``contract_context``, not a second observation: the same provider
+#:       record is a failure under one domain and advisory under another
+#:       (Section 7), so it is answered per selected mode. Purely additive
+#:       and advisory, same as 2.23/2.25: the exit contribution is *stated*,
+#:       never applied — the independent coverage exit is ADR-049 Phase 7's,
+#:       alongside the default flip.
+REPORT_SCHEMA_VERSION = "2.26"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -356,7 +372,40 @@ REPORT_SCHEMA_VERSION = "2.25"
 #:       version collision between two structurally distinct additive
 #:       changes — reusing 1.4 here would leave a consumer unable to detect
 #:       which shape it actually received).
-SCAN_SCHEMA_VERSION = "1.5"
+#: 1.6 — the ``diff`` block became comparable field-for-field with
+#:       ``compare``'s own report (ADR-049 Phase 5 §6.4's Gate). Every
+#:       ``findings``/``suppressed`` entry gained ``finding_id`` — the same
+#:       canonical identity ``compare``'s ``changes`` entries carry
+#:       (``finding_identity.report_finding_id``), so a consumer can join a
+#:       scan finding to its ``compare`` counterpart, or to the same
+#:       finding across two runs, instead of relying on array order. The
+#:       ``diff`` block also gained an optional ``detectors`` list (same
+#:       ``name``/``changes_count``/``enabled``/``coverage_gap`` shape and
+#:       same "findings or a coverage gap" filter as ``compare``'s
+#:       top-level ``detectors``; omitted when empty). And, only under the
+#:       new ``scan --against --contract-evaluation``, each finding
+#:       additionally carries ``contract_relevance``/
+#:       ``contract_reason_code``/``contract_assurance``/
+#:       ``contract_evidence_refs``, under the same "absent means unstamped"
+#:       rule ``compare``'s report already follows. So a run *without*
+#:       ``--contract-evaluation`` differs from a 1.5 one in exactly three
+#:       places: this version marker itself, the new ``finding_id`` on each
+#:       finding, and the ``detectors`` list — which, unlike the contract
+#:       keys, does not depend on that flag (CodeRabbit review: the earlier
+#:       wording claimed byte-identity apart from ``finding_id``, which
+#:       understated both).
+#: 1.7 — the ``diff`` block gained three keys under ``scan --against
+#:       --contract-evaluation`` (ADR-049 Phase 5): ``contract_context``
+#:       (the same three-block sibling group ``compare``'s report carries at
+#:       its top level, serialized by the same encoder, so a scan receipt
+#:       replays identically), plus the sibling
+#:       ``contract_coverage_failures``/``contract_coverage_exit_contribution``
+#:       ledger (report schema 2.26's equivalents). Before this the scan
+#:       *computed* a contract context — its findings were stamped from one —
+#:       and then dropped it, so the evidence those decisions rest on was
+#:       unobservable from a scan. All three are absent without the flag, so
+#:       an ordinary scan is unchanged from 1.6.
+SCAN_SCHEMA_VERSION = "1.7"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

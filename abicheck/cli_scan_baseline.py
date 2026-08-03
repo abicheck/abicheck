@@ -216,7 +216,21 @@ def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, A
     ``suppression_rule`` value and whose exact shape existing tests and
     sibling modules (``cli_compare_release.py``, ``stack_report.py``) already
     pin.
+
+    **ADR-049 Phase 5 §6.4.** The Gate wants the two commands' shared
+    comparison findings compared *field by field*, and named the fields:
+    canonical identity, ``ChangeKind``, contract relevance/reason/evidence
+    side, compatibility decision, and suppression. ``kind``/``symbol``/
+    ``suppression_rule`` covered three of those; ``finding_id`` (the same
+    canonical identity ``reporter._change_to_dict`` emits, so the two are
+    joinable rather than merely both present) and the four contract fields
+    close the rest. The contract keys appear only when a finding actually
+    carries a decision -- i.e. under ``scan --against --contract-evaluation``
+    -- exactly as ``reporter._add_contract_evaluation_fields`` gates them,
+    so an ordinary scan's summary is byte-identical to before.
     """
+    from .finding_identity import report_finding_id
+
     findings = []
     for c in changes:
         kind = getattr(c, "kind", None)
@@ -226,11 +240,43 @@ def _baseline_finding_dicts(changes: list[Any], bucket: str) -> list[dict[str, A
             "symbol": getattr(c, "symbol", None),
             "description": getattr(c, "description", None),
             "source_location": getattr(c, "source_location", None),
+            "finding_id": report_finding_id(c),
         }
+        _add_contract_fields(entry, c)
         if bucket == "suppressed":
             entry["suppression_rule"] = getattr(c, "suppression_rule", None)
         findings.append(entry)
     return findings
+
+
+def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
+    """Copy *c*'s shadow contract decision into *entry*, if it has one.
+
+    The projection of ``reporter._add_contract_evaluation_fields`` this
+    summary can carry: same keys, same values, same "absent means unstamped"
+    rule. Deliberately not an import of that function -- it also computes a
+    ``finding_id`` fallback and is typed against report dicts -- but the key
+    names are asserted equal to the reporter's by
+    ``tests/test_scan_compare_parity.py``, so the two cannot drift into
+    naming the same decision differently.
+
+    Enum values are read the same tolerant way ``_baseline_finding_dicts``
+    reads ``kind`` -- that function's whole contract is that it stays safe
+    against the lightweight fakes the surrounding tests and sibling modules
+    build, and requiring a real enum here would have broken it for exactly
+    those callers (CodeRabbit review).
+    """
+    relevance = getattr(c, "contract_relevance", None)
+    if relevance is None:
+        return
+    entry["contract_relevance"] = getattr(relevance, "value", str(relevance))
+    entry["contract_reason_code"] = getattr(c, "contract_reason_code", None)
+    assurance = getattr(c, "contract_assurance", None)
+    if assurance is not None:
+        entry["contract_assurance"] = getattr(assurance, "value", str(assurance))
+    refs = getattr(c, "contract_evidence_refs", None)
+    if refs is not None:
+        entry["contract_evidence_refs"] = list(refs)
 
 
 def _baseline_is_native_library(path: Path) -> bool:
@@ -282,6 +328,9 @@ def _run_baseline_compare(
     pattern_verdicts: bool = False,
     env_matrix: EnvironmentMatrix | None = None,
     collapse_versioned_symbols: bool = False,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
+    resolved_config: Any = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -424,6 +473,8 @@ def _run_baseline_compare(
         pattern_verdicts=pattern_verdicts,
         env_matrix=env_matrix,
         collapse_versioned_symbols=collapse_versioned_symbols,
+        contract_evaluation=contract_evaluation,
+        contract_mode=contract_mode,
     )
     summary: dict[str, Any] = {
         "breaking": len(diff.breaking),
@@ -431,6 +482,27 @@ def _run_baseline_compare(
         "risk": len(diff.risk),
         "compatible": len(diff.compatible),
     }
+    # ADR-049 Phase 5 §6.4 names *detector provenance* among the fields the
+    # two commands must agree on, and `compare`'s JSON report has carried it
+    # since long before this Gate (`reporter._add_detectors`) while `scan
+    # --against`'s summary carried nothing equivalent -- so "which detector
+    # produced this comparison's findings, and did any report a coverage
+    # gap" was answerable for one command and not the other on the same
+    # inputs. Same shape and same "only detectors with findings or a
+    # coverage gap" filter as the reporter's, so the two are comparable
+    # rather than merely both non-empty.
+    detectors = [
+        {
+            "name": det.name,
+            "changes_count": det.changes_count,
+            "enabled": det.enabled,
+            "coverage_gap": det.coverage_gap,
+        }
+        for det in getattr(diff, "detector_results", None) or []
+        if det.changes_count > 0 or det.coverage_gap is not None
+    ]
+    if detectors:
+        summary["detectors"] = detectors
     # Preserve the actual findings (kind/symbol/description/location), not just
     # their counts — a failing `scan --baseline` used to report e.g.
     # "breaking=1" with no way to tell which symbol broke without a separate
@@ -471,6 +543,35 @@ def _run_baseline_compare(
         )
         if len(suppressed_changes) > _MAX_BASELINE_FINDINGS:
             summary["suppressed_truncated"] = True
+
+    # ADR-049 Phase 5: install this front end's own resolved configuration
+    # over the narrower object `checker.compare` reconstructs from its
+    # arguments, then emit the whole persisted context -- which `scan
+    # --against --contract-evaluation` computed and then dropped, so the
+    # receipt its per-finding decisions rest on was unobservable. Same
+    # encoder `reporter._add_contract_context` uses, so the block is
+    # byte-for-byte the one `compare` writes and `replay_original_decisions`
+    # reads back.
+    from .cli_scan_receipt import context_block, record_resolved_config
+
+    if resolved_config is not None:
+        record_resolved_config(diff, resolved_config)
+    context = context_block(diff)
+    if context is not None:
+        summary["contract_context"] = context
+        from .contract_coverage_ledger import (
+            coverage_exit_contribution,
+            coverage_failures_for_context,
+        )
+
+        # The sibling unsuppressible ledger, on the same terms `compare`
+        # reports it (plan Section 6.1) -- a coverage failure is not a
+        # finding, so it belongs beside the diff's findings, not among them.
+        failures = coverage_failures_for_context(diff.contract_context)
+        summary["contract_coverage_failures"] = [f.to_dict() for f in failures]
+        summary["contract_coverage_exit_contribution"] = coverage_exit_contribution(
+            failures
+        )
 
     from .cli_compare_helpers import _verdict_exit_code
 

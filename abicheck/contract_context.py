@@ -23,16 +23,20 @@ binds all three:
 
 - ``evaluation_context`` -- the resolved
   :class:`~abicheck.compatibility_evaluation_config.CompatibilityEvaluationConfig`
-  that produced the decisions, with field-level provenance. Built from what
-  ``checker.compare`` itself resolved, which is deliberately narrower than
-  what a front end resolves (Phase 1's
+  that produced the decisions, with field-level provenance. Built here from
+  what ``checker.compare`` itself resolved, which is deliberately narrower
+  than what a front end resolves (Phase 1's
   :mod:`abicheck.compatibility_evaluation_frontend` sees CLI/API/project
   inputs this core verb never receives): the provenance therefore records
   ``API_REQUEST`` for a value that arrived as a ``compare()`` argument,
-  rather than claiming a CLI/recipe layer it cannot observe. Phase 5 is what
-  replaces this with the front end's own already-resolved object;
-  under-claiming until then is the honest encoding, since a wrong provenance
-  layer is exactly what D7's precedence receipts exist to make impossible.
+  rather than claiming a CLI/recipe layer it cannot observe. A front end
+  that has resolved the canonical object hands it over through
+  :func:`with_resolved_config` (Phase 5), and what this module builds is
+  what a front end that has not still gets -- under-claiming, since a wrong
+  provenance layer is exactly what D7's precedence receipts exist to make
+  impossible. The native ``compare`` CLI does hand one over
+  (:mod:`abicheck.cli_compare_receipt`); the MCP ``abi_compare`` tool does
+  not yet.
 - ``decision_receipt`` -- the mode/root-dependent closure and the per-finding
   relevance map. Computed *from the evidence block's own persisted graph*
   (:func:`~abicheck.contract_evidence_collect.closure_from_graph`), not from
@@ -271,29 +275,136 @@ def build_evaluation_context(
     return EvaluationContextBlock(resolved_config=config)
 
 
-def with_field_provenance(
-    context: PersistedContractContext, updates: Mapping[str, ValueProvenance]
-) -> PersistedContractContext:
-    """Return *context* with each named field's provenance replaced.
+def _merged_overlay_provenance(
+    *, stated: ValueProvenance | None, observed: ValueProvenance | None
+) -> ValueProvenance | None:
+    """The receipt for an overlay field that was both stated and observed.
 
-    The value-free counterpart of :func:`with_resolved_gate`, for a field
-    whose *value* the core verb resolved correctly but whose *source* only
-    the front end can name. ``contract.mode`` is the case: ``compare()``
-    receives the mode as an argument and can honestly claim no more than
-    ``API_REQUEST``, so a user who typed ``--contract exports`` had their
-    typed flag recorded as a programmatic request (Codex review, fresh
-    evidence). A front end that knows better says so here; one that does not
-    leaves the field alone, and the core verb's honest under-claim stands.
+    *stated* is the front end's entry (which option, which file, which
+    digest); *observed* is the ledger's (that an overlay really applied).
+    Neither subsumes the other, and a run can have only one of them -- a
+    ``--post-manifest`` scope the front end cannot model, or a resolved value
+    on a run whose ledger recorded no overlay -- so the merge keeps the
+    richer entry and appends the other's hops rather than choosing between
+    them. Duplicate hops are dropped, since a merged receipt naming the same
+    selector twice would misreport one selection as two.
     """
-    config = context.evaluation_context.resolved_config
-    provenance = dict(config.provenance)
-    provenance.update(updates)
+    if stated is None:
+        return observed
+    if observed is None:
+        return stated
+    extra = tuple(h for h in observed.selected_by if h not in stated.selected_by)
+    if not extra:
+        return stated
+    return replace(stated, selected_by=stated.selected_by + extra)
+
+
+def with_resolved_config(
+    context: PersistedContractContext,
+    config: CompatibilityEvaluationConfig,
+) -> PersistedContractContext:
+    """Return *context* carrying the front end's own already-resolved config.
+
+    ADR-049 Phase 5's "every front end consumes one
+    :class:`CompatibilityEvaluationConfig`", as the one seam where that
+    object replaces the narrower one ``checker.compare`` reconstructs from
+    its own arguments. The core verb sees values, not the inputs that chose
+    them, so it can claim no more than ``API_REQUEST`` for any of them (see
+    this module's docstring);
+    :func:`~abicheck.compatibility_evaluation_frontend.resolve_compatibility_evaluation_config`
+    sees the CLI flags, the project config, and the selected packs, and
+    resolves the real D7 layer per field.
+
+    **Two overlay fields keep their observed values.**
+    ``contract.overlays`` and ``surface.explicit_scope`` are not resolved
+    from stated inputs at all: :func:`overlay_selection` recovers them from
+    the run's *own evidence ledger*, so they name the overlays that actually
+    applied -- including ``--post-manifest``, which no front-end input model
+    describes. An observation of what ran outranks a resolution of what was
+    asked for, so when the ledger recorded any overlay, both values survive.
+
+    Their *provenance* follows a different rule, because value and receipt
+    answer different questions. The core's entry for
+    ``surface.explicit_scope`` is a contentless ``API_REQUEST`` hop, while
+    the resolver's names the layer, the option, and -- for
+    ``--public-symbols-list`` -- the file and digest that selected the scope.
+    Taking the core's wholesale therefore dropped exactly the identification
+    a replay needs (Codex review, fresh evidence). So when the front end
+    really resolved a value of its own, its entry is kept and the observed
+    hop is appended to it, leaving both recorded; when it did not (a
+    ``--post-manifest``-only run, which it cannot model), the core's stands
+    alone.
+
+    ``contract.overlays`` is the one field where both sides can also state a
+    *value*: a ``kind: contract`` pack assigns overlay selectors, and the
+    ledger observes provider ids -- two different sets, both genuinely in
+    effect. So that field's value is their union, not a replacement
+    (CodeRabbit review: replacing dropped a pack's selection and its
+    provenance whenever any overlay was observed).
+
+    What this deliberately does *not* touch: the gate. Its values are
+    resolved after ``compare()`` returns and are written by
+    :func:`with_resolved_gate` from the configuration the run was really
+    scored with -- see that function, and
+    ``cli_compare_receipt.record_resolved_config`` for why the two are
+    written from different sources.
+    """
+    from .compatibility_evaluation_frontend import (
+        CONTRACT_OVERLAYS_FIELD,
+        EXPLICIT_SCOPE_FIELD,
+    )
+
+    observed = context.evaluation_context.resolved_config
+    if observed.contract.overlays:
+        provenance = dict(config.provenance)
+        # A `kind: contract` pack can assign `contract.overlays` too
+        # (`compatibility_evaluation_wiring`'s route table), and those
+        # selectors are a different set from the providers the ledger
+        # observed -- both were genuinely in effect, so replacing one with
+        # the other dropped a real selection and its receipt (CodeRabbit
+        # review). Union the values, merge the entries.
+        overlays = tuple(
+            sorted({*config.contract.overlays, *observed.contract.overlays})
+        )
+        for field, entry in (
+            (
+                CONTRACT_OVERLAYS_FIELD,
+                _merged_overlay_provenance(
+                    stated=(
+                        config.provenance.get(CONTRACT_OVERLAYS_FIELD)
+                        if config.contract.overlays
+                        else None
+                    ),
+                    observed=observed.provenance.get(CONTRACT_OVERLAYS_FIELD),
+                ),
+            ),
+            (
+                EXPLICIT_SCOPE_FIELD,
+                _merged_overlay_provenance(
+                    stated=(
+                        config.provenance.get(EXPLICIT_SCOPE_FIELD)
+                        if config.surface.explicit_scope is not None
+                        else None
+                    ),
+                    observed=observed.provenance.get(EXPLICIT_SCOPE_FIELD),
+                ),
+            ),
+        ):
+            if entry is None:
+                provenance.pop(field, None)
+            else:
+                provenance[field] = entry
+        config = replace(
+            config,
+            contract=replace(config.contract, overlays=overlays),
+            surface=replace(
+                config.surface, explicit_scope=observed.surface.explicit_scope
+            ),
+            provenance=provenance,
+        )
     return replace(
         context,
-        evaluation_context=replace(
-            context.evaluation_context,
-            resolved_config=replace(config, provenance=provenance),
-        ),
+        evaluation_context=replace(context.evaluation_context, resolved_config=config),
     )
 
 

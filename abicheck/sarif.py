@@ -521,6 +521,53 @@ def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
     return block
 
 
+def _coverage_notifications(result: object) -> dict[str, object]:
+    """The ``toolExecutionNotifications`` entry for this run's coverage ledger.
+
+    Returns an empty mapping -- so the key is absent, not empty -- when the
+    run built no contract context, which is every run without
+    ``--contract-evaluation``. A run whose domain *closed* yields an empty
+    list, because "checked, nothing missing" and "never checked" are
+    different states and a consumer must be able to tell them apart.
+
+    ``level: "error"`` regardless of the ledger's advisory exit status: the
+    notification describes the evidence, not the gate, and the gate's own
+    ``executionSuccessful``/``exitCode`` are deliberately left untouched --
+    the independent coverage exit is ADR-049 Phase 7's.
+    """
+    from .contract_coverage_ledger import coverage_failures_for_context
+
+    ctx = getattr(result, "contract_context", None)
+    if ctx is None:
+        return {}
+    failures = coverage_failures_for_context(ctx)
+    return {
+        "toolExecutionNotifications": [
+            {
+                "level": "error",
+                "message": {
+                    "text": (
+                        f"contract coverage: {f.provider} ({f.side}) could not "
+                        f"close the {f.mode} domain ({f.reason})"
+                    )
+                },
+                "descriptor": {"id": f"abicheck.coverage.{f.reason}"},
+                "properties": {
+                    "provider": f.provider,
+                    "side": f.side,
+                    "recordId": f.record_id,
+                    "contractMode": f.mode,
+                    # Stated per notification so a consumer reading one in
+                    # isolation knows it cannot be waived by a suppression
+                    # rule (plan Section 6.2).
+                    "suppressible": False,
+                },
+            }
+            for f in failures
+        ]
+    }
+
+
 def to_sarif(
     result: DiffResult,
     *,
@@ -749,6 +796,18 @@ def to_sarif(
                 },
                 "invocations": [
                     {
+                        # ADR-049 plan Section 6.1: "SARIF emits deterministic
+                        # properties and a tool-level coverage notification."
+                        # A contract-coverage failure is not a result -- it is
+                        # the tool saying the evidence needed to decide was
+                        # missing -- so it belongs in
+                        # `toolExecutionNotifications`, which is SARIF's own
+                        # channel for exactly that, rather than as another
+                        # `results[]` entry a consumer would count as a
+                        # finding. Absent (not empty) when the run computed no
+                        # contract context, so an ordinary document is
+                        # unchanged.
+                        **_coverage_notifications(result),
                         # Always true: this reports the SARIF tool run, which
                         # completed. It must not encode the ABI/severity gate
                         # outcome — see the docstring above.

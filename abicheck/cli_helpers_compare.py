@@ -41,6 +41,7 @@ from .service_scan import pair_wide_cxx20_std_override
 if TYPE_CHECKING:
     from .buildsource.inline import BuildConfig
     from .checker_types import Change, DiffResult
+    from .compatibility_evaluation_frontend import PublicSymbolsList
     from .model import AbiSnapshot
     from .service_scan import CompileContext
     from .severity import SeverityConfig
@@ -303,6 +304,65 @@ from .compatibility_evaluation_frontend import (  # noqa: E402
 )
 
 _collect_force_public_symbols = collect_force_public_symbols
+
+
+def load_required_symbols(
+    symbols: tuple[str, ...], symbols_file: Path | None,
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
+    """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
+
+    The file format is one symbol per line; blank lines and ``#`` comments are
+    ignored (ADR-043, folds the removed ``plugin-check`` command's manifest).
+
+    Returns the combined contract, *what the file itself contributed*, and the
+    digest of its bytes (both empty/``None`` when no file was given), all from
+    the one read. A required-symbol contract selects the base policy
+    (ADR-043), so an ADR-049 receipt has to identify what really did it: the
+    file's own contribution is what decides whether naming that file is a true
+    claim, since a file that parsed to nothing selected nothing (Codex review,
+    fresh evidence). The digest is over raw bytes, so it matches the file on
+    disk rather than a newline-normalized rendering of it.
+    """
+    from_file: list[str] = []
+    digest: str | None = None
+    if symbols_file is not None:
+        import hashlib
+
+        data = symbols_file.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        for line in data.decode("utf-8").splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                from_file.append(stripped)
+    # De-duplicate while preserving first-seen order.
+    return (
+        tuple(dict.fromkeys([*symbols, *from_file])),
+        tuple(from_file),
+        digest,
+    )
+
+
+def resolve_force_public_scope(
+    public_symbols: tuple[str, ...], symbols_list_path: str | Path | None
+) -> tuple[set[str], PublicSymbolsList | None]:
+    """The forced-public set, and the list file it was read from -- one read.
+
+    ``--public-symbols-list`` feeds two consumers: the live comparison's
+    forced-public overlay, and the ADR-049 receipt that names the file with
+    its digest. Reading it once for both is what keeps the receipt honest --
+    a second read could pair the persisted digest with content that did not
+    score the run, and a file deleted mid-run would fail an otherwise
+    finished comparison during receipt generation (Codex review, fresh
+    evidence). Returns ``None`` for the list when no file was given, which
+    is a different fact from a file that named no symbols.
+    """
+    from .compatibility_evaluation_frontend import PublicSymbolsList as _List
+
+    listed = (
+        _List.from_file(symbols_list_path) if symbols_list_path is not None else None
+    )
+    forced = collect_force_public_symbols(public_symbols, None, already_read=listed)
+    return forced, listed
 
 
 def _collect_additions(result: DiffResult) -> list[object]:

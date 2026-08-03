@@ -1,0 +1,673 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-049 Phase 5's unsuppressible contract-coverage ledger.
+
+Definition-of-done item 6 is two claims: suppression is explicit, and
+coverage failures are unsuppressible. The first was already true (the
+ADR-013 audit trail). These test the second, from both directions -- the
+ledger says the right thing, *and* a `--suppress` rule written specifically
+to reach one cannot.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from abicheck.checker import compare
+from abicheck.cli import main
+from abicheck.contract_coverage_ledger import (
+    REQUIRED_PROVIDERS,
+    CoverageFailure,
+    coverage_exit_contribution,
+    coverage_failures,
+    coverage_failures_for_context,
+    suppression_reaches_coverage_failures,
+)
+from abicheck.contract_evidence import (
+    ContractEvidenceBlock,
+    EvidenceCompleteness,
+    EvidenceProviderStatus,
+    EvidenceSearchRecord,
+    ProviderEvidenceEntry,
+)
+from abicheck.contract_relevance_types import ContractMode
+from abicheck.model import (
+    AbiSnapshot,
+    AccessLevel,
+    Function,
+    ScopeOrigin,
+    Visibility,
+)
+from abicheck.serialization import snapshot_to_json
+
+
+def _fn(name: str, mangled: str) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        access=AccessLevel.PUBLIC,
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+
+
+def _pair_without_export_table() -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A header-only pair: `public` can close, `exports` cannot.
+
+    The whole point of the ledger is that these are different answers about
+    the same observations, so the fixture has to be one where they differ.
+    """
+    old = AbiSnapshot(
+        library="libfoo.so.1",
+        version="1.0",
+        from_headers=True,
+        functions=[_fn("pub_a", "_Z5pub_av"), _fn("pub_b", "_Z5pub_bv")],
+    )
+    new = AbiSnapshot(
+        library="libfoo.so.1",
+        version="2.0",
+        from_headers=True,
+        functions=[_fn("pub_a", "_Z5pub_av")],
+    )
+    return old, new
+
+
+def _record(provider: str, side: str, **kwargs) -> ProviderEvidenceEntry:
+    base = {
+        "id": f"{provider}:{side}",
+        "provider": provider,
+        "side": side,
+        "domain_kind": "declared_public",
+        "status": EvidenceProviderStatus.AVAILABLE,
+        "completeness": EvidenceCompleteness.COMPLETE,
+        "identity_coverage": EvidenceCompleteness.COMPLETE,
+    }
+    base.update(kwargs)
+    return ProviderEvidenceEntry(record=EvidenceSearchRecord(**base))
+
+
+def _block(*entries: ProviderEvidenceEntry) -> ContractEvidenceBlock:
+    return ContractEvidenceBlock(providers=entries)
+
+
+class TestDerivation:
+    def test_a_complete_available_provider_is_not_a_failure(self) -> None:
+        block = _block(_record("public_header", "old"), _record("public_header", "new"))
+        assert coverage_failures(block, ContractMode.PUBLIC) == ()
+        assert coverage_exit_contribution(()) == 0
+
+    @pytest.mark.parametrize(
+        "status,expected",
+        [
+            (EvidenceProviderStatus.UNAVAILABLE, "provider_unavailable"),
+            (EvidenceProviderStatus.FAILED, "provider_failed"),
+            (EvidenceProviderStatus.UNSUPPORTED, "provider_unsupported"),
+            (EvidenceProviderStatus.STALE, "provider_stale"),
+        ],
+    )
+    def test_each_non_available_status_is_its_own_reason(
+        self, status, expected: str
+    ) -> None:
+        """Four different ways of not having the fact, four different fixes --
+        collapsing them to a boolean would defeat the ledger's own purpose
+        (saying *why* a domain did not close)."""
+        block = _block(_record("public_header", "old", status=status))
+        (failure,) = coverage_failures(block, ContractMode.PUBLIC)
+        assert failure.reason == expected
+        assert failure.status == status.value
+
+    def test_an_available_but_partial_search_is_a_failure(self) -> None:
+        block = _block(
+            _record("public_header", "old", completeness=EvidenceCompleteness.PARTIAL)
+        )
+        (failure,) = coverage_failures(block, ContractMode.PUBLIC)
+        assert failure.reason == "search_incomplete"
+
+    def test_partial_identity_coverage_alone_is_a_failure(self) -> None:
+        """Section 4.2 requires identity coverage separately from overall
+        completeness: a complete search whose identity coverage is partial
+        cannot support a proven exclusion for the ambiguous spellings."""
+        block = _block(
+            _record(
+                "public_header",
+                "old",
+                identity_coverage=EvidenceCompleteness.PARTIAL,
+            )
+        )
+        (failure,) = coverage_failures(block, ContractMode.PUBLIC)
+        assert failure.reason == "identity_coverage_incomplete"
+
+    def test_not_started_configuration_coverage_is_not_a_failure(self) -> None:
+        """Every record this build produces has `configuration_coverage:
+        NOT_STARTED` (no variant source exists yet). Treating that as a
+        coverage failure would report every run as failing for a facet
+        nothing can satisfy."""
+        block = _block(_record("public_header", "old"))
+        assert coverage_failures(block, ContractMode.PUBLIC) == ()
+
+    def test_the_same_record_is_a_failure_in_one_domain_and_not_another(self) -> None:
+        """Section 7's rule, which is why this is derived per-mode rather
+        than recorded at collection time: under `exports`,
+        "public-header/manifest/consumer failures are unrelated and
+        advisory"."""
+        block = _block(
+            _record("public_header", "old", status=EvidenceProviderStatus.UNAVAILABLE)
+        )
+        assert coverage_failures(block, ContractMode.PUBLIC)
+        assert coverage_failures(block, ContractMode.EXPORTS) == ()
+
+    def test_all_mode_can_never_have_a_coverage_failure(self) -> None:
+        """`all` requires no root or closure evidence, so no provider failure
+        can stop it closing -- and it correspondingly has no unresolved
+        findings either."""
+        block = _block(
+            _record("public_header", "old", status=EvidenceProviderStatus.FAILED),
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED),
+        )
+        assert coverage_failures(block, ContractMode.ALL) == ()
+        assert REQUIRED_PROVIDERS[ContractMode.ALL] == frozenset()
+
+    def test_a_string_mode_resolves_the_same_as_the_enum(self) -> None:
+        block = _block(
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED)
+        )
+        assert coverage_failures(block, "exports") == coverage_failures(
+            block, ContractMode.EXPORTS
+        )
+
+    def test_no_evidence_is_no_claim_rather_than_a_failure(self) -> None:
+        """A run that computed no context made no coverage claim; that is not
+        the same as one whose providers failed."""
+        assert coverage_failures(None, ContractMode.PUBLIC) == ()
+        assert coverage_failures_for_context(None) == ()
+
+    def test_the_ledger_order_does_not_depend_on_traversal_order(self) -> None:
+        entries = [
+            _record("export_table", "new", status=EvidenceProviderStatus.FAILED),
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED),
+        ]
+        forward = coverage_failures(_block(*entries), ContractMode.EXPORTS)
+        reverse = coverage_failures(_block(*reversed(entries)), ContractMode.EXPORTS)
+        assert forward == reverse
+        assert [f.side for f in forward] == ["new", "old"]
+
+    def test_a_failure_states_its_own_unsuppressibility(self) -> None:
+        block = _block(
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED)
+        )
+        (failure,) = coverage_failures(block, ContractMode.EXPORTS)
+        assert failure.suppressible is False
+        assert failure.to_dict()["suppressible"] is False
+        assert failure.to_dict()["mode"] == "exports"
+
+
+class TestUnsuppressibility:
+    """The half of Definition-of-done item 6 that had no implementation."""
+
+    def _failure(self) -> CoverageFailure:
+        block = _block(
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED)
+        )
+        (failure,) = coverage_failures(block, ContractMode.EXPORTS)
+        return failure
+
+    def test_a_rule_written_to_match_a_failure_still_cannot_reach_it(
+        self, tmp_path: Path
+    ) -> None:
+        """The direct proof. These rules are deliberately broad -- a wildcard
+        symbol selector that matches every real finding -- and are handed to
+        the same predicate `checker._filter_suppressed_changes` consults."""
+        from abicheck.suppression import SuppressionList
+
+        rules = tmp_path / "s.yaml"
+        rules.write_text(
+            "version: 1\nsuppressions:\n"
+            "  - symbol: '.*'\n"
+            "    reason: 'silence everything'\n",
+            encoding="utf-8",
+        )
+        suppression = SuppressionList.load(rules)
+        assert (
+            suppression_reaches_coverage_failures([self._failure()], suppression) == ()
+        )
+
+    def test_no_suppression_reaches_nothing(self) -> None:
+        assert suppression_reaches_coverage_failures([self._failure()], None) == ()
+
+    def test_a_coverage_failure_is_structurally_not_a_change(self) -> None:
+        """*Why* the rule holds, rather than that it happens to. Suppression
+        is applied in exactly one place, to `Change` objects; a
+        `CoverageFailure` has none of the attributes that selects on, so it
+        cannot be a candidate."""
+        failure = self._failure()
+        for change_attr in ("kind", "symbol", "description", "source_location"):
+            assert not hasattr(failure, change_attr), change_attr
+
+
+class TestReportIntegration:
+    def _report(self, tmp_path: Path, mode: str) -> dict:
+        old, new = _pair_without_export_table()
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        out = tmp_path / f"report-{mode}.json"
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--format",
+                "json",
+                "--contract-evaluation",
+                "--contract",
+                mode,
+                "-o",
+                str(out),
+            ],
+        )
+        assert res.exit_code in (0, 2, 4), res.output
+        return json.loads(out.read_text(encoding="utf-8"))
+
+    def test_a_missing_export_table_is_a_coverage_failure_under_exports(
+        self, tmp_path: Path
+    ) -> None:
+        report = self._report(tmp_path, "exports")
+        failures = report["contract_coverage_failures"]
+        assert {f["side"] for f in failures} == {"old", "new"}
+        assert {f["provider"] for f in failures} == {"export_table"}
+        assert all(f["reason"] == "provider_unavailable" for f in failures)
+        assert report["contract_coverage_exit_contribution"] == 1
+
+    @pytest.mark.parametrize("mode", ["public", "all"])
+    def test_the_same_run_has_no_failures_in_the_other_domains(
+        self, tmp_path: Path, mode: str
+    ) -> None:
+        report = self._report(tmp_path, mode)
+        assert report["contract_coverage_failures"] == []
+        assert report["contract_coverage_exit_contribution"] == 0
+
+    def test_an_empty_ledger_is_emitted_rather_than_omitted(
+        self, tmp_path: Path
+    ) -> None:
+        """`[]` is the checkable answer "this domain closed"; an absent key
+        could not be told apart from "not computed"."""
+        report = self._report(tmp_path, "public")
+        assert "contract_coverage_failures" in report
+
+    def test_no_ledger_at_all_without_contract_evaluation(self, tmp_path: Path) -> None:
+        old, new = _pair_without_export_table()
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        out = tmp_path / "plain.json"
+        res = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--format", "json", "-o", str(out)],
+        )
+        assert res.exit_code == 4, res.output
+        report = json.loads(out.read_text(encoding="utf-8"))
+        assert "contract_coverage_failures" not in report
+
+    def test_the_ledger_does_not_change_the_verdict_or_exit_code(
+        self, tmp_path: Path
+    ) -> None:
+        """Advisory, like the rest of ADR-049 Phase 3-6: the independent
+        coverage exit is Phase 7's. A run with a non-zero *stated*
+        contribution must still exit on its compatibility verdict alone."""
+        report = self._report(tmp_path, "exports")
+        assert report["contract_coverage_exit_contribution"] == 1
+        assert report["verdict"] == "BREAKING"
+
+    def test_the_ledger_matches_what_the_python_api_derives(
+        self, tmp_path: Path
+    ) -> None:
+        """The report is a view of the derivation, not a second one."""
+        old, new = _pair_without_export_table()
+        result = compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            contract_mode="exports",
+        )
+        derived = coverage_failures_for_context(result.contract_context)
+        report = self._report(tmp_path, "exports")
+        assert [f.to_dict() for f in derived] == report["contract_coverage_failures"]
+
+
+class TestDownstreamConsumers:
+    """ADR-049 Phase 6's Gate ends with "all downstream consumers understand
+    new schema", and plan §6.1 is specific about two of them: SARIF emits a
+    tool-level coverage notification; JUnit represents the state "could not
+    be checked" per its coverage/error contract, "never as a passed
+    compatibility test". Neither handled any ADR-049 field before.
+    """
+
+    def _result(self, mode: str = "exports"):
+        old, new = _pair_without_export_table()
+        return compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            contract_mode=mode,
+        )
+
+    def test_sarif_emits_one_notification_per_coverage_failure(self) -> None:
+        from abicheck.sarif import to_sarif
+
+        doc = to_sarif(self._result())
+        invocation = doc["runs"][0]["invocations"][0]
+        notifications = invocation["toolExecutionNotifications"]
+        assert {n["properties"]["provider"] for n in notifications} == {"export_table"}
+        assert {n["properties"]["side"] for n in notifications} == {"old", "new"}
+        assert all(n["properties"]["suppressible"] is False for n in notifications)
+        assert all(n["level"] == "error" for n in notifications)
+
+    def test_sarif_leaves_the_gate_alone(self) -> None:
+        """The notification describes the evidence, not the gate: the
+        independent coverage exit is Phase 7's, so this run's own
+        `executionSuccessful`/`exitCode` must be untouched."""
+        from abicheck.sarif import to_sarif
+
+        with_ctx = to_sarif(self._result())["runs"][0]["invocations"][0]
+        old, new = _pair_without_export_table()
+        plain = to_sarif(compare(old, new))["runs"][0]["invocations"][0]
+        assert with_ctx["executionSuccessful"] == plain["executionSuccessful"]
+        assert with_ctx["exitCode"] == plain["exitCode"]
+
+    def test_sarif_omits_the_key_entirely_without_contract_evaluation(self) -> None:
+        """Absent, not empty: a run that never checked and one that checked
+        and found nothing are different states."""
+        from abicheck.sarif import to_sarif
+
+        old, new = _pair_without_export_table()
+        doc = to_sarif(compare(old, new))
+        assert "toolExecutionNotifications" not in doc["runs"][0]["invocations"][0]
+
+    def test_sarif_emits_an_empty_list_when_the_domain_closed(self) -> None:
+        from abicheck.sarif import to_sarif
+
+        doc = to_sarif(self._result(mode="public"))
+        assert doc["runs"][0]["invocations"][0]["toolExecutionNotifications"] == []
+
+    def test_junit_reports_coverage_as_errors_never_as_passes(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        from abicheck.junit_report import to_junit_xml
+
+        root = ET.fromstring(to_junit_xml(self._result()))
+        (suite,) = [
+            s
+            for s in root.findall("testsuite")
+            if (s.get("name") or "").startswith("abicheck.contract_coverage")
+        ]
+        assert suite.get("errors") == "2"
+        assert suite.get("failures") == "0"
+        cases = suite.findall("testcase")
+        assert len(cases) == 2
+        # Every case carries an <error>; none is a bare (passing) testcase.
+        assert all(case.find("error") is not None for case in cases)
+        assert {case.find("error").get("type") for case in cases} == {
+            "provider_unavailable"
+        }
+
+    def test_junit_rolls_the_errors_into_the_document_totals(self) -> None:
+        """A dashboard reading only the root counts must still see them."""
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(to_junit_xml_of(self._result()))
+        assert root.get("errors") == "2"
+
+    def test_junit_has_no_coverage_suite_without_contract_evaluation(self) -> None:
+        import xml.etree.ElementTree as ET
+
+        from abicheck.junit_report import to_junit_xml
+
+        old, new = _pair_without_export_table()
+        root = ET.fromstring(to_junit_xml(compare(old, new)))
+        assert not [
+            s
+            for s in root.findall("testsuite")
+            if (s.get("name") or "").startswith("abicheck.contract_coverage")
+        ]
+
+
+def to_junit_xml_of(result):
+    from abicheck.junit_report import to_junit_xml
+
+    return to_junit_xml(result)
+
+
+class TestGuardsAndEdges:
+    """The defensive paths a happy-path run never reaches.
+
+    Each is a real state, not a hypothetical: a search that never started, a
+    context missing one of the two inputs the derivation needs, and a
+    suppression object that answers the matcher call at all.
+    """
+
+    def test_a_search_that_never_started_is_its_own_reason(self) -> None:
+        """Distinct from `search_incomplete`: "we did not look" and "we
+        looked and did not finish" need different fixes."""
+        block = _block(
+            _record(
+                "public_header",
+                "old",
+                completeness=EvidenceCompleteness.NOT_STARTED,
+            )
+        )
+        (failure,) = coverage_failures(block, ContractMode.PUBLIC)
+        assert failure.reason == "search_not_started"
+
+    def test_a_context_without_a_resolved_mode_derives_nothing(self) -> None:
+        """Both inputs are required. A context carrying evidence but no
+        selected domain cannot be answered *for* a domain, and guessing one
+        would invent the policy the derivation exists to read."""
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(
+            contract_evidence=_block(_record("export_table", "old")),
+            evaluation_context=SimpleNamespace(
+                resolved_config=SimpleNamespace(contract=SimpleNamespace(mode=None))
+            ),
+        )
+        assert coverage_failures_for_context(ctx) == ()
+
+    def test_a_context_without_evidence_derives_nothing(self) -> None:
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(
+            contract_evidence=None,
+            evaluation_context=SimpleNamespace(
+                resolved_config=SimpleNamespace(
+                    contract=SimpleNamespace(mode=ContractMode.EXPORTS)
+                )
+            ),
+        )
+        assert coverage_failures_for_context(ctx) == ()
+
+    def test_a_suppression_without_the_predicate_reaches_nothing(self) -> None:
+        """A duck-typed object that is not a `SuppressionList` has no
+        `is_suppressed`; that is "nothing matched", not an error."""
+
+        class _NotASuppressionList:
+            pass
+
+        block = _block(
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED)
+        )
+        (failure,) = coverage_failures(block, ContractMode.EXPORTS)
+        assert (
+            suppression_reaches_coverage_failures([failure], _NotASuppressionList())
+            == ()
+        )
+
+    def test_a_matcher_that_answers_true_would_be_reported(self) -> None:
+        """The proof function must be capable of reporting a hit, or its
+        empty answer everywhere else would prove nothing. A deliberately
+        indiscriminate matcher is the only way to reach that branch --
+        `SuppressionList.is_suppressed` itself cannot, which is the point.
+        """
+        block = _block(
+            _record("export_table", "old", status=EvidenceProviderStatus.FAILED)
+        )
+        (failure,) = coverage_failures(block, ContractMode.EXPORTS)
+
+        class _SaysYesToAnything:
+            def is_suppressed(self, _change) -> bool:
+                return True
+
+        assert suppression_reaches_coverage_failures(
+            [failure], _SaysYesToAnything()
+        ) == ("old:export_table",)
+
+
+def test_junit_multi_result_documents_carry_the_coverage_suite() -> None:
+    """`to_junit_xml_multi` renders one document for several libraries, and
+    each carries its own contract context — so a run can have one uncheckable
+    comparison beside several closed ones. Wiring only the single-result
+    renderer left the multi document reporting `errors="0"` with no coverage
+    suite, letting a consumer read an uncheckable comparison as clean (Codex
+    review).
+    """
+    import xml.etree.ElementTree as ET
+
+    from abicheck.junit_report import to_junit_xml_multi
+
+    old, new = _pair_without_export_table()
+    result = compare(
+        old,
+        new,
+        scope_to_public_surface=True,
+        contract_evaluation=True,
+        contract_mode="exports",
+    )
+    root = ET.fromstring(to_junit_xml_multi([(result, old)]))
+    suites = [
+        s
+        for s in root.findall("testsuite")
+        if (s.get("name") or "").startswith("abicheck.contract_coverage")
+    ]
+    assert len(suites) == 1
+    assert suites[0].get("errors") == "2"
+    # And the document totals see them, not just the nested suite.
+    assert int(root.get("errors")) >= 2
+
+
+def test_junit_coverage_suites_stay_attributable_per_library() -> None:
+    """Two libraries failing the same provider on the same side produced two
+    suites named alike, whose cases identify only provider and side — so a
+    consumer could not tell which library either error belonged to
+    (CodeRabbit review). The library qualifies both the suite name and the
+    testcase classname.
+    """
+    import xml.etree.ElementTree as ET
+
+    from abicheck.junit_report import to_junit_xml_multi
+
+    old, new = _pair_without_export_table()
+    results = []
+    for name in ("liba.so", "libb.so"):
+        result = compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            contract_mode="exports",
+        )
+        result.library = name
+        results.append((result, old))
+    root = ET.fromstring(to_junit_xml_multi(results))
+    suites = [
+        s
+        for s in root.findall("testsuite")
+        if (s.get("name") or "").startswith("abicheck.contract_coverage")
+    ]
+    assert len(suites) == 2
+    # The identical failures no longer collapse into indistinguishable suites.
+    assert {s.get("name") for s in suites} == {
+        "abicheck.contract_coverage.liba.so",
+        "abicheck.contract_coverage.libb.so",
+    }
+    for suite in suites:
+        classnames = {c.get("classname") for c in suite.findall("testcase")}
+        assert classnames == {suite.get("name")}
+
+
+class TestCoverageFailuresValidateAgainstTheSchema:
+    """The published schema must accept what the reporter actually emits.
+
+    `contract_coverage_failures`' `required` array was hand-edited to match
+    `CoverageFailure.to_dict()` (CodeRabbit review found it declaring six of
+    the eight always-emitted fields). Nothing re-derives one from the other,
+    so without this the two can drift apart silently: a field added to
+    `to_dict` and not to the schema makes every published report fail a
+    consumer's validation, and one removed from `to_dict` while still
+    `required` does the same.
+    """
+
+    def _report(self, **kwargs) -> dict:
+        from abicheck.reporter import to_json
+
+        old, new = _pair_without_export_table()
+        result = compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            **kwargs,
+        )
+        return json.loads(to_json(result))
+
+    def _validate(self, report: dict) -> None:
+        jsonschema = pytest.importorskip("jsonschema")
+
+        from abicheck.schemas import load_compare_report_schema
+
+        jsonschema.validate(report, load_compare_report_schema())
+
+    def test_a_report_carrying_failures_validates(self) -> None:
+        report = self._report(contract_mode="exports")
+        # Guard the guard: a run with no failures would validate trivially.
+        assert report["contract_coverage_failures"]
+        self._validate(report)
+
+    def test_a_report_whose_domain_closed_validates(self) -> None:
+        """`[]` rather than omitted is itself part of the contract."""
+        report = self._report(contract_mode="public")
+        assert report["contract_coverage_failures"] == []
+        self._validate(report)
+
+    def test_every_emitted_key_is_declared_required(self) -> None:
+        """The drift this pins, checked directly rather than through a
+        validator that would also pass if a key were merely optional."""
+        from abicheck.schemas import load_compare_report_schema
+
+        report = self._report(contract_mode="exports")
+        emitted = set(report["contract_coverage_failures"][0])
+        schema = load_compare_report_schema()
+        declared = schema["properties"]["contract_coverage_failures"]["items"]
+        assert emitted == set(declared["required"])
+        assert emitted == set(declared["properties"])

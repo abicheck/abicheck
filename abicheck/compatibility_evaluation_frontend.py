@@ -178,6 +178,31 @@ def _digest(payload: object) -> str:
     ).hexdigest()
 
 
+def stated_policy_base(policy: Any, policy_file: Any) -> Any:
+    """*policy*, unless a ``policy_file`` overrode it with a value this
+    resolver would reject.
+
+    Both the MCP tool and the scan API validate ``policy`` **only when no
+    ``policy_file`` is given** -- the file takes precedence over the base
+    name -- so an unknown ``policy`` alongside a valid file is an accepted
+    request whose comparison completes under the file's own base. Handing
+    that ignored value to the resolver made :func:`builtin_policy_identity`
+    raise and killed an otherwise-finished run: a receipt turning a
+    successful comparison into a failure, the one thing a receipt must never
+    do (Codex review, found once on the MCP path and then again on the scan
+    path -- hence living here rather than in either front end).
+
+    Dropped rather than repaired: the value chose nothing, so naming it in
+    the receipt would be false either way, and the resolver reads the base
+    off ``policy_file`` exactly as the comparison did. With no file present
+    the value passes through unchanged, so a genuinely unknown policy still
+    fails loudly where the front end validates it.
+    """
+    if policy_file is None or policy is None:
+        return policy
+    return policy if policy in VALID_BASE_POLICIES else None
+
+
 @functools.cache
 def builtin_policy_identity(name: str) -> ImmutableIdentity:
     """The replayable identity of a built-in ``--policy`` base.
@@ -280,6 +305,42 @@ class SuppressionSource:
         object.__setattr__(self, "rules", tuple(self.rules))
 
     @classmethod
+    def from_loaded(
+        cls, suppression: Any, path: Any = None
+    ) -> SuppressionSource | None:
+        """Build one from a list a front end already loaded. ``None`` passes through.
+
+        The single-read rule: built from the list that really scored the run,
+        never a re-read of *path*, so the digest cannot describe content that
+        did not.
+
+        **The digest falls back to the rules' own content** when the list
+        carries no ``source_sha256``. That is not a rare case: a
+        programmatically constructed or merged
+        :class:`~abicheck.suppression.SuppressionList` has none, and every
+        front end that accepts one could hand it over. Taking ``""`` there --
+        which each of them previously did, by spelling this
+        ``getattr(...) or ""`` inline -- made :class:`SuppressionConfig`
+        reject the input and fail an otherwise-valid run (Codex review, found
+        on the scan path; the MCP path had it too). ``contract_context.
+        suppression_config_for`` already derived the fallback correctly, so
+        this is that rule shared rather than a fourth transcription of it:
+        the rules are persisted verbatim beside the digest, so a digest over
+        them authenticates exactly what a replay would re-read.
+        """
+        if suppression is None:
+            return None
+        from .contract_evidence_collect import content_digest
+
+        rules = tuple(suppression.rule_identities())
+        return cls(
+            path=str(path) if path is not None else None,
+            sha256=getattr(suppression, "source_sha256", None)
+            or content_digest(list(rules)),
+            rules=rules,
+        )
+
+    @classmethod
     def from_file(
         cls, path: str | Path, *, require_justification: bool = False
     ) -> SuppressionSource:
@@ -375,6 +436,21 @@ class ExplicitCompatibilityInputs:
     scope_public_headers: bool | None = None
     #: ``--policy`` / ``CompareRequest.policy``.
     policy_base: str | None = None
+    #: Which option selected *policy_base*, when it was not ``--policy``
+    #: itself. ``compare`` switches an untouched ``--policy`` to
+    #: ``plugin_abi`` for a ``--required-symbol`` contract (ADR-043), so the
+    #: value really was selected -- by a different typed flag. Recording it
+    #: as ``--policy`` would name an option the user never passed, and
+    #: leaving it unstated made the receipt claim ``strict_abi`` for a run
+    #: that used ``plugin_abi`` (Codex review, fresh evidence).
+    policy_base_option: str | None = None
+    #: The file that option named, when it has one
+    #: (``--required-symbols FILE``), and the digest of the bytes read from
+    #: it. Without them the receipt can say a symbol list selected the policy
+    #: but not *which* list, which is the same gap the policy-file and
+    #: suppression sources carry digests to close (Codex review).
+    policy_base_path: str | None = None
+    policy_base_sha256: str | None = None
     #: An already-loaded ``--policy-file`` document.
     policy_file: PolicyFile | None = None
     #: Digest of that file's own bytes, for the receipt (ADR-049 D6). Left
@@ -488,6 +564,45 @@ class ProjectCompatibilityInputs:
         )
 
 
+@dataclass(frozen=True)
+class RunProfileInputs:
+    """What a selected ``--profile`` filled in, at D7's ``run_profile`` tier.
+
+    ``cli_options.apply_compare_profile`` folds a profile's defaults into the
+    command's kwargs only where the user left the option alone, so by the
+    time the live run reads them a profile-selected value is
+    indistinguishable from a built-in default. Resolving the receipt without
+    this layer therefore did not merely under-claim the source -- it produced
+    a *wrong* value: ``--profile ci-gate`` runs with
+    ``exit_code_scheme="severity"``, while a resolution that never saw the
+    profile answers ``"legacy"`` for a run stating no severity flag.
+
+    **A deliberate deviation from D7, recorded rather than smoothed over.**
+    ADR-049 scopes ``run_profile`` to execution fields (depth, format,
+    budget, workflow) and assigns the exit-code scheme to the *gate*
+    namespace -- yet the pre-existing ``ci-gate`` bundle
+    (:data:`~abicheck.cli_options.COMPARE_PROFILES`) really does select it.
+    Encoding what the bundle does today is the honest receipt; the two ways
+    to remove the deviation (move the key out of ``ci-gate`` into a gate
+    pack, or amend D7) both change user-visible behavior or the ADR, so
+    neither belongs in the wiring change that found it. Only this one field
+    passes ``allow_run_profile=True``; a profile assigning any other field
+    still raises, which is what keeps the deviation from spreading.
+
+    The remaining ``ci-gate``/``release-cut``/``quick`` keys (``depth``,
+    ``fmt``, ``recommend``, ``stat``) are execution/report concerns with no
+    field in this configuration at all, so they are not modelled here.
+    """
+
+    #: The profile's own name (``ci-gate``/``release-cut``/``quick``), for
+    #: the receipt's ``reference``.
+    name: str | None = None
+    #: ``exit_code_scheme``, only when the profile actually supplied it --
+    #: an explicitly typed flag is filtered out by ``apply_compare_profile``
+    #: before it ever reaches here.
+    exit_code_scheme: str | None = None
+
+
 # --------------------------------------------------------------------------
 # Candidate construction helpers.
 # --------------------------------------------------------------------------
@@ -556,6 +671,7 @@ def _resolve(
     pack_option: str = "--pack",
     default_is_stated: bool = False,
     require_legacy_alias_agreement: bool = True,
+    allow_run_profile: bool = False,
 ) -> tuple[Hashable, ValueProvenance]:
     """Resolve one field, letting a selected pack fill it only if nothing else did.
 
@@ -588,6 +704,11 @@ def _resolve(
     that same layer -- and refining a preset with one category flag
     (``--severity-preset strict --severity-addition info``) is legal, not a
     conflict.
+
+    *allow_run_profile* is forwarded to :func:`resolve_field`, which rejects a
+    ``RUN_PROFILE`` candidate for any field the caller has not opted in --
+    D7 scopes that layer to execution fields. See :class:`RunProfileInputs`
+    for the one field this module opts in, and why.
     """
     all_candidates = list(candidates)
     if not all_candidates and pack is not None and not default_is_stated:
@@ -609,6 +730,7 @@ def _resolve(
         all_candidates,
         default=default,
         require_legacy_alias_agreement=require_legacy_alias_agreement,
+        allow_run_profile=allow_run_profile,
     )
 
 
@@ -623,6 +745,8 @@ _STATED_ELSEWHERE: Hashable = "<stated by another layer>"
 def collect_force_public_symbols(
     public_symbols: tuple[str, ...],
     symbols_list: Path | None,
+    *,
+    already_read: PublicSymbolsList | None = None,
 ) -> set[str]:
     """Merge ``--public-symbol`` values with a ``--public-symbols-list`` file.
 
@@ -636,9 +760,19 @@ def collect_force_public_symbols(
     importing a CLI-layer module. Reading only the inline tuple made a
     list-file-only invocation resolve to no explicit scope at all, and a
     mixed one silently drop every symbol the file supplied (Codex review).
+
+    *already_read* lets a caller that will *also* build a receipt from this
+    file supply the one read both need. Reading it twice pairs the receipt's
+    digest with content that may not be what scored the run, and lets a file
+    deleted mid-run fail an otherwise-finished comparison during receipt
+    generation (Codex review, fresh evidence) -- the same single-read rule
+    the policy, suppression, project-config, and required-symbol sources
+    already follow.
     """
     out: set[str] = {s.strip() for s in public_symbols if s.strip()}
-    if symbols_list is not None:
+    if already_read is not None:
+        out.update(already_read.items)
+    elif symbols_list is not None:
         out.update(read_symbols_list(symbols_list))
     return out
 
@@ -820,6 +954,8 @@ def resolve_compatibility_evaluation_config(
     front_end: FrontEnd = FrontEnd.CLI,
     explicit: ExplicitCompatibilityInputs | None = None,
     project: ProjectCompatibilityInputs | None = None,
+    profile: RunProfileInputs | None = None,
+    api_spellings: Mapping[str, str] | None = None,
 ) -> CompatibilityEvaluationConfig:
     """Resolve one complete effective configuration plus its receipt.
 
@@ -844,6 +980,11 @@ def resolve_compatibility_evaluation_config(
       the Phase 6 flag's own documented contract ("an explicit value outranks
       those"). Making that pair an error would reject a combination the live
       CLI accepts today.
+
+    *profile* is what a selected ``--profile`` filled in; it contributes at
+    D7's ``run_profile`` tier, between the explicit and project-config
+    layers. See :class:`RunProfileInputs` for the one field it can state and
+    the ADR deviation that field records.
 
     ``"auto"`` never reaches a resolved *value*: ADR-037 D12's third
     ``--exit-code-scheme`` choice means "decide from whether a severity
@@ -878,10 +1019,19 @@ def resolve_compatibility_evaluation_config(
         purpose, so it could not catch that (Codex review). *api_field* is
         ``None`` for an input only the CLI can state, where the CLI spelling
         is the only truthful one.
+
+        *api_field* is the :class:`~abicheck.api_types.CompareRequest`
+        spelling, because that is the typed surface this resolver was built
+        against -- but "the API" is not one namespace. ``ScanRequest`` names
+        the same three inputs ``scope_to_public_surface``/``policy_file``/
+        ``suppression``, so resolving its request at ``FrontEnd.API`` alone
+        still produced field names that entity does not have (Codex review,
+        a second round on the same receipt). *api_spellings* lets a caller
+        remap them per request type; an unmapped field keeps the default.
         """
         if front_end is FrontEnd.CLI or api_field is None:
             return cli_option
-        return api_field
+        return (api_spellings or {}).get(api_field, api_field)
 
     policy_overrides_explicit = _policy_file_override_slugs(explicit.policy_file)
     policy_source = _PolicyFileSource.of(
@@ -904,9 +1054,13 @@ def resolve_compatibility_evaluation_config(
     ):
         pinned_contract[INTERNAL_NAMESPACES_FIELD] = _STATED_ELSEWHERE
     pinned_gate: dict[str, Hashable] = {}
-    if explicit.exit_code_scheme is not None or (
-        project is not None
-        and _stated_exit_code_scheme(project.exit_code_scheme) is not None
+    if (
+        explicit.exit_code_scheme is not None
+        or (profile is not None and profile.exit_code_scheme is not None)
+        or (
+            project is not None
+            and _stated_exit_code_scheme(project.exit_code_scheme) is not None
+        )
     ):
         pinned_gate[EXIT_CODE_SCHEME_FIELD] = _STATED_ELSEWHERE
     # A stated preset owns *every* category it expands into, so those fields
@@ -974,8 +1128,11 @@ def resolve_compatibility_evaluation_config(
     legacy_mode = legacy_contract_mode_candidate(
         scope_public_headers=bool(explicit.scope_public_headers),
         scope_public_headers_is_explicit=explicit.scope_public_headers is not None,
-        # An API caller set `CompareRequest.scope_public`, not a CLI flag.
-        option=None if front_end is FrontEnd.CLI else "scope_public",
+        # An API caller set a request field, not a CLI flag -- and which
+        # field depends on the request type, so it goes through `spell()`
+        # rather than hard-coding `CompareRequest`'s own name. `None` keeps
+        # the CLI's existing "the alias names itself" behaviour.
+        option=None if front_end is FrontEnd.CLI else spell("", "scope_public"),
     )
     if legacy_mode is not None:
         mode_candidates.append(legacy_mode)
@@ -1085,9 +1242,19 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 SelectorLayer.LEGACY_ALIAS,
                 builtin_policy_identity(explicit.policy_base),
-                option=spell("--policy", "policy"),
+                # Same slot whichever option supplied it: an explicit
+                # `--policy-file` outranks a `--required-symbol`-derived base
+                # exactly as it outranks a typed `--policy`, which is what the
+                # live run does too (`effective_policy`).
+                option=explicit.policy_base_option or spell("--policy", "policy"),
                 source_kind="builtin_policy",
                 reference=explicit.policy_base,
+                # The file that selected it, when the selecting option named
+                # one -- `source_sha256`, not `sha256`: the digest identifies
+                # the *source*, while the value is a file-less built-in
+                # policy identity with a digest of its own.
+                path=explicit.policy_base_path,
+                source_sha256=explicit.policy_base_sha256,
             )
         )
     policy_base, prov[POLICY_BASE_FIELD] = _resolve(
@@ -1141,7 +1308,7 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 layer,
                 explicit_preset,
-                option="--severity-preset",
+                option=spell("--severity-preset", "severity_preset"),
                 source_kind="severity_preset",
                 reference=explicit.severity_preset,
                 version=explicit_preset.version,
@@ -1181,7 +1348,10 @@ def resolve_compatibility_evaluation_config(
                 _candidate(
                     layer,
                     SeverityLevel(stated),
-                    option=f"--severity-{category.replace('_', '-')}",
+                    option=spell(
+                        f"--severity-{category.replace('_', '-')}",
+                        f"severity_{category}",
+                    ),
                     source_kind="severity_override",
                 )
             )
@@ -1253,6 +1423,23 @@ def resolve_compatibility_evaluation_config(
                 reference=explicit.exit_code_scheme,
             )
         )
+    # A `--profile` fills this in only where the user left the flag alone, so
+    # it never ties with the explicit candidate above -- it sits between that
+    # and the project config, exactly where D7 puts `run_profile`. See
+    # `RunProfileInputs` for why a gate field accepts that layer at all.
+    profile_scheme = (
+        _stated_exit_code_scheme(profile.exit_code_scheme) if profile else None
+    )
+    if profile_scheme is not None:
+        scheme_candidates.append(
+            _candidate(
+                SelectorLayer.RUN_PROFILE,
+                profile_scheme,
+                option="--profile",
+                source_kind="run_profile",
+                reference=profile.name if profile is not None else None,
+            )
+        )
     # A project config's own `exit_code_scheme:` defaults to the *string*
     # "auto" when the key is absent (`BuildConfig.exit_code_scheme`), so
     # unlike the CLI flag, "auto" there is indistinguishable from unset and
@@ -1278,6 +1465,7 @@ def resolve_compatibility_evaluation_config(
         pack=gate_pack_fields.get(EXIT_CODE_SCHEME_FIELD),
         pack_layer=layer,
         pack_option=pack_option,
+        allow_run_profile=True,
     )
 
     gate_packs, prov[GATE_PACKS_FIELD] = packs_by_field[GATE_PACKS_FIELD]
@@ -1462,6 +1650,10 @@ def compare_cli_inputs(
     explicit_parameters: Collection[str] = (),
     policy_file: PolicyFile | None = None,
     suppression: SuppressionSource | None = None,
+    policy_base_option: str | None = None,
+    policy_base_path: str | None = None,
+    policy_base_sha256: str | None = None,
+    public_symbols_list: PublicSymbolsList | None = None,
 ) -> ExplicitCompatibilityInputs:
     """Normalize the ``compare`` command's real kwargs into resolver inputs.
 
@@ -1478,6 +1670,21 @@ def compare_cli_inputs(
     the command itself carries -- silently ignoring a path the invocation
     really named would make the resolved configuration misrepresent the run.
 
+    *policy_base_option* names the option that selected ``policy`` when it was
+    not ``--policy``: ``compare`` switches an untouched ``--policy`` to
+    ``plugin_abi`` for a ``--required-symbol``/``--required-symbols``
+    contract, and that value is read as stated regardless of
+    *explicit_parameters* (it was not typed, but it was chosen -- see
+    :attr:`ExplicitCompatibilityInputs.policy_base_option`).
+    *policy_base_path*/*policy_base_sha256* identify the list file when that
+    option is the file form.
+
+    *public_symbols_list* is the same "pass what you already read" affordance
+    as *policy_file*/*suppression*: the CLI reads this file to build the live
+    force-public set, so re-reading it here could pair the receipt's digest
+    with content that did not score the run -- and a file deleted mid-run
+    would fail an otherwise-finished comparison (Codex review).
+
     ``--public-symbols-list`` is read into its own
     :class:`PublicSymbolsList` rather than flattened into ``public_symbols``,
     so a list-file-only invocation resolves a real ``surface.explicit_scope``
@@ -1491,11 +1698,9 @@ def compare_cli_inputs(
         return kwargs.get(name) if name in typed else None
 
     symbols_list_path = kwargs.get("public_symbols_list")
-    symbols_list = (
-        PublicSymbolsList.from_file(symbols_list_path)
-        if symbols_list_path is not None
-        else None
-    )
+    if public_symbols_list is None and symbols_list_path is not None:
+        public_symbols_list = PublicSymbolsList.from_file(symbols_list_path)
+    symbols_list = public_symbols_list
     if policy_file is None and kwargs.get("policy_file_path") is not None:
         policy_file = _load_policy_file(kwargs["policy_file_path"])
     if suppression is None and kwargs.get("suppress") is not None:
@@ -1506,7 +1711,12 @@ def compare_cli_inputs(
     return ExplicitCompatibilityInputs(
         contract_mode=kwargs.get("contract_mode"),
         scope_public_headers=_defaulted("scope_public_headers"),
-        policy_base=_defaulted("policy"),
+        policy_base=(
+            kwargs.get("policy") if policy_base_option else _defaulted("policy")
+        ),
+        policy_base_option=policy_base_option,
+        policy_base_path=policy_base_path,
+        policy_base_sha256=policy_base_sha256,
         policy_file=policy_file,
         public_symbols=tuple(kwargs.get("public_symbols") or ()),
         public_symbols_list=symbols_list,
@@ -1670,3 +1880,93 @@ def cross_front_end_equivalent(
 ) -> bool:
     """``True`` when :func:`cross_front_end_differences` finds nothing."""
     return not cross_front_end_differences(a, b)
+
+
+#: The tiers whose hops name an input the *caller* stated, as opposed to a
+#: key inside a file the caller pointed at. Only these are checked against a
+#: request type's fields -- see :func:`unstatable_selectors`.
+_REQUEST_STATED_LAYERS = frozenset(
+    {SelectorLayer.API_REQUEST, SelectorLayer.LEGACY_ALIAS}
+)
+
+
+def unstatable_selectors(
+    config: CompatibilityEvaluationConfig, *, request_type: type | None = None
+) -> list[str]:
+    """Every hop in *config* that names an input its own layer cannot state.
+
+    A receipt exists so a run's inputs can be identified and replayed, so a
+    hop claiming an input the caller never had is worse than a missing one:
+    it is confidently wrong. Four instances have now been found by review:
+    the original explicit-candidate default that motivated ``spell()``,
+    ``--policy``/``--scope-public-headers`` on a ``ScanRequest``,
+    ``--severity-*`` on the MCP tool, and -- once those were routed through
+    ``spell()`` -- a ``ScanRequest`` receipt naming ``CompareRequest``'s
+    ``scope_public``/``policy_file_path``/``suppress``, which is a *different*
+    entity's field list.
+
+    Two checks, because that fourth instance proved the first insufficient
+    on its own:
+
+    * every ``API_REQUEST`` hop must not name a CLI flag (a candidate built
+      with a hard-coded ``"--flag"`` instead of going through ``spell()``);
+    * given *request_type*, every hop at a *front-end-stated* tier
+      (``API_REQUEST`` and ``LEGACY_ALIAS``) must name a real field of it.
+      Without this, "not a flag" passes for any plausible-looking
+      identifier, which is exactly how one wrong spelling was replaced by
+      another. Pass the dataclass the front end actually accepts.
+
+    ``LEGACY_ALIAS`` is included deliberately, and only under *request_type*:
+    the reported ``scope_public`` hop sat at that tier, not ``API_REQUEST``
+    (``--policy``/``scope_public`` are D7 aliases for the fields they
+    select), so a check restricted to the request tier would have passed
+    the very defect it was written for. Layers that describe a *file*
+    (``PROJECT_CONFIG``, ``RUN_RECIPE``, ``RUN_PROFILE``) are excluded:
+    those hops correctly name config keys such as ``severity.preset``,
+    which are not request fields and never should be.
+
+    :func:`cross_front_end_differences` structurally cannot catch either:
+    :func:`_normalized_provenance` drops option spellings *on purpose*, since
+    the same semantic input is legitimately spelled differently per front
+    end. That normalization is what makes the equality gate meaningful and
+    also what makes it blind here, so this is a separate check rather than a
+    stricter setting of that one.
+
+    Returns human-readable descriptions so a failure names the field and the
+    spelling, not merely that one exists. Deliberately one-directional: a CLI
+    hop carrying a bare field name is not an error, because several CLI
+    inputs (a project-config key, a composed scope) genuinely have no flag.
+    """
+    import dataclasses
+
+    known: frozenset[str] | None = None
+    request_name = ""
+    if request_type is not None and dataclasses.is_dataclass(request_type):
+        known = frozenset(f.name for f in dataclasses.fields(request_type))
+        request_name = request_type.__name__
+    offenders: list[str] = []
+    for field_name in sorted(config.provenance):
+        prov = config.provenance[field_name]
+        chain = [
+            prov,
+            *([] if prov.shadowed_legacy is None else [prov.shadowed_legacy]),
+        ]
+        for entry in chain:
+            for hop in entry.selected_by:
+                option = hop.option or ""
+                if hop.layer is SelectorLayer.API_REQUEST and option.startswith("--"):
+                    offenders.append(
+                        f"{field_name}: api_request hop names the CLI flag "
+                        f"{option!r}, which no API caller can pass"
+                    )
+                elif (
+                    known is not None
+                    and option
+                    and hop.layer in _REQUEST_STATED_LAYERS
+                    and option not in known
+                ):
+                    offenders.append(
+                        f"{field_name}: {hop.layer.value} hop names {option!r}, "
+                        f"which is not a field of {request_name}"
+                    )
+    return offenders

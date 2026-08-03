@@ -229,6 +229,13 @@ class ScanRequest:
     pattern_verdicts: bool = False
     env_matrix: EnvironmentMatrix | None = None
     collapse_versioned_symbols: bool = False
+    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side
+    # among the fields the two commands must agree on -- which a
+    # `scan --against` result could not carry at all while only `compare`
+    # could ask for the shadow evaluator. Same advisory contract as
+    # `compare`: stamping a decision never changes verdict or exit code.
+    contract_evaluation: bool = False
+    contract_mode: str | None = None
     # ADR-056: options the single-binary CLI path (cli_scan.py) already
     # forwards straight to run_scan_core, bypassing ScanRequest entirely.
     # Both run_scan and run_scan_set (--artifact-set) honor these when set
@@ -1041,6 +1048,8 @@ def _reject_comparison_only_fields(req: ScanRequest) -> None:
             ("pattern_verdicts", req.pattern_verdicts),
             ("env_matrix", req.env_matrix is not None),
             ("collapse_versioned_symbols", req.collapse_versioned_symbols),
+            ("contract_evaluation", req.contract_evaluation),
+            ("contract_mode", req.contract_mode is not None),
         )
         if is_set
     ]
@@ -1051,6 +1060,100 @@ def _reject_comparison_only_fields(req: ScanRequest) -> None:
             "req.mode not 'audit'); they configure compare_snapshots and "
             "have no effect otherwise."
         )
+
+
+def _scan_request_config(req: ScanRequest) -> Any:
+    """This request's resolved configuration, or ``None`` when unused.
+
+    The API counterpart of ``cli_scan``'s own resolution. Without it a
+    ``run_scan(ScanRequest(..., contract_evaluation=True))`` persisted the
+    context ``checker.compare`` reconstructs from its arguments -- which
+    keeps :class:`GateConfig`'s defaults, so the receipt claimed the
+    ``severity`` scheme while ``run_scan`` computed its 0/2/4 exit straight
+    from the compatibility verdict (Codex review). The CLI was wired first
+    and this path was left behind.
+
+    Every field is read as *stated*, matching
+    :func:`~abicheck.compatibility_evaluation_frontend.compare_request_inputs`:
+    a typed request has no "unset" representation, so a caller constructing
+    one chose those values whether deliberately or by accepting the
+    dataclass default. The gate fields are blanked for the same reason the
+    CLI blanks the project config's -- a scan's exit follows its verdict and
+    never consults them.
+
+    Resolved at :attr:`FrontEnd.API`, so the receipt names this request's own
+    fields rather than the ``--policy``/``--scope-public-headers`` flags
+    nobody typed -- and through
+    :data:`~abicheck.cli_scan_receipt.SCAN_REQUEST_SPELLINGS`, so they are
+    *this* request's names: the default API spelling is ``CompareRequest``'s,
+    which calls three of the same inputs ``scope_public``/
+    ``policy_file_path``/``suppress``, none of which a ``ScanRequest`` has
+    (Codex review, twice on the same receipt).
+    :func:`~abicheck.compatibility_evaluation_frontend.unstatable_selectors`
+    checks both halves now rather than leaving them to review.
+
+    A D7 same-tier conflict or a D8 pack conflict is a *usage* error about
+    the request, but the resolver raises its own :class:`ValueError`
+    subclasses for those. Unmapped, they escaped ``run_scan`` raw -- past a
+    ``try`` that catches only the budget and evidence-contract signals -- so
+    a caller guarding it with ``except ValidationError``, which every other
+    request-validation failure here raises, would not catch them.
+    ``cli_scan.py`` already maps the same failures to ``click.UsageError``;
+    this is the API's equivalent, so a bad request is reported the same way
+    on both front ends (CodeRabbit review). Mapped here rather than at the
+    one call site so a second caller cannot reintroduce the gap.
+
+    One ``except ValueError`` covers every case: ``FieldResolutionError``,
+    ``PackConflictError``, and ``PackManifestError`` -- the three
+    ``cli_scan.scan_cmd`` names individually -- are all ``ValueError``
+    subclasses (``PackManifestError`` through ``AbicheckError``), so naming
+    them adds no coverage. It is also strictly wider, which this front end
+    needs: an unknown ``ScanRequest.policy`` reaches
+    ``builtin_policy_identity`` and raises a *plain* ``ValueError`` that
+    none of the three would have caught. The CLI cannot reach that case --
+    ``--policy`` is a ``click.Choice``, so Click rejects an unknown base
+    before the resolver sees it -- which is why the two front ends' nets
+    differ: they admit different inputs, not different ideas of what a bad
+    request is. Keep them in sync if either gains a new failure mode.
+
+    The breadth has a real cost worth stating: an internal ``ValueError``
+    from a bug inside the resolver would also be reported as a bad request
+    rather than crashing. That is the accepted trade -- every ``ValueError``
+    this resolver raises today *is* a statement about the request's own
+    values, and misreporting a hypothetical internal one is better than
+    letting a genuine bad request escape as an unhandled exception through
+    a Tier-2 API whose other validation failures all raise
+    ``ValidationError``.
+    """
+    if not req.contract_evaluation or req.baseline is None:
+        return None
+    from .cli_scan_receipt import resolve_scan_config
+    from .compatibility_evaluation_frontend import FrontEnd, stated_policy_base
+    from .errors import ValidationError
+
+    try:
+        return resolve_scan_config(
+            {
+                # Dropped when a `policy_file` overrode it, exactly as the
+                # comparison itself treats it -- otherwise an accepted
+                # request (unknown name, valid file) died in its own receipt
+                # before the comparison ran (Codex review, the same defect
+                # already fixed on the MCP path; the helper is shared now).
+                "policy": stated_policy_base(req.policy, req.policy_file),
+                "policy_file_path": None,
+                "suppress": None,
+                "scope_public_headers": req.scope_to_public_surface,
+                "public_symbols": tuple(sorted(req.force_public_symbols or ())),
+                "public_symbols_list": None,
+                "contract_mode": req.contract_mode,
+            },
+            typed={"policy", "scope_public_headers"},
+            policy_file=req.policy_file,
+            suppression=req.suppression,
+            front_end=FrontEnd.API,
+        )
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 def run_scan(req: ScanRequest) -> ScanResult:
@@ -1095,6 +1198,17 @@ def run_scan(req: ScanRequest) -> ScanResult:
     # caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
     if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
         _reject_comparison_only_fields(req)
+    else:
+        # ADR-049 Phase 6's own rule, applied where the CLI applies it: up
+        # front, not after the scan. `compare_snapshots` already rejects the
+        # combination at the Tier-2 boundary (`service._validate_contract_mode`,
+        # which this reuses rather than restating), so it was never silently
+        # accepted -- but reaching that check means a full scan runs first and
+        # then fails, where `scan_cmd` rejects the same request before any work
+        # (CodeRabbit review).
+        from .service import _validate_contract_mode
+
+        _validate_contract_mode(req.contract_mode, req.contract_evaluation)
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
 
@@ -1203,6 +1317,9 @@ def run_scan(req: ScanRequest) -> ScanResult:
             pattern_verdicts=req.pattern_verdicts,
             env_matrix=req.env_matrix,
             collapse_versioned_symbols=req.collapse_versioned_symbols,
+            contract_evaluation=req.contract_evaluation,
+            contract_mode=req.contract_mode,
+            resolved_config=_scan_request_config(req),
             abi3_floor=req.abi3_floor,
         )
     except _BudgetOverflow:

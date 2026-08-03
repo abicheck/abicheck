@@ -68,7 +68,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from check_fp_rate import CORPUS, Case, _category_of  # noqa: E402
+from check_fp_rate import CORPUS as FP_CORPUS, Case, _category_of  # noqa: E402
+from contract_platform_corpus import (  # noqa: E402
+    PLATFORM_CORPUS,
+    UNCOVERED_LANES,
+    lane_of,
+)
 
 from abicheck.checker import compare  # noqa: E402
 from abicheck.checker_policy import (  # noqa: E402
@@ -95,6 +100,18 @@ MEASURED_MODES: tuple[ContractMode, ...] = (
     ContractMode.EXPORTS,
     ContractMode.ALL,
 )
+
+#: Everything measured: the labelled FP-rate corpus (the ground truth for
+#: losses and FP reductions) plus ADR-049 Phase 6's platform/shape corpus.
+#:
+#: The second was added because the first, by construction, carries no export
+#: tables -- so the `exports` domain measured 100% unresolved on every case,
+#: and "measured and accepted unresolved rate" was, for that domain, measuring
+#: only the absence of evidence. `contract_platform_corpus` supplies the
+#: ELF/PE/Mach-O, stripped, versioned, and C lanes Phase 6's Gate names, each
+#: tagged so the unresolved rate can be reported *per lane* rather than as one
+#: number whose composition is invisible.
+CORPUS: list[Case] = [*FP_CORPUS, *PLATFORM_CORPUS]
 
 PROVEN_LOSS_BASELINE = 0
 UNEVIDENCED_DELTA_BASELINE = 0
@@ -159,6 +176,14 @@ class ModeMeasurement:
     #: ``{observed_export_tables: [resolved, unresolved]}`` -- item 2's
     #: platform axis, keyed by the tables the pair actually carried.
     by_platform: dict[str, list[int]] = field(default_factory=dict)
+    #: ``{lane: [resolved, unresolved]}`` -- ADR-049 Phase 6's own axis, the
+    #: Gate's corpus list (`elf`/`pe`/`macho`/`stripped`/`versioned`/`c`, plus
+    #: `fp_corpus` for the labelled scoping corpus). Distinct from
+    #: `by_platform`, which keys on the export tables a pair happened to
+    #: carry: two lanes can share a platform key (an ELF break and a stripped
+    #: ELF pair are both `elf`) while testing different evidence shapes, and
+    #: it is the *shape* Phase 6 asks to have covered.
+    by_lane: dict[str, list[int]] = field(default_factory=dict)
     proven_losses: list[str] = field(default_factory=list)
     fp_reductions: list[str] = field(default_factory=list)
     unevidenced_deltas: list[str] = field(default_factory=list)
@@ -261,6 +286,7 @@ def measure_case(case: Case, mode: ContractMode) -> ModeMeasurement:
                 out.unresolved += 1
             _tally(out.by_provider_state, provider_state, resolved)
             _tally(out.by_platform, platform, resolved)
+            _tally(out.by_lane, lane_of(case.name), resolved)
             # Keyed exactly as `checker` writes the receipt -- through the
             # report's own `finding_id`, not a second spelling of the
             # convention (a mismatch here would report every finding as lost).
@@ -354,7 +380,7 @@ def _merge(into: ModeMeasurement, other: ModeMeasurement) -> None:
         for relevance, count in row.items():
             target[relevance] = target.get(relevance, 0) + count
     into.unresolved += other.unresolved
-    for bucket_name in ("by_provider_state", "by_platform"):
+    for bucket_name in ("by_provider_state", "by_platform", "by_lane"):
         target_bucket = getattr(into, bucket_name)
         for key, row in getattr(other, bucket_name).items():
             existing = target_bucket.setdefault(key, [0, 0])
@@ -387,6 +413,10 @@ def metrics(
     measurements = measurements or measure()
     return {
         "cases": len(CORPUS),
+        # Bounded honestly: the coverage claim is what was actually run, not
+        # what Phase 6's Gate list mentions. A lane this measurement cannot
+        # reach is named with its reason rather than silently absent.
+        "uncovered_lanes": dict(sorted(UNCOVERED_LANES.items())),
         "modes": {
             mode: {
                 "findings": m.findings,
@@ -404,6 +434,10 @@ def metrics(
                 "unresolved_by_platform": {
                     key: {"resolved": row[0], "unresolved": row[1]}
                     for key, row in sorted(m.by_platform.items())
+                },
+                "unresolved_by_lane": {
+                    key: {"resolved": row[0], "unresolved": row[1]}
+                    for key, row in sorted(m.by_lane.items())
                 },
                 "proven_public_break_losses": sorted(m.proven_losses),
                 "proven_false_positive_reductions": sorted(m.fp_reductions),
@@ -471,6 +505,37 @@ def render_markdown(m: dict[str, object]) -> str:
             f"{row['unresolved_rate']:.2%} | "
             f"{len(row['proven_false_positive_reductions'])} |"
         )
+
+    # ADR-049 Phase 6's own axis. The aggregate unresolved rate above says
+    # *how much* is unresolved; only this says *where*, which is what makes
+    # the number acceptable-or-not rather than merely reported: a domain
+    # unresolved exactly on the lanes carrying no evidence for it is working
+    # as designed, and one unresolved on a lane that does carry evidence is
+    # a defect the aggregate would hide.
+    lanes = sorted({lane for row in modes.values() for lane in row["unresolved_by_lane"]})
+    if lanes:
+        lines += [
+            "",
+            "Unresolved rate by lane (Phase 6's corpus axis):",
+            "",
+            "| Domain | " + " | ".join(lanes) + " |",
+            "|--------|" + "|".join("---:" for _ in lanes) + "|",
+        ]
+        for mode, row in modes.items():
+            cells = []
+            for lane in lanes:
+                counts = row["unresolved_by_lane"].get(lane)
+                if not counts:
+                    cells.append("—")
+                    continue
+                total = counts["resolved"] + counts["unresolved"]
+                cells.append(f"{counts['unresolved']}/{total}")
+            lines.append(f"| {mode} | " + " | ".join(cells) + " |")
+
+    uncovered = m.get("uncovered_lanes") or {}
+    if uncovered:
+        lines += ["", "Lanes not covered by this measurement:", ""]
+        lines += [f"- **{lane}** — {why}" for lane, why in uncovered.items()]  # type: ignore[union-attr]
     return "\n".join(lines)
 
 

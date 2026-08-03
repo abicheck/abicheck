@@ -242,10 +242,33 @@ Core pipeline (in order of data flow):
      defaults), a typed `CompareRequest`, and the project's `.abicheck.yml`.
      `cross_front_end_differences()` is this phase's gate as an executable
      check: equivalent CLI and API input must resolve equally, modulo only
-     which front end stated a value. Resolution only — no live command
-     constructs it (Phase 5 owns consuming it, Phase 7 the default flip), so
-     it changes no verdict, finding, or exit code. Reference:
-     `docs/reference/compatibility-evaluation-config.md`
+     which front end stated a value. Resolution only — it changes no verdict,
+     finding, or exit code (Phase 7 owns the default flip). ADR-049 Phase 5
+     wired the native `compare` CLI to it: `cli_compare_receipt.py` resolves
+     one object per invocation from the raw CLI values + which parameters
+     Click reports as typed + the discovered `.abicheck.yml` + a selected
+     `--profile` (`RunProfileInputs`, D7's `run_profile` tier), and installs
+     it via `contract_context.with_resolved_config` so the persisted
+     `evaluation_context` carries real per-field D7 provenance instead of
+     `checker.compare`'s honest `API_REQUEST` under-claim. The gate is the
+     one split: values from `resolve_compare_config` (what actually scored
+     the run), provenance from this resolver, with
+     `tests/test_cli_compare_config_receipt.py` asserting the two agree.
+     Reference: `docs/reference/compatibility-evaluation-config.md`
+   - `mcp_compare_receipt.py` — the same thing for the MCP `abi_compare`
+     tool (ADR-049 Phase 5), which previously patched its own gate rather
+     than resolving a config. `resolve_tool_config` hands the tool's real
+     arguments (`policy`/`policy_file`/`suppression_file` + the four
+     severity levels) to the canonical resolver at `FrontEnd.API`;
+     `record_resolved_config` installs the result through
+     `with_resolved_config` before the report renders, keeping the CLI's
+     "values from the run, provenance from the resolver" gate split. The
+     receipt states only what this tool *has*: `abi_compare` takes no
+     scope/contract/public-symbol/exit-code-scheme parameter, so those
+     resolve as built-in defaults — honest, since `compare_snapshots`'
+     own `scope_to_public_surface` default agrees with
+     `BUILT_IN_DEFAULT_CONTRACT_MODE` by construction. A leaf; nothing
+     imports back into the server
    - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
      evaluator: one `ContractEvaluationDecision` (relevance + stable reason
      code + assurance) per already-emitted finding. Stamped onto findings
@@ -270,6 +293,21 @@ Core pipeline (in order of data flow):
      (`evidence_refs_for_reason` → `Change.contract_evidence_refs`). "Not
      consulted" is deliberately encoded as an absent entry, never as a
      failed one
+   - `contract_coverage_ledger.py` — ADR-049 Phase 5's *unsuppressible*
+     sibling ledger (plan §6.1/§6.2, Definition-of-done item 6). Derives
+     `contract_coverage_failures` from the observed provider records **for
+     the selected `--contract` domain** — the same record is a failure under
+     one domain and advisory under another (§7), so it is answered per mode
+     rather than recorded at collection time, which would also go stale under
+     `reevaluate_from_evidence`. Unsuppressibility is structural: a
+     `CoverageFailure` is not a `Change` (no `ChangeKind`, no symbol, never
+     in `DiffResult.changes`), so `checker._filter_suppressed_changes` — the
+     one place suppression is applied — cannot see one;
+     `suppression_reaches_coverage_failures()` is the executable *proof* of
+     that, not its enforcement. `coverage_exit_contribution()` states §6.1's
+     `0`/`1`; nothing applies it, since the independent coverage exit is
+     Phase 7's. Emitted by `reporter.py` under `--contract-evaluation`
+     (report schema 2.26), `[]` rather than omitted when a domain closed
    - `contract_context.py` / `contract_context_io.py` / `contract_replay.py`
      — ADR-049 Phase 4's assembly, JSON round-trip, and the two procedures
      D6 names. `checker.compare(..., contract_evaluation=True)` returns a

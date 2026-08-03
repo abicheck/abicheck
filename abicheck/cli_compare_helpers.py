@@ -59,11 +59,12 @@ from .cli_compare_fold import (
 )
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
-    _collect_force_public_symbols,
     _pair_wide_dialect_override,
     _resolve_per_side_options,
     _warn_ignored_flags,
     fold_l0_hard_removals,
+    load_required_symbols,
+    resolve_force_public_scope,
 )
 from .cli_options import resolve_compile_context
 from .cli_params import _load_suppression_and_policy
@@ -140,19 +141,27 @@ def _resolve_compare_config(
     debuginfod: bool,
     debuginfod_url: str | None,
     show_redundant: bool,
-) -> tuple[Path | None, object, ResolvedCompareConfig]:
+) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
     ADR-037 D4: resolved *before* dispatch so both the single-file and the
     directory/package fan-out paths share one resolution. Auto-discovered from the
     current directory upward, overridable with ``--config``.
+
+    The fourth element is the digest of the bytes the config was parsed from
+    (``None`` when there is no config), captured by the same read so an
+    ADR-049 receipt can prove *which revision* of the file supplied a value
+    rather than only naming its path (Codex review, fresh evidence).
     """
-    from .buildsource.inline import load_build_config
+    from .buildsource.build_config_io import load_build_config_with_digest
     from .cli_helpers_compare import discover_project_config, resolve_compare_config
 
     cfg_path = config if config is not None else discover_project_config()
+    cfg_sha: str | None = None
     try:
-        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
+        project_cfg = None
+        if cfg_path is not None:
+            project_cfg, cfg_sha = load_build_config_with_digest(cfg_path)
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 
@@ -187,7 +196,7 @@ def _resolve_compare_config(
         cli_debuginfod_url=debuginfod_url,
         cli_show_redundant=_cli_flag("show_redundant", show_redundant),
     )
-    return cfg_path, project_cfg, resolved_cfg
+    return cfg_path, project_cfg, resolved_cfg, cfg_sha
 
 
 def _reject_set_input_flags(
@@ -934,24 +943,6 @@ def _apply_required_symbol_scoping(
     return exit_code
 
 
-def _load_required_symbols(
-    symbols: tuple[str, ...], symbols_file: Path | None,
-) -> tuple[str, ...]:
-    """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
-
-    The file format is one symbol per line; blank lines and ``#`` comments are
-    ignored (ADR-043, folds the removed ``plugin-check`` command's manifest).
-    """
-    combined = list(symbols)
-    if symbols_file is not None:
-        for line in symbols_file.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                combined.append(stripped)
-    # De-duplicate while preserving first-seen order.
-    return tuple(dict.fromkeys(combined))
-
-
 def _render_compare_dry_run(
     *,
     old_input: Path, new_input: Path,
@@ -1225,7 +1216,9 @@ def run_compare(
             "report with the secondary one."
         )
 
-    required_symbols = _load_required_symbols(required_symbols_opt, required_symbols_file)
+    required_symbols, required_symbols_from_file, required_symbols_sha = (
+        load_required_symbols(required_symbols_opt, required_symbols_file)
+    )
     if used_by_apps and required_symbols:
         raise click.UsageError(
             "--used-by and --required-symbol/--required-symbols are mutually "
@@ -1234,13 +1227,35 @@ def run_compare(
         )
     # Required-symbol contracts default to the plugin-oriented policy unless the
     # user explicitly picked one -- an explicit --policy always wins (ADR-043).
+    # Recorded, not just applied: the ADR-049 receipt has to name whatever
+    # really selected `policy.base`, and this value was chosen by a typed
+    # `--required-symbol` rather than by `--policy` or a built-in default
+    # (Codex review, fresh evidence -- the receipt claimed `strict_abi` for a
+    # run that used `plugin_abi`).
+    # Which spelling actually *contributed* decides what the receipt names --
+    # not merely which was passed. A `--required-symbols FILE` run never
+    # passed `--required-symbol`, so naming the inline flag fabricates a
+    # selector; but a file that parsed to nothing selected nothing either, so
+    # naming it for a `--required-symbol api_b --required-symbols empty.txt`
+    # run omits the option that really made the contract non-empty (Codex
+    # review, two rounds). The file form wins when it contributed, since it is
+    # then both true and the one carrying a path and digest to audit.
+    policy_selected_by: str | None = None
+    policy_selected_path: Path | None = None
+    policy_selected_sha: str | None = None
     if required_symbols and ctx.get_parameter_source("policy") != click.core.ParameterSource.COMMANDLINE:
         policy = "plugin_abi"
+        if required_symbols_from_file:
+            policy_selected_by = "--required-symbols"
+            policy_selected_path = required_symbols_file
+            policy_selected_sha = required_symbols_sha
+        else:
+            policy_selected_by = "--required-symbol"
 
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    cfg_path, project_cfg, resolved_cfg = _resolve_compare_config(
+    cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
         config=config,
         severity_preset=severity_preset,
         severity_abi_breaking=severity_abi_breaking,
@@ -1633,7 +1648,9 @@ def run_compare(
     # returns None here when suppress itself was None, so suppression is
     # guaranteed non-None at this point too.
 
-    force_public = _collect_force_public_symbols(
+    # One read for both consumers -- the live overlay and the ADR-049 receipt
+    # that names this file with its digest (see the helper for why).
+    force_public, symbols_list = resolve_force_public_scope(
         resolved_cfg.public_symbols, public_symbols_list
     )
     _warn_force_public_ignored(force_public, scope_public_headers)
@@ -1693,17 +1710,66 @@ def run_compare(
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
-    from .cli_compare_receipt import SEVERITY_PARAMS, record_resolved_gate
-
-    record_resolved_gate(
-        result,
-        resolved_cfg,
-        project_cfg,
-        # Only this module holds the Click context, so it answers "did the
-        # user type this?" and hands the answers over as data -- which is
-        # what keeps `cli_compare_receipt` a leaf.
-        typed={name: _param_from_cli(name) for name in SEVERITY_PARAMS},
+    from .cli_compare_receipt import record_resolved_config, typed_parameter_names
+    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
+    from .compatibility_evaluation_resolver import (
+        FieldResolutionError,
+        PackConflictError,
     )
+    from .errors import PackManifestError
+
+    try:
+        record_resolved_config(
+            result,
+            resolved_cfg,
+            project_cfg,
+            # The raw CLI values, not the already-merged ones several of
+            # these locals were overwritten with above: the resolver's whole
+            # job is to merge them itself, from each layer's own inputs, and
+            # handing it a pre-merged value would make every field look
+            # CLI-stated.
+            params={
+                "contract_mode": contract_mode,
+                "scope_public_headers": scope_public_headers,
+                "policy": policy,
+                "policy_file_path": policy_file_path,
+                "public_symbols": public_symbols,
+                "public_symbols_list": public_symbols_list,
+                "suppress": suppress,
+                "require_justification": require_justification,
+                "exit_code_scheme": exit_code_scheme,
+                "severity_preset": severity_preset,
+                "severity_abi_breaking": severity_abi_breaking,
+                "severity_potential_breaking": severity_potential_breaking,
+                "severity_quality_issues": severity_quality_issues,
+                "severity_addition": severity_addition,
+                # ADR-049 D8 pack manifests are resolvable but not yet applied
+                # by the engine, so no front end selects one (Codex review).
+                "pack_paths": (),
+            },
+            # Only this module holds the Click context, so it answers "did the
+            # user type this?" and hands the answers over as data -- which is
+            # what keeps `cli_compare_receipt` a leaf.
+            typed={n for n in typed_parameter_names() if _param_from_cli(n)},
+            project_path=cfg_path,
+            # Both already loaded for the comparison itself; re-reading them
+            # here could pair one content's digest with another's rules.
+            policy_file=pf,
+            suppression=suppression,
+            suppress_path=suppress,
+            run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
+            policy_option=policy_selected_by,
+            policy_path=policy_selected_path,
+            policy_sha256=policy_selected_sha,
+            project_sha256=cfg_sha,
+            symbols_list=symbols_list,
+        )
+    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+        # A D7 same-tier conflict / D8 pack conflict / malformed manifest is a
+        # usage error, the exit code the resolver's own docstring leaves to
+        # its front end. Only reachable under --contract-evaluation, which is
+        # the only thing that builds a context to record onto.
+        raise click.UsageError(str(exc)) from exc
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed

@@ -213,6 +213,7 @@ module = [
     "abicheck.probe_harness",
     "abicheck.bundle",
     "abicheck.bundle_manifest",
+    "abicheck.buildsource.build_config_io",
     "abicheck.buildsource.extractor_manifest",
     "abicheck.buildsource.inline",
     "abicheck.buildsource.project_targets",

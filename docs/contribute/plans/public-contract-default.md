@@ -3426,6 +3426,368 @@ include the now-appended `expires=2000-01-01`, and added
 only by `expires`, asserting distinct `near_expiry_rules` labels each
 containing their own date).
 
+**Updated (2026-08-01): the phase's headline item landed for `compare` --
+"every front end consumes one `CompatibilityEvaluationConfig`" (§12's
+Definition-of-Done item 2) is now true of the native CLI.** Phase 1 built
+the canonical resolver and Phase 4 persisted an `evaluation_context` block,
+but nothing joined them: the block carried what `checker.compare`
+reconstructed from its own arguments, and the CLI patched the two fields it
+happened to know about afterwards (`cli_compare_receipt.record_resolved_gate`
+for the gate, `with_field_provenance` for a typed `--contract`). Because a
+core verb sees values and not the inputs that chose them, every other field
+was recorded at `API_REQUEST` -- honest, but useless to an audit consumer
+asking *which* layer selected a value. `run_compare` now resolves its own
+inputs through `resolve_compatibility_evaluation_config` -- the raw CLI
+values (not the already-merged locals several of them are overwritten with),
+the set of parameters Click reports as really typed, the discovered
+`.abicheck.yml`, and the already-loaded `--policy-file`/`--suppress`
+documents (passed in rather than re-read, so one content's digest cannot be
+paired with another's rules) -- and installs the result through a new
+`contract_context.with_resolved_config`. Every field's provenance is now the
+real D7 layer with the path and digest a replay would re-read.
+
+Two seams needed a decision rather than plumbing. **The gate** is resolved
+by `resolve_compare_config` *after* `compare()` returns and is what the
+verdict and exit code were actually computed from, so its *values* are still
+written by `with_resolved_gate` from that resolution, while its *provenance*
+comes from the canonical resolver. That split is only sound while the two
+agree, so it is asserted rather than assumed:
+`tests/test_cli_compare_config_receipt.py::TestGateParityWithTheLiveRun`
+resolves both from the same inputs across a parametrized matrix and compares
+the scheme and all four severity levels. **Observed overlays** go the other
+way: `contract.overlays`/`surface.explicit_scope` are recovered from the
+run's own evidence ledger (`overlay_selection`) and name what actually
+applied, including `--post-manifest`, which no front-end input model
+describes -- so `with_resolved_config` keeps both from the core's version
+whenever the ledger recorded any overlay, and takes the resolver's otherwise.
+
+**A real bug fell out of the wiring, in `--profile`.** `apply_compare_profile`
+fills a profile's values into the command's own kwargs wherever the user left
+the option alone and deliberately does *not* stamp a parameter source
+("nothing downstream needs the source" -- its own docstring). Once a receipt
+resolves D7 layers, that stopped being true in the worst way: the injected
+value is indistinguishable from a typed one, so `--profile ci-gate` first
+resolved `gate.exit_code_scheme` as `EXPLICIT_CLI`, and blanking it there
+resolved it to `legacy` -- a *wrong value* for a run that really scored under
+`severity`, not merely an unnamed source. The profile now records what it
+injected in `ctx.meta` (`RUN_PROFILE_META_KEY`), the receipt blanks those
+keys from the explicit tier, and a new `RunProfileInputs` re-contributes them
+at D7's own `run_profile` layer -- below an explicit flag, above the project
+config.
+
+That layer carries **a deliberate ADR deviation, recorded rather than
+smoothed over**: D7 scopes `run_profile` to execution fields (depth, format,
+budget, workflow) and puts the exit-code scheme in the *gate* namespace, yet
+the pre-existing `ci-gate` bundle really does select it. Encoding what the
+bundle does today is the honest receipt; both ways to remove the deviation
+(move the key out of `ci-gate` into a gate pack, or amend D7) change
+user-visible behavior or the ADR, so neither belongs in the wiring change
+that found it. Only that one field passes `allow_run_profile=True`, so a
+profile assigning any other field still raises -- which is what keeps the
+deviation from spreading.
+
+`cli_options.py` crossed the 2000-line hard cap on the way, so ADR-040
+Lever 3's run-profile *data* (the table, its `--profile` option, the meta
+key) moved to a new leaf, `cli_profiles.py`, re-exported from its former
+home. `apply_compare_profile`/`_profile_targets_set_input` deliberately
+stayed behind: they reach `cli_resolve`, and moving them would have made the
+new module a fresh member of the CLI-registration import cycle -- exactly
+what the `import-cycle-growth` gate exists to catch, and unnecessary, since
+the split works without one.
+
+**Two Codex review findings on this slice, both real, both fixed.** (1) A
+`--required-symbol` contract switches an untouched `--policy` to `plugin_abi`
+(ADR-043) — a value that is neither typed, nor a project setting, nor the
+built-in default, so a resolution reading only typed flags recorded
+`strict_abi` while the run scored under `plugin_abi`, exactly the wrong-receipt
+class this wiring exists to remove. `ExplicitCompatibilityInputs` gained
+`policy_base_option`: the value is read as stated, and the receipt names
+`--required-symbol` rather than a `--policy` nobody passed. It stays in the
+`LEGACY_ALIAS` slot, so an explicit `--policy-file` still outranks it — which
+is what `effective_policy` does live. (2) Keeping the *observed*
+`surface.explicit_scope` provenance wholesale dropped what the resolver had
+just captured for `--public-symbols-list`: the layer, the option, the path and
+the digest of the file that selected the scope, leaving a replay unable to find
+it. Value and receipt answer different questions, so they now follow different
+rules — the ledger's value (what applied), the resolver's entry with the
+observed hop appended (what selected it), and the core's entry alone only when
+the front end modelled no scope at all (a `--post-manifest`-only run).
+
+**Two more Codex findings on the same slice, both about a receipt that names
+a source it cannot prove.** (3) The `--required-symbol`-derived policy fix
+above hardcoded `--required-symbol` as the selector, but a
+`--required-symbols FILE` run never passes that flag — the receipt named an
+option the user did not use and left the list that really chose `plugin_abi`
+unidentifiable. The file form is now named whenever a file was given, with
+its path and a digest taken from `_load_required_symbols`' own single read.
+(4) `ProjectCompatibilityInputs` was built with a path and no `sha256`, so
+every project-derived entry could name `.abicheck.yml` but not prove which
+revision of it supplied the value — unlike the policy and suppression
+sources, which carry digests for exactly that reason.
+`load_build_config_with_digest` returns the config and the digest of the
+bytes it parsed from one read (over raw bytes, so a CRLF file matches what is
+on disk rather than its newline-normalized rendering), and
+`_resolve_compare_config` threads it through. It landed in a new leaf,
+`buildsource/build_config_io.py`, rather than beside `load_build_config`:
+`inline.py` is at its 2000-line hard cap, and the dependency runs one way
+(the new module imports `BuildConfig`; `inline` does not import it back), so
+no cycle forms and every values-only caller keeps using `load_build_config`
+unchanged. Hashing the path at the call site instead was rejected —
+`ProjectCompatibilityInputs.sha256`'s own docstring refuses to compute the
+digest from a path for exactly the pairing reason a second read reintroduces.
+
+**Three more findings, one of them a CI break.** (5) The new module reads
+YAML, and `pyproject.toml`'s stubless-PyYAML mypy override lists modules
+explicitly — omitting it broke the zero-error typecheck gate in any
+environment without `types-PyYAML`. Added to the existing override rather
+than an inline ignore, per this file's own rule. (6) `contract.overlays` is
+routable from a `kind: contract` pack, so "no front-end input" was wrong:
+with a pack assignment *and* an observed overlay, replacing the value
+dropped the pack's selection and its provenance. The value is now the union
+of both sets and the entries merge, the same rule `surface.explicit_scope`
+already followed (CodeRabbit review). (7) `COMPARE_CONFIG_PARAMS` declared
+that a renamed option should fail loudly, but nothing checked the caller's
+mapping against it — `resolve_cli_config` now rejects a partial one instead
+of letting a dropped key resolve as "not stated".
+
+**An eighth finding closed the last re-read.** `--public-symbols-list` was
+read twice: once by `_collect_force_public_symbols` for the live overlay, and
+again by `compare_cli_inputs` for the receipt. Beyond the digest-pairing risk
+every other source was already fixed for, this one had a worse failure mode —
+a file deleted after the comparison started failed an *otherwise finished*
+run during receipt generation. `resolve_force_public_scope`
+(`cli_helpers_compare.py`) now does the one read both consumers share, and
+`collect_force_public_symbols`/`compare_cli_inputs` each accept the
+already-read list. Test:
+`test_a_symbols_list_deleted_mid_run_does_not_fail_the_comparison`, which
+deletes the file at the moment the receipt is recorded. Two cleanups fell
+out: `with_field_provenance` lost its last caller when the resolver took over
+`contract.mode` provenance, so it was deleted rather than left as an uncalled
+seam; and `cli_compare_helpers.py` crossed its cap again, which the helper's
+new home in `cli_helpers_compare.py` resolved.
+
+**A ninth finding sharpened the file-attribution rule itself.** "Name the
+file form whenever a file was given" was still a claim about what was
+*passed*, not what *contributed*: for `--required-symbol api_b
+--required-symbols empty.txt` the file parses to nothing, so naming it omits
+the option that actually made the contract non-empty.
+`_load_required_symbols` now also returns what the file itself contributed,
+and the file form is named only when that is non-empty — true and
+audit-carrying when it holds, the inline form otherwise.
+
+**Updated (2026-08-01, same PR): the MCP front end closed the second half of
+Definition-of-Done item 2.** `abi_compare` patched its own gate
+(`mcp_server._record_resolved_gate`) instead of resolving a config, leaving
+the CLI as the only front end that consumed one. A new leaf,
+`mcp_compare_receipt.py`, does for the tool what `cli_compare_receipt.py`
+does for the CLI: `resolve_tool_config` hands the tool's real arguments
+(`policy`/`policy_file`/`suppression_file` and the four severity levels) to
+the same canonical resolver at `FrontEnd.API`, and `record_resolved_config`
+installs the result through `with_resolved_config` before the report is
+rendered, keeping the same "values from the run, provenance from the
+resolver" split the CLI gate documents. The 90-line `_record_resolved_gate`
+was deleted rather than left as a second path to the same block.
+
+Resolving through the shared resolver removed a real divergence, not only
+duplicated code. The deleted patch recorded `gate.exit_code_scheme`'s
+provenance as `api_request` whenever a severity argument was passed --
+but no caller ever asks for the `severity` scheme there; it is *derived*
+from a severity level being in effect, which the canonical resolver
+records as a built-in default with `source_kind: auto`, and whose real
+provenance is carried by the severity field itself. `compare`'s receipt
+for the equivalent input already read `built_in_default`/`auto`, so the
+MCP tool had been over-claiming relative to the CLI on the one field both
+front ends compute the same way.
+`test_mcp_server_coverage.TestAbiCompareResolvedGate` was updated to the
+corrected answer with that reasoning recorded in it.
+
+The receipt states only what this tool can state, which is less than the
+CLI's: `abi_compare` has no scope, contract-mode, public-symbol, or
+exit-code-scheme parameter, so those resolve as built-in defaults rather
+than as an API request. That is not an under-claim -- unlike
+`CompareRequest.scope_public`, whose dataclass default is still a caller's
+choice, there is nothing here for a caller to have chosen, and
+`compare_snapshots`' own `scope_to_public_surface` default agrees with
+`BUILT_IN_DEFAULT_CONTRACT_MODE` by construction. New:
+`tests/test_mcp_compare_config_receipt.py`, whose last test runs Phase 1's
+own gate across the two live front ends -- equivalent CLI and MCP input must
+produce zero `cross_front_end_differences`.
+
+**Updated (2026-08-01, same PR): §6.4's cross-command parity Gate is now an
+executable field-for-field check.** The suite compared exit codes only, which
+cannot tell "both commands found the same break" from "both commands found
+*a* break" -- and two of §6.4's named equal fields were not observable from
+`scan --against` at all: it emitted no detector provenance, and it had no
+`--contract-evaluation`, so no finding of its could carry a contract
+relevance/reason/assurance/evidence side to compare. Three changes closed
+that:
+
+1. `scan --against` gained `--contract-evaluation`/`--contract`, threaded
+   through `run_scan_core`/`_run_baseline_compare` into the
+   `compare_snapshots` call it already made, with matching `ScanRequest`
+   fields for the Python API. Same advisory contract as `compare`'s, same
+   `--contract requires --contract-evaluation` rejection (checked in
+   `scan_cmd` so it is a clean exit-64 usage error before any scanning
+   work), and both are in `_COMPARISON_ONLY_FLAGS` so passing them without
+   `--against` is rejected rather than silently discarded.
+2. The scan summary's per-finding dicts gained `finding_id` -- the same
+   canonical identity `reporter._change_to_dict` emits, so the two commands'
+   findings are *joinable* rather than merely both present -- plus the four
+   contract keys under the same "absent means unstamped" rule the reporter
+   uses, and the summary gained a `detectors` block with the reporter's own
+   shape and "findings or a coverage gap" filter.
+3. `tests/test_scan_compare_parity.py`'s new `TestFieldForFieldParity`
+   compares the two commands' shared gating findings as records joined on
+   `finding_id`, across a matrix of defaults / `--policy` / scope on / scope
+   off / `--public-symbol` / all three `--contract` domains /
+   `--pattern-verdicts`, on a snapshot pair rich enough to engage the
+   function, type, and enum detectors at once. Suppression is compared
+   field-for-field on both audit trails (a rule silencing a *different*
+   finding on each side would otherwise still report "1 suppressed" on
+   both), and §6.4's "scan-only findings may be appended, they cannot
+   rewrite the shared comparison findings" is its own assertion.
+   `TestBinaryAndMixedInputParity` (`integration`) extends the same
+   assertions to two real compiled binaries and to a persisted-snapshot
+   baseline against a live binary -- the two commands resolve operands
+   through different code paths, so snapshot parity does not imply binary
+   parity.
+
+`SCAN_SCHEMA_VERSION` went to `1.6` for the additive `diff`-block keys
+(`finding_id` on every finding, the optional `detectors` list, and the four
+contract keys under `--contract-evaluation`), with the entry recording
+exactly what a run *without* the new flag changes relative to 1.5: the
+version marker, `finding_id`, and the `detectors` list -- the last of which,
+unlike the contract keys, is emitted regardless of the flag.
+
+Two smaller things the work forced. The helper reads both reports from
+`-o` files rather than captured stdout: parsing scan's stdout works for a
+snapshot pair and breaks the moment the operand is a real binary, which
+writes warnings to the same stream. And because the scan summary
+re-implements the reporter's contract-field projection rather than importing
+it, a test pins that the two name the same decision with the same keys, so
+the duplication cannot drift into two vocabularies for one field.
+
+**Updated (2026-08-01, same PR): the unsuppressible coverage ledger landed
+-- §12's item 6 and this phase's last open piece.** Item 6 is two claims,
+"suppression is explicit and coverage failures are unsuppressible". The
+first was already true (the ADR-013 audit trail, extended to `scan
+--against` earlier in this phase); the second had no implementation at all.
+
+`abicheck/contract_coverage_ledger.py` (a new leaf) *derives* §6.1's
+`contract_coverage_failures` from what Phase 3's provider ledger already
+observed: one entry per provider/domain coverage failure, carrying which
+provider and side failed, the record it came from, and **why** -- the
+provider's own status (four distinct ways of not having the fact, kept
+distinct because they need different fixes), an incomplete search, or
+partial identity coverage, which §4.2 requires separately from overall
+completeness. `contract_coverage_exit_contribution` states the `0`/`1` §6.1
+gives the ledger; it is reported, not applied, since the independent
+coverage exit is Phase 7's alongside the default flip.
+
+**Derived, not observed.** A provider record is a fact about what was
+searched; whether it is a *failure* depends on the selected domain, which is
+policy. §7 is explicit that the two disagree -- under `exports`,
+"public-header/manifest/consumer failures are unrelated and advisory" --
+so recording a failure at collection time would bake one domain's policy
+into a policy-independent block, and would go stale the moment
+`reevaluate_from_evidence` re-decides under a different mode. Both inputs
+the derivation needs are already in the persisted context, so it answers per
+mode instead. Verified end to end: a header-only pair yields two
+`export_table` failures and contribution `1` under `--contract exports`, and
+none under `public`/`all`, from the identical records.
+
+**Unsuppressibility is structural, not a flag.** §6.2 says an ordinary
+change suppression "cannot ... suppress a provider/domain coverage failure".
+That holds here because a coverage failure is not a `Change`: no
+`ChangeKind`, no symbol, never in `DiffResult.changes`, so
+`checker._filter_suppressed_changes` -- the single place suppression is
+applied -- cannot see one. `suppression_reaches_coverage_failures()` is the
+executable proof rather than the enforcement: it hands each failure to
+`SuppressionList.is_suppressed`, the same predicate the filter itself
+consults, and reports what matched. A test calls it with a wildcard
+`symbol: '.*'` rule -- one that matches every real finding -- and asserts the
+answer is still empty; a second asserts the failure carries none of the
+attributes suppression selects on.
+
+`REPORT_SCHEMA_VERSION` went to `2.26` for the two additive top-level keys,
+with the packaged JSON Schema extended and republished. `[]` is emitted
+rather than omitted: it is the checkable answer "this domain closed", which
+an absent key could not be told apart from "not computed".
+
+**Updated (2026-08-01, same PR): Phase 5's remaining three items closed --
+"same typed config" for the third front end, the `packs` parity axis, and
+the Gate's downstream-consumer clause.** A re-read of the phase's own
+sentences turned up three things the earlier rounds had not done:
+
+1. **`scan --against` resolved no typed config, and emitted no receipt.**
+   Phase 5's body is "route both direct compare and scan baseline compare
+   through the same core *and same typed config*"; only the core half was
+   done. Worse, the command *computed* a contract context under
+   `--contract-evaluation` (its findings were stamped from one) and then
+   dropped it, so fixing only the resolution would have changed nothing
+   observable. `cli_scan_receipt.py` is the third and last front-end
+   receipt: it resolves through the canonical resolver -- reusing
+   `compare_cli_inputs` rather than re-implementing normalization, since
+   `scan` deliberately shares `compare`'s option destinations and two
+   normalizers is exactly how the two would stop agreeing -- and the scan's
+   `diff` block now carries `contract_context` plus the coverage ledger,
+   serialized by the same encoder `compare` uses. Real D7 layers now
+   appear where `API_REQUEST` used to: `--contract` reads `explicit_cli`,
+   `--policy` reads `legacy_alias`, `--public-symbol` reads `explicit_cli`.
+   A parity test asserts the two commands' *receipts* are byte-identical
+   for the same inputs, one level below the findings §6.4 already compared.
+   `SCAN_SCHEMA_VERSION` → `1.7`.
+
+2. **Nothing selects packs, and this round did not change that.** The Gate
+   lists `packs` among the parity axes, but `pack_paths` is only ever `()`:
+   no front end has a `--pack` option, so D8's pack-conflict resolution
+   (built and unit tested in Phase 1 slice 2) still has no live caller and
+   the axis remains untestable end to end.
+
+   A `--pack` flag *was* added on both commands in this round and then
+   removed before merge, because a Codex review round caught what it
+   actually shipped: pack assignments reached the resolved configuration and
+   the persisted receipt, but never the engine. A `kind: policy` pack
+   overriding `func_removed` would have been recorded as active
+   configuration while leaving the verdict and exit code untouched, and
+   without `--contract-evaluation` the manifest was not even loaded, so a
+   malformed one was silently accepted. The parity tests written alongside
+   it passed precisely because they asserted the two commands *resolve*
+   packs identically and never that a pack changes a result — a flag that
+   does nothing satisfies that.
+
+   Exposing configuration that does not configure is worse than not
+   exposing it, so the flag is gone rather than papered over. Making packs
+   real means feeding `policy.overrides` into the verdict path (the
+   `PolicyFile`-shaped overrides `compare_snapshots` already consumes),
+   with D8's precedence against an explicit `--policy-file` decided, and
+   re-verification against the FP-rate and tier-accuracy gates — its own
+   scoped slice, not a drive-by extension of a receipt change. **The
+   `packs` axis of the Phase 5 Gate is therefore still open**, and is the
+   one item this round did not close.
+
+   The `cli.py`/`cli_options.py` hard-limit split it forced is kept:
+   `cli_contract_options.py` now holds the three ADR-049 contract options,
+   which is a real improvement independent of packs.
+
+3. **No downstream consumer understood the new schema** (Phase 6's Gate).
+   §6.1 names two specifically. SARIF now emits the coverage ledger as
+   `invocations[].toolExecutionNotifications` -- SARIF's own channel for a
+   tool-level statement, rather than more `results[]` entries a consumer
+   would count as findings -- with `executionSuccessful`/`exitCode`
+   deliberately untouched, since the independent coverage exit is Phase 7's.
+   JUnit emits an `abicheck.contract_coverage` suite whose every case is an
+   `<error>`, which is precisely JUnit's error-vs-failure distinction ("the
+   test could not run" vs "it ran and failed") and satisfies "never as a
+   passed compatibility test"; the errors roll into the document totals so a
+   dashboard reading only the root counts still sees them. Both are absent
+   -- not empty -- without `--contract-evaluation`, and both emit an *empty*
+   ledger when the domain closed, because "checked, nothing missing" and
+   "never checked" are different states. `aggregate` needed no change: it
+   already keeps ADR-042's three orthogonal axes, and folding the advisory
+   contract ledger into its coverage axis would *apply* an exit contribution
+   the plan reserves for Phase 7.
+
 ### Phase 6 — opt-in public mode and corpus validation
 
 Expose `--contract public|exports|all`. Preserve
@@ -3437,6 +3799,52 @@ renderer/aggregate lanes.
 
 **Gate:** zero unexplained public-break losses; reviewed FP reductions; measured
 and accepted unresolved rate; all downstream consumers understand new schema.
+
+**Updated (2026-08-01): the Gate's corpus axis closed.** The measurement's
+three zero baselines were already green, but on one corpus: the FP-rate
+corpus, which is built to exercise public-header scoping and so carries no
+export tables at all. The consequence was recorded honestly in the previous
+note and is the thing this slice fixes -- `exports` measured **100%
+unresolved on every case**, so "measured and accepted unresolved rate" was,
+for that domain, measuring the absence of evidence rather than the domain.
+
+`scripts/contract_platform_corpus.py` supplies the lanes the Gate's own list
+names and this measurement can reach without a toolchain: ELF, PE, Mach-O
+(hand-built snapshots carrying the real `.dynsym` / export-directory /
+export-trie shapes `export_surface.observed_exports_by_platform` reads, so
+the same provider code a real binary exercises runs on every host), plus
+stripped (exports with no header provenance at all), versioned (ELF symbol
+versions), and C (`extern "C"`, the name-based identity tier rather than the
+mangled-primary one). It is a separate corpus rather than more FP-rate cases
+deliberately: that corpus is a gate with its own 0/0 FP/FN baselines, and a
+Mach-O export-table shape has nothing to say about false-positive rate.
+
+Each case is tagged with its lane, and the measurement reports unresolved
+rate **by lane** alongside the existing by-domain and by-provider-state
+axes. That is what makes the number acceptable-or-not rather than merely
+reported: a domain unresolved exactly on the lanes carrying no evidence for
+it is working as designed, and one unresolved on a lane that *does* carry
+evidence is a defect the aggregate hides. Result — the gate stays at
+0/0/0/0, and `exports` goes from 100% unresolved to resolving on every lane
+with an export table (76.8% aggregate, entirely attributable to the
+evidence-free FP-rate corpus), with 2 deltas and 2 proven exclusions where
+it previously concluded nothing.
+
+One case earns its place specifically: a public-header type whose layout
+changes but which no export reaches. `public` calls it `IN_CONTRACT` (the
+header committed to it); `exports` proves it out (nothing linkable reaches
+it). Without a case where the two domains are *supposed* to disagree, the
+`exports` domain could pass every baseline while concluding nothing at all
+— the same vacuity the `public` domain already has a guard against, now
+given to `exports` too.
+
+**Bounded honestly.** Two lanes the Gate lists are named in
+`UNCOVERED_LANES` with their reason and reported in the output rather than
+silently omitted: `package` (`compare` rejects `--contract-evaluation` for
+directory/package operands, so there is no contract decision on a package
+pair to measure) and `real_binaries` (needs a compiler; covered by the
+integration lanes, `tests/test_scan_compare_parity.py` and
+`tests/test_abi_examples.py`, not by this always-on measurement).
 
 ### Phase 7 — default flip
 

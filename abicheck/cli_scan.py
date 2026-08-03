@@ -85,7 +85,6 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
 )
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_compare_helpers import _cli_flag, _warn_force_public_ignored
-from .cli_helpers_compare import _collect_force_public_symbols
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
@@ -589,6 +588,8 @@ _COMPARISON_ONLY_FLAGS = {
     "public_symbols_list": "--public-symbols-list",
     "pattern_verdicts": "--pattern-verdicts/--no-pattern-verdicts",
     "env_matrix_path": "--env-matrix",
+    "contract_evaluation": "--contract-evaluation",
+    "contract_mode": "--contract",
 }
 
 
@@ -962,6 +963,29 @@ def _run_artifact_set(
     "guarantee is lost.",
 )
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract), --against only
+@click.option(
+    "--contract-evaluation",
+    "contract_evaluation",
+    is_flag=True,
+    default=False,
+    help="With --against: stamp each comparison finding with ADR-049 Phase 3's "
+    "shadow contract decision (contract_relevance / contract_reason_code / "
+    "contract_assurance / contract_evidence_refs), exactly as `compare "
+    "--contract-evaluation` does. Advisory only -- it never changes the "
+    "verdict, the exit code, or which findings appear.",
+)
+@click.option(
+    "--contract",
+    "contract_mode",
+    type=click.Choice(["public", "exports", "all"]),
+    default=None,
+    help="With --against: which evidence domain --contract-evaluation judges "
+    "against ('public' header-derived surface, 'exports' the binary's own "
+    "export table plus its type closure, 'all' every entity). Omitted, the "
+    "domain follows --scope-public-headers/--no-scope-public-headers. "
+    "Requires --contract-evaluation, and is advisory exactly like it "
+    "(mirrors `compare --contract`).",
+)
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -1012,6 +1036,8 @@ def scan_cmd(
     public_symbols_list: Path | None,
     pattern_verdicts: bool,
     env_matrix_path: Path | None,
+    contract_evaluation: bool,
+    contract_mode: str | None,
     lang: str,
     allow_build_query: bool,
     fmt: str,
@@ -1172,7 +1198,7 @@ def scan_cmd(
     # only flags without --against" guard above, only attempted for an
     # actual `--against` comparison -- a plain one-build audit never needs
     # any of this, so it must not even try the cwd-upward walk.
-    from .buildsource.inline import discover_build_config, load_build_config
+    from .buildsource.inline import discover_build_config
 
     explicit_config = build_config is not None
     cfg_path = build_config if explicit_config else discover_build_config(sources)
@@ -1181,9 +1207,16 @@ def scan_cmd(
 
         cfg_path = discover_project_config()
     project_cfg = None
+    # ADR-049 D6: a project-derived receipt entry must name the path *and*
+    # prove which revision supplied the value, from the same read that
+    # parsed it -- so the digest comes from `load_build_config_with_digest`
+    # rather than a second read at receipt time.
+    _project_sha256: str | None = None
     if cfg_path is not None:
         try:
-            project_cfg = load_build_config(cfg_path)
+            from .buildsource.build_config_io import load_build_config_with_digest
+
+            project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
         except ValueError as exc:
             if explicit_config:
                 raise click.UsageError(
@@ -1303,10 +1336,27 @@ def scan_cmd(
     # (--env-matrix) config surface, both of which `compare_snapshots` already
     # accepts as plain kwargs (`force_public_symbols`/`env_matrix`) -- no new
     # engine capability, just CLI/service plumbing parity.
-    force_public_symbols = _collect_force_public_symbols(
+    from .cli_helpers_compare import resolve_force_public_scope
+
+    force_public_symbols, _symbols_list = resolve_force_public_scope(
         public_symbols, public_symbols_list
     )
     _warn_force_public_ignored(force_public_symbols, scope_public_headers)
+
+    if contract_mode is not None and not contract_evaluation:
+        # Same rule, same wording as `compare`'s own check
+        # (`cli_compare_helpers.run_compare`) and the Tier-2 entry's
+        # (`service._validate_contract_mode`): --contract on its own would
+        # silently do nothing, since no finding carries a contract decision
+        # unless --contract-evaluation asked for one. Checked here rather
+        # than left to `compare_snapshots` so it is a clean usage error
+        # (exit 64) raised before any scanning work, matching `compare`.
+        raise click.UsageError(
+            "--contract requires --contract-evaluation: it selects which "
+            "evidence domain the shadow contract evaluator judges against, "
+            "and without that flag no contract decision is computed at all."
+        )
+
     from .errors import AbicheckError
     from .service import load_env_matrix
 
@@ -1314,6 +1364,55 @@ def scan_cmd(
         env_matrix = load_env_matrix(env_matrix_path)
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
+
+    # ADR-049 Phase 5's "same typed config", for the third and last front
+    # end. `checker.compare` can only claim `API_REQUEST` for arguments it
+    # was handed, so without this the scan's persisted `evaluation_context`
+    # carried the core verb's reconstruction rather than real D7 provenance
+    # -- the same defect already fixed for `compare` and the MCP tool.
+    # Resolved here because this is where the Click context is: which flags
+    # the user actually typed is a question only the front end can answer.
+    resolved_config = None
+    if against is not None and contract_evaluation:
+        from .cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
+        from .compatibility_evaluation_resolver import (
+            FieldResolutionError,
+            PackConflictError,
+        )
+        from .errors import PackManifestError
+
+        _ctx = click.get_current_context()
+        _params = {name: _ctx.params.get(name) for name in SCAN_CONFIG_PARAMS}
+        _typed = {
+            name
+            for name in SCAN_CONFIG_PARAMS
+            if _ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+        }
+        try:
+            resolved_config = resolve_scan_config(
+                _params,
+                typed=_typed,
+                project_cfg=project_cfg,
+                project_path=cfg_path,
+                project_sha256=_project_sha256,
+                policy_file=policy_file,
+                suppression=suppression,
+                suppress_path=suppress,
+                symbols_list=_symbols_list,
+            )
+        except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+            # A D7 same-tier conflict or a D8 pack conflict is a usage error,
+            # exactly as it is for `compare` -- not a traceback out of a
+            # command that had already validated its own flags.
+            #
+            # Narrower than `service_scan._scan_request_config`'s
+            # `except (ValueError, PackManifestError)` on purpose, not by
+            # oversight: the extra case that catch covers is an unknown base
+            # policy, which reaches the resolver only as a free string on a
+            # typed `ScanRequest`. Here `--policy` is a `click.Choice`, so
+            # Click rejects an unknown base before this call. If either front
+            # end gains a new failure mode, change both.
+            raise click.UsageError(str(exc)) from exc
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
@@ -1449,6 +1548,9 @@ def scan_cmd(
             pattern_verdicts=pattern_verdicts,
             env_matrix=env_matrix,
             collapse_versioned_symbols=collapse_versioned_symbols,
+            contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
+            resolved_config=resolved_config,
             compile_context=None if compile_context.is_default else compile_context,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=abi3_floor,

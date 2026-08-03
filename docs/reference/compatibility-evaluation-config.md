@@ -12,14 +12,18 @@ generated: false
 
 # Compatibility evaluation configuration (ADR-049)
 
-!!! warning "Proposed — resolved, not yet applied"
+!!! warning "Resolved and reported — not yet applied"
 
     Everything on this page is implemented as *configuration resolution*
-    (`abicheck.compatibility_evaluation_frontend`) and is fully tested, but no
-    command consumes the resolved object yet: it changes no verdict, no
-    finding, and no exit code. Applying it in the authoritative comparison path
-    is [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
-    Phase 5 work, and the default flip is Phase 7. Pack manifests (below) have
+    (`abicheck.compatibility_evaluation_frontend`) and is fully tested.
+    `abicheck compare --contract-evaluation` resolves one such object per run
+    and reports it, as the `contract_context.evaluation_context` block of its
+    JSON report — but only as an audit record: it changes no verdict, no
+    finding, and no exit code. Every other command, and every `compare` run
+    without that flag, resolves nothing. Applying the object in the
+    authoritative comparison path is the rest of
+    [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
+    Phase 5, and the default flip is Phase 7. Pack manifests (below) have
     no CLI flag yet either — they are reachable from the Python API only.
     Today's live behaviour is documented in
     [Configuration File](config-file.md) and [Exit Codes](exit-codes.md).
@@ -113,7 +117,7 @@ the shadowed input is retained in the receipt
 | `policy.base` | `--policy-file` `base_policy`; legacy `--policy` | `policy` | — | — |
 | `policy.overrides` | `--policy-file` `overrides:` | — | — | `policy` |
 | `policy.packs` | *(pack paths)* | — | — | — |
-| `gate.exit_code_scheme` | `--exit-code-scheme` | — | `exit_code_scheme` | `gate` |
+| `gate.exit_code_scheme` | `--exit-code-scheme`; `--profile` (see below) | — | `exit_code_scheme` | `gate` |
 | `gate.preset` | `--severity-preset` | — | `severity.preset` | — |
 | `gate.severity.*` | `--severity-abi-breaking`, … | — | `severity.*` | `gate` |
 | `gate.packs` | *(pack paths)* | — | — | — |
@@ -134,6 +138,25 @@ is `BuildConfig`'s default for it, so it contributes nothing.)
 
 `--strict-suppressions` and `--require-justification` are real inputs with no
 field in ADR-049's typed shape; they stay outside this object.
+
+### The `run_profile` tier and `--profile ci-gate`
+
+`--profile` fills each setting its bundle declares only where you left the
+corresponding flag alone, so it sits at D7's `run_profile` tier: below an
+explicit flag, above `.abicheck.yml`. Exactly one field of this object is
+reachable that way — `gate.exit_code_scheme`, which `ci-gate` sets to
+`severity`. The bundle's other keys (`depth`, the report format,
+`--recommend`, `--stat`) are execution and report settings with no field
+here.
+
+That one field is a **known deviation** from D7, which scopes the
+`run_profile` tier to execution fields and puts the exit-code scheme in the
+`gate` namespace. It is recorded as what it is rather than smoothed over:
+`ci-gate` predates ADR-049 and really does select the scheme, so resolving
+the field without the profile would report a value the run was not scored
+with. Removing the deviation means either moving the key out of `ci-gate`
+into a gate pack or amending D7 — both user-visible changes in their own
+right. Any *other* field a future profile tried to assign is rejected.
 
 ## Pack manifests
 
@@ -215,6 +238,74 @@ The only permitted difference is *which* front end stated a value
 (`explicit_cli` vs. `api_request`, and the option spelling recorded with it) —
 D7 puts both in the same precedence tier. Any difference in a resolved value,
 or in any other part of the receipt, is reported.
+
+Both live front ends resolve through it: the native `compare` CLI
+(`cli_compare_receipt.py`) and the MCP `abi_compare` tool
+(`mcp_compare_receipt.py`), and
+`tests/test_mcp_compare_config_receipt.py` runs the check above across the
+two on equivalent input.
+
+A receipt only ever names inputs its front end actually has. `abi_compare`
+takes no contract-mode, public-symbol, or exit-code-scheme parameter, so
+those fields resolve as `built_in_default` there rather than as an API
+request — which is the accurate answer, not a missing claim: there is
+nothing for a caller to have chosen. (Contrast `CompareRequest.scope_public`,
+whose dataclass default *is* a caller's choice and is recorded as one.)
+
+!!! warning "Known gap: consumer scope is not in the resolved config"
+
+    `abi_compare` **does** take two consumer-scope arguments — `used_by`
+    (application binaries) and `required_symbols` (an entrypoint contract) —
+    and they are authoritative: the scoping pass rewrites the verdict and
+    exit code from them. But no field of `CompatibilityEvaluationConfig`
+    models a consumer scope, so a scoped run resolves the *same* object an
+    unscoped one does, with `surface.explicit_scope: null` at
+    `built_in_default`. The gap is wider than "which scope": `scoped` is not
+    a value `GateConfig` accepts, so the *underlying* scheme is recorded
+    instead — nothing in the resolved config indicates a consumer scope was
+    in effect at all.
+
+    `compare --used-by` has the identical gap. `--required-symbol` is the
+    one partial exception, and only on the CLI: there a required-symbol
+    contract switches an untouched `--policy` to `plugin_abi`, and *that*
+    is recorded via `policy_base_option`, leaving an indirect trace. The
+    MCP tool performs no such switch, so it has no trace at all.
+
+    Closing this needs a new typed field plus an identity scheme for
+    application binaries (path + content digest, resolved once and shared
+    with the comparison that read them) — a scoped design, not a parameter
+    to thread through. Until then, treat a scoped run's `resolved_config` as
+    describing the *policy* configuration only.
+
+The complement of that rule — a receipt must not name an input its front end
+*cannot* have — needs its own check, because the equality gate above
+deliberately normalizes option spellings away and so is blind to it:
+
+```python
+from abicheck.compatibility_evaluation_frontend import unstatable_selectors
+
+unstatable_selectors(api_config)                            # no CLI flag at an API tier
+unstatable_selectors(api_config, request_type=ScanRequest)  # ...and every name is a real field
+```
+
+Without `request_type` it reports any `api_request` hop labelled with a CLI
+flag — a candidate built with a hard-coded `"--flag"` instead of going
+through the resolver's front-end-aware spelling. That check alone is not
+enough, because "not a flag" passes for any plausible-looking identifier:
+**"the API" is not one namespace.** The default API spelling is
+`CompareRequest`'s, and `ScanRequest` names three of the same inputs
+differently (`scope_to_public_surface`, `policy_file`, `suppression`), so a
+front end resolving at `FrontEnd.API` can still record fields its own request
+type does not have. Pass `api_spellings=` to remap them per request type, and
+`request_type=` to have the check verify it.
+
+The field check covers the `api_request` **and** `legacy_alias` tiers, since
+`--policy`/`scope_public` are D7 aliases and a hop for one sits at the latter.
+Layers describing a *file* (`project_config`, `run_recipe`, `run_profile`) are
+excluded — those correctly name config keys like `severity.preset`, which are
+not request fields. The flag check stays one-directional: a CLI hop carrying a
+bare field name is fine, since several CLI inputs (a project-config key, a
+composed scope) genuinely have no flag.
 
 ## See also
 
