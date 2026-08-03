@@ -1370,7 +1370,7 @@ def run_compare(
     from .errors import PackManifestError as _PackManifestError
 
     try:
-        validate_pack_manifests(pack_paths, policy_file_given=policy_file_path is not None)
+        validate_pack_manifests(pack_paths, policy_file_path=policy_file_path)
     except _PackManifestError as exc:
         raise click.UsageError(str(exc)) from exc
 

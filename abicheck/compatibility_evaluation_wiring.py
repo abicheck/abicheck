@@ -72,7 +72,7 @@ from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .change_registry_types import Verdict
 from .compatibility_evaluation_config import (
@@ -116,6 +116,30 @@ BUILT_IN_DEFAULT_CONTRACT_MODE = LEGACY_SCOPE_FLAG_CONTRACT_MODE[
     LegacyScopeFlag.SCOPE_PUBLIC_HEADERS
 ]
 _BUILT_IN_DEFAULT_MODE = BUILT_IN_DEFAULT_CONTRACT_MODE  # backward-compatible alias
+
+
+def policy_file_pins_internal_namespaces(policy_file: Any) -> bool:
+    """Does *policy_file* state ``surface.internal_namespaces``?
+
+    The single definition of D7's "another layer already states this field"
+    for this one field. The resolver uses it to build `pinned_contract` (so a
+    selected pack never overrides a stated value), and
+    ``cli_compare_receipt.validate_pack_manifests`` uses it to know whether a
+    pack's assignment can reach runtime at all before precedence is resolved.
+    Shared rather than restated: a second copy is a second thing that can
+    disagree with the resolver about what shadows what (Codex review, which
+    caught a coarser "was any --policy-file given" proxy treating a file that
+    only sets `base_policy` as shadowing).
+
+    An explicit ``internal_namespaces: []`` states "none", so it pins the
+    field exactly as a populated list does.
+    """
+    if policy_file is None:
+        return False
+    return bool(
+        getattr(policy_file, "internal_namespaces", None)
+        or getattr(policy_file, "internal_namespaces_stated", False)
+    )
 
 
 def legacy_contract_mode_candidate(

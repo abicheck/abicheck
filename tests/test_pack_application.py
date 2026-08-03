@@ -381,9 +381,12 @@ class TestOnlyAppliedFieldsAreAccepted:
         writing the same empty list, so honoring stated-empty is its own
         change; rejecting the inert value keeps this module's rule true.
 
-        With no `--policy-file` given, nothing can shadow the field (a policy
-        file is the only layer that pins it), so this is answerable before the
-        `--dry-run` emit too -- and both must agree, hence the parametrization.
+        Whether a `--policy-file` shadows the field is read off the file
+        itself via the resolver's own predicate, so a file that states
+        something else entirely does not suppress the rejection -- the
+        `base_policy`-only case below is the one a coarser "was any policy
+        file given" proxy got wrong. Answerable before the `--dry-run` emit
+        either way, and both must agree, hence the parametrization.
         """
         pack = _pack(
             tmp_path,
@@ -396,6 +399,36 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert "surface.internal_namespaces" in result.output
         # ...and the rejection names which manifest is at fault.
         assert "empty-ns.yml" in result.output
+
+    @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+    def test_a_policy_file_stating_something_else_does_not_shadow(
+        self, pair: tuple[Path, Path], tmp_path: Path, extra: list[str]
+    ) -> None:
+        """A `--policy-file` only shadows the field it actually states.
+
+        Passing "a policy file exists" as the shadow signal treated a file
+        setting only `base_policy` as pinning `surface.internal_namespaces`,
+        so the dry run exited 0 while the real run exited 64 (Codex review,
+        reproduced). The signal is now the resolver's own pin predicate.
+        """
+        policy = tmp_path / "base-only.yml"
+        policy.write_text("base_policy: sdk_vendor\n", encoding="utf-8")
+        pack = _pack(
+            tmp_path,
+            "empty-ns.yml",
+            "id: none\nversion: 1\nkind: contract\n"
+            "assignments:\n  surface.internal_namespaces: []\n",
+        )
+        result = _compare(
+            CliRunner(),
+            pair,
+            "--pack",
+            str(pack),
+            "--policy-file",
+            str(policy),
+            *extra,
+        )
+        assert result.exit_code == 64, (extra, result.output)
 
     def test_a_shadowed_inert_value_is_not_rejected(
         self, pair: tuple[Path, Path], tmp_path: Path

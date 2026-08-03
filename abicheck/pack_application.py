@@ -428,7 +428,7 @@ def check_pack_fields_applied(
     *,
     gate_supported: bool = True,
     gate_reason: str = "",
-    policy_file_given: bool = False,
+    shadowed_fields: frozenset[str] = frozenset(),
     loaded: Iterable[tuple[str, Any]] | None = None,
 ) -> None:
     """Reject a manifest assigning a field this front end does not apply.
@@ -456,14 +456,15 @@ def check_pack_fields_applied(
             # blindly here failed an invocation D8 says is fine (Codex review,
             # reproduced). But it is only *partly* unanswerable: a
             # `--policy-file` is the one layer that can pin any field in
-            # `INERT_PACK_VALUES` (`compatibility_evaluation_frontend`'s
-            # `pinned_contract` reads `explicit.policy_file` and nothing
-            # else), so with no policy file given the pack's value is
-            # certainly active and the answer needs no resolution at all.
-            # That is what keeps the dry run and the real run agreeing for
-            # the common case; with a policy file present the question is
-            # deferred to `check_resolved_config_applies_packs`, which knows.
-            if not policy_file_given:
+            # `INERT_PACK_VALUES`, and whether it actually does is answerable
+            # from the file itself via the resolver's own shared predicate
+            # (`policy_file_pins_internal_namespaces`). *shadowed_fields* is
+            # that answer; a field not in it is certainly active, so the dry
+            # run and the real run agree. An earlier revision passed a coarse
+            # "was any --policy-file given" boolean, which treated a file
+            # setting only `base_policy` as shadowing and re-opened the same
+            # divergence (Codex review, reproduced twice).
+            if field_name not in shadowed_fields:
                 inert = _inert_value_reason(field_name, value)
                 if inert is not None:
                     raise PackManifestError(

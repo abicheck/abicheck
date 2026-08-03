@@ -250,8 +250,36 @@ def dry_run_scheme_label(resolved_cfg: Any, pack_paths: Collection[Any]) -> str:
     return f"{label}; a selected --pack may adjust it" if pack_paths else label
 
 
+def _shadowed_inert_fields(policy_file_path: Any) -> frozenset[str]:
+    """Which `INERT_PACK_VALUES` fields a `--policy-file` already states.
+
+    Loaded here rather than proxied on "a path was given": a file setting
+    only `base_policy` shadows nothing, and treating it as shadowing skipped
+    a rejection the real run then made (Codex review). The predicate is the
+    resolver's own, so this cannot disagree with `pinned_contract`.
+
+    A file that fails to load yields "nothing shadowed" rather than raising:
+    the real run loads it properly a moment later and reports that failure
+    with its own `--policy-file` framing. This is also the only place that
+    reads it early, and it runs only when `--pack` is selected, so no
+    pre-existing invocation changes.
+    """
+    if policy_file_path is None:
+        return frozenset()
+    from .compatibility_evaluation_wiring import policy_file_pins_internal_namespaces
+    from .policy_file import PolicyFile
+
+    try:
+        loaded = PolicyFile.load(policy_file_path)
+    except Exception:
+        return frozenset()
+    if policy_file_pins_internal_namespaces(loaded):
+        return frozenset({"surface.internal_namespaces"})
+    return frozenset()
+
+
 def validate_pack_manifests(
-    pack_paths: Collection[Any], *, policy_file_given: bool = False
+    pack_paths: Collection[Any], *, policy_file_path: Any = None
 ) -> None:
     """Reject an unusable ``--pack`` manifest before anything else runs.
 
@@ -283,7 +311,9 @@ def validate_pack_manifests(
         return
     from .pack_application import check_pack_fields_applied
 
-    check_pack_fields_applied(list(pack_paths), policy_file_given=policy_file_given)
+    check_pack_fields_applied(
+        list(pack_paths), shadowed_fields=_shadowed_inert_fields(policy_file_path)
+    )
 
 
 def resolve_and_apply(
