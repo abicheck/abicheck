@@ -42,19 +42,32 @@ import pytest
 ACTION_DIR = Path(__file__).resolve().parent.parent / "action"
 RUN_SH = ACTION_DIR / "run.sh"
 
+# POSIX only, and not for want of a real bash on Windows: the harness works by
+# putting an *extensionless, shebang-dispatched* `abicheck` on PATH, because
+# `run.sh` resolves the binary by name. Windows has neither the executable bit
+# nor kernel shebang handling, and Git bash's `chmod` is a no-op on NTFS, so
+# the stub is not runnable there. The mapping under test is plain shell with no
+# platform-dependent behaviour, and the Linux lane exercises all of it.
 pytestmark = pytest.mark.skipif(
-    not RUN_SH.is_file() or shutil.which("bash") is None,
-    reason="action/run.sh or bash not available",
+    os.name == "nt" or not RUN_SH.is_file() or shutil.which("bash") is None,
+    reason="needs a POSIX shell that can exec a shebang script from PATH",
 )
 
 
 def _stub_abicheck(
-    tmp_path: Path, *, exit_code: int, report: dict | None, stderr: str = ""
+    tmp_path: Path,
+    *,
+    exit_code: int,
+    report: dict | None,
+    stderr: str = "",
+    to_stdout: bool = False,
 ) -> Path:
     """A fake ``abicheck`` on PATH: writes *report* to ``-o``/``--secondary-output``.
 
     Mirrors what the real CLI does for the two things the mapping reads -- the
-    JSON report and the stderr notice -- and nothing else.
+    JSON report and the stderr notice -- and nothing else. *to_stdout* is the
+    documented ``format: json`` with no ``output-file`` mode, where the report
+    is only ever on stdout.
     """
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -70,6 +83,7 @@ def _stub_abicheck(
         "  fi\n"
         '  prev="$arg"\n'
         "done\n"
+        + (f'cat "{payload}"\n' if to_stdout else "")
         + (f'printf "%s\\n" {json.dumps(stderr)} >&2\n' if stderr else "")
         + f"exit {exit_code}\n",
         encoding="utf-8",
@@ -240,6 +254,33 @@ class TestCompareTellsTheTwoAxesApart:
             tmp_path, _report(coverage=1, severity_exit=1)
         )
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
+    def test_the_report_is_found_when_json_goes_to_stdout(
+        self, tmp_path: Path
+    ) -> None:
+        """`format: json` with no `output-file` is the documented stdout mode:
+        there is no file anywhere, and the JSON renderer deliberately prints no
+        stderr notice because its report carries the ledger. Both of the
+        mapping's signals were therefore silent for that one configuration, and
+        it fell back to SEVERITY_ERROR (Codex review).
+        """
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report=_report(coverage=1, severity_exit=0),
+            to_stdout=True,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
 
     def test_a_run_without_contract_evaluation_is_unchanged(
         self, tmp_path: Path

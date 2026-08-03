@@ -742,7 +742,7 @@ echo ""
 ABICHECK_EXIT=0
 ABICHECK_OUTPUT=""
 STDERR_FILE=$(mktemp)
-trap 'rm -f "$STDERR_FILE"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
+trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}"; rm -rf "${_BASELINE_CLEANUP:-}"' EXIT
 
 if [[ -n "${OUTPUT_FILE:-}" ]]; then
   # Output goes to file; capture stderr separately for error detection
@@ -778,11 +778,25 @@ _is_cli_error() {
 # already asks the same invocation to write via --secondary-format. Empty
 # when neither exists. One function because three separate decisions below
 # read the same report and must not disagree about which one it is.
+#
+# `format: json` with no `output-file` is the documented stdout mode, where
+# there is no file at all and the report is only in $ABICHECK_OUTPUT — so it
+# is persisted here rather than left unreadable, which otherwise made every
+# decision below take its "no report" fallback for that one configuration
+# (Codex review). Cached, since three callers ask and the answer cannot
+# change once abicheck has exited.
+_STDOUT_JSON_FILE=""
 _json_report_src() {
   if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
     echo "${OUTPUT_FILE}"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
+  elif [[ "${FORMAT:-}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
+    if [[ -z "$_STDOUT_JSON_FILE" ]]; then
+      _STDOUT_JSON_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-stdout-json.XXXXXX")
+      printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
+    fi
+    echo "$_STDOUT_JSON_FILE"
   fi
 }
 

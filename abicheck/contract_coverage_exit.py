@@ -57,6 +57,29 @@ from .contract_coverage_ledger import (
 #: The *only* thing it changes is this module's floor (Section 6.2).
 ACCEPT_UNRESOLVED = "warn"
 
+#: How a CLI user reads the full ledger and accepts incomplete coverage.
+#: Both halves are reachable from `compare` and `scan --against`, which have
+#: `--format` and `--pack`.
+CLI_MITIGATION = (
+    "Use --format json for the full contract_coverage_failures ledger, "
+    "or set contract.unresolved=warn to accept incomplete coverage."
+)
+
+#: The same two questions answered for a caller of the MCP `abi_compare` tool.
+#: `contract.unresolved` can only be stated by a `kind: contract` pack (the
+#: resolver gives it no other candidate source) and that tool exposes no pack
+#: parameter, so telling this audience to "set contract.unresolved=warn"
+#: points at a control it does not have (Codex review). The finding half of
+#: the message is identical either way; only the mitigation differs, because
+#: the surfaces genuinely differ.
+MCP_MITIGATION = (
+    "The full ledger is in this response's contract_coverage.failures. "
+    "Accepting incomplete coverage needs contract.unresolved=warn from a "
+    "`kind: contract` pack, which this tool does not expose -- it is "
+    "available on the compare and scan CLIs."
+)
+
+
 
 def coverage_exit_for_context(ctx: Any) -> int:
     """The exit floor a persisted contract context imposes (``0``/``1``).
@@ -100,7 +123,9 @@ def _accepts_unresolved(ctx: Any) -> bool:
     return getattr(contract, "unresolved", None) == ACCEPT_UNRESOLVED
 
 
-def coverage_failure_diagnostic(result: Any, *, base_exit: int = 0) -> str | None:
+def coverage_failure_diagnostic(
+    result: Any, *, base_exit: int = 0, mitigation: str = CLI_MITIGATION
+) -> str | None:
     """Why this run's exit code was affected by coverage, or ``None``.
 
     Only ``--format json`` carries ``contract_coverage_failures``; markdown,
@@ -128,6 +153,7 @@ def coverage_failure_diagnostic(result: Any, *, base_exit: int = 0) -> str | Non
         sorted({f"{f.side}/{f.provider}" for f in failures}),
         coverage_exit_for_context(ctx),
         base_exit,
+        mitigation,
     )
 
 
@@ -154,8 +180,17 @@ def coverage_diagnostic_from_summary(
     return _coverage_message(where, floor, base_exit)
 
 
-def _coverage_message(where: list[str], floor: int, base_exit: int) -> str:
-    """The one wording, so the two entry points cannot describe it differently."""
+def _coverage_message(
+    where: list[str], floor: int, base_exit: int, mitigation: str = CLI_MITIGATION
+) -> str:
+    """The one wording, so the two entry points cannot describe it differently.
+
+    *mitigation* is the only part a surface may vary, and it has to: the
+    advice is "here is how to see the rest and how to accept it", which is
+    not the same sentence for a caller that has no ``--format`` and no
+    ``--pack``. Everything before it -- what fell short, and what that did to
+    the exit code -- is the same fact for everyone.
+    """
     if floor == 0:
         # `contract.unresolved=warn` accepted these. Staying silent here
         # would make `warn` *hide* the failures for every renderer that
@@ -182,8 +217,7 @@ def _coverage_message(where: list[str], floor: int, base_exit: int) -> str:
         "Contract coverage incomplete for the selected --contract domain: "
         + ", ".join(where)
         + f". {effect} (ADR-049 contract-coverage axis). "
-        "Use --format json for the full contract_coverage_failures ledger, "
-        "or set contract.unresolved=warn to accept incomplete coverage."
+        + mitigation
     )
 
 
@@ -218,7 +252,7 @@ def report_carries_the_ledger(
 
 
 def coverage_response_block(
-    result: Any, *, base_exit: int = 0
+    result: Any, *, base_exit: int = 0, mitigation: str = MCP_MITIGATION
 ) -> dict[str, Any] | None:
     """The axis as structured data, for a front end whose answer *is* a dict.
 
@@ -249,7 +283,9 @@ def coverage_response_block(
     return {
         "exit_contribution": coverage_exit_for_context(ctx),
         "failures": [f.to_dict() for f in failures],
-        "diagnostic": coverage_failure_diagnostic(result, base_exit=base_exit),
+        "diagnostic": coverage_failure_diagnostic(
+            result, base_exit=base_exit, mitigation=mitigation
+        ),
     }
 
 

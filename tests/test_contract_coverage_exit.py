@@ -182,8 +182,12 @@ class TestTheGatingConditionIsVisible:
         # Names the providers, not just a count: "old/export_table" is
         # actionable, "2 coverage failures" is not.
         assert "export_table" in result.output, result.output
-        # ...and points at the way out, so the message is actionable.
+        # ...and points at the way out, so the message is actionable. Both
+        # halves are things a CLI user really has: `--format json` for the
+        # ledger, `--pack` for `contract.unresolved`. The MCP tool has
+        # neither, which is why its own wording differs.
         assert "contract.unresolved=warn" in result.output
+        assert "--format json" in result.output
 
     def test_json_does_not_repeat_what_its_report_already_carries(
         self, tmp_path: Path
@@ -379,7 +383,16 @@ class TestEveryFrontEndFoldsTheAxis:
         assert coverage["exit_contribution"] == 1, coverage
         assert coverage["failures"], coverage
         # ...and it says which provider fell short, not just that one did.
-        assert "Contract coverage incomplete" in coverage["diagnostic"], coverage
+        diagnostic = coverage["diagnostic"]
+        assert "Contract coverage incomplete" in diagnostic, coverage
+        # The advice has to be advice this caller can act on. `abi_compare`
+        # exposes no `--format` and no `--pack`, and `contract.unresolved` has
+        # no source other than a `kind: contract` pack, so the CLI wording
+        # would point an MCP client at controls it does not have (Codex
+        # review). The finding half is shared; only the mitigation differs.
+        assert "--format json" not in diagnostic, diagnostic
+        assert "contract_coverage.failures" in diagnostic, diagnostic
+        assert "does not expose" in diagnostic, diagnostic
 
     def test_a_run_without_contract_evaluation_gets_no_coverage_block(
         self, tmp_path: Path

@@ -275,7 +275,11 @@ always outranks a pack, and two selected packs disagreeing about the same
 field are a usage error rather than a silent last-one-wins.
 
 `kind: contract` and `kind: gate` packs carry the other two namespaces
-(internal namespaces, and the exit-code scheme / severity levels).
+(internal namespaces and `contract.unresolved`; and the exit-code scheme /
+severity levels). `contract.unresolved` needs `--contract-evaluation` to have
+any effect — it configures the contract-coverage exit, which is only computed
+when a domain is selected to measure coverage of — so assigning it without
+that flag is a usage error rather than a silently inert setting.
 
 Where each form is accepted follows from what a command has to configure:
 a `kind: gate` pack is **compare-only**, because a `scan`'s exit code follows

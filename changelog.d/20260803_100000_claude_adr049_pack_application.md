@@ -9,7 +9,8 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   (`id`/`version`/`kind`/`assignments`) carrying one reusable piece of
   configuration: a `kind: policy` pack assigns `ChangeKind` slugs to
   `break`/`warn`/`risk`/`ignore` exactly as `--policy-file`'s overrides do, a
-  `kind: contract` pack assigns `surface.internal_namespaces`, and a
+  `kind: contract` pack assigns `surface.internal_namespaces` (and, since the
+  contract-coverage exit below, `contract.unresolved`), and a
   `kind: gate` pack assigns `gate.exit_code_scheme` and
   `gate.severity.<category>`. Selecting one really changes the verdict and the
   exit code — the pack loader, the D8 conflict rule, and the resolver that

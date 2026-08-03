@@ -771,9 +771,11 @@ def abi_compare(
             The contribution never lowers a real break's ``2``/``4``. The
             response's top-level ``contract_coverage`` block states what was
             found and what it contributed, whatever ``output_format`` is
-            selected; a pack setting ``contract.unresolved: warn`` accepts
-            incomplete coverage and zeroes the contribution without hiding
-            it. Default False; the response is unchanged from today's shape
+            selected. Accepting incomplete coverage requires
+            ``contract.unresolved: warn``, which only a ``kind: contract``
+            pack can state and which **this tool does not expose** — it is
+            available on the ``compare`` and ``scan`` CLIs via ``--pack``.
+            Default False; the response is unchanged from today's shape
             unless this is set.
     """
     t0 = _time.monotonic()

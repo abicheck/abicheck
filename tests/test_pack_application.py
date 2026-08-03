@@ -560,6 +560,44 @@ class TestOnlyAppliedFieldsAreAccepted:
         # one cannot join the registry without a rejection test.
         assert set(_UNAPPLIED_FIELD_VALUES) == set(UNAPPLIED_PACK_FIELDS)
 
+    def test_the_pack_help_names_every_field_it_applies(self) -> None:
+        """`--pack`'s own help is the answer a user gets, so it has to be the
+        answer the code gives.
+
+        It said a `kind: contract` pack assigns `surface.internal_namespaces`
+        and stopped there -- true until Phase 7 gave `contract.unresolved` an
+        engine consumer, in the same commit range. A user-facing description
+        that understates what this build applies is how a supported field gets
+        talked out of existence, so the two are pinned together rather than
+        kept in sync by hand (CodeRabbit review, on the adjacent claim).
+        """
+        from abicheck.cli import main
+        from abicheck.compatibility_evaluation_packs import PackKind
+        from abicheck.pack_application import (
+            UNAPPLIED_PACK_FIELDS,
+            applied_pack_fields,
+        )
+
+        option = next(
+            p for p in main.commands["compare"].params if p.name == "pack_paths"
+        )
+        help_text = option.help or ""
+        for kind in PackKind:
+            for field_name in applied_pack_fields(kind):
+                # The four `gate.severity.<category>` fields are one family and
+                # the help names them as one, which is a description of the
+                # vocabulary rather than an omission from it. Nothing else may
+                # stand in for a field's own name.
+                family = "gate.severity.<category>"
+                spellings = {field_name}
+                if field_name.startswith("gate.severity."):
+                    spellings.add(family)
+                assert any(s in help_text for s in spellings), (kind, field_name)
+        # ...and the complement: advertising a field this build rejects would
+        # be the same failure pointing the other way.
+        for field_name in UNAPPLIED_PACK_FIELDS:
+            assert field_name not in help_text, field_name
+
     def test_a_gate_pack_is_rejected_by_scan_which_has_no_gate(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:

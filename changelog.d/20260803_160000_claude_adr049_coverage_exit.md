@@ -50,7 +50,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   the report's pre-fold `severity.exit_code` rather than guessed from the code:
   when the severity gate produced 1 too, its verdict stands and the coverage
   contribution is reported alongside. A run without `--contract-evaluation`
-  maps exactly as before.
+  maps exactly as before — including in the documented `format: json` with no
+  `output-file` mode, where the report exists only on stdout and neither of the
+  mapping's signals had a file to read.
+
+  The MCP tool's own diagnostic says how *its* caller sees the full ledger and
+  what accepting incomplete coverage would take: `contract.unresolved: warn`
+  has no source other than a `kind: contract` pack, and `abi_compare` exposes
+  no pack parameter, so it is a `compare`/`scan` control today and the tool
+  says so rather than recommending one its callers cannot reach.
 
 ### Added
 
