@@ -3809,6 +3809,25 @@ sentences turned up three things the earlier rounds had not done:
    baseline comparison's policy) and `--pack` on a directory/package
    compare, whose fan-out dispatches before the configuration is resolved.
 
+   **Two review findings on the first revision, both real, both about the
+   same principle the module states and then broke in one place.** (1)
+   `apply_to_compare_config` re-derived the exit-code scheme locally
+   (`"severity" if severity_active`) instead of reading the resolved one, so
+   a gate pack assigning only a severity level silently overrode an explicit
+   `--exit-code-scheme legacy` — turning a BREAKING run's exit 4 into 0,
+   which is exactly the "a pack never overrides a stated value" rule D8
+   exists to enforce. The resolver already had the right answer (its `auto`
+   default folds in the pack's own levels via `_severity_active`, while an
+   explicit flag contributes an outranking `EXPLICIT_CLI` candidate), so the
+   fix was to read it. (2) `--pack` was validated *after* `compare`'s
+   `--dry-run` emit, so a dry run reported "ok" for a manifest the identical
+   real run rejects with 64 — against a convention this same file states
+   twice for its other guards. Manifest validity moved ahead of the emit;
+   pack-vs-pack *conflict* detection deliberately did not, since D8 exempts a
+   field another layer states and those layers are not resolved that early —
+   checking there would make a dry run *stricter* than the real run, the same
+   divergence in the other direction.
+
    `tests/test_pack_application.py` leads every behavioural test with an
    exit code that *differs* with and without the pack, deliberately: the
    parity tests written alongside the reverted flag passed precisely because

@@ -141,6 +141,12 @@ class PackApplication:
     #: ``gate.severity.<category>`` levels a gate pack supplied, keyed by the
     #: :class:`~abicheck.severity.SeverityConfig` field name.
     severity_levels: Mapping[str, Any] = field(default_factory=dict)
+    #: The resolver's own ``gate.exit_code_scheme``, whoever supplied it.
+    #: Not a pack contribution and never applied on its own -- carried so
+    #: :func:`apply_to_compare_config` can *read* the resolved answer when a
+    #: pack severity level would otherwise make it re-derive one. See that
+    #: function for why re-deriving was wrong.
+    resolved_exit_code_scheme: str | None = None
 
     def is_empty(self) -> bool:
         """True when no pack contributed anything this run applies."""
@@ -202,6 +208,9 @@ def pack_application(config: Any, *, policy_file: PolicyFile | None) -> PackAppl
         internal_namespaces=namespaces,
         exit_code_scheme=scheme,
         severity_levels=severity_levels,
+        resolved_exit_code_scheme=getattr(
+            getattr(config, "gate", None), "exit_code_scheme", None
+        ),
     )
 
 
@@ -262,11 +271,24 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     it (or stated a preset that owns it), so overwriting here can never
     displace a value the run was configured with.
 
-    A severity level *is* severity being configured, so it flips
-    ``severity_active`` -- and with it an unstated ``--exit-code-scheme
-    auto``, exactly as a level set in ``.abicheck.yml`` already does. Without
-    that, a gate pack's severity would resolve, be reported, and then be
-    scored under the legacy scheme that never reads it.
+    A severity level *is* severity being configured, so it can move an
+    unstated ``--exit-code-scheme auto``, exactly as a level set in
+    ``.abicheck.yml`` already does. Without that, a gate pack's severity
+    would resolve, be reported, and then be scored under the legacy scheme
+    that never reads it.
+
+    **Which way it moves is the resolver's answer, not one re-derived here.**
+    An earlier revision wrote ``"severity" if severity_active else ...``,
+    which silently overrode an explicitly selected ``--exit-code-scheme
+    legacy`` whenever a gate pack assigned a severity level -- a
+    warning-level pack turned a BREAKING comparison's exit 4 into 0, exactly
+    the "a pack never overrides a stated value" rule D8 exists to enforce
+    (Codex review, reproduced). The resolver already decides this correctly:
+    its ``auto`` default is computed by ``_severity_active``, which *includes*
+    the gate pack's own levels, while an explicit ``--exit-code-scheme``
+    contributes an ``EXPLICIT_CLI`` candidate that outranks it. So the fix is
+    the same one this module's docstring states as its first rule -- read the
+    resolved value instead of re-deriving one.
     """
     if application.exit_code_scheme is None and not application.severity_levels:
         return resolved_cfg
@@ -276,11 +298,13 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
         severity = replace(severity, **application.severity_levels)
         severity_active = True
     scheme = application.exit_code_scheme
+    if scheme is None and application.severity_levels:
+        # The resolver folded these very levels into its own `auto` decision,
+        # and let any stated scheme outrank it. Fall back to the pre-pack
+        # value only if it somehow resolved nothing.
+        scheme = application.resolved_exit_code_scheme
     if scheme is None:
-        # `auto` was already resolved before this ran, so the only honest
-        # re-resolution is the one `resolve_compare_config` would have made
-        # had the pack's levels been present: severity, once any is set.
-        scheme = "severity" if severity_active else resolved_cfg.exit_code_scheme
+        scheme = resolved_cfg.exit_code_scheme
     return replace(
         resolved_cfg,
         severity=severity,

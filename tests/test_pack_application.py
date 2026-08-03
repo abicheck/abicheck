@@ -94,6 +94,27 @@ def _compare(runner: CliRunner, pair: tuple[Path, Path], *extra: str):
     return runner.invoke(main, ["compare", str(old), str(new), *extra])
 
 
+def _field_kind(field: str):
+    """The `PackKind` whose route table declares *field*."""
+    from abicheck.compatibility_evaluation_wiring import PACK_FIELD_ROUTES_BY_KIND
+
+    for kind, routes in PACK_FIELD_ROUTES_BY_KIND.items():
+        if field in routes:
+            return kind
+    raise AssertionError(f"{field} is in no pack route table")
+
+
+#: One route-valid YAML value per unapplied field. Hand-written because each
+#: route accepts a different shape, but the *keys* are asserted against
+#: `UNAPPLIED_PACK_FIELDS` below, so a registry entry without a value here
+#: fails rather than silently dropping out of the parametrize list.
+_UNAPPLIED_FIELD_VALUES: dict[str, str] = {
+    "contract.unresolved": "warn",
+    "contract.overlays": "[post_manifest]",
+    "assurance.require_evidence": "false",
+}
+
+
 class TestAPackActuallyConfiguresTheRun:
     """The reason the first `--pack` was reverted: it configured nothing."""
 
@@ -220,6 +241,44 @@ class TestD8Precedence:
         )
         assert result.exit_code == 4, result.output
 
+    @pytest.mark.parametrize(
+        ("scheme_flag", "expected"),
+        [
+            # An explicitly selected scheme is a stated value; a pack may not
+            # move it, whichever way the pack's own levels would point.
+            (["--exit-code-scheme", "legacy"], 4),
+            (["--exit-code-scheme", "severity"], 0),
+            # Nothing stated it, so the pack's own level decides `auto`.
+            ([], 0),
+        ],
+    )
+    def test_a_gate_pack_never_overrides_a_stated_exit_code_scheme(
+        self,
+        pair: tuple[Path, Path],
+        tmp_path: Path,
+        scheme_flag: list[str],
+        expected: int,
+    ) -> None:
+        """A warning-level gate pack must not silently un-fail a legacy run.
+
+        The first revision re-derived the scheme locally (`"severity" if
+        severity_active`), which turned an explicit `--exit-code-scheme
+        legacy` BREAKING run's exit 4 into 0 — a pack overriding a stated
+        value, which is exactly what D8 forbids (Codex review). The fix reads
+        the resolver's own answer instead, so this parametrization pins all
+        three directions rather than only the one that regressed.
+        """
+        gate = _pack(
+            tmp_path,
+            "lenient.yml",
+            "id: lenient\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.severity.abi_breaking: warning\n",
+        )
+        result = _compare(
+            CliRunner(), pair, "--format", "json", "--pack", str(gate), *scheme_flag
+        )
+        assert result.exit_code == expected, result.output
+
     def test_two_packs_disagreeing_on_one_field_is_a_usage_error(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
@@ -286,14 +345,24 @@ class TestD8Precedence:
 class TestOnlyAppliedFieldsAreAccepted:
     """A pack assignment that changes nothing is rejected, not recorded."""
 
-    @pytest.mark.parametrize("field", sorted(["contract.unresolved"]))
+    @pytest.mark.parametrize("field", sorted(_UNAPPLIED_FIELD_VALUES))
     def test_an_unapplied_field_is_a_usage_error(
         self, pair: tuple[Path, Path], tmp_path: Path, field: str
     ) -> None:
+        """Every registry entry, not just the first one.
+
+        The parametrize list is derived from `UNAPPLIED_PACK_FIELDS` itself
+        (via `_UNAPPLIED_FIELD_VALUES`, which pairs each with a value its own
+        route accepts), so a field added to the registry later arrives with a
+        rejection test instead of an untested branch. Each manifest must be
+        *routable* — otherwise the loader would reject it for the wrong
+        reason and the test would pass without exercising this rule at all.
+        """
         pack = _pack(
             tmp_path,
             "future.yml",
-            f"id: future\nversion: 1\nkind: contract\nassignments:\n  {field}: warn\n",
+            f"id: future\nversion: 1\nkind: {_field_kind(field).value}\n"
+            f"assignments:\n  {field}: {_UNAPPLIED_FIELD_VALUES[field]}\n",
         )
         result = _compare(CliRunner(), pair, "--pack", str(pack))
         assert result.exit_code == 64, result.output
@@ -314,6 +383,9 @@ class TestOnlyAppliedFieldsAreAccepted:
             routable |= set(routes)
             assert applied_pack_fields(kind) <= set(routes)
         assert set(UNAPPLIED_PACK_FIELDS) <= routable
+        # ...and every registry entry is actually exercised above, so a new
+        # one cannot join the registry without a rejection test.
+        assert set(_UNAPPLIED_FIELD_VALUES) == set(UNAPPLIED_PACK_FIELDS)
 
     def test_a_gate_pack_is_rejected_by_scan_which_has_no_gate(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -340,6 +412,33 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
         assert result.exit_code == 64, result.output
         assert "--pack" in result.output
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "kind: nonsense\nassignments:\n  x: y\n",
+            "kind: contract\nassignments:\n  contract.unresolved: warn\n",
+        ],
+    )
+    def test_a_dry_run_rejects_what_the_real_run_rejects(
+        self, pair: tuple[Path, Path], tmp_path: Path, body: str
+    ) -> None:
+        """`compare` validates flag combinations ahead of its `--dry-run`
+        emit precisely so a dry run cannot report "ok" for an invocation the
+        identical real run rejects. Manifest validity is answerable that
+        early, so it is answered there (Codex/CodeRabbit review)."""
+        pack = _pack(tmp_path, "bad.yml", f"id: bad\nversion: 1\n{body}")
+        for extra in ([], ["--dry-run"]):
+            result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
+            assert result.exit_code == 64, (extra, result.output)
+
+    def test_a_dry_run_still_accepts_a_usable_pack(
+        self, pair: tuple[Path, Path], ignore_removals: Path
+    ) -> None:
+        result = _compare(
+            CliRunner(), pair, "--dry-run", "--pack", str(ignore_removals)
+        )
+        assert result.exit_code == 0, result.output
 
     def test_pack_is_rejected_on_a_release_comparison(
         self, tmp_path: Path, ignore_removals: Path

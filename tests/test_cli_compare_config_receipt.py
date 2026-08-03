@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -450,9 +451,11 @@ class TestObservedOverlaysSurvive:
         listed.write_text("api_b\n", encoding="utf-8")
         real = receipt.resolve_and_apply
 
-        def _delete_then_resolve(*args, **kwargs):
+        def _delete_then_resolve(
+            params: dict, **kwargs: Any
+        ) -> tuple[Any, Any, Any]:
             listed.unlink()
-            return real(*args, **kwargs)
+            return real(params, **kwargs)
 
         monkeypatch.setattr(receipt, "resolve_and_apply", _delete_then_resolve)
         ctx = _context(tmp_path, "--public-symbols-list", str(listed))
@@ -636,7 +639,7 @@ class TestWiringContract:
 
         seen: dict = {}
 
-        def _spy(params, **kwargs):
+        def _spy(params: dict, **kwargs: Any) -> tuple[Any, Any, Any]:
             seen.update(params)
             return None, kwargs.get("policy_file"), kwargs["resolved_cfg"]
 

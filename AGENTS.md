@@ -281,14 +281,21 @@ Core pipeline (in order of data flow):
      compare config (`gate.exit_code_scheme`, `gate.severity.*`). Ordering
      matters: the config is resolved from the *explicitly given*
      `--policy-file` and only then folded, since folding first would present
-     a pack's override to the resolver as an explicit one. `UNAPPLIED_PACK_
-     FIELDS` is the enforcement half — a routable field with no engine
-     consumer (`contract.unresolved`, `contract.overlays`,
+     a pack's override to the resolver as an explicit one.
+     `UNAPPLIED_PACK_FIELDS` is the enforcement half — a routable field with
+     no engine consumer (`contract.unresolved`, `contract.overlays`,
      `assurance.require_evidence`) is a usage error rather than a silently
      inert assignment, and it is the complement of what is applied, so a
      newly-routable field is applied or listed, never neither. `compare`
      takes all three kinds; `scan --against` takes policy/contract and
-     rejects a gate pack, having no gate of its own
+     rejects a gate pack, having no gate of its own. Two review findings
+     worth not rediscovering: the gate application must *read* the resolved
+     `gate.exit_code_scheme` rather than re-derive one (re-deriving let a
+     severity-only gate pack override an explicit `--exit-code-scheme
+     legacy`), and manifest validity is checked ahead of `compare`'s
+     `--dry-run` emit — but pack-vs-pack conflict detection is not, since
+     D8 exempts a field another layer states and those layers aren't
+     resolved that early
    - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
      evaluator: one `ContractEvaluationDecision` (relevance + stable reason
      code + assurance) per already-emitted finding. Stamped onto findings

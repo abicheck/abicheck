@@ -4,8 +4,8 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
 
 ### Added
 
-- **`compare --pack` / `scan --pack`: ADR-049 D8 pack manifests now configure
-  the run.** A pack is a small versioned YAML document
+- **`compare --pack` / `scan --against ... --pack`: ADR-049 D8 pack manifests
+  now configure the run.** A pack is a small versioned YAML document
   (`id`/`version`/`kind`/`assignments`) carrying one reusable piece of
   configuration: a `kind: policy` pack assigns `ChangeKind` slugs to
   `break`/`warn`/`risk`/`ignore` exactly as `--policy-file`'s overrides do, a

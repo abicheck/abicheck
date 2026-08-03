@@ -1363,6 +1363,17 @@ def run_compare(
             "--audit-suppressions requires --suppress (nothing to audit)."
         )
 
+    # Manifest validity, ahead of the --dry-run emit for the same reason as
+    # the two guards above -- see the helper for what deliberately does *not*
+    # move here.
+    from .cli_compare_receipt import validate_pack_manifests
+    from .errors import PackManifestError as _PackManifestError
+
+    try:
+        validate_pack_manifests(pack_paths)
+    except _PackManifestError as exc:
+        raise click.UsageError(str(exc)) from exc
+
     if dry_run:
         from .dry_run import emit_dry_run
 
@@ -1668,10 +1679,10 @@ def run_compare(
 
     # ADR-049: one resolved configuration for this invocation -- the receipt
     # the report carries *and*, since D8's `--pack` landed, the thing that
-    # configures the run. Resolved before the comparison for that reason, and
-    # from the raw CLI values rather than the already-merged locals several of
-    # these were overwritten with above: the resolver merges them itself, from
-    # each layer's own inputs, and a pre-merged value would look CLI-stated.
+    # configures the run (hence: before the comparison). Built from the raw
+    # CLI values, not the already-merged locals several of these were
+    # overwritten with above -- the resolver merges them itself, and a
+    # pre-merged value would look CLI-stated.
     from .cli_compare_receipt import resolve_and_apply, typed_parameter_names
     from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
     from .compatibility_evaluation_resolver import (
@@ -1701,7 +1712,6 @@ def run_compare(
             },
             resolved_cfg=resolved_cfg,
             policy=policy,
-            pack_paths=pack_paths,
             contract_evaluation=contract_evaluation,
             # Only this module holds the Click context, so it answers "did the
             # user type this?" and hands the answers over as data -- which is
@@ -1722,13 +1732,11 @@ def run_compare(
             symbols_list=symbols_list,
         )
     except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
-        # A D7 same-tier conflict / D8 pack conflict / malformed or
-        # inapplicable manifest is a usage error, the exit code the resolver's
-        # own docstring leaves to its front end.
+        # A D7 same-tier conflict / D8 pack conflict / inapplicable manifest
+        # is a usage error, the exit code the resolver leaves to its front end.
         raise click.UsageError(str(exc)) from exc
-    # A gate pack may have moved the scheme or a severity level; every later
-    # consumer reads them off these two, so re-derive rather than leave the
-    # pre-pack values behind.
+    # A gate pack may have moved a severity level; later consumers read it
+    # off here, so re-derive rather than keep the pre-pack value.
     sev_config = resolved_cfg.severity
 
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)

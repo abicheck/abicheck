@@ -227,12 +227,46 @@ def resolve_cli_config(
     )
 
 
+def validate_pack_manifests(pack_paths: Collection[Any]) -> None:
+    """Reject an unusable ``--pack`` manifest before anything else runs.
+
+    Called ahead of ``compare``'s ``--dry-run`` emit, where that command
+    already validates every other flag combination: a dry run must not report
+    "ok" for an invocation the identical real run rejects with exit 64. The
+    full pack *resolution* cannot move that early -- it needs the
+    ``--policy-file`` the command loads much later -- but manifest validity
+    is a property of the manifests alone, so a malformed document, an unknown
+    ``kind``/``ChangeKind`` slug, an unroutable field, or an assignment this
+    build resolves but does not apply is answerable here (Codex and
+    CodeRabbit review, both reproduced).
+
+    Pack-vs-pack *conflict* detection deliberately stays behind: D8 exempts a
+    field another layer already states, so the answer depends on layers not
+    resolved yet. Checking it here would make a dry run *stricter* than the
+    real run -- the same divergence in the other direction.
+
+    Reads the manifests a second time (the resolver loads its own). That is
+    inherent to validating before resolution rather than an oversight: the
+    two answer different questions, and the resolver's own "one read per
+    resolution" rule is about not splitting *one* resolution's identities
+    across two reads, which this does not do.
+
+    Raises :class:`~abicheck.errors.PackManifestError`; the caller maps it to
+    a usage error.
+    """
+    if not pack_paths:
+        return
+    from .pack_application import check_pack_fields_applied
+
+    check_pack_fields_applied(list(pack_paths))
+
+
 def resolve_and_apply(
     params: Mapping[str, Any],
     *,
     resolved_cfg: Any,
     policy: str,
-    pack_paths: Collection[Any] = (),
+    contract_evaluation: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any, Any]:
     """Resolve this invocation's configuration, then let its packs configure it.
@@ -241,6 +275,15 @@ def resolve_and_apply(
     configuration (``None`` when nothing would read one -- see
     :func:`record_resolved_config`), and the policy file and compare config
     the comparison should actually run with.
+
+    The selected packs are read from ``params['pack_paths']`` and nowhere
+    else. An earlier revision also took them as a keyword and let that
+    overwrite the ``params`` entry, so the two could silently disagree -- and
+    the branches below read only the keyword, meaning a caller that filled
+    ``params`` alone would have its packs *recorded in the receipt and
+    applied to nothing*. That is precisely the decorative-``--pack``
+    regression this module exists to prevent, so there is one source
+    (CodeRabbit review).
 
     Both halves come from the *same* resolution, which is what makes
     ``--pack`` real rather than decorative: the resolver has already applied
@@ -258,25 +301,23 @@ def resolve_and_apply(
     Raises what the canonical resolver and the pack loader raise; mapping
     those onto exit 64 is the caller's job, as both modules document.
     """
-    if not kwargs.get("contract_evaluation", False) and not pack_paths:
+    pack_paths = tuple(params.get("pack_paths") or ())
+    if not contract_evaluation and not pack_paths:
         # Nothing would read a resolution: no context exists to record one
         # onto, and no pack can contribute to the run. Resolving anyway would
         # make every ordinary `compare` newly able to fail on a D7 conflict
         # it never previously computed.
         return None, kwargs.get("policy_file"), resolved_cfg
-    kwargs.pop("contract_evaluation", None)
-    config = resolve_cli_config({**params, "pack_paths": tuple(pack_paths)}, **kwargs)
+    config = resolve_cli_config(params, **kwargs)
     policy_file = kwargs.get("policy_file")
     if not pack_paths:
         return config, policy_file, resolved_cfg
     from .pack_application import (
         apply_to_compare_config,
-        check_pack_fields_applied,
         pack_application,
         policy_file_with_packs,
     )
 
-    check_pack_fields_applied(list(pack_paths))
     application = pack_application(config, policy_file=policy_file)
     return (
         config,
