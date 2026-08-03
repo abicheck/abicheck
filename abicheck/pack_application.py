@@ -491,38 +491,6 @@ def check_resolved_config_applies_packs(
             )
 
 
-def check_packs_assign_something(
-    pack_paths: Sequence[str | Path],
-    *,
-    loaded: Iterable[tuple[str, Any]] | None = None,
-) -> None:
-    """Reject a manifest whose ``assignments`` mapping is empty.
-
-    The decorative pack in its purest form: selected, recorded in the receipt
-    as active configuration, and changing no verdict, finding or exit code.
-
-    Its own function because it is the one rule **both** front ends must ask
-    of the *files*. Every other rejection here is precedence-sensitive and so
-    belongs to :func:`check_resolved_config_applies_packs`, which `scan` uses
-    exclusively -- and that is exactly why `scan` first missed this one
-    (Codex review). It cannot move there either: a pack whose value an
-    explicit ``--policy-file`` outranks *also* supplies no provenance, so
-    "recorded but contributed nothing" is indistinguishable, at the
-    resolution, from D8 precedence working correctly. Emptiness is a property
-    of the file, answerable before any layer speaks, which is what lets
-    `--dry-run` answer it too.
-    """
-    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
-    for path, pack in entries:
-        if not pack.assignments:
-            raise PackManifestError(
-                f"{path}: assigns nothing. A pack that is selected, recorded "
-                "as active configuration, and changes no verdict, finding or "
-                "exit code is the failure this check exists to prevent -- "
-                "give it an assignment or drop the --pack."
-            )
-
-
 def check_pack_fields_applied(
     pack_paths: Sequence[str | Path],
     *,
@@ -544,8 +512,11 @@ def check_pack_fields_applied(
     a malformed manifest raises, since both are "this manifest cannot be
     used as written" rather than a fact about the libraries being compared.
     """
+    # `load_selected_packs` rejects a manifest that assigns nothing, so the
+    # emptiness rule is asked by the same read that answers everything below
+    # -- and, for the real run, by the resolver's own read rather than this
+    # earlier one.
     entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
-    check_packs_assign_something(pack_paths, loaded=entries)
     for path, pack in entries:
         for field_name, value in pack.assignments.items():
             # An *inert value* is a precedence question -- an explicit

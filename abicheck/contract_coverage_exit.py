@@ -217,6 +217,42 @@ def report_carries_the_ledger(
     return all(f == _LEDGER_BEARING_FORMAT for f in rendered)
 
 
+def coverage_response_block(
+    result: Any, *, base_exit: int = 0
+) -> dict[str, Any] | None:
+    """The axis as structured data, for a front end whose answer *is* a dict.
+
+    ``None`` when the run evaluated no contract at all -- there is no domain
+    to be short of evidence for, so an empty block would suggest a question
+    was asked that never was.
+
+    Otherwise always present, including when the domain closed cleanly
+    (``failures: []``, contribution ``0``), matching how ``reporter.py``
+    emits the ledger rather than omitting it: "we looked and found nothing"
+    and "we never looked" are different answers and must not serialize the
+    same.
+
+    Why a front end needs this at all rather than reading its own rendered
+    report: only the JSON report carries the ledger, so an MCP client asking
+    for markdown/sarif/html got a change-free report beside ``exit_code: 1``
+    with nothing anywhere saying why (Codex review). Unlike the CLI's stderr
+    notice -- which is *skipped* for JSON because a second copy beside a
+    piped report is noise -- this block is emitted for every format: it is a
+    sibling key of the very ``exit_code`` it explains, and making a client
+    branch on ``output_format`` to find out why its gate failed is the
+    failure this exists to prevent.
+    """
+    ctx = getattr(result, "contract_context", None)
+    if ctx is None:
+        return None
+    failures = coverage_failures_for_context(ctx)
+    return {
+        "exit_contribution": coverage_exit_for_context(ctx),
+        "failures": [f.to_dict() for f in failures],
+        "diagnostic": coverage_failure_diagnostic(result, base_exit=base_exit),
+    }
+
+
 def announce_coverage_floor(
     result: Any,
     *,

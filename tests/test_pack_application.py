@@ -697,11 +697,12 @@ class TestOnlyAppliedFieldsAreAccepted:
         because it uses only the resolved check while emptiness was asked of
         the files (Codex review).
 
-        It cannot simply move to the resolved check either: a pack an
-        explicit `--policy-file` outranks *also* supplies no provenance, so
-        at the resolution "assigns nothing" is indistinguishable from D8
-        precedence working correctly. Hence one file-based rule, called by
-        both front ends — and this test, so they cannot drift apart again.
+        It cannot move to the resolved check either: a pack an explicit
+        `--policy-file` outranks *also* supplies no provenance, so at the
+        resolution "assigns nothing" is indistinguishable from D8 precedence
+        working correctly. It lives in `load_selected_packs` instead — every
+        path that resolves or validates packs loads through there, so neither
+        command can miss it again.
         """
         old_p, new_p = pair
         pack = _pack(
@@ -733,6 +734,45 @@ class TestOnlyAppliedFieldsAreAccepted:
         result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
         assert result.exit_code == 64, (extra, result.output)
         assert "assigns nothing" in result.output
+
+    def test_emptiness_is_judged_on_the_revision_that_configures_the_run(
+        self, tmp_path: Path
+    ) -> None:
+        """The window a front-end-only check left open: a generated or
+        concurrently edited pack that is non-empty when the command validates
+        it and `assignments: {}` when the resolver reads it (Codex review).
+
+        Validating early and resolving later is two reads; the rule has to
+        hold on the second one, or the empty revision is what configures the
+        run while the first read approved a different document.
+        """
+        from abicheck.cli_compare_receipt import validate_pack_manifests
+        from abicheck.compatibility_evaluation_frontend import (
+            ExplicitCompatibilityInputs,
+            FrontEnd,
+            resolve_compatibility_evaluation_config,
+        )
+        from abicheck.errors import PackManifestError
+
+        pack = _pack(
+            tmp_path,
+            "shrinking.yml",
+            "id: shrinking\nversion: 1\nkind: contract\n"
+            "assignments:\n  surface.internal_namespaces: [priv]\n",
+        )
+        # The early, file-level validation every `compare` runs before its
+        # --dry-run emit: this revision is fine.
+        validate_pack_manifests([str(pack)])
+        # ...and then it is rewritten before resolution.
+        pack.write_text(
+            "id: shrinking\nversion: 1\nkind: contract\nassignments: {}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(PackManifestError, match="assigns nothing"):
+            resolve_compatibility_evaluation_config(
+                front_end=FrontEnd.CLI,
+                explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)),
+            )
 
     def test_pack_without_a_baseline_is_a_usage_error_on_scan(
         self, pair: tuple[Path, Path], ignore_removals: Path

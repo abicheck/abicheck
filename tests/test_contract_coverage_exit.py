@@ -354,6 +354,48 @@ class TestEveryFrontEndFoldsTheAxis:
         assert result["verdict"] in {"NO_CHANGE", "COMPATIBLE"}, result
         assert result["exit_code"] == 1, result
 
+    @pytest.mark.parametrize("fmt", ["json", "markdown"])
+    def test_the_mcp_response_explains_the_gate_in_every_format(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
+        """Only the JSON report carries the ledger, so a client asking for any
+        other format got a change-free report beside `exit_code: 1` with
+        nothing saying why (Codex review). The block is a sibling of the code
+        it explains, so no client has to branch on `output_format` to find it.
+        """
+        pytest.importorskip("mcp")
+        from abicheck.mcp_server import abi_compare
+
+        old_p, new_p = _write(tmp_path, *_compatible_pair())
+        raw = abi_compare(
+            old_input=str(old_p),
+            new_input=str(new_p),
+            contract_evaluation=True,
+            output_format=fmt,
+        )
+        result = json.loads(raw) if isinstance(raw, str) else raw
+        assert result["exit_code"] == 1, result
+        coverage = result["contract_coverage"]
+        assert coverage["exit_contribution"] == 1, coverage
+        assert coverage["failures"], coverage
+        # ...and it says which provider fell short, not just that one did.
+        assert "Contract coverage incomplete" in coverage["diagnostic"], coverage
+
+    def test_a_run_without_contract_evaluation_gets_no_coverage_block(
+        self, tmp_path: Path
+    ) -> None:
+        """"We looked and found nothing" and "we never looked" must not
+        serialize the same, so the block is absent rather than empty when no
+        contract was evaluated at all."""
+        pytest.importorskip("mcp")
+        from abicheck.mcp_server import abi_compare
+
+        old_p, new_p = _write(tmp_path, *_compatible_pair())
+        raw = abi_compare(old_input=str(old_p), new_input=str(new_p))
+        result = json.loads(raw) if isinstance(raw, str) else raw
+        assert result["exit_code"] == 0, result
+        assert "contract_coverage" not in result, result
+
 
 class TestTheProgrammaticApiStaysQuiet:
     """`fold_coverage_exit` is on `service_scan.run_scan()`'s path, so it must

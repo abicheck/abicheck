@@ -1454,20 +1454,18 @@ def scan_cmd(
                 # the same reason `cli_scan_receipt._without_gate_settings`
                 # blanks the gate rather than reporting one it never used.
                 from .pack_application import (
-                    check_packs_assign_something,
                     check_resolved_config_applies_packs,
                     pack_application,
                     policy_file_with_packs,
                 )
 
-                # Emptiness is the one rule that must be asked of the
-                # *files*: a pack an explicit --policy-file outranks also
-                # supplies no provenance, so at the resolution "assigns
-                # nothing" is indistinguishable from D8 precedence working
-                # (Codex review -- scan missed this rule precisely because
-                # it uses only the resolved check).
-                check_packs_assign_something(list(pack_paths))
-
+                # Emptiness is not asked here: it is a property of the file,
+                # and `load_selected_packs` -- which the resolution above
+                # already went through -- rejects an empty manifest on the
+                # very revision that configured this run. Asking it again
+                # from a second read would only move that window, not close
+                # it (Codex review).
+                #
                 # Everything else is asked of the resolution, not a second
                 # read of the files -- same reasoning as the compare path:
                 # the resolver already loaded its own copy, so re-reading

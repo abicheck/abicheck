@@ -399,8 +399,49 @@ def load_selected_packs(
     re-digest every manifest per call, and a manifest edited *between* those
     reads would produce receipt entries carrying different identities for
     what is meant to be one configuration (CodeRabbit review).
+
+    Also where a selected-but-empty manifest is rejected, for the same
+    reason: emptiness is a property of the file, and asking it *here* asks it
+    of the revision that will configure the run. An earlier arrangement asked
+    it from the front ends before resolution, which left the window this
+    function's own one-read rule exists to close -- a generated or
+    concurrently edited pack that was non-empty at the front end's read and
+    ``assignments: {}`` at the resolver's would be recorded as selected,
+    supply no field provenance, pass every later check, and succeed as
+    exactly the decorative pack the rule rejects (Codex review). Every path
+    that resolves or validates packs loads through here, so one call site
+    covers `compare`, `compare --dry-run`, `scan`, the MCP tools and the
+    typed API.
     """
-    return [(str(path), load_pack_manifest(path)) for path in pack_paths]
+    entries = [(str(path), load_pack_manifest(path)) for path in pack_paths]
+    check_packs_assign_something(entries)
+    return entries
+
+
+def check_packs_assign_something(entries: Sequence[tuple[str, LoadedPack]]) -> None:
+    """Reject a loaded manifest whose ``assignments`` mapping is empty.
+
+    The decorative pack in its purest form: selected, recorded in the receipt
+    as active configuration, and changing no verdict, finding or exit code.
+
+    Its own named function rather than an inline loop in
+    :func:`load_selected_packs` so the rule can be tested directly on
+    entries, and so it reads as a rule rather than as loading trivia.
+
+    It cannot instead be asked of the *resolved* configuration, where every
+    other pack rejection lives: a pack whose value an explicit
+    ``--policy-file`` outranks also supplies no provenance, so "recorded but
+    contributed nothing" would be indistinguishable there from D8 precedence
+    working correctly.
+    """
+    for path, pack in entries:
+        if not pack.assignments:
+            raise PackManifestError(
+                f"{path}: assigns nothing. A pack that is selected, recorded "
+                "as active configuration, and changes no verdict, finding or "
+                "exit code is the failure this check exists to prevent -- "
+                "give it an assignment or drop the --pack."
+            )
 
 
 def resolve_selected_packs(

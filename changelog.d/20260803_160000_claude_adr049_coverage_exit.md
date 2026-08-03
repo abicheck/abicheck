@@ -34,6 +34,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   the same function the exit path uses, so the ledger a user reads is the one
   that gated them.
 
+- **The MCP `abi_compare` tool folds the same axis, and explains it.** Its
+  `exit_code` is subject to the identical `max` fold, so a client gating on the
+  returned code can no longer accept a run the returned report says was gated.
+  Because only the JSON report carries the ledger, the response gained a
+  top-level `contract_coverage` block — the contribution, the failure list, and
+  a one-line diagnostic — emitted for every `output_format` rather than only
+  the one whose report happens to include it.
+
 ### Added
 
 - **`contract.unresolved` is now an applied `kind: contract` pack field.** It
