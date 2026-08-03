@@ -18,14 +18,23 @@ generated: false
     (`abicheck.compatibility_evaluation_frontend`) and is fully tested.
     `abicheck compare --contract-evaluation` resolves one such object per run
     and reports it, as the `contract_context.evaluation_context` block of its
-    JSON report — but only as an audit record: it changes no verdict, no
-    finding, and no exit code. Every other command, and every `compare` run
-    without that flag, resolves nothing. Applying the object in the
-    authoritative comparison path is the rest of
+    JSON report.
+
+    **Two parts of it are live and do change results.** A selected `--pack`
+    really configures the run — a `kind: policy` pack overriding a
+    `ChangeKind` moves the verdict and the exit code (see "Selecting a
+    pack" below). And under `--contract-evaluation` the contract-coverage
+    ledger contributes an orthogonal exit `1` when the selected domain's
+    evidence is incomplete (ADR-049 Phase 7; see
+    [Exit Codes](exit-codes.md)).
+
+    Everything else on this page is still resolution only: the per-finding
+    contract decisions change no verdict and no finding, and a `compare` run
+    *without* `--contract-evaluation` — and every other command — resolves
+    nothing at all, so its behaviour is unchanged. Making those decisions
+    authoritative, and the default flip, are the rest of
     [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
-    Phase 5, and the default flip is Phase 7. Pack manifests (below) have
-    no CLI flag yet either — they are reachable from the Python API only.
-    Today's live behaviour is documented in
+    Phase 7. Today's live behaviour is also documented in
     [Configuration File](config-file.md) and [Exit Codes](exit-codes.md).
 
 ADR-049 D7 requires that **one** typed object carry every setting that decides

@@ -925,7 +925,7 @@
     },
     "contract_coverage_failures": {
       "type": "array",
-      "description": "ADR-049 Phase 5 (schema 2.26): present only when the caller opts into `compare --contract-evaluation`. The sibling contract-coverage ledger of ADR-049 plan Section 6.1 \u2014 one entry per provider/domain coverage failure for the contract domain this run selected. Deliberately not change rows: a coverage failure carries no ChangeKind and never enters `changes`, which is what makes it unsuppressible ('ordinary change suppressions ... cannot suppress a provider/domain coverage failure', Section 6.2). Derived from `contract_context`, so the same provider record is a failure under one domain and advisory under another. An empty array is a real value meaning the selected domain closed. Advisory only; never affects verdict, severity, or any exit code.",
+      "description": "ADR-049 Phase 5 (schema 2.26): present only when the caller opts into `compare --contract-evaluation`. The sibling contract-coverage ledger of ADR-049 plan Section 6.1 \u2014 one entry per provider/domain coverage failure for the contract domain this run selected. Deliberately not change rows: a coverage failure carries no ChangeKind and never enters `changes`, which is what makes it unsuppressible ('ordinary change suppressions ... cannot suppress a provider/domain coverage failure', Section 6.2). Derived from `contract_context`, so the same provider record is a failure under one domain and advisory under another. An empty array is a real value meaning the selected domain closed. Never affects verdict or severity. It does affect the process exit status: ADR-049 Phase 7 applies the sibling `contract_coverage_exit_contribution` as an orthogonal floor (folded with max, so it never lowers a 2/4).",
       "items": {
         "type": "object",
         "properties": {
@@ -980,7 +980,7 @@
         0,
         1
       ],
-      "description": "ADR-049 Phase 5 (schema 2.26): what `contract_coverage_failures` WOULD contribute to the exit code \u2014 1 when non-empty, 0 otherwise. Stated, not applied: the independent coverage exit is ADR-049 Phase 7's, alongside the default flip, so this run's actual exit code is unaffected. Present only alongside `contract_coverage_failures`."
+      "description": "ADR-049 (schema 2.26): what `contract_coverage_failures` contributes to the exit code \u2014 1 when non-empty, 0 otherwise, and 0 when `contract.unresolved=warn` accepted the failures. **Applied** since ADR-049 Phase 7: the process exit status is floored to this value (folded with max, so it never lowers a 2/4 from the compatibility axis, and never rewrites a finding's decision or gate contribution). This is the number that actually gated the run, derived by the same function the exit path uses. Present only alongside `contract_coverage_failures`."
     }
   },
   "$defs": {
