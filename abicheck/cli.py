@@ -1168,7 +1168,7 @@ def _announce_exit_scheme(
 
 def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
-    fmt: str | None = None, stat: bool = False,
+    fmt: str | None = None, stat: bool = False, secondary_fmt: str | None = None,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
 
@@ -1191,7 +1191,7 @@ def _exit_with_severity_or_verdict(
         )
     else:
         exit_code = legacy_exit_code(result.verdict)
-    announce_coverage_floor(result, base_exit=exit_code, fmt=fmt, stat=stat)
+    announce_coverage_floor(result, base_exit=exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
     exit_code = fold_coverage_exit(exit_code, result)
     if exit_code != 0:
         sys.exit(exit_code)

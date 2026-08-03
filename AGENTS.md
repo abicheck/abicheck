@@ -283,10 +283,17 @@ Core pipeline (in order of data flow):
      `--policy-file` and only then folded, since folding first would present
      a pack's override to the resolver as an explicit one.
      `UNAPPLIED_PACK_FIELDS` is the enforcement half — a routable field with
-     no engine consumer (`contract.unresolved`, `contract.overlays`,
-     `assurance.require_evidence`) is a usage error rather than a silently
-     inert assignment, and it is the complement of what is applied, so a
-     newly-routable field is applied or listed, never neither. `compare`
+     no engine consumer (`contract.overlays`, `assurance.require_evidence`)
+     is a usage error rather than a silently inert assignment, and it is the
+     complement of what is applied, so a newly-routable field is applied or
+     listed, never neither. `contract.unresolved` left that list in Phase 7,
+     when the coverage exit gave it a consumer. Three more routes are
+     rejected for adjacent reasons: a field whose consumer only runs under
+     `--contract-evaluation` when that flag is absent
+     (`CONTRACT_EVALUATION_ONLY_FIELDS`), a value the runtime does not act on
+     (`INERT_PACK_VALUES`), and a manifest whose `assignments` mapping is
+     empty — each is a pack recorded as active configuration that changes
+     nothing, which is the single failure all of these guard. `compare`
      takes all three kinds; `scan --against` takes policy/contract and
      rejects a gate pack, having no gate of its own. Two review findings
      worth not rediscovering: the gate application must *read* the resolved

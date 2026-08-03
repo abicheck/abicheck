@@ -195,19 +195,35 @@ def _coverage_message(where: list[str], floor: int, base_exit: int) -> str:
 _LEDGER_BEARING_FORMAT = "json"
 
 
-def report_carries_the_ledger(fmt: str | None, *, stat: bool = False) -> bool:
-    """Does the output this invocation renders already state the ledger?
+def report_carries_the_ledger(
+    fmt: str | None, *, stat: bool = False, secondary_fmt: str | None = None
+) -> bool:
+    """Does *every* output this invocation renders already state the ledger?
 
-    The condition for staying quiet. Getting it wrong in the permissive
-    direction is what makes a run exit non-zero with no explanation
-    anywhere, so it answers for the report actually produced rather than
-    for the ``--format`` name alone.
+    The condition for staying quiet, and it has to hold for all of them:
+    `--format json --secondary-format markdown` writes a second report that
+    carries none of the ledger, so answering from the primary alone let the
+    markdown say the change is safe while the process exited 1 (Codex
+    review). Getting this wrong in the permissive direction is exactly what
+    makes a run fail with no explanation anywhere.
+
+    ``--stat`` is the same problem one level in: `to_stat_json` is a summary
+    that omits both ledger keys, so a stat run is ledgerless whatever its
+    ``--format`` says.
     """
-    return fmt == _LEDGER_BEARING_FORMAT and not stat
+    if stat:
+        return False
+    rendered = [fmt] + ([secondary_fmt] if secondary_fmt is not None else [])
+    return all(f == _LEDGER_BEARING_FORMAT for f in rendered)
 
 
 def announce_coverage_floor(
-    result: Any, *, base_exit: int, fmt: str | None = None, stat: bool = False
+    result: Any,
+    *,
+    base_exit: int,
+    fmt: str | None = None,
+    stat: bool = False,
+    secondary_fmt: str | None = None,
 ) -> None:
     """Print the coverage notice to stderr, unless the report already says it.
 
@@ -219,7 +235,7 @@ def announce_coverage_floor(
 
     stderr, not stdout: the report a caller pipes onward stays intact.
     """
-    if report_carries_the_ledger(fmt, stat=stat):
+    if report_carries_the_ledger(fmt, stat=stat, secondary_fmt=secondary_fmt):
         return
     diagnostic = coverage_failure_diagnostic(result, base_exit=base_exit)
     if diagnostic is None:

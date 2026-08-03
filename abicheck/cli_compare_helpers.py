@@ -1947,11 +1947,11 @@ def run_compare(
         # to the application/plugin-host contract, floored at the worst
         # scoped result -- the full library verdict stays informational only.
         # ADR-049 §7's coverage axis is orthogonal to that scoping.
-        announce_coverage_floor(result, base_exit=scoped_exit_code, fmt=fmt, stat=stat)
+        announce_coverage_floor(result, base_exit=scoped_exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
         sys.exit(fold_coverage_exit(scoped_exit_code, result))
 
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
-    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme, fmt, stat)
+    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme, fmt, stat, secondary_fmt)
 
 
 def _fold_evidence_depth_into_json(

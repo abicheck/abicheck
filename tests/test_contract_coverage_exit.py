@@ -213,9 +213,7 @@ class TestTheGatingConditionIsVisible:
         assert report["contract_coverage_exit_contribution"] == 1
         assert report["contract_coverage_failures"]
 
-    def test_stat_json_is_ledgerless_so_it_still_explains(
-        self, tmp_path: Path
-    ) -> None:
+    def test_stat_json_is_ledgerless_so_it_still_explains(self, tmp_path: Path) -> None:
         """`--stat` renders `to_stat_json`, a summary that omits both ledger
         keys -- so a stat run is ledgerless whatever `--format` says, and
         suppressing on the format name alone left it exiting 1 with no
@@ -233,9 +231,7 @@ class TestTheGatingConditionIsVisible:
         assert result.exit_code == 1, result.output
         assert "Contract coverage incomplete" in result.output
 
-    def test_it_does_not_claim_a_floor_it_did_not_apply(
-        self, tmp_path: Path
-    ) -> None:
+    def test_it_does_not_claim_a_floor_it_did_not_apply(self, tmp_path: Path) -> None:
         """Beside a real ABI break `max` keeps the 4, so "Exit code floored to
         1" would be a false statement about what happened. The incomplete
         coverage is still reported -- it is why part of the comparison could
@@ -273,8 +269,13 @@ class TestTheGatingConditionIsVisible:
         result = CliRunner().invoke(
             main,
             [
-                "scan", str(new_p), "--against", str(old_p),
-                "--contract-evaluation", "--contract", "exports",
+                "scan",
+                str(new_p),
+                "--against",
+                str(old_p),
+                "--contract-evaluation",
+                "--contract",
+                "exports",
             ],
         )
         assert result.exit_code == 1, result.output
@@ -286,6 +287,36 @@ class TestTheGatingConditionIsVisible:
         # coverage is what made it 1 (Codex review).
         assert "floored to 1" in result.output
         assert "already" not in result.output
+
+    def test_a_non_json_secondary_report_still_gets_the_notice(
+        self, tmp_path: Path
+    ) -> None:
+        """Staying quiet requires *every* rendered report to carry the ledger.
+        With `--format json --secondary-format markdown` the markdown carries
+        none of it, so answering from the primary alone let that report say
+        the change is safe while the process exited 1 (Codex review)."""
+        old_p, new_p = _write(tmp_path, *_compatible_pair())
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--format",
+                "json",
+                "-o",
+                str(tmp_path / "r.json"),
+                "--secondary-format",
+                "markdown",
+                "--secondary-output",
+                str(tmp_path / "r.md"),
+                "--contract-evaluation",
+                "--contract",
+                "exports",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Contract coverage incomplete" in result.output
 
     def test_a_run_the_axis_does_not_gate_stays_quiet(self, tmp_path: Path) -> None:
         """No notice when there is nothing to explain -- otherwise the message
