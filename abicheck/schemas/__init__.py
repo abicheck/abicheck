@@ -313,10 +313,11 @@ from typing import Any
 #:       rather than omitted. The ledger is **derived** from
 #:       ``contract_context``, not a second observation: the same provider
 #:       record is a failure under one domain and advisory under another
-#:       (Section 7), so it is answered per selected mode. Purely additive
-#:       and advisory, same as 2.23/2.25: the exit contribution is *stated*,
-#:       never applied — the independent coverage exit is ADR-049 Phase 7's,
-#:       alongside the default flip.
+#:       (Section 7), so it is answered per selected mode. Unlike 2.23/2.25,
+#:       this one is not purely advisory: ADR-049 Phase 7 applies the
+#:       contribution, so ``contract_coverage_exit_contribution`` is the
+#:       number that actually gated the run (folded with ``max``, and ``0``
+#:       when ``contract.unresolved=warn`` accepted the failures below it).
 REPORT_SCHEMA_VERSION = "2.26"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

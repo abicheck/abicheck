@@ -385,7 +385,11 @@ def resolve_and_apply(
     # would only move that window rather than close it, since the resolver had
     # already loaded its own copy. Asking the resolved config is exact: it is
     # the revision that configures the run, by construction.
-    check_resolved_config_applies_packs(config)
+    # `contract_evaluation` is passed because a field like
+    # `contract.unresolved` only has a consumer when a domain is selected --
+    # accepting it otherwise would record active configuration that reads
+    # back as nothing, the decorative-pack failure again (Codex review).
+    check_resolved_config_applies_packs(config, contract_evaluation=contract_evaluation)
 
     application = pack_application(config, policy_file=policy_file)
     return (

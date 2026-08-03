@@ -400,15 +400,36 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     )
 
 
-def check_resolved_config_applies_packs(
-    config: Any, *, gate_supported: bool = True, gate_reason: str = ""
-) -> None:
-    """Reject a pack this build (or this command) cannot apply.
+#: Pack fields whose engine consumer only runs under contract evaluation,
+#: mapped to why. Assigning one without ``--contract-evaluation`` resolves
+#: and records a value nothing will read -- the decorative-pack failure this
+#: module exists to prevent -- so it is rejected rather than accepted
+#: (Codex review). Distinct from :data:`UNAPPLIED_PACK_FIELDS`, which is
+#: about what this *build* applies at all; this is about what this
+#: *invocation* enabled.
+CONTRACT_EVALUATION_ONLY_FIELDS: Mapping[str, str] = {
+    "contract.unresolved": (
+        "it configures the contract-coverage exit, which is only computed "
+        "when --contract-evaluation selects a domain to measure coverage of"
+    ),
+}
 
-    Both questions are answered from the resolved configuration: an unapplied
-    field from ``provenance[field].source_kind``, and a selected gate pack
-    from ``gate.packs`` -- which lists exactly the ``kind: gate`` manifests,
-    since :func:`resolve_selected_packs` groups them by kind.
+
+def check_resolved_config_applies_packs(
+    config: Any,
+    *,
+    gate_supported: bool = True,
+    gate_reason: str = "",
+    contract_evaluation: bool = True,
+) -> None:
+    """Reject a pack this build, command, or invocation cannot apply.
+
+    Every question is answered from the resolved configuration: an unapplied
+    field from ``provenance[field].source_kind``, a selected gate pack from
+    ``gate.packs`` -- which lists exactly the ``kind: gate`` manifests, since
+    :func:`resolve_selected_packs` groups them by kind -- and, when
+    *contract_evaluation* is false, any
+    :data:`CONTRACT_EVALUATION_ONLY_FIELDS` a pack supplied.
 
     The authoritative half, and the *only* place the gate question is asked:
     :func:`check_pack_fields_applied` re-reads the files, and asking there
@@ -439,6 +460,16 @@ def check_resolved_config_applies_packs(
             raise _unapplied_field_error(
                 _supplying_pack(config, field_name), field_name, reason
             )
+    if not contract_evaluation:
+        for field_name, reason in CONTRACT_EVALUATION_ONLY_FIELDS.items():
+            if _pack_supplied(config, field_name):
+                raise PackManifestError(
+                    f"{_supplying_pack(config, field_name)}: {field_name!r} "
+                    f"needs --contract-evaluation to have any effect ({reason}). "
+                    "Add it, or drop the assignment -- a pack recorded as "
+                    "active configuration while changing nothing is the "
+                    "failure this check exists to prevent."
+                )
     for field_name in INERT_PACK_VALUES:
         # `_pack_supplied` is what makes this precedence-aware: a field an
         # explicit `--policy-file` states carries *that* source's provenance,

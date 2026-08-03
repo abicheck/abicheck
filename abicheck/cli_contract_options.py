@@ -106,9 +106,11 @@ def contract_options(f: F) -> F:
                        "declaration is not. 'all': every entity, no root or closure "
                        "evidence required. Omitted, the domain follows "
                        "--scope-public-headers/--no-scope-public-headers as before; an "
-                       "explicit value outranks those. Requires --contract-evaluation, "
-                       "and is advisory exactly like it: selecting a domain never "
-                       "changes verdict, exit_code, or which findings appear.")(f)
+                       "explicit value outranks those. Requires --contract-evaluation. "
+                       "Selecting a domain never changes the verdict or which findings "
+                       "appear, but it does select which evidence the contract-coverage "
+                       "axis is answered against, and that axis can contribute exit 1 -- "
+                       "see --contract-evaluation.")(f)
     f = click.option("--contract-evaluation", "contract_evaluation", is_flag=True, default=False,
                   help="ADR-049 Phase 3's shadow contract evaluator (non-authoritative; "
                        "pick its evidence domain with --contract). Stamps each finding in "
@@ -127,7 +129,15 @@ def contract_options(f: F) -> F:
                        "top-level contract_context block (the observed provider evidence, "
                        "the resolved evaluation context, and the decision receipt), so a "
                        "decision can be replayed or re-evaluated later without re-reading "
-                       "the binaries. Advisory only: it never changes verdict, exit_code, "
-                       "or which findings appear. Default off; the report is unchanged "
-                       "unless this is set.")(f)
+                       "the binaries. The per-finding decisions are advisory: they never "
+                       "change the verdict or which findings appear. **This flag can "
+                       "still affect the exit code**, through one orthogonal axis: if the "
+                       "selected domain's required evidence is incomplete, the "
+                       "contract-coverage ledger contributes exit 1 (ADR-049 Phase 7). It "
+                       "is folded with max, so it never lowers an ABI break's 2/4, and a "
+                       "run without this flag is unaffected. Set contract.unresolved=warn "
+                       "(e.g. via a `kind: contract` --pack) to accept incomplete "
+                       "coverage: that zeroes the contribution while still reporting "
+                       "every failure. Default off; the report is unchanged unless this "
+                       "is set.")(f)
     return f

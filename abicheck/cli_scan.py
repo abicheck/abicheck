@@ -995,8 +995,10 @@ def _run_artifact_set(
     "against ('public' header-derived surface, 'exports' the binary's own "
     "export table plus its type closure, 'all' every entity). Omitted, the "
     "domain follows --scope-public-headers/--no-scope-public-headers. "
-    "Requires --contract-evaluation, and is advisory exactly like it "
-    "(mirrors `compare --contract`).",
+    "Requires --contract-evaluation. The per-finding decisions are advisory, "
+    "but the selected domain is what the contract-coverage axis is answered "
+    "against, and that axis can contribute exit 1 (mirrors `compare "
+    "--contract`).",
 )
 @pack_option  # ADR-049 D8: --pack (requires --against; see _COMPARISON_ONLY_FLAGS)
 @lang_option
@@ -1444,6 +1446,7 @@ def scan_cmd(
                         "directly, so it has no severity or exit-code scheme "
                         "for a gate pack to move (compare does)"
                     ),
+                    contract_evaluation=contract_evaluation,
                 )
                 policy_file = policy_file_with_packs(
                     policy_file,

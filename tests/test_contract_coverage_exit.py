@@ -243,6 +243,31 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         assert report["contract_coverage_failures"], report
         assert report["contract_coverage_exit_contribution"] == 0
 
+    @pytest.mark.parametrize("command", ["compare", "scan"])
+    def test_it_is_rejected_without_contract_evaluation(
+        self, tmp_path: Path, command: str
+    ) -> None:
+        """A pack whose only assignment has no consumer in *this invocation*
+        is the decorative pack `pack_application` exists to prevent, one
+        level in: the field is applied by this build, but nothing computes
+        coverage unless a domain was selected, so the value would be recorded
+        as active configuration and read back as nothing (Codex review).
+
+        Rejected rather than silently accepted, and on both commands --
+        `scan --against` resolves packs through the same check.
+        """
+        old_p, new_p = _write(tmp_path, *_compatible_pair())
+        pack = str(self._warn_pack(tmp_path))
+        argv = (
+            ["compare", str(old_p), str(new_p), "--pack", pack]
+            if command == "compare"
+            else ["scan", str(new_p), "--against", str(old_p), "--pack", pack]
+        )
+        result = CliRunner().invoke(main, argv)
+        assert result.exit_code == 64, result.output
+        assert "contract.unresolved" in result.output
+        assert "--contract-evaluation" in result.output
+
     @pytest.mark.parametrize("mode", ["exports", "public"])
     def test_warn_never_moves_the_compatibility_axis(
         self, tmp_path: Path, mode: str

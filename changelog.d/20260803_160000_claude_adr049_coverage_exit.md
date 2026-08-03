@@ -42,3 +42,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   pack may now assign it. It is the one applied pack field that is not folded
   into a legacy object — its consumer reads it straight off the resolved
   configuration the receipt already persists.
+
+  Assigning it **without `--contract-evaluation` is a usage error (exit 64)**
+  on both `compare` and `scan --against`: nothing computes coverage unless a
+  domain is selected, so the value would be recorded as active configuration
+  and read back as nothing. That is the decorative-pack failure the pack
+  application layer exists to prevent, one level in — the field is applied by
+  this build, just not by that invocation.
