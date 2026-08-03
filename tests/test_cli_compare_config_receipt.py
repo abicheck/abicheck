@@ -549,8 +549,17 @@ class TestOverlayProvenanceEdges:
         assert provenance["surface.explicit_scope"].selected_by
 
     def test_a_stated_overlay_selector_survives_alongside_the_observed_one(self):
-        """A `kind: contract` pack can assign `contract.overlays`, and those
-        selectors are a different set from the providers the ledger observed.
+        """A run can state `contract.overlays` — via `--post-manifest`/
+        `--public-symbol`, or an API request as here — and those selectors are
+        a different set from the providers the ledger observed.
+
+        Deliberately not "a `kind: contract` pack can assign it", which this
+        docstring used to say: a pack assigning `contract.overlays` is now a
+        usage error (`pack_application.UNAPPLIED_PACK_FIELDS` — the field
+        routes and resolves, but the overlay kinds it names have no concrete
+        input to point at). The merge under test is unaffected either way,
+        since it is about a stated value meeting an observed one whatever
+        stated it (CodeRabbit review).
 
         Replacing one with the other dropped a real selection and its receipt
         (CodeRabbit review), so the value is their union and the entries
