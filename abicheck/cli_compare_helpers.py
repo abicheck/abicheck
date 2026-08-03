@@ -210,6 +210,7 @@ def _reject_set_input_flags(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     audit_suppressions: bool = False,
+    pack_paths: tuple[Path, ...] = (),
     include_labels: dict[Path, str] | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
@@ -284,6 +285,14 @@ def _reject_set_input_flags(
             "(release) comparisons yet: the per-library fan-out has no "
             "single suppression-audit result to attach. Compare the "
             "specific library individually to use it."
+        )
+    if pack_paths:
+        raise click.UsageError(
+            "--pack is not supported for directory/package (release) "
+            "comparisons yet: the fan-out dispatches before the effective "
+            "configuration is resolved, so a pack would be accepted and then "
+            "score nothing. Compare the specific library individually to "
+            "use it."
         )
     if include_labels:
         raise click.UsageError(
@@ -1166,6 +1175,7 @@ def run_compare(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     audit_suppressions: bool = False,
+    pack_paths: tuple[Path, ...] = (),
     include_labels: dict[Path, str] | None = None,
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
@@ -1317,6 +1327,7 @@ def run_compare(
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
             audit_suppressions=audit_suppressions,
+            pack_paths=pack_paths,
             include_labels=include_labels,
         )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
@@ -1655,6 +1666,71 @@ def run_compare(
     )
     _warn_force_public_ignored(force_public, scope_public_headers)
 
+    # ADR-049: one resolved configuration for this invocation -- the receipt
+    # the report carries *and*, since D8's `--pack` landed, the thing that
+    # configures the run. Resolved before the comparison for that reason, and
+    # from the raw CLI values rather than the already-merged locals several of
+    # these were overwritten with above: the resolver merges them itself, from
+    # each layer's own inputs, and a pre-merged value would look CLI-stated.
+    from .cli_compare_receipt import resolve_and_apply, typed_parameter_names
+    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
+    from .compatibility_evaluation_resolver import (
+        FieldResolutionError,
+        PackConflictError,
+    )
+    from .errors import PackManifestError
+
+    try:
+        evaluation_config, pf, resolved_cfg = resolve_and_apply(
+            {
+                "contract_mode": contract_mode,
+                "scope_public_headers": scope_public_headers,
+                "policy": policy,
+                "policy_file_path": policy_file_path,
+                "public_symbols": public_symbols,
+                "public_symbols_list": public_symbols_list,
+                "suppress": suppress,
+                "require_justification": require_justification,
+                "exit_code_scheme": exit_code_scheme,
+                "severity_preset": severity_preset,
+                "severity_abi_breaking": severity_abi_breaking,
+                "severity_potential_breaking": severity_potential_breaking,
+                "severity_quality_issues": severity_quality_issues,
+                "severity_addition": severity_addition,
+                "pack_paths": pack_paths,
+            },
+            resolved_cfg=resolved_cfg,
+            policy=policy,
+            pack_paths=pack_paths,
+            contract_evaluation=contract_evaluation,
+            # Only this module holds the Click context, so it answers "did the
+            # user type this?" and hands the answers over as data -- which is
+            # what keeps `cli_compare_receipt` a leaf.
+            typed={n for n in typed_parameter_names() if _param_from_cli(n)},
+            project_cfg=project_cfg,
+            project_path=cfg_path,
+            # Both already loaded for the comparison itself; re-reading them
+            # here could pair one content's digest with another's rules.
+            policy_file=pf,
+            suppression=suppression,
+            suppress_path=suppress,
+            run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
+            policy_option=policy_selected_by,
+            policy_path=policy_selected_path,
+            policy_sha256=policy_selected_sha,
+            project_sha256=cfg_sha,
+            symbols_list=symbols_list,
+        )
+    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+        # A D7 same-tier conflict / D8 pack conflict / malformed or
+        # inapplicable manifest is a usage error, the exit code the resolver's
+        # own docstring leaves to its front end.
+        raise click.UsageError(str(exc)) from exc
+    # A gate pack may have moved the scheme or a severity level; every later
+    # consumer reads them off these two, so re-derive rather than leave the
+    # pre-pack values behind.
+    sev_config = resolved_cfg.severity
+
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
     # A header-scoped compare can silently drop a function that's genuinely
@@ -1710,66 +1786,9 @@ def run_compare(
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
-    from .cli_compare_receipt import record_resolved_config, typed_parameter_names
-    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
-    from .compatibility_evaluation_resolver import (
-        FieldResolutionError,
-        PackConflictError,
-    )
-    from .errors import PackManifestError
+    from .cli_compare_receipt import record_resolved_config
 
-    try:
-        record_resolved_config(
-            result,
-            resolved_cfg,
-            project_cfg,
-            # The raw CLI values, not the already-merged ones several of
-            # these locals were overwritten with above: the resolver's whole
-            # job is to merge them itself, from each layer's own inputs, and
-            # handing it a pre-merged value would make every field look
-            # CLI-stated.
-            params={
-                "contract_mode": contract_mode,
-                "scope_public_headers": scope_public_headers,
-                "policy": policy,
-                "policy_file_path": policy_file_path,
-                "public_symbols": public_symbols,
-                "public_symbols_list": public_symbols_list,
-                "suppress": suppress,
-                "require_justification": require_justification,
-                "exit_code_scheme": exit_code_scheme,
-                "severity_preset": severity_preset,
-                "severity_abi_breaking": severity_abi_breaking,
-                "severity_potential_breaking": severity_potential_breaking,
-                "severity_quality_issues": severity_quality_issues,
-                "severity_addition": severity_addition,
-                # ADR-049 D8 pack manifests are resolvable but not yet applied
-                # by the engine, so no front end selects one (Codex review).
-                "pack_paths": (),
-            },
-            # Only this module holds the Click context, so it answers "did the
-            # user type this?" and hands the answers over as data -- which is
-            # what keeps `cli_compare_receipt` a leaf.
-            typed={n for n in typed_parameter_names() if _param_from_cli(n)},
-            project_path=cfg_path,
-            # Both already loaded for the comparison itself; re-reading them
-            # here could pair one content's digest with another's rules.
-            policy_file=pf,
-            suppression=suppression,
-            suppress_path=suppress,
-            run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
-            policy_option=policy_selected_by,
-            policy_path=policy_selected_path,
-            policy_sha256=policy_selected_sha,
-            project_sha256=cfg_sha,
-            symbols_list=symbols_list,
-        )
-    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
-        # A D7 same-tier conflict / D8 pack conflict / malformed manifest is a
-        # usage error, the exit code the resolver's own docstring leaves to
-        # its front end. Only reachable under --contract-evaluation, which is
-        # the only thing that builds a context to record onto.
-        raise click.UsageError(str(exc)) from exc
+    record_resolved_config(result, resolved_cfg, evaluation_config)
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     # Pass all injected findings (probe-matrix + evidence) so artifact-backed

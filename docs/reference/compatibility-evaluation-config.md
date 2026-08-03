@@ -173,11 +173,11 @@ assignments:
   gate.severity.addition: error
 ```
 
-| `kind` | Assignable fields |
-|---|---|
-| `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` |
-| `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` |
-| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` |
+| `kind` | Assignable fields | Applied today |
+|---|---|---|
+| `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` | `surface.internal_namespaces` only |
+| `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` | all |
+| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare` only) |
 
 Deliberately **not** assignable: `contract.mode` (which evidence domain a run
 judges against stays the user's own per-run choice — ADR-049 D3 forbids a
@@ -191,6 +191,29 @@ with each other. Load order is never a tiebreak.
 
 An unknown `ChangeKind` slug in a `kind: policy` pack is a hard error, exactly
 as in a `--policy-file`, so a renamed kind cannot silently disable a rule.
+
+### Selecting a pack
+
+`compare --pack PATH` and `scan --against ... --pack PATH` select one
+(repeatable). A selected pack **configures the run**: a `kind: policy` pack
+overriding `func_removed` changes the verdict and the exit code, and a
+`kind: gate` pack's severity moves what blocks CI. That is worth stating
+plainly, because the opposite would be worse than having no flag — a first
+version of `--pack` reached the receipt and never the engine, and was reverted
+before merge for exactly that reason.
+
+The "Applied today" column above is enforced, not documentation:
+a manifest assigning a field this build resolves but does not yet act on is a
+usage error naming the field and the reason, rather than an assignment silently
+recorded as active configuration (`abicheck.pack_application`). The same rule
+rejects a `kind: gate` pack on `scan`, whose exit code follows its
+compatibility verdict directly and so has no gate to move.
+
+Two further restrictions, both for the same "configure or reject" reason:
+`--pack` needs `--against` on `scan` (a pack's only application there is the
+baseline comparison's policy), and it is rejected on a directory/package
+(release) `compare`, whose per-library fan-out dispatches before the effective
+configuration is resolved.
 
 ## The resolution receipt
 

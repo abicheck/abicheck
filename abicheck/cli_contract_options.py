@@ -18,15 +18,15 @@
 A leaf under :mod:`abicheck.cli_options`, which re-exports the name so
 existing import paths are unchanged.
 
-The split happened while a since-removed ``--pack`` flag pushed ``cli.py``
-past its 2000-line hard limit, and moving these 41 lines into
-``cli_options.py`` pushed *that* file over the same limit. With ``--pack``
-gone, inlining them again would put ``cli.py`` at exactly 2000 -- passing,
-but with zero headroom, so the next option added anywhere in that file
-fails the gate. Kept split for that reason rather than the original one:
-41 lines of option definitions for one cohesive concept is what this module
-is for, and the alternative both times -- trimming their help text to buy
-space -- would shrink a feature's user-facing documentation to make room for
+The split happened while ``--pack`` first pushed ``cli.py`` past its
+2000-line hard limit, and moving these option definitions into
+``cli_options.py`` pushed *that* file over the same limit. ``--pack`` was
+then reverted before merge (it configured nothing; see
+:mod:`abicheck.pack_application`) and has since come back for real, so the
+original reason applies again as written -- but the split would be right
+either way: option definitions for one cohesive concept is what this module
+is for, and the alternative both times, trimming their help text to buy
+space, would shrink a feature's user-facing documentation to make room for
 its own code.
 
 One decorator rather than a copy per command: `tests/test_cli_contract.py`
@@ -40,6 +40,7 @@ cannot pull a new member into the CLI-registration import cycle the
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypeVar
 
 import click
@@ -48,6 +49,37 @@ import click
 #: type var is invariant over the decorated object, so a plain callable
 #: alias keeps these composable with every other option decorator.
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+#: ADR-049 D8's pack selector. Separate from :func:`contract_options` because
+#: the two answer different questions and are not registered on the same set
+#: of commands: ``--pack`` configures the run (it changes verdicts and exit
+#: codes), while the contract options only ask for an advisory decision.
+def pack_option(f: F) -> F:
+    """Attach the repeatable ``--pack`` manifest selector."""
+    # Assigned rather than returned inline, matching `contract_options` below:
+    # the click decorator is untyped, so returning its result directly is an
+    # `Any` return from a function declared to return `F` (mypy no-any-return).
+    f = click.option("--pack", "pack_paths", multiple=True,
+                  type=click.Path(exists=True, dir_okay=False, path_type=Path),
+                  help="Select an ADR-049 D8 pack manifest (repeatable). A pack is a "
+                       "small versioned YAML document (id/version/kind/assignments) "
+                       "carrying one reusable piece of configuration. 'kind: policy' "
+                       "assigns ChangeKind slugs to break/warn/risk/ignore, exactly as "
+                       "--policy-file's overrides do; 'kind: contract' assigns "
+                       "surface.internal_namespaces; 'kind: gate' assigns "
+                       "gate.exit_code_scheme and gate.severity.<category>. Composition "
+                       "is D8's: an explicitly stated value (--policy-file, "
+                       "--exit-code-scheme, --severity-*, a --profile, or .abicheck.yml) "
+                       "always outranks a pack, and two selected packs assigning "
+                       "different values to the same field are a usage error unless "
+                       "something else already states it. A manifest assigning a field "
+                       "this build resolves but does not yet apply is rejected rather "
+                       "than silently recorded. On `scan` this requires --against (a "
+                       "pack's only application there is the baseline comparison) and "
+                       "a 'kind: gate' pack is rejected, since a scan's exit code "
+                       "follows its verdict directly and has no gate to move.")(f)
+    return f
 
 
 #: ADR-049's three contract-evaluation options, as one decorator -- see this

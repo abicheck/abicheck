@@ -91,6 +91,7 @@ from .cli_options import (
     env_matrix_option,
     lang_option,
     merge_compile_config,
+    pack_option,
     policy_options,
     resolve_compile_context,
     scope_options,
@@ -590,6 +591,9 @@ _COMPARISON_ONLY_FLAGS = {
     "env_matrix_path": "--env-matrix",
     "contract_evaluation": "--contract-evaluation",
     "contract_mode": "--contract",
+    # ADR-049 D8: a pack's only application here is the baseline comparison's
+    # policy file, so without one it would configure nothing.
+    "pack_paths": "--pack",
 }
 
 
@@ -986,6 +990,7 @@ def _run_artifact_set(
     "Requires --contract-evaluation, and is advisory exactly like it "
     "(mirrors `compare --contract`).",
 )
+@pack_option  # ADR-049 D8: --pack (requires --against; see _COMPARISON_ONLY_FLAGS)
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -1038,6 +1043,7 @@ def scan_cmd(
     env_matrix_path: Path | None,
     contract_evaluation: bool,
     contract_mode: str | None,
+    pack_paths: tuple[Path, ...],
     lang: str,
     allow_build_query: bool,
     fmt: str,
@@ -1373,7 +1379,7 @@ def scan_cmd(
     # Resolved here because this is where the Click context is: which flags
     # the user actually typed is a question only the front end can answer.
     resolved_config = None
-    if against is not None and contract_evaluation:
+    if against is not None and (contract_evaluation or pack_paths):
         from .cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
         from .compatibility_evaluation_resolver import (
             FieldResolutionError,
@@ -1400,6 +1406,34 @@ def scan_cmd(
                 suppress_path=suppress,
                 symbols_list=_symbols_list,
             )
+            if pack_paths:
+                # ADR-049 D8: a pack that reached the receipt and not the
+                # engine is exactly what got the flag reverted once before, so
+                # its contributions are folded into the policy file the
+                # baseline comparison runs with. `gate_supported=False`
+                # because a scan's exit code follows its verdict directly --
+                # the same reason `cli_scan_receipt._without_gate_settings`
+                # blanks the gate rather than reporting one it never used.
+                from .pack_application import (
+                    check_pack_fields_applied,
+                    pack_application,
+                    policy_file_with_packs,
+                )
+
+                check_pack_fields_applied(
+                    list(pack_paths),
+                    gate_supported=False,
+                    gate_reason=(
+                        "a scan's exit code follows its compatibility verdict "
+                        "directly, so it has no severity or exit-code scheme "
+                        "for a gate pack to move (compare does)"
+                    ),
+                )
+                policy_file = policy_file_with_packs(
+                    policy_file,
+                    pack_application(resolved_config, policy_file=policy_file),
+                    base_policy=policy,
+                )
         except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
             # A D7 same-tier conflict or a D8 pack conflict is a usage error,
             # exactly as it is for `compare` -- not a traceback out of a

@@ -252,6 +252,34 @@ modify the final process exit status. Treat the table above as `compare` semanti
 
 ---
 
+## Reusable packs (`--pack`)
+
+A `--policy-file` is one project's own overrides. When the *same* overrides
+should be shared across projects, put them in a **pack** — a small versioned
+YAML document (`id`/`version`/`kind`/`assignments`) selected with
+`compare --pack` or `scan --against ... --pack` (repeatable):
+
+```yaml
+id: vendor_sdk_relaxations
+version: 1
+kind: policy
+assignments:
+  func_removed: warn
+```
+
+A pack really configures the run: it changes the verdict and the exit code
+exactly as the equivalent `--policy-file` overrides would. It just never wins
+against one — an explicitly stated value (a `--policy-file` override, an
+`--exit-code-scheme`, a `--severity-*` flag, a `--profile`, or `.abicheck.yml`)
+always outranks a pack, and two selected packs disagreeing about the same
+field are a usage error rather than a silent last-one-wins.
+
+`kind: contract` and `kind: gate` packs carry the other two namespaces
+(internal namespaces, and the exit-code scheme / severity levels). For the
+full field vocabulary, the precedence rules, and what a resolution receipt
+records, see
+[Compatibility evaluation configuration](../reference/compatibility-evaluation-config.md).
+
 ## Extending Policies
 
 Built-in profiles are defined in `abicheck/checker_policy.py`:

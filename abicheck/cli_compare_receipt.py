@@ -227,32 +227,91 @@ def resolve_cli_config(
     )
 
 
+def resolve_and_apply(
+    params: Mapping[str, Any],
+    *,
+    resolved_cfg: Any,
+    policy: str,
+    pack_paths: Collection[Any] = (),
+    **kwargs: Any,
+) -> tuple[Any, Any, Any]:
+    """Resolve this invocation's configuration, then let its packs configure it.
+
+    Returns ``(config, policy_file, resolved_cfg)``: the resolved
+    configuration (``None`` when nothing would read one -- see
+    :func:`record_resolved_config`), and the policy file and compare config
+    the comparison should actually run with.
+
+    Both halves come from the *same* resolution, which is what makes
+    ``--pack`` real rather than decorative: the resolver has already applied
+    D7 precedence and D8 conflict detection, and
+    :func:`~abicheck.pack_application.pack_application` reads back only the
+    fields whose provenance names a pack. Nothing here decides precedence.
+
+    The order matters and is not incidental: the configuration is resolved
+    from the *explicitly given* ``policy_file`` (``kwargs['policy_file']``),
+    and only then are the packs' contributions folded into a new one. Folding
+    first would present a pack's override to the resolver as an explicitly
+    stated ``--policy-file`` value -- outranking the packs it came from, and
+    misreported in the receipt.
+
+    Raises what the canonical resolver and the pack loader raise; mapping
+    those onto exit 64 is the caller's job, as both modules document.
+    """
+    if not kwargs.get("contract_evaluation", False) and not pack_paths:
+        # Nothing would read a resolution: no context exists to record one
+        # onto, and no pack can contribute to the run. Resolving anyway would
+        # make every ordinary `compare` newly able to fail on a D7 conflict
+        # it never previously computed.
+        return None, kwargs.get("policy_file"), resolved_cfg
+    kwargs.pop("contract_evaluation", None)
+    config = resolve_cli_config({**params, "pack_paths": tuple(pack_paths)}, **kwargs)
+    policy_file = kwargs.get("policy_file")
+    if not pack_paths:
+        return config, policy_file, resolved_cfg
+    from .pack_application import (
+        apply_to_compare_config,
+        check_pack_fields_applied,
+        pack_application,
+        policy_file_with_packs,
+    )
+
+    check_pack_fields_applied(list(pack_paths))
+    application = pack_application(config, policy_file=policy_file)
+    return (
+        config,
+        policy_file_with_packs(policy_file, application, base_policy=policy),
+        apply_to_compare_config(resolved_cfg, application),
+    )
+
+
 def record_resolved_config(
     result: Any,
     resolved_cfg: Any,
-    project_cfg: Any,
-    *,
-    params: Mapping[str, Any],
-    typed: Collection[str],
-    project_path: Path | None = None,
-    policy_file: Any = None,
-    suppression: Any = None,
-    suppress_path: Path | None = None,
-    run_profile: Mapping[str, Any] | None = None,
-    policy_option: str | None = None,
-    policy_path: Path | None = None,
-    policy_sha256: str | None = None,
-    project_sha256: str | None = None,
-    symbols_list: Any = None,
+    config: Any,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
-    A no-op unless ``--contract-evaluation`` produced a context. Runs before
-    any report is rendered, so every output path sees one configuration
-    resolved by the canonical resolver rather than the core verb's
-    argument-shaped reconstruction, and sees the gate the run was actually
-    scored with rather than :class:`GateConfig`'s built-in defaults.
+    A no-op unless ``--contract-evaluation`` produced a context (and unless
+    the caller resolved a *config* at all -- a run with neither
+    ``--contract-evaluation`` nor ``--pack`` resolves nothing, since nothing
+    would read the result). Runs before any report is rendered, so every
+    output path sees one configuration resolved by the canonical resolver
+    rather than the core verb's argument-shaped reconstruction, and sees the
+    gate the run was actually scored with rather than :class:`GateConfig`'s
+    built-in defaults.
+
+    *config* arrives already resolved rather than being resolved here: since
+    ADR-049's ``--pack`` landed, the same object also *configures* the run
+    (``pack_application``), and it has to exist before the comparison for
+    that. Resolving a second time here would re-read every pack manifest --
+    the "one read per resolution" rule ``resolve_compatibility_evaluation_config``
+    keeps internally, for the same reason -- and would be handed the
+    already-pack-folded policy file, so the receipt would report a pack's
+    contribution as an explicitly stated ``--policy-file`` override.
     """
+    if config is None:
+        return
     from .contract_evidence import PersistedContractContext
 
     ctx = getattr(result, "contract_context", None)
@@ -264,21 +323,6 @@ def record_resolved_config(
     )
     from .contract_context import with_resolved_config, with_resolved_gate
 
-    config = resolve_cli_config(
-        params,
-        typed=typed,
-        project_cfg=project_cfg,
-        project_path=project_path,
-        policy_file=policy_file,
-        suppression=suppression,
-        suppress_path=suppress_path,
-        run_profile=run_profile,
-        policy_option=policy_option,
-        policy_path=policy_path,
-        policy_sha256=policy_sha256,
-        project_sha256=project_sha256,
-        symbols_list=symbols_list,
-    )
     ctx = with_resolved_config(ctx, config)
     # The values the run was scored with, with the canonical resolver's
     # provenance -- see this module's docstring for why the two halves come

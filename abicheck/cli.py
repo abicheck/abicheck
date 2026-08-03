@@ -82,6 +82,7 @@ from .cli_options import (
     lang_option,
     normalize_sided_options,
     output_options,
+    pack_option,
     policy_options,
     profile_option,
     release_options,
@@ -1803,6 +1804,7 @@ def _embed_inline_source_side(
                    "diff is trusted. Not needed, and does nothing, on a "
                    "comparable pair.")
 @contract_options  # ADR-049: --contract-evaluation/--contract/--audit-suppressions
+@pack_option  # ADR-049 D8: --pack
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:

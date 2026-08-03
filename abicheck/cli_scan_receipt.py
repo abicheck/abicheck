@@ -74,6 +74,7 @@ SCAN_CONFIG_PARAMS: tuple[str, ...] = (
     "public_symbols",
     "public_symbols_list",
     "contract_mode",
+    "pack_paths",
 )
 
 #: How a :class:`~abicheck.service_scan.ScanRequest` spells the inputs whose

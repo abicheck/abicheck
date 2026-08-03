@@ -1776,6 +1776,16 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "binary actually export' -- so it follows --contract-evaluation's own "
         "per-invocation nature rather than being a stable project default."
     ),
+    "--pack": (
+        "ADR-049 D8: selects a reusable configuration pack (policy/contract/"
+        "gate) for this comparison. Which packs apply varies per run -- the "
+        "same library is checked against a vendor SDK contract in one "
+        "invocation and an internal CI gate in another -- so it is a per-run "
+        "selection, like --policy-file. Revisit this entry if a project-config "
+        "`packs:` key lands: D7 already reserves the `project_config` tier "
+        "below packs, so a permanent project-wide selection would belong "
+        "there and this flag would become the per-run override of it."
+    ),
     "--audit-suppressions": (
         "Opts one invocation into an additional audit of the --suppress "
         "rule file (stale/high-risk/expired/near-expiry rules) against this "
@@ -1982,4 +1992,5 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
 #: module, and a leaf holding option definitions never imports back.
 from .cli_contract_options import (  # noqa: E402
     contract_options as contract_options,
+    pack_option as pack_option,
 )

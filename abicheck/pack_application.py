@@ -1,0 +1,325 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-049 Phase 5: turning a selected pack into something the engine runs.
+
+Phase 1 built pack *manifests* (``compatibility_evaluation_packs.py``), the
+D8 conflict rule (``compatibility_evaluation_resolver.detect_pack_conflicts``),
+and the wiring that folds a selected pack into one resolved
+:class:`~abicheck.compatibility_evaluation_config.CompatibilityEvaluationConfig`
+(``compatibility_evaluation_wiring.py``). What none of that does is *apply* the
+result: a resolved configuration is a receipt, and the comparison itself is
+scored from a :class:`~abicheck.policy_file.PolicyFile` and a
+:class:`~abicheck.severity.SeverityConfig` that nothing was folding a pack into.
+
+A ``--pack`` flag was written and removed once before merge for exactly that
+reason (recorded in the plan's Phase 5 section): it reached the receipt and
+never the verdict, so a ``kind: policy`` pack overriding ``func_removed``
+was reported as active configuration while the exit code ignored it.
+**Exposing configuration that does not configure is worse than not exposing
+it**, so this module exists before the flag came back.
+
+Two rules keep it honest:
+
+**1. The applied value is read off the resolved configuration, never
+re-derived.** :func:`pack_application` takes the object the canonical
+resolver already produced and asks, per field, whether *a pack* supplied the
+value -- which is a question the resolver already answered, in
+``ValueProvenance.source_kind == "pack_manifest"``. Nothing here re-implements
+D7 precedence or D8 conflict detection, so a front end cannot apply a pack
+value the resolver would have ruled out: if ``--policy-file``, ``--exit-code-
+scheme``, a ``--profile``, or ``.abicheck.yml`` stated the field, its
+provenance names *that* source and this module contributes nothing for it.
+
+**2. A pack may only assign a field this build actually applies.**
+:data:`UNAPPLIED_PACK_FIELDS` names the routable fields with no engine
+consumer yet, each with the reason, and :func:`check_pack_fields_applied`
+rejects a manifest assigning one. That is the same posture the manifest
+loader already takes toward an unknown key -- the alternative is a pack
+whose assignment lands in the receipt and changes nothing, which is the
+exact failure this module was written to prevent. Wiring a field's consumer
+is what removes it from that mapping, so the registry doubles as the list of
+what is left.
+
+A leaf: nothing here imports a ``cli*`` module, and its two consumers
+(``cli_compare_helpers``/``cli_scan``) pass what they already loaded.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from .change_registry_types import Verdict
+from .checker_policy import ChangeKind
+from .compatibility_evaluation_frontend import (
+    EXIT_CODE_SCHEME_FIELD,
+    SEVERITY_CATEGORY_FIELDS,
+)
+from .compatibility_evaluation_packs import PackKind
+from .compatibility_evaluation_wiring import (
+    INTERNAL_NAMESPACES_FIELD,
+    load_selected_packs,
+)
+from .errors import PackManifestError
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .policy_file import PolicyFile
+
+#: ``ValueProvenance.source_kind`` the resolver stamps on a field a selected
+#: pack supplied. Imported rather than restated wherever possible; spelled
+#: here because the resolver writes it as a literal at its own two sites.
+PACK_SOURCE_KIND = "pack_manifest"
+
+#: Routable pack fields this build resolves but does **not** apply, and why.
+#: A manifest assigning one is rejected by :func:`check_pack_fields_applied`
+#: rather than accepted into a receipt it cannot act on.
+#:
+#: Every entry is a field ``compatibility_evaluation_wiring``'s
+#: ``CONTRACT_PACK_FIELD_ROUTES``/``GATE_PACK_FIELD_ROUTES`` accepts, so the
+#: two together partition the routable vocabulary into "applied" and "not
+#: yet" -- :func:`applied_pack_fields` derives the first half from the second
+#: rather than keeping a second hand-maintained list.
+UNAPPLIED_PACK_FIELDS: Mapping[str, str] = {
+    "contract.unresolved": (
+        "how an UNKNOWN_UNRESOLVED finding is treated is ADR-049 Phase 7's "
+        "independent coverage exit, which nothing consults yet -- the value "
+        "would be recorded and ignored"
+    ),
+    "contract.overlays": (
+        "the public domain's overlays come from --post-manifest/--public-symbol, "
+        "which name concrete inputs; a pack naming an overlay kind has nothing "
+        "to point those at"
+    ),
+    "assurance.require_evidence": (
+        "PolicyFile.require_evidence is a per-layer mapping the compare "
+        "evidence pipeline enforces, not the single bool this field resolves to"
+    ),
+}
+
+
+def applied_pack_fields(kind: PackKind) -> frozenset[str]:
+    """The fields a *kind* pack may assign and this build really applies."""
+    from .compatibility_evaluation_wiring import PACK_FIELD_ROUTES_BY_KIND
+
+    routes = PACK_FIELD_ROUTES_BY_KIND.get(kind, {})
+    return frozenset(routes) - frozenset(UNAPPLIED_PACK_FIELDS)
+
+
+@dataclass(frozen=True)
+class PackApplication:
+    """What the selected packs, and only they, contribute to this run.
+
+    Every attribute is ``None``/empty unless a pack actually supplied the
+    value, so an application built from a run with no ``--pack`` is inert by
+    construction -- the property the "no behaviour change without a pack"
+    tests assert directly rather than by sampling outputs.
+    """
+
+    #: ``ChangeKind -> Verdict`` a policy pack contributed, already excluding
+    #: every kind an explicit ``--policy-file`` states (D8: explicit override
+    #: > selected packs > base policy).
+    policy_overrides: Mapping[ChangeKind, Verdict]
+    #: ``surface.internal_namespaces`` when a contract pack supplied it.
+    internal_namespaces: tuple[str, ...] | None = None
+    #: ``gate.exit_code_scheme`` when a gate pack supplied it.
+    exit_code_scheme: str | None = None
+    #: ``gate.severity.<category>`` levels a gate pack supplied, keyed by the
+    #: :class:`~abicheck.severity.SeverityConfig` field name.
+    severity_levels: Mapping[str, Any] = field(default_factory=dict)
+
+    def is_empty(self) -> bool:
+        """True when no pack contributed anything this run applies."""
+        return not (
+            self.policy_overrides
+            or self.internal_namespaces is not None
+            or self.exit_code_scheme is not None
+            or self.severity_levels
+        )
+
+
+def _pack_supplied(config: Any, field_name: str) -> bool:
+    """Did a selected pack supply *field_name*'s resolved value?
+
+    The resolver's own answer, not a re-derivation: a field another layer
+    stated carries that layer's provenance, so reading ``source_kind`` is
+    what makes this module unable to apply a value D7 precedence rejected.
+    An absent entry is "not resolved here", which is never a pack.
+    """
+    provenance = getattr(config, "provenance", {}).get(field_name)
+    return getattr(provenance, "source_kind", None) == PACK_SOURCE_KIND
+
+
+def pack_application(config: Any, *, policy_file: PolicyFile | None) -> PackApplication:
+    """The pack-supplied half of *config*, in the shapes the engine takes.
+
+    *policy_file* is the ``--policy-file`` the run really loaded (``None``
+    when none was given). Its own overrides are subtracted from the resolved
+    ``policy.overrides``, which the resolver deliberately returns *merged*
+    (explicit re-applied last, so it is the final value rather than a delta):
+    keeping only the difference is what makes the result "what the packs
+    added", so folding it back onto that same policy file cannot silently
+    restate — or, on a future shape change, contradict — a value the file
+    already owns.
+    """
+    explicit_kinds = set((policy_file.overrides if policy_file else {}) or {})
+    resolved_overrides = getattr(getattr(config, "policy", None), "overrides", {}) or {}
+    pack_overrides: dict[ChangeKind, Verdict] = {}
+    for slug, verdict in resolved_overrides.items():
+        kind = slug if isinstance(slug, ChangeKind) else ChangeKind(slug)
+        if kind not in explicit_kinds:
+            pack_overrides[kind] = verdict
+
+    namespaces: tuple[str, ...] | None = None
+    if _pack_supplied(config, INTERNAL_NAMESPACES_FIELD):
+        namespaces = tuple(config.surface.internal_namespaces)
+
+    scheme: str | None = None
+    if _pack_supplied(config, EXIT_CODE_SCHEME_FIELD):
+        scheme = config.gate.exit_code_scheme
+
+    severity_levels: dict[str, Any] = {}
+    for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
+        if _pack_supplied(config, field_name):
+            severity_levels[category] = getattr(config.gate.severity, category)
+
+    return PackApplication(
+        policy_overrides=pack_overrides,
+        internal_namespaces=namespaces,
+        exit_code_scheme=scheme,
+        severity_levels=severity_levels,
+    )
+
+
+def policy_file_with_packs(
+    policy_file: PolicyFile | None,
+    application: PackApplication,
+    *,
+    base_policy: str,
+) -> PolicyFile | None:
+    """*policy_file* with the packs' policy/surface contributions folded in.
+
+    Returns *policy_file* unchanged when the packs contributed neither, so a
+    run without ``--pack`` reaches ``compare_snapshots`` with the identical
+    object it does today.
+
+    With no ``--policy-file`` given there is nothing to fold into, so one is
+    synthesized -- carrying *base_policy*, the ``--policy`` the run resolved,
+    because ``checker`` reads a present file's ``base_policy`` **instead of**
+    the ``policy`` argument (``effective_policy``). Synthesizing one with the
+    dataclass default would silently reset a ``--policy plugin_abi`` run to
+    ``strict_abi``: a pack overriding one kind would change the base policy
+    for every other one. It carries no ``source_path``/``source_sha256``
+    because it came from no file; the packs' own identities and digests are
+    already in the receipt, which is where a replay reads them from.
+    """
+    if not application.policy_overrides and application.internal_namespaces is None:
+        return policy_file
+    from .policy_file import PolicyFile
+
+    if policy_file is None:
+        policy_file = PolicyFile(base_policy=base_policy)
+    overrides = dict(policy_file.overrides)
+    # Explicit-last, mirroring `resolve_policy_pack_overrides`'s own merge:
+    # `application.policy_overrides` already excludes every kind the file
+    # states, so this cannot overwrite one -- the ordering states the rule
+    # rather than relying on it.
+    overrides.update(application.policy_overrides)
+    updated = replace(policy_file, overrides=overrides)
+    if application.internal_namespaces is not None:
+        updated = replace(
+            updated,
+            internal_namespaces=list(application.internal_namespaces),
+            # A pack that supplied this field made the same statement a file
+            # would have; `checker` distinguishes "stated empty" from "unset"
+            # and the resolver only reaches a pack when nothing else stated it.
+            internal_namespaces_stated=True,
+        )
+    return updated
+
+
+def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> Any:
+    """*resolved_cfg* with the gate packs' contributions folded in.
+
+    A no-op unless a gate pack supplied a value. Only reachable for a field
+    ``resolve_compare_config`` left at its built-in default: the resolver
+    exempts ``gate.exit_code_scheme``/``gate.severity.*`` from pack
+    assignment whenever the CLI, a ``--profile``, or ``.abicheck.yml`` stated
+    it (or stated a preset that owns it), so overwriting here can never
+    displace a value the run was configured with.
+
+    A severity level *is* severity being configured, so it flips
+    ``severity_active`` -- and with it an unstated ``--exit-code-scheme
+    auto``, exactly as a level set in ``.abicheck.yml`` already does. Without
+    that, a gate pack's severity would resolve, be reported, and then be
+    scored under the legacy scheme that never reads it.
+    """
+    if application.exit_code_scheme is None and not application.severity_levels:
+        return resolved_cfg
+    severity = resolved_cfg.severity
+    severity_active = resolved_cfg.severity_active
+    if application.severity_levels:
+        severity = replace(severity, **application.severity_levels)
+        severity_active = True
+    scheme = application.exit_code_scheme
+    if scheme is None:
+        # `auto` was already resolved before this ran, so the only honest
+        # re-resolution is the one `resolve_compare_config` would have made
+        # had the pack's levels been present: severity, once any is set.
+        scheme = "severity" if severity_active else resolved_cfg.exit_code_scheme
+    return replace(
+        resolved_cfg,
+        severity=severity,
+        severity_active=severity_active,
+        exit_code_scheme=scheme,
+    )
+
+
+def check_pack_fields_applied(
+    pack_paths: Sequence[str | Path],
+    *,
+    gate_supported: bool = True,
+    gate_reason: str = "",
+    loaded: Iterable[tuple[str, Any]] | None = None,
+) -> None:
+    """Reject a manifest assigning a field this front end does not apply.
+
+    Two independent reasons a routable assignment can be inapplicable:
+    :data:`UNAPPLIED_PACK_FIELDS` (no engine consumer in this build at all),
+    and *gate_supported* being false (this command has no gate to configure
+    -- ``scan``'s exit code follows its verdict directly, which is why its
+    receipt blanks the gate rather than reporting one it never used).
+
+    Raises :class:`~abicheck.errors.PackManifestError`, the same error class
+    a malformed manifest raises, since both are "this manifest cannot be
+    used as written" rather than a fact about the libraries being compared.
+    """
+    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
+    for path, pack in entries:
+        if pack.kind is PackKind.GATE and not gate_supported:
+            raise PackManifestError(
+                f"{path}: a `kind: gate` pack cannot be applied here"
+                + (f" -- {gate_reason}" if gate_reason else "")
+            )
+        for field_name in pack.assignments:
+            reason = UNAPPLIED_PACK_FIELDS.get(field_name)
+            if reason is not None:
+                raise PackManifestError(
+                    f"{path}: {field_name!r} is resolvable but not applied by this "
+                    f"build ({reason}). A pack assignment that changes nothing "
+                    "is rejected rather than recorded as active configuration."
+                )

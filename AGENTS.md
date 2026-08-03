@@ -269,6 +269,26 @@ Core pipeline (in order of data flow):
      own `scope_to_public_surface` default agrees with
      `BUILT_IN_DEFAULT_CONTRACT_MODE` by construction. A leaf; nothing
      imports back into the server
+   - `pack_application.py` — ADR-049 D8's *application* layer: what turns a
+     selected `--pack` manifest into something the engine runs, rather than
+     a line in the receipt (a first `--pack` was reverted before merge for
+     being exactly that). Deliberately not a second resolver — it reads back
+     off the already-resolved `CompatibilityEvaluationConfig` only the
+     fields whose `ValueProvenance.source_kind` is `pack_manifest`, so a
+     value D7 precedence ruled out is unreachable from here, and folds them
+     into the two objects the run is scored from: a `PolicyFile`
+     (`policy.overrides`, `surface.internal_namespaces`) and the resolved
+     compare config (`gate.exit_code_scheme`, `gate.severity.*`). Ordering
+     matters: the config is resolved from the *explicitly given*
+     `--policy-file` and only then folded, since folding first would present
+     a pack's override to the resolver as an explicit one. `UNAPPLIED_PACK_
+     FIELDS` is the enforcement half — a routable field with no engine
+     consumer (`contract.unresolved`, `contract.overlays`,
+     `assurance.require_evidence`) is a usage error rather than a silently
+     inert assignment, and it is the complement of what is applied, so a
+     newly-routable field is applied or listed, never neither. `compare`
+     takes all three kinds; `scan --against` takes policy/contract and
+     rejects a gate pack, having no gate of its own
    - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
      evaluator: one `ContractEvaluationDecision` (relevance + stable reason
      code + assurance) per already-emitted finding. Stamped onto findings

@@ -3766,6 +3766,56 @@ sentences turned up three things the earlier rounds had not done:
    `packs` axis of the Phase 5 Gate is therefore still open**, and is the
    one item this round did not close.
 
+   **Updated (2026-08-03): the `packs` axis closed — `--pack` is back, and
+   it configures the run.** `abicheck/pack_application.py` is the missing
+   application layer, and it is deliberately *not* a second resolver: it
+   takes the object the canonical resolver already produced and reads back
+   only the fields whose `ValueProvenance.source_kind` is `pack_manifest`.
+   Nothing in it re-implements D7 precedence or D8 conflict detection, so a
+   front end cannot apply a value the resolver ruled out — if
+   `--policy-file`, `--exit-code-scheme`, a `--profile`, or `.abicheck.yml`
+   stated the field, its provenance names *that* source and the application
+   contributes nothing for it. What the packs did supply is folded into the
+   two objects the comparison is actually scored from: a `PolicyFile`
+   (`policy.overrides` and `surface.internal_namespaces`) and the resolved
+   compare config (`gate.exit_code_scheme`, `gate.severity.*`).
+
+   That forced one ordering decision worth recording: the configuration is
+   resolved from the *explicitly given* policy file, and only then are the
+   packs folded into a new one. Folding first would present a pack's own
+   override to the resolver as an explicitly stated `--policy-file` value —
+   outranking the packs it came from, and misreported in the receipt. It
+   also moved the whole resolution to *before* `compare_snapshots` rather
+   than after it (`resolve_and_apply`), since an object that configures the
+   run has to exist before the run; `record_resolved_config` now installs
+   the same object instead of resolving a second time, which would re-read
+   every manifest and be handed the already-folded policy file.
+
+   The half that keeps this from being decoration again is a rule the
+   reverted version had no place to put: **a pack may only assign a field
+   this build actually applies.** `UNAPPLIED_PACK_FIELDS` names the three
+   routable fields with no engine consumer (`contract.unresolved` — Phase
+   7's own coverage exit; `contract.overlays` — the real overlays name
+   concrete `--post-manifest`/`--public-symbol` inputs a pack has nothing to
+   point at; `assurance.require_evidence` — `PolicyFile.require_evidence` is
+   a per-layer mapping, not this field's single bool), each with its reason,
+   and a manifest assigning one is a usage error naming the field. It is
+   the complement of what is applied rather than a second hand-kept list, so
+   a newly-routable field is applied or listed, never neither. The same rule
+   rejects a `kind: gate` pack on `scan` — whose exit code follows its
+   verdict directly, the same reason `cli_scan_receipt._without_gate_settings`
+   blanks the gate rather than reporting one the run never used — plus
+   `--pack` without `--against` (a pack's only application there is the
+   baseline comparison's policy) and `--pack` on a directory/package
+   compare, whose fan-out dispatches before the configuration is resolved.
+
+   `tests/test_pack_application.py` leads every behavioural test with an
+   exit code that *differs* with and without the pack, deliberately: the
+   parity tests written alongside the reverted flag passed precisely because
+   they only asserted that the two commands resolve packs identically, which
+   a flag that does nothing satisfies. The §6.4 receipt-parity assertion is
+   still there, but second, and now with a real pack on both sides.
+
    The `cli.py`/`cli_options.py` hard-limit split it forced is kept:
    `cli_contract_options.py` now holds the three ADR-049 contract options,
    which is a real improvement independent of packs.
