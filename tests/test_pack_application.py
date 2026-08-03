@@ -368,8 +368,9 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert result.exit_code == 64, result.output
         assert field in result.output
 
+    @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
     def test_an_inert_empty_namespace_set_is_rejected(
-        self, pair: tuple[Path, Path], tmp_path: Path
+        self, pair: tuple[Path, Path], tmp_path: Path, extra: list[str]
     ) -> None:
         """`surface.internal_namespaces: []` routes and resolves, but nothing
         acts on it: post-processing turns an empty list into "unset" and falls
@@ -380,9 +381,9 @@ class TestOnlyAppliedFieldsAreAccepted:
         writing the same empty list, so honoring stated-empty is its own
         change; rejecting the inert value keeps this module's rule true.
 
-        Answered after precedence, so the `--dry-run` emit (which runs before
-        the policy file is even loaded) cannot answer it -- see the shadowed
-        case below for why answering it early was wrong.
+        With no `--policy-file` given, nothing can shadow the field (a policy
+        file is the only layer that pins it), so this is answerable before the
+        `--dry-run` emit too -- and both must agree, hence the parametrization.
         """
         pack = _pack(
             tmp_path,
@@ -390,8 +391,8 @@ class TestOnlyAppliedFieldsAreAccepted:
             "id: none\nversion: 1\nkind: contract\n"
             "assignments:\n  surface.internal_namespaces: []\n",
         )
-        result = _compare(CliRunner(), pair, "--pack", str(pack))
-        assert result.exit_code == 64, result.output
+        result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
+        assert result.exit_code == 64, (extra, result.output)
         assert "surface.internal_namespaces" in result.output
         # ...and the rejection names which manifest is at fault.
         assert "empty-ns.yml" in result.output
@@ -421,6 +422,17 @@ class TestOnlyAppliedFieldsAreAccepted:
             CliRunner(), pair, "--pack", str(pack), "--policy-file", str(policy)
         )
         assert result.exit_code == 4, result.output
+        # ...and the dry run agrees rather than rejecting it early.
+        dry = _compare(
+            CliRunner(),
+            pair,
+            "--dry-run",
+            "--pack",
+            str(pack),
+            "--policy-file",
+            str(policy),
+        )
+        assert dry.exit_code == 0, dry.output
 
     def test_a_non_empty_namespace_set_still_applies(self, tmp_path: Path) -> None:
         """Only the inert *value* is rejected — the field itself still works."""
@@ -534,8 +546,8 @@ class TestOnlyAppliedFieldsAreAccepted:
 
         real = receipt.validate_pack_manifests
 
-        def _validate_then_swap(pack_paths):
-            real(pack_paths)
+        def _validate_then_swap(pack_paths, **kwargs):
+            real(pack_paths, **kwargs)
             ignore_removals.write_text(
                 "id: relax_removals\nversion: 2\nkind: contract\n"
                 "assignments:\n  contract.unresolved: warn\n",

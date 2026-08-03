@@ -428,6 +428,7 @@ def check_pack_fields_applied(
     *,
     gate_supported: bool = True,
     gate_reason: str = "",
+    policy_file_given: bool = False,
     loaded: Iterable[tuple[str, Any]] | None = None,
 ) -> None:
     """Reject a manifest assigning a field this front end does not apply.
@@ -449,14 +450,27 @@ def check_pack_fields_applied(
                 f"{path}: a `kind: gate` pack cannot be applied here"
                 + (f" -- {gate_reason}" if gate_reason else "")
             )
-        for field_name in pack.assignments:
-            # NB: an *inert value* (`INERT_PACK_VALUES`) is deliberately not
-            # checked here. Whether the pack's value reaches runtime at all is
-            # a precedence question -- an explicit `--policy-file` stating the
-            # same field shadows it -- and precedence is not resolved yet, so
-            # rejecting here failed an invocation D8 says is fine (Codex
-            # review, reproduced). Same reasoning as pack-vs-pack conflicts:
-            # this path answers only what a manifest alone can answer.
+        for field_name, value in pack.assignments.items():
+            # An *inert value* is a precedence question -- an explicit
+            # `--policy-file` stating the same field shadows it, and checking
+            # blindly here failed an invocation D8 says is fine (Codex review,
+            # reproduced). But it is only *partly* unanswerable: a
+            # `--policy-file` is the one layer that can pin any field in
+            # `INERT_PACK_VALUES` (`compatibility_evaluation_frontend`'s
+            # `pinned_contract` reads `explicit.policy_file` and nothing
+            # else), so with no policy file given the pack's value is
+            # certainly active and the answer needs no resolution at all.
+            # That is what keeps the dry run and the real run agreeing for
+            # the common case; with a policy file present the question is
+            # deferred to `check_resolved_config_applies_packs`, which knows.
+            if not policy_file_given:
+                inert = _inert_value_reason(field_name, value)
+                if inert is not None:
+                    raise PackManifestError(
+                        f"{path}: {field_name!r} is assigned a value this "
+                        f"build does not act on ({inert}). Rejected rather "
+                        "than recorded as active configuration."
+                    )
             reason = UNAPPLIED_PACK_FIELDS.get(field_name)
             if reason is not None:
                 raise PackManifestError(

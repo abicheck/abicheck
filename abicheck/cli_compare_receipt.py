@@ -250,7 +250,9 @@ def dry_run_scheme_label(resolved_cfg: Any, pack_paths: Collection[Any]) -> str:
     return f"{label}; a selected --pack may adjust it" if pack_paths else label
 
 
-def validate_pack_manifests(pack_paths: Collection[Any]) -> None:
+def validate_pack_manifests(
+    pack_paths: Collection[Any], *, policy_file_given: bool = False
+) -> None:
     """Reject an unusable ``--pack`` manifest before anything else runs.
 
     Called ahead of ``compare``'s ``--dry-run`` emit, where that command
@@ -281,7 +283,7 @@ def validate_pack_manifests(pack_paths: Collection[Any]) -> None:
         return
     from .pack_application import check_pack_fields_applied
 
-    check_pack_fields_applied(list(pack_paths))
+    check_pack_fields_applied(list(pack_paths), policy_file_given=policy_file_given)
 
 
 def resolve_and_apply(
