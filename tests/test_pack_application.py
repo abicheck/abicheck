@@ -684,6 +684,25 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert tail in compare_out, compare_out
         assert tail in scan_out, scan_out
 
+    @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+    def test_a_pack_that_assigns_nothing_is_rejected(
+        self, pair: tuple[Path, Path], tmp_path: Path, extra: list[str]
+    ) -> None:
+        """`assignments: {}` is the decorative pack in its purest form —
+        selected, recorded in the receipt, configuring nothing (Codex
+        review). Answerable from the file, since emptiness is not a
+        precedence question and no layer can rescue it, so `--dry-run`
+        rejects it too rather than approving a plan the real run refuses.
+        """
+        pack = _pack(
+            tmp_path,
+            "empty.yml",
+            "id: empty\nversion: 1\nkind: policy\nassignments: {}\n",
+        )
+        result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
+        assert result.exit_code == 64, (extra, result.output)
+        assert "assigns nothing" in result.output
+
     def test_pack_without_a_baseline_is_a_usage_error_on_scan(
         self, pair: tuple[Path, Path], ignore_removals: Path
     ) -> None:

@@ -514,6 +514,17 @@ def check_pack_fields_applied(
     """
     entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
     for path, pack in entries:
+        if not pack.assignments:
+            # The decorative pack in its purest form: selected, recorded in
+            # the receipt, and configuring nothing at all. Answerable from
+            # the file -- emptiness is not a precedence question, so no
+            # layer can rescue it and `--dry-run` agrees (Codex review).
+            raise PackManifestError(
+                f"{path}: assigns nothing. A pack that is selected, recorded "
+                "as active configuration, and changes no verdict, finding or "
+                "exit code is the failure this check exists to prevent -- "
+                "give it an assignment or drop the --pack."
+            )
         for field_name, value in pack.assignments.items():
             # An *inert value* is a precedence question -- an explicit
             # `--policy-file` stating the same field shadows it, and checking
