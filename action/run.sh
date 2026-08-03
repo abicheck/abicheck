@@ -770,7 +770,7 @@ fi
 
 # `format: json` with no `output-file` is the documented stdout mode: the
 # report exists only in $ABICHECK_OUTPUT, so it is persisted once here for the
-# jq lookups below.
+# report queries below.
 #
 # In the *parent* shell, deliberately. Every caller reads the path through
 # `_src=$(_json_report_src)`, and a command substitution runs in a subshell —
@@ -809,6 +809,87 @@ _json_report_src() {
   fi
 }
 
+# Read one derived value out of the JSON report, whatever shape produced it.
+#
+# **Python, not jq.** The composite Action installs no `jq`; GitHub-hosted
+# runners happen to ship it, self-hosted ones need not. On a runner without
+# it, a JSON-format coverage-gated run had no signal at all -- the CLI
+# deliberately prints no stderr notice when the report already carries the
+# ledger -- so scan published ERROR and compare SEVERITY_ERROR for a run whose
+# own report said otherwise (Codex review). Python is the dependency this
+# Action really has: it runs `actions/setup-python`, and `abicheck` is itself
+# a Python console script, so an interpreter exists in any run that got far
+# enough to produce a report.
+#
+# One implementation, not a jq fast path with a Python fallback: two parsers
+# for one question is the shape that drifts. Queries are named rather than
+# passed as expressions, so a caller cannot inject one.
+#
+# The two modes nest the ledger differently and BOTH reach here: `compare`
+# writes it at the top level, while `ScanOutcome.to_dict()` puts the
+# comparison summary under `diff`. Each query below looks in both.
+_PY_BIN="$(command -v python3 || command -v python || true)"
+_report_query() {
+  # $1 = report path, $2 = query name. Prints nothing when the report cannot
+  # be read or parsed, which every caller treats as "cannot tell" rather than
+  # as an answer.
+  [[ -n "$_PY_BIN" && -n "${1:-}" ]] || return 1
+  "$_PY_BIN" - "$1" "$2" <<'PYQUERY' 2>/dev/null
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        report = json.load(fh)
+except Exception:
+    raise SystemExit(1)
+if not isinstance(report, dict):
+    raise SystemExit(1)
+nested = report.get("diff")
+nested = nested if isinstance(nested, dict) else {}
+
+
+def _either(key, default):
+    """The value from the compare shape, else the scan shape, else *default*."""
+    value = report.get(key)
+    if value is None:
+        value = nested.get(key, default)
+    return default if value is None else value
+
+
+def _severity():
+    block = report.get("severity")
+    return block if isinstance(block, dict) else {}
+
+
+query = sys.argv[2]
+if query == "coverage_contribution":
+    print(_either("contract_coverage_exit_contribution", 0))
+elif query == "severity_exit":
+    # An absent `severity` block is the legacy scheme, whose compare exit
+    # codes are 0/2/4 and never 1 -- so the compatibility axis contributed 0
+    # by construction. Only an unreadable report is "cannot tell", and that
+    # exits above without printing.
+    print(_severity().get("exit_code", 0))
+elif query == "blocking_categories":
+    print(", ".join(str(c) for c in (_severity().get("blocking_categories") or [])))
+elif query == "coverage_where":
+    print(
+        ", ".join(
+            sorted(
+                {
+                    "{}/{}".format(f.get("side"), f.get("provider"))
+                    for f in (_either("contract_coverage_failures", []) or [])
+                    if isinstance(f, dict)
+                }
+            )
+        )
+    )
+else:
+    raise SystemExit(2)
+PYQUERY
+}
+
 # Did ADR-049's orthogonal contract-coverage axis contribute to this exit?
 #
 # Since ADR-049 Phase 7, a run passing --contract-evaluation (via extra-args)
@@ -821,32 +902,16 @@ _json_report_src() {
 # Two signals, mirroring where abicheck itself puts the answer: the JSON
 # report carries `contract_coverage_exit_contribution`, and for every other
 # renderer — which omits the ledger — the same fact is announced on stderr.
-# Absent both (no --contract-evaluation), the field defaults to 0 and the
-# mapping below is exactly what it was.
-#
-# The two modes nest it differently and BOTH reach here: `compare` writes the
-# ledger at the top level, while `ScanOutcome.to_dict()` puts the comparison
-# summary under `diff`. Reading only the top level meant a coverage-gated
-# `mode: scan` with `format: json` -- whose JSON renderer also suppresses the
-# stderr notice, since its report carries the ledger -- had neither signal and
-# published ERROR (Codex review). `//` is the right joiner: jq treats only
-# null/false as absent, so a real top-level `0` still wins over the nested
-# lookup instead of falling through to it.
-_COVERAGE_CONTRIBUTION_Q='.contract_coverage_exit_contribution // .diff.contract_coverage_exit_contribution // 0'
+# Absent both (no --contract-evaluation), the field reads 0 and the mapping
+# below is exactly what it was.
 _coverage_gated() {
   local _src
   _src=$(_json_report_src)
-  if [[ -n "$_src" ]] && command -v jq >/dev/null 2>&1 \
-     && [[ "$(jq -r "$_COVERAGE_CONTRIBUTION_Q" "$_src" 2>/dev/null)" == "1" ]]; then
+  if [[ "$(_report_query "$_src" coverage_contribution)" == "1" ]]; then
     return 0
   fi
   echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete'
 }
-
-#: The failure list, from whichever of the two shapes this run produced. Same
-#: reasoning as above, and the same both-modes reachability: COVERAGE_INCOMPLETE
-#: is published by the scan branch as well as the compare one.
-_COVERAGE_FAILURES_Q='[((.contract_coverage_failures // .diff.contract_coverage_failures) // [])[] | "\(.side)/\(.provider)"] | unique | join(", ")'
 
 # The compatibility axis's own exit code, from the JSON report's severity gate
 # (`severity.exit_code`, schema 2.3). Computed by abicheck *before* the
@@ -862,10 +927,10 @@ _COVERAGE_FAILURES_Q='[((.contract_coverage_failures // .diff.contract_coverage_
 # classified every coverage-gated run under the *default* scheme as
 # SEVERITY_ERROR (Codex review).
 #
-# Empty only when there is no readable report at all -- no file, or one jq
-# cannot parse, in which case jq exits non-zero and prints nothing. That is
-# the genuine "cannot tell", and the caller keeps its established verdict
-# rather than guessing.
+# Empty only when there is no readable report at all -- no file, or one that
+# cannot be parsed, in which case `_report_query` prints nothing. That is the
+# genuine "cannot tell", and the caller keeps its established verdict rather
+# than guessing.
 #
 # Top-level only, deliberately, unlike the coverage queries above: this is
 # reached from the compare branch alone (a scan's exit code follows its
@@ -876,9 +941,7 @@ _COVERAGE_FAILURES_Q='[((.contract_coverage_failures // .diff.contract_coverage_
 _severity_gate_exit() {
   local _src
   _src=$(_json_report_src)
-  if [[ -n "$_src" ]] && command -v jq >/dev/null 2>&1; then
-    jq -r '.severity.exit_code // 0' "$_src" 2>/dev/null
-  fi
+  _report_query "$_src" severity_exit
 }
 
 if [[ "$MODE" == "deps-compare" ]]; then
@@ -1050,12 +1113,10 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # setup above already asks the same abicheck invocation to write via
         # --secondary-format/--secondary-output, so it's already populated
         # by this point without a second run (Codex review). Falls back to
-        # the generic message when neither is available or jq is missing.
+        # the generic message when no report is readable.
         _blocking_categories=""
         _json_src=$(_json_report_src)
-        if [[ -n "$_json_src" ]] && command -v jq >/dev/null 2>&1; then
-          _blocking_categories=$(jq -r '(.severity.blocking_categories // []) | join(", ")' "$_json_src" 2>/dev/null)
-        fi
+        _blocking_categories=$(_report_query "$_json_src" blocking_categories)
         if [[ -n "$_blocking_categories" ]]; then
           echo "> **Verdict: SEVERITY_ERROR** ⚠️ — Blocked by severity policy: \`$_blocking_categories\` configured as \`error\`. This is a policy gate, not necessarily an ABI/API break — see the report below for each finding's actual compatibility."
         else
@@ -1081,9 +1142,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # bare "coverage incomplete" leaves them to go find out.
         _coverage_where=""
         _json_src=$(_json_report_src)
-        if [[ -n "$_json_src" ]] && command -v jq >/dev/null 2>&1; then
-          _coverage_where=$(jq -r "$_COVERAGE_FAILURES_Q" "$_json_src" 2>/dev/null)
-        fi
+        _coverage_where=$(_report_query "$_json_src" coverage_where)
         if [[ -n "$_coverage_where" ]]; then
           echo "> **Verdict: COVERAGE_INCOMPLETE** ⚠️ — The selected \`--contract\` domain could not be closed on the available evidence: \`$_coverage_where\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\` (which keeps the findings reported, and only zeroes this contribution)."
         else

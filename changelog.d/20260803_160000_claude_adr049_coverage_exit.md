@@ -66,6 +66,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   contract does not meet exit 1 as an undocumented failure — or, under the
   severity scheme, mistake it for a severity error.
 
+  The Action reads the report with Python rather than `jq`. It never installed
+  `jq` — GitHub-hosted runners happen to ship it, self-hosted ones need not —
+  and on a runner without it a JSON-format coverage-gated run had no signal at
+  all, since the CLI deliberately prints no stderr notice when the report
+  already carries the ledger. Python is the dependency the Action really has:
+  it runs `actions/setup-python`, and `abicheck` is itself a Python console
+  script. All four of its report lookups now share that one parser.
+
 ### Added
 
 - **`contract.unresolved` is now an applied `kind: contract` pack field.** It

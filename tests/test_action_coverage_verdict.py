@@ -141,6 +141,29 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
     return outputs
 
 
+def _shadow_path_without(tmp_path: Path, missing: str) -> Path:
+    """A single directory mirroring the real ``PATH``, minus one command.
+
+    Symlinks rather than copies, first-wins so the real ``PATH`` precedence is
+    preserved. Used to prove a code path does not need a tool the composite
+    Action never installs.
+    """
+    shadow = tmp_path / f"path_without_{missing}"
+    shadow.mkdir(exist_ok=True)
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        directory = Path(entry)
+        if not entry or not directory.is_dir():
+            continue
+        for item in directory.iterdir():
+            if item.name == missing or (shadow / item.name).exists():
+                continue
+            try:
+                (shadow / item.name).symlink_to(item)
+            except OSError:  # pragma: no cover - unreadable entry
+                continue
+    return shadow
+
+
 def _lib(tmp_path: Path, name: str) -> str:
     path = tmp_path / name
     path.write_bytes(b"\x7fELF")
@@ -243,6 +266,41 @@ class TestScanMapsTheCoverageExit:
         )
         assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
         # ...and the summary names the provider from the same nested place.
+        assert "old/export_table" in outputs["_summary"], outputs["_summary"]
+
+    def test_the_report_is_read_without_jq(self, tmp_path: Path) -> None:
+        """The composite Action installs no `jq`. GitHub-hosted runners happen
+        to ship it; self-hosted ones need not, and there a JSON-format
+        coverage-gated run had no signal at all — the CLI prints no stderr
+        notice when the report already carries the ledger — so scan published
+        ERROR for a run its own report contradicted (Codex review).
+
+        Python is the dependency this Action really has, so the run is driven
+        here with a PATH that has no `jq` on it at all.
+        """
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report=_report(coverage=1, severity_exit=0),
+        )
+        # The real PATH with exactly one thing removed. Mirroring every entry
+        # rather than allow-listing a few tools: the script and the stub reach
+        # for whatever they reach for, and a hand-picked list only proves the
+        # tools someone thought of were present.
+        jqless = _shadow_path_without(tmp_path, "jq")
+        assert shutil.which("jq", path=str(jqless)) is None
+        outputs = _run_action(
+            tmp_path,
+            {
+                "PATH": f"{bindir}{os.pathsep}{jqless}",
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )
+        assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
         assert "old/export_table" in outputs["_summary"], outputs["_summary"]
 
     def test_a_crash_still_maps_to_error(self, tmp_path: Path) -> None:
