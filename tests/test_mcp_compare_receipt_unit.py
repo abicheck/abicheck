@@ -319,3 +319,31 @@ class TestConsumerScopeIsNotModelled:
         assert _cfg(scoped).gate.exit_code_scheme == "legacy"
         assert _cfg(scoped).gate == _cfg(plain).gate
         assert _cfg(scoped).surface == _cfg(plain).surface
+
+
+class TestAnInMemorySuppressionListResolves:
+    """The same defect Codex found on the scan path existed here.
+
+    Both front ends spelled the digest `getattr(..., "source_sha256", None)
+    or ""` inline, and an in-memory `SuppressionList` carries none -- so
+    `SuppressionConfig` rejected it and failed an otherwise-valid run. Only
+    the scan path was reported; this pins the MCP half, which shares the fix
+    through `SuppressionSource.from_loaded`.
+    """
+
+    def test_a_list_with_no_source_digest_still_resolves(self):
+        from abicheck.suppression import SuppressionList
+
+        config = resolve_tool_config(
+            policy="strict_abi", suppression=SuppressionList([])
+        )
+        assert config.suppressions is not None
+        assert config.suppressions.sha256, "an empty digest is rejected downstream"
+
+    def test_a_real_file_digest_still_wins_over_the_fallback(self):
+        """The fallback must not displace a digest the list really carried."""
+        rules = SimpleNamespace(
+            source_sha256="deadbeef", rule_identities=lambda: ("symbol:api_b",)
+        )
+        config = resolve_tool_config(policy="strict_abi", suppression=rules)
+        assert config.suppressions.sha256 == "deadbeef"

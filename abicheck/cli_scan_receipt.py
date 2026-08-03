@@ -163,15 +163,12 @@ def resolve_scan_config(
             "must be present, so a renamed option fails here rather than "
             "silently resolving as 'not stated'."
         )
-    suppression_source = None
-    if suppression is not None:
-        suppression_source = SuppressionSource(
-            path=str(suppress_path) if suppress_path is not None else None,
-            # From the single load the comparison itself used, so the digest
-            # always describes the rules that scored the run.
-            sha256=getattr(suppression, "source_sha256", None) or "",
-            rules=tuple(suppression.rule_identities()),
-        )
+    # From the single load the comparison itself used, so the digest always
+    # describes the rules that scored the run -- and falling back to a
+    # content digest of the rules when the list carries none, which an
+    # in-memory `SuppressionList` always does (Codex review; the inline
+    # version here took `""` and failed the whole scan).
+    suppression_source = SuppressionSource.from_loaded(suppression, suppress_path)
     project = None
     if project_cfg is not None:
         project = _without_gate_settings(

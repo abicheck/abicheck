@@ -1128,13 +1128,18 @@ def _scan_request_config(req: ScanRequest) -> Any:
     if not req.contract_evaluation or req.baseline is None:
         return None
     from .cli_scan_receipt import resolve_scan_config
-    from .compatibility_evaluation_frontend import FrontEnd
+    from .compatibility_evaluation_frontend import FrontEnd, stated_policy_base
     from .errors import ValidationError
 
     try:
         return resolve_scan_config(
             {
-                "policy": req.policy,
+                # Dropped when a `policy_file` overrode it, exactly as the
+                # comparison itself treats it -- otherwise an accepted
+                # request (unknown name, valid file) died in its own receipt
+                # before the comparison ran (Codex review, the same defect
+                # already fixed on the MCP path; the helper is shared now).
+                "policy": stated_policy_base(req.policy, req.policy_file),
                 "policy_file_path": None,
                 "suppress": None,
                 "scope_public_headers": req.scope_to_public_surface,

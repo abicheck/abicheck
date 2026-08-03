@@ -28,13 +28,17 @@ declares legitimate.
 **What this tool can and cannot state**, since a receipt may only name inputs
 that exist. ``abi_compare`` takes ``policy``/``policy_file``/
 ``suppression_file`` and the four severity levels, so those resolve from real
-arguments. It takes no scope, contract-mode, public-symbol, or exit-code-scheme
+arguments. It takes no contract-mode, public-symbol, or exit-code-scheme
 parameter at all -- so unlike ``CompareRequest.scope_public``, whose dataclass
 default is still a caller's choice, there is nothing for a caller to have
-chosen here and those fields resolve as built-in defaults. That is not an
+chosen there and those fields resolve as built-in defaults. That is not an
 under-claim: ``service.compare_snapshots``' own ``scope_to_public_surface``
 default is what runs, and it agrees with
 ``BUILT_IN_DEFAULT_CONTRACT_MODE`` by construction.
+
+It *does* take two consumer-scope arguments, ``used_by`` and
+``required_symbols``, and those are a genuine under-claim rather than an
+honest default -- see :func:`resolve_tool_config` for the recorded gap.
 
 Its own module rather than more lines in ``mcp_server.py``: that file is
 already allowlisted as oversized, and this is one cohesive concern with one
@@ -54,52 +58,6 @@ _SEVERITY_CATEGORIES = (
     "quality_issues",
     "addition",
 )
-
-
-def _suppression_source(suppression: Any, path: Any) -> Any:
-    """The already-loaded ``suppression_file``, as a resolver input.
-
-    Built from the list the run really used rather than re-reading *path* --
-    the single-read rule every file-derived receipt entry in this codebase
-    follows, so the digest cannot describe content that did not score the
-    run (see ``cli_compare_receipt._suppression_source``, which this
-    mirrors).
-    """
-    if suppression is None:
-        return None
-    from .compatibility_evaluation_frontend import SuppressionSource
-
-    return SuppressionSource(
-        path=str(path) if path is not None else None,
-        sha256=getattr(suppression, "source_sha256", None) or "",
-        rules=tuple(suppression.rule_identities()),
-    )
-
-
-def _stated_policy_base(policy: Any, policy_file: Any) -> Any:
-    """*policy*, unless a ``policy_file`` overrode it with a value this
-    resolver would reject.
-
-    ``abi_compare`` validates ``policy`` **only when no ``policy_file`` is
-    given** ("policy_file takes precedence over the base policy name",
-    `mcp_server.py`), so an unknown ``policy`` alongside a valid file is an
-    accepted request whose comparison completes under the file's own base.
-    Handing that ignored value to the resolver made ``builtin_policy_identity``
-    raise, and the tool's outer handler then replaced a *finished* comparison
-    with an error response -- a receipt turning a successful run into a
-    failure, which is the one thing a receipt must never do (Codex review).
-
-    Dropped rather than repaired: the value did not choose anything, so
-    naming it in the receipt would be false either way, and the resolver
-    reads the base off ``policy_file`` exactly as the comparison did. With
-    no file present the value is passed through unchanged, so a genuinely
-    unknown policy still fails loudly at the tool's own validation.
-    """
-    if policy_file is None or policy is None:
-        return policy
-    from .checker_policy import VALID_BASE_POLICIES
-
-    return policy if policy in VALID_BASE_POLICIES else None
 
 
 def resolve_tool_config(
@@ -150,15 +108,17 @@ def resolve_tool_config(
     from .compatibility_evaluation_frontend import (
         ExplicitCompatibilityInputs,
         FrontEnd,
+        SuppressionSource,
         resolve_compatibility_evaluation_config,
+        stated_policy_base,
     )
 
     return resolve_compatibility_evaluation_config(
         front_end=FrontEnd.API,
         explicit=ExplicitCompatibilityInputs(
-            policy_base=_stated_policy_base(policy, policy_file),
+            policy_base=stated_policy_base(policy, policy_file),
             policy_file=policy_file,
-            suppression=_suppression_source(suppression, suppression_path),
+            suppression=SuppressionSource.from_loaded(suppression, suppression_path),
             severity_preset=severity_preset,
             severity_abi_breaking=severity_abi_breaking,
             severity_potential_breaking=severity_potential_breaking,

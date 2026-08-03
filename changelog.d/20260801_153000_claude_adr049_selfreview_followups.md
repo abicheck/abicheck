@@ -31,3 +31,14 @@
   resolved config is indistinguishable from an unscoped one's; that is now
   recorded as a known gap in the reference, the module, and a test, rather
   than described as an accurate "nothing was chosen".
+
+### Fixed (second round)
+
+- Two inputs the comparison accepts no longer fail during receipt
+  resolution, on `scan --against`/`run_scan` and the MCP tool alike: an
+  unknown `policy` name alongside a `policy_file` that overrides it, and an
+  in-memory `SuppressionList` carrying no `source_sha256`. Each had already
+  been fixed once on one front end and reappeared on another, so both now
+  live on shared helpers — `stated_policy_base` and
+  `SuppressionSource.from_loaded` — rather than being spelled inline per
+  front end.

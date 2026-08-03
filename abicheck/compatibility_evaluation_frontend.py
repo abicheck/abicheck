@@ -178,6 +178,31 @@ def _digest(payload: object) -> str:
     ).hexdigest()
 
 
+def stated_policy_base(policy: Any, policy_file: Any) -> Any:
+    """*policy*, unless a ``policy_file`` overrode it with a value this
+    resolver would reject.
+
+    Both the MCP tool and the scan API validate ``policy`` **only when no
+    ``policy_file`` is given** -- the file takes precedence over the base
+    name -- so an unknown ``policy`` alongside a valid file is an accepted
+    request whose comparison completes under the file's own base. Handing
+    that ignored value to the resolver made :func:`builtin_policy_identity`
+    raise and killed an otherwise-finished run: a receipt turning a
+    successful comparison into a failure, the one thing a receipt must never
+    do (Codex review, found once on the MCP path and then again on the scan
+    path -- hence living here rather than in either front end).
+
+    Dropped rather than repaired: the value chose nothing, so naming it in
+    the receipt would be false either way, and the resolver reads the base
+    off ``policy_file`` exactly as the comparison did. With no file present
+    the value passes through unchanged, so a genuinely unknown policy still
+    fails loudly where the front end validates it.
+    """
+    if policy_file is None or policy is None:
+        return policy
+    return policy if policy in VALID_BASE_POLICIES else None
+
+
 @functools.cache
 def builtin_policy_identity(name: str) -> ImmutableIdentity:
     """The replayable identity of a built-in ``--policy`` base.
@@ -278,6 +303,42 @@ class SuppressionSource:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rules", tuple(self.rules))
+
+    @classmethod
+    def from_loaded(
+        cls, suppression: Any, path: Any = None
+    ) -> SuppressionSource | None:
+        """Build one from a list a front end already loaded. ``None`` passes through.
+
+        The single-read rule: built from the list that really scored the run,
+        never a re-read of *path*, so the digest cannot describe content that
+        did not.
+
+        **The digest falls back to the rules' own content** when the list
+        carries no ``source_sha256``. That is not a rare case: a
+        programmatically constructed or merged
+        :class:`~abicheck.suppression.SuppressionList` has none, and every
+        front end that accepts one could hand it over. Taking ``""`` there --
+        which each of them previously did, by spelling this
+        ``getattr(...) or ""`` inline -- made :class:`SuppressionConfig`
+        reject the input and fail an otherwise-valid run (Codex review, found
+        on the scan path; the MCP path had it too). ``contract_context.
+        suppression_config_for`` already derived the fallback correctly, so
+        this is that rule shared rather than a fourth transcription of it:
+        the rules are persisted verbatim beside the digest, so a digest over
+        them authenticates exactly what a replay would re-read.
+        """
+        if suppression is None:
+            return None
+        from .contract_evidence_collect import content_digest
+
+        rules = tuple(suppression.rule_identities())
+        return cls(
+            path=str(path) if path is not None else None,
+            sha256=getattr(suppression, "source_sha256", None)
+            or content_digest(list(rules)),
+            rules=rules,
+        )
 
     @classmethod
     def from_file(

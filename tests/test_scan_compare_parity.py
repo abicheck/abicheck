@@ -1454,3 +1454,58 @@ class TestApiRequestValidationErrors:
         from abicheck.service_scan import _scan_request_config
 
         assert _scan_request_config(self._request(mixed_pair)) is not None
+
+
+class TestAnAcceptedRequestIsNotKilledByItsOwnReceipt:
+    """Two inputs the comparison accepts must not fail during resolution.
+
+    Both were already fixed once on the MCP path and reappeared here, which
+    is why the fixes now live on shared helpers
+    (`stated_policy_base`, `SuppressionSource.from_loaded`) rather than in
+    each front end (Codex review).
+    """
+
+    def _config(self, mixed_pair: tuple[Path, Path], **kwargs):
+        from abicheck.service_scan import ScanRequest, _scan_request_config
+
+        old, new = mixed_pair
+        return _scan_request_config(
+            ScanRequest(
+                binaries=[new], baseline=old, contract_evaluation=True, **kwargs
+            )
+        )
+
+    def test_a_policy_file_overrides_an_unknown_policy_name(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """The file takes precedence, so the name chose nothing and naming it
+        would be false either way -- it is dropped, not repaired."""
+        from abicheck.policy_file import PolicyFile
+
+        config = self._config(
+            mixed_pair,
+            policy="not_a_policy",
+            policy_file=PolicyFile(base_policy="sdk_vendor"),
+        )
+        assert config.policy.base.id == "sdk_vendor"
+
+    def test_an_unknown_policy_alone_still_fails_loudly(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """The drop is gated on a file overriding it; with no file the value
+        really was the caller's choice and really is invalid."""
+        from abicheck.errors import ValidationError
+
+        with pytest.raises(ValidationError, match="unknown base policy"):
+            self._config(mixed_pair, policy="not_a_policy")
+
+    def test_an_in_memory_suppression_list_resolves(
+        self, mixed_pair: tuple[Path, Path]
+    ) -> None:
+        """A programmatically built list carries no `source_sha256`; taking
+        `""` there made `SuppressionConfig` reject an otherwise-valid scan."""
+        from abicheck.suppression import SuppressionList
+
+        config = self._config(mixed_pair, suppression=SuppressionList([]))
+        assert config.suppressions is not None
+        assert config.suppressions.sha256
