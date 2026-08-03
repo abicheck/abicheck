@@ -332,9 +332,27 @@ Core pipeline (in order of data flow):
      one place suppression is applied — cannot see one;
      `suppression_reaches_coverage_failures()` is the executable *proof* of
      that, not its enforcement. `coverage_exit_contribution()` states §6.1's
-     `0`/`1`; nothing applies it, since the independent coverage exit is
-     Phase 7's. Emitted by `reporter.py` under `--contract-evaluation`
+     `0`/`1`. Emitted by `reporter.py` under `--contract-evaluation`
      (report schema 2.26), `[]` rather than omitted when a domain closed
+   - `contract_coverage_exit.py` — ADR-049 Phase 7: the step that turns the
+     ledger's `0`/`1` into a real exit code. Deliberately the *only* place
+     that fold happens, and it is `max` — §7's orthogonality means a
+     coverage failure raises a clean `0` to `1` and can never lower a gate's
+     `2`/`4` (that would demote a real ABI break to "warnings only"), and it
+     never rewrites a finding's compatibility decision or gate contribution.
+     `compare` folds it inside `cli._exit_with_severity_or_verdict` rather
+     than at each call site, so a command cannot pick up a compatibility
+     exit and forget the orthogonal one; `cli_scan_baseline.py` folds the
+     same function, since a ledger gating one command and not the other is
+     exactly §6.4's cross-command divergence. `contract.unresolved=warn`
+     (D9) zeroes the floor and changes nothing else — the failures stay
+     listed and unsuppressible, because accepting incomplete assurance is
+     not hiding it. `reporter.py` emits *this* function's answer as
+     `contract_coverage_exit_contribution`, so the number a user reads is
+     the one that gated them. `0` whenever no contract context exists: a run
+     without `--contract-evaluation` has no selected domain to be short of
+     evidence for, which is what keeps every pre-existing invocation's exit
+     code unchanged
    - `contract_context.py` / `contract_context_io.py` / `contract_replay.py`
      — ADR-049 Phase 4's assembly, JSON round-trip, and the two procedures
      D6 names. `checker.compare(..., contract_evaluation=True)` returns a

@@ -3922,6 +3922,35 @@ to `public`, `strict_abi`, and `not_checkable`. Keep `contract=all` and
 `--no-scope-public-headers` as the exact forensic rollback. Do not make a
 `public_contract` enum/preset permanent.
 
+**Updated (2026-08-03): the coverage-exit slice landed; the default flip and
+the authoritative evaluator have not.** The maintainer directed a full flip
+and stated explicitly that **no migration window was run** — recorded here
+because this section's own precondition ("after release notes and a migration
+window") is therefore not satisfied, and that was a deliberate decision rather
+than an oversight. Release notes ship with the change instead of ahead of it.
+
+What is done: `contract_coverage_exit.py` turns the ledger's long-computed
+`0`/`1` into a real exit code, folded with `max` in exactly one place per
+command (`cli._exit_with_severity_or_verdict` for `compare`,
+`cli_scan_baseline` for `scan --against`, §6.4). The orthogonality claims are
+now executable rather than stated: a coverage failure raises a clean `0` to
+`1` and provably cannot lower a gate's `2`/`4`, and a run without
+`--contract-evaluation` has no selected domain and so is bit-for-bit
+unaffected. `contract.unresolved` gained its first engine consumer and
+therefore left `pack_application.UNAPPLIED_PACK_FIELDS`; `warn` zeroes the
+floor and changes nothing else, with the failures still listed and still
+unsuppressible. `reporter.py` now emits the *applied* number rather than a
+hypothetical one — a field named "exit contribution" that disagreed with the
+actual exit status would be a trap once the number bites.
+
+What remains, in dependency order: making the contract decision authoritative
+(today the shadow evaluator runs *after* `verdict` is computed, over the final
+`kept` list, so a `NOT_EVALUATED` finding still scores — reordering that is
+the large, FP-rate/tier-accuracy-sensitive piece); flipping
+`--contract-evaluation` on by default; and the downstream consumers §6.1
+reserved for this phase (SARIF `executionSuccessful`/`exitCode`, `aggregate`
+folding the ledger into its coverage axis).
+
 ## 10. Test plan
 
 ### 10.1 Unit tests

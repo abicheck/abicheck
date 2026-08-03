@@ -1169,7 +1169,14 @@ def _announce_exit_scheme(
 def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
 ) -> None:
-    """Exit with the appropriate code for the resolved exit-code scheme."""
+    """Exit with the appropriate code for the resolved exit-code scheme.
+
+    ADR-049 Phase 7: the contract-coverage axis is folded in here rather than
+    at each call site, so a command cannot acquire a compatibility exit and
+    forget the orthogonal one. `fold_coverage_exit` reads the floor off
+    *result*'s own persisted context and is `0` when the run recorded none.
+    """
+    from .contract_coverage_exit import fold_coverage_exit
     from .severity import compute_exit_code, legacy_exit_code
     if scheme == "severity":
         assert sev_config is not None
@@ -1181,12 +1188,11 @@ def _exit_with_severity_or_verdict(
             kind_sets=eff_sets,
             policy_file=result.policy_file,
         )
-        if exit_code != 0:
-            sys.exit(exit_code)
     else:
-        code = legacy_exit_code(result.verdict)
-        if code != 0:
-            sys.exit(code)
+        exit_code = legacy_exit_code(result.verdict)
+    exit_code = fold_coverage_exit(exit_code, result)
+    if exit_code != 0:
+        sys.exit(exit_code)
 
 
 def _log_one_side_debug(

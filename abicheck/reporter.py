@@ -315,17 +315,18 @@ def _add_contract_context(d: dict[str, object], result: DiffResult) -> None:
     # enforce. Emitted as `[]` rather than omitted when there are none: an
     # empty ledger is the real, checkable answer "this domain closed", which
     # an absent key could not distinguish from "not computed".
-    from .contract_coverage_ledger import (
-        coverage_exit_contribution,
-        coverage_failures_for_context,
-    )
+    from .contract_coverage_exit import coverage_exit_for_context
+    from .contract_coverage_ledger import coverage_failures_for_context
 
     failures = coverage_failures_for_context(ctx)
     d["contract_coverage_failures"] = [f.to_dict() for f in failures]
-    # What the ledger *would* contribute to the exit code. Reported, not
-    # applied: the independent coverage exit is Phase 7's, alongside the
-    # default flip, and seeing the number before it bites is the point.
-    d["contract_coverage_exit_contribution"] = coverage_exit_contribution(failures)
+    # ADR-049 Phase 7: what the ledger contributes to the exit code, now
+    # actually applied rather than merely stated. Derived by the same
+    # function the exit path uses, so the number a user reads is the one
+    # that gated them -- including `contract.unresolved=warn` zeroing it
+    # while the failures above stay listed, which is what accepting
+    # incomplete assurance means as opposed to hiding it.
+    d["contract_coverage_exit_contribution"] = coverage_exit_for_context(ctx)
 
 
 def _to_json_leaf(

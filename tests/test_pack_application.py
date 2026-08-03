@@ -140,7 +140,6 @@ def _field_kind(field: str):
 #: `UNAPPLIED_PACK_FIELDS` below, so a registry entry without a value here
 #: fails rather than silently dropping out of the parametrize list.
 _UNAPPLIED_FIELD_VALUES: dict[str, str] = {
-    "contract.unresolved": "warn",
     "contract.overlays": "[post_manifest]",
     "assurance.require_evidence": "false",
 }
@@ -210,7 +209,11 @@ class TestAPackActuallyConfiguresTheRun:
             policy_file_with_packs,
         )
 
-        assert applied_pack_fields(PackKind.CONTRACT) == {"surface.internal_namespaces"}
+        assert applied_pack_fields(PackKind.CONTRACT) == {
+            "surface.internal_namespaces",
+            # Applied since Phase 7, when its coverage exit became real.
+            "contract.unresolved",
+        }
         pack = _pack(
             tmp_path,
             "ns.yml",
@@ -584,13 +587,13 @@ class TestOnlyAppliedFieldsAreAccepted:
             tmp_path,
             "future.yml",
             "id: future\nversion: 1\nkind: contract\n"
-            "assignments:\n  contract.unresolved: warn\n",
+            "assignments:\n  contract.overlays: [post_manifest]\n",
         )
         result = CliRunner().invoke(
             main, ["scan", str(new), "--against", str(old), "--pack", str(pack)]
         )
         assert result.exit_code == 64, result.output
-        assert "contract.unresolved" in result.output
+        assert "contract.overlays" in result.output
 
     def test_scan_rejects_an_inert_value_from_the_resolution(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -665,7 +668,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             tmp_path,
             "future.yml",
             "id: future\nversion: 1\nkind: contract\n"
-            "assignments:\n  contract.unresolved: warn\n",
+            "assignments:\n  contract.overlays: [post_manifest]\n",
         )
         compare_out = _compare(CliRunner(), pair, "--pack", str(pack)).output
         scan_out = (
@@ -677,7 +680,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
         # The shared tail is everything after the source token, so comparing it
         # pins the wording without pinning which path names the pack how.
-        tail = "'contract.unresolved' is resolvable but not applied by this"
+        tail = "'contract.overlays' is resolvable but not applied by this"
         assert tail in compare_out, compare_out
         assert tail in scan_out, scan_out
 
@@ -695,7 +698,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         "body",
         [
             "kind: nonsense\nassignments:\n  x: y\n",
-            "kind: contract\nassignments:\n  contract.unresolved: warn\n",
+            "kind: contract\nassignments:\n  contract.overlays: [post_manifest]\n",
         ],
     )
     @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
@@ -730,14 +733,14 @@ class TestOnlyAppliedFieldsAreAccepted:
             real(pack_paths, **kwargs)
             ignore_removals.write_text(
                 "id: relax_removals\nversion: 2\nkind: contract\n"
-                "assignments:\n  contract.unresolved: warn\n",
+                "assignments:\n  contract.overlays: [post_manifest]\n",
                 encoding="utf-8",
             )
 
         monkeypatch.setattr(receipt, "validate_pack_manifests", _validate_then_swap)
         result = _compare(CliRunner(), pair, "--pack", str(ignore_removals))
         assert result.exit_code == 64, result.output
-        assert "contract.unresolved" in result.output
+        assert "contract.overlays" in result.output
 
     def test_the_dry_run_reports_the_resolved_scheme_not_the_raw_flag(
         self, pair: tuple[Path, Path], tmp_path: Path, monkeypatch
@@ -846,6 +849,10 @@ class TestReceiptAgreesWithWhatScored:
             CliRunner(),
             pair,
             "--contract-evaluation",
+            # See the parity test below: `all` keeps ADR-049 Phase 7's
+            # contract-coverage axis quiet so this stays a test about packs.
+            "--contract",
+            "all",
             "--format",
             "json",
             "--pack",
@@ -878,6 +885,12 @@ class TestReceiptAgreesWithWhatScored:
         scan_out = tmp_path / "scan.json"
         common = [
             "--contract-evaluation",
+            # Pin the rollback domain so this stays a test about `packs`.
+            # ADR-049 Phase 7 made the contract-coverage axis real, and this
+            # fixture's symbols carry no header provenance, so `public` would
+            # contribute its orthogonal exit 1 and mask the pack's own effect.
+            "--contract",
+            "all",
             "--pack",
             str(ignore_removals),
             "--format",

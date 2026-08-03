@@ -96,12 +96,15 @@ PACK_SOURCE_KIND = "pack_manifest"
 #: two together partition the routable vocabulary into "applied" and "not
 #: yet" -- :func:`applied_pack_fields` derives the first half from the second
 #: rather than keeping a second hand-maintained list.
+#:
+#: ``contract.unresolved`` left this mapping in Phase 7, when the coverage
+#: exit it configures became real (``contract_coverage_exit.py``). It is
+#: also the one applied field :func:`pack_application` does *not* fold into
+#: anything: its consumer reads it straight off the resolved configuration
+#: the receipt already persists, so there is no legacy object to graft it
+#: onto -- which is what "applied" means for a field the engine learned to
+#: read natively, as opposed to one translated into a ``PolicyFile``.
 UNAPPLIED_PACK_FIELDS: Mapping[str, str] = {
-    "contract.unresolved": (
-        "how an UNKNOWN_UNRESOLVED finding is treated is ADR-049 Phase 7's "
-        "independent coverage exit, which nothing consults yet -- the value "
-        "would be recorded and ignored"
-    ),
     "contract.overlays": (
         "the public domain's overlays come from --post-manifest/--public-symbol, "
         "which name concrete inputs; a pack naming an overlay kind has nothing "

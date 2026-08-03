@@ -23,7 +23,7 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   off the one canonically-resolved configuration by provenance, so no front end
   can apply a value D7 precedence ruled out.
   A manifest assigning a field this build resolves but does not yet act on
-  (`contract.unresolved`, `contract.overlays`, `assurance.require_evidence`) is
+  (`contract.overlays`, `assurance.require_evidence`) is
   rejected with the field and the reason, as is a `kind: gate` pack on `scan`
   (whose exit code follows its verdict directly, so it has no gate to move),
   `--pack` without `--against` on `scan`, and `--pack` on a directory/package
