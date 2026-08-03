@@ -1404,6 +1404,14 @@ def scan_cmd(
             # A D7 same-tier conflict or a D8 pack conflict is a usage error,
             # exactly as it is for `compare` -- not a traceback out of a
             # command that had already validated its own flags.
+            #
+            # Narrower than `service_scan._scan_request_config`'s
+            # `except (ValueError, PackManifestError)` on purpose, not by
+            # oversight: the extra case that catch covers is an unknown base
+            # policy, which reaches the resolver only as a free string on a
+            # typed `ScanRequest`. Here `--policy` is a `click.Choice`, so
+            # Click rejects an unknown base before this call. If either front
+            # end gains a new failure mode, change both.
             raise click.UsageError(str(exc)) from exc
 
     budget_s = _parse_budget(budget)

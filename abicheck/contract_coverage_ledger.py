@@ -93,6 +93,19 @@ if TYPE_CHECKING:
 #: `exports`' is "only exported function/variable roots and closure computed
 #: from the raw type graph". Anything not listed for a mode is advisory *in
 #: that mode* -- not ignored, but not a coverage failure either.
+#:
+#: **The overlay providers are deliberately absent from every entry.**
+#: `post_manifest` and `forced_public_symbols` are *additive* to a domain,
+#: not constitutive of it: an overlay names extra entities to treat as in
+#: contract, so a failed overlay leaves the domain's own roots exactly as
+#: complete as they were. `public` still closes on `public_header` alone,
+#: and the finding an overlay would have moved simply stays where the base
+#: domain put it. Listing them here would report a coverage *failure* --
+#: "this domain could not be closed" -- for a run whose domain closed fine
+#: and merely applied one fewer overlay, which is a different fact and
+#: belongs in the evidence ledger that already records it per provider.
+#: A run that needs an overlay to have applied should assert on
+#: `contract_evidence`, not on this ledger being empty.
 REQUIRED_PROVIDERS: dict[ContractMode, frozenset[str]] = {
     ContractMode.PUBLIC: frozenset({"public_header"}),
     ContractMode.EXPORTS: frozenset({"export_table"}),
@@ -286,14 +299,25 @@ def suppression_reaches_coverage_failures(
     cannot ... suppress a provider/domain coverage failure". This is not a
     filter that *enforces* the rule -- the rule is enforced structurally, by
     a coverage failure not being a `Change` and so never reaching
-    `checker._filter_suppressed_changes`. This is the *proof*: it hands each
-    failure to the real matcher and reports what matched.
+    `checker._filter_suppressed_changes`. This is a *witness* for it: it
+    hands each failure to the real matcher and reports what matched.
 
-    Kept as a function rather than a comment because the guarantee is about
-    a seam between two modules that are edited independently, which is
-    exactly the kind of invariant that stops being true silently. A test
-    calls it with rules deliberately written to match a failure's provider
-    and side, and asserts the answer is still empty.
+    **Be honest about how strong that witness is.** Because a
+    `CoverageFailure` exposes none of the attributes the matcher keys on, an
+    empty answer follows from the type's shape, so a test asserting `== ()`
+    would keep passing even if the structural guarantee were dismantled some
+    *other* way -- by routing failures into `DiffResult.changes`, say, which
+    happens nowhere near this call. What it does catch is the one mutation
+    that would make a failure matchable in place: giving `CoverageFailure` a
+    `kind`/`symbol` (or making it a `Change` subclass) so a wildcard rule
+    starts matching. That is a narrow guarantee, not a general one; the
+    general one is `contract_coverage_failures` never being built from
+    `DiffResult.changes`, which the caller in `reporter.py` shows directly.
+
+    Kept as a function rather than a comment because even the narrow
+    guarantee spans two modules that are edited independently. A test calls
+    it with rules deliberately written to match a failure's provider and
+    side, and asserts the answer is still empty.
     """
     if suppression is None:
         return ()

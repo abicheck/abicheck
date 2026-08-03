@@ -1103,15 +1103,27 @@ def _scan_request_config(req: ScanRequest) -> Any:
     on both front ends (CodeRabbit review). Mapped here rather than at the
     one call site so a second caller cannot reintroduce the gap.
 
-    ``ValueError`` broadly, rather than only the two resolver subclasses the
-    CLI names: an unknown ``ScanRequest.policy`` reaches
+    ``ValueError`` broadly, rather than only the two resolver subclasses
+    ``cli_scan.scan_cmd`` names (``FieldResolutionError``/
+    ``PackConflictError``, both ``ValueError`` subclasses, which it maps to
+    ``click.UsageError``): an unknown ``ScanRequest.policy`` reaches
     ``builtin_policy_identity`` and raises a *plain* ``ValueError``, which
     leaked identically. The CLI cannot hit that one -- ``--policy`` is a
-    ``click.Choice`` -- but a typed request's ``policy`` is a free string, so
-    the API needs the wider net. Every ``ValueError`` out of this resolver is
-    a statement about the request's own values, which is exactly what
-    ``ValidationError`` means here; ``PackManifestError`` is listed
-    separately because it is not one.
+    ``click.Choice``, so Click rejects an unknown base before the resolver
+    ever sees it -- but a typed request's ``policy`` is a free string, so
+    the API needs the wider net. The two nets differ because the two front
+    ends admit different inputs, not because they disagree about what a bad
+    request is; keep them in sync if either gains a new failure mode.
+
+    The breadth has a real cost worth stating: an internal ``ValueError``
+    from a bug inside the resolver would also be reported as a bad request
+    rather than crashing. That is the accepted trade -- every ``ValueError``
+    this resolver raises today *is* a statement about the request's own
+    values, and misreporting a hypothetical internal one is better than
+    letting a genuine bad request escape as an unhandled exception through
+    a Tier-2 API whose other validation failures all raise
+    ``ValidationError``. ``PackManifestError`` is listed separately because
+    it is not a ``ValueError``.
     """
     if not req.contract_evaluation or req.baseline is None:
         return None
@@ -1120,31 +1132,23 @@ def _scan_request_config(req: ScanRequest) -> Any:
     from .errors import PackManifestError, ValidationError
 
     try:
-        return _resolve_scan_request(req, resolve_scan_config, FrontEnd)
+        return resolve_scan_config(
+            {
+                "policy": req.policy,
+                "policy_file_path": None,
+                "suppress": None,
+                "scope_public_headers": req.scope_to_public_surface,
+                "public_symbols": tuple(sorted(req.force_public_symbols or ())),
+                "public_symbols_list": None,
+                "contract_mode": req.contract_mode,
+            },
+            typed={"policy", "scope_public_headers"},
+            policy_file=req.policy_file,
+            suppression=req.suppression,
+            front_end=FrontEnd.API,
+        )
     except (ValueError, PackManifestError) as exc:
         raise ValidationError(str(exc)) from exc
-
-
-def _resolve_scan_request(
-    req: ScanRequest, resolve_scan_config: Any, FrontEnd: Any
-) -> Any:
-    """The resolver call itself, split out so its exception mapping reads as
-    one statement in :func:`_scan_request_config`."""
-    return resolve_scan_config(
-        {
-            "policy": req.policy,
-            "policy_file_path": None,
-            "suppress": None,
-            "scope_public_headers": req.scope_to_public_surface,
-            "public_symbols": tuple(sorted(req.force_public_symbols or ())),
-            "public_symbols_list": None,
-            "contract_mode": req.contract_mode,
-        },
-        typed={"policy", "scope_public_headers"},
-        policy_file=req.policy_file,
-        suppression=req.suppression,
-        front_end=FrontEnd.API,
-    )
 
 
 def run_scan(req: ScanRequest) -> ScanResult:

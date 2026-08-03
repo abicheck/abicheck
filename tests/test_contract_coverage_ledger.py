@@ -614,3 +614,60 @@ def test_junit_coverage_suites_stay_attributable_per_library() -> None:
     for suite in suites:
         classnames = {c.get("classname") for c in suite.findall("testcase")}
         assert classnames == {suite.get("name")}
+
+
+class TestCoverageFailuresValidateAgainstTheSchema:
+    """The published schema must accept what the reporter actually emits.
+
+    `contract_coverage_failures`' `required` array was hand-edited to match
+    `CoverageFailure.to_dict()` (CodeRabbit review found it declaring six of
+    the eight always-emitted fields). Nothing re-derives one from the other,
+    so without this the two can drift apart silently: a field added to
+    `to_dict` and not to the schema makes every published report fail a
+    consumer's validation, and one removed from `to_dict` while still
+    `required` does the same.
+    """
+
+    def _report(self, **kwargs) -> dict:
+        from abicheck.reporter import to_json
+
+        old, new = _pair_without_export_table()
+        result = compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            **kwargs,
+        )
+        return json.loads(to_json(result))
+
+    def _validate(self, report: dict) -> None:
+        jsonschema = pytest.importorskip("jsonschema")
+
+        from abicheck.schemas import load_compare_report_schema
+
+        jsonschema.validate(report, load_compare_report_schema())
+
+    def test_a_report_carrying_failures_validates(self) -> None:
+        report = self._report(contract_mode="exports")
+        # Guard the guard: a run with no failures would validate trivially.
+        assert report["contract_coverage_failures"]
+        self._validate(report)
+
+    def test_a_report_whose_domain_closed_validates(self) -> None:
+        """`[]` rather than omitted is itself part of the contract."""
+        report = self._report(contract_mode="public")
+        assert report["contract_coverage_failures"] == []
+        self._validate(report)
+
+    def test_every_emitted_key_is_declared_required(self) -> None:
+        """The drift this pins, checked directly rather than through a
+        validator that would also pass if a key were merely optional."""
+        from abicheck.schemas import load_compare_report_schema
+
+        report = self._report(contract_mode="exports")
+        emitted = set(report["contract_coverage_failures"][0])
+        schema = load_compare_report_schema()
+        declared = schema["properties"]["contract_coverage_failures"]["items"]
+        assert emitted == set(declared["required"])
+        assert emitted == set(declared["properties"])
