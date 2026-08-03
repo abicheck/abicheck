@@ -45,8 +45,10 @@ provenance names *that* source and this module contributes nothing for it.
 
 **2. A pack may only assign a field this build actually applies.**
 :data:`UNAPPLIED_PACK_FIELDS` names the routable fields with no engine
-consumer yet, each with the reason, and :func:`check_pack_fields_applied`
-rejects a manifest assigning one. That is the same posture the manifest
+consumer yet, each with the reason, and
+:func:`check_resolved_config_applies_packs` rejects a resolution carrying
+one (:func:`check_pack_fields_applied` asks the same of the files, early
+enough that ``--dry-run`` agrees). That is the same posture the manifest
 loader already takes toward an unknown key -- the alternative is a pack
 whose assignment lands in the receipt and changes nothing, which is the
 exact failure this module was written to prevent. Wiring a field's consumer
@@ -378,13 +380,15 @@ def check_resolved_config_applies_packs(
     from ``gate.packs`` -- which lists exactly the ``kind: gate`` manifests,
     since :func:`resolve_selected_packs` groups them by kind.
 
-    The same rule as :func:`check_pack_fields_applied`, asked of the
-    *resolution* instead of the files. That closes the window re-reading the
-    manifests leaves open: the resolver has already loaded them, and between
-    that read and any later one a generated or concurrently edited pack can
-    change, so a second read validates a revision that is not the one
-    configuring the run (Codex review, twice -- first for the gap before this
-    check existed at all, then for the gap re-reading still left).
+    The authoritative half, and the *only* place the gate question is asked:
+    :func:`check_pack_fields_applied` re-reads the files, and asking there
+    too would answer one question from two revisions. That is the window
+    re-reading leaves open -- the resolver has already loaded the manifests,
+    and between that read and any later one a generated or concurrently
+    edited pack can change, so a second read validates a revision that is not
+    the one configuring the run (Codex review, twice -- first for the gap
+    before this check existed at all, then for the gap re-reading still
+    left).
 
     Asking the resolved object is exact rather than merely closer: a pack's
     contribution is recorded in ``provenance[field].source_kind`` by the same
@@ -426,18 +430,18 @@ def check_resolved_config_applies_packs(
 def check_pack_fields_applied(
     pack_paths: Sequence[str | Path],
     *,
-    gate_supported: bool = True,
-    gate_reason: str = "",
     shadowed_fields: frozenset[str] = frozenset(),
     loaded: Iterable[tuple[str, Any]] | None = None,
 ) -> None:
-    """Reject a manifest assigning a field this front end does not apply.
+    """Reject a manifest assigning a field this build does not apply.
 
-    Two independent reasons a routable assignment can be inapplicable:
-    :data:`UNAPPLIED_PACK_FIELDS` (no engine consumer in this build at all),
-    and *gate_supported* being false (this command has no gate to configure
-    -- ``scan``'s exit code follows its verdict directly, which is why its
-    receipt blanks the gate rather than reporting one it never used).
+    The file-level half of :data:`UNAPPLIED_PACK_FIELDS`, asked early enough
+    that ``compare --dry-run`` answers it the same way the real run does.
+    Deliberately *not* asked here: whether the selected command has a gate to
+    configure at all. That is a precedence question about the resolution
+    rather than a fact about the file -- ``scan`` asks it of
+    :func:`check_resolved_config_applies_packs`, which reads the resolved
+    ``gate.packs``, so it stays answered in exactly one place.
 
     Raises :class:`~abicheck.errors.PackManifestError`, the same error class
     a malformed manifest raises, since both are "this manifest cannot be
@@ -445,11 +449,6 @@ def check_pack_fields_applied(
     """
     entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
     for path, pack in entries:
-        if pack.kind is PackKind.GATE and not gate_supported:
-            raise PackManifestError(
-                f"{path}: a `kind: gate` pack cannot be applied here"
-                + (f" -- {gate_reason}" if gate_reason else "")
-            )
         for field_name, value in pack.assignments.items():
             # An *inert value* is a precedence question -- an explicit
             # `--policy-file` stating the same field shadows it, and checking

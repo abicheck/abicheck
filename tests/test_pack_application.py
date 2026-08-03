@@ -36,13 +36,19 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model import AbiSnapshot, Function, Variable, Visibility
 from abicheck.serialization import snapshot_to_json
 
 
 def _fn(name: str, mangled: str) -> Function:
     return Function(
         name=name, mangled=mangled, return_type="int", visibility=Visibility.PUBLIC
+    )
+
+
+def _var(name: str, mangled: str) -> Variable:
+    return Variable(
+        name=name, mangled=mangled, type="int", visibility=Visibility.PUBLIC
     )
 
 
@@ -68,6 +74,31 @@ def pair(tmp_path: Path) -> tuple[Path, Path]:
     )
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
+    old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+    new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+    return old_p, new_p
+
+
+@pytest.fixture
+def two_kind_pair(tmp_path: Path) -> tuple[Path, Path]:
+    """As `pair`, but the removal spans two `ChangeKind`s.
+
+    One finding cannot show that per-kind overrides from two sources compose:
+    with a single kind, dropping either source's contribution is invisible
+    whenever the surviving one already covers it.
+    """
+    common = {"library": "libfoo.so.1", "from_headers": True}
+    old = AbiSnapshot(
+        version="1.0",
+        functions=[_fn("api_a", "_Z5api_av"), _fn("api_b", "_Z5api_bv")],
+        variables=[_var("api_v", "api_v")],
+        **common,
+    )
+    new = AbiSnapshot(
+        version="2.0", functions=[_fn("api_a", "_Z5api_av")], variables=[], **common
+    )
+    old_p = tmp_path / "old-two.json"
+    new_p = tmp_path / "new-two.json"
     old_p.write_text(snapshot_to_json(old), encoding="utf-8")
     new_p.write_text(snapshot_to_json(new), encoding="utf-8")
     return old_p, new_p
@@ -219,6 +250,33 @@ class TestD8Precedence:
             str(policy_file),
         )
         assert result.exit_code == 4, result.output
+
+    def test_a_pack_folds_into_a_policy_file_that_states_other_kinds(
+        self, two_kind_pair: tuple[Path, Path], ignore_removals: Path, tmp_path: Path
+    ) -> None:
+        """Outranking is per *kind*, not per file: a `--policy-file` shadows
+        only the kinds it actually states, and the pack still supplies the
+        rest by merging into that same file rather than replacing it.
+
+        The sibling above covers the collision (the file wins). This covers
+        the merge, which is the half either a "policy file present, so drop
+        the pack" shortcut or a "pack selected, so replace the file" one would
+        silently break -- so the pair here drops a function *and* a variable,
+        one override coming from each side. Exit 0 requires both to survive.
+        """
+        policy_file = tmp_path / "other-kinds.yml"
+        policy_file.write_text("overrides:\n  var_removed: ignore\n", encoding="utf-8")
+        result = _compare(
+            CliRunner(),
+            two_kind_pair,
+            "--format",
+            "json",
+            "--pack",
+            str(ignore_removals),
+            "--policy-file",
+            str(policy_file),
+        )
+        assert result.exit_code == 0, result.output
 
     def test_an_explicit_severity_flag_outranks_a_gate_pack(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -533,6 +591,62 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
         assert result.exit_code == 64, result.output
         assert "contract.unresolved" in result.output
+
+    def test_scan_rejects_an_inert_value_from_the_resolution(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The inert-value rule reaches `scan` through the resolution alone.
+
+        `compare` answers this twice -- once against the files, early enough
+        that `--dry-run` agrees, and once authoritatively against the resolved
+        provenance. `scan` has no dry run and so asks only the second, which
+        is the path that reads the *resolved* value rather than the manifest's
+        (`_resolved_field`). Same verdict, reached the other way.
+        """
+        old, new = pair
+        pack = _pack(
+            tmp_path,
+            "scan-empty-ns.yml",
+            "id: none\nversion: 1\nkind: contract\n"
+            "assignments:\n  surface.internal_namespaces: []\n",
+        )
+        result = CliRunner().invoke(
+            main, ["scan", str(new), "--against", str(old), "--pack", str(pack)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "surface.internal_namespaces" in result.output
+        # ...and it names the manifest, which only the provenance can supply.
+        assert "scan-empty-ns.yml" in result.output
+
+    def test_an_unreadable_policy_file_does_not_decide_the_shadow_question(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The early shadow probe reads the `--policy-file` itself, so it has
+        to answer "unreadable" somehow. It answers "shadows nothing", which is
+        the conservative half: the pack stays subject to the inert-value rule
+        rather than being waved through by a file that states nothing.
+
+        The probe deliberately swallows the load failure instead of reporting
+        it, since the real run loads the same file a moment later and reports
+        it with its own `--policy-file` framing (exit 1, not a usage error) --
+        this path exists only to keep `--dry-run` honest, not to validate
+        policy files. Asserting the *pack* framing is what pins that: were the
+        probe to answer "pinned" on an unreadable file, this invocation would
+        reach the policy error instead.
+        """
+        policy = tmp_path / "broken.yml"
+        policy.write_text("internal_namespaces: [unclosed\n", encoding="utf-8")
+        pack = _pack(
+            tmp_path,
+            "empty-ns.yml",
+            "id: none\nversion: 1\nkind: contract\n"
+            "assignments:\n  surface.internal_namespaces: []\n",
+        )
+        result = _compare(
+            CliRunner(), pair, "--pack", str(pack), "--policy-file", str(policy)
+        )
+        assert result.exit_code == 64, result.output
+        assert "surface.internal_namespaces" in result.output
 
     def test_pack_without_a_baseline_is_a_usage_error_on_scan(
         self, pair: tuple[Path, Path], ignore_removals: Path
