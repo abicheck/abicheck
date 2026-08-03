@@ -410,6 +410,75 @@ class TestEveryFrontEndFoldsTheAxis:
         assert "contract_coverage" not in result, result
 
 
+class TestArtifactsAgreeWithTheProcessExit:
+    """An artifact that publishes its own machine-readable exit contract has
+    to publish the one the process used. SARIF's
+    `invocations[0].exitCode` said `0` beside a run that exited 1, so a
+    consumer reading the artifact accepted a run its own coverage
+    notifications said was gated (Codex review)."""
+
+    def test_sarif_folds_the_coverage_floor_into_its_invocation(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "report.sarif"
+        result = _compare(
+            tmp_path,
+            _compatible_pair(),
+            "--format",
+            "sarif",
+            "-o",
+            str(out),
+            "--contract-evaluation",
+            "--contract",
+            "exports",
+        )
+        assert result.exit_code == 1, result.output
+        invocation = json.loads(out.read_text(encoding="utf-8"))["runs"][0][
+            "invocations"
+        ][0]
+        assert invocation["exitCode"] == 1, invocation
+        # ...and says which axis moved it, so the artifact alone distinguishes
+        # a coverage floor from a gate decision.
+        assert "contract coverage" in invocation["exitCodeDescription"], invocation
+        # `executionSuccessful` is NOT folded: per the SARIF spec it reports
+        # whether the tool ran to completion, and it did.
+        assert invocation["executionSuccessful"] is True, invocation
+
+    def test_a_clean_run_keeps_its_zero(self, tmp_path: Path) -> None:
+        """The fold must not invent a floor for a run that had none."""
+        out = tmp_path / "report.sarif"
+        result = _compare(
+            tmp_path, _compatible_pair(), "--format", "sarif", "-o", str(out)
+        )
+        assert result.exit_code == 0, result.output
+        invocation = json.loads(out.read_text(encoding="utf-8"))["runs"][0][
+            "invocations"
+        ][0]
+        assert invocation["exitCode"] == 0, invocation
+        assert "contract coverage" not in invocation["exitCodeDescription"], invocation
+
+    def test_a_breaking_run_keeps_its_own_higher_code(self, tmp_path: Path) -> None:
+        """`max`, not "1 when the ledger fails" — the same orthogonality claim
+        the process fold makes, asserted where the artifact states it."""
+        out = tmp_path / "report.sarif"
+        result = _compare(
+            tmp_path,
+            _breaking_pair(),
+            "--format",
+            "sarif",
+            "-o",
+            str(out),
+            "--contract-evaluation",
+            "--contract",
+            "exports",
+        )
+        assert result.exit_code == 4, result.output
+        invocation = json.loads(out.read_text(encoding="utf-8"))["runs"][0][
+            "invocations"
+        ][0]
+        assert invocation["exitCode"] == 4, invocation
+
+
 class TestTheExitCodeContractIsDocumented:
     """A command's own `--help` is the exit-code contract a CI integration is
     written against. Both commands gained a new meaning for exit 1 while their

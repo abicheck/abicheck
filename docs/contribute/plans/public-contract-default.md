@@ -3947,9 +3947,17 @@ What remains, in dependency order: making the contract decision authoritative
 (today the shadow evaluator runs *after* `verdict` is computed, over the final
 `kept` list, so a `NOT_EVALUATED` finding still scores — reordering that is
 the large, FP-rate/tier-accuracy-sensitive piece); flipping
-`--contract-evaluation` on by default; and the downstream consumers §6.1
-reserved for this phase (SARIF `executionSuccessful`/`exitCode`, `aggregate`
-folding the ledger into its coverage axis).
+`--contract-evaluation` on by default; and `aggregate` folding the ledger
+into its coverage axis.
+
+SARIF's invocation exit code is **no longer** on that list: it publishes its
+own machine-readable exit contract, so leaving it unfolded meant an artifact
+saying `exitCode: 0` beside a process that exited 1, which a consumer reading
+the artifact would accept. It is folded with the same `max`.
+`executionSuccessful` deliberately stays `true` — per the SARIF spec it
+reports whether the tool ran to completion, not whether it found blocking
+issues, and the spec's own example pairs `exitCode: 1` with
+`executionSuccessful: true`.
 
 ## 10. Test plan
 

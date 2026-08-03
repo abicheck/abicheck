@@ -74,6 +74,15 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   it runs `actions/setup-python`, and `abicheck` is itself a Python console
   script. All four of its report lookups now share that one parser.
 
+- **SARIF's `invocations[0].exitCode` folds the axis too.** The artifact
+  publishes its own machine-readable exit contract, so a run that exited 1 on
+  incomplete coverage previously shipped a SARIF document claiming
+  `exitCode: 0` — which a consumer reading the artifact would accept.
+  `exitCodeDescription` names the axis, so a coverage floor is still
+  distinguishable from a gate decision. `executionSuccessful` is deliberately
+  unchanged: per the SARIF spec it reports whether the tool ran to completion,
+  and it did.
+
 ### Added
 
 - **`contract.unresolved` is now an applied `kind: contract` pack field.** It
