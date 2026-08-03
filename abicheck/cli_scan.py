@@ -484,6 +484,19 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
     else:
         click.echo(text)
 
+    # ADR-049 §7: a coverage-gated exit must say so. `scan --format json`
+    # carries the ledger in its own summary; every other renderer ignores
+    # those keys, so without this the command prints "Verdict: NO_CHANGE"
+    # and then fails with no explanation (Codex review).
+    if fmt != "json":
+        from .contract_coverage_exit import coverage_diagnostic_from_summary
+
+        notice = coverage_diagnostic_from_summary(
+            outcome.diff_summary, base_exit=outcome.exit_code
+        )
+        if notice is not None:
+            click.echo(notice, err=True)
+
     if outcome.exit_code != 0:
         sys.exit(outcome.exit_code)
 

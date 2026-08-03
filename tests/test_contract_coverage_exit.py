@@ -252,6 +252,35 @@ class TestTheGatingConditionIsVisible:
         assert "floored" not in result.output
         assert "which stands" in result.output
 
+    def test_the_tie_case_claims_neither_flooring_nor_being_below(self) -> None:
+        """`base_exit == floor` is its own case. "Floored" would claim a change
+        the axis did not make alone, and "below ... which stands" is simply
+        false when the two are equal (CodeRabbit review)."""
+        from abicheck.contract_coverage_exit import _coverage_message
+
+        tie = _coverage_message(["old/export_table"], 1, 1)
+        assert "already 1" in tie
+        assert "floored" not in tie
+        assert "below" not in tie
+
+    def test_scan_explains_its_coverage_gated_exit(self, tmp_path: Path) -> None:
+        """`scan`'s text renderer ignores the ledger keys, so without this the
+        command printed a clean verdict and then failed silently (Codex
+        review). Built from the summary it already has -- the diff never
+        reaches the scan CLI, which is why the announcement cannot live in
+        the service-shared `_run_baseline_compare`."""
+        old_p, new_p = _write(tmp_path, *_compatible_pair())
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(new_p), "--against", str(old_p),
+                "--contract-evaluation", "--contract", "exports",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Contract coverage incomplete" in result.output
+        assert "export_table" in result.output
+
     def test_a_run_the_axis_does_not_gate_stays_quiet(self, tmp_path: Path) -> None:
         """No notice when there is nothing to explain -- otherwise the message
         becomes noise every run prints and no one reads."""
