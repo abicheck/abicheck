@@ -121,12 +121,13 @@ def coverage_failure_diagnostic(result: Any, *, base_exit: int = 0) -> str | Non
     failures" is not.
     """
     ctx = getattr(result, "contract_context", None)
-    floor = coverage_exit_for_context(ctx)
-    if floor == 0:
-        return None
     failures = coverage_failures_for_context(ctx)
+    if not failures:
+        return None
     return _coverage_message(
-        sorted({f"{f.side}/{f.provider}" for f in failures}), floor, base_exit
+        sorted({f"{f.side}/{f.provider}" for f in failures}),
+        coverage_exit_for_context(ctx),
+        base_exit,
     )
 
 
@@ -144,9 +145,9 @@ def coverage_diagnostic_from_summary(
     if not isinstance(summary, dict):
         return None
     failures = summary.get("contract_coverage_failures") or []
-    floor = summary.get("contract_coverage_exit_contribution") or 0
-    if not floor:
+    if not failures:
         return None
+    floor = summary.get("contract_coverage_exit_contribution") or 0
     where = sorted(
         f"{f.get('side')}/{f.get('provider')}" for f in failures if isinstance(f, dict)
     )
@@ -155,7 +156,17 @@ def coverage_diagnostic_from_summary(
 
 def _coverage_message(where: list[str], floor: int, base_exit: int) -> str:
     """The one wording, so the two entry points cannot describe it differently."""
-    if base_exit < floor:
+    if floor == 0:
+        # `contract.unresolved=warn` accepted these. Staying silent here
+        # would make `warn` *hide* the failures for every renderer that
+        # omits the ledger -- the exact opposite of the distinction this
+        # feature draws between accepting incomplete assurance and
+        # pretending it was complete (Codex review).
+        effect = (
+            "Accepted by contract.unresolved=warn, so it contributes 0 to "
+            "the exit code"
+        )
+    elif base_exit < floor:
         effect = f"Exit code floored to {floor}"
     elif base_exit == floor:
         # The two axes agree on the number. Saying the contribution is

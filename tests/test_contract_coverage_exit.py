@@ -459,6 +459,27 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         assert result.exit_code == 64, result.output
         assert "contract.unresolved" in result.output
 
+    def test_warn_still_says_coverage_was_incomplete(self, tmp_path: Path) -> None:
+        """Accepting is not hiding — and for markdown/review/sarif/junit the
+        notice is the *only* place it could be said, since those renderers
+        omit the ledger. Basing the notice on the exit floor meant `warn`
+        silenced it there entirely (Codex review)."""
+        result = _compare(
+            tmp_path,
+            _compatible_pair(),
+            "--format",
+            "review",
+            "--contract-evaluation",
+            "--contract",
+            "exports",
+            "--pack",
+            str(self._warn_pack(tmp_path)),
+        )
+        assert result.exit_code == 0, result.output
+        assert "Contract coverage incomplete" in result.output
+        assert "contract.unresolved=warn" in result.output
+        assert "contributes 0" in result.output
+
     @pytest.mark.parametrize("mode", ["exports", "public"])
     def test_warn_never_moves_the_compatibility_axis(
         self, tmp_path: Path, mode: str
