@@ -100,60 +100,102 @@ def _accepts_unresolved(ctx: Any) -> bool:
     return getattr(contract, "unresolved", None) == ACCEPT_UNRESOLVED
 
 
-def coverage_failure_diagnostic(result: Any) -> str | None:
-    """Why this run's exit code was floored, or ``None`` if it was not.
+def coverage_failure_diagnostic(result: Any, *, base_exit: int = 0) -> str | None:
+    """Why this run's exit code was affected by coverage, or ``None``.
 
     Only ``--format json`` carries ``contract_coverage_failures``; markdown,
     review, html, sarif, and junit do not. Without this, a compatible
     comparison under a domain that cannot close prints "safe to merge" and
-    exits 1 with nothing anywhere saying why (Codex review). Emitted to
-    stderr by the caller, so it reaches every format without corrupting a
-    machine-readable stdout.
+    exits 1 with nothing anywhere saying why (Codex review).
 
-    Names the providers rather than just the count: "old/new export_table"
-    is actionable ("this snapshot has no export table"), a bare "2 coverage
+    *base_exit* is the compatibility axis's own code, and it decides the
+    wording rather than merely whether to speak: beside a real ABI break
+    ``max`` keeps the ``4``, so claiming the exit "was floored to 1" would be
+    false (Codex review). The incomplete coverage is still worth reporting
+    there -- it is why part of the comparison could not be checked -- so the
+    message states the contribution instead of a status change it did not
+    make.
+
+    Names the providers rather than just the count: "old/export_table" is
+    actionable ("this snapshot has no export table"), a bare "2 coverage
     failures" is not.
     """
     ctx = getattr(result, "contract_context", None)
-    if coverage_exit_for_context(ctx) == 0:
+    floor = coverage_exit_for_context(ctx)
+    if floor == 0:
         return None
     failures = coverage_failures_for_context(ctx)
     where = sorted({f"{f.side}/{f.provider}" for f in failures})
+    effect = (
+        f"Exit code floored to {floor}"
+        if base_exit < floor
+        else f"Contributes {floor}, below the compatibility axis's own exit "
+        f"{base_exit}, which stands"
+    )
     return (
         "Contract coverage incomplete for the selected --contract domain: "
         + ", ".join(where)
-        + ". Exit code floored to 1 (ADR-049 contract-coverage axis). "
+        + f". {effect} (ADR-049 contract-coverage axis). "
         "Use --format json for the full contract_coverage_failures ledger, "
         "or set contract.unresolved=warn to accept incomplete coverage."
     )
 
 
 #: The one output format that already carries the ledger, so the stderr
-#: notice would be a second copy of what the report states. Every other
-#: format renders none of it, which is the gap the notice exists to close.
+#: notice would be a second copy of what the report states -- but only when
+#: the *full* report is rendered. ``--stat``'s ``to_stat_json`` is a summary
+#: that omits both ledger keys, so a stat run is ledgerless whatever its
+#: ``--format`` says (Codex review).
 _LEDGER_BEARING_FORMAT = "json"
 
 
-def fold_coverage_exit(base: int, result: Any, *, fmt: str | None = None) -> int:
-    """*base* raised to the coverage floor, announcing the floor if it bites.
+def report_carries_the_ledger(fmt: str | None, *, stat: bool = False) -> bool:
+    """Does the output this invocation renders already state the ledger?
 
-    One function so every command folds the axis the same way *and* explains
-    it the same way. ``max`` rather than "1 when the ledger fails", because
-    the two axes are independent and the compatibility one is strictly more
-    severe when it speaks at all.
-
-    The notice goes to stderr whenever the floor bites, except under
-    ``--format json``, whose report already carries
-    ``contract_coverage_failures`` and the applied contribution -- there the
-    message would restate the data next to it, and its "use --format json"
-    advice would be nonsense. Keeping the announcement here rather than at
-    each exit site is what stops a second exit path from acquiring the floor
-    without the explanation.
+    The condition for staying quiet. Getting it wrong in the permissive
+    direction is what makes a run exit non-zero with no explanation
+    anywhere, so it answers for the report actually produced rather than
+    for the ``--format`` name alone.
     """
+    return fmt == _LEDGER_BEARING_FORMAT and not stat
+
+
+def announce_coverage_floor(
+    result: Any, *, base_exit: int, fmt: str | None = None, stat: bool = False
+) -> None:
+    """Print the coverage notice to stderr, unless the report already says it.
+
+    The front end's half of the split: :func:`fold_coverage_exit` stays pure
+    for ``service_scan.run_scan()``, and this is the only thing that writes.
+    It lives beside the message rather than in each command so the decision
+    "does this invocation need telling?" has one answer, and so a second CLI
+    exit path cannot acquire the floor without the explanation.
+
+    stderr, not stdout: the report a caller pipes onward stays intact.
+    """
+    if report_carries_the_ledger(fmt, stat=stat):
+        return
+    diagnostic = coverage_failure_diagnostic(result, base_exit=base_exit)
+    if diagnostic is None:
+        return
     import click
 
-    if fmt != _LEDGER_BEARING_FORMAT:
-        diagnostic = coverage_failure_diagnostic(result)
-        if diagnostic is not None:
-            click.echo(diagnostic, err=True)
+    click.echo(diagnostic, err=True)
+
+
+def fold_coverage_exit(base: int, result: Any) -> int:
+    """*base* raised to the coverage floor -- Section 7's orthogonal fold.
+
+    One function so every command folds the axis the same way. ``max`` rather
+    than "1 when the ledger fails", because the two axes are independent and
+    the compatibility one is strictly more severe when it speaks at all.
+
+    **Pure**, deliberately: this is on the path ``service_scan.run_scan()``
+    takes, and a library call that writes to stderr is an unexpected side
+    effect for a caller that already gets the coverage details back in its
+    result (Codex review). Announcing belongs to the front end, which is
+    also the only layer that knows the output format --
+    :func:`coverage_failure_diagnostic` and :func:`report_carries_the_ledger`
+    are what it uses.
+    """
     return max(base, coverage_exit_floor(result))

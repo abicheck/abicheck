@@ -213,6 +213,45 @@ class TestTheGatingConditionIsVisible:
         assert report["contract_coverage_exit_contribution"] == 1
         assert report["contract_coverage_failures"]
 
+    def test_stat_json_is_ledgerless_so_it_still_explains(
+        self, tmp_path: Path
+    ) -> None:
+        """`--stat` renders `to_stat_json`, a summary that omits both ledger
+        keys -- so a stat run is ledgerless whatever `--format` says, and
+        suppressing on the format name alone left it exiting 1 with no
+        explanation anywhere (Codex review)."""
+        result = _compare(
+            tmp_path,
+            _compatible_pair(),
+            "--stat",
+            "--format",
+            "json",
+            "--contract-evaluation",
+            "--contract",
+            "exports",
+        )
+        assert result.exit_code == 1, result.output
+        assert "Contract coverage incomplete" in result.output
+
+    def test_it_does_not_claim_a_floor_it_did_not_apply(
+        self, tmp_path: Path
+    ) -> None:
+        """Beside a real ABI break `max` keeps the 4, so "Exit code floored to
+        1" would be a false statement about what happened. The incomplete
+        coverage is still reported -- it is why part of the comparison could
+        not be checked -- but as a contribution, not a status change."""
+        result = _compare(
+            tmp_path,
+            _breaking_pair(),
+            "--contract-evaluation",
+            "--contract",
+            "exports",
+        )
+        assert result.exit_code == 4, result.output
+        assert "Contract coverage incomplete" in result.output
+        assert "floored" not in result.output
+        assert "which stands" in result.output
+
     def test_a_run_the_axis_does_not_gate_stays_quiet(self, tmp_path: Path) -> None:
         """No notice when there is nothing to explain -- otherwise the message
         becomes noise every run prints and no one reads."""
@@ -221,6 +260,36 @@ class TestTheGatingConditionIsVisible:
         )
         assert result.exit_code == 0, result.output
         assert "Contract coverage incomplete" not in result.output
+
+
+class TestTheProgrammaticApiStaysQuiet:
+    """`fold_coverage_exit` is on `service_scan.run_scan()`'s path, so it must
+    stay pure. A library call that writes to stderr is an unexpected side
+    effect for a caller that already gets the coverage details back in its
+    result (Codex review) -- and it was a real one, since the announcement
+    briefly lived inside the fold."""
+
+    def test_folding_writes_nothing(self, tmp_path: Path, capsys) -> None:
+        from abicheck.contract_coverage_exit import fold_coverage_exit
+
+        class _Ctx:
+            pass
+
+        # A result with no context is the trivial case; the point is that the
+        # fold has no output path at all, so nothing can leak from it.
+        assert fold_coverage_exit(4, object()) == 4
+        assert capsys.readouterr().err == ""
+
+    def test_the_module_does_not_import_click_at_module_scope(self) -> None:
+        """The import is function-local inside the announcer, so importing
+        this module from a library context pulls in no CLI machinery."""
+        import abicheck.contract_coverage_exit as module
+
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        module_level = [
+            line for line in source.splitlines() if line.startswith("import click")
+        ]
+        assert module_level == [], module_level
 
 
 class TestCompareAndScanFoldTheAxisIdentically:

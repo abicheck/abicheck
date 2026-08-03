@@ -1168,7 +1168,7 @@ def _announce_exit_scheme(
 
 def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
-    fmt: str | None = None,
+    fmt: str | None = None, stat: bool = False,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
 
@@ -1177,7 +1177,7 @@ def _exit_with_severity_or_verdict(
     forget the orthogonal one. `fold_coverage_exit` reads the floor off
     *result*'s own persisted context and is `0` when the run recorded none.
     """
-    from .contract_coverage_exit import fold_coverage_exit
+    from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
     from .severity import compute_exit_code, legacy_exit_code
     if scheme == "severity":
         assert sev_config is not None
@@ -1191,7 +1191,8 @@ def _exit_with_severity_or_verdict(
         )
     else:
         exit_code = legacy_exit_code(result.verdict)
-    exit_code = fold_coverage_exit(exit_code, result, fmt=fmt)
+    announce_coverage_floor(result, base_exit=exit_code, fmt=fmt, stat=stat)
+    exit_code = fold_coverage_exit(exit_code, result)
     if exit_code != 0:
         sys.exit(exit_code)
 

@@ -74,7 +74,7 @@ from .cli_resolve import (
     _resolve_compare_snapshots,
     classify_compare_operand,
 )
-from .contract_coverage_exit import fold_coverage_exit
+from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
 from .contract_evaluation import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 
@@ -1945,13 +1945,13 @@ def run_compare(
     if scoped_exit_code is not None:
         # ADR-043: --used-by / --required-symbol(s) scope the primary verdict
         # to the application/plugin-host contract, floored at the worst
-        # scoped result -- the full library verdict stays informational only
-        # (already folded in above), never gating an invocation scoped this
-        # way. ADR-049 §7's coverage axis is orthogonal to that scoping.
-        sys.exit(fold_coverage_exit(scoped_exit_code, result, fmt=fmt))
+        # scoped result -- the full library verdict stays informational only.
+        # ADR-049 §7's coverage axis is orthogonal to that scoping.
+        announce_coverage_floor(result, base_exit=scoped_exit_code, fmt=fmt, stat=stat)
+        sys.exit(fold_coverage_exit(scoped_exit_code, result))
 
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
-    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme, fmt)
+    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme, fmt, stat)
 
 
 def _fold_evidence_depth_into_json(
