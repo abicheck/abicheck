@@ -403,6 +403,31 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert result.exit_code == 64, result.output
         assert "gate" in result.output
 
+    def test_scan_rejects_an_unapplied_field_from_the_resolution(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """`scan` validates the resolved configuration, like `compare`.
+
+        It previously re-read the manifests after `resolve_scan_config` had
+        already loaded them, so the revision it validated need not be the one
+        recorded and applied (Codex review, raised for `compare` first and
+        then for this path). Both of its questions are answerable from the
+        resolution: an unapplied field from provenance, a selected gate pack
+        from `gate.packs`.
+        """
+        old, new = pair
+        pack = _pack(
+            tmp_path,
+            "future.yml",
+            "id: future\nversion: 1\nkind: contract\n"
+            "assignments:\n  contract.unresolved: warn\n",
+        )
+        result = CliRunner().invoke(
+            main, ["scan", str(new), "--against", str(old), "--pack", str(pack)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "contract.unresolved" in result.output
+
     def test_pack_without_a_baseline_is_a_usage_error_on_scan(
         self, pair: tuple[Path, Path], ignore_removals: Path
     ) -> None:

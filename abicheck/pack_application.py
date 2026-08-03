@@ -313,8 +313,15 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     )
 
 
-def check_resolved_config_applies_packs(config: Any) -> None:
-    """Reject a pack-supplied value for a field this build does not apply.
+def check_resolved_config_applies_packs(
+    config: Any, *, gate_supported: bool = True, gate_reason: str = ""
+) -> None:
+    """Reject a pack this build (or this command) cannot apply.
+
+    Both questions are answered from the resolved configuration: an unapplied
+    field from ``provenance[field].source_kind``, and a selected gate pack
+    from ``gate.packs`` -- which lists exactly the ``kind: gate`` manifests,
+    since :func:`resolve_selected_packs` groups them by kind.
 
     The same rule as :func:`check_pack_fields_applied`, asked of the
     *resolution* instead of the files. That closes the window re-reading the
@@ -332,6 +339,12 @@ def check_resolved_config_applies_packs(config: Any) -> None:
     threading of loaded manifests through a public signature that exists to
     return a configuration.
     """
+    gate: Any = getattr(config, "gate", None)
+    if not gate_supported and getattr(gate, "packs", None):
+        raise PackManifestError(
+            "a `kind: gate` pack cannot be applied here"
+            + (f" -- {gate_reason}" if gate_reason else "")
+        )
     for field_name, reason in UNAPPLIED_PACK_FIELDS.items():
         if _pack_supplied(config, field_name):
             raise PackManifestError(

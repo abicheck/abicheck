@@ -300,7 +300,9 @@ def _render_text(out: ScanOutcome) -> str:
 
 
 def _resolve_changed_seed(
-    changed_paths_opt: tuple[str, ...], since: str | None, sources: Path | None,
+    changed_paths_opt: tuple[str, ...],
+    since: str | None,
+    sources: Path | None,
 ) -> tuple[list[str], str, bool]:
     """Resolve the changed-path seed → ``(changed, changed_src, seeded)``.
 
@@ -318,8 +320,6 @@ def _resolve_changed_seed(
             return [], f"--since {since} (seed failed; broad scope)", False
         return git_changed, f"--since {since}", True
     return [], "none (no diff seed; broad scope)", False
-
-
 
 
 def _parse_abi3_floor(abi3: str | None) -> tuple[int, int] | None:
@@ -360,7 +360,8 @@ def _resolve_auto_source_method(
 
 
 def _scan_explicit_flags(
-    source_method: str | None, depth: str | None,
+    source_method: str | None,
+    depth: str | None,
 ) -> tuple[bool, bool]:
     """The two deliberately-distinct 'explicit' notions (ADR-037), as a pair.
 
@@ -442,11 +443,18 @@ def render_scan_dry_run(
     )
     try:
         req = ScanRequest(
-            binaries=[artifact], headers=headers, includes=includes,
-            sources=sources, build_info=effective_build_info,
-            mode="pr", source_method=resolved.value, depth=eff_depth_enum.value,
-            changed_paths=list(changed), seeded=seeded,
-            budget=Budget(total_timeout=budget_s), lang=lang,
+            binaries=[artifact],
+            headers=headers,
+            includes=includes,
+            sources=sources,
+            build_info=effective_build_info,
+            mode="pr",
+            source_method=resolved.value,
+            depth=eff_depth_enum.value,
+            changed_paths=list(changed),
+            seeded=seeded,
+            budget=Budget(total_timeout=budget_s),
+            lang=lang,
         )
         estimates = estimate_scan(req, resolved_level=(resolved, eff_depth_enum))
         total = sum(e.est_seconds for e in estimates)
@@ -716,9 +724,7 @@ def _run_artifact_set(
     budget_s = _parse_budget(budget)
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
-    bsp = tuple(
-        s.strip() for s in bundle_system_providers.split(",") if s.strip()
-    )
+    bsp = tuple(s.strip() for s in bundle_system_providers.split(",") if s.strip())
 
     req = ScanRequest(
         binaries=list(discovered.values()),
@@ -789,7 +795,9 @@ def _run_artifact_set(
 
 
 @main.command("scan")
-@click.argument("artifact", type=click.Path(exists=True, path_type=Path), required=False)
+@click.argument(
+    "artifact", type=click.Path(exists=True, path_type=Path), required=False
+)
 @artifact_set_options
 @click.option(
     "-H",
@@ -1008,8 +1016,13 @@ def _run_artifact_set(
     show_default=True,
     help="Output format.",
 )
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
-              help="Write output to this path (default: stdout).")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write output to this path (default: stdout).",
+)
 @verbose_option
 @compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
@@ -1149,9 +1162,7 @@ def scan_cmd(
         )
         return
     if bundle_system_providers:
-        raise click.UsageError(
-            "--bundle-system-providers requires --artifact-set."
-        )
+        raise click.UsageError("--bundle-system-providers requires --artifact-set.")
     # The mutual-exclusion check above already guarantees exactly one of
     # ARTIFACT/--artifact-set is set, and the --artifact-set branch always
     # returns -- so `artifact` is non-None on every path reaching here.
@@ -1415,13 +1426,18 @@ def scan_cmd(
                 # the same reason `cli_scan_receipt._without_gate_settings`
                 # blanks the gate rather than reporting one it never used.
                 from .pack_application import (
-                    check_pack_fields_applied,
+                    check_resolved_config_applies_packs,
                     pack_application,
                     policy_file_with_packs,
                 )
 
-                check_pack_fields_applied(
-                    list(pack_paths),
+                # Asked of the resolution, not a second read of the files --
+                # same reasoning as the compare path: the resolver already
+                # loaded its own copy, so re-reading would validate a
+                # revision that is not the one configuring the run (Codex
+                # review, raised for compare and then for this path too).
+                check_resolved_config_applies_packs(
+                    resolved_config,
                     gate_supported=False,
                     gate_reason=(
                         "a scan's exit code follows its compatibility verdict "
@@ -1473,7 +1489,9 @@ def scan_cmd(
     # so a seeded scan escalates by risk and an unseeded one falls back to the
     # preset. Only when --depth was omitted entirely -- a pinned rung stays
     # deterministic.
-    sm, is_auto, auto_method = _resolve_auto_source_method(None, dp, False, seeded, risk)
+    sm, is_auto, auto_method = _resolve_auto_source_method(
+        None, dp, False, seeded, risk
+    )
     resolved, eff_depth_enum = resolve_level(
         mode=scan_mode,
         source_method=sm,
@@ -1486,7 +1504,8 @@ def scan_cmd(
     # the current library target, never a zero-TU no-op, whether --depth source
     # was pinned explicitly or reached via the auto/PR preset.
     collect_mode = level_to_collect_mode(
-        resolved, eff_depth_enum,
+        resolved,
+        eff_depth_enum,
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
     headers, baseline_header, sources, build_info, compile_db = _normalize_depth_inputs(
@@ -1502,15 +1521,27 @@ def scan_cmd(
     if dry_run:
         from .dry_run import emit_dry_run
 
-        emit_dry_run(render_scan_dry_run(
-            artifact=artifact, against=against,
-            headers=list(headers), includes=list(includes),
-            sources=sources, effective_build_info=effective_build_info,
-            changed=changed, changed_src=changed_src, seeded=seeded,
-            depth=depth, eff_depth_enum=eff_depth_enum, resolved=resolved,
-            collect_mode=collect_mode, budget_s=budget_s, lang=lang,
-            header_backend=header_backend, fmt=fmt,
-        ))
+        emit_dry_run(
+            render_scan_dry_run(
+                artifact=artifact,
+                against=against,
+                headers=list(headers),
+                includes=list(includes),
+                sources=sources,
+                effective_build_info=effective_build_info,
+                changed=changed,
+                changed_src=changed_src,
+                seeded=seeded,
+                depth=depth,
+                eff_depth_enum=eff_depth_enum,
+                resolved=resolved,
+                collect_mode=collect_mode,
+                budget_s=budget_s,
+                lang=lang,
+                header_backend=header_backend,
+                fmt=fmt,
+            )
+        )
 
     # --- run the engine core (the shared orchestration; ADR-035 D10) ----------
     # The classify→tier→level→compare body lives in ``run_scan_core`` so the CLI,
@@ -1606,6 +1637,3 @@ def scan_cmd(
         drain_build_dir_cleanups(build_dir_cleanups)
 
     _emit_scan_report(core.outcome, fmt, output)
-
-
-
