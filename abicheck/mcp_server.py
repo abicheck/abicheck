@@ -1204,6 +1204,15 @@ def abi_compare(
         # with the full-library verdict kept as `full_verdict` for context (Codex
         # review — a caller that only reads `verdict` must not see the full
         # library's BREAKING alongside a scoped-compatible exit_code: 0).
+        # ADR-049 §7: the coverage axis is orthogonal and gates every front
+        # end, not only the CLI ones. Without this the tool could return
+        # `exit_code: 0` beside a report stating the coverage contribution
+        # was 1, so a client gating on the top-level code accepts a run its
+        # own report says was gated (Codex review).
+        from .contract_coverage_exit import fold_coverage_exit
+
+        exit_code = fold_coverage_exit(exit_code, result)
+
         response: dict[str, Any] = {
             "status": "ok",
             "verdict": scoped_verdict_value if scoped_verdict_value is not None else result.verdict.value,

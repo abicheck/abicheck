@@ -271,10 +271,11 @@ from typing import Any
 #:       ``contract_reason_code`` (a stable slug, e.g.
 #:       "public_root_membership"/"required_evidence_incomplete"/
 #:       "non_entity_finding"), and ``contract_assurance`` (one of
-#:       "complete"/"partial"/"unavailable"). Purely additive and
-#:       shadow: absent for every existing caller that doesn't pass
-#:       ``contract_evaluation=True`` (the default), and never affects
-#:       ``verdict``, ``severity``, or any exit code.
+#:       "complete"/"partial"/"unavailable"). Absent for every existing
+#:       caller that doesn't pass ``contract_evaluation=True`` (the
+#:       default). These per-finding decisions never affect ``verdict`` or
+#:       ``severity``; the sibling contract-coverage ledger added in 2.26
+#:       does contribute an orthogonal exit floor (ADR-049 Phase 7).
 #:   2.24: added the optional top-level ``suppression_audit`` object, present
 #:       only when the caller opts into ``compare --audit-suppressions``
 #:       (``--suppress`` also required). ``total_rules`` (int),

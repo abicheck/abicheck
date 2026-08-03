@@ -1004,8 +1004,13 @@ def _run_artifact_set(
     help="With --against: stamp each comparison finding with ADR-049 Phase 3's "
     "shadow contract decision (contract_relevance / contract_reason_code / "
     "contract_assurance / contract_evidence_refs), exactly as `compare "
-    "--contract-evaluation` does. Advisory only -- it never changes the "
-    "verdict, the exit code, or which findings appear.",
+    "--contract-evaluation` does. The per-finding decisions are advisory: "
+    "they never change the verdict or which findings appear. It CAN change "
+    "the exit code, through one orthogonal axis -- if the selected domain's "
+    "evidence is incomplete the contract-coverage ledger contributes exit 1 "
+    "(folded with max, so it never lowers a 2/4). Set "
+    "contract.unresolved=warn via a `kind: contract` --pack to accept "
+    "incomplete coverage; the failures stay reported either way.",
 )
 @click.option(
     "--contract",

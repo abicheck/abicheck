@@ -328,6 +328,33 @@ class TestTheGatingConditionIsVisible:
         assert "Contract coverage incomplete" not in result.output
 
 
+class TestEveryFrontEndFoldsTheAxis:
+    """The (b)-shape failures on this PR have all been asymmetries: a rule on
+    one front end and not another. `compare`, `scan --against` and the MCP
+    `abi_compare` tool all return an exit code, so all three must fold."""
+
+    def test_the_mcp_tool_folds_it_too(self, tmp_path: Path) -> None:
+        """Returning a compatibility-only code beside a report stating the
+        coverage contribution was 1 lets a client that gates on the code
+        accept a run its own report says was gated (Codex review)."""
+        pytest.importorskip("mcp")
+        from abicheck.mcp_server import abi_compare
+
+        old_p, new_p = _write(tmp_path, *_compatible_pair())
+        raw = abi_compare(
+            old_input=str(old_p),
+            new_input=str(new_p),
+            contract_evaluation=True,
+        )
+        result = json.loads(raw) if isinstance(raw, str) else raw
+        # `abi_compare` takes no --contract parameter, so the domain is the
+        # built-in default; this fixture's symbols carry no header
+        # provenance, so that domain cannot close either. The pair is
+        # otherwise compatible, so a returned 1 can only be the coverage axis.
+        assert result["verdict"] in {"NO_CHANGE", "COMPATIBLE"}, result
+        assert result["exit_code"] == 1, result
+
+
 class TestTheProgrammaticApiStaysQuiet:
     """`fold_coverage_exit` is on `service_scan.run_scan()`'s path, so it must
     stay pure. A library call that writes to stderr is an unexpected side
