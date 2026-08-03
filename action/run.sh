@@ -768,6 +768,22 @@ if [[ -s "$STDERR_FILE" ]]; then
   STDERR_CONTENT=$(cat "$STDERR_FILE")
 fi
 
+# `format: json` with no `output-file` is the documented stdout mode: the
+# report exists only in $ABICHECK_OUTPUT, so it is persisted once here for the
+# jq lookups below.
+#
+# In the *parent* shell, deliberately. Every caller reads the path through
+# `_src=$(_json_report_src)`, and a command substitution runs in a subshell —
+# so creating the file lazily inside that function wrote the memo to a shell
+# that then exited, making each of the three callers mint its own copy and
+# leaving the EXIT trap with an empty path to clean up. On a persistent
+# self-hosted runner that leaks a full report copy per lookup (Codex review).
+_STDOUT_JSON_FILE=""
+if [[ "${FORMAT:-}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
+  _STDOUT_JSON_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-stdout-json.XXXXXX")
+  printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
+fi
+
 _is_cli_error() {
   echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try |Traceback|click\.)'
 }
@@ -779,24 +795,17 @@ _is_cli_error() {
 # when neither exists. One function because three separate decisions below
 # read the same report and must not disagree about which one it is.
 #
-# `format: json` with no `output-file` is the documented stdout mode, where
-# there is no file at all and the report is only in $ABICHECK_OUTPUT — so it
-# is persisted here rather than left unreadable, which otherwise made every
-# decision below take its "no report" fallback for that one configuration
-# (Codex review). Cached, since three callers ask and the answer cannot
-# change once abicheck has exited.
-_STDOUT_JSON_FILE=""
+# The stdout-mode file above is the third source, already materialised — the
+# function only ever *reads* a path, so it stays safe to call from a command
+# substitution. Without that file, every decision below took its "no report"
+# fallback for the one configuration that keeps the report on stdout.
 _json_report_src() {
   if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
     echo "${OUTPUT_FILE}"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
-  elif [[ "${FORMAT:-}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
-    if [[ -z "$_STDOUT_JSON_FILE" ]]; then
-      _STDOUT_JSON_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-stdout-json.XXXXXX")
-      printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
-    fi
-    echo "$_STDOUT_JSON_FILE"
+  elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then
+    echo "${_STDOUT_JSON_FILE}"
   fi
 }
 

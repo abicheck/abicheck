@@ -106,6 +106,10 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
     out.write_text("", encoding="utf-8")
     summary = tmp_path / "step_summary"
     summary.write_text("", encoding="utf-8")
+    # Its own directory so a test can assert the run left no scratch files
+    # behind, without seeing another test's (or the system's) temp files.
+    runner_temp = tmp_path / "runner_temp"
+    runner_temp.mkdir(exist_ok=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env.update(
         {
@@ -113,6 +117,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
             "ACTION_PATH": str(ACTION_DIR),
             "GITHUB_OUTPUT": str(out),
             "GITHUB_STEP_SUMMARY": str(summary),
+            "RUNNER_TEMP": str(runner_temp),
             "INPUT_ADD_JOB_SUMMARY": "true",
             **env_extra,
         }
@@ -132,6 +137,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
             outputs[key] = value
     outputs["_stdout"] = proc.stdout
     outputs["_summary"] = summary.read_text(encoding="utf-8")
+    outputs["_runner_temp"] = str(runner_temp)
     return outputs
 
 
@@ -375,6 +381,14 @@ class TestCompareTellsTheTwoAxesApart:
             bindir,
         )
         assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
+        # ...and it left nothing behind. The persisted copy is created in the
+        # parent shell so the EXIT trap can see it: creating it lazily inside
+        # `_json_report_src` put the memo in a command-substitution subshell,
+        # so each of the three lookups minted its own copy and the trap had an
+        # empty path to clean up -- a full report leaked per lookup on a
+        # persistent self-hosted runner (Codex review).
+        leaked = list(Path(outputs["_runner_temp"]).glob("abicheck-stdout-json.*"))
+        assert leaked == [], leaked
 
     def test_a_run_without_contract_evaluation_is_unchanged(
         self, tmp_path: Path
