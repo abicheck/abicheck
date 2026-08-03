@@ -827,13 +827,26 @@ _coverage_gated() {
 # The compatibility axis's own exit code, from the JSON report's severity gate
 # (`severity.exit_code`, schema 2.3). Computed by abicheck *before* the
 # coverage fold, so it is what tells a shared exit 1 apart: a severity
-# category gating, or coverage alone. Empty when there is no readable report,
-# which the caller treats as "cannot tell" rather than as either answer.
+# category gating, or coverage alone.
+#
+# A readable report with **no** `severity` block answers `0`, not "unknown".
+# The block is emitted only when the resolved scheme is `severity`
+# (`cli_compare_helpers` passes `severity_config` on exactly that condition),
+# so its absence means the legacy scheme -- whose compare exit codes are
+# 0/2/4 and never 1. The compatibility axis therefore contributed 0 to a
+# legacy exit 1, by construction. Treating the absent block as "cannot tell"
+# classified every coverage-gated run under the *default* scheme as
+# SEVERITY_ERROR (Codex review).
+#
+# Empty only when there is no readable report at all -- no file, or one jq
+# cannot parse, in which case jq exits non-zero and prints nothing. That is
+# the genuine "cannot tell", and the caller keeps its established verdict
+# rather than guessing.
 _severity_gate_exit() {
   local _src
   _src=$(_json_report_src)
   if [[ -n "$_src" ]] && command -v jq >/dev/null 2>&1; then
-    jq -r '.severity.exit_code // empty' "$_src" 2>/dev/null
+    jq -r '.severity.exit_code // 0' "$_src" 2>/dev/null
   fi
 }
 

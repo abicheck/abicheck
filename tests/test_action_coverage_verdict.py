@@ -54,11 +54,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+#: Sentinel for "the run wrote a report jq cannot parse" -- distinct from
+#: ``None`` ("no meaningful report"), which still writes a valid ``{}``.
+_MALFORMED = object()
+
+
 def _stub_abicheck(
     tmp_path: Path,
     *,
     exit_code: int,
-    report: dict | None,
+    report: dict | object | None,
     stderr: str = "",
     to_stdout: bool = False,
 ) -> Path:
@@ -72,7 +77,10 @@ def _stub_abicheck(
     bindir = tmp_path / "bin"
     bindir.mkdir()
     payload = tmp_path / "payload.json"
-    payload.write_text(json.dumps(report or {}), encoding="utf-8")
+    payload.write_text(
+        "not json" if report is _MALFORMED else json.dumps(report or {}),
+        encoding="utf-8",
+    )
     stub = bindir / "abicheck"
     stub.write_text(
         "#!/usr/bin/env bash\n"
@@ -252,6 +260,56 @@ class TestCompareTellsTheTwoAxesApart:
         reported alongside instead."""
         outputs = self._compare_outputs(
             tmp_path, _report(coverage=1, severity_exit=1)
+        )
+        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+
+    def test_the_default_legacy_scheme_has_no_severity_block_to_read(
+        self, tmp_path: Path
+    ) -> None:
+        """The legacy scheme is the *default*, and its report carries no
+        `severity` block at all -- `cli_compare_helpers` passes
+        `severity_config` only when the resolved scheme is `severity`.
+
+        Treating the missing block as "cannot tell" classified every
+        coverage-gated run under the default scheme as SEVERITY_ERROR (Codex
+        review). Absence is an answer here: legacy compare exits 0/2/4 and
+        never 1, so the compatibility axis contributed 0 by construction.
+        """
+        outputs = self._compare_outputs(
+            tmp_path,
+            {
+                "report_schema_version": "2.26",
+                "verdict": "COMPATIBLE",
+                "contract_coverage_exit_contribution": 1,
+                "contract_coverage_failures": [COVERAGE_FAILURE],
+            },
+        )
+        assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
+
+    def test_an_unparseable_report_keeps_the_established_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        """The genuine "cannot tell": jq exits non-zero and prints nothing, so
+        the mapping must not read that as a zero severity contribution. The
+        stderr notice is what still identifies the axis here."""
+        bindir = _stub_abicheck(
+            tmp_path,
+            exit_code=1,
+            report=_MALFORMED,
+            stderr=(
+                "Contract coverage incomplete for the selected --contract "
+                "domain: old/export_table. Exit code floored to 1."
+            ),
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "markdown",
+            },
+            bindir,
         )
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
 
