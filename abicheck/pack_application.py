@@ -190,6 +190,18 @@ def _unapplied_field_error(
     )
 
 
+def _needs_contract_evaluation_error(
+    source: str, field_name: str, reason: str
+) -> PackManifestError:
+    """The rejection for a field this *invocation* enabled no consumer for."""
+    return PackManifestError(
+        f"{source}: {field_name!r} needs --contract-evaluation to have any "
+        f"effect ({reason}). Add it, or drop the assignment -- a pack "
+        "recorded as active configuration while changing nothing is the "
+        "failure this check exists to prevent."
+    )
+
+
 def _inert_value_error(source: str, field_name: str, reason: str) -> PackManifestError:
     """The rejection for an applied field assigned a value nothing acts on."""
     return PackManifestError(
@@ -463,12 +475,8 @@ def check_resolved_config_applies_packs(
     if not contract_evaluation:
         for field_name, reason in CONTRACT_EVALUATION_ONLY_FIELDS.items():
             if _pack_supplied(config, field_name):
-                raise PackManifestError(
-                    f"{_supplying_pack(config, field_name)}: {field_name!r} "
-                    f"needs --contract-evaluation to have any effect ({reason}). "
-                    "Add it, or drop the assignment -- a pack recorded as "
-                    "active configuration while changing nothing is the "
-                    "failure this check exists to prevent."
+                raise _needs_contract_evaluation_error(
+                    _supplying_pack(config, field_name), field_name, reason
                 )
     for field_name in INERT_PACK_VALUES:
         # `_pack_supplied` is what makes this precedence-aware: a field an
@@ -487,6 +495,7 @@ def check_pack_fields_applied(
     pack_paths: Sequence[str | Path],
     *,
     shadowed_fields: frozenset[str] = frozenset(),
+    contract_evaluation: bool = True,
     loaded: Iterable[tuple[str, Any]] | None = None,
 ) -> None:
     """Reject a manifest assigning a field this build does not apply.
@@ -526,3 +535,15 @@ def check_pack_fields_applied(
             reason = UNAPPLIED_PACK_FIELDS.get(field_name)
             if reason is not None:
                 raise _unapplied_field_error(str(path), field_name, reason)
+            # Answerable from the file, unlike the inert-value rule above,
+            # because no layer other than a pack can state any
+            # `CONTRACT_EVALUATION_ONLY_FIELDS` entry -- their resolver
+            # candidate lists are empty, so there is no shadowing case in
+            # which the assignment would be ruled out anyway. That is what
+            # lets `--dry-run` answer it too, instead of approving a plan the
+            # identical real run rejects (Codex review).
+            needs_evaluation = CONTRACT_EVALUATION_ONLY_FIELDS.get(field_name)
+            if needs_evaluation is not None and not contract_evaluation:
+                raise _needs_contract_evaluation_error(
+                    str(path), field_name, needs_evaluation
+                )

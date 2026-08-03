@@ -1371,7 +1371,7 @@ def run_compare(
     from .errors import PackManifestError as _PackManifestError
 
     try:
-        validate_pack_manifests(pack_paths, policy_file_path=policy_file_path)
+        validate_pack_manifests(pack_paths, policy_file_path=policy_file_path, contract_evaluation=contract_evaluation)
     except _PackManifestError as exc:
         raise click.UsageError(str(exc)) from exc
 
@@ -1948,10 +1948,10 @@ def run_compare(
         # scoped result -- the full library verdict stays informational only
         # (already folded in above), never gating an invocation scoped this
         # way. ADR-049 §7's coverage axis is orthogonal to that scoping.
-        sys.exit(fold_coverage_exit(scoped_exit_code, result))
+        sys.exit(fold_coverage_exit(scoped_exit_code, result, fmt=fmt))
 
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
-    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme)
+    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme, fmt)
 
 
 def _fold_evidence_depth_into_json(

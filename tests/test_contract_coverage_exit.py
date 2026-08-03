@@ -160,6 +160,69 @@ class TestTheCoverageExitIsApplied:
         assert result.exit_code == report["contract_coverage_exit_contribution"]
 
 
+class TestTheGatingConditionIsVisible:
+    """Only `--format json` carries the ledger. Without a diagnostic, a
+    `--format review` run prints "safe to merge" and exits 1 with nothing
+    anywhere saying why (Codex review)."""
+
+    @pytest.mark.parametrize("fmt", ["review", "markdown", "sarif", "junit"])
+    def test_every_format_without_the_ledger_explains_the_floor(
+        self, tmp_path: Path, fmt: str
+    ) -> None:
+        result = _compare(
+            tmp_path,
+            _compatible_pair(),
+            "--format",
+            fmt,
+            "--contract-evaluation",
+            "--contract",
+            "exports",
+        )
+        assert result.exit_code == 1, result.output
+        # Names the providers, not just a count: "old/export_table" is
+        # actionable, "2 coverage failures" is not.
+        assert "export_table" in result.output, result.output
+        # ...and points at the way out, so the message is actionable.
+        assert "contract.unresolved=warn" in result.output
+
+    def test_json_does_not_repeat_what_its_report_already_carries(
+        self, tmp_path: Path
+    ) -> None:
+        """`--format json` states the failures and the applied contribution in
+        the report itself, so the notice would be a second copy beside the
+        data -- and its "use --format json" advice would be nonsense. It also
+        keeps stdout parseable for a caller piping the report onward."""
+        old_p, new_p = _write(tmp_path, *_compatible_pair())
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--format",
+                "json",
+                "--contract-evaluation",
+                "--contract",
+                "exports",
+            ],
+        )
+        assert result.exit_code == 1, result.output
+        assert "Contract coverage incomplete" not in result.output
+        # The report is still valid JSON and still carries the ledger.
+        report = json.loads(result.output)
+        assert report["contract_coverage_exit_contribution"] == 1
+        assert report["contract_coverage_failures"]
+
+    def test_a_run_the_axis_does_not_gate_stays_quiet(self, tmp_path: Path) -> None:
+        """No notice when there is nothing to explain -- otherwise the message
+        becomes noise every run prints and no one reads."""
+        result = _compare(
+            tmp_path, _compatible_pair(), "--contract-evaluation", "--contract", "all"
+        )
+        assert result.exit_code == 0, result.output
+        assert "Contract coverage incomplete" not in result.output
+
+
 class TestCompareAndScanFoldTheAxisIdentically:
     """§6.4's cross-command parity Gate, for the axis Phase 7 made real.
 
@@ -267,6 +330,30 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         assert result.exit_code == 64, result.output
         assert "contract.unresolved" in result.output
         assert "--contract-evaluation" in result.output
+
+    def test_the_dry_run_rejects_it_too(self, tmp_path: Path) -> None:
+        """`--dry-run` must not approve a plan the identical real run rejects.
+
+        Answerable that early because no layer other than a pack can state
+        `contract.unresolved` -- its resolver candidate list is empty -- so
+        there is no shadowing case in which the raw manifest would
+        over-reject (Codex review, the same dry-run divergence raised twice
+        before for manifest validity and inert values).
+        """
+        old_p, new_p = _write(tmp_path, *_compatible_pair())
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--dry-run",
+                "--pack",
+                str(self._warn_pack(tmp_path)),
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert "contract.unresolved" in result.output
 
     @pytest.mark.parametrize("mode", ["exports", "public"])
     def test_warn_never_moves_the_compatibility_axis(

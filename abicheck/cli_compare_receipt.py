@@ -284,7 +284,10 @@ def _shadowed_inert_fields(policy_file_path: Any) -> frozenset[str]:
 
 
 def validate_pack_manifests(
-    pack_paths: Collection[Any], *, policy_file_path: Any = None
+    pack_paths: Collection[Any],
+    *,
+    policy_file_path: Any = None,
+    contract_evaluation: bool = True,
 ) -> None:
     """Reject an unusable ``--pack`` manifest before anything else runs.
 
@@ -317,7 +320,9 @@ def validate_pack_manifests(
     from .pack_application import check_pack_fields_applied
 
     check_pack_fields_applied(
-        list(pack_paths), shadowed_fields=_shadowed_inert_fields(policy_file_path)
+        list(pack_paths),
+        shadowed_fields=_shadowed_inert_fields(policy_file_path),
+        contract_evaluation=contract_evaluation,
     )
 
 

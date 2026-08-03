@@ -100,11 +100,60 @@ def _accepts_unresolved(ctx: Any) -> bool:
     return getattr(contract, "unresolved", None) == ACCEPT_UNRESOLVED
 
 
-def fold_coverage_exit(base: int, result: Any) -> int:
-    """*base* raised to the coverage floor -- Section 7's orthogonal fold.
+def coverage_failure_diagnostic(result: Any) -> str | None:
+    """Why this run's exit code was floored, or ``None`` if it was not.
 
-    One function so every command folds the axis the same way. ``max`` rather
-    than "1 when the ledger fails", because the two axes are independent and
-    the compatibility one is strictly more severe when it speaks at all.
+    Only ``--format json`` carries ``contract_coverage_failures``; markdown,
+    review, html, sarif, and junit do not. Without this, a compatible
+    comparison under a domain that cannot close prints "safe to merge" and
+    exits 1 with nothing anywhere saying why (Codex review). Emitted to
+    stderr by the caller, so it reaches every format without corrupting a
+    machine-readable stdout.
+
+    Names the providers rather than just the count: "old/new export_table"
+    is actionable ("this snapshot has no export table"), a bare "2 coverage
+    failures" is not.
     """
+    ctx = getattr(result, "contract_context", None)
+    if coverage_exit_for_context(ctx) == 0:
+        return None
+    failures = coverage_failures_for_context(ctx)
+    where = sorted({f"{f.side}/{f.provider}" for f in failures})
+    return (
+        "Contract coverage incomplete for the selected --contract domain: "
+        + ", ".join(where)
+        + ". Exit code floored to 1 (ADR-049 contract-coverage axis). "
+        "Use --format json for the full contract_coverage_failures ledger, "
+        "or set contract.unresolved=warn to accept incomplete coverage."
+    )
+
+
+#: The one output format that already carries the ledger, so the stderr
+#: notice would be a second copy of what the report states. Every other
+#: format renders none of it, which is the gap the notice exists to close.
+_LEDGER_BEARING_FORMAT = "json"
+
+
+def fold_coverage_exit(base: int, result: Any, *, fmt: str | None = None) -> int:
+    """*base* raised to the coverage floor, announcing the floor if it bites.
+
+    One function so every command folds the axis the same way *and* explains
+    it the same way. ``max`` rather than "1 when the ledger fails", because
+    the two axes are independent and the compatibility one is strictly more
+    severe when it speaks at all.
+
+    The notice goes to stderr whenever the floor bites, except under
+    ``--format json``, whose report already carries
+    ``contract_coverage_failures`` and the applied contribution -- there the
+    message would restate the data next to it, and its "use --format json"
+    advice would be nonsense. Keeping the announcement here rather than at
+    each exit site is what stops a second exit path from acquiring the floor
+    without the explanation.
+    """
+    import click
+
+    if fmt != _LEDGER_BEARING_FORMAT:
+        diagnostic = coverage_failure_diagnostic(result)
+        if diagnostic is not None:
+            click.echo(diagnostic, err=True)
     return max(base, coverage_exit_floor(result))
