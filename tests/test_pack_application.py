@@ -684,6 +684,31 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert tail in compare_out, compare_out
         assert tail in scan_out, scan_out
 
+    def test_scan_rejects_a_pack_that_assigns_nothing_too(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The rule has to hold on both commands, and `scan` first missed it
+        because it uses only the resolved check while emptiness was asked of
+        the files (Codex review).
+
+        It cannot simply move to the resolved check either: a pack an
+        explicit `--policy-file` outranks *also* supplies no provenance, so
+        at the resolution "assigns nothing" is indistinguishable from D8
+        precedence working correctly. Hence one file-based rule, called by
+        both front ends — and this test, so they cannot drift apart again.
+        """
+        old_p, new_p = pair
+        pack = _pack(
+            tmp_path,
+            "empty.yml",
+            "id: empty\nversion: 1\nkind: policy\nassignments: {}\n",
+        )
+        result = CliRunner().invoke(
+            main, ["scan", str(new_p), "--against", str(old_p), "--pack", str(pack)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "assigns nothing" in result.output
+
     @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
     def test_a_pack_that_assigns_nothing_is_rejected(
         self, pair: tuple[Path, Path], tmp_path: Path, extra: list[str]
