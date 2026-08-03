@@ -169,6 +169,33 @@ def _inert_value_reason(field_name: str, value: object) -> str | None:
     return None
 
 
+# The two rejections below are each raised from two places -- once against the
+# files (early, so `--dry-run` agrees) and once against the resolution (the
+# authoritative answer). Only the *source token* differs: a manifest path
+# there, the provenance-named pack here. Written out twice, an edit to one
+# wording would leave `--dry-run` and the real run explaining the same
+# condition differently, which is the "two things that can disagree" shape
+# this module's own rules exist to avoid (CodeRabbit review).
+def _unapplied_field_error(
+    source: str, field_name: str, reason: str
+) -> PackManifestError:
+    """The rejection for a routable field with no engine consumer."""
+    return PackManifestError(
+        f"{source}: {field_name!r} is resolvable but not applied by this "
+        f"build ({reason}). A pack assignment that changes nothing is "
+        "rejected rather than recorded as active configuration."
+    )
+
+
+def _inert_value_error(source: str, field_name: str, reason: str) -> PackManifestError:
+    """The rejection for an applied field assigned a value nothing acts on."""
+    return PackManifestError(
+        f"{source}: {field_name!r} is assigned a value this build does not "
+        f"act on ({reason}). Rejected rather than recorded as active "
+        "configuration."
+    )
+
+
 def applied_pack_fields(kind: PackKind) -> frozenset[str]:
     """The fields a *kind* pack may assign and this build really applies."""
     from .compatibility_evaluation_wiring import PACK_FIELD_ROUTES_BY_KIND
@@ -406,11 +433,8 @@ def check_resolved_config_applies_packs(
         )
     for field_name, reason in UNAPPLIED_PACK_FIELDS.items():
         if _pack_supplied(config, field_name):
-            raise PackManifestError(
-                f"{_supplying_pack(config, field_name)}: {field_name!r} is "
-                f"resolvable but not applied by this build ({reason}). A pack "
-                "assignment that changes nothing is rejected rather than "
-                "recorded as active configuration."
+            raise _unapplied_field_error(
+                _supplying_pack(config, field_name), field_name, reason
             )
     for field_name in INERT_PACK_VALUES:
         # `_pack_supplied` is what makes this precedence-aware: a field an
@@ -420,10 +444,8 @@ def check_resolved_config_applies_packs(
             continue
         inert = _inert_value_reason(field_name, _resolved_field(config, field_name))
         if inert is not None:
-            raise PackManifestError(
-                f"{_supplying_pack(config, field_name)}: {field_name!r} is "
-                f"assigned a value this build does not act on ({inert}). "
-                "Rejected rather than recorded as active configuration."
+            raise _inert_value_error(
+                _supplying_pack(config, field_name), field_name, inert
             )
 
 
@@ -466,15 +488,7 @@ def check_pack_fields_applied(
             if field_name not in shadowed_fields:
                 inert = _inert_value_reason(field_name, value)
                 if inert is not None:
-                    raise PackManifestError(
-                        f"{path}: {field_name!r} is assigned a value this "
-                        f"build does not act on ({inert}). Rejected rather "
-                        "than recorded as active configuration."
-                    )
+                    raise _inert_value_error(str(path), field_name, inert)
             reason = UNAPPLIED_PACK_FIELDS.get(field_name)
             if reason is not None:
-                raise PackManifestError(
-                    f"{path}: {field_name!r} is resolvable but not applied by this "
-                    f"build ({reason}). A pack assignment that changes nothing "
-                    "is rejected rather than recorded as active configuration."
-                )
+                raise _unapplied_field_error(str(path), field_name, reason)

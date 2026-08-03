@@ -626,16 +626,16 @@ class TestOnlyAppliedFieldsAreAccepted:
         the conservative half: the pack stays subject to the inert-value rule
         rather than being waved through by a file that states nothing.
 
-        The probe deliberately swallows the load failure instead of reporting
-        it, since the real run loads the same file a moment later and reports
-        it with its own `--policy-file` framing (exit 1, not a usage error) --
-        this path exists only to keep `--dry-run` honest, not to validate
-        policy files. Asserting the *pack* framing is what pins that: were the
-        probe to answer "pinned" on an unreadable file, this invocation would
-        reach the policy error instead.
+        The probe swallows the failure instead of reporting it, since the real
+        run loads the same file a moment later and reports it with its own
+        `--policy-file` framing -- this path exists only to keep `--dry-run`
+        honest, not to validate policy files. It swallows exactly the three
+        exceptions `PolicyFile.load` documents, which is also the set
+        `cli_params` catches, so an undocumented failure surfaces identically
+        whether or not `--pack` was given.
         """
         policy = tmp_path / "broken.yml"
-        policy.write_text("internal_namespaces: [unclosed\n", encoding="utf-8")
+        policy.write_text("overrides: not_a_mapping\n", encoding="utf-8")
         pack = _pack(
             tmp_path,
             "empty-ns.yml",
@@ -647,6 +647,39 @@ class TestOnlyAppliedFieldsAreAccepted:
         )
         assert result.exit_code == 64, result.output
         assert "surface.internal_namespaces" in result.output
+
+    def test_both_paths_explain_a_rejection_identically(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """One condition, one explanation.
+
+        `compare` reaches an unapplied field through the file-based check and
+        `scan --against` through the resolved-provenance one. Only the source
+        token differs -- a manifest path there, the provenance-named pack
+        here -- so both build the message from one helper. Written out twice,
+        an edit to one wording would leave the two paths explaining the same
+        condition differently (CodeRabbit review).
+        """
+        old, new = pair
+        pack = _pack(
+            tmp_path,
+            "future.yml",
+            "id: future\nversion: 1\nkind: contract\n"
+            "assignments:\n  contract.unresolved: warn\n",
+        )
+        compare_out = _compare(CliRunner(), pair, "--pack", str(pack)).output
+        scan_out = (
+            CliRunner()
+            .invoke(
+                main, ["scan", str(new), "--against", str(old), "--pack", str(pack)]
+            )
+            .output
+        )
+        # The shared tail is everything after the source token, so comparing it
+        # pins the wording without pinning which path names the pack how.
+        tail = "'contract.unresolved' is resolvable but not applied by this"
+        assert tail in compare_out, compare_out
+        assert tail in scan_out, scan_out
 
     def test_pack_without_a_baseline_is_a_usage_error_on_scan(
         self, pair: tuple[Path, Path], ignore_removals: Path

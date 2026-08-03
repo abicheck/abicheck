@@ -263,6 +263,11 @@ def _shadowed_inert_fields(policy_file_path: Any) -> frozenset[str]:
     with its own `--policy-file` framing. This is also the only place that
     reads it early, and it runs only when `--pack` is selected, so no
     pre-existing invocation changes.
+
+    Only the three failures `PolicyFile.load` documents are swallowed. A
+    blanket `except Exception` here would also absorb whatever the *caller's*
+    own `PackManifestError` handling is meant to see, and would hide a real
+    defect in the loader behind a silently-empty answer (CodeRabbit review).
     """
     if policy_file_path is None:
         return frozenset()
@@ -271,7 +276,7 @@ def _shadowed_inert_fields(policy_file_path: Any) -> frozenset[str]:
 
     try:
         loaded = PolicyFile.load(policy_file_path)
-    except Exception:
+    except (ValueError, OSError, ImportError):
         return frozenset()
     if policy_file_pins_internal_namespaces(loaded):
         return frozenset({"surface.internal_namespaces"})
