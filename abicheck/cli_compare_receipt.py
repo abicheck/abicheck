@@ -227,6 +227,29 @@ def resolve_cli_config(
     )
 
 
+def dry_run_scheme_label(resolved_cfg: Any, pack_paths: Collection[Any]) -> str:
+    """How ``compare --dry-run`` should describe the exit-code scheme.
+
+    The renderer was previously handed the *raw* ``--exit-code-scheme`` value,
+    so it printed "legacy (0/2/4)" whenever the flag was absent -- including
+    when ``.abicheck.yml`` configured severity and the real run therefore used
+    the severity scheme. That predates ``--pack`` and is wrong for the plain
+    config case too, so this reports the *resolved* scheme instead (Codex
+    review, reproduced against a config-only run with no pack involved).
+
+    A selected pack is called out rather than resolved: a gate pack can move
+    the scheme, but resolving one here is not safe. The configuration cannot
+    be resolved before the ``--policy-file`` this command loads much later,
+    and a *partial* resolution would run D8 conflict detection against
+    different pins than the real one -- which can reject a pack pair the real
+    run accepts. Saying the scheme may still move is honest; asserting one
+    computed under different precedence would not be.
+    """
+    scheme = getattr(resolved_cfg, "exit_code_scheme", None)
+    label = "legacy (0/2/4)" if scheme == "legacy" else (scheme or "legacy (0/2/4)")
+    return f"{label}; a selected --pack may adjust it" if pack_paths else label
+
+
 def validate_pack_manifests(pack_paths: Collection[Any]) -> None:
     """Reject an unusable ``--pack`` manifest before anything else runs.
 
@@ -314,21 +337,18 @@ def resolve_and_apply(
         return config, policy_file, resolved_cfg
     from .pack_application import (
         apply_to_compare_config,
-        check_pack_fields_applied,
+        check_resolved_config_applies_packs,
         pack_application,
         policy_file_with_packs,
     )
 
-    # Checked again here, on the read that actually configures the run.
-    # `validate_pack_manifests` ran much earlier (before the dry-run emit) and
-    # so validated whatever was on disk *then* -- with a full snapshot
-    # resolution in between, a manifest edited in the meantime would reach
-    # `resolve_cli_config` unvalidated, and an unapplied field it gained would
-    # be silently ignored instead of rejected (Codex review). The two calls
-    # answer different questions and both are needed: the early one is what
-    # makes a dry run agree with the real run, this one is what makes the
-    # "only assign what this build applies" rule true of the version applied.
-    check_pack_fields_applied(list(pack_paths))
+    # Checked again here -- but against the *resolution*, not a second read of
+    # the files. `validate_pack_manifests` ran much earlier (before the
+    # dry-run emit) and validated whatever was on disk then; re-reading here
+    # would only move that window rather than close it, since the resolver had
+    # already loaded its own copy. Asking the resolved config is exact: it is
+    # the revision that configures the run, by construction.
+    check_resolved_config_applies_packs(config)
 
     application = pack_application(config, policy_file=policy_file)
     return (

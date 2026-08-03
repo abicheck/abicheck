@@ -313,6 +313,35 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     )
 
 
+def check_resolved_config_applies_packs(config: Any) -> None:
+    """Reject a pack-supplied value for a field this build does not apply.
+
+    The same rule as :func:`check_pack_fields_applied`, asked of the
+    *resolution* instead of the files. That closes the window re-reading the
+    manifests leaves open: the resolver has already loaded them, and between
+    that read and any later one a generated or concurrently edited pack can
+    change, so a second read validates a revision that is not the one
+    configuring the run (Codex review, twice -- first for the gap before this
+    check existed at all, then for the gap re-reading still left).
+
+    Asking the resolved object is exact rather than merely closer: a pack's
+    contribution is recorded in ``provenance[field].source_kind`` by the same
+    mechanism :func:`pack_application` reads, so this sees precisely what was
+    resolved, needs no file access, and cannot disagree with what gets
+    applied. It also needs nothing from the resolver's internals -- no
+    threading of loaded manifests through a public signature that exists to
+    return a configuration.
+    """
+    for field_name, reason in UNAPPLIED_PACK_FIELDS.items():
+        if _pack_supplied(config, field_name):
+            raise PackManifestError(
+                f"a selected pack assigns {field_name!r}, which is resolvable "
+                f"but not applied by this build ({reason}). A pack assignment "
+                "that changes nothing is rejected rather than recorded as "
+                "active configuration."
+            )
+
+
 def check_pack_fields_applied(
     pack_paths: Sequence[str | Path],
     *,

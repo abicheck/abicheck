@@ -1366,7 +1366,7 @@ def run_compare(
     # Manifest validity, ahead of the --dry-run emit for the same reason as
     # the two guards above -- see the helper for what deliberately does *not*
     # move here.
-    from .cli_compare_receipt import validate_pack_manifests
+    from .cli_compare_receipt import dry_run_scheme_label, validate_pack_manifests
     from .errors import PackManifestError as _PackManifestError
 
     try:
@@ -1385,7 +1385,8 @@ def run_compare(
             old_headers_only=old_headers_only, new_headers_only=new_headers_only,
             old_sources=old_sources, new_sources=new_sources,
             old_build_info=old_build_info, new_build_info=new_build_info,
-            cfg_path=cfg_path, fmt=fmt, exit_code_scheme=exit_code_scheme,
+            cfg_path=cfg_path, fmt=fmt,
+            exit_code_scheme=dry_run_scheme_label(resolved_cfg, pack_paths),
             header_backend=header_backend,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
         ))

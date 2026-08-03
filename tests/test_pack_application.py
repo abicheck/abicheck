@@ -461,6 +461,46 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert result.exit_code == 64, result.output
         assert "contract.unresolved" in result.output
 
+    def test_the_dry_run_reports_the_resolved_scheme_not_the_raw_flag(
+        self, pair: tuple[Path, Path], tmp_path: Path, monkeypatch
+    ) -> None:
+        """A dry run previews CI behaviour, so the scheme it prints must be
+        the one the run would use.
+
+        The renderer was handed the raw `--exit-code-scheme`, so it printed
+        "legacy (0/2/4)" whenever the flag was absent — including when
+        `.abicheck.yml` configured severity and the real run therefore used
+        the severity scheme. That predates `--pack` (Codex review), which is
+        why this case uses no pack at all.
+        """
+        old, new = pair
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: warning\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(main, ["compare", str(old), str(new), "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "exit-code scheme: severity" in result.output
+
+    def test_the_dry_run_says_a_pack_may_still_move_the_scheme(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """A gate pack's scheme cannot be resolved this early — the
+        configuration needs the `--policy-file` loaded much later, and a
+        *partial* resolution would run D8 conflict detection against
+        different pins than the real one, which can reject a pack pair the
+        real run accepts. Saying so is honest; asserting a scheme computed
+        under different precedence would not be."""
+        gate = _pack(
+            tmp_path,
+            "scheme.yml",
+            "id: scheme\nversion: 1\nkind: gate\n"
+            "assignments:\n  gate.exit_code_scheme: severity\n",
+        )
+        result = _compare(CliRunner(), pair, "--dry-run", "--pack", str(gate))
+        assert result.exit_code == 0, result.output
+        assert "a selected --pack may adjust it" in result.output
+
     def test_a_dry_run_still_accepts_a_usable_pack(
         self, pair: tuple[Path, Path], ignore_removals: Path
     ) -> None:
