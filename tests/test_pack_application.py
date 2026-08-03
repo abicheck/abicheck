@@ -432,6 +432,35 @@ class TestOnlyAppliedFieldsAreAccepted:
             result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
             assert result.exit_code == 64, (extra, result.output)
 
+    def test_a_manifest_swapped_after_the_early_check_is_still_rejected(
+        self, pair: tuple[Path, Path], ignore_removals: Path, monkeypatch
+    ) -> None:
+        """The applied-field rule must hold for the version actually applied.
+
+        `validate_pack_manifests` runs before the dry-run emit, so it reads
+        whatever is on disk *then* — with a full snapshot resolution in
+        between, a manifest edited afterwards would reach the resolver
+        unvalidated and its unapplied field would be silently ignored rather
+        than rejected (Codex review). Simulated by rewriting the manifest at
+        the moment the early check returns.
+        """
+        import abicheck.cli_compare_receipt as receipt
+
+        real = receipt.validate_pack_manifests
+
+        def _validate_then_swap(pack_paths):
+            real(pack_paths)
+            ignore_removals.write_text(
+                "id: relax_removals\nversion: 2\nkind: contract\n"
+                "assignments:\n  contract.unresolved: warn\n",
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(receipt, "validate_pack_manifests", _validate_then_swap)
+        result = _compare(CliRunner(), pair, "--pack", str(ignore_removals))
+        assert result.exit_code == 64, result.output
+        assert "contract.unresolved" in result.output
+
     def test_a_dry_run_still_accepts_a_usable_pack(
         self, pair: tuple[Path, Path], ignore_removals: Path
     ) -> None:

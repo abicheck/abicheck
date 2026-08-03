@@ -314,9 +314,21 @@ def resolve_and_apply(
         return config, policy_file, resolved_cfg
     from .pack_application import (
         apply_to_compare_config,
+        check_pack_fields_applied,
         pack_application,
         policy_file_with_packs,
     )
+
+    # Checked again here, on the read that actually configures the run.
+    # `validate_pack_manifests` ran much earlier (before the dry-run emit) and
+    # so validated whatever was on disk *then* -- with a full snapshot
+    # resolution in between, a manifest edited in the meantime would reach
+    # `resolve_cli_config` unvalidated, and an unapplied field it gained would
+    # be silently ignored instead of rejected (Codex review). The two calls
+    # answer different questions and both are needed: the early one is what
+    # makes a dry run agree with the real run, this one is what makes the
+    # "only assign what this build applies" rule true of the version applied.
+    check_pack_fields_applied(list(pack_paths))
 
     application = pack_application(config, policy_file=policy_file)
     return (
