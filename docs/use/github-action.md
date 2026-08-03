@@ -273,8 +273,8 @@ operands themselves, so there is no separate mode to select.
 
 | Output | Description |
 |--------|-------------|
-| `verdict` | **compare** (single pair or directory/package operands, including `--used-by`/`--required-symbol`-scoped runs): `COMPATIBLE`, `SEVERITY_ERROR`, `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY` (directory/package operands with `fail-on-removed-library` set), or `ERROR`. **dump:** `COMPATIBLE` or `ERROR`. **scan:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, `BUDGET_OVERFLOW`, or `ERROR`. **deps-compare:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps-tree:** `PASS`, `FAIL`, or `ERROR`. |
-| `exit-code` | **compare:** `0` (compatible), `1` (severity error), `2` (API break), `4` (ABI break), `8` (library removed). **scan:** `0` (compatible/advisory), `2` (API break), `4` (ABI break), `5` (budget overflow). **deps-compare:** `0` (pass), `1` (warn), `4` (fail). **deps-tree:** `0` (ok), `1` (missing). |
+| `verdict` | **compare** (single pair or directory/package operands, including `--used-by`/`--required-symbol`-scoped runs): `COMPATIBLE`, `SEVERITY_ERROR`, `COVERAGE_INCOMPLETE`, `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY` (directory/package operands with `fail-on-removed-library` set), or `ERROR`. **dump:** `COMPATIBLE` or `ERROR`. **scan:** `COMPATIBLE`, `COVERAGE_INCOMPLETE`, `API_BREAK`, `BREAKING`, `BUDGET_OVERFLOW`, or `ERROR`. **deps-compare:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps-tree:** `PASS`, `FAIL`, or `ERROR`. |
+| `exit-code` | **compare:** `0` (compatible), `1` (severity error, or incomplete contract coverage — the two share the code and are told apart by the report's pre-fold `severity.exit_code`), `2` (API break), `4` (ABI break), `8` (library removed). **scan:** `0` (compatible/advisory), `1` (incomplete contract coverage), `2` (API break), `4` (ABI break), `5` (budget overflow). **deps-compare:** `0` (pass), `1` (warn), `4` (fail). **deps-tree:** `0` (ok), `1` (missing). |
 | `report-path` | Path to the generated report file (empty when no output file was produced) |
 
 ## Usage examples

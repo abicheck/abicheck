@@ -772,6 +772,57 @@ _is_cli_error() {
   echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try |Traceback|click\.)'
 }
 
+# The JSON report this run produced, if any — the primary output when
+# format=json, or (the common case: default format=markdown) the
+# always-unfiltered secondary JSON the compare-mode command setup above
+# already asks the same invocation to write via --secondary-format. Empty
+# when neither exists. One function because three separate decisions below
+# read the same report and must not disagree about which one it is.
+_json_report_src() {
+  if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
+    echo "${OUTPUT_FILE}"
+  elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
+    echo "${PR_JSON}"
+  fi
+}
+
+# Did ADR-049's orthogonal contract-coverage axis contribute to this exit?
+#
+# Since ADR-049 Phase 7, a run passing --contract-evaluation (via extra-args)
+# whose selected contract domain cannot be closed on the available evidence
+# contributes exit 1 — independently of the compatibility verdict, which the
+# axis deliberately never rewrites. Without asking, `scan` published
+# verdict=ERROR (an operational failure) and `compare` SEVERITY_ERROR (a
+# severity-policy failure) for what is neither.
+#
+# Two signals, mirroring where abicheck itself puts the answer: the JSON
+# report carries `contract_coverage_exit_contribution`, and for every other
+# renderer — which omits the ledger — the same fact is announced on stderr.
+# Absent both (no --contract-evaluation), the field defaults to 0 and the
+# mapping below is exactly what it was.
+_coverage_gated() {
+  local _src
+  _src=$(_json_report_src)
+  if [[ -n "$_src" ]] && command -v jq >/dev/null 2>&1 \
+     && [[ "$(jq -r '.contract_coverage_exit_contribution // 0' "$_src" 2>/dev/null)" == "1" ]]; then
+    return 0
+  fi
+  echo "$STDERR_CONTENT" | grep -q 'Contract coverage incomplete'
+}
+
+# The compatibility axis's own exit code, from the JSON report's severity gate
+# (`severity.exit_code`, schema 2.3). Computed by abicheck *before* the
+# coverage fold, so it is what tells a shared exit 1 apart: a severity
+# category gating, or coverage alone. Empty when there is no readable report,
+# which the caller treats as "cannot tell" rather than as either answer.
+_severity_gate_exit() {
+  local _src
+  _src=$(_json_report_src)
+  if [[ -n "$_src" ]] && command -v jq >/dev/null 2>&1; then
+    jq -r '.severity.exit_code // empty' "$_src" 2>/dev/null
+  fi
+}
+
 if [[ "$MODE" == "deps-compare" ]]; then
   # deps-compare exit codes: 0=PASS, 1=WARN, 4=FAIL
   if _is_cli_error; then
@@ -823,6 +874,20 @@ elif [[ "$MODE" == "scan" ]]; then
   else
     case $ABICHECK_EXIT in
       0) VERDICT="COMPATIBLE" ;;
+      1)
+        # `scan`'s own verdict codes are 0/2/4/5, so 1 can only come from the
+        # orthogonal contract-coverage axis — but only claim that when the run
+        # actually says so, since a crash also exits 1 and must stay ERROR.
+        if _coverage_gated; then
+          VERDICT="COVERAGE_INCOMPLETE"
+          echo "::warning::abicheck scan could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI or API break — the compatibility verdict is unchanged; the contract-coverage axis is reporting that part of the surface could not be checked."
+        else
+          VERDICT="ERROR"
+          if _is_cli_error; then
+            echo "::error::abicheck scan failed due to a CLI error (exit code 1)."
+          fi
+        fi
+        ;;
       2) VERDICT="API_BREAK" ;;
       4) VERDICT="BREAKING" ;;
       5) VERDICT="BUDGET_OVERFLOW" ;;
@@ -852,6 +917,22 @@ else
           VERDICT="ERROR"
           echo "::error::abicheck failed due to a CLI argument or configuration error (exit code 1)."
           echo "::error::Check the command and inputs above."
+        elif _coverage_gated; then
+          # `compare` shares exit 1 between two independent axes, so the
+          # report's pre-fold `severity.exit_code` is what tells them apart
+          # rather than a guess. Only when the severity gate itself did not
+          # produce 1 is this run gated by coverage *alone*.
+          _sev_exit=$(_severity_gate_exit)
+          if [[ "$_sev_exit" == "0" ]]; then
+            VERDICT="COVERAGE_INCOMPLETE"
+            echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
+          else
+            # Either severity gated too, or there is no readable JSON report
+            # to tell. Keep the established verdict rather than overwrite it
+            # on a guess, and say that coverage also contributed.
+            VERDICT="SEVERITY_ERROR"
+            echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
+          fi
         else
           VERDICT="SEVERITY_ERROR"
         fi
@@ -913,12 +994,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # by this point without a second run (Codex review). Falls back to
         # the generic message when neither is available or jq is missing.
         _blocking_categories=""
-        _json_src=""
-        if [[ "${FORMAT:-}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]]; then
-          _json_src="${OUTPUT_FILE}"
-        elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
-          _json_src="${PR_JSON}"
-        fi
+        _json_src=$(_json_report_src)
         if [[ -n "$_json_src" ]] && command -v jq >/dev/null 2>&1; then
           _blocking_categories=$(jq -r '(.severity.blocking_categories // []) | join(", ")' "$_json_src" 2>/dev/null)
         fi
@@ -939,6 +1015,22 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       BUDGET_OVERFLOW)
         echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — Scan exceeded the configured \`budget\`. Pin a shallower level (--depth) or raise the budget; a budget never silently shrinks scope."
+        ;;
+      COVERAGE_INCOMPLETE)
+        # ADR-049's orthogonal contract-coverage axis (exit code 1). Naming
+        # which provider fell short is the actionable part — "old/export_table"
+        # tells the reader the old snapshot carries no export table, where a
+        # bare "coverage incomplete" leaves them to go find out.
+        _coverage_where=""
+        _json_src=$(_json_report_src)
+        if [[ -n "$_json_src" ]] && command -v jq >/dev/null 2>&1; then
+          _coverage_where=$(jq -r '[(.contract_coverage_failures // [])[] | "\(.side)/\(.provider)"] | unique | join(", ")' "$_json_src" 2>/dev/null)
+        fi
+        if [[ -n "$_coverage_where" ]]; then
+          echo "> **Verdict: COVERAGE_INCOMPLETE** ⚠️ — The selected \`--contract\` domain could not be closed on the available evidence: \`$_coverage_where\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\` (which keeps the findings reported, and only zeroes this contribution)."
+        else
+          echo "> **Verdict: COVERAGE_INCOMPLETE** ⚠️ — The selected \`--contract\` domain could not be closed on the available evidence. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. See \`contract_coverage_failures\` in the JSON report."
+        fi
         ;;
       PASS)
         echo "> **Verdict: PASS** — Binary loads and no harmful ABI changes detected."

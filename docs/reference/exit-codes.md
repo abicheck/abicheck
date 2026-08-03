@@ -41,7 +41,13 @@ in `contract_coverage_failures` in every report.
 
 Reports state the applied number in `contract_coverage_exit_contribution`,
 which distinguishes contract coverage exit `1` from severity or aggregate
-required-target coverage. The configured `GateDecision` independently
+required-target coverage. The MCP `abi_compare` tool states the same thing in
+its response's top-level `contract_coverage` block, for every `output_format`
+rather than only the one whose rendered report carries the ledger. The
+composite GitHub Action reads the same field and publishes
+`verdict: COVERAGE_INCOMPLETE` rather than labelling the axis a severity-policy
+or operational failure; on `compare`, where exit `1` is shared, it uses the
+report's pre-fold `severity.exit_code` to tell the two apart. The configured `GateDecision` independently
 contributes `0/1/2/4`: a compatible addition can block, and a breaking finding
 can be demoted. Only legacy output without a gate block falls back from
 compatibility verdict to `2`/`4`. Existing command-specific `5`, `8`, and `64`

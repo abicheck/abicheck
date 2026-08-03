@@ -42,6 +42,16 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   a one-line diagnostic — emitted for every `output_format` rather than only
   the one whose report happens to include it.
 
+- **The composite GitHub Action publishes `verdict: COVERAGE_INCOMPLETE`** for
+  a run gated by this axis, instead of misreporting it as an operational
+  failure (`ERROR`, on `scan`, which previously had no mapping for exit 1 at
+  all) or a severity-policy failure (`SEVERITY_ERROR`, on `compare`). On
+  `compare`, where the two axes genuinely share exit 1, they are told apart by
+  the report's pre-fold `severity.exit_code` rather than guessed from the code:
+  when the severity gate produced 1 too, its verdict stands and the coverage
+  contribution is reported alongside. A run without `--contract-evaluation`
+  maps exactly as before.
+
 ### Added
 
 - **`contract.unresolved` is now an applied `kind: contract` pack field.** It
