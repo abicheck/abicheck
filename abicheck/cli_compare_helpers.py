@@ -1447,8 +1447,15 @@ def run_compare(
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes, build_config=cfg_path,
-        frontend_context=frontend_context,
+        frontend_context=frontend_context, already_read=project_cfg,
     )
+    # `already_read` above is the config `_resolve_compare_config` parsed for
+    # the ADR-049 receipt. Without it `merge_compile_config` re-read `cfg_path`,
+    # so a file edited mid-run folded a *different* revision's compile settings
+    # in than the digest the receipt persists -- and a file deleted mid-run
+    # dropped them silently, with no error, parsing against neither (verified
+    # empirically). The same single-read rule the policy, suppression,
+    # symbols-list and project-config-values sources already follow.
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include
     # override (which replaces the both-sides -I for that side). Keep them separate

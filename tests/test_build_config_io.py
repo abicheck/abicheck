@@ -104,3 +104,72 @@ class TestDigest:
 
         config, _ = load_build_config_with_digest(cfg)
         assert config == load_build_config(cfg)
+
+
+class TestCompileSettingsSurviveAConfigChangedMidRun:
+    """The single-read rule, extended to the `compile:` block.
+
+    `_resolve_compare_config` parses `.abicheck.yml` for the ADR-049 receipt,
+    but `merge_compile_config` used to re-read the path — so an edit mid-run
+    folded a different revision's compile settings in than the persisted
+    digest describes, and a deletion dropped them with no error at all
+    (Codex review). `already_read` closes both.
+    """
+
+    def _cfg(self, tmp_path: Path) -> Path:
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "compile:\n  std: c++17\n  defines:\n    - RACE_MARKER=1\n",
+            encoding="utf-8",
+        )
+        return cfg
+
+    def _tokens(self, ctx) -> list[str]:
+        return [
+            t
+            for t in (ctx.gcc_option_tokens or ())
+            if "std" in t or "RACE_MARKER" in t
+        ]
+
+    def test_settings_survive_the_file_being_deleted_mid_run(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.buildsource.build_config_io import load_build_config_with_digest
+        from abicheck.cli_options import merge_compile_config
+        from abicheck.service_scan import CompileContext
+
+        cfg = self._cfg(tmp_path)
+        loaded, _ = load_build_config_with_digest(cfg)
+        cfg.unlink()
+        ctx, _ = merge_compile_config(
+            CompileContext(), (), cfg, already_read=loaded
+        )
+        assert self._tokens(ctx) == ["-std=c++17", "-DRACE_MARKER=1"]
+
+    def test_without_it_the_deletion_still_drops_them(self, tmp_path: Path) -> None:
+        """Pins that the fix is what changed the outcome, not the fixture."""
+        from abicheck.cli_options import merge_compile_config
+        from abicheck.service_scan import CompileContext
+
+        cfg = self._cfg(tmp_path)
+        cfg.unlink()
+        ctx, _ = merge_compile_config(CompileContext(), (), cfg)
+        assert self._tokens(ctx) == []
+
+    def test_an_edit_mid_run_does_not_change_what_is_folded_in(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.buildsource.build_config_io import load_build_config_with_digest
+        from abicheck.cli_options import merge_compile_config
+        from abicheck.service_scan import CompileContext
+
+        cfg = self._cfg(tmp_path)
+        loaded, _ = load_build_config_with_digest(cfg)
+        cfg.write_text(
+            "compile:\n  std: c++11\n  defines:\n    - OTHER=2\n", encoding="utf-8"
+        )
+        ctx, _ = merge_compile_config(
+            CompileContext(), (), cfg, already_read=loaded
+        )
+        # The revision the receipt's digest describes, not the one on disk now.
+        assert self._tokens(ctx) == ["-std=c++17", "-DRACE_MARKER=1"]

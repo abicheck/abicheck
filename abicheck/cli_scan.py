@@ -1251,6 +1251,11 @@ def scan_cmd(
         build_config=cfg_path,
         sources=sources,
         frontend_context=frontend_context,
+        # The config parsed above for the receipt, not a second read of it:
+        # an edit mid-run would otherwise fold a different revision's compile
+        # settings in than the persisted digest describes, and a deletion
+        # would drop them silently (Codex review; `compare` does the same).
+        already_read=project_cfg,
     )
     includes = includes_tuple
     binary = artifact

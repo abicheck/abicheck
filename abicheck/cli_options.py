@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 import click
 
@@ -718,6 +718,7 @@ def merge_compile_config(
     *,
     frontend_explicit: bool = False,
     nostdinc_explicit: bool = False,
+    already_read: Any = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
 
@@ -751,7 +752,10 @@ def merge_compile_config(
         return cli_ctx, cli_includes
 
     try:
-        bc = load_build_config(cfg)
+        # `already_read`: the caller's own parse of this same file. Reusing it
+        # is the single-read rule -- see `cli_compare_helpers.run_compare`,
+        # which passes it (Codex review).
+        bc = already_read if already_read is not None else load_build_config(cfg)
     except ValueError as exc:
         if explicit_config:
             # An *explicit* --config the user pointed at must fail loudly: for an
@@ -840,6 +844,7 @@ def resolve_compile_context(
     build_config: Path | None,
     sources: Path | None = None,
     frontend_context: str = "host",
+    already_read: Any = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
 
@@ -884,6 +889,7 @@ def resolve_compile_context(
         sources=sources,
         frontend_explicit=_explicit("header_backend"),
         nostdinc_explicit=_explicit("nostdinc"),
+        already_read=already_read,
     )
 
 
