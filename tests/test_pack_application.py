@@ -205,6 +205,7 @@ class TestAPackActuallyConfiguresTheRun:
         from abicheck.compatibility_evaluation_packs import PackKind
         from abicheck.pack_application import (
             applied_pack_fields,
+            check_resolved_config_applies_packs,
             pack_application,
             policy_file_with_packs,
         )
@@ -224,6 +225,11 @@ class TestAPackActuallyConfiguresTheRun:
             front_end=FrontEnd.CLI,
             explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)),
         )
+        # The applicability check has to *accept* this: the inert-value rule
+        # rejects `surface.internal_namespaces: []`, and a rule that rejected
+        # the non-empty case too would make the field unassignable rather than
+        # merely value-restricted.
+        check_resolved_config_applies_packs(config)
         folded = policy_file_with_packs(
             None, pack_application(config, policy_file=None), base_policy="strict_abi"
         )
@@ -879,6 +885,47 @@ class TestNoPackChangesNothing:
         assert policy_file_with_packs(original, inert, base_policy="x") is original
         sentinel = object()
         assert apply_to_compare_config(sentinel, inert) is sentinel
+
+    def test_a_severity_pack_never_invents_a_scheme_the_resolver_did_not_give(
+        self,
+    ) -> None:
+        """The last fallback in `apply_to_compare_config`: with a gate pack's
+        severity levels to fold but no resolved scheme to read, the run keeps
+        the scheme it already had.
+
+        Reachable only if the resolver somehow answered nothing -- which is
+        exactly why it must not re-derive one. The reverted revision computed
+        `"severity" if severity_active else ...` here, which turned an
+        explicitly selected `--exit-code-scheme legacy` into severity scoring
+        whenever a pack assigned a level (Codex review).
+        """
+        from abicheck.cli_helpers_compare import resolve_compare_config
+        from abicheck.pack_application import PackApplication, apply_to_compare_config
+        from abicheck.severity import SeverityLevel
+
+        resolved = resolve_compare_config(
+            None,
+            cli_severity_preset=None,
+            cli_severity_abi_breaking=None,
+            cli_severity_potential_breaking=None,
+            cli_severity_quality_issues=None,
+            cli_severity_addition=None,
+            cli_scope_public=None,
+            cli_collapse_versioned_symbols=None,
+        )
+        assert resolved.exit_code_scheme == "legacy"
+        application = PackApplication(
+            policy_overrides={},
+            severity_levels={"abi_breaking": SeverityLevel.WARNING},
+            # The resolver stated nothing -- the case the fallback exists for.
+            resolved_exit_code_scheme=None,
+        )
+        folded = apply_to_compare_config(resolved, application)
+        # The level is folded in, and the scheme is the pre-pack one, not one
+        # this module decided for itself.
+        assert folded.severity.abi_breaking == SeverityLevel.WARNING
+        assert folded.severity_active is True
+        assert folded.exit_code_scheme == "legacy"
 
 
 class TestReceiptAgreesWithWhatScored:
