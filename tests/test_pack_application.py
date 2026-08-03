@@ -368,6 +368,37 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert result.exit_code == 64, result.output
         assert field in result.output
 
+    @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+    def test_an_inert_empty_namespace_set_is_rejected(
+        self, pair: tuple[Path, Path], tmp_path: Path, extra: list[str]
+    ) -> None:
+        """`surface.internal_namespaces: []` routes and resolves, but nothing
+        acts on it: post-processing turns an empty list into "unset" and falls
+        back to the default namespaces, so the pack would be recorded as
+        active configuration having changed nothing (Codex review).
+
+        The runtime collapse is pre-existing and shared with a `--policy-file`
+        writing the same empty list, so honoring stated-empty is its own
+        change; rejecting the inert value keeps this module's rule true. Both
+        the dry run and the real run reject it, or they would disagree again.
+        """
+        pack = _pack(
+            tmp_path,
+            "empty-ns.yml",
+            "id: none\nversion: 1\nkind: contract\n"
+            "assignments:\n  surface.internal_namespaces: []\n",
+        )
+        result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
+        assert result.exit_code == 64, result.output
+        assert "surface.internal_namespaces" in result.output
+
+    def test_a_non_empty_namespace_set_still_applies(self, tmp_path: Path) -> None:
+        """Only the inert *value* is rejected — the field itself still works."""
+        from abicheck.pack_application import _inert_value_reason
+
+        assert _inert_value_reason("surface.internal_namespaces", ("priv",)) is None
+        assert _inert_value_reason("surface.internal_namespaces", ()) is not None
+
     def test_the_registry_partitions_the_routable_vocabulary(self) -> None:
         """`UNAPPLIED_PACK_FIELDS` is the *complement* of what is applied, so
         a newly-routable field is applied or listed -- never neither, which is

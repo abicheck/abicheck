@@ -112,6 +112,45 @@ UNAPPLIED_PACK_FIELDS: Mapping[str, str] = {
 }
 
 
+#: Field values that route and resolve but are inert at runtime, and why.
+#: Narrower than :data:`UNAPPLIED_PACK_FIELDS`: the field *is* applied, just
+#: not with this particular value, so only the value is rejected.
+#:
+#: ``surface.internal_namespaces: []`` is a *statement* ("this project has
+#: none") that `PolicyFile.internal_namespaces_stated` carries into the
+#: provenance receipt -- but no further. ``checker._run_post_processing``
+#: turns an empty list into ``None`` and the pipeline steps then fall back to
+#: ``DEFAULT_INTERNAL_NAMESPACES``, so `detail`/`impl`/... keep applying and
+#: the pack changed nothing (Codex review). That collapse is *pre-existing*
+#: and shared with a `--policy-file` writing the same empty list, so honoring
+#: stated-empty means changing that shared runtime semantic -- its own scoped
+#: change, with its own FP-rate re-verification. Rejecting the inert value
+#: here keeps this module's own rule true in the meantime, and is what should
+#: be deleted once the runtime learns to honor it.
+INERT_PACK_VALUES: Mapping[str, tuple[object, str]] = {
+    "surface.internal_namespaces": (
+        (),
+        "an empty internal-namespace set is not honored at runtime: "
+        "post-processing treats it as unset and falls back to the built-in "
+        "default namespaces, so the assignment would change nothing",
+    ),
+}
+
+
+def _resolved_field(config: Any, field_name: str) -> object:
+    """The resolved value of a dotted *field_name* on *config*."""
+    namespace, _, attr = field_name.partition(".")
+    return getattr(getattr(config, namespace, None), attr, None)
+
+
+def _inert_value_reason(field_name: str, value: object) -> str | None:
+    """Why *value* is inert for *field_name*, or ``None`` if it applies."""
+    entry = INERT_PACK_VALUES.get(field_name)
+    if entry is not None and value == entry[0]:
+        return entry[1]
+    return None
+
+
 def applied_pack_fields(kind: PackKind) -> frozenset[str]:
     """The fields a *kind* pack may assign and this build really applies."""
     from .compatibility_evaluation_wiring import PACK_FIELD_ROUTES_BY_KIND
@@ -353,6 +392,16 @@ def check_resolved_config_applies_packs(
                 "that changes nothing is rejected rather than recorded as "
                 "active configuration."
             )
+    for field_name in INERT_PACK_VALUES:
+        if not _pack_supplied(config, field_name):
+            continue
+        inert = _inert_value_reason(field_name, _resolved_field(config, field_name))
+        if inert is not None:
+            raise PackManifestError(
+                f"a selected pack assigns {field_name!r} a value this build "
+                f"does not act on ({inert}). Rejected rather than recorded as "
+                "active configuration."
+            )
 
 
 def check_pack_fields_applied(
@@ -381,7 +430,14 @@ def check_pack_fields_applied(
                 f"{path}: a `kind: gate` pack cannot be applied here"
                 + (f" -- {gate_reason}" if gate_reason else "")
             )
-        for field_name in pack.assignments:
+        for field_name, value in pack.assignments.items():
+            inert = _inert_value_reason(field_name, value)
+            if inert is not None:
+                raise PackManifestError(
+                    f"{path}: {field_name!r} is assigned a value this build "
+                    f"does not act on ({inert}). Rejected rather than "
+                    "recorded as active configuration."
+                )
             reason = UNAPPLIED_PACK_FIELDS.get(field_name)
             if reason is not None:
                 raise PackManifestError(
