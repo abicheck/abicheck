@@ -368,9 +368,8 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert result.exit_code == 64, result.output
         assert field in result.output
 
-    @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
     def test_an_inert_empty_namespace_set_is_rejected(
-        self, pair: tuple[Path, Path], tmp_path: Path, extra: list[str]
+        self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
         """`surface.internal_namespaces: []` routes and resolves, but nothing
         acts on it: post-processing turns an empty list into "unset" and falls
@@ -379,8 +378,11 @@ class TestOnlyAppliedFieldsAreAccepted:
 
         The runtime collapse is pre-existing and shared with a `--policy-file`
         writing the same empty list, so honoring stated-empty is its own
-        change; rejecting the inert value keeps this module's rule true. Both
-        the dry run and the real run reject it, or they would disagree again.
+        change; rejecting the inert value keeps this module's rule true.
+
+        Answered after precedence, so the `--dry-run` emit (which runs before
+        the policy file is even loaded) cannot answer it -- see the shadowed
+        case below for why answering it early was wrong.
         """
         pack = _pack(
             tmp_path,
@@ -388,9 +390,37 @@ class TestOnlyAppliedFieldsAreAccepted:
             "id: none\nversion: 1\nkind: contract\n"
             "assignments:\n  surface.internal_namespaces: []\n",
         )
-        result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
+        result = _compare(CliRunner(), pair, "--pack", str(pack))
         assert result.exit_code == 64, result.output
         assert "surface.internal_namespaces" in result.output
+        # ...and the rejection names which manifest is at fault.
+        assert "empty-ns.yml" in result.output
+
+    def test_a_shadowed_inert_value_is_not_rejected(
+        self, pair: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """D8: an explicit `--policy-file` stating the field wins, so the
+        pack's value never reaches runtime and there is nothing inert to
+        reject.
+
+        The first version of the inert check ran against the raw manifest,
+        before precedence was resolved, and so failed this invocation with
+        exit 64 (Codex review, reproduced). `_pack_supplied` is what makes the
+        surviving check precedence-aware: the field's provenance names the
+        policy file, not a pack.
+        """
+        policy = tmp_path / "ns.yml"
+        policy.write_text("internal_namespaces:\n  - priv\n", encoding="utf-8")
+        pack = _pack(
+            tmp_path,
+            "empty-ns.yml",
+            "id: none\nversion: 1\nkind: contract\n"
+            "assignments:\n  surface.internal_namespaces: []\n",
+        )
+        result = _compare(
+            CliRunner(), pair, "--pack", str(pack), "--policy-file", str(policy)
+        )
+        assert result.exit_code == 4, result.output
 
     def test_a_non_empty_namespace_set_still_applies(self, tmp_path: Path) -> None:
         """Only the inert *value* is rejected — the field itself still works."""
@@ -476,17 +506,17 @@ class TestOnlyAppliedFieldsAreAccepted:
             "kind: contract\nassignments:\n  contract.unresolved: warn\n",
         ],
     )
+    @pytest.mark.parametrize("extra", [[], ["--dry-run"]])
     def test_a_dry_run_rejects_what_the_real_run_rejects(
-        self, pair: tuple[Path, Path], tmp_path: Path, body: str
+        self, pair: tuple[Path, Path], tmp_path: Path, body: str, extra: list[str]
     ) -> None:
         """`compare` validates flag combinations ahead of its `--dry-run`
         emit precisely so a dry run cannot report "ok" for an invocation the
         identical real run rejects. Manifest validity is answerable that
         early, so it is answered there (Codex/CodeRabbit review)."""
         pack = _pack(tmp_path, "bad.yml", f"id: bad\nversion: 1\n{body}")
-        for extra in ([], ["--dry-run"]):
-            result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
-            assert result.exit_code == 64, (extra, result.output)
+        result = _compare(CliRunner(), pair, "--pack", str(pack), *extra)
+        assert result.exit_code == 64, (extra, result.output)
 
     def test_a_manifest_swapped_after_the_early_check_is_still_rejected(
         self, pair: tuple[Path, Path], ignore_removals: Path, monkeypatch

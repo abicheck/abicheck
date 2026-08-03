@@ -143,6 +143,22 @@ def _resolved_field(config: Any, field_name: str) -> object:
     return getattr(getattr(config, namespace, None), attr, None)
 
 
+def _supplying_pack(config: Any, field_name: str) -> str:
+    """The manifest path (or identity) that supplied *field_name*.
+
+    Read off the same provenance entry :func:`_pack_supplied` consults, so a
+    rejection names *which* `--pack` is at fault when several are selected
+    (CodeRabbit review). Falls back to a generic phrase rather than inventing
+    a path when the entry carries none.
+    """
+    provenance = getattr(config, "provenance", {}).get(field_name)
+    return (
+        getattr(provenance, "path", None)
+        or getattr(provenance, "reference", None)
+        or "a selected pack"
+    )
+
+
 def _inert_value_reason(field_name: str, value: object) -> str | None:
     """Why *value* is inert for *field_name*, or ``None`` if it applies."""
     entry = INERT_PACK_VALUES.get(field_name)
@@ -387,20 +403,23 @@ def check_resolved_config_applies_packs(
     for field_name, reason in UNAPPLIED_PACK_FIELDS.items():
         if _pack_supplied(config, field_name):
             raise PackManifestError(
-                f"a selected pack assigns {field_name!r}, which is resolvable "
-                f"but not applied by this build ({reason}). A pack assignment "
-                "that changes nothing is rejected rather than recorded as "
-                "active configuration."
+                f"{_supplying_pack(config, field_name)}: {field_name!r} is "
+                f"resolvable but not applied by this build ({reason}). A pack "
+                "assignment that changes nothing is rejected rather than "
+                "recorded as active configuration."
             )
     for field_name in INERT_PACK_VALUES:
+        # `_pack_supplied` is what makes this precedence-aware: a field an
+        # explicit `--policy-file` states carries *that* source's provenance,
+        # so a shadowed pack value is never reached here.
         if not _pack_supplied(config, field_name):
             continue
         inert = _inert_value_reason(field_name, _resolved_field(config, field_name))
         if inert is not None:
             raise PackManifestError(
-                f"a selected pack assigns {field_name!r} a value this build "
-                f"does not act on ({inert}). Rejected rather than recorded as "
-                "active configuration."
+                f"{_supplying_pack(config, field_name)}: {field_name!r} is "
+                f"assigned a value this build does not act on ({inert}). "
+                "Rejected rather than recorded as active configuration."
             )
 
 
@@ -430,14 +449,14 @@ def check_pack_fields_applied(
                 f"{path}: a `kind: gate` pack cannot be applied here"
                 + (f" -- {gate_reason}" if gate_reason else "")
             )
-        for field_name, value in pack.assignments.items():
-            inert = _inert_value_reason(field_name, value)
-            if inert is not None:
-                raise PackManifestError(
-                    f"{path}: {field_name!r} is assigned a value this build "
-                    f"does not act on ({inert}). Rejected rather than "
-                    "recorded as active configuration."
-                )
+        for field_name in pack.assignments:
+            # NB: an *inert value* (`INERT_PACK_VALUES`) is deliberately not
+            # checked here. Whether the pack's value reaches runtime at all is
+            # a precedence question -- an explicit `--policy-file` stating the
+            # same field shadows it -- and precedence is not resolved yet, so
+            # rejecting here failed an invocation D8 says is fine (Codex
+            # review, reproduced). Same reasoning as pack-vs-pack conflicts:
+            # this path answers only what a manifest alone can answer.
             reason = UNAPPLIED_PACK_FIELDS.get(field_name)
             if reason is not None:
                 raise PackManifestError(
