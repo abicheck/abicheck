@@ -271,3 +271,51 @@ class TestSeveritySelectorsNameApiFields:
         addition = config.provenance["gate.severity.addition"].selected_by
         assert [hop.option for hop in preset] == ["--severity-preset"]
         assert [hop.option for hop in addition] == ["--severity-addition"]
+
+
+class TestConsumerScopeIsNotModelled:
+    """Pins the known gap so it stays known.
+
+    `abi_compare` takes `used_by`/`required_symbols` and they rewrite the
+    verdict and exit code, but `CompatibilityEvaluationConfig` has no field
+    for a consumer scope, so the receipt cannot name them (Codex review).
+    Asserting the *current* answer means the day someone adds that field,
+    this test fails and points at the docs and module docstring that
+    describe the gap -- rather than the gap quietly persisting because
+    nothing referenced it.
+    """
+
+    def test_a_scoped_run_resolves_no_explicit_scope(self):
+        config = resolve_tool_config(policy="strict_abi")
+        assert config.surface.explicit_scope is None
+        prov = config.provenance["surface.explicit_scope"]
+        assert prov.layer.value == "built_in_default"
+
+    def test_the_resolver_takes_no_consumer_scope_argument(self):
+        """The gap's actual shape: it is not that the caller forgot to pass
+        them, it is that there is no parameter to pass them to."""
+        import inspect
+
+        params = set(inspect.signature(resolve_tool_config).parameters)
+        assert "used_by" not in params
+        assert "required_symbols" not in params
+
+    def test_not_even_the_scoped_scheme_marks_the_receipt(self):
+        """The gap is wider than "which scope" -- it is "any scope at all".
+
+        `"scoped"` is not a value `GateConfig` accepts, so
+        `record_resolved_config` records the *underlying* scheme instead
+        (`legacy` here). A scoped run's resolved config is therefore
+        byte-identical to an unscoped one's: nothing in it indicates a
+        consumer scope was in effect."""
+        scoped = TestRecordResolvedConfig()._result_with_context()
+        record_resolved_config(scoped, exit_code_scheme="scoped", policy="strict_abi")
+        plain = TestRecordResolvedConfig()._result_with_context()
+        record_resolved_config(plain, exit_code_scheme="legacy", policy="strict_abi")
+
+        def _cfg(r):
+            return r.contract_context.evaluation_context.resolved_config
+
+        assert _cfg(scoped).gate.exit_code_scheme == "legacy"
+        assert _cfg(scoped).gate == _cfg(plain).gate
+        assert _cfg(scoped).surface == _cfg(plain).surface

@@ -125,3 +125,96 @@ class TestNoProjectConfig:
         from abicheck.cli_scan_receipt import _without_gate_settings
 
         assert _without_gate_settings(None) is None
+
+
+class TestResolverErrorsAreUsageErrors:
+    """`scan`'s own mapping of a resolver failure to exit 64.
+
+    The API half of this pair was tested when it was added; the CLI half
+    never was, which is the asymmetry the two front ends' cross-referencing
+    comments claim to have closed (Codecov flagged both lines as uncovered
+    from the start).
+
+    Patched rather than driven by a real conflicting invocation, matching
+    `test_cli_compare_config_receipt`'s equivalent test and for the same
+    reason: `scan` exposes no flag pair that resolves to a same-tier
+    conflict today (`--policy`/`--policy-file` is D7's documented
+    compatibility exception, and `--public-symbol`/`--public-symbols-list`
+    union rather than conflict). So this pins the handler -- that the error
+    becomes exit 64 with its message intact rather than a traceback -- not
+    that some input reaches it.
+    """
+
+    def _pair(self, tmp_path: Path) -> tuple[Path, Path]:
+        from abicheck.model import AbiSnapshot
+        from abicheck.serialization import snapshot_to_json
+
+        paths = []
+        for name in ("old", "new"):
+            p = tmp_path / f"{name}.abi.json"
+            p.write_text(
+                snapshot_to_json(AbiSnapshot(library="libfoo.so", version="1")),
+                encoding="utf-8",
+            )
+            paths.append(p)
+        return paths[0], paths[1]
+
+    def _errors(self) -> list[tuple[Exception, str]]:
+        """One real instance of each type the handler names, built the way
+        the resolver builds it -- `PackConflictError` composes its message
+        from real pack identities, so a bare string would not construct."""
+        from abicheck.compatibility_evaluation_config import ImmutableIdentity
+        from abicheck.compatibility_evaluation_resolver import (
+            FieldResolutionError,
+            PackConflictError,
+        )
+        from abicheck.errors import PackManifestError
+
+        def _identity(name: str) -> ImmutableIdentity:
+            return ImmutableIdentity(id=name, version=1, sha256="0" * 64)
+
+        return [
+            (
+                FieldResolutionError("contract.mode: two explicit values"),
+                "two explicit values",
+            ),
+            (
+                PackConflictError(
+                    "gate.preset",
+                    [(_identity("strict"), "a"), (_identity("lax"), "b")],
+                ),
+                "gate.preset",
+            ),
+            (PackManifestError("pack manifest is malformed"), "malformed"),
+        ]
+
+    @pytest.mark.parametrize("index", [0, 1, 2])
+    def test_each_resolver_error_becomes_exit_64(
+        self, tmp_path: Path, monkeypatch, index: int
+    ) -> None:
+        from click.testing import CliRunner
+
+        import abicheck.cli_scan_receipt as receipt
+        from abicheck.cli import main
+
+        error, message = self._errors()[index]
+
+        def _boom(*args, **kwargs):
+            raise error
+
+        monkeypatch.setattr(receipt, "resolve_scan_config", _boom)
+        old_p, new_p = self._pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(new_p),
+                "--against",
+                str(old_p),
+                "--contract-evaluation",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 64, result.output
+        assert message in result.output

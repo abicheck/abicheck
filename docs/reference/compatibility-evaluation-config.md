@@ -246,11 +246,36 @@ Both live front ends resolve through it: the native `compare` CLI
 two on equivalent input.
 
 A receipt only ever names inputs its front end actually has. `abi_compare`
-takes no scope, contract-mode, public-symbol, or exit-code-scheme parameter,
-so those fields resolve as `built_in_default` there rather than as an API
+takes no contract-mode, public-symbol, or exit-code-scheme parameter, so
+those fields resolve as `built_in_default` there rather than as an API
 request — which is the accurate answer, not a missing claim: there is
 nothing for a caller to have chosen. (Contrast `CompareRequest.scope_public`,
 whose dataclass default *is* a caller's choice and is recorded as one.)
+
+!!! warning "Known gap: consumer scope is not in the resolved config"
+
+    `abi_compare` **does** take two consumer-scope arguments — `used_by`
+    (application binaries) and `required_symbols` (an entrypoint contract) —
+    and they are authoritative: the scoping pass rewrites the verdict and
+    exit code from them. But no field of `CompatibilityEvaluationConfig`
+    models a consumer scope, so a scoped run resolves the *same* object an
+    unscoped one does, with `surface.explicit_scope: null` at
+    `built_in_default`. The gap is wider than "which scope": `scoped` is not
+    a value `GateConfig` accepts, so the *underlying* scheme is recorded
+    instead — nothing in the resolved config indicates a consumer scope was
+    in effect at all.
+
+    `compare --used-by` has the identical gap. `--required-symbol` is the
+    one partial exception, and only on the CLI: there a required-symbol
+    contract switches an untouched `--policy` to `plugin_abi`, and *that*
+    is recorded via `policy_base_option`, leaving an indirect trace. The
+    MCP tool performs no such switch, so it has no trace at all.
+
+    Closing this needs a new typed field plus an identity scheme for
+    application binaries (path + content digest, resolved once and shared
+    with the comparison that read them) — a scoped design, not a parameter
+    to thread through. Until then, treat a scoped run's `resolved_config` as
+    describing the *policy* configuration only.
 
 The complement of that rule — a receipt must not name an input its front end
 *cannot* have — needs its own check, because the equality gate above

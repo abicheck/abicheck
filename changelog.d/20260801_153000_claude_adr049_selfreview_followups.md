@@ -21,3 +21,13 @@
   one specific mutation — giving `CoverageFailure` the attributes the matcher
   keys on — and says so, rather than implying it proves the general
   unsuppressibility guarantee.
+
+### Documentation
+
+- Corrected a false claim that the MCP `abi_compare` tool takes no scope
+  parameter. It takes two — `used_by` and `required_symbols` — and they
+  rewrite the verdict and exit code. No field of
+  `CompatibilityEvaluationConfig` models a consumer scope, so a scoped run's
+  resolved config is indistinguishable from an unscoped one's; that is now
+  recorded as a known gap in the reference, the module, and a test, rather
+  than described as an accurate "nothing was chosen".

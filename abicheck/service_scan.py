@@ -1103,17 +1103,18 @@ def _scan_request_config(req: ScanRequest) -> Any:
     on both front ends (CodeRabbit review). Mapped here rather than at the
     one call site so a second caller cannot reintroduce the gap.
 
-    ``ValueError`` broadly, rather than only the two resolver subclasses
-    ``cli_scan.scan_cmd`` names (``FieldResolutionError``/
-    ``PackConflictError``, both ``ValueError`` subclasses, which it maps to
-    ``click.UsageError``): an unknown ``ScanRequest.policy`` reaches
-    ``builtin_policy_identity`` and raises a *plain* ``ValueError``, which
-    leaked identically. The CLI cannot hit that one -- ``--policy`` is a
-    ``click.Choice``, so Click rejects an unknown base before the resolver
-    ever sees it -- but a typed request's ``policy`` is a free string, so
-    the API needs the wider net. The two nets differ because the two front
-    ends admit different inputs, not because they disagree about what a bad
-    request is; keep them in sync if either gains a new failure mode.
+    One ``except ValueError`` covers every case: ``FieldResolutionError``,
+    ``PackConflictError``, and ``PackManifestError`` -- the three
+    ``cli_scan.scan_cmd`` names individually -- are all ``ValueError``
+    subclasses (``PackManifestError`` through ``AbicheckError``), so naming
+    them adds no coverage. It is also strictly wider, which this front end
+    needs: an unknown ``ScanRequest.policy`` reaches
+    ``builtin_policy_identity`` and raises a *plain* ``ValueError`` that
+    none of the three would have caught. The CLI cannot reach that case --
+    ``--policy`` is a ``click.Choice``, so Click rejects an unknown base
+    before the resolver sees it -- which is why the two front ends' nets
+    differ: they admit different inputs, not different ideas of what a bad
+    request is. Keep them in sync if either gains a new failure mode.
 
     The breadth has a real cost worth stating: an internal ``ValueError``
     from a bug inside the resolver would also be reported as a bad request
@@ -1122,14 +1123,13 @@ def _scan_request_config(req: ScanRequest) -> Any:
     values, and misreporting a hypothetical internal one is better than
     letting a genuine bad request escape as an unhandled exception through
     a Tier-2 API whose other validation failures all raise
-    ``ValidationError``. ``PackManifestError`` is listed separately because
-    it is not a ``ValueError``.
+    ``ValidationError``.
     """
     if not req.contract_evaluation or req.baseline is None:
         return None
     from .cli_scan_receipt import resolve_scan_config
     from .compatibility_evaluation_frontend import FrontEnd
-    from .errors import PackManifestError, ValidationError
+    from .errors import ValidationError
 
     try:
         return resolve_scan_config(
@@ -1147,7 +1147,7 @@ def _scan_request_config(req: ScanRequest) -> Any:
             suppression=req.suppression,
             front_end=FrontEnd.API,
         )
-    except (ValueError, PackManifestError) as exc:
+    except ValueError as exc:
         raise ValidationError(str(exc)) from exc
 
 

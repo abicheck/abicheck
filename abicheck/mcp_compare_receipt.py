@@ -122,6 +122,28 @@ def resolve_tool_config(
     the typed surface has no "unset" for it, so a caller accepting the
     default still chose it.
 
+    **The tool's two consumer-scope arguments are deliberately absent, and
+    that is a known gap, not a design choice** (Codex review). ``used_by``
+    and ``required_symbols`` are authoritative -- the scoping pass in
+    ``mcp_server`` rewrites the verdict and exit code from them -- but no
+    field of :class:`CompatibilityEvaluationConfig` models a consumer scope,
+    so passing them here would have nowhere to land. A scoped call therefore
+    resolves the same object an unscoped one does
+    (``surface.explicit_scope`` ``None`` at ``BUILT_IN_DEFAULT``), and the
+    gap is wider than "which scope": ``"scoped"`` is not a value
+    ``GateConfig`` accepts, so :func:`record_resolved_config` records the
+    *underlying* scheme instead. Nothing in the resolved config indicates a
+    consumer scope was in effect **at all** -- a scoped run's config
+    compares equal to an unscoped one's.
+
+    ``compare --used-by`` has the same gap; ``--required-symbol`` is a
+    partial exception on the CLI only, where the contract switches an
+    untouched ``--policy`` to ``plugin_abi`` and ``policy_base_option``
+    records that indirectly. This tool performs no such switch, so nothing
+    traces it. Closing it needs a typed field plus an identity scheme for
+    application binaries, shared with the comparison that already read them
+    -- its own slice, on the same footing as the unclosed ``packs`` axis.
+
     Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
     D8 pack conflict); mapping those to a tool error is the caller's job.
     """
