@@ -25,7 +25,7 @@ import pytest
 
 from abicheck.api_types import CompareRequest, DumpRequest, InputSpec
 from abicheck.compile_context import CompileContext
-from abicheck.errors import ValidationError
+from abicheck.errors import SnapshotError, ValidationError
 from abicheck.model import AbiSnapshot, Function
 from abicheck.serialization import snapshot_to_json
 
@@ -1203,6 +1203,81 @@ class TestSourceAbiOnlyFrontendOnScan:
             abi_dump(str(snap_path), ast_frontend="android", build_info=str(tmp_path))
         )
         assert data["status"] == "ok"
+
+
+class TestRawSourceUnderHybridIsRejected:
+    """`depth="source"` + the `hybrid` frontend is a usage error, not a
+    silently weaker result — `hybrid` has no real L4 extractor. Mirrors
+    `cli.py`'s own `UsageError` for the same combination.
+    """
+
+    def _request(self, snap_path: Path, sources: Path, frontend: str) -> DumpRequest:
+        return DumpRequest(
+            input=InputSpec(path=snap_path, sources=sources),
+            frontend=frontend,
+            depth="source",
+        )
+
+    def test_a_raw_source_tree_under_hybrid_raises(
+        self, snap_path: Path, tmp_path: Path
+    ):
+        from abicheck import service
+
+        sources = tmp_path / "raw"
+        sources.mkdir()
+        (sources / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+        with pytest.raises(ValidationError, match="incompatible with the 'hybrid'"):
+            service.run_dump_request(self._request(snap_path, sources, "hybrid"))
+
+    def test_a_prebuilt_pack_under_hybrid_is_allowed(
+        self, snap_path: Path, tmp_path: Path, monkeypatch
+    ):
+        # Only a *raw* tree needs real extraction; a prebuilt pack never feeds
+        # L4, so it must not be swept up by the same guard.
+        from abicheck import cli_buildsource, service
+
+        monkeypatch.setattr(
+            cli_buildsource, "embed_build_source", lambda snap, **kwargs: None
+        )
+        # A real pack is identified by manifest *content* -- the
+        # BuildSourcePack version marker -- not by the file merely existing.
+        pack = tmp_path / "pack"
+        pack.mkdir()
+        (pack / "manifest.json").write_text(
+            '{"build_source_pack_version": 1}', encoding="utf-8"
+        )
+        # The stub embeds nothing, so the run still fails -- but on the depth
+        # floor, *not* the hybrid guard. That distinction is the assertion:
+        # reaching the floor at all proves the pack got past the guard.
+        with pytest.raises(ValidationError) as exc:
+            service.run_dump_request(self._request(snap_path, pack, "hybrid"))
+        assert "only reached 'binary'" in str(exc.value)
+        assert "hybrid" not in str(exc.value)
+
+
+class TestMalformedPackIsTranslated:
+    """`embed_build_source` raises `click.ClickException` on a malformed pack —
+    a CLI concept with no place in this Tier-2 API's contract, so the
+    resolver translates it to `SnapshotError`.
+    """
+
+    def test_click_exception_becomes_snapshot_error(
+        self, snap_path: Path, tmp_path: Path, monkeypatch
+    ):
+        import click
+
+        from abicheck import cli_buildsource, service
+
+        def _boom(snap, **kwargs):
+            raise click.ClickException("build pack is malformed")
+
+        monkeypatch.setattr(cli_buildsource, "embed_build_source", _boom)
+        sources = tmp_path / "src"
+        sources.mkdir()
+        with pytest.raises(SnapshotError, match="build pack is malformed"):
+            service.run_dump_request(
+                DumpRequest(input=InputSpec(path=snap_path, sources=sources))
+            )
 
 
 class TestSourceReplayUsesTheSelectedCompiler:
