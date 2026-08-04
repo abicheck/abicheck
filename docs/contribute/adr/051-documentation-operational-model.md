@@ -7,6 +7,7 @@ automation), Stage 3 (cluster consolidation), and Stage 4 (physical
 restructuring) implemented; Stage 5 explicitly deferred, not silently
 dropped — see "Rollout stages" for what each covers and why.
 
+**Verified:** main@e73aea6 on 2026-08-04
 **Decision maker:** (pending — recorded per repository convention, the same
 bar ADR-044 D1 and ADR-048 set for a PR-driven ADR with no separate approval
 step yet.)

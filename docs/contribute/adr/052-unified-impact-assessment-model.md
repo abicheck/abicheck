@@ -26,6 +26,7 @@ original decision text also named it, but it turns out to construct no
 clarification pass rather than a migration (see "Deliberately not
 implemented this slice") — see "Slice 8"/"Slice 9" below for the full
 scoping rationale.
+**Verified:** main@e73aea6 on 2026-08-04
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 3's own
 "needs its own ADR" gate — [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md)'s

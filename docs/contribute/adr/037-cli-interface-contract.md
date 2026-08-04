@@ -6,9 +6,14 @@
 `complete`); phased work in
 [plans/g22-cli-consolidation.md](../plans/g22-cli-consolidation.md). All seven
 phases landed (D1–D12), enforced by the `cli-contract` AI-readiness gate and
-`tests/test_cli_contract.py`. The single residual is the `--ast-frontend android`
-value, which stays exposed on `collect`'s `--source-abi-extractor` rather than
-the header-AST commands (it has no header-AST path).
+`tests/test_cli_contract.py`. The residual this line used to record — the
+`--ast-frontend android` value staying exposed on `collect`'s
+`--source-abi-extractor` — is **gone rather than resolved**:
+[ADR-043](043-cli-pre-1.0-surface-reset.md)'s D4 deleted `collect` outright,
+and its own D4 text notes that the narrow glue wiring a deleted command's
+flags together (naming `collect`'s `--source-abi android` dispatch
+specifically) did not survive the cut. Neither the flag nor the value is CLI
+surface today.
 **Note the "implemented" scope:** the *contract itself* (tiers, decorators,
 one `--depth` dial, one exit-code scheme, the CI gate) is implemented and
 enforced today. The §"Backward compatibility" *mechanism* (deprecated-flag
@@ -16,6 +21,7 @@ aliases, e.g. `--depth symbols`/`--collect-mode`) is also implemented and does
 warn on stderr (see `cli_params.py`), but per that section it remains
 **advisory, not mandatory, until the 1.0 switch-on criteria are met** — old
 flags still work and nothing errors on their use yet.
+**Verified:** main@e73aea6 on 2026-08-04
 **Decision maker:** (pending)
 
 ---

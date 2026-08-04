@@ -131,7 +131,12 @@ _ADR_VERIFIED_VALUE_RE = re.compile(
 #: The end of an ADR's leading metadata block: the first section heading or
 #: horizontal rule. Everything before it is the `**Date:**`/`**Status:**`/
 #: `**Verified:**`/`**Decision maker:**` preamble every ADR here opens with.
-_ADR_METADATA_END_RE = re.compile(r"^\s*#{2,}\s|^\s*-{3,}\s*$")
+#: `## Status` is deliberately *not* a terminator: a handful of ADRs use the
+#: heading style for their status (ADR-036, ADR-042), and stopping there would
+#: put their status section -- and any receipt following it -- outside the
+#: block, so a receipt added to one would be silently ignored. That is exactly
+#: the class of quiet no-op this gate exists to prevent.
+_ADR_METADATA_END_RE = re.compile(r"^\s*#{2,}\s+(?!Status\b)|^\s*-{3,}\s*$")
 _ADR_FENCE_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 
 

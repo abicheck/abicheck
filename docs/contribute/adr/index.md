@@ -98,7 +98,7 @@ against the code as unverified, regardless of how confident it reads.
 | [020b](020-sycl-and-heterogeneous-stack-support.md) | SYCL and Heterogeneous Computing Stack Support | Accepted — implemented |
 | [021a](021-debug-artifact-resolution.md) | Debug Artifact Resolution Subsystem | Accepted — implemented |
 | [021b](021-mcp-security-model.md) | MCP Security Model | Accepted — implemented |
-| [022](022-baseline-registry.md) | Baseline Registry and Snapshot Distribution | Accepted — partially implemented (filesystem backend only) |
+| [022](022-baseline-registry.md) | Baseline Registry and Snapshot Distribution | Accepted — not implemented; the filesystem backend and `baseline` command group that once shipped were deleted by [ADR-043](043-cli-pre-1.0-surface-reset.md) D4, which also records recreating a registry as a non-goal |
 | [023](023-bundle-aware-multi-binary-analysis.md) | Bundle-Aware Multi-Binary ABI Analysis | Accepted — implemented |
 | [024](024-public-abi-surface-resolution.md) | Public ABI Surface Resolution and False-Positive Traceability | Accepted — implemented |
 | [025](025-pr-diff-source-evaluation.md) | PR-Diff-Aware ABI Evaluation (Source Diff as Trigger and Localizer) | Proposed; D1–D3 absorbed by ADR-033/035, D4 still future work |

@@ -1129,6 +1129,20 @@ def test_adr_status_sync_ignores_a_verified_example_in_the_body(
     assert f.errors == [], f"a documented example was read as a receipt: {f.errors}"
 
 
+def test_adr_metadata_block_covers_heading_style_status(ass):
+    """A few ADRs write their status as a `## Status` section (ADR-036,
+    ADR-042). Ending the metadata block at the first `##` would put their
+    status — and any receipt after it — outside the block, so a receipt added
+    to one of those would be silently ignored: the same quiet no-op this gate
+    exists to catch."""
+    block = ass._adr_metadata_block(
+        "# ADR-036\n\n## Status\n\nAccepted — core implemented.\n\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n\n## Context\n\nBody.\n"
+    )
+    assert ass._ADR_VERIFIED_START_RE.search(block) is not None
+    assert "Body." not in block
+
+
 def test_adr_status_sync_rejects_malformed_verified_line(
     car, ass, tmp_path, monkeypatch
 ):
