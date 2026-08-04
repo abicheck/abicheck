@@ -155,7 +155,7 @@ flat directory), starting from whatever the
 underlying `compare`/`scan` run already produced and layering on the
 fields below. For a normal single-library `compare` (the common case),
 that starting shape is `abicheck/reporter.py`'s existing compare-report
-shape (`report_schema_version: "2.13"`). A `baseline-channel: none` audit
+shape (`report_schema_version: "2.26"`). A `baseline-channel: none` audit
 instead starts from a `scan` report (its own `scan_schema_version` shape),
 and a `kind: bundle` check starts from the CLI's per-library release
 fan-out summary (`libraries`/`old_dir`, no schema-version marker of its

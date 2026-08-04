@@ -46,6 +46,19 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `depth` | `str \| None` | `None` |
 | `frontend_context` | `str` | `'host'` |
 
+## `CompareResult`
+
+What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `diff` | `DiffResult` | *(required)* |
+| `old_snapshot` | `AbiSnapshot` | *(required)* |
+| `new_snapshot` | `AbiSnapshot` | *(required)* |
+| `suppression` | `SuppressionList \| None` | `None` |
+
 ## `CompileContext`
 
 L2 header-AST compile context — shared by ``dump`` and ``scan``.
@@ -98,6 +111,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `dump_manifest` | `DumpManifest \| None` | `None` |
 | `compile` | `CompileContext \| None` | `None` |
 | `public_header_dirs` | `tuple[Path, ...]` | `()` |
+| `follow_linker_scripts` | `bool` | `True` |
 
 ## `LayerResult`
 
@@ -404,6 +418,16 @@ Compare two ABI inputs described by a :class:`CompareRequest`.
 | `request` | `CompareRequest` | *(required)* |
 
 **Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
+
+## `run_compare_request_v2`
+
+Compare two ABI inputs and return a typed :class:`CompareResult`.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `request` | `CompareRequest` | *(required)* |
+
+**Returns:** `CompareResult`
 
 ## `run_dump`
 

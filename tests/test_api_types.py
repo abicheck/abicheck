@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.api_types import CompareRequest, InputSpec, OutputSpec
+from abicheck.api_types import CompareRequest, CompareResult, InputSpec, OutputSpec
 from abicheck.errors import ValidationError
 
 
@@ -78,6 +78,18 @@ class TestInputSpec:
     def test_of_coerces_public_header_dirs(self):
         spec = InputSpec.of("lib.so", public_header_dirs=["a", "b"])
         assert spec.public_header_dirs == (Path("a"), Path("b"))
+
+    # ── ADR-055 D4: follow_linker_scripts ─────────────────────────────────────
+
+    def test_follow_linker_scripts_defaults_true(self):
+        # Matches `resolve_input`'s own default, so no pre-existing caller's
+        # behaviour changes just because the field appeared.
+        assert InputSpec.of("lib.so").follow_linker_scripts is True
+        assert InputSpec(path=Path("lib.so")).follow_linker_scripts is True
+
+    def test_of_passes_through_follow_linker_scripts(self):
+        spec = InputSpec.of("lib.so", follow_linker_scripts=False)
+        assert spec.follow_linker_scripts is False
 
     def test_of_passes_through_compile_and_dump_manifest(self):
         from abicheck.compile_context import CompileContext
@@ -352,3 +364,44 @@ class TestOutputSpec:
         out = OutputSpec(fmt="json")
         with pytest.raises(dataclasses.FrozenInstanceError):
             out.fmt = "sarif"  # type: ignore[misc]
+
+
+class TestCompareResult:
+    """ADR-055 D2: the typed result wrapper."""
+
+    def _result(self):
+        from abicheck.checker_types import DiffResult
+        from abicheck.model import AbiSnapshot
+
+        diff = DiffResult(old_version="1.0", new_version="2.0", library="lib")
+        old = AbiSnapshot(library="lib", version="1.0")
+        new = AbiSnapshot(library="lib", version="2.0")
+        return CompareResult(diff=diff, old_snapshot=old, new_snapshot=new), diff, old, new
+
+    def test_as_tuple_matches_the_legacy_return_shape(self):
+        # The whole point of the wrapper is that it is a *rename* of the tuple,
+        # not a reordering — a caller unpacking either must see the same three
+        # objects in the same order.
+        result, diff, old, new = self._result()
+        assert result.as_tuple() == (diff, old, new)
+
+    def test_suppression_defaults_to_none(self):
+        result, _diff, _old, _new = self._result()
+        assert result.suppression is None
+
+    def test_carries_the_resolved_suppression_list(self):
+        from abicheck.suppression import SuppressionList
+
+        _result, diff, old, new = self._result()
+        suppression = SuppressionList([])  # empty rule set is enough here
+        result = CompareResult(
+            diff=diff, old_snapshot=old, new_snapshot=new, suppression=suppression
+        )
+        assert result.suppression is suppression
+        # ...and it stays out of the tuple view, which is the legacy shape.
+        assert result.as_tuple() == (diff, old, new)
+
+    def test_is_frozen(self):
+        result, _diff, _old, new = self._result()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            result.old_snapshot = new  # type: ignore[misc]

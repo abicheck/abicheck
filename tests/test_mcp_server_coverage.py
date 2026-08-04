@@ -516,6 +516,14 @@ class TestAbiDumpTool:
 # ---------------------------------------------------------------------------
 
 class TestAbiCompareTool:
+    """These patch ``abicheck.service.resolve_input``/``compare_snapshots``,
+    not the ``abicheck.mcp_server`` names the sibling ``abi_dump`` tests still
+    patch. ADR-055 D4 routed ``abi_compare`` through the Tier-2 chokepoint
+    (``run_compare_request``), so the service-layer names are the ones this
+    tool now actually reaches; patching the MCP module's own would stub a
+    function ``abi_compare`` no longer calls.
+    """
+
     def _make_inputs(self, tmp_path):
         """Create two fake JSON snapshot files."""
         old = tmp_path / "old.json"
@@ -539,7 +547,7 @@ class TestAbiCompareTool:
         old, new = self._make_inputs(tmp_path)
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.resolve_input",
             lambda *a, **kw: fake_snap,
         )
         # Mock ShowOnlyFilter.parse to raise
@@ -563,7 +571,7 @@ class TestAbiCompareTool:
 
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.resolve_input",
             lambda *a, **kw: fake_snap,
         )
         mock_supp = MagicMock()
@@ -573,7 +581,7 @@ class TestAbiCompareTool:
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare_snapshots",
+            "abicheck.service.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -595,7 +603,7 @@ class TestAbiCompareTool:
 
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.resolve_input",
             lambda *a, **kw: fake_snap,
         )
         mock_pf = MagicMock()
@@ -605,7 +613,7 @@ class TestAbiCompareTool:
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare_snapshots",
+            "abicheck.service.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -624,12 +632,12 @@ class TestAbiCompareTool:
         old, new = self._make_inputs(tmp_path)
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.resolve_input",
             lambda *a, **kw: fake_snap,
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare_snapshots",
+            "abicheck.service.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -647,12 +655,12 @@ class TestAbiCompareTool:
         old, new = self._make_inputs(tmp_path)
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.resolve_input",
             lambda *a, **kw: fake_snap,
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare_snapshots",
+            "abicheck.service.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -671,12 +679,12 @@ class TestAbiCompareTool:
         old, new = self._make_inputs(tmp_path)
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.resolve_input",
             lambda *a, **kw: fake_snap,
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare_snapshots",
+            "abicheck.service.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -695,12 +703,12 @@ class TestAbiCompareTool:
         old, new = self._make_inputs(tmp_path)
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.resolve_input",
             lambda *a, **kw: fake_snap,
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare_snapshots",
+            "abicheck.service.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -719,7 +727,7 @@ class TestAbiCompareTool:
         old, new = self._make_inputs(tmp_path)
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.resolve_input",
             lambda *a, **kw: fake_snap,
         )
         result_str = abi_compare(

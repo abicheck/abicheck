@@ -656,17 +656,26 @@ def check_doc_count_sync(f: Findings) -> None:
       guard silently stopped covering that spot — update the regex here).
     """
     try:
+        from abicheck import schemas
         from abicheck.castxml_policy import (
             MAX_CASTXML,
             MIN_CASTXML,
             MIN_CASTXML_CLANG_MAJOR,
         )
         from abicheck.checker_policy import ChangeKind
-        from abicheck.serialization import SCHEMA_VERSION
     except Exception:
         # Package not importable (e.g. pre-install lane) — skip silently, like
         # the other ChangeKind checks.
         return
+
+    # ADR-055 D3: read every persisted-artifact version through the registry
+    # rather than importing each artifact's own constant here. That is what
+    # gives `schemas.current()` a consumer instead of leaving it a lookup
+    # nothing calls — the registry exists precisely because a version number
+    # with no single queryable owner is how `docs/use/python-api.md` came to
+    # claim schema_version 8 against a real 17.
+    SCHEMA_VERSION = schemas.current("snapshot")
+    REPORT_SCHEMA_VERSION = schemas.current("compare")
 
     n_kinds = len(list(ChangeKind))
 
@@ -756,6 +765,18 @@ def check_doc_count_sync(f: Findings) -> None:
             "snapshot schema_version (field table)",
             SCHEMA_VERSION,
             r"Snapshot format version \(currently `(\d+)`\)",
+        ),
+        (
+            DOCS / "use/output-formats.md",
+            "compare report_schema_version (scan envelope JSON example)",
+            REPORT_SCHEMA_VERSION,
+            r'"report_schema_version":\s*"([0-9]+\.[0-9]+)"',
+        ),
+        (
+            DOCS / "reference/check-target.md",
+            "compare report_schema_version (starting-shape sentence)",
+            REPORT_SCHEMA_VERSION,
+            r'shape \(`report_schema_version: "([0-9]+\.[0-9]+)"`\)',
         ),
         (
             DOCS / "reference/environment.md",

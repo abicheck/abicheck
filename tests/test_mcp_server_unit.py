@@ -883,8 +883,33 @@ class TestAbiDump:
 
 
 # ===================================================================
-# 11. abi_compare (with mocked _resolve_input)
+# 11. abi_compare (with mocked service.resolve_input)
 # ===================================================================
+
+
+def _stub_service_resolve(monkeypatch, old_snap: AbiSnapshot, new_snap: AbiSnapshot):
+    """Stub the resolver ``abi_compare`` reaches through the Tier-2 chokepoint.
+
+    ADR-055 D4 moved input resolution out of ``mcp_server._resolve_input`` and
+    into ``service.run_compare_request``, so a test feeding synthetic snapshots
+    for fake-ELF paths patches ``service.resolve_input`` — the function that
+    now actually runs — instead of the MCP-local wrapper that no longer does.
+
+    Dispatch is on ``version`` (``"old"``/``"new"``, exactly what
+    ``run_compare_request`` passes through from each ``InputSpec``), not on
+    call order: that function resolves both sides concurrently in a
+    ``ThreadPoolExecutor``, so an order-dependent ``side_effect=[old, new]``
+    list would hand the *old* snapshot to whichever side's thread happened to
+    start first.
+    """
+    import abicheck.service as service_mod
+
+    def _fake(
+        path, headers=None, includes=None, version="", lang="c++", **kwargs
+    ) -> AbiSnapshot:
+        return old_snap if version == "old" else new_snap
+
+    monkeypatch.setattr(service_mod, "resolve_input", _fake)
 
 
 class TestAbiCompare:
@@ -1173,7 +1198,6 @@ class TestAbiCompare:
         # code 0 (info-only preset). Picking the reported scoped verdict by
         # exit code (both apps tie at 0) let a later, merely-COMPATIBLE app
         # overwrite the first BREAKING app's verdict (Codex review).
-        from abicheck import mcp_server
         from abicheck.appcompat import AppCompatResult
 
         old = _make_snapshot("1.0", functions=[_pub_func("f", "_Zf")])
@@ -1184,9 +1208,7 @@ class TestAbiCompare:
         app2 = tmp_path / "app2"
         app2.write_bytes(b"\x7fELF" + b"\x00" * 100)
 
-        monkeypatch.setattr(
-            mcp_server, "_resolve_input", MagicMock(side_effect=[old, new]),
-        )
+        _stub_service_resolve(monkeypatch, old, new)
         breaking_scoped = AppCompatResult(
             app_path=str(app1), old_lib_path=str(old_p), new_lib_path=str(new_p),
             required_symbols={"_Zf"}, required_symbol_count=1,
@@ -1338,12 +1360,8 @@ class TestAbiCompare:
         """Stub snapshot resolution (fake ELF paths aren't real libraries) and
         appcompat.scope_diff_to_app so --used-by is exercised end to end
         without a real compiler/binary."""
-        from abicheck import mcp_server
 
-        monkeypatch.setattr(
-            mcp_server, "_resolve_input",
-            MagicMock(side_effect=[old_snap, new_snap]),
-        )
+        _stub_service_resolve(monkeypatch, old_snap, new_snap)
         import abicheck.appcompat as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: scoped)
@@ -1555,12 +1573,8 @@ class TestAbiCompare:
                 breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
             )
 
-        from abicheck import mcp_server
 
-        monkeypatch.setattr(
-            mcp_server, "_resolve_input",
-            MagicMock(side_effect=[old, new]),
-        )
+        _stub_service_resolve(monkeypatch, old, new)
         import abicheck.appcompat as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
@@ -1882,12 +1896,8 @@ class TestAbiCompare:
                 breaking_for_app=[change], verdict=Verdict.BREAKING,
             )
 
-        from abicheck import mcp_server
 
-        monkeypatch.setattr(
-            mcp_server, "_resolve_input",
-            MagicMock(side_effect=[old, new]),
-        )
+        _stub_service_resolve(monkeypatch, old, new)
         import abicheck.appcompat as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
@@ -1933,12 +1943,8 @@ class TestAbiCompare:
                 breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
             )
 
-        from abicheck import mcp_server
 
-        monkeypatch.setattr(
-            mcp_server, "_resolve_input",
-            MagicMock(side_effect=[old, new]),
-        )
+        _stub_service_resolve(monkeypatch, old, new)
         import abicheck.appcompat as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
@@ -1983,12 +1989,8 @@ class TestAbiCompare:
                 breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
             )
 
-        from abicheck import mcp_server
 
-        monkeypatch.setattr(
-            mcp_server, "_resolve_input",
-            MagicMock(side_effect=[old, new]),
-        )
+        _stub_service_resolve(monkeypatch, old, new)
         import abicheck.appcompat as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
@@ -2034,12 +2036,8 @@ class TestAbiCompare:
                 breaking_for_app=[scoped_only], verdict=Verdict.BREAKING,
             )
 
-        from abicheck import mcp_server
 
-        monkeypatch.setattr(
-            mcp_server, "_resolve_input",
-            MagicMock(side_effect=[old, new]),
-        )
+        _stub_service_resolve(monkeypatch, old, new)
         import abicheck.appcompat as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
@@ -2068,15 +2066,11 @@ class TestAbiCompare:
         assert "real library binaries" in data["error"]
 
     def test_used_by_app_not_found(self, tmp_path: Path, monkeypatch):
-        from abicheck import mcp_server
 
         old = _make_snapshot("1.0")
         new = _make_snapshot("2.0")
         old_p, new_p = self._make_binary_pair(tmp_path)
-        monkeypatch.setattr(
-            mcp_server, "_resolve_input",
-            MagicMock(side_effect=[old, new]),
-        )
+        _stub_service_resolve(monkeypatch, old, new)
         raw = abi_compare(
             str(old_p), str(new_p), used_by=[str(tmp_path / "no_such_app")],
         )
@@ -2239,17 +2233,21 @@ class TestAbiCompare:
         assert data["status"] == "ok"
 
     def test_old_headers_overrides_shared(self, tmp_path: Path, monkeypatch):
-        """When old_headers=[] is given, it overrides shared headers."""
-        from abicheck import mcp_server
+        """When old_headers=[] is given, it overrides shared headers.
+
+        Spies on ``service.resolve_input`` for the same reason as
+        ``test_headers_are_passed_as_public_headers`` above (ADR-055 D4).
+        """
+        import abicheck.service as service_mod
 
         captured: list[tuple[str, list]] = []
-        original_resolve = mcp_server._resolve_input
+        original_resolve = service_mod.resolve_input
 
-        def _spy(path, headers, includes, version, lang, **kwargs):
-            captured.append((str(path), list(headers)))
+        def _spy(path, headers=None, includes=None, version="", lang="c++", **kwargs):
+            captured.append((str(path), list(headers or [])))
             return original_resolve(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(mcp_server, "_resolve_input", _spy)
+        monkeypatch.setattr(service_mod, "resolve_input", _spy)
 
         shared_hdr = tmp_path / "shared.h"
         shared_hdr.write_text("// shared\n", encoding="utf-8")
@@ -2273,17 +2271,23 @@ class TestAbiCompare:
     def test_headers_are_passed_as_public_headers(self, tmp_path: Path, monkeypatch):
         """abi_compare's ``old_headers``/``new_headers`` are documented as
         header files just like the CLI's ``compare --header`` — both sides
-        must be threaded through as the public-header set for provenance."""
-        from abicheck import mcp_server
+        must be threaded through as the public-header set for provenance.
+
+        Spies on ``service.resolve_input`` rather than the MCP-local wrapper:
+        after ADR-055 D4 the provenance threading is ``run_compare_request``'s
+        own ``split_public_header_inputs`` step, so watching the wrapper would
+        assert nothing about what actually happens.
+        """
+        import abicheck.service as service_mod
 
         captured: list[tuple[str, object]] = []
-        original_resolve = mcp_server._resolve_input
+        original_resolve = service_mod.resolve_input
 
-        def _spy(path, headers, includes, version, lang, **kwargs):
+        def _spy(path, headers=None, includes=None, version="", lang="c++", **kwargs):
             captured.append((version, kwargs.get("public_headers")))
             return original_resolve(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(mcp_server, "_resolve_input", _spy)
+        monkeypatch.setattr(service_mod, "resolve_input", _spy)
 
         snap = _make_snapshot("1.0")
         old_p, new_p = self._make_pair(tmp_path, snap, snap)
@@ -2708,3 +2712,204 @@ class TestAbiScanPublicHeaderDir:
         data = json.loads(raw)
         assert data["status"] == "ok"
         assert captured["public_header_dirs"] == [pub.resolve()]
+
+
+# ===================================================================
+# abi_compare ↔ CLI `compare` parity (ADR-055 D4)
+# ===================================================================
+
+
+class TestAbiCompareCliParity:
+    """``abi_compare`` and the CLI ``compare`` command must agree.
+
+    ADR-055 D4's regression guard. Before that decision, ``abi_compare``
+    resolved its own inputs, loaded its own policy/suppression, and only
+    borrowed ``compare_snapshots`` for the middle diffing step — a second
+    compare engine that could drift from the CLI's without anything failing.
+    Now both build one ``CompareRequest`` and go through
+    ``run_compare_request``, so this asserts the observable consequence:
+    identical findings, verdict, and exit code for equivalent flags.
+
+    Two keys are excluded rather than asserted equal: ``old_evidence_depth``/
+    ``new_evidence_depth``. Those are added by the CLI's own report-rendering
+    call, not by the comparison — this MCP tool has never emitted them, and
+    D4 explicitly keeps rendering/presentation as front-end glue rather than
+    folding it into the shared request/result. ``used_by``/
+    ``required_symbols`` scoping is likewise out of this test's scope for the
+    same reason (D4 keeps it MCP-local glue applied *after* a result exists);
+    the sibling ``TestAbiCompare`` scoping tests cover it.
+    """
+
+    #: Keys the CLI's renderer adds that the MCP tool has never emitted.
+    _RENDER_ONLY_KEYS = ("old_evidence_depth", "new_evidence_depth")
+
+    def _pair(self, tmp_path: Path):
+        """One removed symbol, one signature change, one addition."""
+        old = _make_snapshot(
+            "1.0",
+            functions=[_pub_func("a", "_Z1av"), _pub_func("b", "_Z1bv")],
+        )
+        new_a = _pub_func("a", "_Z1av")
+        new_a.return_type = "long"
+        new = _make_snapshot("2.0", functions=[new_a, _pub_func("c", "_Z1cv")])
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        _write_snapshot(old_p, old)
+        _write_snapshot(new_p, new)
+        return old_p, new_p
+
+    def _cli_report(self, argv: list[str]) -> tuple[dict, int]:
+        from click.testing import CliRunner
+
+        # Import `cli` (not a sibling helper) first: `cli_compare_helpers`
+        # imports `cli` at module scope while `cli`'s own tail re-imports it,
+        # so entering that cluster through the helper raises a partially-
+        # initialized ImportError. Pre-existing, unrelated to this test.
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(main, argv)
+        assert result.exception is None or isinstance(
+            result.exception, SystemExit
+        ), result.output
+        report = json.loads(result.output)
+        for key in self._RENDER_ONLY_KEYS:
+            report.pop(key, None)
+        return report, result.exit_code
+
+    @pytest.mark.parametrize(
+        ("mcp_kwargs", "cli_flags"),
+        [
+            pytest.param({}, [], id="defaults"),
+            pytest.param(
+                {"policy": "sdk_vendor"},
+                ["--policy", "sdk_vendor"],
+                id="policy-profile",
+            ),
+            pytest.param(
+                {"show_only": "removed"}, ["--show-only", "removed"], id="show-only"
+            ),
+            pytest.param(
+                {"severity_abi_breaking": "error", "severity_addition": "warning"},
+                [
+                    "--severity-abi-breaking",
+                    "error",
+                    "--severity-addition",
+                    "warning",
+                ],
+                id="severity-aware",
+            ),
+            pytest.param(
+                {"report_mode": "leaf"}, ["--report-mode", "leaf"], id="report-mode"
+            ),
+        ],
+    )
+    def test_report_matches_cli(self, tmp_path: Path, mcp_kwargs, cli_flags):
+        old_p, new_p = self._pair(tmp_path)
+
+        cli_report, cli_exit = self._cli_report(
+            ["compare", str(old_p), str(new_p), "--format", "json", *cli_flags]
+        )
+        data = json.loads(
+            abi_compare(str(old_p), str(new_p), output_format="json", **mcp_kwargs)
+        )
+
+        assert data["status"] == "ok"
+        assert data["report"] == cli_report
+        assert data["exit_code"] == cli_exit
+
+    def test_suppression_file_matches_cli(self, tmp_path: Path):
+        old_p, new_p = self._pair(tmp_path)
+        supp = tmp_path / "suppress.yaml"
+        supp.write_text(
+            "version: 1\nsuppressions:\n  - symbol: _Z1bv\n    reason: parity\n",
+            encoding="utf-8",
+        )
+
+        cli_report, cli_exit = self._cli_report(
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--format",
+                "json",
+                "--suppress",
+                str(supp),
+            ]
+        )
+        data = json.loads(
+            abi_compare(
+                str(old_p),
+                str(new_p),
+                output_format="json",
+                suppression_file=str(supp),
+            )
+        )
+
+        assert data["status"] == "ok"
+        # The suppression actually took effect on both sides -- otherwise this
+        # would pass trivially by both ignoring the file identically.
+        assert cli_report["suppression"]["suppressed_count"] == 1
+        assert data["report"] == cli_report
+        assert data["exit_code"] == cli_exit
+
+    def test_policy_file_matches_cli(self, tmp_path: Path):
+        old_p, new_p = self._pair(tmp_path)
+        pol = tmp_path / "policy.yaml"
+        pol.write_text(
+            "base: strict_abi\noverrides:\n  func_removed: ignore\n", encoding="utf-8"
+        )
+
+        cli_report, cli_exit = self._cli_report(
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--format",
+                "json",
+                "--policy-file",
+                str(pol),
+            ]
+        )
+        data = json.loads(
+            abi_compare(
+                str(old_p), str(new_p), output_format="json", policy_file=str(pol)
+            )
+        )
+
+        assert data["status"] == "ok"
+        assert data["report"] == cli_report
+        assert data["exit_code"] == cli_exit
+
+    def test_unsupported_language_is_a_validation_error(self, tmp_path: Path):
+        """The typed request validates language the way the CLI's own
+        ``--lang`` choice does, instead of passing an unknown value down."""
+        old_p, new_p = self._pair(tmp_path)
+        data = json.loads(abi_compare(str(old_p), str(new_p), language="rust"))
+        assert data["status"] == "error"
+        assert "unsupported language" in data["error"]
+
+    def test_no_second_compare_engine_left_in_abi_compare(self):
+        """ADR-055 D4's acceptance test, executable.
+
+        The gate is stated as source-level absence because that is exactly
+        what regressed before: re-adding a local resolve or policy load would
+        still produce correct output today while silently recreating the
+        duplication -- no behavioural assertion can catch that.
+        """
+        import inspect
+
+        from abicheck import mcp_server
+
+        source = inspect.getsource(mcp_server.abi_compare)
+        # Strip comments: this function *documents* what it no longer calls,
+        # and a comment naming a removed call is the point, not a violation.
+        body = "\n".join(
+            line for line in source.splitlines() if not line.lstrip().startswith("#")
+        )
+        assert "_resolve_input(" not in body
+        assert "PolicyFile.load" not in body
+        assert "SuppressionList.load" not in body
+        assert "compare_snapshots(" not in body
+        assert "run_compare_request_v2(" in body
+        # ...and the module no longer imports the snapshot-diffing verb at all.
+        assert not hasattr(mcp_server, "compare_snapshots")

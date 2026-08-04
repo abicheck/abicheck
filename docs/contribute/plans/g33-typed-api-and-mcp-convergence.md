@@ -1,9 +1,10 @@
 # G33 — Typed API convergence: schema registry, Request/Result completeness, MCP dedup
 
-**Status:** Phase 0 (verification) and Phase 1 (schema-version registry,
-ADR-055 D3) done; Phases 2-6 not started — see per-phase status below
+**Status:** Phases 0-4 done (ADR-055 D1-D4 all implemented); Phase 5
+unblocked but not started; Phase 6 is a standing constraint, not work —
+see per-phase status below
 **Normative decision:** [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md)
-(Proposed — D3 implemented; D1/D2/D4 not started)
+(Accepted — implemented)
 **Related:** ADR-037 (G22, CLI consolidation — done), ADR-049 (contract relevance,
 see [public-contract-default.md](public-contract-default.md) for its own
 rollout), ADR-043 (`used_by`/`required_symbols` app scoping), ADR-050
@@ -86,10 +87,15 @@ CLI / Python / MCP / Action
 Invariant this plan exists to restore: **no front end (CLI, MCP, or an
 Action) resolves inputs, loads policy/suppression, or classifies a
 comparison on its own** — every front end builds the same typed request and
-reads the same typed result for that classification step. Today
-`abi_compare` is the one confirmed violation of that invariant (Phase 4/D4
-below); the other phases close gaps that make the invariant harder to reach
-even where it isn't yet violated. This deliberately does **not** cover every
+reads the same typed result for that classification step. `abi_compare` was
+the one confirmed violation (Phase 4/D4 below) and no longer is; the other
+phases closed gaps that made the invariant harder to reach even where it
+wasn't yet violated. One qualification the invariant needs, now that it
+holds: the CLI `compare` command builds the same *request* type and reads the
+same *result*, but still runs its own richer input resolution
+(`cli_resolve._resolve_compare_snapshots`) — a recorded decision, not an
+outstanding violation. See Phase 2's progress note for what that actually
+covers. This deliberately does **not** cover every
 downstream presentation concern: `used_by`/`required_symbols` app-scoping
 and severity/exit-code computation are explicitly kept as thin,
 front-end-specific glue applied *after* a typed result exists (Phase 4
@@ -153,7 +159,7 @@ or read the owning module's docstring for the live value.)
 generated from this registry (or a page that itself reads from it), not a
 hand-copied literal.
 
-**Progress:** the registry itself is done —
+**Progress:** done. The registry itself —
 `abicheck.schemas.current(name)` (`abicheck/schemas/__init__.py`) covers
 all six artifact names above, backed by each artifact's existing constant
 via a function-local import (a module-level import would create a real
@@ -161,12 +167,21 @@ cycle: `run-plan` needs `buildsource.run_plan.RUN_PLAN_SCHEMA`, but
 `buildsource/run_plan.py` imports `buildsource/check_report.py`, which
 already imports `abicheck.schemas` — confirmed by reading both modules
 before choosing the deferred-import shape). Covered by
-`tests/test_schemas_registry.py`. Still remaining: wiring an actual doc
-page or generator to *read from* `current()` instead of a hand-copied
-literal — `docs/reference/snapshot-format.md` (the designated fact-owner
-page for the snapshot version) still states "17" by hand, same as every
-other artifact's own doc page. That's a separate, larger follow-up (a real
-doc-generator change, reviewed on its own), not bundled into this slice.
+`tests/test_schemas_registry.py`.
+
+The gate above ("every version number quoted in docs is generated from this
+registry, not a hand-copied literal") is now met too, by a route this phase
+did not originally anticipate: rather than converting pages to generated
+ones, `scripts/check_ai_readiness.py`'s existing `doc-count-sync` check
+reads its expected snapshot and compare-report versions from
+`schemas.current()` and pins them against the pages that quote them. These
+numbers live inside hand-written prose and JSON examples, so a generator
+would have had to own a whole page to own one number, while the check fails
+the build on exactly the drift D3 was about — and caught two live instances
+on its first run (`docs/use/output-formats.md` and
+`docs/reference/check-target.md` both quoting long-superseded
+`report_schema_version` values). Extending it to the remaining four
+artifacts is mechanical: add an anchor when a doc page starts quoting one.
 
 ### Phase 2 — extend `InputSpec`/`CompareRequest` (ADR-055 D1)
 
@@ -183,37 +198,29 @@ today).
 has no explicit `--gcc-options` equivalent today"; "no lower-level
 'parse only, don't classify' mode") are no longer true.
 
-**Progress:** not started; a real complication found while scoping it,
-not yet reflected in ADR-055 itself. `run_compare_request` (the function
-`CompareRequest` feeds) is **not** what the CLI `compare` command actually
-calls for its full depth/sources/build-info/multi-TU-manifest feature set
-— reading `cli_compare_helpers.py` and `cli_resolve.py` shows the CLI's
-own resolution goes through `cli_resolve._resolve_compare_snapshots`, a
-CLI-layer function with a much richer parameter set (per-side
-`CompileContext`/`dump_manifest`/debug-root/debuginfod overrides, explicit
-old/new format detection, dependency-graph following) that itself calls
-`service.resolve_input`/`compare_snapshots` directly — not
-`run_compare_request`. So today there are genuinely **two** independent
-resolution paths: the CLI's rich one (`_resolve_compare_snapshots`) and
-the typed one (`run_compare_request`, what `CompareRequest` feeds, and
-what a future `abi_compare` rewrite in Phase 4 would use). Adding fields to
-`CompareRequest`/`InputSpec` without addressing this split would give the
-typed request a way to *carry* depth/sources/build-info in, but would not
-by itself make `CompareRequest` capable of everything the CLI supports —
-`_resolve_compare_snapshots`'s extra logic (dependency-graph following,
-per-side backend override, debug-root/debuginfod per side) would still
-need to either move into `run_compare_request` or be reconciled with it.
-Before writing code, whoever picks this up should decide: (a) migrate the
-CLI `compare` command onto an extended `run_compare_request` (higher risk,
-touches the CLI's own heavily-tested resolution path), or (b) extend
-`run_compare_request` to match `_resolve_compare_snapshots`'s capability
-set in parallel, keeping both paths but eliminating the *capability* gap
-between them (lower risk, but the two-path duplication ADR-055 D1 set out
-to close would persist one level down). The `DumpManifest`/`CompileContext`
-machinery itself is no longer a blocker either way — G32 (Phase 0 and
-Phases A–E) is now done, per that plan's own status — so this phase's
-only real blocker is the resolution-path decision above, not missing
-lower-level machinery.
+**Progress:** done, in [PR #651](https://github.com/abicheck/abicheck/pull/651)
+— whose title ("close dump/compare dependency-scoping asymmetry") is why this
+note went on saying "not started" for several PRs afterwards. `InputSpec`
+gained `sources`/`build_info`/`dump_manifest`/`compile`/`public_header_dirs`,
+`CompareRequest` gained `depth`/`frontend_context`, and the resolution wiring
+lives in the new `abicheck/service_compare_evidence.py`. The gate holds:
+neither `service.py` comment quoted above still exists. Tests:
+`TestCompareRequestAdr055Evidence` (`tests/test_service_unit.py`) and the
+ADR-055 D1 blocks in `tests/test_api_types.py`.
+
+The two-resolution-path question this note raised is now **decided as (b)**,
+recorded in ADR-055's D1 section rather than left open here:
+`run_compare_request` was extended in parallel and the CLI `compare` command
+still resolves through `cli_resolve._resolve_compare_snapshots`. The
+capability gap D1 existed to close is closed — no Python or MCP caller has to
+drop to loose kwargs any more — while option (a) would rewrite the CLI's
+most heavily-tested resolution path for no user-observable gain. What stays
+CLI-only is narrower than the framing above implies, and is worth not
+re-deriving: project-config `source.method` inference, the set-input
+evidence-flag rejection guard, and the per-side AST-frontend override.
+Migrating the CLI onto `run_compare_request` remains possible as its own
+change, gated on its own before/after parity evidence across the CLI's flag
+matrix.
 
 ### Phase 3 — `CompareResult` wrapper (ADR-055 D2)
 
@@ -226,9 +233,24 @@ caller.
 **Gate:** a new field (resolved depth, an `EvaluationReceipt`, a coverage
 summary) has somewhere to land without a second tuple-shape break.
 
-**Progress:** not started. Depends on Phase 2 landing first (ADR-055's own
-rollout order — the wrapper is only worth adding once the request side is
-worth wrapping too).
+**Progress:** done. `CompareResult` (`diff`/`old_snapshot`/`new_snapshot`)
+lives in `api_types.py` beside `CompareRequest`, and
+`service.run_compare_request_v2` returns it. `run_compare_request` keeps its
+exact tuple signature for every existing caller — it is now a one-line view
+(`CompareResult.as_tuple()`) over the same implementation, rather than a
+second copy of the resolution logic, which would have been this plan's own
+failure mode reproduced inside its fix.
+
+One departure from the decision as written: the struct carries a fourth
+field, `suppression`, not just the tuple's three. Phase 4 is why — the
+service resolves the suppression list internally, but `appcompat.
+scope_diff_to_app(..., suppression=...)` needs the resolved object *after*
+classification, and `DiffResult` carries the resolved policy file but not the
+suppression list. Without it the MCP server would have kept a
+`SuppressionList.load` call solely to re-derive what the service had already
+loaded — the duplication Phase 4 removes, reintroduced by the shape chosen to
+enable removing it. Tests: `TestCompareResult` (`tests/test_api_types.py`),
+`TestRunCompareRequestV2` (`tests/test_service_unit.py`).
 
 ### Phase 4 — route `abi_compare` through `run_compare_request` (ADR-055 D4)
 
@@ -247,10 +269,38 @@ avoid).
 identical output to the CLI `compare` command for equivalent flags, both
 before and after the rewrite.
 
-**Progress:** not started. Deliberately last and gated on Phase 2 — a
-rewrite before `CompareRequest` can express `abi_compare`'s full parameter
-set would either lose capability (dropping a parameter the tool currently
-accepts) or invent an ad hoc extension outside ADR-055's own decision.
+**Progress:** done. `abi_compare` builds one `CompareRequest` and calls
+`run_compare_request_v2`; `mcp_server.py` no longer imports
+`compare_snapshots` at all. Both halves of the gate are executable in
+`tests/test_mcp_server_unit.py`'s `TestAbiCompareCliParity`: the source-level
+absence check (comments stripped first — the function now *documents* what it
+stopped calling), and CLI-parity assertions over a flag matrix (defaults,
+policy profile, policy file, suppression file, `--show-only`,
+`--report-mode`, severity-aware gating) covering the rendered report and the
+exit code. Parity was additionally verified as a before/after diff of the
+tool's own output across that matrix, so the rewrite is shown not to have
+moved anything rather than only agreeing with the CLI.
+
+Three findings worth carrying forward:
+
+1. One MCP guard had to become *request* surface: `_resolve_input` pinned
+   `follow_linker_scripts=False` because the tool size-checks only the
+   caller-supplied path, and a GNU ld script's `INPUT()` target would bypass
+   that. `InputSpec.follow_linker_scripts` (default `True`, matching
+   `resolve_input`'s own default) carries it now. Path containment and file
+   size stayed MCP-local, applied before the request is built — those
+   constrain untrusted input, which really is the front end's job.
+2. The report matches the CLI's exactly, except for two keys the CLI's
+   renderer adds and this tool has never emitted (`old_evidence_depth`/
+   `new_evidence_depth`).
+3. One intentional behaviour change: an unsupported `language` is now a
+   structured validation error instead of a value passed quietly down the
+   resolver — `CompareRequest.validate()` doing what the CLI's `--lang`
+   choice already did (ADR-037 D9's front-end parity), so it is recorded as
+   intended rather than tolerated.
+
+`used_by`/`required_symbols` scoping and severity/exit-code computation
+stayed MCP glue over the returned `CompareResult`, exactly as scoped above.
 
 ### Phase 5 — extend the other MCP tools to the same parity (deferred)
 
@@ -265,7 +315,8 @@ this before Phase 4 is done.
 of `abi_compare`'s post-Phase-4 parameter set for every concept `dump`
 and `compare` share.
 
-**Progress:** not started; blocked on Phase 4.
+**Progress:** not started — but no longer blocked: Phase 4 is done, which
+was its only stated precondition.
 
 ### Phase 6 — ADR-049 sequencing constraint (no new work here)
 
@@ -294,14 +345,27 @@ actual progress in that plan's own "Work breakdown," not here.
 
 ## 6. Definition of done
 
-- All four ADR-055 decisions (D1–D4) implemented and tested per their
+All met:
+
+- [x] All four ADR-055 decisions (D1–D4) implemented and tested per their
   individual gates above.
-- `tests/test_mcp_server_unit.py`'s `abi_compare` parity test passes against
-  both the pre- and post-rewrite CLI `compare` output for a representative
-  input matrix (binary-only, headers, snapshot inputs, `used_by`-scoped,
-  severity-aware).
-- `docs/reference/python-api-reference.md` and
+- [x] `tests/test_mcp_server_unit.py`'s `abi_compare` parity test passes
+  against both the pre- and post-rewrite CLI `compare` output for a
+  representative input matrix. Two deliberate narrowings of the matrix this
+  line originally listed, each for a reason rather than for convenience:
+  *binary-only/headers* inputs need a real compiled library (the marker lanes
+  this fast-suite test can't require), and the JSON-snapshot inputs it does
+  use exercise the same request-building and classification path; and
+  *`used_by`-scoped* runs are deliberately excluded because that scoping is
+  applied after a result exists and has no CLI-comparable rendering here —
+  the sibling `TestAbiCompare` scoping tests own it. *Snapshot inputs* and
+  *severity-aware* are both covered.
+- [x] `docs/reference/python-api-reference.md` and
   `docs/reference/mcp-tools-reference.md` regenerated and committed.
-- ADR-055's status line updated from "Proposed" to "Accepted —
-  implemented" (or the individual D1–D4 statuses split out, if they land
-  in separate PRs on different schedules).
+- [x] ADR-055's status line updated from "Proposed" to "Accepted —
+  implemented".
+
+Remaining work tracked elsewhere, not reopening this plan: Phase 5
+(`abi_dump`/`abi_scan` parity) is unblocked and still open, and migrating the
+CLI onto `run_compare_request` is a possible future change under Phase 2's
+recorded decision (b).

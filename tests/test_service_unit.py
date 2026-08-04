@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from abicheck.api_types import CompareRequest, InputSpec
+from abicheck.api_types import CompareRequest, CompareResult, InputSpec
 from abicheck.checker_types import DiffResult
 from abicheck.comparability import compute_extraction_contract
 from abicheck.errors import ScopeMismatchError, SnapshotError, ValidationError
@@ -25,6 +25,7 @@ from abicheck.service import (
     resolve_input,
     run_compare,
     run_compare_request,
+    run_compare_request_v2,
     run_dump,
     sniff_text_format,
 )
@@ -4558,3 +4559,91 @@ class TestMetadataAttachFailuresAreSwallowed:
         snap = self._snap()
         _try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
         assert snap.numpy_capi is None
+
+
+class TestRunCompareRequestV2:
+    """ADR-055 D2: the typed entry point, and that it did not fork behaviour."""
+
+    def _pair(self, tmp_path):
+        old = AbiSnapshot(library="libtest", version="1.0")
+        new = AbiSnapshot(library="libtest", version="2.0")
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(old, old_p)
+        save_snapshot(new, new_p)
+        return CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+
+    def test_returns_a_compare_result(self, tmp_path):
+        result = run_compare_request_v2(self._pair(tmp_path))
+        assert isinstance(result, CompareResult)
+        assert isinstance(result.diff, DiffResult)
+        assert result.old_snapshot.version == "1.0"
+        assert result.new_snapshot.version == "2.0"
+
+    def test_tuple_entry_point_returns_the_same_three_objects(self, tmp_path):
+        """The legacy shape is a *view* of this one, not a second run.
+
+        Asserted on field values rather than identity: the two calls resolve
+        their own snapshots, so identity would only prove they both ran.
+        """
+        request = self._pair(tmp_path)
+        diff, old, new = run_compare_request(request)
+        typed = run_compare_request_v2(request)
+        assert (old.version, new.version) == (
+            typed.old_snapshot.version,
+            typed.new_snapshot.version,
+        )
+        assert diff.verdict == typed.diff.verdict
+        assert len(diff.changes) == len(typed.diff.changes)
+
+    def test_suppression_is_none_when_the_request_names_no_file(self, tmp_path):
+        assert run_compare_request_v2(self._pair(tmp_path)).suppression is None
+
+    def test_carries_the_resolved_suppression_list(self, tmp_path):
+        """What ADR-055 D4 needs: the resolved list, without a second load.
+
+        ``DiffResult`` carries the resolved policy file but never the
+        suppression list, so before this a front end applying post-
+        classification scoping (``appcompat.scope_diff_to_app``) had to load
+        the same file again itself.
+        """
+        supp = tmp_path / "suppress.yaml"
+        supp.write_text(
+            "version: 1\nsuppressions:\n  - symbol: _Z1gone\n    reason: test\n",
+            encoding="utf-8",
+        )
+        request = self._pair(tmp_path).replace(suppress=supp)
+        result = run_compare_request_v2(request)
+        assert result.suppression is not None
+        assert len(result.suppression.rule_identities()) == 1
+
+    def test_follow_linker_scripts_is_forwarded_per_side(self, tmp_path, monkeypatch):
+        """ADR-055 D4: the MCP server's resource guard is request surface.
+
+        ``resolve_input`` follows a GNU ld linker script by default; the MCP
+        tools must not, because they size-check only the caller-supplied path.
+        """
+        import abicheck.service as service_mod
+
+        captured: dict[str, object] = {}
+        original = service_mod.resolve_input
+
+        def _spy(path, headers=None, includes=None, version="", lang="c++", **kwargs):
+            captured[version] = kwargs.get("follow_linker_scripts")
+            return original(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+        import dataclasses
+
+        base = self._pair(tmp_path)
+        run_compare_request_v2(
+            base.replace(
+                old=dataclasses.replace(
+                    base.old, version="old", follow_linker_scripts=False
+                ),
+                new=dataclasses.replace(base.new, version="new"),
+            )
+        )
+        assert captured["old"] is False
+        # Unset stays the historical default rather than inheriting the other side.
+        assert captured["new"] is True

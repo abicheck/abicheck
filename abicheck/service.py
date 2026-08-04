@@ -33,7 +33,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .api_types import CompareRequest, InputSpec, OutputSpec
+from .api_types import CompareRequest, CompareResult, InputSpec, OutputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
@@ -1634,8 +1634,38 @@ def run_compare_request(
     a ``CompareRequest`` and calls this, so defaults cannot diverge between
     invocation paths. The legacy keyword-argument :func:`run_compare` is a thin
     shim that builds the request and delegates here.
+
+    Unchanged for every existing caller (ADR-055 D2 is explicitly additive):
+    this is now a thin tuple-shaped view of
+    :func:`run_compare_request_v2`, which owns the implementation and returns
+    the typed :class:`~abicheck.api_types.CompareResult`. Delegating rather
+    than keeping a second copy is what stops the two shapes from drifting into
+    two different resolution behaviours — the failure this ADR exists to
+    prevent, not one to reintroduce inside the fix for it.
+
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
+    Raises:
+        ValidationError: If the request fails :meth:`CompareRequest.validate`.
+        SnapshotError: If either input cannot be loaded.
+    """
+    return run_compare_request_v2(request).as_tuple()
+
+
+def run_compare_request_v2(request: CompareRequest) -> CompareResult:
+    """Compare two ABI inputs and return a typed :class:`CompareResult`.
+
+    ADR-055 D2. Identical work to :func:`run_compare_request` — this is the
+    implementation both entry points share — differing only in the returned
+    shape: a struct whose future fields are additive, instead of a tuple whose
+    fourth element would break every positional caller.
+
+    The ``_v2`` name is deliberate and deliberately temporary: it is an
+    internal migration seam, not user-facing vocabulary a caller types daily
+    the way ``run_scan``/``run_compare_request`` are. Renaming it to something
+    permanent is out of scope for ADR-055 and belongs to whichever follow-up
+    retires the tuple-returning entry point (see that ADR's D2).
+
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`.
         SnapshotError: If either input cannot be loaded.
@@ -1702,6 +1732,7 @@ def run_compare_request(
             public_header_dirs=public_header_dirs,
             include_dependencies=side.include_dependencies,
             dump_manifest=evidence.dump_manifest,
+            follow_linker_scripts=side.follow_linker_scripts,
         )
         if side.sources or side.build_info:
             # Codex: same roots as resolve_input, plus dump_manifest's declared-public roots only (project_owned TU includes are private, so dump_manifest_public_roots not dump_manifest_header_roots).
@@ -1786,7 +1817,12 @@ def run_compare_request(
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
     result.old_metadata = collect_metadata(request.old.path)
     result.new_metadata = collect_metadata(request.new.path)
-    return result, old, new
+    # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
+    # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
+    # list this call already resolved instead of loading it a second time.
+    return CompareResult(
+        diff=result, old_snapshot=old, new_snapshot=new, suppression=suppression
+    )
 
 
 def run_compare(
@@ -1925,6 +1961,7 @@ from .service_scan import (  # noqa: E402,F401
 __all__ = [
     "Budget",
     "CompareRequest",
+    "CompareResult",
     "CompileContext",
     "CostEstimate",
     "InputSpec",
@@ -1945,6 +1982,7 @@ __all__ = [
     "run_audit",
     "run_compare",
     "run_compare_request",
+    "run_compare_request_v2",
     "run_dump",
     "run_scan",
     "run_scan_set",

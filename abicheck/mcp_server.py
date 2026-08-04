@@ -36,11 +36,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .policy_file import PolicyFile
     from .severity import SeverityConfig
-    from .suppression import SuppressionList
 
 from . import mcp_shared
+from .api_types import CompareRequest, CompareResult, InputSpec
 from .checker import DiffResult
 from .checker_policy import (
     API_BREAK_KINDS,
@@ -71,7 +70,6 @@ from .mcp_shared import (
 from .model import AbiSnapshot
 from .reporter import _finding_id, to_json, to_markdown
 from .serialization import snapshot_to_json
-from .service import compare_snapshots
 
 # ---------------------------------------------------------------------------
 # Configuration (environment variables or CLI flags)
@@ -872,51 +870,72 @@ def abi_compare(
                     {"status": "error", "error": f"Invalid show_only: {exc}"}
                 )
 
-        # Resolve inputs, load suppression/policy, and compare — all under
-        # a real timeout so we don't block the MCP stdio server.
-        def _do_compare() -> tuple[
-            AbiSnapshot, AbiSnapshot, DiffResult, PolicyFile | None, SuppressionList | None
-        ]:
-            old_snap = _resolve_input(
-                old_path, old_h, inc, "old", language, public_headers=old_h
+        # ADR-055 D4: one typed request through the Tier-2 chokepoint —
+        # `run_compare_request_v2` resolves both sides, loads policy and
+        # suppression, and classifies. This tool used to do all three itself
+        # (its own `_resolve_input` pair, its own `PolicyFile.load`/
+        # `SuppressionList.load`, and `compare_snapshots` for the middle step
+        # only), which made it a second compare engine that happened to share
+        # one internal function with the first.
+        #
+        # The MCP-specific resource guards stay here, ahead of the request:
+        # `_safe_read_path` (containment) and `_check_file_size` validate the
+        # caller-supplied policy/suppression paths *before* anything loads
+        # them, and `InputSpec.follow_linker_scripts=False` keeps
+        # MCP_MAX_FILE_SIZE authoritative for the library paths themselves
+        # (see `_resolve_input`'s docstring for why following a linker script
+        # would defeat it). Those are guards on untrusted input, not
+        # comparison logic — unlike the resolve/load/classify work above,
+        # they have no business in the shared service layer.
+        suppression_path = None
+        if suppression_file:
+            suppression_path = _safe_read_path(
+                suppression_file, label="suppression_file"
             )
-            new_snap = _resolve_input(
-                new_path, new_h, inc, "new", language, public_headers=new_h
-            )
-            suppression = None
-            if suppression_file:
-                from .suppression import SuppressionList
+            _check_file_size(suppression_path, label="suppression_file")
+        policy_path = None
+        if policy_file:
+            policy_path = _safe_read_path(policy_file, label="policy_file")
+            _check_file_size(policy_path, label="policy_file")
 
-                suppression_path = _safe_read_path(
-                    suppression_file, label="suppression_file"
-                )
-                _check_file_size(suppression_path, label="suppression_file")
-                suppression = SuppressionList.load(suppression_path)
-            pf = None
-            if policy_file:
-                from .policy_file import PolicyFile
+        def _do_compare() -> CompareResult:
+            from .service import run_compare_request_v2
 
-                policy_path = _safe_read_path(policy_file, label="policy_file")
-                _check_file_size(policy_path, label="policy_file")
-                pf = PolicyFile.load(policy_path)
-            return (
-                old_snap,
-                new_snap,
-                compare_snapshots(
-                    old_snap,
-                    new_snap,
-                    suppression=suppression,
-                    policy=policy,
-                    policy_file=pf,
-                    diagnostic_comparison=diagnostic_comparison,
-                    contract_evaluation=contract_evaluation,
+            request = CompareRequest(
+                old=InputSpec(
+                    path=old_path,
+                    headers=tuple(old_h),
+                    includes=tuple(inc),
+                    version="old",
+                    follow_linker_scripts=False,
                 ),
-                pf,
-                suppression,
+                new=InputSpec(
+                    path=new_path,
+                    headers=tuple(new_h),
+                    includes=tuple(inc),
+                    version="new",
+                    follow_linker_scripts=False,
+                ),
+                lang=language,
+                policy=policy,
+                policy_file_path=policy_path,
+                suppress=suppression_path,
+                diagnostic_comparison=diagnostic_comparison,
+                contract_evaluation=contract_evaluation,
             )
+            return run_compare_request_v2(request)
 
         try:
-            old_snap, new_snap, result, pf, suppression = _call_with_timeout(_do_compare)
+            compare_result = _call_with_timeout(_do_compare)
+            old_snap = compare_result.old_snapshot
+            new_snap = compare_result.new_snapshot
+            result = compare_result.diff
+            # The resolved policy/suppression the run actually classified with
+            # — read back off the result rather than re-derived here, so the
+            # `used_by`/`required_symbols` scoping below cannot apply a
+            # different policy than the comparison it is scoping.
+            pf = result.policy_file
+            suppression = compare_result.suppression
         except _futures.TimeoutError:
             elapsed = _time.monotonic() - t0
             _audit_log(

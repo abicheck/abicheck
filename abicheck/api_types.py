@@ -36,12 +36,20 @@ Gap 1 documents: ``CompareRequest`` previously had no way to express
 per-side ``CompileContext`` feature set at all, so a Python caller wanting
 that had to fall back to loose keyword arguments on lower-level functions.
 ``service.run_compare_request`` reads these new fields directly (see its own
-docstring for exactly how); it does not yet match every capability of the
-CLI's own, separately-maintained ``cli_resolve._resolve_compare_snapshots``
+docstring for exactly how); it does not match every capability of the CLI's
+own, separately-maintained ``cli_resolve._resolve_compare_snapshots``
 (project-config ``source.method`` inference, the set-input evidence-flag
-rejection guard, per-side AST-frontend override) — migrating the CLI onto
-this path, or extending it further to match, is deliberately left as
-follow-up work (ADR-055's own "Two-resolution-path finding").
+rejection guard, per-side AST-frontend override). Keeping those two paths —
+extending this one in parallel rather than migrating the CLI onto it — is a
+recorded decision, not an unfinished migration: ADR-055's
+"Two-resolution-path finding" answers it as option (b), on the grounds that
+the *capability* gap is what D1 existed to close, while rewriting the CLI's
+most heavily-tested resolution path buys nothing a user can observe. The
+three CLI-only capabilities are listed above so a future reader does not
+have to re-derive the actual scope of the difference.
+
+ADR-055 D2 adds :class:`CompareResult`, the result side of the same pair, and
+D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.
 """
 
 from __future__ import annotations
@@ -54,8 +62,11 @@ from typing import TYPE_CHECKING, Any
 from .errors import ValidationError
 
 if TYPE_CHECKING:
+    from .checker_types import DiffResult
     from .compile_context import CompileContext
     from .dump_manifest import DumpManifest
+    from .model import AbiSnapshot
+    from .suppression import SuppressionList
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
 SUPPORTED_LANGS = frozenset({"c", "c++"})
@@ -133,6 +144,17 @@ class InputSpec:
     # already inferred by splitting `headers` into files/dirs
     # (`split_public_header_inputs`) -- mirrors `--public-header-dir`.
     public_header_dirs: tuple[Path, ...] = ()
+    # ADR-055 D4: whether resolving `path` may follow a GNU ld linker script's
+    # INPUT()/GROUP() target to the real library. Default True matches
+    # `resolve_input`'s own default (and therefore every pre-existing caller);
+    # the MCP server sets it False because it enforces MCP_MAX_FILE_SIZE on the
+    # *caller-supplied* path before resolving, and following a script would
+    # reach a target that never went through that guard -- a tiny script
+    # pointing at a huge library would otherwise defeat the resource limit.
+    # Without this field, routing `abi_compare` through `run_compare_request`
+    # (D4) would have silently dropped that guard, so it is request surface,
+    # not an MCP-local wrapper concern.
+    follow_linker_scripts: bool = True
 
     @classmethod
     def of(
@@ -150,6 +172,7 @@ class InputSpec:
         dump_manifest: DumpManifest | None = None,
         compile: CompileContext | None = None,
         public_header_dirs: Iterable[Path | str] | None = None,
+        follow_linker_scripts: bool = True,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -165,6 +188,7 @@ class InputSpec:
             dump_manifest=dump_manifest,
             compile=compile,
             public_header_dirs=_path_tuple(public_header_dirs),
+            follow_linker_scripts=follow_linker_scripts,
         )
 
 
@@ -391,11 +415,59 @@ class CompareRequest:
         return replace(self, **changes)
 
 
+@dataclass(frozen=True)
+class CompareResult:
+    """What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
+
+    :func:`abicheck.service.run_compare_request` returns a bare
+    ``tuple[DiffResult, AbiSnapshot, AbiSnapshot]``, so every new thing a
+    comparison resolves has nowhere to land except a fourth tuple slot — a
+    break for every positional caller. This wraps that same tuple (``diff``/
+    ``old_snapshot``/``new_snapshot`` are exactly its three elements, in
+    order) so a future field (a resolved-depth record, ADR-049's evaluation
+    receipt, a coverage summary) is an additive attribute instead. The same
+    reasoning ADR-035 applied to ``ScanRequest``/``ScanResult``, generalized
+    to ``compare``.
+
+    ``suppression`` is the one field beyond that rename, and it is not
+    speculative: it is what ADR-055 D4 needed to exist. ``run_compare_request``
+    resolves the suppression list internally from
+    ``CompareRequest.suppress``, but a front end applying a *post*-
+    classification concern still needs the resolved object — ``appcompat``'s
+    ``scope_diff_to_app(..., suppression=...)`` is the concrete case. Without
+    it here, the MCP server would have had to keep its own
+    ``SuppressionList.load`` call purely to re-derive a value the service had
+    already loaded, which is precisely the duplication D4 removes. The
+    resolved policy file needs no equivalent field — ``DiffResult.policy_file``
+    already carries it.
+
+    Placed here rather than in ``service.py`` (where ADR-055's own file sketch
+    put it) so the request and its result live in one leaf module: this one is
+    already "typed request/response structs", imports nothing at runtime from
+    the service layer, and keeps a caller able to type-annotate a result
+    without importing ``service``'s much heavier graph.
+    """
+
+    diff: DiffResult
+    old_snapshot: AbiSnapshot
+    new_snapshot: AbiSnapshot
+    suppression: SuppressionList | None = None
+
+    def as_tuple(self) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+        """Return the legacy ``run_compare_request`` 3-tuple shape.
+
+        The tuple-returning entry points are implemented in terms of this, so
+        the two shapes cannot drift apart into two orderings.
+        """
+        return self.diff, self.old_snapshot, self.new_snapshot
+
+
 __all__ = [
     "HEADER_AST_FRONTENDS",
     "SUPPORTED_FRONTENDS",
     "SUPPORTED_LANGS",
     "CompareRequest",
+    "CompareResult",
     "InputSpec",
     "OutputSpec",
 ]
