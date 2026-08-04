@@ -252,8 +252,26 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     # unsuppressible, and advisory mode is about not gating, not about
     # hiding what was found -- the same split `contract.unresolved=warn`
     # already makes.
-    if _is_valid_coverage_contribution(report.get("contract_coverage_exit_contribution")):
-        report["contract_coverage_exit_contribution"] = 0
+    # Every block the aggregate *reads* it from, not just the document root:
+    # a `scan --against` report carries these fields under `diff` (and under
+    # `report.diff` for a service envelope), so zeroing only the root left an
+    # advisory scan's nested contribution intact and the trailing aggregate
+    # folded it back into the CI exit anyway (Codex review, reproduced).
+    #
+    # The traversal is imported rather than re-derived here. A local copy is
+    # what produced that bug: it agreed with the reader for the compare shape
+    # and silently disagreed for the scan one. Imported inside the function
+    # to keep this module's import graph a leaf (`run_plan` already reaches
+    # into `..aggregate` the same way); `aggregate` never imports back.
+    from ..aggregate import contract_coverage_blocks
+
+    for block in contract_coverage_blocks(report):
+        if not isinstance(block, dict):
+            continue
+        if _is_valid_coverage_contribution(
+            block.get("contract_coverage_exit_contribution")
+        ):
+            block["contract_coverage_exit_contribution"] = 0
 
 
 def _is_valid_coverage_contribution(raw: object) -> bool:

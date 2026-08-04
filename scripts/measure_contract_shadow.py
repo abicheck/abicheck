@@ -175,10 +175,17 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 #: `type_reachability.directly_referenced_stdlib_types` reaching the
 #: evaluator, which today receives surfaces and no snapshot; that is a
 #: threaded parameter and its own change, not a drive-by here.
+#: Full finding keys (`case:mode:kind:symbol`), not case names. A case can
+#: emit several findings, so pinning only the case still let one accepted
+#: gap be fixed while a *different* finding in the same case regressed --
+#: the count and the case set both stay identical, which is the exact
+#: substitution the identity pin exists to catch (Codex review).
 UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES = (
-    "ambiguous_namespaced_leaf",
-    "public_std_string_typedef_alias_layout_changed",
-    "public_stdlib_type_used_directly_layout_changed",
+    "ambiguous_namespaced_leaf:public:type_size_changed:Cache",
+    "public_std_string_typedef_alias_layout_changed:public:type_size_changed:"
+    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >",
+    "public_stdlib_type_used_directly_layout_changed:public:type_size_changed:"
+    "vector<int, std::allocator<int> >",
 )
 #: A replayed decision that out-claims the live one that wrote it. The
 #: persisted evaluator may only ever *weaken*, so this baseline is 0 and is
@@ -573,14 +580,15 @@ def metrics(
                 mode: len(m.unresolved_losses)
                 for mode, m in sorted(measurements.items())
             },
-            # The *identities*, not only the count. A budget alone cannot
-            # tell "the accepted gaps are still the accepted gaps" from "one
-            # was fixed and a different case regressed to UNKNOWN_*" -- the
-            # total is 2 either way, so a count-only gate would swap an
-            # accepted gap for a fresh false negative silently (Codex
-            # review).
+            # The full finding keys, not only the count and not only the
+            # case name. A budget alone cannot tell "the accepted gaps are
+            # still the accepted gaps" from "one was fixed and something
+            # else regressed to UNKNOWN_*" -- the total is identical either
+            # way -- and a case-name projection cannot tell them apart when
+            # the substitution happens *inside* one case (Codex review,
+            # twice).
             "unresolved_public_break_cases": {
-                mode: sorted({key.split(":", 1)[0] for key in m.unresolved_losses})
+                mode: sorted(m.unresolved_losses)
                 for mode, m in sorted(measurements.items())
             },
             "unevidenced_deltas": sum(

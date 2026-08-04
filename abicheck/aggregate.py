@@ -1222,7 +1222,7 @@ def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
     """
     return any(
         _is_valid_contribution(block.get("contract_coverage_exit_contribution"))
-        for block in _contract_coverage_blocks(data)
+        for block in contract_coverage_blocks(data)
     )
 
 
@@ -1256,14 +1256,24 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     root value is *unusable*, not merely absent, so a malformed root key
     cannot shadow a valid nested one.
     """
-    for block in _contract_coverage_blocks(data):
+    for block in contract_coverage_blocks(data):
         raw = block.get("contract_coverage_exit_contribution")
         if _is_valid_contribution(raw):
             return raw
     return 0
 
 
-def _contract_coverage_blocks(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+def contract_coverage_blocks(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Every block of *data* that may carry a contract-coverage contribution.
+
+    Public because it is a *contract between a reader and a writer*, not an
+    implementation detail of this module: ``buildsource.check_report.
+    _neutralize_gate`` has to zero the contribution in exactly the blocks
+    this function hands back. A local copy of the traversal there missed the
+    scan-shaped nested field and let an advisory scan gate CI anyway (Codex
+    review) -- so the two share one definition rather than two that agree
+    until one changes.
+    """
     """Every place a report may carry the contract-coverage keys, outermost
     first, so the outermost usable value wins and an inner one is only a
     *fallback* for an unusable outer one.
@@ -1338,14 +1348,14 @@ def _contract_coverage_incomplete(data: Mapping[str, Any]) -> bool:
     evidence).
 
     Searches the same blocks as the contribution, through the same shared
-    :func:`_contract_coverage_blocks` -- the two answer different questions
+    :func:`contract_coverage_blocks` -- the two answer different questions
     off the same keys in the same places, so a nesting one knows and the other
     does not is a guaranteed divergence. A non-list, or an empty list, is
     "nothing to report" -- the same fail-open reading as the contribution, and
     correct for every pre-2.26 report and every run without
     ``--contract-evaluation``.
     """
-    for block in _contract_coverage_blocks(data):
+    for block in contract_coverage_blocks(data):
         failures = block.get("contract_coverage_failures")
         if isinstance(failures, list):
             return bool(failures)

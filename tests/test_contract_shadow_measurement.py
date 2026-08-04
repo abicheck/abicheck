@@ -198,6 +198,31 @@ class TestUnresolvedLossMetric:
             shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES
         )
 
+    def test_the_pin_is_a_full_finding_key_not_just_a_case_name(self) -> None:
+        # A case can emit several findings, so a case-name projection still
+        # let one accepted gap be fixed while a different finding in the
+        # same case regressed -- count and case set both unchanged (Codex
+        # review). Every pinned entry must therefore carry the full
+        # `case:mode:kind:symbol` key.
+        for key in shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES:
+            assert key.count(":") >= 3, key
+            assert ":public:" in key, key
+
+    def test_an_intra_case_substitution_is_caught(self) -> None:
+        # The executable proof that the tightening was not cosmetic: swap
+        # one finding for another *within* a pinned case and the pin fires,
+        # where a case-name projection saw nothing.
+        known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
+        original = "ambiguous_namespaced_leaf:public:type_size_changed:Cache"
+        assert original in known
+        swapped = (known - {original}) | {
+            "ambiguous_namespaced_leaf:public:type_field_removed:Cache"
+        }
+        assert swapped - known  # the full-key pin sees the substitution
+        assert not {k.split(":", 1)[0] for k in swapped} - {
+            k.split(":", 1)[0] for k in known
+        }  # ...while the old case-name projection did not
+
     def test_the_known_list_is_consistent_with_the_budget(self) -> None:
         # Two statements of the same fact; if they drift, one of them is
         # lying about what is accepted.

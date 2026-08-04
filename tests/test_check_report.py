@@ -571,6 +571,65 @@ class TestAugmentReport:
         # unsuppressible, so the failures stay exactly as recorded.
         assert out["contract_coverage_failures"] == [{"provider": "public_header"}]
 
+    def test_advisory_neutralizes_a_scan_report_nested_contribution(self):
+        """A `scan --against` report carries these fields under `diff`.
+
+        Zeroing only the document root left the nested contribution intact,
+        and the aggregate — which explicitly reads the scan-shaped block —
+        folded it straight back into the CI exit, so an advisory scan gated
+        anyway (Codex review, reproduced end to end).
+        """
+        out = augment_report(
+            {
+                "scan_schema_version": "1.8",
+                "exit_code": 1,
+                "verdict": "NO_CHANGE",
+                "diff": {
+                    "verdict": "NO_CHANGE",
+                    "contract_coverage_exit_contribution": 1,
+                    "contract_coverage_failures": [{"provider": "public_header"}],
+                },
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit_code"] == 0
+        assert out["diff"]["contract_coverage_exit_contribution"] == 0
+        assert out["diff"]["contract_coverage_failures"] == [
+            {"provider": "public_header"}
+        ]
+
+    def test_neutralization_covers_every_block_the_aggregate_reads(self):
+        # The invariant behind the fix: the writer must zero exactly the
+        # blocks the reader consults. Asserting it against the shared
+        # traversal is what stops the two drifting apart again.
+        from abicheck.aggregate import contract_coverage_blocks
+
+        out = augment_report(
+            {
+                "scan_schema_version": "1.8",
+                "exit_code": 1,
+                "verdict": "NO_CHANGE",
+                "contract_coverage_exit_contribution": 1,
+                "diff": {
+                    "verdict": "NO_CHANGE",
+                    "contract_coverage_exit_contribution": 1,
+                },
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        blocks = contract_coverage_blocks(out)
+        assert len(blocks) >= 2
+        for block in blocks:
+            assert block.get("contract_coverage_exit_contribution", 0) == 0
+
     def test_deferred_keeps_its_contract_coverage_contribution(self):
         # `deferred` exists so the trailing aggregate computes the gate from
         # the real values -- neutralizing it there would blind that
