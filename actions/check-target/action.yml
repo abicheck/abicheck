@@ -231,6 +231,18 @@ inputs:
     description: 'Install system dependencies (castxml, gcc). Set to false if pre-installed.'
     required: false
     default: 'true'
+  dependency-source:
+    description: >-
+      How to install system dependencies: 'conda-forge',
+      'conda-forge-gcc14', 'conda-forge-clang20', 'system', or 'none'.
+      Forwarded verbatim to the root action's input of the same name, which
+      owns both the accepted-value list and the fallback to the legacy
+      `install-deps` boolean when this is empty. Set per check cell by
+      check-project.yml from the profile's own `dependency_source:` (G34
+      Phase C), so a GCC-profile cell and a Clang-profile cell in one run can
+      each provision a matching toolchain.
+    required: false
+    default: ''
   action-version:
     description: 'Recorded in the report envelope as the abicheck Action ref that ran this check.'
     required: false
@@ -517,6 +529,7 @@ runs:
         upload-sarif: 'false'
         python-version: ${{ inputs.python-version }}
         install-deps: ${{ inputs.install-deps }}
+        dependency-source: ${{ inputs.dependency-source }}
 
     # ── Always write the report envelope, regardless of the above steps' ───
     # outcomes (ADR-047 §7: "always execute the report-envelope-writing ─────

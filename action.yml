@@ -455,7 +455,11 @@ inputs:
       installs bear on Linux only — the macOS path installs only castxml via
       Homebrew and relies on Xcode's preinstalled clang, no bear), or 'none'
       (skip; dependencies must already be on PATH). Leave unset to fall back
-      to `install-deps` for backward compatibility.
+      to `install-deps` for backward compatibility. **On a Windows runner the
+      unset default is 'system', not 'conda-forge'** — every conda-forge
+      source is unsupported there, so the usual default would hard-fail
+      before analysis; an explicitly requested conda-forge* still errors
+      rather than being silently rewritten.
     required: false
     default: ''
   upload-sarif:
@@ -636,11 +640,32 @@ runs:
       env:
         INPUT_DEPENDENCY_SOURCE: ${{ inputs.dependency-source }}
         INPUT_INSTALL_DEPS: ${{ inputs.install-deps }}
+        RUNNER_OS: ${{ runner.os }}
       run: |
         if [ -n "$INPUT_DEPENDENCY_SOURCE" ]; then
           resolved="$INPUT_DEPENDENCY_SOURCE"
         elif [ "$INPUT_INSTALL_DEPS" = "false" ]; then
           resolved="none"
+        elif [ "$RUNNER_OS" = "Windows" ]; then
+          # The default below is a Linux/macOS default: every conda-forge*
+          # source is explicitly unsupported on Windows (the step further
+          # down that hard-fails it), because pyproject.toml's
+          # native-toolchain* pixi features don't cover win-64. Defaulting a
+          # Windows runner to conda-forge therefore resolves straight into
+          # that `exit 1` -- which nobody could have been relying on, so
+          # falling back to `system` here can only unblock. `system` is
+          # exactly what that error message already tells Windows users to
+          # pick, and install-deps.sh's own Windows branch warns and
+          # continues rather than failing, matching the "toolchain is
+          # pre-installed on the image" story an MSVC lane has anyway.
+          # An *explicit* conda-forge* still fails: asking for something
+          # unsupported should say so, not be silently rewritten.
+          #
+          # Reached for real since G34 Phase C, which lets an `os: windows`
+          # profile schedule a native `windows-latest` check cell (Codex
+          # review) -- before that, no Windows runner got this far through
+          # check-project.yml at all.
+          resolved="system"
         else
           resolved="conda-forge"
         fi

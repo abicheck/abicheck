@@ -251,6 +251,18 @@ on:
         description: 'Install system dependencies (castxml, gcc). Set to false if pre-installed.'
         type: boolean
         default: true
+      dependency-source:
+        description: >
+          How to install system dependencies — 'conda-forge',
+          'conda-forge-gcc14', 'conda-forge-clang20', 'system', or 'none'
+          (see the root action.yml's own input of the same name, which owns
+          the accepted-value list and the fallback to `install-deps` when
+          this is empty). Carried here so a single check can select a
+          toolchain the same way a check-project.yml matrix cell can
+          (G34 Phase C) — this workflow runs one check and reads no profile,
+          so there is nothing per-cell to derive it from.
+        type: string
+        default: ''
 
     outputs:
       outcome:
@@ -474,6 +486,7 @@ jobs:
           extra-args: ${{ inputs.extra-args }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
+          dependency-source: ${{ inputs.dependency-source }}
           action-version: ${{ format('{0}@{1}', steps.identity.outputs.repository, steps.identity.outputs.ref) }}
           # This job's own already-resolved identity (captured in "Capture
           # this reusable workflow's identity" above) -- check-target's own

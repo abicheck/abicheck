@@ -43,6 +43,7 @@ from abicheck.buildsource.run_plan import (
     RunPlan,
     RunPlanCheck,
     _compose_gcc_options,
+    _scheduling_fields_for_profile,
     generate_run_plan,
     to_aggregate_manifest,
 )
@@ -1663,3 +1664,145 @@ def test_check_to_dict_omits_kind_inappropriate_fields(
     else:
         assert "bundle_members" not in d
         assert d["binary_pattern"] == "x"
+
+
+class TestSchedulingProjection:
+    """G34 Phase C: each cell carries the runner it must be scheduled on and
+    the dependency source it provisions with, both derived from its own
+    profile — the two axes `check-project.yml` previously fixed for every
+    cell in a run."""
+
+    _RAW = {
+        "targets": {
+            "libfoo": {
+                "kind": "library",
+                "binary_pattern": "build/libfoo*.so",
+                "checks": [
+                    {"channel": "release", "depth": "headers", "required": True},
+                ],
+            },
+        },
+        "profiles": {
+            "linux-gcc14": {
+                "contract": True,
+                "os": "linux",
+                "dependency_source": "conda-forge-gcc14",
+            },
+            "windows-msvc": {"contract": True, "os": "windows"},
+            "plain": {"contract": True},
+        },
+        "baseline": {
+            "channels": {
+                "release": {"source": "github-release", "asset_pattern": "libfoo-*"},
+            },
+        },
+    }
+
+    def _plan(self) -> dict[str, object]:
+        plan, report = generate_run_plan(
+            _parsed(self._RAW),
+            {p: _bo("libfoo") for p in ("linux-gcc14", "windows-msvc", "plain")},
+        )
+        assert report.ok
+        return {c.profile_id: c for c in plan.checks}
+
+    def test_os_selects_the_runner(self) -> None:
+        by_profile = self._plan()
+        assert by_profile["linux-gcc14"].runs_on == "ubuntu-latest"
+        assert by_profile["windows-msvc"].runs_on == "windows-latest"
+
+    def test_a_profile_without_os_keeps_todays_runner(self) -> None:
+        """Every profile written before this phase is this one."""
+        assert self._plan()["plain"].runs_on == "ubuntu-latest"
+
+    def test_runs_on_is_always_serialized(self) -> None:
+        """Unlike every other optional field here: `check-project.yml` reads
+        it as `matrix.runs_on`, and a matrix entry missing the key resolves
+        `runs-on:` to the empty string, scheduling nothing."""
+        d = self._plan()["plain"].to_dict()
+        assert d["runs_on"] == "ubuntu-latest"
+
+    def test_dependency_source_projects_per_cell(self) -> None:
+        by_profile = self._plan()
+        assert by_profile["linux-gcc14"].dependency_source == "conda-forge-gcc14"
+        assert (
+            by_profile["linux-gcc14"].to_dict()["dependency_source"]
+            == "conda-forge-gcc14"
+        )
+
+    def test_an_undeclared_dependency_source_stays_empty(self) -> None:
+        """Empty leaves the caller's workflow-level default standing, rather
+        than this module picking one for a project that never asked."""
+        check = self._plan()["windows-msvc"]
+        assert check.dependency_source == ""
+        assert "dependency_source" not in check.to_dict()
+
+    def test_both_fields_round_trip(self) -> None:
+        check = self._plan()["linux-gcc14"]
+        assert RunPlanCheck.from_dict(check.to_dict()) == check
+
+    def test_a_plan_from_an_older_abicheck_still_resolves_a_runner(self) -> None:
+        """`from_dict` defaults a missing `runs_on` rather than emptying it —
+        the same case `check-project.yml`'s own `|| 'ubuntu-latest'` covers on
+        its side."""
+        assert RunPlanCheck.from_dict({"check_id": "x"}).runs_on == "ubuntu-latest"
+
+    def test_bundle_cells_are_scheduled_too(self) -> None:
+        raw = {
+            "targets": {
+                "libpvxs": {
+                    "kind": "library",
+                    "binary_pattern": "lib/libpvxs.so*",
+                    "bundle": "pvxs-release",
+                },
+            },
+            "bundles": {
+                "pvxs-release": {
+                    "targets": ["libpvxs"],
+                    "checks": [
+                        {"channel": "release", "depth": "binary", "required": True},
+                    ],
+                },
+            },
+            "profiles": {
+                "linux-gcc14": {
+                    "contract": True,
+                    "os": "linux",
+                    "dependency_source": "conda-forge-clang20",
+                },
+            },
+            "baseline": {
+                "channels": {
+                    "release": {
+                        "source": "github-release",
+                        "asset_pattern": "pvxs-*",
+                    },
+                },
+            },
+        }
+        plan, report = generate_run_plan(_parsed(raw), {"linux-gcc14": _bo("libpvxs")})
+        assert report.ok
+        [check] = plan.checks
+        assert check.runs_on == "ubuntu-latest"
+        assert check.dependency_source == "conda-forge-clang20"
+
+    def test_an_unknown_profile_falls_back_to_the_defaults(self) -> None:
+        """Matches how every other `*_for_profile` helper here treats a
+        profile it cannot find: the cell is generated either way, and a
+        missing profile is a separate, already-reported error rather than
+        this helper's to raise on."""
+        assert _scheduling_fields_for_profile(_parsed(self._RAW), "nope") == (
+            "ubuntu-latest",
+            "",
+        )
+
+    def test_an_unroutable_os_raises_rather_than_defaulting(self) -> None:
+        """Generation refuses rather than quietly scheduling a non-Linux
+        profile on a Linux runner. `project validate` reports the same
+        condition first; reaching this means validation was skipped."""
+        raw = {
+            **self._RAW,
+            "profiles": {"odd": {"contract": True, "os": "freebsd"}},
+        }
+        with pytest.raises(ValueError, match="does not name a platform"):
+            generate_run_plan(_parsed(raw), {"odd": _bo("libfoo")})

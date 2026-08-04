@@ -626,11 +626,90 @@ class TestManifestAndIdentity:
         assert r.targets[0].analyzed
 
 
+class TestErrorReleaseReportFindings:
+    """`compare-release` sets the top-level verdict to ERROR when one library
+    fails, but `_format_release_json` still emits `bundle_findings`/
+    `matrix_findings` for whatever did complete (Codex review). Dropping them
+    lost real evidence from the profile most likely to differ."""
+
+    _GCC = "libfoo@linux-gcc14#release@headers"
+    _CLANG = "libfoo@linux-clang20#release@headers"
+    _MATRIX_FINDING = {
+        "kind": "build_config_changed",
+        "symbol": "x",
+        "description": "flag drift",
+        "old_value": None,
+        "new_value": None,
+    }
+
+    @staticmethod
+    def _write(d, target_id: str, payload: dict) -> None:
+        (d / f"abi-report-{target_id}.json").write_text(json.dumps(payload))
+
+    def _expect_both(self):
+        return ExpectedTargets.from_lists([self._GCC, self._CLANG], [])
+
+    def test_findings_survive_an_operational_error(self, tmp_path):
+        self._write(
+            tmp_path,
+            self._GCC,
+            {"verdict": "ERROR", "matrix_findings": [dict(self._MATRIX_FINDING)]},
+        )
+        self._write(tmp_path, self._CLANG, {"verdict": "COMPATIBLE", "changes": []})
+        r = aggregate_reports_dir(tmp_path, expected=self._expect_both())
+        (entry,) = r.finding_matrix
+        assert entry.kinds == ("build_config_changed",)
+        assert entry.affected_profiles == ("linux-gcc14",)
+
+    def test_an_errored_report_still_clears_nobody(self, tmp_path):
+        """It can convict its own profile and nothing more: a run that failed
+        cannot have accounted for everything."""
+        self._write(tmp_path, self._GCC, {"verdict": "ERROR", "matrix_findings": []})
+        self._write(
+            tmp_path,
+            self._CLANG,
+            {
+                "verdict": "BREAKING",
+                "changes": [dict(self._MATRIX_FINDING, severity="error")],
+            },
+        )
+        r = aggregate_reports_dir(tmp_path, expected=self._expect_both())
+        (entry,) = r.finding_matrix
+        assert entry.affected_profiles == ("linux-clang20",)
+        assert entry.unaffected_profiles == ()
+        assert entry.undetermined_profiles == ("linux-gcc14",)
+
+    def test_the_operational_error_gate_is_unchanged(self, tmp_path):
+        """Reading findings must not soften the blocking exit an ERROR report
+        already forces."""
+        self._write(
+            tmp_path,
+            self._GCC,
+            {"verdict": "ERROR", "matrix_findings": [dict(self._MATRIX_FINDING)]},
+        )
+        r = aggregate_reports_dir(
+            tmp_path, expected=ExpectedTargets.from_lists([self._GCC], [])
+        )
+        assert r.exit_code() == 4
+
+
 class TestRendering:
+    def test_schema_version_is_pinned(self):
+        """The one place the version is written as a literal.
+
+        Every other assertion compares against `AGGREGATE_SCHEMA_VERSION`,
+        which makes them structural but vacuous as version checks — they
+        compare the constant with itself. This pin is what makes a bump
+        deliberate: it fails until someone updates it in the same change
+        that updates `aggregate_report.schema.json`, its published mirror,
+        and the docs (CodeRabbit review).
+        """
+        assert AGGREGATE_SCHEMA_VERSION == "1.2"
+
     def test_json_schema_shape(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS)).to_dict()
-        assert d["aggregate_schema_version"] == "1.1"
+        assert d["aggregate_schema_version"] == AGGREGATE_SCHEMA_VERSION
         assert d["status"] == "fail"
         assert d["gate"]["exit_code"] == 1
         assert d["gate"]["coverage_blocking"] is True

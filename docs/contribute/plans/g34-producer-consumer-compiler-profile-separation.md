@@ -90,15 +90,17 @@ confirmed by reading the workflow, not asserted from a design doc):
   resolve to a Clang 12 executable with no error — the snapshot honestly
   records what actually ran, but nothing fails the gated check for the
   mismatch itself.
-- **No per-finding cross-profile reconciliation.** `aggregate` (G32/ADR-050,
-  done) already produces `affected_profiles`/`incomplete_profiles`/
-  `unanalyzed_profiles` and a `verdict_by_profile` map at the *target*
-  level, but does not merge the *same logical finding* appearing in two
-  different profiles' reports into one entry with its own
-  `affected_profiles` list — this was flagged as an explicit open item
-  in `docs/contribute/plans/index.md`'s G32 row ("this is pure
-  target-level aggregation, not per-finding reconciliation") and is not a
-  new gap this review discovered, just one this plan's Phase D closes.
+- ~~**No per-finding cross-profile reconciliation.**~~ **Closed by Phase D.**
+  `aggregate` (G32/ADR-050, done) already produced
+  `affected_profiles`/`incomplete_profiles`/`unanalyzed_profiles` and a
+  `verdict_by_profile` map at the *target* level, but did not merge the
+  *same logical finding* appearing in two different profiles' reports into
+  one entry with its own `affected_profiles` list. That limit was a known
+  one carried over from G32, not a new gap this review discovered.
+  `AggregateResult.finding_matrix` now does it; see Phase D below.
+  (The earlier wording quoted a sentence from `index.md`'s G32 row that is
+  no longer there — CodeRabbit review; a dangling quote is worse than no
+  citation, so the fact is stated directly instead.)
 
 ## Goal & acceptance criteria
 
@@ -221,51 +223,361 @@ confirmed by reading the workflow, not asserted from a design doc):
       independent resolution, no-override case) cover the schema/projection
       slice landed here.
 
-### Phase C — Actions-matrix native-OS scheduling + per-cell dependency source (L)
+### Phase C — Actions-matrix native-OS scheduling + per-cell dependency source (L) — **done**
 
-- [ ] `check-project.yml`'s check-matrix job's `runs-on:` is derived from
+- [x] `check-project.yml`'s check-matrix job's `runs-on:` is derived from
       the resolved profile's `os:` field (`ubuntu-latest`/`windows-latest`/
-      `macos-latest`) instead of the current hardcoded `ubuntu-latest` —
-      this is the change with the widest blast radius in this plan (a
-      reusable workflow every project consuming `check-project.yml`
-      depends on), so it ships behind the existing `matrix.profile_id`
-      indirection with a compatibility test asserting an `os`-less profile
-      (today's default) still resolves to `ubuntu-latest` unchanged.
-- [ ] `check-project.yml`/`actions/check-target/action.yml` gain a
+      `macos-latest`) instead of the current hardcoded `ubuntu-latest`.
+      Derived once, at plan time: `runner_label_for_os` (`project_targets.py`)
+      is the mapping, `RunPlanCheck.runs_on` carries it, and the workflow
+      reads `matrix.runs_on` — so the widest-blast-radius half of this plan
+      is a one-expression change in the reusable workflow rather than
+      scheduling logic embedded in YAML. A profile with **no** `os:` (every
+      profile written before this phase) resolves to `ubuntu-latest`
+      unchanged, which `test_a_profile_without_os_keeps_todays_runner` pins.
+      Two decisions worth not re-litigating: `runs_on` is serialized even at
+      its default, unlike every other optional field, because a matrix entry
+      missing the key resolves `runs-on:` to the empty string and schedules
+      *nothing*; and an `os:` naming no schedulable platform is a hard error
+      at both `project validate` and `project plan` time rather than a
+      fallback to Linux, since a cell scheduled on the wrong platform
+      reports success having gated the wrong thing. A GitHub-hosted runner
+      label (`ubuntu-24.04`) passes through verbatim — `os:` was a
+      free-form, never-consulted string before this phase, so narrowing it
+      to platform names only would be a breaking config change dressed up
+      as a feature.
+- [x] `check-project.yml`/`actions/check-target/action.yml` gain a
       per-cell `dependency-source` input, resolved from the profile the
-      same way `compile_gcc_path`/`compile_gcc_options` already are,
-      forwarded to the root `action.yml`'s existing `dependency-source`
-      input instead of only the legacy `install-deps` boolean.
-- [ ] `docs/reference/check-target.md` and the GitHub Actions integration
-      docs (G30) document the new inputs; `tests/test_build_source_cli.py`
-      (or a dedicated new test module) covers the `os:`-to-`runs-on:`
-      resolution logic in isolation (this is plain Python string mapping,
-      testable without actually running the workflow).
-- [ ] Out of scope for this phase: an actual native `windows-latest` CI
-      lane exercising a real MSVC profile end-to-end through
-      `check-project.yml` — that needs a real fixture project and belongs
-      in G17 (real-world validation corpus) once the scheduling mechanism
-      itself lands here.
+      same way `compile_gcc_path`/`compile_gcc_options` already are
+      (`profiles.<id>.dependency_source` → `RunPlanCheck.dependency_source`
+      → `matrix.dependency_source || inputs.dependency-source`), forwarded
+      to the root `action.yml`'s existing `dependency-source` input instead
+      of only the legacy `install-deps` boolean. Both unset leaves that
+      boolean deciding exactly as before — the root Action already owns that
+      fallback, so the workflow forwards one expression rather than keeping
+      a second copy of the rule. The accepted-value list is mirrored from
+      `action.yml` (its own validation case is the fact owner) and
+      `TestActionYmlAgreesOnDependencySources` asserts the two agree, plus
+      that `check-target` actually forwards the input — a per-cell value
+      accepted but never forwarded would be silently inert, which is the
+      exact failure this phase is about.
+- [x] `docs/reference/check-target.md`, `run-plan-schema.md`,
+      `project-targets-schema.md`, and `reusable-workflows.md` document the
+      new fields/inputs; `tests/test_project_targets_scheduling.py` covers
+      the `os:`-to-`runs-on:` resolution and the `dependency_source` schema
+      in isolation (plain Python, no workflow run), and
+      `test_run_plan.py`'s `TestSchedulingProjection` covers the projection
+      into target and bundle cells.
+- [x] **The unset `dependency-source` default is OS-aware.** Making Windows
+      cells schedulable for the first time exposed that the existing default
+      is a *Linux/macOS* default: an unset `dependency-source` with
+      `install-deps: true` resolves to `conda-forge`, and `action.yml` then
+      explicitly hard-fails every conda-forge source on Windows (pixi's
+      `native-toolchain*` features don't cover win-64), so a Windows cell
+      declaring no `dependency_source:` — including this plan's own
+      `windows-msvc` example — would have been scheduled straight into an
+      `exit 1` before reaching analysis (Codex review, P1). Fixed in the one
+      place that already owns the fallback rule and already knows the
+      platform: `action.yml`'s own `Resolve dependency-source` step now
+      resolves an unset value to `system` on a Windows runner. That is what
+      the conda-forge-on-Windows error message already tells users to pick,
+      and `install-deps.sh`'s Windows branch warns and continues rather than
+      failing, matching the "toolchain is pre-installed on the image" story
+      an MSVC lane has anyway. Deliberately *not* fixed by injecting a
+      default into the run-plan: that would have made a per-cell value
+      silently outrank the workflow-level `dependency-source` input for
+      Windows cells only. An **explicit** conda-forge* still fails —
+      requesting something unsupported should say so rather than be
+      rewritten — and no existing consumer can regress, since the path this
+      replaces was an unconditional error. `TestWindowsDependencySourceDefault`
+      extracts and *runs* the real resolve script rather than string-matching
+      it, so a future edit that keeps the wording but changes the branching
+      still fails.
+- [x] **The `check` job's own shell steps resolve their Python interpreter.**
+      Three of them (`Resolve candidate binary/binaries`, `Synthesize
+      pre-check operational-error report`, `Sanitize check-id for artifact
+      name`) invoked `python3` directly, which Git Bash on a Windows runner
+      does not resolve — the Windows CPython layout ships `python.exe` only.
+      Harmless while every cell ran on Linux; a guaranteed failure the moment
+      this phase let one land on `windows-latest`, and a compounding one:
+      candidate resolution fails, then the envelope-writing fallback fails
+      with it, so the cell produces no report at all rather than an
+      operational-error one (Codex review). All three now resolve the
+      interpreter the way `action/run.sh` already does
+      (`PY="$(command -v python3 || command -v python)"`), and
+      `test_check_job_shell_steps_resolve_their_python_interpreter` fails on
+      any future bare invocation in this job. Two pre-existing tests that
+      extracted these steps' embedded Python by splitting on the literal
+      `python3 -c` broke on the change and now split on the flag instead, so
+      they no longer pin an interpreter name they don't care about.
+- [ ] Out of scope for this phase, still open: an actual native
+      `windows-latest` CI lane exercising a real MSVC profile end-to-end
+      through `check-project.yml` — that needs a real fixture project and
+      belongs in G17 (real-world validation corpus) now that the scheduling
+      mechanism itself has landed here.
 
-### Phase D — per-finding cross-profile reconciliation (M, depends on G32)
+### Phase D — per-finding cross-profile reconciliation (M, depends on G32) — **done**
 
-- [ ] A new aggregate stage (extending `abicheck/aggregate*.py`'s existing
-      per-profile grouping, G32/ADR-050) computes a stable per-finding
-      identity (reusing `finding_identity.py`'s tiered
-      canonical/normalized/reduced resolution, ADR-049 Phase 2 — the same
-      identity model `diff_filtering.py`'s cross-detector dedup key
-      already uses) across every profile's report for one target, and
-      emits one entry per distinct finding with its own
-      `affected_profiles`/`unaffected_profiles` lists instead of the
-      finding appearing once per profile report.
-- [ ] A finding present in every analyzed profile and one present in only
-      one profile are visibly distinguished in the aggregate JSON/Markdown
-      output (not just inferable by cross-referencing per-profile reports
-      by hand).
-- [ ] `tests/test_aggregate*.py` gains a fixture with the same finding
-      appearing (with the same reduced identity) in two profile reports
-      and a profile-specific finding appearing in only one, asserting the
-      merged/split output shape.
+- [x] `AggregateResult.finding_matrix` (`abicheck/aggregate.py`) extends the
+      existing per-profile grouping (G32/ADR-050) with a per-finding one,
+      keyed by `aggregate_findings.resolve_report_change_identity` — a new
+      read-back adapter that runs the *same* tiered canonical/normalized/
+      reduced resolution (ADR-049 Phase 2, the identity model
+      `diff_filtering.py`'s cross-detector dedup key already uses) over a
+      report's serialized `changes[]` entry instead of a live `Change`. One
+      `FindingMatrixEntry` per distinct finding per `base_target`, with its
+      own `affected_profiles`/`unaffected_profiles` lists. Because the
+      identity model collapses the rich-vs-symbols-only detector pair, one
+      event two profiles report under different kinds (`func_removed` where
+      DWARF was available, `func_removed_elf_only` where it wasn't) is one
+      entry carrying both `kinds`, not two unrelated findings — the case a
+      real GCC/Clang/MSVC matrix actually produces. `kinds` unions across
+      *every* check a profile ran, not just its first, since one profile can
+      run a `binary`-depth and a `headers`-depth check that report the same
+      event under the two equivalent kinds.
+- [x] Profiles on **different C++ ABIs** no longer falsely clear each other,
+      which the mangled-name identity alone could not prevent: one
+      declaration is spelled `_ZN3lib3addEii` by an Itanium toolchain and
+      `?add@lib@@YAHHH@Z` by MSVC, so a Linux and a Windows profile
+      reporting one logical removal produced two profile-specific entries,
+      each asserting the *other* profile was clean of it.
+      `cross_abi_declaration` recovers the declaration's qualified name from
+      either scheme (`diff_cxx_rules.itanium_qualified_name`/
+      `msvc_qualified_name` — pure structural parsers, no demangler
+      subprocess, so this works identically on every host), and
+      `resolve_cross_abi_identity` re-resolves the identity from it, keeping
+      the discriminator so a removal and an addition on one declaration are
+      not treated as related.
+- [x] **That key withholds a clean verdict; it never merges two findings.**
+      Neither parser recovers parameter types, so `add(int, int)` and
+      `add(double)` reduce to the same key — meaning two profiles matching on
+      it may be reporting one shared removal or two unrelated overload
+      removals, and *nothing in a report distinguishes those*. Withholding
+      needs no proof and is therefore safe; merging asserts a pairing the
+      evidence does not establish, so it is not done. A profile holding a
+      finding on the same declaration under another mangling is reported
+      `undetermined`, and the shared declaration is exposed on the entry so a
+      consumer can present the two together without the report claiming they
+      are one finding.
+- [x] **Withholding applies only where the spellings cannot be compared.**
+      Sharing a qualified name is not itself ambiguity: two Itanium manglings
+      encode their parameter types, so `_ZN3lib3addEii` vs `_ZN3lib3addEd`
+      *proves* two distinct overloads, and reporting either profile as
+      merely undetermined threw away real precision on the commonest
+      configuration of all — a GCC and a Clang profile, both Itanium. The
+      clean verdict is now withheld only when the other profile's spelling
+      is in a *different* scheme (Itanium vs MSVC, not comparable without a
+      type-encoding translator this module does not have) or normalizes to
+      the *same* symbol. That second case is the Mach-O quirk: a macOS
+      toolchain prefixes an extra leading underscore, so one entity appears
+      as two raw symbols and two primary identities — `comparable_mangled_symbol`
+      recognizes them as one. (Fifth Codex review round; the Mach-O sub-case
+      was found while implementing it, and is why the rule compares
+      normalized symbols rather than just schemes.) (An intermediate revision *did* merge when each
+      profile contributed exactly one identity; the third Codex review round
+      pointed out that cardinality is not evidence — Linux losing
+      `add(int, int)` while Windows loses `add(double)` passes that check and
+      would have been published as a single all-profiles finding. Reverted to
+      withholding only.)
+- [x] **The Mach-O case is a merge, not a withholding.** Withholding was
+      still the wrong answer for it: the two spellings normalize to
+      byte-identical *complete* Itanium encodings, parameter types included,
+      so they are provably one declaration — the exact evidence the
+      cross-ABI case lacks. Left split, a Linux and a macOS profile reporting
+      one removal produced two `undetermined` entries where one
+      `all_profiles` finding is the truth.
+      `_merge_equivalent_spellings` re-keys such identities onto one before
+      the matrix is built, keyed on `(cross_identity, comparable_symbol)` —
+      never on the qualified name alone, so two genuinely different
+      overloads spelled by a Linux and a Mach-O toolchain stay two findings
+      exactly as two Linux toolchains' would. (Sixth Codex review round; the
+      distinction between this merge and the one the third round reverted is
+      *whether the whole mangling matches*, not how many identities each
+      profile contributed.)
+- [x] A finding entry is validated before it counts as *enumerated*: being a
+      JSON object is not enough, since one with no `kind` still parses into a
+      contentless REDUCED-tier identity and would let a garbage array read as
+      an exhaustive finding set. `kind` must be a non-empty string and every
+      other identity-essential field must be a string when present — a
+      wrong-typed value is rejected rather than coerced, since coercion would
+      mint an identity from a spelling no producer emitted. Valid siblings in
+      the same array stay usable. (Third Codex review round; the same false
+      clean claim as the non-object case, one level down.)
+- [x] The rule that validation follows is **accept exactly what the identity
+      resolver handles, no less.** `old_value`/`new_value` are annotated
+      `str | None` but the annotation is not runtime-enforced, and
+      `diff_python.py`'s `python_stable_abi_violation` emissions really do
+      pass a list (`new_value=sorted(group)`), which `_change_to_dict`
+      preserves verbatim into JSON —
+      `finding_identity._stringify_change_value` exists precisely to fold
+      that shape. A first cut of the validation above rejected it, which
+      dropped a genuine finding *and* marked its report incomplete, demoting
+      a demonstrably affected profile to undetermined. List/tuple values are
+      now accepted for those two fields and forwarded intact rather than
+      filtered to `None`, so they discriminate the identity as they should;
+      every other field stays string-only. (Fourth Codex review round —
+      a regression the third round's fix introduced.)
+- [x] A third list, `undetermined_profiles`, was **added beyond the original
+      scope** and is the load-bearing one: a profile whose findings are not
+      fully known is neither affected nor unaffected. Without it, this view
+      would answer "profile X is clean of this finding" for a profile that
+      was never checked — the per-finding form of exactly the "an expected
+      target with no report is unknown, never compatible" invariant the rest
+      of `aggregate.py` is built on. `ReportFindings` carries the findings
+      and a separate `complete` flag so the two facts cannot be conflated,
+      and `FindingMatrixEntry.scope` answers `undetermined` ahead of every
+      other value whenever any profile is in that state. Six things fall
+      short of complete: a missing/unreadable/not-comparable report, a
+      report with no finding array, a report with an unparseable or
+      non-conformant array element, a `compare-release` report, a `scan
+      --against` report (gating buckets only, capped), and a report whose
+      array was narrowed for *display* rather than enumerated. Only
+      `complete` may *clear* a profile; an incomplete report's findings are
+      still read, since seeing a finding proves it is there while not seeing
+      one proves nothing.
+- [x] All three report shapes participate. A `compare` report carries
+      `changes`; a `compare-release` report — what a `kind: bundle` check
+      produces, since a bundle comparison routes through the per-library
+      release fan-out — has no `changes` at all and instead carries
+      `bundle_findings`/`matrix_findings` plus per-library entries that are
+      only *counts*; a `scan --against` report itemizes its gating buckets
+      under `diff.findings`. All three arrays are parsed, so bundle and
+      scan-baseline targets reconcile rather than being written off as
+      unknown (sixth Codex review round for the scan shape, which previously
+      vanished out of the matrix entirely); the missing per-library detail —
+      and, for scan, the deliberately-omitted compatible findings plus the
+      20-entry cap — is exactly why such a report can never be `complete`. A bundle
+      finding's `consumer_library`/`provider_library` are folded into its
+      description using `BundleFinding.to_change`'s own
+      `"[consumer ← provider] "` flattening, so two findings differing only
+      in which library pair they are about stay two findings. (Both this
+      item and the `complete` flag above came from the PR's Codex review;
+      the original slice treated every release report as unknown and let a
+      partially-unparseable `changes` array read as an exhaustive one.)
+- [x] An entry must carry the fields the compare-report schema marks
+      *required* on a `changes[]` entry before the array counts as
+      enumerated — a `kind` alone is not something a conformant producer
+      wrote, so it is no evidence the array is exhaustive. Present-but-`null`
+      is accepted: a producer really does emit those keys with `None` for a
+      finding carrying no before/after value, and that is emitting the field
+      rather than omitting it. (Sixth Codex review round — the type-only
+      validation from the third round left the "field absent entirely" hole
+      open.)
+- [x] **Readability and conformance are two questions, answered separately.**
+      A first cut folded both into one predicate over `("symbol",
+      "description")`, which was wrong in both directions (seventh/eighth
+      Codex review rounds). Too narrow: `old_value`/`new_value` are
+      `required` by the schema *and* part of the identity discriminator, so
+      an entry omitting them resolved to a different identity while its
+      report stayed `complete` — each profile then listing the other as
+      unaffected. Too broad: `cli_scan_baseline`'s own findings carry no
+      `old_value`/`new_value`/`severity` at all (verified against the
+      producer, not assumed), so simply extending the one predicate would
+      have dropped every `scan --against` finding the round before had just
+      made readable. Split into `_is_usable_finding_entry` (can an identity
+      be resolved — governs whether a finding is *kept*, and a kept finding
+      can only ever convict) and `_is_conformant_change_entry` (did a
+      conformant producer write it — governs whether the array is
+      *exhaustive*, the only thing that can clear a profile). The mirrored
+      required-field list is checked against
+      `compare_report.schema.json`'s own `required` by
+      `TestSchemaRequiredFieldsAgree`, since the schema is the fact owner.
+      Test fixtures now build `changes[]` entries through one `_change_entry`
+      helper that fills the required set — hand-written near-miss fixtures
+      are how this validation drifted from producer reality to begin with.
+- [x] **Conformance checks the schema's declared *types*, not just key
+      presence.** A first cut of the split above tested only that each
+      required key existed, so `symbol: null` — schema-invalid, and read as
+      an empty spelling that resolves to a different identity than the same
+      finding elsewhere — still counted as conformant and left the report
+      `complete` (ninth Codex review round). The nullability split is the
+      schema's own: `old_value`/`new_value` are declared `["string",
+      "null"]` because a finding with no before/after value really is
+      emitted that way, while `kind`/`symbol`/`description`/`severity` are
+      plain `"string"`. `_CONFORMANT_CHANGE_FIELDS` became a field →
+      nullable map and `TestSchemaRequiredFieldsAgree` now pins both halves
+      to the schema. `severity` is the one field where the two predicates
+      genuinely disagree — required by the schema but not part of the
+      identity, so a non-string there is readable yet non-conformant.
+- [x] **Structured values are validated element-wise, and so is
+      `affected_symbols`.** Checking only the container let
+      `old_value: [{"bad": 1}]` through, which `_stringify_change_value`
+      folds into the spelling `"{'bad': 1}"` — an identity no producer
+      wrote (eleventh Codex review round). `affected_symbols` was worse:
+      the adapter `str()`-coerced every element, so a `[123]` became the
+      spelling `"123"` and could *collide* with an unrelated profile's
+      genuine `"123"` symbol — and `resolve_change_identity` folds that
+      whole set into `header_binary_context_mismatch`'s discriminator. It
+      is no longer coerced (a non-conformant array reads as absent) and is
+      validated in conformance despite being optional, since it is
+      identity-bearing when present.
+- [x] **Same scheme is proof of distinctness for Itanium only.** An MSVC
+      decoration can encode the *target ABI* rather than the declaration:
+      ARM64EC inserts a `$$h` tag, so one declaration is spelled
+      `?add@lib@@YAHHH@Z` on x64 and `?add@lib@@$$hYAHHH@Z` on ARM64EC —
+      verified, both reduce to `lib::add` through `msvc_qualified_name`.
+      Two Windows profiles on different targets were therefore reported
+      clean of each other's identical removal (eleventh Codex review
+      round). MSVC pairs now withhold; Itanium keeps its precision, which
+      matters because a GCC/Clang matrix is the commonest configuration
+      there is. Withheld rather than normalized away, because `$$h` is the
+      decoration this module can *name*, not demonstrably the only one —
+      and withholding needs no such proof, which is this module's whole
+      asymmetry.
+- [x] **A `compare-release` report that errored still contributes its
+      findings.** `_format_release_json` emits `bundle_findings`/
+      `matrix_findings` for whatever completed, independent of the
+      top-level verdict, but `aggregate._load_report_file` returned early
+      on `ERROR` and dropped them — losing real evidence from the profile
+      most likely to differ (eleventh Codex review round). They are now
+      parsed and explicitly marked incomplete at that call site, where the
+      reason (the run errored) lives, so they convict their own profile and
+      clear no other. The forced blocking exit an `ERROR` report already
+      carries is unchanged, with a test pinning it.
+- [x] **The structured-value carve-out covers exactly `old_value`/
+      `new_value`.** The type check above initially accepted `str | list |
+      tuple` for *every* required field, so `severity: []` still read as
+      conformant (tenth Codex review round). The carve-out exists for one
+      reason — `diff_python.py` really passes a list for those two fields and
+      the identity resolver folds it — so it is now scoped to them alone;
+      every other required field is a plain string or nothing.
+- [x] A well-formed array is not by itself proof that nothing else was
+      found: `compare --show-only` narrows `changes` (`reporter.to_json`)
+      while the verdict, the gate, and the `summary` block all keep
+      describing the whole diff, so a profile that *hid* a finding read as
+      one that did not have it. Two signals are checked, because neither
+      covers every report mode — `show_only_filter`, emitted by full and
+      root-cause mode, and a `summary.total_changes` exceeding the array's
+      own length, which is the only signal `--report-mode leaf` leaves. The
+      count comparison is the general form of the question, so any future
+      display filter that narrows the array while leaving the summary whole
+      is caught by it alone. (Seventh Codex review round;
+      `TestDisplayFilteredReports` verifies it against the real producer in
+      all three report modes rather than against hand-built dicts.)
+- [x] A finding present on every profile and one present on only one are
+      distinguished by an explicit `scope` discriminator
+      (`all_profiles`/`profile_specific`/`partial`/`undetermined`) in both
+      the JSON (`finding_matrix`, aggregate schema `1.2`, published in
+      `abicheck/schemas/aggregate_report.schema.json`) and the text output's
+      `Cross-profile findings:` section. *Note on the acceptance criterion's
+      wording:* `aggregate` has `--format json|text` and no Markdown
+      renderer, so "JSON/Markdown" landed as JSON + text; adding a Markdown
+      format for `aggregate` is separate surface, not part of this phase.
+- [x] `tests/test_aggregate_findings.py` (a sibling of `test_aggregate.py`,
+      mirroring the source split) covers the merged/split shapes (same
+      finding on all profiles, profile-specific, partial), the rich-vs-L0
+      kind collapse, every source of `undetermined` including the
+      partially-malformed array, the release report, the scan report, and
+      the display-filtered one, bundle/matrix/scan findings participating,
+      bundle attribution keeping distinct library
+      pairs apart, "affected outranks undetermined across one profile's own
+      checks", ordering stability, the unknown-future-kind degradation, that
+      the gate exit code is unmoved, and schema validation of the new block.
+
+**Not part of this phase, deliberately:** `finding_matrix` is a reporting
+view only — it never contributes to `exit_code()`. A cross-profile *gate*
+("fail when a finding is profile-specific") would be a new policy axis and
+needs its own design, not a drive-by addition to a reconciliation view.
 
 ## Design
 

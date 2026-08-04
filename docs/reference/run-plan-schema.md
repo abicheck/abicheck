@@ -102,6 +102,8 @@ dicts can forward each field through with no renaming.
 | `consumer_compile_gcc_options` | this cell's profile's `consumer_compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Same composition as `compile_gcc_options`, from the `consumer_compile:` overlay. |
 | `compile_ast_frontend` | this cell's profile's `compile` overlay sets `frontend` | One of `auto`/`castxml`/`clang`/`hybrid` (G34 Phase B), overriding the global `--ast-frontend` default for this profile's cell only. Empty (field omitted) when the profile has no `compile:` overlay or sets no `frontend`. |
 | `consumer_compile_ast_frontend` | this cell's profile's `consumer_compile` overlay sets `frontend` | Same resolution as `compile_ast_frontend`, from the profile's separate `consumer_compile:` overlay (G34 Phase 0) — never falls back to `compile_ast_frontend`'s own value when the profile has no `consumer_compile:`. |
+| `runs_on` | **always** | The GitHub-hosted runner this cell must be scheduled on, derived from its profile's `os:` (G34 Phase C) — `check-project.yml` reads it as `matrix.runs_on`. `ubuntu-latest` for a profile with no `os:`, which is what every cell hardcoded before this phase. Unlike every other optional field here it is emitted even at its default: a matrix entry missing the key resolves `runs-on:` to the empty string, scheduling nothing. |
+| `dependency_source` | this cell's profile declares `dependency_source:` | How this cell provisions its own system dependencies — one of `conda-forge`/`conda-forge-gcc14`/`conda-forge-clang20`/`system`/`none` (G34 Phase C), forwarded as `check-target`'s `dependency-source` input. Empty (field omitted) when the profile declares none, which leaves the caller's workflow-level default standing. |
 
 **`profiles.<id>.compile` reaches the cell (P1 toolchain-profile audit).**
 [`project-targets-schema.md`'s `profiles:`](project-targets-schema.md#profiles)
@@ -137,6 +139,24 @@ documents the config-schema side; this generator projects each overlay's
 consumer yet threads this field into a real `dump`/`compare` invocation's
 `--ast-frontend` — this is config-schema projection only, same caveat as
 `consumer_compile:` above.
+
+**A cell schedules itself (G34 Phase C).** `runs_on` and `dependency_source`
+are the two axes `check-project.yml` previously fixed for the whole run: every
+check cell ran on a hardcoded `ubuntu-latest`, and dependency provisioning came
+from one workflow-level `install-deps` boolean. Deriving both per cell is what
+makes a genuine GCC/Clang/MSVC matrix schedulable through the shared reusable
+workflow — an `os: windows` profile's cell lands on `windows-latest`, and a
+GCC-profile cell and a Clang-profile cell in the same run can each provision a
+matching conda environment. Unlike the two overlays above, this pair is not
+projection-only: `check-project.yml` consumes both today.
+
+Precedence for `dependency_source` matches every other per-profile override
+here — the profile's own value wins over the workflow-level
+`dependency-source` input, and both empty leaves the legacy `install-deps`
+boolean deciding, exactly as before. An `os:` naming no schedulable platform
+is a hard error at both `project validate` and `project plan` time rather than
+a silent fallback to Linux: a cell scheduled on the wrong platform reports
+success having gated the wrong thing.
 
 **No build-output paths are carried through.** `build-output.json` is used
 purely as an existence/membership oracle here — the candidate artifact a

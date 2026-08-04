@@ -140,12 +140,15 @@ from typing import Any
 from .build_output import BuildOutput
 from .check_report import build_check_id
 from .project_targets import (
+    DEFAULT_PROFILE_RUNNER_LABEL,
     TARGET_KIND_LIBRARY,
     BundleSpec,
     CheckSpec,
     ProfileCompileSpec,
     ProjectTargetsConfig,
     TargetSpec,
+    runner_label_for_os,
+    unroutable_os_message,
 )
 
 #: Schema discriminator stamped into every ``run-plan.json`` (mirrors
@@ -292,6 +295,21 @@ class RunPlanCheck:
     #: separate consumer-toolchain overlay (G34 Phase 0) -- never falls
     #: back to :attr:`compile_ast_frontend` when absent.
     consumer_compile_ast_frontend: str = ""
+    #: The GitHub-hosted runner this cell must be scheduled on, derived from
+    #: its profile's ``os:`` (G34 Phase C). Always populated -- a profile
+    #: with no ``os:`` resolves to ``ubuntu-latest``, which is what every
+    #: cell hardcoded before this phase, so an existing project's plan is
+    #: unmoved. Unlike every other field here it is emitted even at its
+    #: default, because ``check-project.yml`` reads it as
+    #: ``matrix.runs_on``: a matrix entry silently missing the key would
+    #: schedule nothing rather than fall back.
+    runs_on: str = DEFAULT_PROFILE_RUNNER_LABEL
+    #: This cell's profile's ``dependency_source:`` (G34 Phase C) --
+    #: forwarded as ``check-target``'s own ``dependency-source`` input so a
+    #: GCC-profile cell and a Clang-profile cell in one run each provision a
+    #: matching toolchain. Empty when the profile declares none, which lets
+    #: the caller's workflow-level default stand.
+    dependency_source: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -330,6 +348,11 @@ class RunPlanCheck:
             d["compile_ast_frontend"] = self.compile_ast_frontend
         if self.consumer_compile_ast_frontend:
             d["consumer_compile_ast_frontend"] = self.consumer_compile_ast_frontend
+        # Unconditional -- see the field's own comment: this one is read as a
+        # matrix key, where "absent" means "schedule on nothing".
+        d["runs_on"] = self.runs_on
+        if self.dependency_source:
+            d["dependency_source"] = self.dependency_source
         return d
 
     @classmethod
@@ -368,6 +391,8 @@ class RunPlanCheck:
             consumer_compile_ast_frontend=_opt_str(
                 d.get("consumer_compile_ast_frontend")
             ),
+            runs_on=_opt_str(d.get("runs_on"), DEFAULT_PROFILE_RUNNER_LABEL),
+            dependency_source=_opt_str(d.get("dependency_source")),
         )
 
 
@@ -510,6 +535,32 @@ def _consumer_compile_ast_frontend_for_profile(
     return consumer_compile_spec.frontend if consumer_compile_spec is not None else ""
 
 
+def _scheduling_fields_for_profile(
+    config: ProjectTargetsConfig, profile_id: str
+) -> tuple[str, str]:
+    """Returns ``(runs_on, dependency_source)`` for *profile_id* (G34 Phase C).
+
+    An unknown profile resolves to the same defaults an ``os:``-less one
+    does, matching how every other ``*_for_profile`` helper here treats a
+    profile it cannot find — the cell is generated either way, and a missing
+    profile is a separate, already-reported error.
+
+    An ``os:`` that names nothing schedulable raises instead of defaulting:
+    quietly sending it to a Linux runner would produce a green cell that
+    checked the wrong platform. :func:`~abicheck.buildsource.project_targets.
+    _profile_issues` reports the same condition at ``project validate`` time,
+    so reaching this raise means validation was skipped, not that the message
+    is new.
+    """
+    profile = config.profiles.get(profile_id)
+    if profile is None:
+        return DEFAULT_PROFILE_RUNNER_LABEL, ""
+    label = runner_label_for_os(profile.os)
+    if label is None:
+        raise ValueError(unroutable_os_message("profiles", profile_id, profile.os))
+    return label, profile.dependency_source
+
+
 def _library_lookup_and_pattern(
     config: ProjectTargetsConfig, target: TargetSpec
 ) -> tuple[str, str]:
@@ -581,6 +632,9 @@ def _generate_target_checks(
                     config, profile_id, resolved_bindings
                 )
             )
+            runs_on, dependency_source = _scheduling_fields_for_profile(
+                config, profile_id
+            )
             out.append(
                 RunPlanCheck(
                     check_id=check_id,
@@ -614,6 +668,8 @@ def _generate_target_checks(
                     consumer_compile_ast_frontend=(
                         _consumer_compile_ast_frontend_for_profile(config, profile_id)
                     ),
+                    runs_on=runs_on,
+                    dependency_source=dependency_source,
                 )
             )
     return out
@@ -687,6 +743,9 @@ def _generate_bundle_checks(
                     config, profile_id, resolved_bindings
                 )
             )
+            runs_on, dependency_source = _scheduling_fields_for_profile(
+                config, profile_id
+            )
             out.append(
                 RunPlanCheck(
                     check_id=check_id,
@@ -710,6 +769,8 @@ def _generate_bundle_checks(
                     consumer_compile_ast_frontend=(
                         _consumer_compile_ast_frontend_for_profile(config, profile_id)
                     ),
+                    runs_on=runs_on,
+                    dependency_source=dependency_source,
                 )
             )
     return out

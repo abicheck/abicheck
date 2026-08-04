@@ -814,6 +814,86 @@ class ProfileCompileSpec:
         )
 
 
+#: The GitHub-hosted runner label a profile's ``os:`` routes its check cell
+#: to (G34 Phase C). Before this, every cell ran on ``ubuntu-latest``
+#: regardless of what the profile declared, so a ``windows`` profile could
+#: not be checked natively through ``check-project.yml`` at all — the
+#: mechanical gap that blocked a genuine GCC/Clang/MSVC matrix.
+#:
+#: ``darwin`` is accepted alongside ``macos`` because both spellings occur in
+#: the wild for one platform; nothing else is guessed at.
+PROFILE_RUNNER_LABEL_BY_OS = {
+    "linux": "ubuntu-latest",
+    "windows": "windows-latest",
+    "macos": "macos-latest",
+    "darwin": "macos-latest",
+}
+
+#: What a profile with no ``os:`` at all routes to — today's behaviour for
+#: *every* profile, so an existing project's cells are unmoved by Phase C.
+DEFAULT_PROFILE_RUNNER_LABEL = "ubuntu-latest"
+
+#: A runner label is accepted verbatim when it names a GitHub-hosted image
+#: family, so a profile already written as ``os: ubuntu-24.04`` (pinning an
+#: image rather than naming a platform) keeps working. ``os:`` was a free-form,
+#: never-consulted string before this phase, so anything narrower would be a
+#: breaking config change dressed up as a feature.
+_RUNNER_LABEL_PREFIXES = ("ubuntu-", "windows-", "macos-")
+
+
+def runner_label_for_os(os_value: str) -> str | None:
+    """The runner label *os_value* routes to, or ``None`` if it routes nowhere.
+
+    ``None`` is deliberately *not* folded into
+    :data:`DEFAULT_PROFILE_RUNNER_LABEL`: silently sending an ``os: freebsd``
+    profile to a Linux runner would produce a green cell that checked the
+    wrong platform, which is the "a job reports success having gated the
+    wrong thing" failure mode ``check-project.yml``'s own guards exist to
+    close. An *unset* ``os:`` is a different question and does map to the
+    default — that is every existing project, and it is what they get today.
+    """
+    if not os_value:
+        return DEFAULT_PROFILE_RUNNER_LABEL
+    mapped = PROFILE_RUNNER_LABEL_BY_OS.get(os_value.lower())
+    if mapped is not None:
+        return mapped
+    if os_value.startswith(_RUNNER_LABEL_PREFIXES):
+        return os_value
+    return None
+
+
+def unroutable_os_message(where: str, profile_id: str, os_value: str) -> str:
+    """One shared wording for an ``os:`` no runner can be derived from, so
+    ``project validate`` and ``project plan`` say the same thing."""
+    known = ", ".join(sorted(PROFILE_RUNNER_LABEL_BY_OS))
+    return (
+        f"{where}: profiles entry {profile_id!r} has os: {os_value!r}, which "
+        f"does not name a platform check-project.yml can schedule a runner "
+        f"for — use one of {{{known}}}, or a GitHub-hosted runner label "
+        f"({', '.join(p + '…' for p in _RUNNER_LABEL_PREFIXES)}) to pin an "
+        "image directly."
+    )
+
+
+#: Accepted ``profiles.<id>.dependency_source`` values (G34 Phase C).
+#:
+#: **Not the fact owner** — the root ``action.yml``'s own ``Resolve
+#: dependency-source`` step is, and it validates the identical set. This
+#: mirror exists so a bad value fails at ``project validate`` time rather
+#: than inside a matrix cell twenty minutes later;
+#: ``tests/test_project_targets_dependency_source.py`` asserts the two agree
+#: so the copy cannot drift silently.
+PROFILE_DEPENDENCY_SOURCES = frozenset(
+    {
+        "conda-forge",
+        "conda-forge-gcc14",
+        "conda-forge-clang20",
+        "system",
+        "none",
+    }
+)
+
+
 @dataclass
 class ProfileSpec:
     """One ``profiles:`` entry (ADR-047 §3) — a build-lane identity.
@@ -841,12 +921,24 @@ class ProfileSpec:
     consumer applying it to the header-AST (L2) extraction step only is not
     yet wired (see ``docs/contribute/plans/
     g34-producer-consumer-compiler-profile-separation.md``'s Phase 0).
+
+    ``os:`` is no longer purely informational (G34 Phase C): it selects the
+    runner a ``check-project.yml`` check cell for this profile is scheduled
+    on (:func:`runner_label_for_os`). ``dependency_source:`` — new in the
+    same phase — selects how that cell provisions its own system
+    dependencies, so a GCC-profile cell and a Clang-profile cell in one run
+    can each get a matching conda environment instead of sharing whatever
+    the workflow-level input happened to say.
     """
 
     id: str = ""
     contract: bool = True
     os: str = ""
     arch: str = ""
+    #: One of :data:`PROFILE_DEPENDENCY_SOURCES`, or ``""`` to inherit the
+    #: caller's own workflow-level default (which is what every profile does
+    #: today).
+    dependency_source: str = ""
     compile: ProfileCompileSpec | None = None
     consumer_compile: ProfileCompileSpec | None = None
 
@@ -856,6 +948,8 @@ class ProfileSpec:
             d["os"] = self.os
         if self.arch:
             d["arch"] = self.arch
+        if self.dependency_source:
+            d["dependency_source"] = self.dependency_source
         if self.compile is not None and not self.compile.is_empty:
             d["compile"] = self.compile.to_dict()
         if self.consumer_compile is not None and not self.consumer_compile.is_empty:
@@ -870,7 +964,15 @@ class ProfileSpec:
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
         unknown = _unknown_keys(
-            d, {"contract", "os", "arch", "compile", "consumer_compile"}
+            d,
+            {
+                "contract",
+                "os",
+                "arch",
+                "dependency_source",
+                "compile",
+                "consumer_compile",
+            },
         )
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
@@ -880,6 +982,20 @@ class ProfileSpec:
         for key in ("os", "arch"):
             if key in d and not isinstance(d[key], str):
                 raise ValueError(f"{where}.{key} must be a string")
+        dependency_source = ""
+        if "dependency_source" in d:
+            value = d["dependency_source"]
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"{where}.dependency_source must be a string, got {value!r}"
+                )
+            if value and value not in PROFILE_DEPENDENCY_SOURCES:
+                allowed = ", ".join(sorted(PROFILE_DEPENDENCY_SOURCES))
+                raise ValueError(
+                    f"{where}.dependency_source must be one of {{{allowed}}}, "
+                    f"got {value!r}"
+                )
+            dependency_source = value
         compile_spec: ProfileCompileSpec | None = None
         if "compile" in d:
             compile_spec = ProfileCompileSpec.from_dict(
@@ -895,9 +1011,17 @@ class ProfileSpec:
             contract=contract,
             os=str(d.get("os", "") or ""),
             arch=str(d.get("arch", "") or ""),
+            dependency_source=dependency_source,
             compile=compile_spec,
             consumer_compile=consumer_compile_spec,
         )
+
+    @property
+    def runner_label(self) -> str | None:
+        """The runner this profile's check cells are scheduled on (G34 Phase
+        C), or ``None`` when its ``os:`` names nothing schedulable — see
+        :func:`runner_label_for_os`."""
+        return runner_label_for_os(self.os)
 
 
 @dataclass
@@ -1347,7 +1471,14 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
 
 
 def _profile_issues(profile: ProfileSpec) -> list[str]:
-    return _identifier_issues("profile", profile.id)
+    issues = _identifier_issues("profile", profile.id)
+    # G34 Phase C: `os:` now selects a runner, so a value no runner can be
+    # derived from is a real misconfiguration rather than the harmless free
+    # text it used to be. Caught here, at `project validate` time, so it
+    # surfaces before a matrix cell exists to be scheduled wrongly.
+    if profile.os and runner_label_for_os(profile.os) is None:
+        issues.append(unroutable_os_message("profiles", profile.id, profile.os))
+    return issues
 
 
 def _baseline_channel_issues(channel: BaselineChannelSpec) -> list[str]:
