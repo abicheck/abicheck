@@ -266,7 +266,7 @@ class Change:
     # yet been migrated — the flat fields above remain the sole source of
     # truth for those, exactly as before this field existed.
     impact_assessment: ImpactAssessment | None = None
-    # ADR-049 Phase 3 (shadow contract evaluator, opt-in `compare(...,
+    # ADR-049's contract evaluator (opt-in `compare(...,
     # contract_evaluation=True)`) — `contract_evaluation.
     # evaluate_snapshot_pair_contract_relevance`'s per-finding decision,
     # flattened into three fields (mirroring every other producer-attached
@@ -276,10 +276,13 @@ class Change:
     # import (`contract_evaluation.py` itself imports `Change` from this
     # module), but `ContractRelevance`/`ContractAssurance` live in the
     # dependency-free leaf module `contract_relevance_types.py`, which this
-    # module can safely import. Purely additive and shadow -- never
-    # consulted by verdict computation, policy, or exit-code logic; `None`
-    # for every finding when the caller didn't opt in (the default), and
-    # for the still-unimplemented `ContractMode.EXPORTS`.
+    # module can safely import. Structurally additive, but no longer inert:
+    # since ADR-049 Phase 7 `contract_gating.evaluation_status_of` falls back
+    # to `contract_relevance` when `compatibility_evaluation_status` below is
+    # unset, so this field can decide whether compatibility policy and the
+    # change gate score the finding at all. `None` for every finding when the
+    # caller didn't opt in (the default) -- and an unstamped finding is
+    # evaluated, which is what keeps that default path unchanged.
     contract_relevance: ContractRelevance | None = None
     contract_reason_code: str | None = None
     contract_assurance: ContractAssurance | None = None
@@ -454,8 +457,11 @@ class DiffResult:
     # ``contract_evidence.py`` reaches ``compatibility_evaluation_config.py``
     # -> ``checker_policy.py``, which this module also imports, and a real
     # annotation here would pull that whole chain into every consumer of
-    # ``DiffResult``. Shadow/audit data only -- never read by verdict,
-    # policy, or exit-code logic.
+    # ``DiffResult``. Audit data as far as *compatibility* policy and the
+    # change gate are concerned -- they read the per-finding fields above,
+    # never this block -- but not inert: ``contract_coverage_exit.
+    # fold_coverage_exit`` derives the orthogonal coverage contribution from
+    # it, so a run carrying one can exit ``1`` on that axis (ADR-049 §7).
     contract_context: object | None = None
 
     def _effective_kind_sets(

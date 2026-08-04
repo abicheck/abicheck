@@ -384,6 +384,87 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
         removal = next(c for c in report["changes"] if c["kind"] == "func_removed")
         assert removal["gate_contribution"] == 4
 
+    def test_every_representation_of_the_finding_agrees(self, tmp_path: Path) -> None:
+        """`--report-mode root-cause` serializes the same finding twice, into
+        `changes[]` and into `root_causes[].findings` — and after the JSON
+        round trip those are independent dicts, so zeroing one left the same
+        finding reading `0` in one place and `4` in another within a single
+        document (Codex review, reproduced)."""
+        old_p, new_p = self._uncovered_break_pair(tmp_path)
+        out = tmp_path / "report.json"
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z4keepv",
+                "--contract-evaluation",
+                "--contract",
+                "all",
+                "--report-mode",
+                "root-cause",
+                "--format",
+                "json",
+                "-o",
+                str(out),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        report = json.loads(out.read_text(encoding="utf-8"))
+
+        def _contributions(node: object) -> list[int]:
+            if isinstance(node, dict):
+                found = (
+                    [node["gate_contribution"]]
+                    if node.get("kind") == "func_removed"
+                    and "gate_contribution" in node
+                    else []
+                )
+                for value in node.values():
+                    found += _contributions(value)
+                return found
+            if isinstance(node, list):
+                return [n for item in node for n in _contributions(item)]
+            return []
+
+        seen = _contributions(report)
+        # Both representations must be present, or the test would pass
+        # vacuously on a report that simply stopped carrying one of them.
+        assert len(seen) >= 2, report
+        assert set(seen) == {0}, seen
+
+    def test_the_mcp_response_agrees_with_the_report_it_embeds(
+        self, tmp_path: Path
+    ) -> None:
+        """`abi_compare` publishes its own top-level `changes` array beside a
+        rendered CLI report. The array was serialized with full-library
+        contributions before the scoped gate replaced the primary verdict and
+        exit code, so one response said `4` at the top level and `0` in the
+        report it embedded (Codex review, reproduced)."""
+        from abicheck.mcp_server import abi_compare
+
+        old_p, new_p = self._uncovered_break_pair(tmp_path)
+        response = json.loads(
+            abi_compare(
+                str(old_p),
+                str(new_p),
+                required_symbols=["_Z4keepv"],
+                contract_evaluation=True,
+                output_format="json",
+            )
+        )
+        assert response["status"] == "ok", response
+        top = next(c for c in response["changes"] if c["kind"] == "func_removed")
+        embedded = next(
+            c for c in response["report"]["changes"] if c["kind"] == "func_removed"
+        )
+        assert top["gate_contribution"] == embedded["gate_contribution"] == 0
+        # The compatibility axis is untouched here too: still a real break,
+        # it just did not gate *this* run.
+        assert response["full_verdict"] == "BREAKING"
+
 
 class TestPromotionNeverLowersAVerdict:
     """The recomputation `appcompat`'s promotion triggers must combine with
@@ -454,6 +535,9 @@ class TestScanKeepsWhatItDoesNotScore:
             main,
             ["scan", str(new_p), "--against", str(old_p), "--format", "json", *extra],
         )
+        # A documented nonzero exit is a `SystemExit`, not a failure --
+        # anything else is a real traceback the parse below would hide.
+        assert isinstance(result.exception, SystemExit | None), result.output
         payload = json.loads(result.output)
         return payload.get("report", payload)
 
@@ -582,7 +666,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         """
         old_p, new_p = self._changed_signature_pair(tmp_path)
         out = tmp_path / "report.json"
-        CliRunner().invoke(
+        result = CliRunner().invoke(
             main,
             [
                 "compare",
@@ -599,6 +683,9 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
                 str(out),
             ],
         )
+        # A documented nonzero exit is a `SystemExit`, not a failure --
+        # anything else is a real traceback the parse below would hide.
+        assert isinstance(result.exception, SystemExit | None), result.output
         report = json.loads(out.read_text(encoding="utf-8"))
         assert report["full_verdict"] == "BREAKING"
         assert report["full_summary"]["breaking"] == 1
@@ -1021,6 +1108,9 @@ class TestNothingIsLost:
                 "exports",
             ],
         )
+        # A documented nonzero exit is a `SystemExit`, not a failure --
+        # anything else is a real traceback the parse below would hide.
+        assert isinstance(result.exception, SystemExit | None), result.output
         report = json.loads(result.output)
         removal = next(c for c in report["changes"] if c["kind"] == "func_removed")
         assert removal["contract_relevance"] == "UNKNOWN_UNRESOLVED"

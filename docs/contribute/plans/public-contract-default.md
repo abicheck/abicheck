@@ -3961,8 +3961,8 @@ per-finding shape is emitted: `compatibility_evaluation_status`,
 `compatibility_decision` (JSON `null` when policy did not run) and
 `gate_contribution` (the number the run's own gate folded, not a
 re-derivation). Two display consequences were part of the same change rather
-than deferred, because leaving them would have made reports self-
-contradictory: the four compatibility buckets (`DiffResult.breaking` and
+than deferred, because leaving them would have made reports
+self-contradictory: the four compatibility buckets (`DiffResult.breaking` and
 siblings, and therefore every summary built from them) are over the evaluated
 findings only, and markdown gained a "Not Evaluated (Contract)" section plus
 a headline count — a `NO_CHANGE` verdict printed above a "Breaking Changes"

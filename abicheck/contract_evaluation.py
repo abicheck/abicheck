@@ -1770,13 +1770,28 @@ def _record_scoped_compatibility_decisions(
     per-finding classifier the gate uses, rather than left as the stale
     ``None`` the earlier decision wrote, which would read as "policy
     declined to score a finding it did score".
+
+    Guarded by the same ``is_evaluated`` predicate
+    ``ContractEvaluationStage.record_compatibility_decisions`` uses, so the
+    two recorders cannot disagree about what a decision means. Today every
+    finding reaching here is evaluated -- ``stamp_explicit_scope_...``
+    either promotes it to ``IN_CONTRACT`` or returns early only for
+    ``_NOT_APPLICABLE_KIND_SLUGS``, which is itself an evaluated relevance --
+    but that is an argument about the current early-return set, not a
+    property of this function; a future kind class added there with a
+    non-evaluated relevance would otherwise publish a decision beside
+    ``compatibility_evaluation_status: NOT_EVALUATED`` (CodeRabbit review).
     """
     if not promoted:
         return
+    from .contract_gating import is_evaluated
     from .severity import effective_verdict_for_change
 
     for change in promoted:
         if isinstance(change, dict) or getattr(change, "kind", None) is None:
+            continue
+        if not is_evaluated(change):
+            change.compatibility_decision = None
             continue
         change.compatibility_decision = effective_verdict_for_change(
             change, policy=policy, policy_file=policy_file

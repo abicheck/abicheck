@@ -728,32 +728,39 @@ class TestContractModeSelection:
             ContractRelevance.IN_CONTRACT
         )
 
-    def test_the_selected_domain_decides_whether_the_finding_scores(self) -> None:
+    def test_the_all_domain_scores_the_finding_like_the_baseline(self) -> None:
+        """The control for the parametrized test below.
+
+        `all` makes no root/closure claim at all, so the same finding is in
+        contract and scores -- matching the un-opted-in baseline. Without
+        this, "no verdict" under the other two domains could just mean "no
+        finding".
+        """
+        scored = self._compare(contract_evaluation=True, contract_mode="all")
+        assert scored.verdict is self._compare().verdict is Verdict.BREAKING
+
+    @pytest.mark.parametrize("mode", ["public", "exports"])
+    def test_an_evidence_requiring_domain_stops_the_finding_scoring(
+        self, mode: str
+    ) -> None:
         """ADR-049 D1/D9: relevance runs before compatibility policy, so the
         domain that answers it is what decides the verdict.
 
         On this pair the layout change is to a public-header type that no
-        export reaches and no public root closes over. Under `all` -- which
-        makes no root/closure claim at all -- it is in contract and scores,
-        matching the un-opted-in baseline. Under both evidence-requiring
-        domains it is *proven* out of contract, so policy does not score it
-        and the verdict differs. That difference is the feature: a
-        proven-private change is exactly what those domains are selected to
-        stop gating on.
+        export reaches and no public root closes over, so an
+        evidence-requiring domain *proves* it out of contract: policy does
+        not score it and the verdict differs from the control above. That
+        difference is the feature -- a proven-private change is exactly what
+        these domains are selected to stop gating on.
         """
-        scored = self._compare(contract_evaluation=True, contract_mode="all")
-        assert scored.verdict is self._compare().verdict is Verdict.BREAKING
-        for mode in ("public", "exports"):
-            unscored = self._compare(contract_evaluation=True, contract_mode=mode)
-            assert unscored.verdict is Verdict.NO_CHANGE, mode
-            # Conserved, not deleted: still reported, with the reason it did
-            # not gate (ADR-049 D9's "exactly one visible outcome").
-            internal = {c.symbol: c for c in unscored.changes}["Internal"]
-            assert internal.contract_relevance is (
-                ContractRelevance.PROVEN_OUT_OF_CONTRACT
-            ), mode
-            assert internal.compatibility_decision is None, mode
-            assert internal in unscored.not_evaluated, mode
+        unscored = self._compare(contract_evaluation=True, contract_mode=mode)
+        assert unscored.verdict is Verdict.NO_CHANGE
+        # Conserved, not deleted: still reported, with the reason it did not
+        # gate (ADR-049 D9's "exactly one visible outcome").
+        internal = {c.symbol: c for c in unscored.changes}["Internal"]
+        assert internal.contract_relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        assert internal.compatibility_decision is None
+        assert internal in unscored.not_evaluated
 
     def test_a_run_that_never_opted_in_scores_everything(self) -> None:
         """The default path is untouched by every domain above."""

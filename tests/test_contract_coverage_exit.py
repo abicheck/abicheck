@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from abicheck.checker_types import DiffResult
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
@@ -81,7 +82,9 @@ def _compare(tmp_path: Path, pair, *extra: str):
     return CliRunner().invoke(main, ["compare", str(old_p), str(new_p), *extra])
 
 
-def _compare_result(pair, *, contract_mode: str):
+def _compare_result(
+    pair: tuple[AbiSnapshot, AbiSnapshot], *, contract_mode: str
+) -> DiffResult:
     """The `DiffResult` the CLI would gate on, for the fold-level assertions.
 
     `fold_coverage_exit`/`_coverage_message` take the result and a base exit,

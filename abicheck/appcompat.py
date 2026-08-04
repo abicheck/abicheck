@@ -27,7 +27,7 @@ import stat
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .checker import Change, DiffResult
 from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verdict
@@ -853,7 +853,11 @@ def _compute_symbol_coverage(
 
 
 def _promote_scoped_contract(
-    changes: list[Any], *, policy: str | None, policy_file: Any, diff: Any = None
+    changes: list[Change],
+    *,
+    policy: str | None,
+    policy_file: PolicyFile | None,
+    diff: DiffResult | None = None,
 ) -> None:
     """Apply ADR-049 §4.3's explicit-scope evidence to a scoped finding set.
 

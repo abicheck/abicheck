@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .contract_gating import zero_scoped_out_gate_contributions
+
 # Maps a rendered change's "severity" label (report_model.VERDICT_PRESENTATION,
 # and the "breaking"/"compatible" literals _resolve_scoped_gate_findings' missing-
 # contract entries use) to the summary-block key it contributes to -- shared by
@@ -200,16 +202,10 @@ def _fold_scoped_compat_into_text(
             # review, reproduced with a removal outside the required-symbol
             # contract). Only entries that already carry the field are
             # touched, so a run without --contract-evaluation is unaffected.
-            _scoped_ids = (
-                getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-            )
-            for _entry in changes_list:
-                if (
-                    isinstance(_entry, dict)
-                    and "gate_contribution" in _entry
-                    and _entry.get("finding_id") not in _scoped_ids
-                ):
-                    _entry["gate_contribution"] = 0
+            # Called here, *before* the scoped-only/missing-contract fold-in
+            # below: those are the scoped gate's own findings and only the
+            # ones tracked in `scoped_relevant_finding_ids` would survive it.
+            zero_scoped_out_gate_contributions(payload, result)
             # G29 Phase 3 slice 3 (ADR-052, Codex review): these synthetic
             # entries are appended to `changes` after `_to_json_root_cause`
             # already grouped `result.changes` into `root_causes` -- without

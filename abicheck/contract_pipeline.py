@@ -114,6 +114,14 @@ class ContractEvaluationStage:
     #: two findings can compare equal (``Change`` is a plain dataclass) while
     #: being distinct facts about distinct entities, and stamping one of them
     #: twice would put a duplicate row in the decision receipt.
+    #:
+    #: An ``id()`` is only stable while the object it names is alive -- CPython
+    #: reuses the value once it is freed. That holds here because ``classify``
+    #: appends every finding it records to ``self.changes`` above, which keeps
+    #: a strong reference for the stage's whole lifetime. Dropping or pruning
+    #: that retention is what would make this set unsafe: a freed finding's
+    #: recycled ``id`` would read as already-classified, and a fresh finding
+    #: would reach compatibility policy unstamped.
     _classified: set[int] = field(default_factory=set, repr=False)
 
     def classify(self, changes: Iterable[Change]) -> None:
@@ -379,10 +387,12 @@ def build_contract_stage(
 def evaluated_for_policy(changes: Sequence[Change]) -> list[Change]:
     """The findings compatibility policy scores, per ADR-049 D1.
 
-    A thin re-export of :func:`abicheck.contract_gating.evaluated_changes`
-    typed for ``Change``, so ``checker.py`` states the rule in the vocabulary
+    The :func:`abicheck.contract_gating.is_evaluated` predicate applied over
+    a ``Change`` sequence, so ``checker.py`` states the rule in the vocabulary
     of this stage rather than reaching into the leaf module for a predicate
-    whose default (unstamped == evaluated) matters to read correctly.
+    whose default (unstamped == evaluated) matters to read correctly. The
+    leaf module deliberately exports the predicate and not a list helper --
+    each consumer needs the filter in its own element type.
     """
     from .contract_gating import is_evaluated
 

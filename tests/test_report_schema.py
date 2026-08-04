@@ -35,6 +35,7 @@ import pytest
 
 from abicheck import reporter
 from abicheck.checker import compare
+from abicheck.contract_pipeline import ContractEvaluationStage
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -416,7 +417,7 @@ class TestReportValidatesAgainstSchema:
             assert e["contract_assurance"] == "complete"
 
     @staticmethod
-    def _stage_for(old, new):
+    def _stage_for(old: AbiSnapshot, new: AbiSnapshot) -> ContractEvaluationStage:
         """The contract-evaluation stage `checker.compare` builds internally."""
         from abicheck.contract_pipeline import build_contract_stage
         from abicheck.post_processing import PipelineContext
