@@ -8,6 +8,7 @@ fixture so the script's expectations match reality.
 
 from __future__ import annotations
 
+import datetime as _dt
 import importlib.util
 import sys
 from pathlib import Path
@@ -1064,37 +1065,6 @@ def test_adr_named_modules_does_not_anchor_shorthand_on_a_non_package_path(ass):
     assert named == ["tests/test_compatibility_evaluation.py"]
 
 
-def test_adr_named_modules_expands_family_shorthand(ass):
-    """Status prose names the first module of a family in full and the rest
-    by suffix (`_resolver.py`). Without expansion, four of ADR-049's own
-    modules were left untripwired (Codex review on PR #667). An expansion
-    that doesn't resolve to a real file is dropped, so a wrong guess can
-    never invent a tripwire on an unrelated module."""
-    named = ass._adr_named_modules(
-        "`abicheck/compatibility_evaluation_config.py`, `_resolver.py`, "
-        "`_packs.py`, `_nonexistent.py`"
-    )
-    assert "abicheck/compatibility_evaluation_resolver.py" in named
-    assert "abicheck/compatibility_evaluation_packs.py" in named
-    assert not any("nonexistent" in path for path in named)
-
-
-def test_adr_named_modules_expands_shorthand_inside_the_anchors_package(ass):
-    """A nested family must resolve in its own package: dropping the anchor's
-    directory looked for a non-existent top-level module and silently omitted
-    the sibling from the freshness pathspec (Codex review on #667)."""
-    named = ass._adr_named_modules(
-        "`abicheck/buildsource/graph_facts.py` and `_impact.py`"
-    )
-    assert "abicheck/buildsource/graph_impact.py" in named
-
-
-def test_adr_named_modules_ignores_shorthand_without_an_anchor(ass):
-    """A leading-underscore token with no preceding full module name has
-    nothing to expand against and must not be guessed at."""
-    assert ass._adr_named_modules("see `_resolver.py` for details") == []
-
-
 def test_adr_status_sync_allows_index_row_to_abridge(car, ass, tmp_path, monkeypatch):
     """An index cell is an abridgement, not a paraphrase-for-paraphrase copy.
     A status paragraph naming follow-up work the one-line row omits is normal
@@ -1112,6 +1082,65 @@ def test_adr_status_sync_allows_index_row_to_abridge(car, ass, tmp_path, monkeyp
     f = car.Findings()
     car.check_adr_status_sync(f)
     assert f.errors == [], f"abridged index row wrongly flagged: {f.errors}"
+
+
+def test_adr_named_modules_does_not_guess_family_shorthand(ass):
+    """Shorthand (`_resolver.py` after `compatibility_evaluation_config.py`)
+    is deliberately not resolved. Guessing it produced a different wrong
+    answer in each of three review rounds — nested anchors lost their
+    directory, `source_graph.py` + `_findings.py` wants the family appended
+    where `graph_facts.py` + `_impact.py` wants it replaced, and an expanded
+    path could not survive deletion without also fabricating one from a bad
+    guess. A Status that wants a module watched names it in full."""
+    named = ass._adr_named_modules(
+        "`abicheck/compatibility_evaluation_config.py` and `_resolver.py`"
+    )
+    assert named == ["abicheck/compatibility_evaluation_config.py"]
+
+
+def test_adr_status_sync_rejects_an_impossible_receipt_date(
+    car, ass, tmp_path, monkeypatch
+):
+    """`2026-99-99` matches the value regex's shape but is not a date, so it
+    would otherwise record a verification that cannot have happened."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** main@abc1234 on 2026-99-99\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("not a real calendar date" in msg for _, msg in f.errors), (
+        f"expected an impossible-date error, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_rejects_a_future_receipt_date(car, ass, tmp_path, monkeypatch):
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    future = _dt.date.today() + _dt.timedelta(days=30)
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        f"**Verified:** main@abc1234 on {future.isoformat()}\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("in the future" in msg for _, msg in f.errors), (
+        f"expected a future-date error, got: {f.errors}"
+    )
 
 
 def test_adr_status_sync_rejects_duplicate_verified_lines(

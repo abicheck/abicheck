@@ -54,6 +54,14 @@ is opt-in precisely so it stays truthful: an ADR without one has simply never
 been checked, which is the honest state of most of the files below and is not
 an error. Adding one you didn't actually perform is worse than having none.
 
+**Name a module in full if you want it watched** — `abicheck/foo.py`, not
+`_foo.py` after a sibling. Family shorthand is deliberately not guessed at:
+the gate would have to infer whether the family is replaced or appended, and
+a wrong inference either watches an unrelated file or silently watches
+nothing. A full path is exact, auditable from the Status line alone, and
+keeps working after the file is renamed or deleted (which is when a claim is
+most likely to have gone stale).
+
 What it buys is a tripwire rather than a promise. `adr-status-sync`
 (implemented in `scripts/adr_status_sync.py`, registered as a check by
 `scripts/check_ai_readiness.py`) reads the first-party module paths the Status

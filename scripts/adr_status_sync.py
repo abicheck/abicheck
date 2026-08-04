@@ -16,6 +16,7 @@ Pure-stdlib, like its caller, so it can run as the first CI step before
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 import subprocess
 from pathlib import Path
@@ -194,35 +195,6 @@ _ADR_MODULE_PATH_RE = re.compile(
 )
 
 
-def _expand_family_shorthand(shorthand: str, anchor: str | None) -> str | None:
-    """Resolve a family shorthand like `_resolver.py` against the last module
-    named in full, e.g. `compatibility_evaluation_config.py` ->
-    `compatibility_evaluation_resolver.py`.
-
-    Real status prose names the first module of a family in full and the rest
-    by suffix, which is readable but left four of ADR-049's own modules
-    untripwired (Codex review). The expansion is only ever *accepted* when it
-    resolves to a real file, so a wrong guess drops the token rather than
-    inventing a tripwire on an unrelated module.
-
-    The anchor's directory is carried over, so a nested family resolves in its
-    own package: `buildsource/graph_facts.py` + `_impact.py` ->
-    `buildsource/graph_impact.py`, not the non-existent top-level
-    `graph_impact.py` that an earlier revision looked for and silently dropped
-    (Codex review on PR #667).
-    """
-    if anchor is None or "/" in shorthand or not shorthand.startswith("_"):
-        return None
-    parent, _sep, base = anchor.rpartition("/")
-    family, sep, _leaf = base.removesuffix(".py").rpartition("_")
-    if not sep:
-        return None
-    candidate = f"{family}{shorthand}"
-    if parent:
-        candidate = f"{parent}/{candidate}"
-    return candidate if (PKG / candidate).is_file() else None
-
-
 def _is_first_party_path(path: str) -> bool:
     """True for a repo-relative path rooted in a first-party tree."""
     head, sep, _rest = path.partition("/")
@@ -242,29 +214,28 @@ def _adr_named_modules(status: str) -> list[str]:
 
     A *bare* `x.py` has to resolve inside the package, since that's the only
     thing distinguishing a real module reference from an unrelated `verify.py`
-    or `conftest.py` mention -- with family shorthand (`_resolver.py`)
-    resolved against the last module named in full, see
-    _expand_family_shorthand.
+    or `conftest.py` mention. That existence gate means a bare name whose
+    module was deleted degrades to no tripwire -- the conservative default,
+    since after deletion nothing distinguishes the two cases any more.
+
+    **Family shorthand (`_resolver.py` after `compatibility_evaluation_config.py`)
+    is deliberately not resolved.** An earlier revision guessed it, and three
+    successive review rounds each found a different shape the guess got wrong:
+    a nested anchor lost its directory, `source_graph.py` + `_findings.py`
+    wants the family *appended* where `graph_facts.py` + `_impact.py` wants it
+    *replaced*, and an expanded path could not be kept as a tripwire after
+    deletion without also fabricating one from a wrong guess. Prose-shape
+    guessing is the wrong thing for a gate to do: a Status that wants a module
+    watched names it in full, which is exact, auditable, and survives
+    deletion. See `adr/index.md`'s convention section.
     """
     named = set()
-    # Only a *package* module anchors shorthand expansion: `_resolver.py` is
-    # resolved against PKG, so anchoring it on a `tests/...` path would build
-    # a candidate under the wrong tree.
-    anchor: str | None = None
     for m in _ADR_MODULE_PATH_RE.finditer(status):
         path = m.group("path")
         if _is_first_party_path(path):
             named.add(path)
-            head, _sep, rest = path.partition("/")
-            anchor = rest if head == "abicheck" else None
-            continue
-        if "/" not in path and (PKG / path).is_file():
+        elif "/" not in path and (PKG / path).is_file():
             named.add(f"abicheck/{path}")
-            anchor = path
-            continue
-        expanded = _expand_family_shorthand(path, anchor)
-        if expanded is not None:
-            named.add(f"abicheck/{expanded}")
     return sorted(named)
 
 
@@ -405,6 +376,38 @@ def _check_receipt_is_durably_anchored(f: Findings, name: str, sha: str) -> None
         )
 
 
+def _receipt_date_is_real(f: Findings, name: str, raw_date: str) -> bool:
+    """True when the receipt's date is a real calendar date, not in the future.
+
+    The value regex only pins the *shape* `\\d{4}-\\d{2}-\\d{2}`, so
+    `2026-99-99` — or a date after the verification could have happened —
+    would otherwise pass a required gate while recording a check that cannot
+    have taken place (Codex review on PR #667).
+
+    One day of slack on the upper bound: the author's local date can be ahead
+    of the runner's UTC date, and failing an honest receipt over a timezone
+    boundary would be worse than accepting a receipt dated one day early.
+    """
+    try:
+        parsed = _dt.date.fromisoformat(raw_date)
+    except ValueError:
+        f.err(
+            "adr-status-sync",
+            f"docs/contribute/adr/{name}: '**Verified:**' date {raw_date!r} "
+            "is not a real calendar date",
+        )
+        return False
+    if parsed > _dt.date.today() + _dt.timedelta(days=1):
+        f.err(
+            "adr-status-sync",
+            f"docs/contribute/adr/{name}: '**Verified:**' date {raw_date} is "
+            "in the future; it records when the Status was checked, which "
+            "cannot be later than today",
+        )
+        return False
+    return True
+
+
 def _check_adr_verification_receipt(
     f: Findings, name: str, text: str, status: str
 ) -> None:
@@ -446,6 +449,8 @@ def _check_adr_verification_receipt(
             f"({raw!r}); expected '<ref>@<sha> on YYYY-MM-DD', "
             "e.g. 'main@2e43d53 on 2026-08-04'",
         )
+        return
+    if not _receipt_date_is_real(f, name, value.group("date")):
         return
     sha = value.group("sha")
     if _git_output("cat-file", "-e", f"{sha}^{{commit}}") is None:

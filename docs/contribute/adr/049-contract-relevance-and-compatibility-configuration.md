@@ -5,7 +5,10 @@
 partially. Phase 0's vocabulary (`abicheck/contract_relevance_types.py`)
 and Phase 1's typed config, precedence resolver, pack manifests, and
 per-field front-end wiring (`abicheck/compatibility_evaluation_config.py`,
-`_resolver.py`, `_packs.py`, `_wiring.py`, `_frontend.py`) are in place.
+`abicheck/compatibility_evaluation_resolver.py`,
+`abicheck/compatibility_evaluation_packs.py`,
+`abicheck/compatibility_evaluation_wiring.py`,
+`abicheck/compatibility_evaluation_frontend.py`) are in place.
 Phase 2's identity primitive (`abicheck/finding_identity.py`) is fully
 wired — `diff_filtering.py`'s cross-detector dedup key resolves through
 `resolve_change_identity`, and `diff_symbols.py`'s own old/new function and
