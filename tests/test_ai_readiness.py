@@ -1104,6 +1104,31 @@ def test_adr_status_sync_allows_index_row_to_abridge(car, ass, tmp_path, monkeyp
     assert f.errors == [], f"abridged index row wrongly flagged: {f.errors}"
 
 
+def test_adr_status_sync_ignores_a_verified_example_in_the_body(
+    car, ass, tmp_path, monkeypatch
+):
+    """An ADR *documenting* the receipt convention — a fenced, deliberately
+    incomplete `**Verified:**` example — must not have that example read as
+    its own live receipt and fail a required CI job (Codex review on #667).
+    Only the leading metadata block counts."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n\n"
+        "## Context\n\nThe convention is:\n\n"
+        "```\n**Verified:** <ref>@<sha> on <YYYY-MM-DD>\n```\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"a documented example was read as a receipt: {f.errors}"
+
+
 def test_adr_status_sync_rejects_malformed_verified_line(
     car, ass, tmp_path, monkeypatch
 ):

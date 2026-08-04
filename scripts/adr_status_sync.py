@@ -128,6 +128,44 @@ _ADR_VERIFIED_VALUE_RE = re.compile(
     r"(?P<date>\d{4}-\d{2}-\d{2})\s*$"
 )
 
+#: The end of an ADR's leading metadata block: the first section heading or
+#: horizontal rule. Everything before it is the `**Date:**`/`**Status:**`/
+#: `**Verified:**`/`**Decision maker:**` preamble every ADR here opens with.
+_ADR_METADATA_END_RE = re.compile(r"^\s*#{2,}\s|^\s*-{3,}\s*$")
+_ADR_FENCE_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
+
+
+def _adr_metadata_block(text: str) -> str:
+    """The ADR's leading metadata preamble, with fenced code removed.
+
+    The receipt is searched here rather than across the whole document so an
+    ADR *documenting* the convention -- a fenced `**Verified:** <ref>@<sha>`
+    example, deliberately illustrative and possibly incomplete -- can't be
+    read as that ADR's own live receipt and fail a required CI job (Codex
+    review on PR #667). Same precaution `adr-index-nav-sync` already takes
+    for links via `_strip_adr_link_noise` (PR #619 review); a fence is
+    stripped even inside the preamble, since the convention places the real
+    receipt on a bare metadata line, never inside a code block.
+    """
+    kept: list[str] = []
+    fence: str | None = None
+    for line in text.split("\n"):
+        m = _ADR_FENCE_RE.match(line)
+        if m:
+            token = m.group(1)
+            if fence is None:
+                fence = token[0]
+            elif token[0] == fence:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        if _ADR_METADATA_END_RE.match(line):
+            break
+        kept.append(line)
+    return "\n".join(kept)
+
+
 #: A first-party Python file named inside a Status paragraph: a repo-relative
 #: path under any first-party root ("`abicheck/contract_evaluation.py`",
 #: "`tests/test_cli_contract.py`") or a bare module name
@@ -314,7 +352,7 @@ def _check_adr_verification_receipt(
     WARN, not an ERROR -- a change to a named module doesn't prove the claim
     went stale, it proves nobody has re-read it since the code moved.
     """
-    m = _ADR_VERIFIED_START_RE.search(text)
+    m = _ADR_VERIFIED_START_RE.search(_adr_metadata_block(text))
     if m is None:
         return
     value = _ADR_VERIFIED_VALUE_RE.match(m.group(1).strip())
