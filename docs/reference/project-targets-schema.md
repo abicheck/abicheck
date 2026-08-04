@@ -270,10 +270,20 @@ Reaches `abicheck project plan` as
 resolved independently for each overlay (a profile with no `frontend:` set
 on an overlay leaves that field empty, deferring to a caller's own global
 `--ast-frontend`/default — it never falls back to the *other* overlay's
-`frontend:` value). Like `consumer_compile:` itself, this is schema/
-projection only — no run-plan consumer resolves a per-cell `RunPlanCell`
-that actually threads this field into a real `dump`/`compare` invocation
-yet; see the G34 plan doc's Phase B for what remains.
+`frontend:` value).
+
+`compile.frontend` is applied end to end: `check-project.yml`'s check job
+forwards the projected `compile_ast_frontend` as that cell's own
+`--ast-frontend`, preferring it over the workflow-level input the same way
+`gcc-path`/`gcc-options` already prefer their per-cell overlay. So the
+example above genuinely runs its producer pass under castxml. The one
+exception is a `kind: bundle` check, whose operand is a staging *directory*
+— the root Action rejects any non-`auto` frontend there, so such a cell
+keeps resolving the workflow-global value.
+`consumer_compile.frontend`, by contrast, is still projection only — it
+describes the header-AST pass of the two-pass producer/consumer extraction
+that `consumer_compile:` itself has not built yet, so nothing forwards it;
+see the G34 plan doc's Phase B and Phase 0 for what remains.
 
 ### `os:` and `dependency_source:` — how a profile schedules its own check cell (G34 Phase C)
 
