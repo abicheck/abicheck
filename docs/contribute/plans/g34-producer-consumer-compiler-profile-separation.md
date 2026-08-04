@@ -305,6 +305,20 @@ confirmed by reading the workflow, not asserted from a design doc):
       mint an identity from a spelling no producer emitted. Valid siblings in
       the same array stay usable. (Third Codex review round; the same false
       clean claim as the non-object case, one level down.)
+- [x] The rule that validation follows is **accept exactly what the identity
+      resolver handles, no less.** `old_value`/`new_value` are annotated
+      `str | None` but the annotation is not runtime-enforced, and
+      `diff_python.py`'s `python_stable_abi_violation` emissions really do
+      pass a list (`new_value=sorted(group)`), which `_change_to_dict`
+      preserves verbatim into JSON —
+      `finding_identity._stringify_change_value` exists precisely to fold
+      that shape. A first cut of the validation above rejected it, which
+      dropped a genuine finding *and* marked its report incomplete, demoting
+      a demonstrably affected profile to undetermined. List/tuple values are
+      now accepted for those two fields and forwarded intact rather than
+      filtered to `None`, so they discriminate the identity as they should;
+      every other field stays string-only. (Fourth Codex review round —
+      a regression the third round's fix introduced.)
 - [x] A third list, `undetermined_profiles`, was **added beyond the original
       scope** and is the load-bearing one: a profile whose findings are not
       fully known is neither affected nor unaffected. Without it, this view

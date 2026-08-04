@@ -84,8 +84,14 @@ class _ReportChangeView:
     kind: str
     symbol: str
     description: str
-    old_value: str | None
-    new_value: str | None
+    #: ``Change`` annotates these ``str | None``, but the annotation is not
+    #: runtime-enforced and ``diff_python.py`` really does pass a list (e.g.
+    #: ``new_value=sorted(group)`` for ``python_stable_abi_violation``), which
+    #: ``_change_to_dict`` preserves verbatim into JSON.
+    #: ``finding_identity._stringify_change_value`` was hardened for exactly
+    #: that shape, so it is forwarded rather than dropped (Codex review).
+    old_value: str | list[Any] | tuple[Any, ...] | None
+    new_value: str | list[Any] | tuple[Any, ...] | None
     source_location: str | None
     affected_symbols: list[str] | None
     qualified_name: str | None
@@ -121,6 +127,18 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
         value = entry.get(key)
         return value if isinstance(value, str) and value else None
 
+    def _opt_value(key: str) -> str | list[Any] | tuple[Any, ...] | None:
+        """``old_value``/``new_value``, keeping a structured value intact.
+
+        Routing these through ``_opt_str`` would read a producer's list as
+        *absent* and quietly compute the identity without a discriminator it
+        really has — see :class:`_ReportChangeView`.
+        """
+        value = entry.get(key)
+        if isinstance(value, (list, tuple)):
+            return value
+        return value if isinstance(value, str) and value else None
+
     affected_raw = entry.get("affected_symbols")
     affected = (
         [str(s) for s in affected_raw] if isinstance(affected_raw, list) else None
@@ -129,8 +147,8 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
         kind=str(entry.get("kind") or ""),
         symbol=str(entry.get("symbol") or ""),
         description=str(entry.get("description") or ""),
-        old_value=_opt_str("old_value"),
-        new_value=_opt_str("new_value"),
+        old_value=_opt_value("old_value"),
+        new_value=_opt_value("new_value"),
         source_location=_opt_str("source_location"),
         affected_symbols=affected,
         # Never serialized by `_change_to_dict` — see this function's own
@@ -306,19 +324,22 @@ def _with_bundle_attribution(entry: Mapping[str, Any]) -> Mapping[str, Any]:
     return {**entry, "description": prefix + str(entry.get("description") or "")}
 
 
-#: Report fields :func:`resolve_report_change_identity` reads to build an
-#: identity. Each must be a string when present -- a non-string here does not
-#: merely degrade the identity, it silently changes it: ``old_value`` and its
-#: neighbours go through an ``isinstance(..., str)`` filter that would read a
-#: structured value as absent, and ``symbol``/``description`` would be
-#: ``str()``-coerced into something no producer ever wrote.
-_IDENTITY_STRING_FIELDS = (
-    "symbol",
-    "description",
-    "old_value",
-    "new_value",
-    "source_location",
-)
+#: Identity fields that must be a plain string when present. A non-string
+#: here does not merely degrade the identity, it silently changes it:
+#: ``symbol`` and ``description`` would be ``str()``-coerced into a spelling
+#: no producer ever wrote, and ``source_location`` would be read as absent.
+_IDENTITY_STRING_FIELDS = ("symbol", "description", "source_location")
+
+#: Identity fields that may *also* carry a structured value. ``Change``
+#: annotates both ``str | None``, but the annotation is not runtime-enforced
+#: and ``diff_python.py``'s ``python_stable_abi_violation`` emissions really
+#: do pass a list -- ``finding_identity._stringify_change_value`` exists
+#: precisely to fold that shape deterministically. Rejecting it here would
+#: drop a genuine finding *and* mark its report incomplete, turning a
+#: profile that is demonstrably affected into an undetermined one (Codex
+#: review). The rule this file follows: accept exactly what the identity
+#: resolver handles, no less.
+_IDENTITY_VALUE_FIELDS = ("old_value", "new_value")
 
 
 def _is_usable_finding_entry(entry: object) -> bool:
@@ -344,9 +365,14 @@ def _is_usable_finding_entry(entry: object) -> bool:
     kind = entry.get("kind")
     if not isinstance(kind, str) or not kind:
         return False
-    return all(
+    if not all(
         entry.get(field) is None or isinstance(entry.get(field), str)
         for field in _IDENTITY_STRING_FIELDS
+    ):
+        return False
+    return all(
+        entry.get(field) is None or isinstance(entry.get(field), (str, list, tuple))
+        for field in _IDENTITY_VALUE_FIELDS
     )
 
 

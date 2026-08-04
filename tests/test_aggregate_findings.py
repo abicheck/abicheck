@@ -771,6 +771,10 @@ class TestFindingEntryValidation:
                 {"kind": "func_removed", "old_value": {"a": 1}}, id="mapping-old-value"
             ),
             pytest.param(
+                {"kind": "func_removed", "source_location": ["h.h:1"]},
+                id="list-source-location",
+            ),
+            pytest.param(
                 {"kind": "func_removed", "description": 7}, id="non-string-description"
             ),
         ],
@@ -805,3 +809,61 @@ class TestFindingEntryValidation:
         result = parse_report_findings({"bundle_findings": [{"symbol": "x"}]})
         assert result.findings == ()
         assert result.complete is False
+
+
+#: `diff_python.py` really passes a list for these findings (e.g.
+#: `new_value=sorted(group)`), and `_change_to_dict` preserves it in JSON.
+_PYTHON_VIOLATION = {
+    "kind": "python_stable_abi_violation",
+    "symbol": "PyFoo",
+    "description": "uses unstable API",
+    "new_value": ["Py_INCREF", "Py_DECREF"],
+}
+
+
+class TestStructuredFindingValues:
+    """`old_value`/`new_value` are annotated `str | None` but not enforced,
+    and one real producer emits a list (Codex review). The validator must
+    accept exactly what the identity resolver handles — no less, or a genuine
+    finding is dropped and its profile demoted to undetermined."""
+
+    def test_structured_value_is_a_usable_finding(self) -> None:
+        result = parse_report_findings({"changes": [dict(_PYTHON_VIOLATION)]})
+        assert len(result.findings) == 1
+        assert result.complete is True
+
+    def test_structured_value_still_discriminates_the_identity(self) -> None:
+        """Routing it through the string-only filter would have read the list
+        as absent, silently dropping a discriminator the finding really has."""
+        both = ReportFinding.from_report_entry(dict(_PYTHON_VIOLATION))
+        one = ReportFinding.from_report_entry(
+            {**_PYTHON_VIOLATION, "new_value": ["Py_INCREF"]}
+        )
+        assert both.identity != one.identity
+
+    def test_a_tuple_value_is_accepted_too(self) -> None:
+        result = parse_report_findings(
+            {"changes": [{**_PYTHON_VIOLATION, "new_value": ("a", "b")}]}
+        )
+        assert len(result.findings) == 1
+        assert result.complete is True
+
+    def test_a_mapping_value_is_still_rejected(self) -> None:
+        """The carve-out is for the shapes the resolver folds
+        deterministically, not for anything non-string."""
+        result = parse_report_findings(
+            {"changes": [{**_PYTHON_VIOLATION, "new_value": {"a": 1}}]}
+        )
+        assert result.findings == ()
+        assert result.complete is False
+
+    def test_such_a_profile_is_affected_not_undetermined(self, tmp_path: Path) -> None:
+        """The end-to-end consequence Codex named."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [dict(_PYTHON_VIOLATION)])
+        _write_findings_report(tmp_path, CLANG, "COMPATIBLE", [])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        (entry,) = r.finding_matrix
+        assert entry.kinds == ("python_stable_abi_violation",)
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.undetermined_profiles == ()
+        assert entry.scope == "profile_specific"
