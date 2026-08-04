@@ -725,11 +725,17 @@ def effective_graph_scope(graph_detail: str, scope: str) -> str:
 
 
 def _run_cleanups(cleanups: list[Callable[[], None]]) -> None:
+    """Run every registered cleanup, never letting one failure skip the rest.
+
+    A failure (a temp tree already gone, a read-only mount) must not abort
+    collection — but it is logged rather than swallowed silently (bandit B110),
+    so a leaked scratch directory is diagnosable instead of invisible.
+    """
     for fn in cleanups:
         try:
             fn()
         except Exception:  # noqa: BLE001
-            pass
+            logger.debug("inline pack cleanup failed: %r", fn, exc_info=True)
 
 
 def collect_inline_pack(

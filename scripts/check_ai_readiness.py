@@ -59,6 +59,7 @@ from adr_status_sync import (  # noqa: E402
     _adr_status_text,
     check_adr_status_sync,
 )
+from findings_report import Findings as _SharedFindings  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -187,38 +188,14 @@ MYPY_ERROR_BASELINE = 0
 # ---------------------------------------------------------------------------
 
 
-class Findings:
-    """Collects errors and warnings, grouped by check name for readable output."""
+class Findings(_SharedFindings):
+    """This gate's error/warning collector — the shared one, labelled for it.
 
-    def __init__(self) -> None:
-        self.errors: list[tuple[str, str]] = []
-        self.warnings: list[tuple[str, str]] = []
+    The collection/grouping/printing itself lives in ``findings_report.py`` so
+    ``check_docs_contract.py`` reports identically without a second copy.
+    """
 
-    def err(self, check: str, msg: str) -> None:
-        self.errors.append((check, msg))
-
-    def warn(self, check: str, msg: str) -> None:
-        self.warnings.append((check, msg))
-
-    def report(self) -> int:
-        by_check: dict[str, dict[str, list[str]]] = defaultdict(
-            lambda: {"errors": [], "warnings": []}
-        )
-        for check, msg in self.errors:
-            by_check[check]["errors"].append(msg)
-        for check, msg in self.warnings:
-            by_check[check]["warnings"].append(msg)
-
-        for check, buckets in sorted(by_check.items()):
-            print(f"\n=== {check} ===")
-            for m in buckets["errors"]:
-                print(f"  ERROR: {m}")
-            for m in buckets["warnings"]:
-                print(f"  WARN:  {m}")
-
-        n_err, n_warn = len(self.errors), len(self.warnings)
-        print(f"\nAI-readiness: {n_err} error(s), {n_warn} warning(s)")
-        return 1 if n_err else 0
+    SUMMARY_LABEL = "AI-readiness"
 
 
 # ---------------------------------------------------------------------------

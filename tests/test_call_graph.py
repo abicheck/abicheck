@@ -1019,6 +1019,7 @@ def test_extract_from_args_rechecks_deadline_before_walking_ast(monkeypatch) -> 
 
     import abicheck.buildsource.call_graph as cg
     from abicheck import deadline
+    from abicheck.buildsource import clang_ast_run
 
     monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
     ast = {"kind": "TranslationUnitDecl", "inner": []}
@@ -1027,13 +1028,13 @@ def test_extract_from_args_rechecks_deadline_before_walking_ast(monkeypatch) -> 
         return _FakeProc(_json.dumps(ast))
 
     monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
-    real_loads = cg.json.loads
+    real_loads = clang_ast_run.json.loads
 
     def _slow_loads(text):
         time.sleep(0.05)
         return real_loads(text)
 
-    monkeypatch.setattr(cg.json, "loads", _slow_loads)
+    monkeypatch.setattr(clang_ast_run.json, "loads", _slow_loads)
     ext = ClangCallGraphExtractor()
     with deadline.deadline_scope(0.03):
         edges = ext.extract_from_args(["x.cpp"])

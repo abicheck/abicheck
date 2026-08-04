@@ -22,6 +22,7 @@ Stacked-decorator helpers that bundle related ``compare`` options so the large
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -1864,7 +1865,10 @@ def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
         try:
             kinds.add(classify_compare_operand(Path(str(operand))))
         except Exception:  # noqa: BLE001 - classification is best-effort here
-            continue
+            # Logged rather than swallowed silently (bandit B112): an operand
+            # this classifier cannot read contributes no kind, and the real
+            # dispatch in ``run_compare`` reports it properly.
+            logging.getLogger(__name__).debug("unclassifiable operand %r", operand, exc_info=True)
     return bool(kinds & {"directory", "package"})
 
 

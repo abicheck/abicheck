@@ -65,7 +65,7 @@ class TestCompileFlagsSlicing:
         cmd = [
             "clang++", "-I", "/inc", "-std=gnu++17",
             "-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump=json",
-            "/tmp/agg.hpp",
+            "/work/agg.hpp",
         ]
         flags = _compile_flags_from_ast_dump_command(cmd)
         assert flags == [
@@ -87,7 +87,7 @@ class TestCompileFlagsSlicing:
             "clang++", "-I", "/inc", "-Xclang", "-some-user-flag",
             "-isystem", "/usr/include/probed",
             "-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump=json",
-            "/tmp/agg.hpp",
+            "/work/agg.hpp",
         ]
         flags = _compile_flags_from_ast_dump_command(cmd)
         assert flags == [

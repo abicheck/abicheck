@@ -1717,13 +1717,15 @@ def test_extract_from_safe_args_rechecks_deadline_before_walking_ast(
 
     monkeypatch.setattr(tg.shutil, "which", lambda _b: "/usr/bin/clang++")
     monkeypatch.setattr(tg.deadline, "run_bounded", fake_run)
-    real_loads = tg.json.loads
+    from abicheck.buildsource import clang_ast_run
+
+    real_loads = clang_ast_run.json.loads
 
     def _slow_loads(text):
         time.sleep(0.05)
         return real_loads(text)
 
-    monkeypatch.setattr(tg.json, "loads", _slow_loads)
+    monkeypatch.setattr(clang_ast_run.json, "loads", _slow_loads)
     extractor = ClangTypeGraphExtractor(clang_bin="clang++")
     with deadline.deadline_scope(0.03):
         edges = extractor._extract_from_safe_args(["--", "foo.cpp"])

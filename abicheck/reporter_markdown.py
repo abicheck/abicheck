@@ -588,37 +588,12 @@ def _to_markdown_leaf(
     """
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
-    v = result.verdict
-    emoji = _VERDICT_EMOJI[v]
-    label = _VERDICT_LABEL[v]
-
-    lines: list[str] = [
-        f"# ABI Report: {result.library} (leaf-change view)",
-        "",
-        "| | |",
-        "|---|---|",
-        f"| **Old version** | `{result.old_version}` |",
-        f"| **New version** | `{result.new_version}` |",
-        f"| **Verdict** | {emoji} `{label}` |",
-        "",
-    ]
-
-    if show_recommendation:
-        _append_recommendation_section(lines, result)
-
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        lines.append(
-            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
-        )
-        lines.append("")
+    lines, changes = _view_preamble(
+        result,
+        "leaf-change view",
+        show_only=show_only,
+        show_recommendation=show_recommendation,
+    )
 
     if severity_config is not None:
         lines += _build_severity_summary_md(
@@ -901,37 +876,12 @@ def _to_markdown_root_cause(
     minimal set of things that actually broke", not "what severity bucket
     does each finding independently fall into".
     """
-    v = result.verdict
-    emoji = _VERDICT_EMOJI[v]
-    label = _VERDICT_LABEL[v]
-
-    lines: list[str] = [
-        f"# ABI Report: {result.library} (root-cause view)",
-        "",
-        "| | |",
-        "|---|---|",
-        f"| **Old version** | `{result.old_version}` |",
-        f"| **New version** | `{result.new_version}` |",
-        f"| **Verdict** | {emoji} `{label}` |",
-        "",
-    ]
-
-    if show_recommendation:
-        _append_recommendation_section(lines, result)
-
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
-        lines.append(
-            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
-        )
-        lines.append("")
+    lines, changes = _view_preamble(
+        result,
+        "root-cause view",
+        show_only=show_only,
+        show_recommendation=show_recommendation,
+    )
 
     # G29 Phase 3 slice 3 follow-up (Codex review): a --used-by/
     # --required-symbol scoped-only change or missing-contract label whose
@@ -1781,6 +1731,56 @@ def _append_policy_section(lines: list[str], result: DiffResult) -> None:
 
 
 _BUMP_EMOJI = {"major": "🔴", "minor": "🟢", "patch": "🟢", "none": "✅"}
+
+
+def _view_preamble(
+    result: DiffResult,
+    view_label: str,
+    *,
+    show_only: str | None,
+    show_recommendation: bool,
+) -> tuple[list[str], list[Change]]:
+    """Opening block shared by the leaf-change and root-cause markdown views.
+
+    Both views open identically — the titled version/verdict table, the optional
+    recommendation section, then the ``--show-only`` filter applied to the
+    change list with its "Filtered by" note. Stated once so the two views cannot
+    drift apart in what a filter does or how the header reads (CodeFactor:
+    duplicate code). Full mode deliberately does not share this: its table
+    carries four extra count rows and it applies ``--show-only`` silently, with
+    no note line.
+
+    Returns the opening lines and the (possibly filtered) changes to render.
+    """
+    lines: list[str] = [
+        f"# ABI Report: {result.library} ({view_label})",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| **Old version** | `{result.old_version}` |",
+        f"| **New version** | `{result.new_version}` |",
+        f"| **Verdict** | {_VERDICT_EMOJI[result.verdict]} `{_VERDICT_LABEL[result.verdict]}` |",
+        "",
+    ]
+
+    if show_recommendation:
+        _append_recommendation_section(lines, result)
+
+    changes = list(result.changes)
+    if show_only:
+        changes = apply_show_only(
+            changes,
+            show_only,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+        )
+        lines.append(
+            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
+        )
+        lines.append("")
+
+    return lines, changes
 
 
 def _append_recommendation_section(lines: list[str], result: DiffResult) -> None:

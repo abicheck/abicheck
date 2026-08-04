@@ -611,7 +611,11 @@ def load_pack_manifest(path: str | Path) -> LoadedPack:
         ) from exc
 
     try:
-        document: Any = yaml.load(raw_text, Loader=_StrictLoader)
+        # `_StrictLoader` *is* a `yaml.SafeLoader` subclass (it only adds the
+        # duplicate-key check above); bandit's B506 flags any `Loader=` it
+        # cannot name-match against `SafeLoader`/`CSafeLoader`, subclasses
+        # included, so this is the safe-loader path, not an arbitrary-object one.
+        document: Any = yaml.load(raw_text, Loader=_StrictLoader)  # nosec B506
     except PackManifestError as exc:
         raise PackManifestError(f"{manifest_path}: {exc}") from exc
     except yaml.YAMLError as exc:
