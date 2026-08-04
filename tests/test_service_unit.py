@@ -4655,14 +4655,14 @@ class TestRunCompareRequestResolutionParity:
     request could not — ``--dwarf-only``, ``--debug-format``, ADR-050 D1's
     include labels, and ``--follow-deps``."""
 
-    def _elf_pair(self, tmp_path):
+    def _elf_pair(self, tmp_path) -> tuple[Path, Path]:
         old_p = tmp_path / "old.so"
         new_p = tmp_path / "new.so"
         for p in (old_p, new_p):
             p.write_bytes(b"\x7fELF" + b"\x00" * 200)
         return old_p, new_p
 
-    def _stub_dump(self, monkeypatch):
+    def _stub_dump(self, monkeypatch) -> dict[str, dict[str, object]]:
         """Record resolve_input's debug kwargs per side, without a real parse."""
         import abicheck.service as service_mod
 
@@ -4678,7 +4678,7 @@ class TestRunCompareRequestResolutionParity:
         monkeypatch.setattr(service_mod, "run_dump", _fake)
         return seen
 
-    def _request(self, tmp_path, **kwargs):
+    def _request(self, tmp_path, **kwargs) -> CompareRequest:
         old_p, new_p = self._elf_pair(tmp_path)
         return CompareRequest(
             old=InputSpec(path=old_p, version="old"),
@@ -4719,7 +4719,9 @@ class TestRunCompareRequestResolutionParity:
         request = self._request(tmp_path, include_labels=((Path("/inc"), "proj"),))
         assert hash(request) == hash(request.replace())
 
-    def _stub_dependency_population(self, monkeypatch):
+    def _stub_dependency_population(
+        self, monkeypatch
+    ) -> list[tuple[str, list[Path], str]]:
         import abicheck.dependency_info as dep_mod
 
         calls: list[tuple] = []

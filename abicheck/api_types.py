@@ -36,17 +36,15 @@ Gap 1 documents: ``CompareRequest`` previously had no way to express
 per-side ``CompileContext`` feature set at all, so a Python caller wanting
 that had to fall back to loose keyword arguments on lower-level functions.
 ``service.run_compare_request`` reads these new fields directly (see its own
-docstring for exactly how); it does not match every capability of the CLI's
-own, separately-maintained ``cli_resolve._resolve_compare_snapshots``
-(project-config ``source.method`` inference, the set-input evidence-flag
-rejection guard, per-side AST-frontend override). Keeping those two paths —
-extending this one in parallel rather than migrating the CLI onto it — is a
-recorded decision, not an unfinished migration: ADR-055's
-"Two-resolution-path finding" answers it as option (b), on the grounds that
-the *capability* gap is what D1 existed to close, while rewriting the CLI's
-most heavily-tested resolution path buys nothing a user can observe. The
-three CLI-only capabilities are listed above so a future reader does not
-have to re-derive the actual scope of the difference.
+docstring for exactly how). A second D1 slice then closed the rest of the
+gap against the CLI's own, separately-maintained
+``cli_resolve._resolve_compare_snapshots`` — ``dwarf_only``,
+``debug_format``, ``include_labels``, and ``--follow-deps`` — so the two
+paths now differ in *structure*, not in what they can express. Keeping both,
+rather than migrating the CLI onto this one, is a recorded decision:
+ADR-055's "Two-resolution-path finding" answers it as option (b), since
+rewriting the CLI's most heavily-tested resolution path buys nothing a user
+can observe.
 
 ADR-055 D2 adds :class:`CompareResult`, the result side of the same pair, and
 D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.
@@ -77,6 +75,14 @@ SUPPORTED_LANGS = frozenset({"c", "c++"})
 #: pre-captured header-abi dump and has no header-AST path), so selecting it
 #: without source inputs is a validation error (D9).
 SUPPORTED_FRONTENDS = frozenset({"auto", "castxml", "clang", "hybrid", "android"})
+
+#: ELF debug formats ``--debug-format`` accepts, matching its ``click.Choice``
+#: exactly (including ``auto``). Compared case-insensitively, the way that
+#: choice is declared ``case_sensitive=False`` -- so an API caller passing
+#: ``"DWARF"`` behaves like the CLI caller who typed it, instead of reaching
+#: ``dumper_debug._resolve_debug_metadata`` and failing its lowercase-only
+#: comparison there (Codex review).
+SUPPORTED_DEBUG_FORMATS = frozenset({"auto", "dwarf", "btf", "ctf"})
 
 #: The subset of :data:`SUPPORTED_FRONTENDS` valid for header-AST parsing.
 #: "hybrid" (G28 Phase 3) runs both castxml and clang and merges them —
@@ -288,6 +294,10 @@ class CompareRequest:
     # `--dwarf-only` / `--debug-format`: restrict a side's debug-info parse to
     # DWARF, or pin which debug format is read, instead of auto-detecting.
     dwarf_only: bool = False
+    # Validated against SUPPORTED_DEBUG_FORMATS and lowercased before use, so a
+    # typo fails through this module's ValidationError contract rather than a
+    # raw ValueError deep in extraction, and "DWARF" works here exactly as it
+    # does for the CLI's case-insensitive choice.
     debug_format: str | None = None
     # ADR-050 D1's resolved `path -> label` map for a labeled include set.
     # A tuple of pairs rather than a `dict` so the request stays hashable, the
@@ -363,6 +373,14 @@ class CompareRequest:
         # helpers from the CLI/service import-cycle-allowlisted cluster this
         # leaf module deliberately stays out of, so it's checked at runtime
         # in service.run_compare_request instead of here.
+        if (
+            self.debug_format is not None
+            and self.debug_format.lower() not in SUPPORTED_DEBUG_FORMATS
+        ):
+            allowed = ", ".join(sorted(SUPPORTED_DEBUG_FORMATS))
+            errors.append(
+                f"unsupported debug format {self.debug_format!r}: choose from {allowed}"
+            )
         if not self.policy:
             errors.append("policy profile name must not be empty")
         # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
@@ -487,6 +505,7 @@ class CompareResult:
 
 __all__ = [
     "HEADER_AST_FRONTENDS",
+    "SUPPORTED_DEBUG_FORMATS",
     "SUPPORTED_FRONTENDS",
     "SUPPORTED_LANGS",
     "CompareRequest",

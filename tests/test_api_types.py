@@ -416,3 +416,34 @@ class TestCompareResult:
         result, _diff, _old, new = self._result()
         with pytest.raises(dataclasses.FrozenInstanceError):
             result.old_snapshot = new  # type: ignore[misc]
+
+
+class TestDebugFormatValidation:
+    """ADR-055 D1 second slice (Codex review): the newly-exposed
+    ``debug_format`` must fail through this module's ``ValidationError``
+    contract, and accept the same spellings the CLI's case-insensitive
+    ``--debug-format`` choice does."""
+
+    def _request(self, debug_format):
+        return CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), debug_format=debug_format
+        )
+
+    @pytest.mark.parametrize("value", ["auto", "dwarf", "btf", "ctf"])
+    def test_cli_choice_values_are_accepted(self, value):
+        assert self._request(value).validation_errors() == []
+
+    @pytest.mark.parametrize("value", ["DWARF", "Btf", "CTF"])
+    def test_accepted_case_insensitively_like_the_cli_choice(self, value):
+        # click.Choice(..., case_sensitive=False) — an API caller typing
+        # "DWARF" must not behave differently from the CLI caller who did.
+        assert self._request(value).validation_errors() == []
+
+    def test_a_typo_is_a_validation_error_not_a_raw_valueerror(self):
+        # Without this it reached dumper_debug._resolve_debug_metadata, whose
+        # comparisons are lowercase-only, and surfaced as a bare ValueError.
+        with pytest.raises(ValidationError, match="unsupported debug format"):
+            self._request("dwraf").validate()
+
+    def test_none_stays_valid(self):
+        assert self._request(None).validation_errors() == []

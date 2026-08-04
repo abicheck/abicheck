@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SideEvidence",
     "effective_frontend",
+    "normalized_debug_format",
     "resolve_compare_request_evidence",
 ]
 
@@ -222,3 +223,15 @@ def resolve_compare_request_evidence(
             dump_manifest=_dump_manifest(request.new, request.depth),
         ),
     )
+
+
+def normalized_debug_format(request: CompareRequest) -> str | None:
+    """``CompareRequest.debug_format`` lowercased for the extraction layer.
+
+    ``validate()`` accepts the same four values the CLI's ``--debug-format``
+    choice does, case-insensitively; every consumer below compares against the
+    lowercase literals (``dumper_debug._resolve_debug_metadata``), so an
+    accepted ``"DWARF"`` has to be normalized once rather than silently
+    behaving as "no format given" (Codex review).
+    """
+    return request.debug_format.lower() if request.debug_format is not None else None

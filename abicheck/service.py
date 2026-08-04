@@ -1733,7 +1733,7 @@ def run_compare_request_v2(request: CompareRequest) -> CompareResult:
             dump_manifest=evidence.dump_manifest,
             follow_linker_scripts=side.follow_linker_scripts,
             dwarf_only=request.dwarf_only,
-            debug_format=request.debug_format,
+            debug_format=_sce.normalized_debug_format(request),
             include_labels=dict(request.include_labels) or None,
         )
         if side.sources or side.build_info:

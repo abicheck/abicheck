@@ -25,6 +25,15 @@
   the new leaf module `abicheck.dependency_info`, which the CLI and the
   service both depend on.
 
+- **`compare --follow-deps` now works for a GNU ld linker-script input.** A
+  distribution's `libfoo.so` is routinely a text linker script naming the real
+  `libfoo.so.1`; dependency enrichment gated on the *input's* detected format,
+  which is not ELF for a script, so it silently skipped the resolution the
+  caller asked for. It now follows the script the same way input resolution
+  does — and reads the graph from the resolved ELF rather than the script that
+  names it — for any side that hasn't opted out via
+  `InputSpec.follow_linker_scripts`.
+
 ### Changed
 
 - **The MCP `abi_compare` tool now routes through the Tier-2 chokepoint
@@ -39,6 +48,11 @@
 - **`abi_compare` rejects an unsupported `language` instead of passing it
   down.** A value outside `c`/`c++` (e.g. `"rust"`) is now a structured
   validation error, matching what the CLI's `--lang` choice has always done.
+- **`CompareRequest.debug_format` is validated and case-normalized.** It
+  accepts exactly what the CLI's case-insensitive `--debug-format` choice does
+  (`auto`/`dwarf`/`btf`/`ctf`); anything else raises `ValidationError` up front
+  rather than a bare `ValueError` from inside extraction, and `"DWARF"` now
+  behaves for an API caller as it does for the CLI caller who typed it.
 
 ### Fixed
 

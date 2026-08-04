@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .api_types import CompareRequest
+    from .api_types import CompareRequest, InputSpec
     from .model import AbiSnapshot
 
 
@@ -120,7 +120,43 @@ def populate_pair_dependency_info(
         return
     search_paths = list(request.dependency_search_paths)
     for snap, side, fmt in ((old, request.old, old_fmt), (new, request.new, new_fmt)):
-        if fmt == "elf":
+        elf_path = _dependency_source(side, fmt)
+        if elf_path is not None:
             populate_dependency_info(
-                snap, side.path, search_paths, None, request.ld_library_path
+                snap, elf_path, search_paths, None, request.ld_library_path
             )
+
+
+def _dependency_source(side: InputSpec, fmt: str | None) -> Path | None:
+    """The ELF this side's dependency graph should be read from, or ``None``.
+
+    Not simply ``side.path if fmt == "elf"``. A distribution's ``libfoo.so`` is
+    routinely a GNU ld *linker script* pointing at the real ``libfoo.so.1``:
+    ``detect_binary_format`` sees a text file and answers ``None``, so a plain
+    format check would silently skip the dependency resolution the caller
+    explicitly asked for — while ``resolve_input`` had already followed the
+    script and produced a perfectly good ELF snapshot (Codex review). Reading
+    the *original* path would be no better: ``resolve_dependencies`` needs the
+    ELF, not the script that names it.
+
+    So this follows the script the same way ``resolve_input`` does, and only
+    when that side opted into following at all
+    (``InputSpec.follow_linker_scripts``) — an MCP request that pinned it off
+    to keep its size guard authoritative must not get scripts followed here by
+    a side door.
+
+    A script naming another script resolves to a non-ELF target and yields
+    ``None``: one hop is what ``resolve_linker_script`` answers, and stopping
+    there is the same conservative "skip rather than guess" direction this
+    function already takes for every other non-ELF input.
+    """
+    from .binary_utils import detect_binary_format, resolve_linker_script
+
+    if fmt == "elf":
+        return side.path
+    if not side.follow_linker_scripts:
+        return None
+    target, is_script = resolve_linker_script(side.path)
+    if is_script and target is not None and detect_binary_format(target) == "elf":
+        return target
+    return None
