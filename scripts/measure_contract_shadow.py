@@ -38,7 +38,16 @@ and reports:
    the exact failure mode of switching the gate over in Phase 7;
 4. **proven false-positive reductions** -- an internal-noise case where the
    shadow evaluator proves a finding out of contract. This is what the phase
-   is *for*, measured rather than asserted.
+   is *for*, measured rather than asserted;
+5. **unresolved public-break losses** -- item 3's failure mode reached by the
+   other door. ADR-049 D1 gives an ``UNKNOWN_*`` finding a null compatibility
+   decision exactly as it does a proven-out one, so once Phase 7 made the
+   decision authoritative both stop gating -- but only the proven half was
+   measured, and the gap was not hypothetical: adding this metric found real
+   breaks the gate had silently stopped blocking. Budgeted per domain
+   (``UNRESOLVED_LOSS_BASELINE``) rather than pinned at zero, because in
+   ``exports`` it reflects a corpus with no export tables to resolve against
+   rather than a defect.
 
 The gate ("every shadow delta has evidence and stable identity; zero
 unexplained fact loss") is enforced as three baselines, all zero:
@@ -63,7 +72,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -84,8 +93,10 @@ from abicheck.checker_types import Change, DiffResult  # noqa: E402
 from abicheck.contract_context import finding_key, relevance_map  # noqa: E402
 from abicheck.contract_evidence_collect import validate_decision_evidence  # noqa: E402
 from abicheck.contract_relevance_types import (  # noqa: E402
+    CompatibilityEvaluationStatus,
     ContractMode,
     ContractRelevance,
+    evaluation_status_for,
 )
 from abicheck.export_surface import observed_exports_by_platform  # noqa: E402
 from abicheck.finding_identity import report_finding_id as _finding_id  # noqa: E402
@@ -116,6 +127,76 @@ CORPUS: list[Case] = [*FP_CORPUS, *PLATFORM_CORPUS]
 PROVEN_LOSS_BASELINE = 0
 UNEVIDENCED_DELTA_BASELINE = 0
 FACT_LOSS_BASELINE = 0
+#: Per-domain ceiling for :attr:`ModeMeasurement.unresolved_losses` -- a real
+#: break the authoritative contract decision stops gating because it could not
+#: *resolve* it. Per-domain rather than one number because the two domains'
+#: numbers mean different things, and a single ceiling would have to be the
+#: larger, hiding every regression in the stricter one:
+#:
+#: - ``public`` is the domain a future default flip targets, and every entry
+#:   here is an evaluator gap rather than an evidence gap -- the header
+#:   provenance needed to answer is present and the evaluator does not use it.
+#:   This is the number to drive to zero.
+#: - ``exports`` is an honest evidence limit, not a defect: two thirds of the
+#:   corpus carries no export table at all, so the domain has nothing to
+#:   resolve against. Those runs also raise the orthogonal coverage axis to
+#:   ``1``, so the loss is *reported*, not silent -- which is exactly why this
+#:   is a budget rather than a hard zero.
+#: - ``all`` resolves everything (no header-origin demotion applies), so its
+#:   zero is real and any drift is a regression.
+#:
+#: A budget, not an accepted loss: unlike `PROVEN_LOSS_BASELINE`, where the
+#: evaluator makes a claim that turns out wrong, here it makes no claim and
+#: the gate defaults open. Both directions are worth knowing about, so the
+#: check reports a drop as well as a rise.
+UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
+    "public": 3,
+    "exports": 20,
+    "all": 0,
+}
+#: The `public` entry's remaining cases, named so the budget cannot be
+#: mistaken for "nothing left to do".
+#:
+#: `ambiguous_namespaced_leaf` is a real break on a type whose bare tail
+#: collides with another type's. Confirming it needs per-identity
+#: reachability the surface does not record -- an attempt to prove the
+#: collision harmless from *header origin* instead was reverted for
+#: confirming an unreachable sibling (see
+#: `contract_evaluation._confirmed_type_matches`).
+#:
+#: The other two are the same gap as each other:
+#: `public_stdlib_type_used_directly_layout_changed` and
+#: `public_std_string_typedef_alias_layout_changed` are layout breaks on a
+#: dependency type a public signature *names outright*, which is the very
+#: evidence `diff_types._is_abi_surface_type` consults to keep the finding
+#: rather than filter it as toolchain churn -- so the pipeline keeps the
+#: finding on evidence the evaluator then declines to read, and the gate
+#: loses them. Closing that needs
+#: `type_reachability.directly_referenced_stdlib_types` reaching the
+#: evaluator, which today receives surfaces and no snapshot; that is a
+#: threaded parameter and its own change, not a drive-by here.
+#: Full finding keys (`case:mode:kind:symbol:finding_id`), not case names.
+#: A case can emit several findings, so pinning only the case let one
+#: accepted gap be fixed while a *different* finding in the same case
+#: regressed -- count and case set both identical. The trailing
+#: `report_finding_id` closes the remaining gap: two findings can share a
+#: kind and a symbol, so kind+symbol alone still admitted a substitution
+#: (Codex review, twice).
+#:
+#: The id changes when the finding's own content does (it covers old/new
+#: value, location and description). That is the intended semantics -- a
+#: changed finding is a different finding -- but it does mean an unrelated
+#: detector-wording change can trip this gate. Re-run
+#: `python scripts/measure_contract_shadow.py --json` and update these
+#: entries deliberately; do not widen the key to make a failure go away.
+UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES = (
+    "ambiguous_namespaced_leaf:public:type_size_changed:Cache:6c6732052b32c3ad",
+    "public_std_string_typedef_alias_layout_changed:public:type_size_changed:"
+    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    ":a136b571e0c96a81",
+    "public_stdlib_type_used_directly_layout_changed:public:type_size_changed:"
+    "vector<int, std::allocator<int> >:24d8295b1b1fd647",
+)
 #: A replayed decision that out-claims the live one that wrote it. The
 #: persisted evaluator may only ever *weaken*, so this baseline is 0 and is
 #: the corpus-level counterpart of `test_contract_replay.py`'s hand-written
@@ -162,6 +243,22 @@ def _is_breaking_kind(change: Change) -> bool:
     return change.kind in BREAKING_KINDS or change.kind in API_BREAK_KINDS
 
 
+def _withheld_from_gate(relevance: ContractRelevance) -> bool:
+    """Whether an authoritative contract decision stops *relevance* gating.
+
+    Read off :func:`~abicheck.contract_relevance_types.evaluation_status_for`
+    -- the same total function the engine's own two enforcement points derive
+    the status from -- rather than re-listing the withheld relevance values
+    here. A second spelling of that membership is exactly how a metric ends
+    up measuring a rule the gate no longer applies: this file's whole purpose
+    is to catch gate losses, so it must not be able to disagree with the gate
+    about what a loss *is*.
+    """
+    return (
+        evaluation_status_for(relevance) is CompatibilityEvaluationStatus.NOT_EVALUATED
+    )
+
+
 @dataclass
 class ModeMeasurement:
     """One contract domain's measurement over the whole corpus."""
@@ -185,6 +282,18 @@ class ModeMeasurement:
     #: it is the *shape* Phase 6 asks to have covered.
     by_lane: dict[str, list[int]] = field(default_factory=dict)
     proven_losses: list[str] = field(default_factory=list)
+    #: The same failure mode as :attr:`proven_losses` reached by the other
+    #: door: a genuinely breaking, legacy-kept finding the contract decision
+    #: withholds from the gate because it could not *resolve* it, rather than
+    #: because it proved it out. ADR-049 D1 gives an ``UNKNOWN_*`` finding a
+    #: null compatibility decision exactly as it does a proven-out one, so
+    #: once the decision is authoritative both stop gating -- but only the
+    #: proven half had a metric, which is why this one exists. Reported and
+    #: gated separately rather than summed into ``proven_losses``: a proven
+    #: loss is the evaluator making a *claim* that turns out wrong, an
+    #: unresolved loss is it making *no claim* and the gate defaulting open,
+    #: and the two need different fixes (a wrong rule vs. missing evidence).
+    unresolved_losses: list[str] = field(default_factory=list)
     fp_reductions: list[str] = field(default_factory=list)
     unevidenced_deltas: list[str] = field(default_factory=list)
     fact_losses: list[str] = field(default_factory=list)
@@ -205,13 +314,29 @@ class ModeMeasurement:
 
         A legacy-kept finding proven out of contract, or a legacy-demoted
         finding the shadow puts back in. An unresolved decision is not a
-        delta -- it changes nothing and claims nothing.
+        delta: it claims nothing, so there is no second opinion here to
+        differ from the legacy one.
+
+        It is emphatically not *harmless*, though, which is what changed
+        when the decision became authoritative: an unresolved finding is
+        withheld from the gate exactly as a proven-out one is. That effect
+        is counted by :attr:`unresolved_losses` rather than here, because it
+        is a property of the gate, not a disagreement between two opinions.
         """
         return self.delta_matrix.get(LEGACY_KEPT, {}).get(
             ContractRelevance.PROVEN_OUT_OF_CONTRACT.value, 0
         ) + self.delta_matrix.get(LEGACY_OUT_OF_SURFACE, {}).get(
             ContractRelevance.IN_CONTRACT.value, 0
         )
+
+
+#: Every ``ModeMeasurement`` field that accumulates a list of finding keys,
+#: derived from the dataclass so :func:`_merge` cannot fall behind it.
+_LIST_ACCUMULATORS: tuple[str, ...] = tuple(
+    f.name
+    for f in fields(ModeMeasurement)
+    if f.default_factory is list  # type: ignore[misc]
+)
 
 
 def _platform_key(old_tables: object, new_tables: object) -> str:
@@ -298,11 +423,28 @@ def measure_case(case: Case, mode: ContractMode) -> ModeMeasurement:
                     out.unevidenced_deltas.append(key)
             if (
                 legacy_state == LEGACY_KEPT
-                and relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
                 and not case.internal_noise
                 and _is_breaking_kind(change)
+                and _withheld_from_gate(relevance)
             ):
-                out.proven_losses.append(key)
+                # Which of the two loss metrics this is depends only on
+                # whether the evaluator made a claim. `_withheld_from_gate`
+                # already answered the shared question -- whether the gate
+                # still sees this finding -- so neither branch restates it.
+                if relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT:
+                    out.proven_losses.append(key)
+                else:
+                    # Pinned by the *report's own* finding id, not by
+                    # kind+symbol. Two distinct findings can share a kind
+                    # and a symbol (two parameter changes on one function,
+                    # differing only in old/new value) -- so a coarser key
+                    # let an allowlisted loss be fixed while a same-kind,
+                    # same-symbol sibling regressed, with the count, the
+                    # case set and the key all unchanged (Codex review).
+                    # The readable prefix is kept ahead of it so a failure
+                    # still says *what* regressed, not only that something
+                    # did.
+                    out.unresolved_losses.append(f"{key}:{_finding_id(change)}")
             if (
                 case.internal_noise
                 and relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT
@@ -386,11 +528,14 @@ def _merge(into: ModeMeasurement, other: ModeMeasurement) -> None:
             existing = target_bucket.setdefault(key, [0, 0])
             existing[0] += row[0]
             existing[1] += row[1]
-    into.proven_losses.extend(other.proven_losses)
-    into.fp_reductions.extend(other.fp_reductions)
-    into.unevidenced_deltas.extend(other.unevidenced_deltas)
-    into.fact_losses.extend(other.fact_losses)
-    into.replay_strengthenings.extend(other.replay_strengthenings)
+    # Every list accumulator, found from the dataclass rather than named one
+    # by one. The hand-written version silently dropped `unresolved_losses`
+    # when it was added: `measure_case` classified it correctly and `measure`
+    # still reported zero, which for a gate metric is the worst possible
+    # failure -- it reads exactly like "no losses". Deriving the set from the
+    # fields means a future accumulator is merged the moment it is declared.
+    for name in _LIST_ACCUMULATORS:
+        getattr(into, name).extend(getattr(other, name))
 
 
 def measure(
@@ -440,6 +585,7 @@ def metrics(
                     for key, row in sorted(m.by_lane.items())
                 },
                 "proven_public_break_losses": sorted(m.proven_losses),
+                "unresolved_public_break_losses": sorted(m.unresolved_losses),
                 "proven_false_positive_reductions": sorted(m.fp_reductions),
                 "unevidenced_deltas": sorted(m.unevidenced_deltas),
                 "fact_losses": sorted(m.fact_losses),
@@ -450,6 +596,21 @@ def metrics(
             "proven_public_break_losses": sum(
                 len(m.proven_losses) for m in measurements.values()
             ),
+            "unresolved_public_break_losses": {
+                mode: len(m.unresolved_losses)
+                for mode, m in sorted(measurements.items())
+            },
+            # The full finding keys, not only the count and not only the
+            # case name. A budget alone cannot tell "the accepted gaps are
+            # still the accepted gaps" from "one was fixed and something
+            # else regressed to UNKNOWN_*" -- the total is identical either
+            # way -- and a case-name projection cannot tell them apart when
+            # the substitution happens *inside* one case (Codex review,
+            # twice).
+            "unresolved_public_break_cases": {
+                mode: sorted(m.unresolved_losses)
+                for mode, m in sorted(measurements.items())
+            },
             "unevidenced_deltas": sum(
                 len(m.unevidenced_deltas) for m in measurements.values()
             ),
@@ -457,6 +618,7 @@ def metrics(
             "replay_strengthenings": sum(
                 len(m.replay_strengthenings) for m in measurements.values()
             ),
+            "unresolved_loss_baseline": dict(sorted(UNRESOLVED_LOSS_BASELINE.items())),
             "proven_loss_baseline": PROVEN_LOSS_BASELINE,
             "unevidenced_delta_baseline": UNEVIDENCED_DELTA_BASELINE,
             "fact_loss_baseline": FACT_LOSS_BASELINE,
@@ -494,7 +656,18 @@ def render_markdown(m: dict[str, object]) -> str:
         f"{gate['unevidenced_deltas']} unevidenced delta(s), "
         f"{gate['fact_losses']} unexplained fact loss(es), "
         f"{gate['replay_strengthenings']} replay strengthening(s) "
-        "(all baselines 0)",
+        "(these four baselines are 0; the unresolved-loss budgets below are "
+        "per-domain and not all zero)",
+        "",
+        "Unresolved public-break losses (a real break withheld from the gate "
+        "because the decision could not resolve it), per domain against its "
+        "own budget: "
+        + ", ".join(
+            f"`{domain}` {count}/{UNRESOLVED_LOSS_BASELINE.get(domain, 0)}"
+            for domain, count in sorted(
+                gate["unresolved_public_break_losses"].items()  # type: ignore[union-attr]
+            )
+        ),
         "",
         "| Domain | Findings | Deltas | Unresolved | Unresolved rate | FP reductions |",
         "|--------|---------:|-------:|-----------:|----------------:|--------------:|",
@@ -585,6 +758,52 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             failed = True
+    # Per-domain, and reported in both directions. A rise is a regression;
+    # a drop means an evaluator fix landed and the budget it was measured
+    # against is now stale -- leaving that unsaid is how a ceiling silently
+    # stops being a ceiling.
+    # `public` is additionally pinned by identity: it is the domain a future
+    # default flip targets and the one whose budget is an evaluator gap
+    # rather than an evidence limit, so a *new* case appearing there is a
+    # regression even when an old one left at the same time. The other
+    # domains stay count-only -- `exports`' 20 tracks which corpus pairs
+    # happen to carry export tables, which is not a claim worth pinning.
+    cases = gate["unresolved_public_break_cases"]
+    assert isinstance(cases, dict)
+    unexpected = sorted(set(cases.get("public", ())) - set(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES))
+    if unexpected:
+        print(
+            "ERROR: unresolved public-break loss in case(s) not on the known "
+            f"list: {', '.join(unexpected)} (known: "
+            f"{', '.join(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)})",
+            file=sys.stderr,
+        )
+        failed = True
+    fixed = sorted(set(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES) - set(cases.get("public", ())))
+    if fixed:
+        print(
+            f"NOTE: known unresolved public-break case(s) no longer losing: "
+            f"{', '.join(fixed)} -- drop them from the known list.",
+            file=sys.stderr,
+        )
+
+    unresolved = gate["unresolved_public_break_losses"]
+    assert isinstance(unresolved, dict)
+    for domain, count in sorted(unresolved.items()):
+        budget = UNRESOLVED_LOSS_BASELINE.get(domain, 0)
+        if count > budget:
+            print(
+                f"ERROR: {count} unresolved public-break loss(es) in "
+                f"contract={domain} (baseline {budget})",
+                file=sys.stderr,
+            )
+            failed = True
+        elif count < budget:
+            print(
+                f"NOTE: only {count} unresolved public-break loss(es) in "
+                f"contract={domain} (baseline {budget}) -- lower the baseline.",
+                file=sys.stderr,
+            )
     if failed:
         return 1
     print("OK: shadow contract evaluator on baseline.", file=sys.stderr)

@@ -239,6 +239,77 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         }
     elif "scan_schema_version" in report and "exit_code" in report:
         report["exit_code"] = 0
+    # ADR-049 Phase 7's contract-coverage axis is a *second* way this report
+    # can raise an exit code, orthogonal to the compatibility gate above and
+    # folded separately by `aggregate` -- so zeroing only the gate left an
+    # advisory report still driving the trailing aggregate to exit 1 (Codex
+    # review, reproduced end to end). "Advisory" means this check gates
+    # nothing; that has to hold on every axis it can contribute to, not just
+    # the one that existed when this function was written.
+    #
+    # Only the *contribution* is zeroed. `contract_coverage_failures` stays
+    # exactly as the run recorded it: the ledger is deliberately
+    # unsuppressible, and advisory mode is about not gating, not about
+    # hiding what was found -- the same split `contract.unresolved=warn`
+    # already makes.
+    # Every block the aggregate *reads* it from, not just the document root:
+    # a `scan --against` report carries these fields under `diff` (and under
+    # `report.diff` for a service envelope), so zeroing only the root left an
+    # advisory scan's nested contribution intact and the trailing aggregate
+    # folded it back into the CI exit anyway (Codex review, reproduced).
+    #
+    # The path set is imported rather than re-derived. A local copy is what
+    # produced that bug: it agreed with the reader for the compare shape and
+    # silently disagreed for the scan one. Imported inside the function to
+    # keep this module's import graph a leaf (`run_plan` already reaches into
+    # `..aggregate` the same way); `aggregate` never imports back.
+    #
+    # Each container along a path is *rebound to a copy* before anything is
+    # written. `augment_report` copies only the top level, so writing through
+    # a nested mapping in place reached back into the caller's own report and
+    # silently rewrote its authoritative contribution -- breaking this
+    # module's documented "*report* itself is never mutated" contract (Codex
+    # review). Copying per path is cheap and, unlike a blanket deepcopy,
+    # leaves the report's large `changes` payload untouched.
+    from ..aggregate import contract_coverage_block_paths
+
+    for path in contract_coverage_block_paths(report):
+        node: dict[str, Any] = report
+        for key in path:
+            # Copied into a real `dict` whatever Mapping flavour the block
+            # was, then rebound. Skipping a non-`dict` Mapping instead was
+            # wrong: the aggregate reads *any* Mapping, so a
+            # `MappingProxyType` block kept its contribution and an advisory
+            # check still gated CI (CodeRabbit review, reproduced). The copy
+            # is also what makes this safe -- an immutable mapping cannot be
+            # written through, and the caller's own nested container must not
+            # be touched either way.
+            #
+            # No type guard here: `contract_coverage_block_paths` only emits
+            # a path whose every node it has already checked is a `Mapping`,
+            # so a guard would be unreachable by construction -- and an
+            # unreachable branch is a worse guarantee than the single
+            # definition that actually enforces it.
+            copied = dict(node[key])
+            node[key] = copied
+            node = copied
+        if _is_valid_coverage_contribution(
+            node.get("contract_coverage_exit_contribution")
+        ):
+            node["contract_coverage_exit_contribution"] = 0
+
+
+def _is_valid_coverage_contribution(raw: object) -> bool:
+    """Whether *raw* is a contribution this function should rewrite.
+
+    Mirrors ``aggregate._is_valid_contribution``: a ``bool`` is excluded
+    before the ``int`` check, since ``True`` is an ``int`` in Python. An
+    absent or unusable value is left untouched rather than replaced with a
+    ``0`` the run never stated -- the aggregate already reads it as "says
+    nothing", and inventing a value here would make it look like an
+    advisory run had answered the question.
+    """
+    return not isinstance(raw, bool) and isinstance(raw, int) and raw in (0, 1)
 
 
 def augment_report(

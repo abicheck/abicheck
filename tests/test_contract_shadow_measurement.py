@@ -25,10 +25,17 @@ FP-rate gate.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
 import pytest
+
+from abicheck.contract_relevance_types import (
+    CompatibilityEvaluationStatus,
+    ContractRelevance,
+    evaluation_status_for,
+)
 
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 
@@ -148,6 +155,126 @@ def test_metrics_report_the_four_measured_quantities() -> None:
         assert "unresolved_by_lane" in row
         assert "proven_public_break_losses" in row
         assert "proven_false_positive_reductions" in row
+
+
+class TestUnresolvedLossMetric:
+    """A real break withheld from the gate because the decision could not
+    *resolve* it -- the same failure mode ``proven_public_break_losses``
+    covers, reached through ``UNKNOWN_*`` instead of
+    ``PROVEN_OUT_OF_CONTRACT``."""
+
+    def test_every_domain_is_within_its_own_budget(self) -> None:
+        gate = shadow.metrics()["gate"]
+        counts = gate["unresolved_public_break_losses"]
+        assert set(counts) == set(shadow.UNRESOLVED_LOSS_BASELINE)
+        for domain, count in counts.items():
+            assert count <= shadow.UNRESOLVED_LOSS_BASELINE[domain], domain
+
+    def test_the_metric_is_not_vacuous(self) -> None:
+        # A loss metric that cannot fire reads exactly like "no losses". The
+        # `exports` domain has a standing non-zero budget precisely because
+        # that corpus carries no export tables, so it is the executable proof
+        # that the classification path is reachable at all.
+        counts = shadow.metrics()["gate"]["unresolved_public_break_losses"]
+        assert counts["exports"] > 0
+
+    @pytest.mark.parametrize("relevance", tuple(ContractRelevance))
+    def test_withheld_matches_the_engine_rather_than_a_second_list(
+        self, relevance: ContractRelevance
+    ) -> None:
+        # The one property that makes this metric trustworthy: it must call
+        # exactly the relevance values withheld a loss, so it cannot measure
+        # a rule the gate stopped applying.
+        assert shadow._withheld_from_gate(relevance) is (
+            evaluation_status_for(relevance)
+            is CompatibilityEvaluationStatus.NOT_EVALUATED
+        )
+
+    def test_public_losses_are_pinned_by_identity_not_only_count(self) -> None:
+        # A budget alone cannot tell "the accepted gaps are still the
+        # accepted gaps" from "one was fixed and a different case regressed"
+        # -- the total is the same either way (Codex review).
+        measured = shadow.metrics()["gate"]["unresolved_public_break_cases"]
+        assert sorted(measured["public"]) == sorted(
+            shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES
+        )
+
+    def test_the_pin_is_a_full_finding_key_not_just_a_case_name(self) -> None:
+        # A case can emit several findings, so a case-name projection still
+        # let one accepted gap be fixed while a different finding in the
+        # same case regressed -- count and case set both unchanged (Codex
+        # review). Every pinned entry must therefore carry the full
+        # `case:mode:kind:symbol` key.
+        for key in shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES:
+            assert key.count(":") >= 4, key
+            assert ":public:" in key, key
+            # ...and ends in the report's own finding id, which is what
+            # separates two findings sharing a kind and a symbol.
+            assert re.fullmatch(r"[0-9a-f]{8,}", key.rsplit(":", 1)[-1]), key
+
+    def test_the_pin_uses_the_same_identity_the_receipt_does(self) -> None:
+        # Not a second spelling of "which finding is this": the trailing
+        # component must be `report_finding_id`, the id the decision receipt
+        # is already keyed by (Codex review).
+        from abicheck.contract_relevance_types import ContractMode
+
+        case = next(
+            c for c in shadow.CORPUS if c.name == "ambiguous_namespaced_leaf"
+        )
+        measurement = shadow.measure_case(case, ContractMode.PUBLIC)
+        (loss,) = measurement.unresolved_losses
+        assert loss in shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES
+
+    def test_a_same_kind_same_symbol_substitution_is_caught(self) -> None:
+        # The gap the previous, kind+symbol-only pin still admitted: swap
+        # the finding id alone and the pin must fire.
+        known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
+        original = next(
+            k for k in known if k.startswith("ambiguous_namespaced_leaf:")
+        )
+        sibling = original.rsplit(":", 1)[0] + ":ffffffffffffffff"
+        assert sibling not in known
+        # Everything up to the id is identical, so every coarser projection
+        # -- case name, and case:mode:kind:symbol -- sees no change at all.
+        assert sibling.rsplit(":", 1)[0] == original.rsplit(":", 1)[0]
+
+    def test_an_intra_case_substitution_is_caught(self) -> None:
+        # The executable proof that the tightening was not cosmetic: swap
+        # one finding for another *within* a pinned case and the pin fires,
+        # where a case-name projection saw nothing.
+        known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
+        original = next(
+            k for k in known if k.startswith("ambiguous_namespaced_leaf:")
+        )
+        swapped = (known - {original}) | {
+            "ambiguous_namespaced_leaf:public:type_field_removed:Cache:0000000000000000"
+        }
+        assert swapped - known  # the full-key pin sees the substitution
+        assert not {k.split(":", 1)[0] for k in swapped} - {
+            k.split(":", 1)[0] for k in known
+        }  # ...while the old case-name projection did not
+
+    def test_the_known_list_is_consistent_with_the_budget(self) -> None:
+        # Two statements of the same fact; if they drift, one of them is
+        # lying about what is accepted.
+        assert len(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES) == (
+            shadow.UNRESOLVED_LOSS_BASELINE["public"]
+        )
+
+    def test_merge_carries_every_list_accumulator(self) -> None:
+        # `_merge` used to name each accumulator by hand and silently dropped
+        # `unresolved_losses` when it was added: `measure_case` classified
+        # correctly and `measure` still reported zero. Deriving the set from
+        # the dataclass is the fix; this pins it, so a future accumulator
+        # cannot regress the same way.
+        assert "unresolved_losses" in shadow._LIST_ACCUMULATORS
+        total = shadow.ModeMeasurement(mode="public")
+        one = shadow.ModeMeasurement(mode="public")
+        for name in shadow._LIST_ACCUMULATORS:
+            getattr(one, name).append(f"sentinel:{name}")
+        shadow._merge(total, one)
+        for name in shadow._LIST_ACCUMULATORS:
+            assert getattr(total, name) == [f"sentinel:{name}"], name
 
 
 def test_public_domain_proves_some_internal_noise_out_of_contract() -> None:

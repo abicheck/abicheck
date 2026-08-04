@@ -1094,9 +1094,73 @@ class TestPublicModeAmbiguousTypeRoot:
     ``public_types`` (its own anti-hiding rule) while recording ``Point`` in
     ``ambiguous_type_names``. Confirmation must not treat that conservative
     closure expansion as proof of root membership (Codex review, eleventh
-    round)."""
+    round).
+
+    An "indecisive ambiguity" exception was tried here and reverted -- see
+    ``_confirmed_type_matches``'s docstring for the full reasoning, and
+    ``test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed``
+    below for the counter-example that sank it. The rejection does cost real
+    gate coverage (``measure_contract_shadow.py``'s ``unresolved_losses``
+    counts it), so the temptation to relax it is real; the cases below exist
+    to make the two failed relaxations fail loudly instead."""
+
+    @staticmethod
+    def _two_siblings(second_origin: ScopeOrigin) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="void", params=["Point *"])],
+            types=[
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=64,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    qualified_name="one::Point",
+                ),
+                RecordType(
+                    name="Point",
+                    kind="struct",
+                    size_bits=32,
+                    origin=second_origin,
+                    qualified_name="two::Point",
+                ),
+            ],
+        )
 
     def test_ambiguous_bare_tail_is_unresolved_not_confirmed(self) -> None:
+        s = compute_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
+        assert "Point" in s.ambiguous_type_names
+        assert "Point" in s.public_types
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+
+    def test_a_private_sibling_behind_the_collision_is_invisible(self) -> None:
+        # Why the rejection cannot be relaxed by looking at the merged
+        # origin: `origin_by_key` resolves the collision with public
+        # winning, so the private sibling that makes the ambiguity matter
+        # leaves no trace there.
+        s = compute_public_surface(self._two_siblings(ScopeOrigin.PRIVATE_HEADER))
+        assert s.origin_by_key["Point"] is ScopeOrigin.PUBLIC_HEADER
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+
+    def test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed(
+        self,
+    ) -> None:
+        """The counter-example that sank an "indecisive ambiguity" shortcut.
+
+        Both ``one::Point`` and ``two::Point`` are declared in public
+        headers, but only ``one::Point`` is reached by a public API. A rule
+        that confirmed the finding whenever every colliding entry is
+        public-header *origin* therefore confirmed a finding about the
+        unreachable one and gated on it (Codex review). Origin is where a
+        declaration was written; membership here is reachability. Keep this
+        case: it is the regression test for re-deriving that shortcut.
+        """
         snap = AbiSnapshot(
             library="l",
             version="1",
@@ -1119,12 +1183,14 @@ class TestPublicModeAmbiguousTypeRoot:
             ],
         )
         s = compute_public_surface(snap)
-        assert "Point" in s.ambiguous_type_names
-        assert "Point" in s.public_types
-        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
+        # The closure collapses both onto the shared bare key, which is why
+        # `public_types` cannot say which qualified identity was reached.
+        assert s.public_types == {"Point"}
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="two::Point", description=""
+        )
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
-        assert decision.reason_code == "required_evidence_incomplete"
 
     def test_unambiguous_candidate_still_confirms_alongside_an_ambiguous_one(
         self,

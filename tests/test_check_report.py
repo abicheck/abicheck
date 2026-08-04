@@ -543,6 +543,173 @@ class TestAugmentReport:
             {"kind": "analysis_error", "message": "bad flag combination"}
         ]
 
+    def test_advisory_also_neutralizes_the_contract_coverage_axis(self):
+        """ADR-049 Phase 7 added a *second* way a report raises an exit code.
+
+        Zeroing only the compatibility gate left an advisory cell still
+        driving the trailing ``aggregate`` job to exit 1 through the
+        orthogonal contract-coverage axis (Codex review, reproduced end to
+        end). "Advisory" has to mean "gates nothing" on every axis this
+        report can contribute to, not just the one that existed when
+        ``_neutralize_gate`` was written.
+        """
+        out = augment_report(
+            {
+                "verdict": "BREAKING",
+                "severity": {"exit_code": 4, "blocking": True},
+                "contract_coverage_exit_contribution": 1,
+                "contract_coverage_failures": [{"provider": "public_header"}],
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["contract_coverage_exit_contribution"] == 0
+        # Not gating is not the same as hiding: the ledger is deliberately
+        # unsuppressible, so the failures stay exactly as recorded.
+        assert out["contract_coverage_failures"] == [{"provider": "public_header"}]
+
+    def test_advisory_neutralizes_a_scan_report_nested_contribution(self):
+        """A `scan --against` report carries these fields under `diff`.
+
+        Zeroing only the document root left the nested contribution intact,
+        and the aggregate — which explicitly reads the scan-shaped block —
+        folded it straight back into the CI exit, so an advisory scan gated
+        anyway (Codex review, reproduced end to end).
+        """
+        out = augment_report(
+            {
+                "scan_schema_version": "1.8",
+                "exit_code": 1,
+                "verdict": "NO_CHANGE",
+                "diff": {
+                    "verdict": "NO_CHANGE",
+                    "contract_coverage_exit_contribution": 1,
+                    "contract_coverage_failures": [{"provider": "public_header"}],
+                },
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit_code"] == 0
+        assert out["diff"]["contract_coverage_exit_contribution"] == 0
+        assert out["diff"]["contract_coverage_failures"] == [
+            {"provider": "public_header"}
+        ]
+
+    def test_neutralization_covers_every_block_the_aggregate_reads(self):
+        # The invariant behind the fix: the writer must zero exactly the
+        # blocks the reader consults. Asserting it against the shared
+        # traversal is what stops the two drifting apart again.
+        from abicheck.aggregate import contract_coverage_blocks
+
+        out = augment_report(
+            {
+                "scan_schema_version": "1.8",
+                "exit_code": 1,
+                "verdict": "NO_CHANGE",
+                "contract_coverage_exit_contribution": 1,
+                "diff": {
+                    "verdict": "NO_CHANGE",
+                    "contract_coverage_exit_contribution": 1,
+                },
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        blocks = contract_coverage_blocks(out)
+        assert len(blocks) >= 2
+        for block in blocks:
+            assert block.get("contract_coverage_exit_contribution", 0) == 0
+
+    def test_a_read_only_nested_mapping_is_neutralized_too(self):
+        """An immutable nested block must still be neutralized, not skipped.
+
+        `contract_coverage_block_paths` admits any `Mapping`, and the
+        aggregate reads any `Mapping` — so skipping a non-`dict` one left its
+        contribution at 1 and an advisory check still gated CI (CodeRabbit
+        review, reproduced). Copying into a real `dict` and rebinding is what
+        makes an unwritable block writable *and* keeps the caller's own
+        container untouched.
+        """
+        from types import MappingProxyType
+
+        proxy = MappingProxyType(
+            {"verdict": "NO_CHANGE", "contract_coverage_exit_contribution": 1}
+        )
+        original = {
+            "scan_schema_version": "1.8",
+            "exit_code": 1,
+            "verdict": "NO_CHANGE",
+            "diff": proxy,
+        }
+        out = augment_report(
+            original,
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit_code"] == 0
+        assert out["diff"]["contract_coverage_exit_contribution"] == 0
+        # The caller's immutable view is neither written through nor swapped.
+        assert original["diff"] is proxy
+        assert proxy["contract_coverage_exit_contribution"] == 1
+
+    def test_deferred_keeps_its_contract_coverage_contribution(self):
+        # `deferred` exists so the trailing aggregate computes the gate from
+        # the real values -- neutralizing it there would blind that
+        # computation, on this axis exactly as on the severity one.
+        out = augment_report(
+            {
+                "verdict": "COMPATIBLE",
+                "severity": {"exit_code": 0, "blocking": False},
+                "contract_coverage_exit_contribution": 1,
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="deferred",
+        )
+        assert out["contract_coverage_exit_contribution"] == 1
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param({}, id="absent"),
+            pytest.param(
+                {"contract_coverage_exit_contribution": "nope"}, id="malformed"
+            ),
+        ],
+    )
+    def test_advisory_does_not_invent_a_contribution_that_was_never_stated(
+        self, payload: dict
+    ):
+        # An absent or unusable value stays absent/unusable rather than
+        # becoming a 0 the run never declared -- otherwise an advisory run
+        # would look like it had answered the coverage question.
+        out = augment_report(
+            {"verdict": "COMPATIBLE", "severity": {"exit_code": 0}, **payload},
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out.get("contract_coverage_exit_contribution") == payload.get(
+            "contract_coverage_exit_contribution"
+        )
+
     def test_advisory_neutralize_is_a_no_op_when_report_has_no_gate_block(self):
         out = augment_report(
             {"verdict": OPERATIONAL_ERROR_VERDICT, "error": "usage error"},

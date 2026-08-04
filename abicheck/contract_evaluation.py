@@ -978,6 +978,31 @@ def _confirmed_type_matches(
     candidate, rather than its ambiguous sibling, is what the signature
     actually reaches. Neither case establishes which record -- or whether
     either -- this finding's root actually resolves to.
+
+    **An "indecisive ambiguity" shortcut was tried here and reverted; do not
+    re-derive it.** The idea was that when every colliding entry is
+    public-header origin, both readings put the finding in the contract, so
+    the ambiguity has nothing to decide and the finding can be confirmed --
+    which would recover the real gate coverage this rejection costs
+    (``measure_contract_shadow.py``'s ``unresolved_losses`` counts it). The
+    premise is false: ``ScopeOrigin.PUBLIC_HEADER`` records *where a
+    declaration was written*, not whether it is reachable from a public
+    root, and this module's whole notion of membership is reachability --
+    that is what ``compute_public_surface`` computes and what ``types``
+    (``public_surface.public_types``) means here. A type declared in a
+    public header that no public API reaches is not in the contract.
+
+    Confirmed empirically before reverting (Codex review): with
+    ``one::api(Point *)`` reaching ``one::Point`` and an unrelated,
+    unreachable ``two::Point`` also declared in a public header, the origin
+    count equals the arity, so a layout finding on ``two::Point`` was
+    confirmed ``IN_CONTRACT`` and gated the run -- turning a withheld
+    finding into a false positive. Counting reachable siblings instead is
+    not available either: the closure adds *both* under the shared bare key
+    (that is the anti-hiding rule above), so ``public_types`` cannot say
+    which qualified identity was independently reached. Proving
+    indecisiveness needs per-identity reachability that ``surface.py`` does
+    not record today.
     """
     return {
         m
