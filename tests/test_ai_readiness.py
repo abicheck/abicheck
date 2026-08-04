@@ -977,6 +977,39 @@ def test_adr_status_sync_catches_decision_word_mismatch(car, tmp_path, monkeypat
     )
 
 
+def test_adr_status_sync_rejects_unrecognized_decision_word(car, tmp_path, monkeypatch):
+    """A typo'd decision word must be reported, not treated as "nothing to
+    compare" -- that would silently disable the decision check for exactly
+    the ADR whose metadata is already broken (Codex review on PR #667)."""
+    _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        car,
+        adr_status="Acceptd — implemented.",
+        index_status="Proposed — implemented",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("recognized decision word" in msg for _, msg in f.errors), (
+        f"expected an unrecognized-decision-word error, got: {f.errors}"
+    )
+
+
+def test_adr_named_modules_keeps_explicit_path_for_deleted_module(car):
+    """A module named in full and since deleted or renamed is the case most
+    likely to have invalidated the claim that names it, so the explicit path
+    stays a tripwire even though it no longer resolves at HEAD. A *bare* name
+    still has to resolve, since that's all that separates a real module
+    reference from an unrelated `verify.py` mention (Codex review on #667)."""
+    named = car._adr_named_modules(
+        "implemented in `abicheck/gone_module.py`; see also `also_gone.py` "
+        "and `abicheck/checker.py`"
+    )
+    assert "abicheck/gone_module.py" in named
+    assert "abicheck/checker.py" in named
+    assert "abicheck/also_gone.py" not in named
+
+
 def test_adr_status_sync_allows_index_row_to_abridge(car, tmp_path, monkeypatch):
     """An index cell is an abridgement, not a paraphrase-for-paraphrase copy.
     A status paragraph naming follow-up work the one-line row omits is normal

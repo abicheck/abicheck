@@ -1656,20 +1656,29 @@ _ADR_VERIFIED_VALUE_RE = re.compile(
 #: family in full and the rest of the family bare. These are what a Status
 #: claim is *about* ("the shadow evaluator is implemented in X"), so a commit
 #: touching one after the recorded verification is exactly the signal that the
-#: claim needs re-reading. A bare name is only accepted when it resolves to a
-#: real file in the package, which is what keeps an unrelated `verify.py` or
-#: `conftest.py` mention out.
+#: claim needs re-reading.
 _ADR_MODULE_PATH_RE = re.compile(
-    r"\b(?:abicheck/)?([A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*\.py)\b"
+    r"\b(?P<prefix>abicheck/)?(?P<path>[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*\.py)\b"
 )
 
 
 def _adr_named_modules(status: str) -> list[str]:
-    """Package-relative paths of the first-party modules a Status claim names."""
+    """Package-relative paths of the first-party modules a Status claim names.
+
+    An explicitly-prefixed `abicheck/x.py` is always a tripwire, **including
+    when no such file exists at HEAD** -- a module named by a verified claim
+    and since deleted or renamed is the case most likely to have invalidated
+    that claim, so dropping it for failing an existence test would suppress
+    the warning exactly where it matters most (Codex review). A *bare*
+    `x.py` has to resolve inside the package, since that's the only thing
+    distinguishing a real module reference from an unrelated `verify.py` or
+    `conftest.py` mention.
+    """
     named = set()
-    for candidate in _ADR_MODULE_PATH_RE.findall(status):
-        if (PKG / candidate).is_file():
-            named.add(f"abicheck/{candidate}")
+    for m in _ADR_MODULE_PATH_RE.finditer(status):
+        path = m.group("path")
+        if m.group("prefix") or (PKG / path).is_file():
+            named.add(f"abicheck/{path}")
     return sorted(named)
 
 
@@ -2173,7 +2182,26 @@ def check_adr_status_sync(f: Findings) -> None:
             _adr_decision_word(status),
             _adr_decision_word(row),
         )
-        if file_decision and row_decision and file_decision != row_decision:
+        # An unparseable decision word is reported rather than skipped: the
+        # vocabulary is closed, so `Acceptd` is a typo, and treating it as
+        # "nothing to compare" would silently switch this gate off for the
+        # one ADR whose metadata is already known-broken (Codex review).
+        unrecognized = [
+            side
+            for side, parsed in (
+                ("its own Status line", file_decision),
+                ("its docs/contribute/adr/index.md row", row_decision),
+            )
+            if parsed is None
+        ]
+        if unrecognized:
+            f.err(
+                "adr-status-sync",
+                f"docs/contribute/adr/{md.name}: {' and '.join(unrecognized)} "
+                "doesn't open with a recognized decision word (one of: "
+                f"{', '.join(sorted(_ADR_DECISION_WORDS))})",
+            )
+        elif file_decision != row_decision:
             f.err(
                 "adr-status-sync",
                 f"docs/contribute/adr/{md.name}: decision is "
