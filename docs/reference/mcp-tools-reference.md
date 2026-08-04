@@ -61,6 +61,7 @@ Compare two ABI surfaces and report breaking changes.
 | `required_symbols` | `list[str] \| None` | no | `None` | An explicit plugin/host required-entrypoint contract (ADR-043) — scope the comparison to only these exported symbols. Mutually exclusive with used_by. Adds a ``required_symbol_contract`` object to the response and computes ``exit_code`` from its verdict under the same legacy/severity-aware scheme as ``used_by`` above. |
 | `diagnostic_comparison` | `bool` | no | `False` | ADR-050 D2's sanctioned escape hatch. By default, a genuine ``ExtractionContract`` mismatch between old_input and new_input (old/new were not extracted under a comparable profile/scope) makes this tool return ``{"status": "not_comparable", "reason": ...}`` instead of a verdict. Setting this True downgrades that into a tentative diff whose report is stamped ``assurance: "none"``, so the caller can still see *a* result but knows not to trust it fully. Not needed, and does nothing, on a comparable pair. |
 | `contract_evaluation` | `bool` | no | `False` | ADR-049's contract-relevance evaluator. **Authoritative since Phase 7** — relevance is classified before compatibility policy, and policy scores only the findings it evaluates, so enabling this can change ``verdict``, ``compatibility_decision`` and ``exit_code``. When True, each finding in the response's ``changes``/``out_of_surface_changes`` lists gains a ``contract_relevance`` (``IN_CONTRACT``/``PROVEN_OUT_OF_CONTRACT``/ ``UNKNOWN_UNPROVEN``/``UNKNOWN_UNRESOLVED``/``NOT_APPLICABLE``), ``contract_reason_code``, and — when resolved — ``contract_assurance`` field, reflecting whether the finding falls inside the library's declared public contract. Each finding also gains ``contract_evidence_refs`` (which evidence records its decision rests on), and — for ``output_format="json"`` only, since every other format returns a rendered report *string* — the response's ``report`` gains a ``contract_context`` block: the observed provider evidence, the resolved evaluation context, and the decision receipt, so a decision can be replayed or re-evaluated later without re-reading the binaries. A finding this evaluator does not evaluate carries ``compatibility_evaluation_status: "NOT_EVALUATED"``, a ``null`` ``compatibility_decision`` and ``gate_contribution: 0`` — it stays fully reported and keeps its ``ChangeKind``, it just did not gate. **A second, orthogonal contract-coverage axis** (ADR-049 Phase 7): when the selected contract domain cannot be closed on the available evidence, that contributes ``1`` to ``exit_code``, so an otherwise compatible comparison can return ``exit_code: 1``. The contribution never lowers a real break's ``2``/``4``. The response's top-level ``contract_coverage`` block states what was found and what it contributed, whatever ``output_format`` is selected. Accepting incomplete coverage requires ``contract.unresolved: warn``, which only a ``kind: contract`` pack can state and which **this tool does not expose** — it is available on the ``compare`` and ``scan`` CLIs via ``--pack``. Default False; the response is unchanged from today's shape unless this is set. |
+| `contract_mode` | `str \| None` | no | `None` | ADR-049 Phase 6's ``--contract``: which evidence domain ``contract_evaluation`` judges against — "public" (the header-derived declared surface), "exports" (the binary's own export table plus its type closure), or "all" (no root/closure evidence required). Omitted, the domain follows this tool's public-surface scoping. Requires ``contract_evaluation``. Since ADR-049 Phase 7 the domain decides which findings compatibility policy scores, so selecting one can change ``verdict`` and ``exit_code``, and it is what the orthogonal contract-coverage axis is answered against. |
 
 ## `abi_deps`
 
@@ -80,10 +81,25 @@ Dump ABI snapshot of a C/C++ shared library to JSON.
 | Parameter | Type | Required | Default | Description |
 |---|---|:--:|---|---|
 | `library_path` | `str` | yes | — | Path to .so, .dll, or .dylib file. |
-| `headers` | `list[str] \| None` | no | `None` | Public header file paths. For ELF (.so), omitting them produces a symbol-only snapshot with no type information (strongly recommended to supply headers). Not used for PE (.dll) or Mach-O (.dylib) inputs. |
+| `headers` | `list[str] \| None` | no | `None` | Public header file paths. For ELF (.so), omitting them produces a symbol-only snapshot with no type information (strongly recommended to supply headers). Not used for PE (.dll) or Mach-O (.dylib) inputs. Mutually exclusive with dump_manifest. |
 | `include_dirs` | `list[str] \| None` | no | `None` | Extra include directories for the C/C++ parser. |
+| `public_header_dirs` | `list[str] \| None` | no | `None` | Directories whose headers are public, for declaration provenance classification — beyond any directory already passed via ``headers``. |
 | `version` | `str` | no | `unknown` | Version label to embed in the snapshot (e.g. "1.2.3"). |
 | `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
+| `depth` | `str \| None` | no | `None` | Evidence depth to collect — "binary" (symbols only), "headers" (+header AST), "build" (+build context), or "source" (+source replay). Omitted, the depth is inferred from the inputs (``sources`` implies source, ``build_info`` implies build). An explicit value is a *floor*: if the resolved snapshot does not reach it, this returns an error instead of a weaker snapshot, matching ``abicheck dump --depth``. |
+| `sources` | `str \| None` | no | `None` | Source tree (or prebuilt evidence pack) supplying inline L3-L5 build/source evidence — mirrors ``dump --sources``. |
+| `build_info` | `str \| None` | no | `None` | Out-of-tree build dir / compile_commands.json / pack supplying build context — mirrors ``dump --build-info``. |
+| `dump_manifest` | `str \| None` | no | `None` | Path to a ``--dump-manifest`` YAML document describing multiple translation units to compile and merge into one snapshot, instead of a single ``headers`` list. Mutually exclusive with ``headers``. ELF only. |
+| `include_dependencies` | `bool` | no | `True` | Keep declarations whose defining header is a toolchain/system header (default True, matching the Python API's own default — ``dump --include-dependencies``'s opt-out is the CLI spelling of the same switch, whose default is the opposite way round). Set False for a dependency-scoped snapshot. |
+| `dwarf_only` | `bool` | no | `False` | Use DWARF debug info as the primary data source even when headers are available. |
+| `debug_format` | `str \| None` | no | `None` | Force the ELF debug format — "auto", "dwarf", "btf", or "ctf". ELF only: a forced format against a PE/Mach-O input is a validation error rather than a silently ignored request. |
+| `ast_frontend` | `str` | no | `auto` | L2 header-AST frontend — "auto" (default), "castxml", "clang", "hybrid", or "android". |
+| `gcc_path` | `str \| None` | no | `None` | Explicit compiler binary for the header frontend. |
+| `gcc_prefix` | `str \| None` | no | `None` | Cross-toolchain prefix for the header frontend. |
+| `gcc_options` | `str \| None` | no | `None` | Extra compiler flags for the header frontend, as one shell-quoted string. |
+| `sysroot` | `str \| None` | no | `None` | Alternate sysroot for the header frontend. |
+| `nostdinc` | `bool` | no | `False` | Suppress the standard include paths for the header frontend. |
+| `frontend_context` | `str` | no | `host` | Which AST context the header frontend targets — "host" (default) or "device" (SYCL/DPC++ offload target). |
 | `output_path` | `str \| None` | no | `None` | If provided, write snapshot to this file and return the path. Otherwise the snapshot JSON is returned inline. |
 
 ## `abi_estimate`
@@ -150,7 +166,20 @@ Run a deterministic source-intelligence scan (ADR-035 D3/D10 / ADR-043).
 | `public_header_dirs` | `list[str] \| None` | no | `None` | Directories whose headers are public; establishes the public/internal boundary so the leakage / RTTI / exported-vs-public cross-checks run instead of skipping. A directory passed via ``headers`` also counts; a lone umbrella header file cannot establish a boundary. |
 | `sources` | `str \| None` | no | `None` | Source tree (compile DB auto-discovered within it). |
 | `compile_db` | `str \| None` | no | `None` | Explicit compile_commands.json (else discovered in sources). |
+| `build_info` | `str \| None` | no | `None` | Out-of-tree build dir / compile_commands.json / pack supplying build context — mirrors ``scan --build-info``. |
 | `against` | `str \| None` | no | `None` | Previous build's dump/library to compare against (omit for a single-release audit — the always-on hygiene catalog runs either way). |
 | `depth` | `str \| None` | no | `None` | Coarse evidence-depth selector: "binary", "headers", "build", or "source" (None = inferred from inputs, escalating with the changed-path risk score once seeded). |
 | `changed_paths` | `list[str] \| None` | no | `None` | Changed-path set focusing the scan (ADR-035 D7). |
 | `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
+| `policy` | `str` | no | `strict_abi` | With ``against``: built-in policy — "strict_abi" (default), "sdk_vendor", or "plugin_abi". Ignored for a one-build audit, which renders no comparison verdict (ADR-049 Phase 5 §6.4 config-surface parity with ``abi_compare``). |
+| `policy_file` | `str \| None` | no | `None` | With ``against``: custom YAML policy file (overrides ``policy``). |
+| `suppression_file` | `str \| None` | no | `None` | With ``against``: YAML suppression file filtering known changes out of the comparison. |
+| `contract_evaluation` | `bool` | no | `False` | With ``against``: stamp each comparison finding with its ADR-049 contract decision, exactly as ``abi_compare``'s own argument does. Authoritative since ADR-049 Phase 7 — it changes the verdict and the exit code, and an incomplete contract domain contributes the orthogonal coverage exit. |
+| `contract_mode` | `str \| None` | no | `None` | With ``contract_evaluation``: which evidence domain the decision is judged against — "public", "exports", or "all". Omitted, the domain follows the scan's public-surface scoping. |
+| `ast_frontend` | `str` | no | `auto` | L2 header-AST frontend — "auto" (default), "castxml", "clang", "hybrid", or "android". |
+| `gcc_path` | `str \| None` | no | `None` | Explicit compiler binary for the header frontend. |
+| `gcc_prefix` | `str \| None` | no | `None` | Cross-toolchain prefix for the header frontend. |
+| `gcc_options` | `str \| None` | no | `None` | Extra compiler flags for the header frontend, as one shell-quoted string. |
+| `sysroot` | `str \| None` | no | `None` | Alternate sysroot for the header frontend. |
+| `nostdinc` | `bool` | no | `False` | Suppress the standard include paths for the header frontend. |
+| `frontend_context` | `str` | no | `host` | Which AST context the header frontend targets — "host" (default) or "device" (SYCL/DPC++ offload target). |

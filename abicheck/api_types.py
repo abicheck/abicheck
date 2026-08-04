@@ -201,6 +201,92 @@ class InputSpec:
         )
 
 
+def _lang_errors(lang: str) -> list[str]:
+    """``lang`` must name one of the C/C++ frontends' language modes."""
+    if lang.lower() in SUPPORTED_LANGS:
+        return []
+    allowed = ", ".join(sorted(SUPPORTED_LANGS))
+    return [f"unsupported language {lang!r}: choose from {allowed}"]
+
+
+def _frontend_value_errors(frontend: str) -> list[str]:
+    """``frontend`` must name a known AST frontend (value check only).
+
+    The cross-flag ``android``-needs-source-inputs rule is left to each request
+    type: what counts as "has source inputs" differs between a two-sided
+    comparison and a single dump.
+    """
+    if frontend.lower() in SUPPORTED_FRONTENDS:
+        return []
+    allowed = ", ".join(sorted(SUPPORTED_FRONTENDS))
+    return [f"unsupported AST frontend {frontend!r}: choose from {allowed}"]
+
+
+_ANDROID_NEEDS_SOURCES = (
+    "the 'android' AST frontend is source-ABI only (it has no "
+    "header-AST path); supply source inputs (--sources) to use it"
+)
+
+
+def _debug_format_errors(debug_format: str | None) -> list[str]:
+    if debug_format is None or debug_format.lower() in SUPPORTED_DEBUG_FORMATS:
+        return []
+    allowed = ", ".join(sorted(SUPPORTED_DEBUG_FORMATS))
+    return [f"unsupported debug format {debug_format!r}: choose from {allowed}"]
+
+
+def _depth_errors(depth: str | None) -> list[str]:
+    if depth is None:
+        return []
+    from .buildsource.scan_levels import USER_DEPTHS
+
+    if depth.lower() in USER_DEPTHS:
+        return []
+    allowed = ", ".join(sorted(USER_DEPTHS))
+    return [f"unsupported depth {depth!r}: choose from {allowed}"]
+
+
+def _frontend_context_errors(frontend_context: str) -> list[str]:
+    # Validated case-insensitively like the other enums -- an unvalidated value
+    # (e.g. "DEVICE") would pass but then compare unequal to the lowercase
+    # "host"/"device" literals every actual consumer checks against, silently
+    # behaving as neither.
+    if frontend_context.lower() in ("host", "device"):
+        return []
+    return [
+        f"unsupported frontend context {frontend_context!r}: choose from device, host"
+    ]
+
+
+def _side_errors(label: str, side: InputSpec) -> list[str]:
+    """The per-:class:`InputSpec` rules both request types apply.
+
+    * a per-side ``compile.frontend_context`` bypassed the request-level enum
+      check entirely, so it is validated here too, same message shape;
+    * ``dump_manifest`` replaces ``headers`` for the primary AST, so forwarding
+      both mixes two declared surfaces into one snapshot's provenance/dialect
+      detection (mirrors the CLI's ``--dump-manifest``/``-H`` ``UsageError``).
+      Checked in this Tier-2 pre-flight, not only at runtime, so a caller using
+      ``validation_errors()``/``validate()`` alone also catches it.
+    """
+    errors: list[str] = []
+    if side.compile is not None and side.compile.frontend_context.lower() not in (
+        "host",
+        "device",
+    ):
+        errors.append(
+            f"unsupported {label} frontend context "
+            f"{side.compile.frontend_context!r}: choose from device, host"
+        )
+    if side.dump_manifest is not None and side.headers:
+        errors.append(
+            f"dump_manifest and a header for the {label} side (InputSpec.headers) "
+            f"are mutually exclusive -- declare the {label} side's public surface "
+            "in the manifest's own base profile instead."
+        )
+    return errors
+
+
 @dataclass(frozen=True)
 class OutputSpec:
     """Where/how a result is rendered — the invocation-level output choice.
@@ -335,16 +421,11 @@ class CompareRequest:
         needs source inputs).
         """
         errors: list[str] = []
-        if self.lang.lower() not in SUPPORTED_LANGS:
-            allowed = ", ".join(sorted(SUPPORTED_LANGS))
-            errors.append(f"unsupported language {self.lang!r}: choose from {allowed}")
+        errors += _lang_errors(self.lang)
         frontend = self.frontend.lower()
-        if frontend not in SUPPORTED_FRONTENDS:
-            allowed = ", ".join(sorted(SUPPORTED_FRONTENDS))
-            errors.append(
-                f"unsupported AST frontend {self.frontend!r}: choose from {allowed}"
-            )
-        elif frontend == "android" and not (
+        frontend_errors = _frontend_value_errors(self.frontend)
+        errors += frontend_errors
+        if not frontend_errors and frontend == "android" and not (
             self.has_sources
             or self.old.sources
             or self.new.sources
@@ -363,10 +444,7 @@ class CompareRequest:
             # `src_is_pack`), so a prebuilt evidence pack passed via
             # `build_info` is exactly the same "already have a pre-captured
             # header-abi dump" case this rule exists to allow.
-            errors.append(
-                "the 'android' AST frontend is source-ABI only (it has no "
-                "header-AST path); supply source inputs (--sources) to use it"
-            )
+            errors.append(_ANDROID_NEEDS_SOURCES)
         # ADR-055 D1 (Codex review, two rounds): whether `InputSpec.sources`
         # is compatible with `frontend == "android"` depends on whether it's
         # a genuine raw source tree (run_compare_request's inline
@@ -376,14 +454,7 @@ class CompareRequest:
         # helpers from the CLI/service import-cycle-allowlisted cluster this
         # leaf module deliberately stays out of, so it's checked at runtime
         # in service.run_compare_request instead of here.
-        if (
-            self.debug_format is not None
-            and self.debug_format.lower() not in SUPPORTED_DEBUG_FORMATS
-        ):
-            allowed = ", ".join(sorted(SUPPORTED_DEBUG_FORMATS))
-            errors.append(
-                f"unsupported debug format {self.debug_format!r}: choose from {allowed}"
-            )
+        errors += _debug_format_errors(self.debug_format)
         if not self.policy:
             errors.append("policy profile name must not be empty")
         # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
@@ -416,32 +487,10 @@ class CompareRequest:
                     "judges against, and without that flag no contract "
                     "decision is computed at all"
                 )
-        if self.depth is not None:
-            from .buildsource.scan_levels import USER_DEPTHS
-
-            if self.depth.lower() not in USER_DEPTHS:
-                allowed = ", ".join(sorted(USER_DEPTHS))
-                errors.append(
-                    f"unsupported depth {self.depth!r}: choose from {allowed}"
-                )
-        # ADR-055 D1 (Codex review): validated case-insensitively like the
-        # other enums above -- an unvalidated value (e.g. "DEVICE") would
-        # pass here but then compare unequal to the lowercase "host"/"device"
-        # literals every actual consumer checks against, silently behaving as
-        # neither.
-        if self.frontend_context.lower() not in ("host", "device"):
-            errors.append(
-                f"unsupported frontend context {self.frontend_context!r}: "
-                "choose from device, host"
-            )
-        # Codex: a per-side InputSpec.compile.frontend_context bypassed this enum check entirely -- validate it here too, same message shape.
+        errors += _depth_errors(self.depth)
+        errors += _frontend_context_errors(self.frontend_context)
         for label, side in (("old", self.old), ("new", self.new)):
-            if side.compile is not None and side.compile.frontend_context.lower() not in ("host", "device"):
-                errors.append(f"unsupported {label} frontend context {side.compile.frontend_context!r}: choose from device, host")
-        # CodeRabbit review: dump_manifest replaces headers for the primary AST; forwarding both mixes two declared surfaces into one snapshot's provenance/dialect detection. Belongs in this Tier-2 pre-flight validate() (mirrors the CLI's --dump-manifest/-H UsageError), not only checked at runtime in run_compare_request -- moved here so a caller using validation_errors()/validate() alone also catches it.
-        for label, side in (("old", self.old), ("new", self.new)):
-            if side.dump_manifest is not None and side.headers:
-                errors.append(f"dump_manifest and a header for the {label} side (InputSpec.headers) are mutually exclusive -- declare the {label} side's public surface in the manifest's own base profile instead.")
+            errors += _side_errors(label, side)
         return errors
 
     def validate(self) -> CompareRequest:
@@ -455,6 +504,103 @@ class CompareRequest:
         return self
 
     def replace(self, **changes: Any) -> CompareRequest:
+        """Return a copy with *changes* applied (frozen-dataclass ``replace``)."""
+        return replace(self, **changes)
+
+
+@dataclass(frozen=True)
+class DumpRequest:
+    """A fully-specified snapshot-extraction request — the input to ``run_dump_request``.
+
+    ``compare``'s counterpart to this (:class:`CompareRequest`) has existed
+    since ADR-037 D2; ``dump`` had no typed request at all, so the only way to
+    ask for a snapshot through the service layer was
+    :func:`abicheck.service.resolve_input`'s twenty-odd loose keyword arguments
+    — and a front end that wanted ``--depth``/``--sources``/``--build-info``
+    had to add the inline build-source embedding, the depth gate and the
+    dependency walk itself. That is what kept the MCP ``abi_dump`` tool at a
+    fixed five-argument subset of what ``abicheck dump`` accepts (G33 Phase 5).
+
+    One side, so it reuses :class:`InputSpec` verbatim: everything about *what*
+    to extract (path, headers, includes, ``sources``/``build_info``,
+    ``dump_manifest``, per-input ``compile`` context, public-header dirs,
+    dependency scoping) already lives there. The fields here are the ones
+    :class:`CompareRequest` also keeps at request level because they describe
+    *how* the extraction runs rather than which input it runs on.
+
+    Deliberately **not** carried over from :class:`CompareRequest`: anything
+    about classification (policy, suppression, scope, severity, contract
+    evaluation). A dump produces evidence; it renders no verdict.
+    """
+
+    input: InputSpec
+    lang: str = "c++"
+    frontend: str = "auto"
+    # Mirrors `CompareRequest.has_sources`: the legacy "this run has source
+    # evidence" flag, which alone satisfies the `android` frontend's rule even
+    # when the evidence is not `InputSpec.sources`/`build_info`.
+    has_sources: bool = False
+    # The friendly evidence-depth dial (`--depth`: binary/headers/build/source).
+    # `None` infers the collect mode from whether the input sets `sources`/
+    # `build_info`, exactly as `CompareRequest.depth` does. An explicit value is
+    # a floor `run_dump_request` enforces: a depth that was requested but not
+    # reached raises rather than silently returning a weaker snapshot (the same
+    # contract `dump --depth` has via `check_requested_depth_satisfied`).
+    depth: str | None = None
+    dwarf_only: bool = False
+    debug_format: str | None = None
+    enable_debuginfod: bool = False
+    debuginfod_url: str | None = None
+    include_labels: tuple[tuple[Path, str], ...] = ()
+    # `--follow-deps` / `--search-path` / `--ld-library-path`: populate the
+    # snapshot's transitive `DependencyInfo`. Off by default, matching the CLI
+    # flag and `CompareRequest.follow_dependencies` — it costs a full
+    # dependency-graph resolution, so it stays opt-in.
+    follow_dependencies: bool = False
+    dependency_search_paths: tuple[Path, ...] = ()
+    ld_library_path: str = ""
+    # Request-level default for `CompileContext.frontend_context`
+    # (`--frontend-context`, host|device), applied when the input's own
+    # `InputSpec.compile.frontend_context` reads as the class default — see
+    # `service_compare_evidence._compile_context` for the accepted limitation
+    # that shared merge rule carries.
+    frontend_context: str = "host"
+
+    def validation_errors(self) -> list[str]:
+        """Return a list of human-readable validation problems (empty == valid).
+
+        The same value and cross-flag rules :meth:`CompareRequest.validation_errors`
+        applies, through the same module-level helpers, so ``dump`` and
+        ``compare`` reject an identical mistake with identical text (ADR-037 D9
+        front-end parity, extended across the two commands).
+        """
+        errors: list[str] = []
+        errors += _lang_errors(self.lang)
+        frontend_errors = _frontend_value_errors(self.frontend)
+        errors += frontend_errors
+        if (
+            not frontend_errors
+            and self.frontend.lower() == "android"
+            and not (self.has_sources or self.input.sources or self.input.build_info)
+        ):
+            errors.append(_ANDROID_NEEDS_SOURCES)
+        errors += _debug_format_errors(self.debug_format)
+        errors += _depth_errors(self.depth)
+        errors += _frontend_context_errors(self.frontend_context)
+        errors += _side_errors("input", self.input)
+        return errors
+
+    def validate(self) -> DumpRequest:
+        """Validate fail-fast; raise :class:`ValidationError` on the first batch.
+
+        Returns ``self`` so callers can write ``request.validate()`` inline.
+        """
+        errors = self.validation_errors()
+        if errors:
+            raise ValidationError("; ".join(errors))
+        return self
+
+    def replace(self, **changes: Any) -> DumpRequest:
         """Return a copy with *changes* applied (frozen-dataclass ``replace``)."""
         return replace(self, **changes)
 
@@ -518,6 +664,7 @@ __all__ = [
     "SUPPORTED_LANGS",
     "CompareRequest",
     "CompareResult",
+    "DumpRequest",
     "InputSpec",
     "OutputSpec",
 ]

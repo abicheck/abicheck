@@ -28,7 +28,6 @@ from __future__ import annotations
 import concurrent.futures as _futures
 import json
 import logging
-import platform
 import sys
 import time as _time
 from pathlib import Path
@@ -38,7 +37,7 @@ if TYPE_CHECKING:
     from .severity import SeverityConfig
 
 from . import mcp_shared
-from .api_types import CompareRequest, CompareResult, InputSpec
+from .api_types import CompareRequest, CompareResult, DumpRequest, InputSpec
 from .checker import DiffResult
 from .checker_policy import (
     API_BREAK_KINDS,
@@ -51,8 +50,21 @@ from .checker_policy import (
     impact_for,
     policy_for,
 )
+from .compile_context import CompileContext
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import ProfileMismatchError, ScopeMismatchError
+from .mcp_server_inputs import (  # noqa: F401  (re-exported for API stability)
+    _ALLOWED_BINARY_SUFFIXES,
+    _ALLOWED_OUTPUT_SUFFIXES,
+    _PUBLIC_DEPTHS,
+    _compile_context_from_args,
+    _contract_mode_error,
+    _detect_binary_format,
+    _public_header_dir_paths,
+    _resolve_input,
+    _safe_write_path,
+    _validate_public_depth,
+)
 from .mcp_server_verdicts import (  # noqa: F401  (re-exported for API stability)
     _VERDICT_SEVERITY_RANK,
     _impact_category,
@@ -85,206 +97,6 @@ from .serialization import snapshot_to_json
 # so main()'s runtime mutation is visible everywhere; see mcp_shared's own
 # module docstring for why a bare `from .mcp_shared import MCP_TIMEOUT`
 # would silently go stale.
-
-#: The public depth ladder (ADR-043 D2): exactly the four user-facing rungs.
-#: ``full``/``symbols``/``graph`` are internal-only vocabulary and must not
-#: leak into the MCP tool surface, matching the public CLI's ``--depth``.
-_PUBLIC_DEPTHS = frozenset({"binary", "headers", "build", "source"})
-
-
-def _validate_public_depth(depth: str | None) -> str | None:
-    """Reject any depth spelling outside the public ladder, or ``None``.
-
-    Note this only validates the *spelling*, not that the requested depth
-    was actually *reached* — but that's not a gap on this surface (re-
-    investigated for G30, AGENTS.md "Known gaps"/CLAUDE.md "M1-6", closed as
-    stale). ``abi_scan`` builds a ``service.py`` ``ScanRequest`` and goes
-    through ``service_scan.run_scan``, which calls the same
-    ``scan_engine.run_scan_core`` the CLI ``scan`` command
-    (``cli_scan.py``) calls directly — both already share one pinned-depth
-    evidence contract (``_check_scan_evidence_contract``'s
-    ``_EvidenceContractError``, ADR-037 D5), so there is no CLI-vs-MCP
-    disparity to close for ``abi_scan``. ``abi_estimate`` also accepts
-    ``depth=`` but is a separate, cost-only path: it builds its own
-    ``ScanRequest`` and calls ``estimate_scan`` (never
-    ``run_scan``/``run_scan_core``), so it never actually parses a binary or
-    header for the estimate to be "unsatisfied" against — this validator's
-    spelling check is all that applies to it. ``dump --depth``'s separate, stricter
-    ``DumpDepthNotSatisfiedError`` gate (PR #601, merged) lives in
-    ``cli._write_snapshot_output`` and has no equivalent on this module's
-    ``abi_dump`` tool to extend it to, because ``abi_dump`` never accepted a
-    ``depth``/``sources``/``build-info`` parameter in the first place.
-    """
-    if depth is not None and depth not in _PUBLIC_DEPTHS:
-        raise ValueError(
-            f"Unknown depth: {depth!r}. Valid depths: {sorted(_PUBLIC_DEPTHS)}"
-        )
-    return depth
-
-
-# ---------------------------------------------------------------------------
-# Path safety helpers
-# ---------------------------------------------------------------------------
-#
-# ``_safe_read_path``/``_sanitize_error``/``mcp`` itself now live in the leaf
-# module ``mcp_shared`` (imported above) so a sibling tool module
-# (``mcp_server_project``) can depend on them without this module depending
-# back on that sibling for shared state — see ``mcp_shared``'s own docstring.
-# ``_safe_write_path`` stays here: no tool outside this module writes an
-# output file.
-
-# Allowed extensions for output files written by abi_dump
-_ALLOWED_OUTPUT_SUFFIXES = frozenset({".json"})
-
-# Allowed extensions for input binary files
-_ALLOWED_BINARY_SUFFIXES = frozenset({".so", ".dll", ".dylib", ".json", ".dump", ""})
-
-
-def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
-    """Resolve and validate a path for writing.
-
-    Enforces:
-    - Must have an allowed suffix (.json only)
-    - Must not be a system-sensitive location
-
-    Raises ValueError on policy violation.
-    """
-    if not raw or raw.strip() == "":
-        raise ValueError(f"Empty {label} is not allowed")
-
-    try:
-        p = Path(raw).resolve()
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"Invalid {label}: {exc!s}") from exc
-
-    if p.suffix.lower() not in _ALLOWED_OUTPUT_SUFFIXES:
-        raise ValueError(f"{label} must have a .json extension, got: {p.suffix!r}")
-
-    # Block writes to sensitive system locations.
-    # Use resolved Path objects to handle symlinks (/etc -> /private/etc on macOS)
-    # and canonicalize traversal sequences (../../etc bypasses raw-string checks).
-    _os = platform.system()
-    if _os in ("Linux", "Darwin"):
-        sensitive_system_dirs = [
-            Path("/etc"),
-            Path("/bin"),
-            Path("/sbin"),
-            Path("/usr/bin"),
-            Path("/usr/sbin"),
-            Path("/boot"),
-            Path("/sys"),
-            Path("/proc"),
-            Path("/dev"),
-        ]
-        for sys_dir in sensitive_system_dirs:
-            try:
-                p.relative_to(sys_dir.resolve())
-                raise ValueError(
-                    f"{label} points to a sensitive system path: {sys_dir}..."
-                )
-            except ValueError as e:
-                if "sensitive system path" in str(e):
-                    raise
-    elif _os == "Windows":
-        p_str = str(p)
-        # Normalize NT extended paths so checks also catch forms like:
-        #   \\?\C:\Windows\...
-        #   \\?\UNC\localhost\c$\Windows\...
-        if p_str.startswith("\\\\?\\"):
-            p_str = p_str[4:]
-            if p_str.upper().startswith("UNC\\"):
-                p_str = "\\\\" + p_str[4:]
-
-        norm = p_str.replace("\\", "/").casefold()
-        sensitive_prefixes = (
-            "c:/windows/",
-            "c:/windows/system32/",
-            "c:/program files/",
-            "c:/program files (x86)/",
-            "c:/programdata/",
-            "//localhost/c$/windows/",
-            "//127.0.0.1/c$/windows/",
-        )
-        if norm.startswith(sensitive_prefixes):
-            raise ValueError(f"{label} points to a sensitive system path")
-
-    # Block writes to SSH/credential directories.
-    # Resolve both sides to handle symlinks (e.g. ~/.ssh → /private/home/user/.ssh).
-    home = Path.home().resolve()
-    for sensitive_dir in [
-        (home / ".ssh").resolve(),
-        (home / ".aws").resolve(),
-        (home / ".gnupg").resolve(),
-    ]:
-        try:
-            p.relative_to(sensitive_dir)
-            raise ValueError(f"{label} points to a sensitive credential directory")
-        except ValueError as e:
-            if "credential" in str(e):
-                raise
-
-    return p
-
-
-# ---------------------------------------------------------------------------
-# Helpers — reuse CLI logic without Click dependency
-# ---------------------------------------------------------------------------
-
-
-def _detect_binary_format(path: Path) -> str | None:
-    """Detect binary format from magic bytes — single file open."""
-    from .binary_utils import detect_binary_format
-
-    return detect_binary_format(path)
-
-
-def _resolve_input(
-    path: Path,
-    headers: list[Path],
-    includes: list[Path],
-    version: str,
-    lang: str,
-    *,
-    public_headers: list[Path] | None = None,
-    public_header_dirs: list[Path] | None = None,
-) -> AbiSnapshot:
-    """Auto-detect input type and return an AbiSnapshot.
-
-    Thin wrapper over :func:`abicheck.service.resolve_input` — the single source
-    of truth for format detection, raw BTF/CTF blobs, and native (ELF/PE/Mach-O)
-    dumping. The MCP surface is framework-free, so the service's
-    ``SnapshotError`` / ``ValidationError`` (both ``AbicheckError`` subclasses)
-    propagate unchanged for the tool handlers to convert into structured error
-    payloads.
-
-    ``follow_linker_scripts=False``: the MCP tools enforce ``MCP_MAX_FILE_SIZE``
-    via :func:`_check_file_size` on the *caller-supplied* path before resolving.
-    Following a GNU ld linker script would parse an ``INPUT()``/``GROUP()``
-    target that never went through that guard, so a tiny script pointing at a
-    huge library could defeat the resource limit. Disabling the follow keeps the
-    size check authoritative (and matches the MCP server's pre-unification
-    behaviour, which never followed linker scripts).
-
-    ``public_headers`` / ``public_header_dirs``: several MCP tools (``abi_dump``,
-    ``abi_compare``, ``abi_audit``) document their plain ``headers`` parameter as
-    "Public header files" — they have no separate opt-in provenance flag the way
-    ``dump``'s CLI ``-H``/``--public-header`` split does. Callers making that same
-    claim should pass the same paths here so declaration provenance is actually
-    classified (ADR-024), matching the CLI ``compare --header`` fix.
-    """
-    from . import service
-
-    return service.resolve_input(
-        path,
-        headers,
-        includes,
-        version,
-        lang,
-        follow_linker_scripts=False,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
-    )
-
 
 def _snapshot_summary(snap: AbiSnapshot) -> dict[str, Any]:
     """Build a compact summary of an ABI snapshot."""
@@ -379,8 +191,23 @@ def abi_dump(
     library_path: str,
     headers: list[str] | None = None,
     include_dirs: list[str] | None = None,
+    public_header_dirs: list[str] | None = None,
     version: str = "unknown",
     language: str = "c++",
+    depth: str | None = None,
+    sources: str | None = None,
+    build_info: str | None = None,
+    dump_manifest: str | None = None,
+    include_dependencies: bool = True,
+    dwarf_only: bool = False,
+    debug_format: str | None = None,
+    ast_frontend: str = "auto",
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    sysroot: str | None = None,
+    nostdinc: bool = False,
+    frontend_context: str = "host",
     output_path: str | None = None,
 ) -> str:
     """Dump ABI snapshot of a C/C++ shared library to JSON.
@@ -393,9 +220,48 @@ def abi_dump(
         headers: Public header file paths. For ELF (.so), omitting them produces
             a symbol-only snapshot with no type information (strongly recommended
             to supply headers). Not used for PE (.dll) or Mach-O (.dylib) inputs.
+            Mutually exclusive with dump_manifest.
         include_dirs: Extra include directories for the C/C++ parser.
+        public_header_dirs: Directories whose headers are public, for declaration
+            provenance classification — beyond any directory already passed via
+            ``headers``.
         version: Version label to embed in the snapshot (e.g. "1.2.3").
         language: Language mode — "c++" (default) or "c".
+        depth: Evidence depth to collect — "binary" (symbols only), "headers"
+            (+header AST), "build" (+build context), or "source" (+source
+            replay). Omitted, the depth is inferred from the inputs
+            (``sources`` implies source, ``build_info`` implies build). An
+            explicit value is a *floor*: if the resolved snapshot does not
+            reach it, this returns an error instead of a weaker snapshot,
+            matching ``abicheck dump --depth``.
+        sources: Source tree (or prebuilt evidence pack) supplying inline L3-L5
+            build/source evidence — mirrors ``dump --sources``.
+        build_info: Out-of-tree build dir / compile_commands.json / pack
+            supplying build context — mirrors ``dump --build-info``.
+        dump_manifest: Path to a ``--dump-manifest`` YAML document describing
+            multiple translation units to compile and merge into one snapshot,
+            instead of a single ``headers`` list. Mutually exclusive with
+            ``headers``. ELF only.
+        include_dependencies: Keep declarations whose defining header is a
+            toolchain/system header (default True, matching the Python API's own
+            default — ``dump --include-dependencies``'s opt-out is the CLI
+            spelling of the same switch, whose default is the opposite way
+            round). Set False for a dependency-scoped snapshot.
+        dwarf_only: Use DWARF debug info as the primary data source even when
+            headers are available.
+        debug_format: Force the ELF debug format — "auto", "dwarf", "btf", or
+            "ctf". ELF only: a forced format against a PE/Mach-O input is a
+            validation error rather than a silently ignored request.
+        ast_frontend: L2 header-AST frontend — "auto" (default), "castxml",
+            "clang", "hybrid", or "android".
+        gcc_path: Explicit compiler binary for the header frontend.
+        gcc_prefix: Cross-toolchain prefix for the header frontend.
+        gcc_options: Extra compiler flags for the header frontend, as one
+            shell-quoted string.
+        sysroot: Alternate sysroot for the header frontend.
+        nostdinc: Suppress the standard include paths for the header frontend.
+        frontend_context: Which AST context the header frontend targets —
+            "host" (default) or "device" (SYCL/DPC++ offload target).
         output_path: If provided, write snapshot to this file and return the path.
             Otherwise the snapshot JSON is returned inline.
     """
@@ -412,6 +278,65 @@ def abi_dump(
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
+        try:
+            phd_paths = _public_header_dir_paths(public_header_dirs)
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
+        try:
+            depth = _validate_public_depth(depth)
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
+        src_path = _safe_read_path(sources, label="sources") if sources else None
+        bi_path = (
+            _safe_read_path(build_info, label="build_info") if build_info else None
+        )
+        manifest = None
+        if dump_manifest:
+            manifest_path = _safe_read_path(dump_manifest, label="dump_manifest")
+            if not manifest_path.exists():
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"dump_manifest not found: {manifest_path}",
+                    }
+                )
+            _check_file_size(manifest_path, label="dump_manifest")
+            from .dump_manifest import load_manifest
+
+            manifest = load_manifest(manifest_path)
+
+        request = DumpRequest(
+            input=InputSpec(
+                path=lib,
+                headers=tuple(hdr_paths),
+                includes=tuple(inc_paths),
+                version=version,
+                public_header_dirs=tuple(phd_paths),
+                include_dependencies=include_dependencies,
+                sources=src_path,
+                build_info=bi_path,
+                dump_manifest=manifest,
+                compile=_compile_context_from_args(
+                    ast_frontend=ast_frontend,
+                    gcc_path=gcc_path,
+                    gcc_prefix=gcc_prefix,
+                    gcc_options=gcc_options,
+                    sysroot=sysroot,
+                    nostdinc=nostdinc,
+                    frontend_context=frontend_context,
+                ),
+                # Same guard as `abi_compare`: this tool size-checks only the
+                # caller-supplied path, so following a GNU ld script's INPUT()
+                # target would reach a file that never went through it.
+                follow_linker_scripts=False,
+            ),
+            lang=language,
+            frontend=ast_frontend,
+            depth=depth,
+            dwarf_only=dwarf_only,
+            debug_format=debug_format,
+            frontend_context=frontend_context,
+        )
 
         # Run the expensive resolve+serialize in a thread with a real timeout
         # so we don't block the MCP stdio server indefinitely. Uses the
@@ -421,15 +346,16 @@ def abi_dump(
         # already fired, defeating the timeout for a genuinely stuck resolve
         # (Codex review; same fix already applied to the four project tools
         # in mcp_server_project.py).
+        #
+        # G33 Phase 5: one typed request through the Tier-2 chokepoint, the
+        # way `abi_compare` builds a `CompareRequest`. This tool used to call
+        # `_resolve_input` with a fixed five-argument subset, which is why it
+        # could not express a depth, inline build/source evidence, a dump
+        # manifest, or a compile context at all.
         def _resolve() -> AbiSnapshot:
-            return _resolve_input(
-                lib,
-                hdr_paths,
-                inc_paths,
-                version,
-                language,
-                public_headers=hdr_paths,
-            )
+            from .service import run_dump_request
+
+            return run_dump_request(request)
 
         try:
             snap = _call_with_timeout(_resolve)
@@ -501,6 +427,7 @@ def abi_compare(
     required_symbols: list[str] | None = None,
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> str:
     """Compare two ABI surfaces and report breaking changes.
 
@@ -612,6 +539,16 @@ def abi_compare(
             available on the ``compare`` and ``scan`` CLIs via ``--pack``.
             Default False; the response is unchanged from today's shape
             unless this is set.
+        contract_mode: ADR-049 Phase 6's ``--contract``: which evidence domain
+            ``contract_evaluation`` judges against — "public" (the
+            header-derived declared surface), "exports" (the binary's own
+            export table plus its type closure), or "all" (no root/closure
+            evidence required). Omitted, the domain follows this tool's
+            public-surface scoping. Requires ``contract_evaluation``. Since
+            ADR-049 Phase 7 the domain decides which findings compatibility
+            policy scores, so selecting one can change ``verdict`` and
+            ``exit_code``, and it is what the orthogonal contract-coverage
+            axis is answered against.
     """
     t0 = _time.monotonic()
     try:
@@ -707,6 +644,15 @@ def abi_compare(
                     {"status": "error", "error": f"Invalid show_only: {exc}"}
                 )
 
+        # `CompareRequest.validate()` states these same two rules, but reaching
+        # them means building the request first; checked here so a usage error
+        # reads like this tool's other ones instead of a sanitized exception,
+        # and so `abi_scan` (whose `ScanRequest` has no `validate()`) can share
+        # exactly one implementation of them.
+        contract_error = _contract_mode_error(contract_mode, contract_evaluation)
+        if contract_error is not None:
+            return json.dumps({"status": "error", "error": contract_error})
+
         # ADR-055 D4: one typed request through the Tier-2 chokepoint —
         # `run_compare_request` resolves both sides, loads policy and
         # suppression, and classifies. This tool used to do all three itself
@@ -759,6 +705,7 @@ def abi_compare(
                 suppress=suppression_path,
                 diagnostic_comparison=diagnostic_comparison,
                 contract_evaluation=contract_evaluation,
+                contract_mode=contract_mode,
             )
             return run_compare_request(request)
 
@@ -1646,10 +1593,23 @@ def abi_scan(
     public_header_dirs: list[str] | None = None,
     sources: str | None = None,
     compile_db: str | None = None,
+    build_info: str | None = None,
     against: str | None = None,
     depth: str | None = None,
     changed_paths: list[str] | None = None,
     language: str = "c++",
+    policy: str = "strict_abi",
+    policy_file: str | None = None,
+    suppression_file: str | None = None,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
+    ast_frontend: str = "auto",
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    sysroot: str | None = None,
+    nostdinc: bool = False,
+    frontend_context: str = "host",
 ) -> str:
     """Run a deterministic source-intelligence scan (ADR-035 D3/D10 / ADR-043).
 
@@ -1671,6 +1631,8 @@ def abi_scan(
             also counts; a lone umbrella header file cannot establish a boundary.
         sources: Source tree (compile DB auto-discovered within it).
         compile_db: Explicit compile_commands.json (else discovered in sources).
+        build_info: Out-of-tree build dir / compile_commands.json / pack
+            supplying build context — mirrors ``scan --build-info``.
         against: Previous build's dump/library to compare against (omit for a
             single-release audit — the always-on hygiene catalog runs either way).
         depth: Coarse evidence-depth selector: "binary", "headers", "build", or
@@ -1678,6 +1640,32 @@ def abi_scan(
             changed-path risk score once seeded).
         changed_paths: Changed-path set focusing the scan (ADR-035 D7).
         language: Language mode — "c++" (default) or "c".
+        policy: With ``against``: built-in policy — "strict_abi" (default),
+            "sdk_vendor", or "plugin_abi". Ignored for a one-build audit, which
+            renders no comparison verdict (ADR-049 Phase 5 §6.4 config-surface
+            parity with ``abi_compare``).
+        policy_file: With ``against``: custom YAML policy file (overrides
+            ``policy``).
+        suppression_file: With ``against``: YAML suppression file filtering
+            known changes out of the comparison.
+        contract_evaluation: With ``against``: stamp each comparison finding
+            with its ADR-049 contract decision, exactly as ``abi_compare``'s own
+            argument does. Authoritative since ADR-049 Phase 7 — it changes the
+            verdict and the exit code, and an incomplete contract domain
+            contributes the orthogonal coverage exit.
+        contract_mode: With ``contract_evaluation``: which evidence domain the
+            decision is judged against — "public", "exports", or "all". Omitted,
+            the domain follows the scan's public-surface scoping.
+        ast_frontend: L2 header-AST frontend — "auto" (default), "castxml",
+            "clang", "hybrid", or "android".
+        gcc_path: Explicit compiler binary for the header frontend.
+        gcc_prefix: Cross-toolchain prefix for the header frontend.
+        gcc_options: Extra compiler flags for the header frontend, as one
+            shell-quoted string.
+        sysroot: Alternate sysroot for the header frontend.
+        nostdinc: Suppress the standard include paths for the header frontend.
+        frontend_context: Which AST context the header frontend targets —
+            "host" (default) or "device" (SYCL/DPC++ offload target).
     """
     t0 = _time.monotonic()
     try:
@@ -1697,30 +1685,65 @@ def abi_scan(
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
-        phd_paths: list[Path] = []
-        for d in public_header_dirs or []:
-            p = _safe_read_path(d, label="public_header_dir")
-            # Match the CLI option (exists=True, file_okay=False): a public-header
-            # boundary must be a real directory, else apply_provenance would tag
-            # every declaration INTERNAL against a path that matches nothing,
-            # producing misleading origin classification (CodeRabbit).
-            if not p.is_dir():
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"public_header_dir must be an existing directory: {d}",
-                    }
-                )
-            phd_paths.append(p)
+        try:
+            phd_paths = _public_header_dir_paths(public_header_dirs)
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
         src_path = _safe_read_path(sources, label="sources") if sources else None
         cdb_path = (
             _safe_read_path(compile_db, label="compile_db") if compile_db else None
         )
         if cdb_path is not None:
             _check_file_size(cdb_path, label="compile_db")
+        bi_path = (
+            _safe_read_path(build_info, label="build_info") if build_info else None
+        )
         base_path = _safe_read_path(against, label="against") if against else None
         if base_path is not None:
             _check_file_size(base_path, label="against")
+
+        # ADR-049 Phase 5 §6.4: a `--against` comparison is scoped/suppressed/
+        # policy-classified the same way a direct `compare` is, so this tool
+        # exposes the same three inputs `abi_compare` does. Same MCP-local
+        # guards, applied before anything loads them (G33 Phase 5).
+        if policy_file is None and policy not in VALID_BASE_POLICIES:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"Unknown policy: {policy!r}. "
+                    f"Valid policies: {', '.join(sorted(VALID_BASE_POLICIES))}",
+                }
+            )
+        suppression_path = None
+        if suppression_file:
+            suppression_path = _safe_read_path(
+                suppression_file, label="suppression_file"
+            )
+            _check_file_size(suppression_path, label="suppression_file")
+        policy_path = None
+        if policy_file:
+            policy_path = _safe_read_path(policy_file, label="policy_file")
+            _check_file_size(policy_path, label="policy_file")
+        # `CompareRequest.validate()` states the not-found case for
+        # `abi_compare`; `ScanRequest` has no `validate()`, so without this a
+        # missing file reaches the loader and surfaces as a sanitized
+        # FileNotFoundError instead of naming the argument at fault.
+        for missing_path, label in (
+            (suppression_path, "suppression_file"),
+            (policy_path, "policy_file"),
+        ):
+            if missing_path is not None and not missing_path.exists():
+                return json.dumps(
+                    {"status": "error", "error": f"{label} not found: {missing_path}"}
+                )
+        contract_error = _contract_mode_error(contract_mode, contract_evaluation)
+        if contract_error is not None:
+            return json.dumps({"status": "error", "error": contract_error})
+        from .service import load_suppression_and_policy
+
+        suppression, loaded_policy_file = load_suppression_and_policy(
+            suppression_path, policy, policy_path
+        )
 
         req = ScanRequest(
             binaries=[bin_path],
@@ -1729,6 +1752,7 @@ def abi_scan(
             public_header_dirs=phd_paths,
             sources=src_path,
             compile_db=cdb_path,
+            build_info=bi_path,
             baseline=base_path,
             # Absence of --against is a one-build audit; presence is compare-too
             # (ADR-043) — neither is a separate mode argument on the MCP surface.
@@ -1738,6 +1762,21 @@ def abi_scan(
             seeded=changed_paths is not None,
             budget=Budget(),
             lang=language,
+            compile=_compile_context_from_args(
+                ast_frontend=ast_frontend,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                frontend_context=frontend_context,
+            )
+            or CompileContext(),
+            policy=policy,
+            policy_file=loaded_policy_file,
+            suppression=suppression,
+            contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
         )
 
         # Run in a killable child process so a deep/hung scan that exceeds the

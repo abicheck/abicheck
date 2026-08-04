@@ -1,9 +1,12 @@
 # G33 — Typed API convergence: schema registry, Request/Result completeness, MCP dedup
 
-**Status:** Phases 0-4 done (ADR-055 D1-D4 all implemented, including D1's
+**Status:** Phases 0-5 done (ADR-055 D1-D4 all implemented, including D1's
 deferred structural half — the CLI now shares one resolution with the typed
-and MCP paths); Phase 5 unblocked but not started; Phase 6 is a standing
-constraint, not work — see per-phase status below
+and MCP paths; Phase 5 gave `dump` the typed request `compare` had, and with
+it the MCP parity it was blocking); Phase 6 is a standing constraint, not
+work. One piece of follow-up is named and tracked rather than folded into a
+closed phase: the native `dump` CLI still resolves its own inputs — see
+Phase 5's "Deliberately not done here"
 **Normative decision:** [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md)
 (Accepted — implemented)
 **Related:** ADR-037 (G22, CLI consolidation — done), ADR-049 (contract relevance,
@@ -353,8 +356,77 @@ this before Phase 4 is done.
 of `abi_compare`'s post-Phase-4 parameter set for every concept `dump`
 and `compare` share.
 
-**Progress:** not started — but no longer blocked: Phase 4 is done, which
-was its only stated precondition.
+**Progress:** done. The gate is executable in
+`tests/test_typed_dump_request.py`'s `TestPhase5ParityGate`, as a signature
+check over the three tools rather than prose — that is the failure this phase
+exists to stop recurring (`abi_dump` sat at a five-argument subset of
+`abicheck dump` for several releases with nothing noticing).
+
+**The phase's own framing was slightly wrong, and the correction is what
+shaped the work.** It reads "gain the same … parity `abi_compare` gains in
+Phase 4", but Phase 4 gave `abi_compare` no depth/sources/build_info
+parameters at all — it moved that tool onto `CompareRequest`, which *carries*
+those fields (Phase 2), without exposing them as tool arguments. So there was
+no parity to copy: `abi_dump` had to gain the concepts outright.
+
+That is why the change is not only MCP surface. `resolve_input` has always
+been the single source of truth for turning a path into a snapshot, but
+everything a real `dump` does *around* it — inferring a collect mode,
+embedding inline L3-L5 evidence, walking dependencies, enforcing that an
+explicit `--depth` was reached — lived only in `cli.py`'s `dump_cmd`. Adding
+the arguments without a typed request would have meant a second copy of those
+four steps inside `mcp_server.py`: precisely the invariant §2 exists to
+protect. So `dump` got the request `compare` has had since ADR-037 D2:
+
+- `api_types.DumpRequest` — one `InputSpec` plus the how-it-runs fields
+  `CompareRequest` also keeps at request level. Deliberately carries nothing
+  about classification (policy, suppression, scope, severity, contract): a
+  dump produces evidence and renders no verdict. Both requests now validate
+  through one set of module-level helpers, so `dump` and `compare` reject an
+  identical mistake with identical text — ADR-037 D9's front-end parity,
+  extended across the two commands.
+- `service_dump_pipeline.run_dump_request` — those four steps, over the same
+  per-input primitives `compare` resolves through.
+- `service_input_resolution` — those primitives. Everything in it was
+  `service_compare_pipeline`'s private helpers (`_resolve_side`,
+  `_embed_side_build_source`, `_enforce_requested_depth`), lifted out of the
+  *pair* and re-expressed for one input, so a change to how an input resolves
+  lands on both commands at once. The pair-shaped decisions stayed behind on
+  purpose: the pair-wide C++20 dialect override exists because two sides must
+  agree on a standard, and the concurrency rule is about two extractions
+  running at once — neither means anything for a lone dump.
+
+`IMPORT_CYCLE_ALLOWLIST` gains both new modules, under the terms
+`service_compare_pipeline` was signed off on for the same reason in Phase 2
+(CLAUDE.md "M1-3"): each is a *split* of an existing member, and every edge
+they have is one the code already had one module over, moved rather than
+added. `mcp_server.py` crossed the 2000-line hard cap on the new parameters,
+so its argument-translation layer moved to `mcp_server_inputs.py` verbatim,
+re-exported for existing callers and tests.
+
+Three narrower things landed with it, each because leaving it out would have
+made the gate pass while the surfaces still disagreed:
+
+1. `abi_scan` gained `build_info`, the `compile_context_options` family, and
+   the `--against` config surface ADR-049 Phase 5 §6.4 already required it to
+   have (`policy`/`policy_file`/`suppression_file`/`contract_evaluation`).
+2. `abi_compare` gained `contract_mode` — the CLI's `--contract`, and a field
+   `CompareRequest` already had. Adding it to `abi_scan` alone would have left
+   the two tools disagreeing about ADR-049 Phase 6.
+3. `--contract`'s two usage rules have one implementation
+   (`mcp_server_inputs._contract_mode_error`) shared by both tools, since
+   `ScanRequest` has no `validate()` of its own to state them in.
+
+**Deliberately not done here**, and not a hidden gap: the native `dump` CLI
+still resolves its own inputs rather than building a `DumpRequest`. That is
+the `dump`-side analogue of Phase 2's "structural half", and it is a real
+piece of work — `dump_cmd` also owns `--dry-run` rendering, git/build-id
+provenance stamping, `fold_dump_provenance_into_json`, compile-database reuse
+and deprecation shims, none of which belong in a Tier-2 request. Phase 2
+earned that migration on `compare` by first finding the seam
+(`resolve`/`classify`) that made it possible; `dump`'s equivalent seam is not
+yet identified, and guessing at it inside a phase scoped to MCP parity is how
+a second resolution path gets created rather than removed. Tracked below.
 
 ### Phase 6 — ADR-049 sequencing constraint (no new work here)
 
@@ -403,7 +475,17 @@ All met:
 - [x] ADR-055's status line updated from "Proposed" to "Accepted —
   implemented".
 
-Remaining work tracked elsewhere, not reopening this plan: Phase 5
-(`abi_dump`/`abi_scan` parity) is unblocked and still open. Migrating the CLI
-onto the shared resolution — Phase 2's deferred structural half — is **done**;
-see that phase's "Structural half" note.
+Every phase this plan owns is now closed. Migrating the `compare` CLI onto the
+shared resolution — Phase 2's deferred structural half — is **done** (see that
+phase's "Structural half" note), and Phase 5's `abi_dump`/`abi_scan` parity is
+**done** (see its own note, including why the phase's original framing of what
+it was copying was wrong).
+
+One follow-up is deliberately left open rather than closed by assertion: the
+native `dump` CLI does not yet build a `DumpRequest`, so `dump` has the
+*shape* `compare` got in Phase 2 without the CLI having adopted it. Phase 5's
+"Deliberately not done here" records what that migration needs first — a real
+seam in `dump_cmd` separating evidence resolution from its provenance/dry-run
+presentation layer, the way `resolve`/`classify` was found for `compare`. It
+is not a regression and blocks nothing in this plan; it is where a `dump`-side
+Phase 2 would start.

@@ -97,6 +97,29 @@ Projected cost of one L-layer for *this* project (ADR-035 D10 dry-run).
 | `cache_hit_rate` | `float` | *(required)* |
 | `note` | `str` | *(required)* |
 
+## `DumpRequest`
+
+A fully-specified snapshot-extraction request — the input to ``run_dump_request``.
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `input` | `InputSpec` | *(required)* |
+| `lang` | `str` | `'c++'` |
+| `frontend` | `str` | `'auto'` |
+| `has_sources` | `bool` | `False` |
+| `depth` | `str \| None` | `None` |
+| `dwarf_only` | `bool` | `False` |
+| `debug_format` | `str \| None` | `None` |
+| `enable_debuginfod` | `bool` | `False` |
+| `debuginfod_url` | `str \| None` | `None` |
+| `include_labels` | `tuple[tuple[Path, str], ...]` | `()` |
+| `follow_dependencies` | `bool` | `False` |
+| `dependency_search_paths` | `tuple[Path, ...]` | `()` |
+| `ld_library_path` | `str` | `''` |
+| `frontend_context` | `str` | `'host'` |
+
 ## `InputSpec`
 
 One side of a comparison: a binary/snapshot path plus its build context.
@@ -493,6 +516,18 @@ Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 | `include_labels` | `dict[Path, str] \| None` | `None` |
 | `dump_manifest` | `DumpManifest \| None` | `None` |
 | `include_dependencies` | `bool` | `True` |
+
+**Returns:** `AbiSnapshot`
+
+## `run_dump_request`
+
+Resolve *request* into one :class:`~abicheck.model.AbiSnapshot`.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `request` | `DumpRequest` | *(required)* |
+| *(keyword-only below)* | | |
+| `notify` | `Callable[[str], None] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
 

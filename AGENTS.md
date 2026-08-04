@@ -131,6 +131,11 @@ Entry points:
 - `abicheck/cli.py` — Click CLI (large file, at the 2000-line hard cap; be careful with edits)
 - `abicheck/compat/cli.py` — ABICC-compatible CLI wrapper
 - `abicheck/mcp_server.py` — MCP server for AI agent integration
+  (`mcp_server_inputs.py` holds its argument-translation layer — the public
+  depth ladder, write-path policy, and the argument families more than one
+  tool takes; `mcp_server_project.py`/`mcp_server_verdicts.py` are the other
+  size-split siblings, each imported back for side-effect registration or
+  re-export)
 - `abicheck/__main__.py` — `python -m abicheck` entry
 
 Core pipeline (in order of data flow):
@@ -462,6 +467,27 @@ Core pipeline (in order of data flow):
      `ABICHECK_PARALLEL_EXTRACTION=0`, forces sequential — a manifest dump
      sizes its per-TU pool off a live `MemAvailable` reading, so two at once
      jointly overcommit)
+   - `service_input_resolution.py` — G33 Phase 5: the per-*input* primitives
+     `compare` and `dump` share (`resolve_side_snapshot`,
+     `embed_side_build_source`, `enforce_requested_depth`,
+     `reject_hybrid_source_frontend`). All of it was
+     `service_compare_pipeline`'s private helpers, lifted out of the pair and
+     re-expressed for one input so a change to how an input resolves lands on
+     both commands at once. The pair-shaped decisions deliberately stayed
+     behind — the pair-wide C++20 dialect override exists because two sides
+     must agree on a standard, and the concurrency rule is about two
+     extractions at once; neither means anything for a lone dump
+   - `service_dump_pipeline.py` — G33 Phase 5: `run_dump_request`, `dump`'s
+     counterpart to `resolve_compare_request`. `resolve_input` was already the
+     one way to turn a path into a snapshot, but the four steps a real `dump`
+     does *around* it (collect-mode inference, inline L3-L5 embedding, the
+     dependency walk, the depth floor) lived only in `cli.py`'s `dump_cmd` —
+     which is why the MCP `abi_dump` tool sat at a five-argument subset of
+     what `abicheck dump` accepts. Deliberately excludes the CLI's provenance/
+     presentation layer (`--dry-run` rendering, git/build-id stamping,
+     `fold_dump_provenance_into_json`); the native `dump` CLI does not build a
+     `DumpRequest` yet — see G33's Phase 5 note for what that migration needs
+     first
    - `stack_checker.py`, `stack_report.py`, `stack_html.py` — stack analysis
 9. **Build-source evidence (optional L3–L5 layers)** — `buildsource/` package
    (collect/merge/source-ABI replay/source graph; ADR-028…033). See
@@ -744,8 +770,21 @@ Once a root command genuinely clears the bar above, pick the right home:
   two default-scoped persisted snapshots against each other rather than
   mixing a persisted baseline JSON with a live-binary operand.
 
-- **Depth contract, CLI vs. API/MCP — re-investigated for G30, closed as
-  stale, not implemented (CLAUDE.md "M1-6").** This entry previously said PR
+- **Depth contract, CLI vs. API/MCP — closed for real by G33 Phase 5, having
+  first been closed as stale.** Finding 1 below is now out of date in a way
+  worth keeping visible rather than deleting: it closed this gap on the
+  grounds that no service/MCP surface *promised* a depth-qualified snapshot,
+  so there was nothing to extend the gate to. That was true when written and
+  is no longer: `DumpRequest.depth` and the MCP `abi_dump`'s `depth` argument
+  are exactly such a promise, and `service_dump_pipeline.run_dump_request`
+  enforces it — the same floor, raising the Tier-2 `ValidationError` where the
+  CLI path raises `DumpDepthNotSatisfiedError`. Note which direction the fix
+  went: the gap was closed by giving the typed surface the *capability* and
+  the gate together, not by extending a gate to a surface that had no
+  capability to gate. Finding 2 is unchanged and still correct. The original
+  text follows.
+
+  This entry previously said PR
   #601 (which adds a hard-fail `DumpDepthNotSatisfiedError` when an explicit
   `dump --depth` isn't actually reached, in `cli.py`/`cli_dump_helpers.py`)
   was still open, and that `abicheck/service.py`'s `ScanRequest`/
