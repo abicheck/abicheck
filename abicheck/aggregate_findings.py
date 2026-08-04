@@ -621,15 +621,13 @@ def build_finding_matrix(
     findings are still read: they can only ever add a profile to
     ``affected``, never wrongly clear one.
 
-    Two identities that differ only because their profiles use different
-    mangling schemes are merged first, via
-    :func:`resolve_cross_abi_identity` — but only when every profile carries
-    at most one of them, since that key cannot tell two overloads apart.
-    Where the merge is ambiguous the identities stay separate, and each
-    profile carrying a *sibling* identity from the same group is reported
-    ``undetermined`` rather than ``unaffected``: it demonstrably has a
-    finding on the same declaration, so it is exactly the profile that must
-    not be called clean.
+    Identities are **never merged** across mangling schemes — see
+    :func:`resolve_cross_abi_identity` for why that key cannot prove two
+    findings are the same one. It is used only to decide whether a profile
+    may be called *clean*: when another profile reported on the same
+    declaration under a spelling this one cannot be compared with
+    (:func:`_withholds_clean_verdict`), that profile is ``undetermined``
+    rather than ``unaffected``.
 
     Entries are ordered by ``(base_target, kinds, symbol, finding_identity)``
     so the output is stable across runs; the identity itself is last only as
@@ -687,9 +685,9 @@ def build_finding_matrix(
             samples = [f for pid in affected for f in known[pid][identity]]
             first = samples[0]
             # A profile carrying a different identity that shares this one's
-            # cross-ABI key has a finding on the same declaration under
-            # another mangling; the merge above declined to pair them, so
-            # this is "cannot tell", never "clean".
+            # cross-ABI key has a finding on the same declaration. Whether
+            # that leaves it clean or merely undetermined turns on whether
+            # the two spellings can be compared at all.
             cross = first.cross_identity
             sibling = (
                 {
