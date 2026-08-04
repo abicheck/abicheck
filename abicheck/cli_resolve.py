@@ -360,51 +360,18 @@ def _populate_dependency_info(
     sysroot: Path | None,
     ld_library_path: str,
 ) -> None:
-    """Resolve transitive deps and store DependencyInfo in the snapshot."""
-    from .binder import BindingStatus, compute_bindings
-    from .model import DependencyInfo
-    from .resolver import resolve_dependencies
+    """Back-compat alias — the implementation now lives in the service layer.
 
-    graph = resolve_dependencies(
-        so_path,
-        search_paths=search_paths or None,
-        sysroot=sysroot,
-        ld_library_path=ld_library_path,
-    )
-    bindings = compute_bindings(graph)
+    ADR-055 D1's second slice gave ``run_compare_request`` ``--follow-deps``
+    parity, so this gained a second caller outside the CLI. It reads only
+    leaf modules (``binder``/``model``/``resolver``), so it moved to the leaf
+    ``dependency_info`` module both layers can depend on rather than either
+    importing the other (AGENTS.md's rule for exactly this shape). Kept as a
+    name here because ``cli.py`` imports and re-exports it.
+    """
+    from .dependency_info import populate_dependency_info
 
-    summary: dict[str, int] = {}
-    for b in bindings:
-        summary[b.status.value] = summary.get(b.status.value, 0) + 1
-
-    missing = [
-        {"consumer": b.consumer, "symbol": b.symbol, "version": b.version}
-        for b in bindings
-        if b.status == BindingStatus.MISSING
-    ]
-
-    snap.dependency_info = DependencyInfo(
-        nodes=[
-            {
-                "path": str(node.path),
-                "soname": node.soname,
-                "needed": node.needed,
-                "depth": node.depth,
-                "resolution_reason": node.resolution_reason,
-            }
-            for node in sorted(graph.nodes.values(), key=lambda n: (n.depth, n.soname))
-        ],
-        edges=[
-            {"consumer": consumer, "provider": provider}
-            for consumer, provider in graph.edges
-        ],
-        unresolved=[
-            {"consumer": consumer, "soname": soname}
-            for consumer, soname in graph.unresolved
-        ],
-        bindings_summary=summary,
-        missing_symbols=missing,
-    )
+    populate_dependency_info(snap, so_path, search_paths, sysroot, ld_library_path)
 
 
 def _is_supported_compare_input(path: Path) -> bool:

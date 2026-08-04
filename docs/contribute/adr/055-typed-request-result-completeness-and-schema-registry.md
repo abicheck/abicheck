@@ -198,19 +198,44 @@ neither `service.py` comment this ADR quoted still exists.
 
 The open choice is now answered: **option (b)** — `run_compare_request` was
 extended in parallel, and the CLI `compare` command still resolves through
-`cli_resolve._resolve_compare_snapshots`. This is recorded as a decision, not
-as unfinished work, because the *capability* gap D1 set out to close is
-closed (a Python or MCP caller no longer has to drop to loose kwargs to reach
-`compare`'s depth/sources/build-info/manifest feature set), while option (a)
+`cli_resolve._resolve_compare_snapshots`. This is a decision, not unfinished
+work: the *capability* gap D1 set out to close is closed, while option (a)
 would rewrite the CLI's single most heavily-tested resolution path to gain
-nothing a user can observe. What remains genuinely two-implementation is
-narrower than the framing above suggests, and is listed explicitly so nobody
-has to re-derive it: project-config `source.method` inference, the set-input
-evidence-flag rejection guard, and the per-side AST-frontend override live
-only in the CLI path. Migrating the CLI onto `run_compare_request` is a
-separate, independently-reviewable change — it needs its own before/after
-parity evidence over the CLI's full flag matrix, which is exactly the kind of
-work that goes wrong when bundled into a different decision's PR.
+nothing a user can observe.
+
+**Correction, and how the capability gap was actually closed.** A first pass
+of this note claimed three things stayed CLI-only — project-config
+`source.method` inference, the set-input evidence-flag rejection guard, and
+the per-side AST-frontend override. Checking each against the code instead of
+asserting it found all three wrong, and found a different, real set:
+
+- The **per-side AST-frontend override** already worked. `InputSpec.compile.
+  frontend` reaches that side's `run_dump`, whose own precedence (an explicit
+  `compile.frontend` beats the request-wide `header_backend`) then applies.
+  Verified by spying on the per-side `run_dump` arguments, not by reading.
+- **`source.method` inference** is not a capability gap. The value is
+  expressible as `CompareRequest.depth`, and a Tier-2 API deliberately does
+  not discover `.abicheck.yml` from the working directory — resolving ambient
+  config is the front end's job, which is exactly how ADR-049 D7's own
+  precedence model already places `project_config` as a front-end tier.
+- The **set-input rejection guard** guards directory/package inputs — an
+  input *kind* `CompareRequest` does not accept at all. It protects a
+  CLI-only feature rather than covering a gap in the typed path.
+
+The real delta was four things, found by diffing the two parameter lists
+rather than reasoning about them, and all four are now on `CompareRequest`:
+`dwarf_only`, `debug_format`, ADR-050 D1's `include_labels`, and
+`--follow-deps` (`follow_dependencies`/`dependency_search_paths`/
+`ld_library_path`). `--follow-deps`'s implementation moved out of
+`cli_resolve` into the new leaf module `abicheck/dependency_info.py`, which
+both layers depend on — the shape AGENTS.md prescribes when a CLI helper
+gains a service-layer caller, instead of either importing the other.
+
+So the two paths now differ in *structure*, not in what they can express.
+Migrating the CLI onto `run_compare_request` remains a separate,
+independently-reviewable change needing its own before/after parity evidence
+over the CLI's full flag matrix — the kind of work that goes wrong when
+bundled into another decision's PR.
 
 ### D2. Typed `Result` wrappers for the existing typed-request verbs
 
@@ -515,9 +540,9 @@ gate in `TestAbiCompareCliParity`).
 **Still open after this ADR, deliberately.** Two items, each needing its own
 scoped change rather than an extension of this one:
 
-- The CLI's separate `_resolve_compare_snapshots` path (option (b) above) —
-  see D1's "As implemented" note for the exact three capabilities that
-  remain CLI-only.
+- The CLI's separate `_resolve_compare_snapshots` path (option (b) above).
+  Structural duplication only — the capability gap is closed; see D1's "As
+  implemented" note.
 - G33's Phase 5 (`abi_dump`/`abi_scan` reaching the same depth/sources/
   build-info/manifest parity `abi_compare` now has). That plan gates it on
   Phase 4, which this closes, so it is unblocked — but it is a change to two

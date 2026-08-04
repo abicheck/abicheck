@@ -14,6 +14,17 @@
   `MCP_MAX_FILE_SIZE` guard authoritative now that it resolves through the
   shared service layer.
 
+- **`CompareRequest` reaches full parity with `compare`'s own input
+  resolution (ADR-055 D1).** Four concepts the CLI could express and a
+  Python/MCP caller could not are now request fields: `dwarf_only`,
+  `debug_format`, `include_labels` (ADR-050 D1's resolved `path -> label`
+  map, carried as a tuple of pairs so the request stays hashable), and
+  `--follow-deps` (`follow_dependencies` + `dependency_search_paths` +
+  `ld_library_path`). All default to off, so no existing caller changes
+  behaviour. `--follow-deps`'s implementation moved from `cli_resolve` into
+  the new leaf module `abicheck.dependency_info`, which the CLI and the
+  service both depend on.
+
 ### Changed
 
 - **The MCP `abi_compare` tool now routes through the Tier-2 chokepoint

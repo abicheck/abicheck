@@ -209,15 +209,25 @@ neither `service.py` comment quoted above still exists. Tests:
 ADR-055 D1 blocks in `tests/test_api_types.py`.
 
 The two-resolution-path question this note raised is now **decided as (b)**,
-recorded in ADR-055's D1 section rather than left open here:
-`run_compare_request` was extended in parallel and the CLI `compare` command
-still resolves through `cli_resolve._resolve_compare_snapshots`. The
-capability gap D1 existed to close is closed — no Python or MCP caller has to
-drop to loose kwargs any more — while option (a) would rewrite the CLI's
-most heavily-tested resolution path for no user-observable gain. What stays
-CLI-only is narrower than the framing above implies, and is worth not
-re-deriving: project-config `source.method` inference, the set-input
-evidence-flag rejection guard, and the per-side AST-frontend override.
+recorded in ADR-055's D1 section: `run_compare_request` was extended in
+parallel and the CLI `compare` command still resolves through
+`cli_resolve._resolve_compare_snapshots`, because option (a) would rewrite
+the CLI's most heavily-tested resolution path for no user-observable gain.
+
+A follow-up slice then closed the *capability* half properly. A first attempt
+at naming what stayed CLI-only listed three things and was wrong on all
+three: the per-side AST-frontend override already worked (`InputSpec.compile.
+frontend` reaches that side's `run_dump`, verified by spying on its
+arguments); `source.method` is expressible as `CompareRequest.depth`, and a
+Tier-2 API deliberately does not read `.abicheck.yml` from the cwd; and the
+set-input guard protects an input *kind* the typed path never accepts.
+Diffing the two parameter lists instead of reasoning about them found the
+real delta — `dwarf_only`, `debug_format`, ADR-050 D1's `include_labels`, and
+`--follow-deps` — all four now on `CompareRequest`, with `--follow-deps`'s
+implementation moved to the new leaf module `abicheck/dependency_info.py`
+that both layers depend on.
+
+So the two paths now differ in structure, not in what they can express.
 Migrating the CLI onto `run_compare_request` remains possible as its own
 change, gated on its own before/after parity evidence across the CLI's flag
 matrix.

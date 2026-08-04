@@ -120,6 +120,17 @@ class TestCompareRequestDefaults:
         assert req.depth is None
         assert req.frontend_context == "host"
 
+    def test_adr055_resolution_parity_defaults(self):
+        # ADR-055 D1's second slice: additive, so an existing caller's
+        # behaviour is unchanged until it opts in.
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
+        assert req.dwarf_only is False
+        assert req.debug_format is None
+        assert req.include_labels == ()
+        assert req.follow_dependencies is False
+        assert req.dependency_search_paths == ()
+        assert req.ld_library_path == ""
+
     def test_is_frozen(self):
         req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
         with pytest.raises(dataclasses.FrozenInstanceError):

@@ -279,6 +279,29 @@ class CompareRequest:
     # since a binary-only depth request that still carries headers would
     # otherwise silently keep running L2.
     depth: str | None = None
+    # ADR-055 D1, second slice: the last four concepts `compare`'s own
+    # resolution (`cli_resolve._resolve_compare_snapshots`) could express and
+    # this request could not, so a Python/MCP caller had to drop to loose
+    # kwargs on `resolve_input` to reach them. All both-sides, mirroring the
+    # CLI flags they come from, which are single-valued too.
+    #
+    # `--dwarf-only` / `--debug-format`: restrict a side's debug-info parse to
+    # DWARF, or pin which debug format is read, instead of auto-detecting.
+    dwarf_only: bool = False
+    debug_format: str | None = None
+    # ADR-050 D1's resolved `path -> label` map for a labeled include set.
+    # A tuple of pairs rather than a `dict` so the request stays hashable, the
+    # property `InputSpec`'s own docstring calls out; `run_compare_request`
+    # converts it back for `resolve_input`.
+    include_labels: tuple[tuple[Path, str], ...] = ()
+    # `--follow-deps` / `--search-path` / `--ld-library-path`: after both
+    # sides resolve, populate each ELF side's transitive `DependencyInfo`.
+    # Off by default, matching the CLI flag: it costs a full dependency-graph
+    # resolution per side, so it stays opt-in rather than becoming a silent
+    # cost for every typed caller.
+    follow_dependencies: bool = False
+    dependency_search_paths: tuple[Path, ...] = ()
+    ld_library_path: str = ""
     # ADR-055 D1 / ADR-050: request-level default for `CompileContext.
     # frontend_context` (`--frontend-context`, host|device), applied to a
     # side whose own `InputSpec.compile.frontend_context` reads as the class

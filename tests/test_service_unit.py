@@ -4647,3 +4647,130 @@ class TestRunCompareRequestV2:
         assert captured["old"] is False
         # Unset stays the historical default rather than inheriting the other side.
         assert captured["new"] is True
+
+
+class TestRunCompareRequestResolutionParity:
+    """ADR-055 D1, second slice: the last concepts the CLI's own resolution
+    (``cli_resolve._resolve_compare_snapshots``) could express and the typed
+    request could not — ``--dwarf-only``, ``--debug-format``, ADR-050 D1's
+    include labels, and ``--follow-deps``."""
+
+    def _elf_pair(self, tmp_path):
+        old_p = tmp_path / "old.so"
+        new_p = tmp_path / "new.so"
+        for p in (old_p, new_p):
+            p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        return old_p, new_p
+
+    def _stub_dump(self, monkeypatch):
+        """Record resolve_input's debug kwargs per side, without a real parse."""
+        import abicheck.service as service_mod
+
+        seen: dict[str, dict] = {}
+
+        def _fake(path, headers=None, *args, **kwargs):
+            seen[Path(path).name] = {
+                k: kwargs.get(k)
+                for k in ("dwarf_only", "debug_format", "include_labels")
+            }
+            return AbiSnapshot(library=Path(path).name, version="x")
+
+        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        return seen
+
+    def _request(self, tmp_path, **kwargs):
+        old_p, new_p = self._elf_pair(tmp_path)
+        return CompareRequest(
+            old=InputSpec(path=old_p, version="old"),
+            new=InputSpec(path=new_p, version="new"),
+            **kwargs,
+        )
+
+    def test_debug_parse_fields_reach_both_sides(self, tmp_path, monkeypatch):
+        seen = self._stub_dump(monkeypatch)
+        run_compare_request_v2(
+            self._request(tmp_path, dwarf_only=True, debug_format="dwarf")
+        )
+        assert set(seen) == {"old.so", "new.so"}
+        for side in seen.values():
+            assert side["dwarf_only"] is True
+            assert side["debug_format"] == "dwarf"
+
+    def test_include_labels_are_converted_back_to_a_mapping(
+        self, tmp_path, monkeypatch
+    ):
+        # Carried as a tuple of pairs so the request stays hashable, but
+        # `resolve_input` takes the mapping — the conversion must happen.
+        seen = self._stub_dump(monkeypatch)
+        run_compare_request_v2(
+            self._request(tmp_path, include_labels=((Path("/inc"), "proj"),))
+        )
+        assert seen["old.so"]["include_labels"] == {Path("/inc"): "proj"}
+
+    def test_include_labels_default_passes_none_not_an_empty_mapping(
+        self, tmp_path, monkeypatch
+    ):
+        seen = self._stub_dump(monkeypatch)
+        run_compare_request_v2(self._request(tmp_path))
+        assert seen["old.so"]["include_labels"] is None
+
+    def test_request_stays_hashable_with_include_labels_set(self, tmp_path):
+        # The property InputSpec's own docstring claims for the whole request.
+        request = self._request(tmp_path, include_labels=((Path("/inc"), "proj"),))
+        assert hash(request) == hash(request.replace())
+
+    def _stub_dependency_population(self, monkeypatch):
+        import abicheck.dependency_info as dep_mod
+
+        calls: list[tuple] = []
+        monkeypatch.setattr(
+            dep_mod,
+            "populate_dependency_info",
+            lambda snap, so_path, search_paths, sysroot, ld_library_path: calls.append(
+                (Path(so_path).name, list(search_paths), ld_library_path)
+            ),
+        )
+        return calls
+
+    def test_follow_dependencies_populates_both_elf_sides(
+        self, tmp_path, monkeypatch
+    ):
+        self._stub_dump(monkeypatch)
+        calls = self._stub_dependency_population(monkeypatch)
+        run_compare_request_v2(
+            self._request(
+                tmp_path,
+                follow_dependencies=True,
+                dependency_search_paths=(Path("/opt/lib"),),
+                ld_library_path="/usr/lib",
+            )
+        )
+        assert [c[0] for c in calls] == ["old.so", "new.so"]
+        assert calls[0][1] == [Path("/opt/lib")]
+        assert calls[0][2] == "/usr/lib"
+
+    def test_follow_dependencies_is_opt_in(self, tmp_path, monkeypatch):
+        # It costs a full dependency-graph resolution per side, so an
+        # unrelated caller must not start paying for it silently.
+        self._stub_dump(monkeypatch)
+        calls = self._stub_dependency_population(monkeypatch)
+        run_compare_request_v2(self._request(tmp_path))
+        assert calls == []
+
+    def test_non_elf_sides_are_skipped(self, tmp_path, monkeypatch):
+        # resolve_dependencies reads ELF DT_NEEDED entries; a PE/Mach-O side
+        # has nothing for it to do.
+        self._stub_dump(monkeypatch)
+        calls = self._stub_dependency_population(monkeypatch)
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(AbiSnapshot(library="lib", version="1.0"), old_p)
+        save_snapshot(AbiSnapshot(library="lib", version="2.0"), new_p)
+        run_compare_request_v2(
+            CompareRequest(
+                old=InputSpec(path=old_p),
+                new=InputSpec(path=new_p),
+                follow_dependencies=True,
+            )
+        )
+        assert calls == []

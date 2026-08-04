@@ -44,6 +44,12 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `contract_evaluation` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
 | `depth` | `str \| None` | `None` |
+| `dwarf_only` | `bool` | `False` |
+| `debug_format` | `str \| None` | `None` |
+| `include_labels` | `tuple[tuple[Path, str], ...]` | `()` |
+| `follow_dependencies` | `bool` | `False` |
+| `dependency_search_paths` | `tuple[Path, ...]` | `()` |
+| `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
 
 ## `CompareResult`

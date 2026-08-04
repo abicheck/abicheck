@@ -37,6 +37,7 @@ from .api_types import CompareRequest, CompareResult, InputSpec, OutputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
+from .dependency_info import populate_pair_dependency_info
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
@@ -1635,13 +1636,11 @@ def run_compare_request(
     invocation paths. The legacy keyword-argument :func:`run_compare` is a thin
     shim that builds the request and delegates here.
 
-    Unchanged for every existing caller (ADR-055 D2 is explicitly additive):
-    this is now a thin tuple-shaped view of
-    :func:`run_compare_request_v2`, which owns the implementation and returns
-    the typed :class:`~abicheck.api_types.CompareResult`. Delegating rather
-    than keeping a second copy is what stops the two shapes from drifting into
-    two different resolution behaviours — the failure this ADR exists to
-    prevent, not one to reintroduce inside the fix for it.
+    Unchanged for every existing caller (ADR-055 D2 is additive): this is now
+    a tuple-shaped view of :func:`run_compare_request_v2`, which owns the
+    implementation. Delegating rather than keeping a second copy is what stops
+    the two shapes from drifting into two resolution behaviours — the failure
+    this ADR exists to prevent, not one to reintroduce inside its own fix.
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
@@ -1733,6 +1732,9 @@ def run_compare_request_v2(request: CompareRequest) -> CompareResult:
             include_dependencies=side.include_dependencies,
             dump_manifest=evidence.dump_manifest,
             follow_linker_scripts=side.follow_linker_scripts,
+            dwarf_only=request.dwarf_only,
+            debug_format=request.debug_format,
+            include_labels=dict(request.include_labels) or None,
         )
         if side.sources or side.build_info:
             # Codex: same roots as resolve_input, plus dump_manifest's declared-public roots only (project_owned TU includes are private, so dump_manifest_public_roots not dump_manifest_header_roots).
@@ -1774,6 +1776,11 @@ def run_compare_request_v2(request: CompareRequest) -> CompareResult:
             new_future = pool.submit(_resolve_new_side)
             old = old_future.result()
             new = new_future.result()
+    # ADR-055 D1, second slice: `--follow-deps`'s transitive DependencyInfo --
+    # the last thing `cli_resolve._resolve_compare_snapshots` did that this
+    # path could not. After both sides resolve, not inside `_resolve_side`: it
+    # reads the on-disk ELF, so it gains nothing from the extraction threads.
+    populate_pair_dependency_info(request, old, new, old_fmt=old_fmt, new_fmt=new_fmt)
     # Codex: an explicitly requested depth (e.g. "source") that a raw input actually failed to reach (no usable compile database/extractor/linkable declarations) previously diffed whatever weaker evidence embed_build_source produced with no signal -- mirrors dump's own check_requested_depth_satisfied hard-fail, but raises ValidationError (a Tier-2 API has no ClickException concept) instead of reusing that CLI-only exception type.
     if request.depth is not None:
         from .cli_dump_helpers import _DEPTH_RANK, _gated_source_label
