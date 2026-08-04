@@ -1,12 +1,11 @@
 ### Added
 
 - **`CompareResult`, a typed result for the `compare` service verb (ADR-055
-  D2).** `abicheck.service.run_compare_request_v2(request)` returns a
-  `CompareResult` (`diff`/`old_snapshot`/`new_snapshot`, plus the resolved
-  `suppression` list) instead of the bare 3-tuple, so a future field has
-  somewhere to land without breaking positional callers. The existing
-  `run_compare_request` keeps its exact tuple signature and is now a view over
-  the same implementation — no caller changes.
+  D2).** `diff` (the `DiffResult`), `old_snapshot`, `new_snapshot`, and the
+  resolved `suppression` list, so a future field has somewhere to land without
+  breaking positional callers. It is what `run_compare_request` and
+  `run_compare` return — see the Changed section for that break and its
+  one-line migration.
 - **`InputSpec.follow_linker_scripts` (ADR-055 D4).** Lets a request decline
   to follow a GNU ld linker script's `INPUT()`/`GROUP()` target to the real
   library. Defaults to `True`, matching the previous behaviour of every
@@ -37,10 +36,9 @@
 ### Changed
 
 - **BREAKING (pre-1.0): `run_compare` and `run_compare_request` return a
-  `CompareResult`, not a 3-tuple.** ADR-055 D2 introduced the typed result
-  beside the tuple and a temporary `run_compare_request_v2` seam; with the
-  project not yet holding API compatibility, the two names collapsed into one
-  rather than being carried indefinitely. A struct can gain a field without
+  `CompareResult`, not a 3-tuple.** With the project not yet holding API
+  compatibility, the typed result became the only shape rather than a second
+  one carried beside the tuple. A struct can gain a field without
   breaking positional callers, which a tuple cannot. Migrate a positional
   caller in one line: `result, old, new = run_compare(...).as_tuple()`.
 - **`CompareRequest.debug_format="auto"` no longer crashes during
@@ -58,7 +56,7 @@
   policy/suppression files, and used `compare_snapshots` for the middle
   diffing step only — a second compare engine that could drift from the CLI's
   without anything failing. It now builds one `CompareRequest` and calls
-  `run_compare_request_v2`. Output is unchanged: a new parity test asserts
+  `run_compare_request`. Output is unchanged: a new parity test asserts
   `abi_compare`'s rendered report and exit code match the CLI `compare`
   command's across policy-profile, policy-file, suppression, `--show-only`,
   `--report-mode`, and severity-aware runs.
