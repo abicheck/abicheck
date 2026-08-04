@@ -176,16 +176,22 @@ Full references:
 from pathlib import Path
 from abicheck.service import run_compare
 
-result, old_snapshot, new_snapshot = run_compare(
+result = run_compare(
     old_input=Path("libfoo.so.1"),
     new_input=Path("libfoo.so.2"),
     old_headers=[Path("include/v1/foo.h")],
     new_headers=[Path("include/v2/foo.h")],
 )
 
-print(result.verdict)       # e.g. Verdict.BREAKING
-print(len(result.changes))  # number of detected changes
+print(result.diff.verdict)       # e.g. Verdict.BREAKING
+print(len(result.diff.changes))  # number of detected changes
+print(result.old_snapshot.library, result.new_snapshot.library)
 ```
+
+`run_compare` returns a `CompareResult` — `diff`, `old_snapshot`,
+`new_snapshot`, and the resolved `suppression` list. It returned a bare
+3-tuple before 0.6; a positional caller migrates in one line with
+`result, old, new = run_compare(...).as_tuple()`.
 
 See the [Python API guide](https://abicheck.github.io/abicheck/user-guide/python-api/)
 for snapshots, custom policies, and rendering, plus the
