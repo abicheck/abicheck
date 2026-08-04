@@ -627,6 +627,18 @@ class TestManifestAndIdentity:
 
 
 class TestRendering:
+    def test_schema_version_is_pinned(self):
+        """The one place the version is written as a literal.
+
+        Every other assertion compares against `AGGREGATE_SCHEMA_VERSION`,
+        which makes them structural but vacuous as version checks — they
+        compare the constant with itself. This pin is what makes a bump
+        deliberate: it fails until someone updates it in the same change
+        that updates `aggregate_report.schema.json`, its published mirror,
+        and the docs (CodeRabbit review).
+        """
+        assert AGGREGATE_SCHEMA_VERSION == "1.2"
+
     def test_json_schema_shape(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         d = aggregate_reports_dir(tmp_path, expected=_expect(LINUX, WINDOWS)).to_dict()

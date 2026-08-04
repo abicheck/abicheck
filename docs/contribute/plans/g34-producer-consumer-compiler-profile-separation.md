@@ -95,11 +95,12 @@ confirmed by reading the workflow, not asserted from a design doc):
   `affected_profiles`/`incomplete_profiles`/`unanalyzed_profiles` and a
   `verdict_by_profile` map at the *target* level, but did not merge the
   *same logical finding* appearing in two different profiles' reports into
-  one entry with its own `affected_profiles` list — flagged as an explicit
-  open item in `docs/contribute/plans/index.md`'s G32 row ("this is pure
-  target-level aggregation, not per-finding reconciliation"), not a new gap
-  this review discovered. `AggregateResult.finding_matrix` now does it; see
-  Phase D below.
+  one entry with its own `affected_profiles` list. That limit was a known
+  one carried over from G32, not a new gap this review discovered.
+  `AggregateResult.finding_matrix` now does it; see Phase D below.
+  (The earlier wording quoted a sentence from `index.md`'s G32 row that is
+  no longer there — CodeRabbit review; a dangling quote is worse than no
+  citation, so the fact is stated directly instead.)
 
 ## Goal & acceptance criteria
 
