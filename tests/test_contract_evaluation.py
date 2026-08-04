@@ -1094,10 +1094,25 @@ class TestPublicModeAmbiguousTypeRoot:
     ``public_types`` (its own anti-hiding rule) while recording ``Point`` in
     ``ambiguous_type_names``. Confirmation must not treat that conservative
     closure expansion as proof of root membership (Codex review, eleventh
-    round)."""
+    round).
 
-    def test_ambiguous_bare_tail_is_unresolved_not_confirmed(self) -> None:
-        snap = AbiSnapshot(
+    That rule has an exception, added later and measured rather than
+    assumed: an ambiguity is only worth withholding a decision over when it
+    can actually *change* the decision. When every colliding entry is
+    public-header origin, both readings put the finding in the contract, and
+    the unknowable part is unknowable about something that does not matter.
+    Withholding there cost real gate coverage --
+    ``measure_contract_shadow.py``'s ``unresolved_losses`` counted a genuine
+    ``type_size_changed`` break on a public type dropped from the gate purely
+    because its bare tail collided with another *public* type.
+
+    The two cases below are that distinction: a *decisive* ambiguity (a
+    private sibling, so which record the finding is about really does decide
+    membership) stays unresolved, an *indecisive* one confirms."""
+
+    @staticmethod
+    def _two_siblings(second_origin: ScopeOrigin) -> AbiSnapshot:
+        return AbiSnapshot(
             library="l",
             version="1",
             functions=[_fn("api", ret="void", params=["Point *"])],
@@ -1113,18 +1128,49 @@ class TestPublicModeAmbiguousTypeRoot:
                     name="Point",
                     kind="struct",
                     size_bits=32,
-                    origin=ScopeOrigin.PUBLIC_HEADER,
+                    origin=second_origin,
                     qualified_name="two::Point",
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+
+    def test_decisive_ambiguous_bare_tail_is_unresolved_not_confirmed(self) -> None:
+        # A private sibling behind the collision is the case the anti-hiding
+        # rule exists for: `origin_by_key` merges the two with public
+        # winning, so nothing downstream can see that `two::Point` is
+        # private -- which is exactly why the proof counts *qualified*
+        # public-origin entries against the recorded arity rather than
+        # asking whether the merged name looks public.
+        s = compute_public_surface(self._two_siblings(ScopeOrigin.PRIVATE_HEADER))
         assert "Point" in s.ambiguous_type_names
         assert "Point" in s.public_types
+        assert s.ambiguous_type_name_arity["Point"] == 2
+        assert s.origin_by_key["Point"] is ScopeOrigin.PUBLIC_HEADER  # merged
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
         assert decision.reason_code == "required_evidence_incomplete"
+
+    def test_indecisive_ambiguous_bare_tail_confirms(self) -> None:
+        # Both siblings public: the finding is in the contract under either
+        # reading, so the ambiguity is not a reason to withhold a decision.
+        s = compute_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
+        assert "Point" in s.ambiguous_type_names
+        assert s.ambiguous_type_name_arity["Point"] == 2
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_an_unrecorded_arity_leaves_the_ambiguity_decisive(self) -> None:
+        # The proof needs a count to compare against; without one it must
+        # fail closed rather than treat "no evidence of a private sibling"
+        # as evidence of none.
+        s = compute_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
+        s.ambiguous_type_name_arity.clear()
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
 
     def test_unambiguous_candidate_still_confirms_alongside_an_ambiguous_one(
         self,

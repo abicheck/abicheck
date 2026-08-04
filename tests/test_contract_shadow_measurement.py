@@ -30,6 +30,12 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.contract_relevance_types import (
+    CompatibilityEvaluationStatus,
+    ContractRelevance,
+    evaluation_status_for,
+)
+
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 
 
@@ -148,6 +154,53 @@ def test_metrics_report_the_four_measured_quantities() -> None:
         assert "unresolved_by_lane" in row
         assert "proven_public_break_losses" in row
         assert "proven_false_positive_reductions" in row
+
+
+class TestUnresolvedLossMetric:
+    """A real break withheld from the gate because the decision could not
+    *resolve* it -- the same failure mode ``proven_public_break_losses``
+    covers, reached through ``UNKNOWN_*`` instead of
+    ``PROVEN_OUT_OF_CONTRACT``."""
+
+    def test_every_domain_is_within_its_own_budget(self) -> None:
+        gate = shadow.metrics()["gate"]
+        counts = gate["unresolved_public_break_losses"]
+        assert set(counts) == set(shadow.UNRESOLVED_LOSS_BASELINE)
+        for domain, count in counts.items():
+            assert count <= shadow.UNRESOLVED_LOSS_BASELINE[domain], domain
+
+    def test_the_metric_is_not_vacuous(self) -> None:
+        # A loss metric that cannot fire reads exactly like "no losses". The
+        # `exports` domain has a standing non-zero budget precisely because
+        # that corpus carries no export tables, so it is the executable proof
+        # that the classification path is reachable at all.
+        counts = shadow.metrics()["gate"]["unresolved_public_break_losses"]
+        assert counts["exports"] > 0
+
+    def test_withheld_matches_the_engine_rather_than_a_second_list(self) -> None:
+        # The one property that makes this metric trustworthy: it must call
+        # exactly the relevance values withheld a loss, so it cannot measure
+        # a rule the gate stopped applying.
+        for relevance in ContractRelevance:
+            assert shadow._withheld_from_gate(relevance) is (
+                evaluation_status_for(relevance)
+                is CompatibilityEvaluationStatus.NOT_EVALUATED
+            )
+
+    def test_merge_carries_every_list_accumulator(self) -> None:
+        # `_merge` used to name each accumulator by hand and silently dropped
+        # `unresolved_losses` when it was added: `measure_case` classified
+        # correctly and `measure` still reported zero. Deriving the set from
+        # the dataclass is the fix; this pins it, so a future accumulator
+        # cannot regress the same way.
+        assert "unresolved_losses" in shadow._LIST_ACCUMULATORS
+        total = shadow.ModeMeasurement(mode="public")
+        one = shadow.ModeMeasurement(mode="public")
+        for name in shadow._LIST_ACCUMULATORS:
+            getattr(one, name).append(f"sentinel:{name}")
+        shadow._merge(total, one)
+        for name in shadow._LIST_ACCUMULATORS:
+            assert getattr(total, name) == [f"sentinel:{name}"], name
 
 
 def test_public_domain_proves_some_internal_noise_out_of_contract() -> None:
