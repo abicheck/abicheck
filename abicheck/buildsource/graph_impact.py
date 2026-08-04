@@ -101,14 +101,18 @@ def is_direct_path(path: list[GraphEdge]) -> bool:
 
 #: ADR-046 D6's six-tier proof-path preference order, numbered by how many of
 #: this module's *computable* tiers a path satisfies (lower is stronger).
-#: Tier 1 ("consumer-proven") needs a consumer graph that doesn't exist yet
-#: (Phase 4) so is not represented here; tiers 2-6 map onto the constants
-#: below in the ADR's own order.
-_TIER_EXACT = 0  # ADR tier 2: every edge is CONF_HIGH
-_TIER_PUBLIC_STRUCTURAL = 1  # ADR tier 3: every node on the path is public
-_TIER_MULTI_PRODUCER = 2  # ADR tier 4: some edge has >1 distinct fact producer
-_TIER_REDUCED = 3  # ADR tier 5: no stronger signal found (the residual case)
-_TIER_OVERAPPROX = 4  # ADR tier 6: crosses a virtual/function-pointer call
+#: Tier 1 ("consumer-proven") became computable in G29 Phase 4 (ADR-057):
+#: ``impact.consumer_graph`` folds a real ``--used-by`` binary's requirements
+#: onto the same ``binary_symbol://`` node ids the library graph exports, so a
+#: path whose endpoint some consumer actually requires is externally proven
+#: rather than merely inferred. Tiers 2-6 map onto the constants below in the
+#: ADR's own order.
+_TIER_CONSUMER_PROVEN = 0  # ADR tier 1: a real consumer requires the endpoint
+_TIER_EXACT = 1  # ADR tier 2: every edge is CONF_HIGH
+_TIER_PUBLIC_STRUCTURAL = 2  # ADR tier 3: every node on the path is public
+_TIER_MULTI_PRODUCER = 3  # ADR tier 4: some edge has >1 distinct fact producer
+_TIER_REDUCED = 4  # ADR tier 5: no stronger signal found (the residual case)
+_TIER_OVERAPPROX = 5  # ADR tier 6: crosses a virtual/function-pointer call
 
 
 def _edge_is_overapprox(edge: GraphEdge) -> bool:
@@ -144,14 +148,46 @@ def _path_node_ids(path: list[GraphEdge]) -> list[str]:
     return [path[0].src, *(e.dst for e in path)]
 
 
-def _graph_path_tier(node_by_id: dict[str, GraphNode], path: list[GraphEdge]) -> int:
+def _consumer_required_nodes(graph: SourceGraphSummary) -> frozenset[str]:
+    """Node ids some consumer in *graph* requires (ADR-057) — the tier-1
+    signal :func:`_graph_path_tier` reads.
+
+    The canonical implementation, re-exported as
+    ``impact.consumer_graph.consumer_required_symbol_nodes``: that module
+    already depends on this one (one-directional), so keeping the definition
+    here means the selector never has to import back into ``impact/`` to
+    compute its own tier. Empty — and therefore inert — for every graph with
+    no consumer facts folded in.
+    """
+    return frozenset(
+        e.dst for e in graph.edges if e.kind == "CONSUMER_REQUIRES_SYMBOL"
+    )
+
+
+def _graph_path_tier(
+    node_by_id: dict[str, GraphNode],
+    path: list[GraphEdge],
+    consumer_required: frozenset[str] = frozenset(),
+) -> int:
     """This path's ADR-046 D6 tier — see the module-level ``_TIER_*``
     constants. Overapprox is checked first and wins regardless of any other
     signal: a path that crosses a virtual/function-pointer call is never
     "exact", however high-confidence its other edges are.
+
+    That precedence deliberately applies to the consumer-proven tier too
+    (ADR-057): a path crossing a virtual/function-pointer call is an
+    over-approximation of the real dispatch chain, so the fact that *some*
+    consumer requires its endpoint does not make the *chain* proven. Tier 1
+    therefore means "consumer-proven **and** exactly resolved" — the
+    conservative reading, matching how ``effect_transitions`` already refuses
+    to let a degraded walk present itself as an exact one.
     """
     if any(_edge_is_overapprox(e) for e in path):
         return _TIER_OVERAPPROX
+    if consumer_required and any(
+        nid in consumer_required for nid in _path_node_ids(path)
+    ):
+        return _TIER_CONSUMER_PROVEN
     if all(e.confidence == CONF_HIGH for e in path):
         return _TIER_EXACT
     if all(_node_is_public(node_by_id.get(nid)) for nid in _path_node_ids(path)):
@@ -170,11 +206,14 @@ def select_preferred_graph_path(
     ``list[str]`` layout-walk paths, a structured ``list[GraphEdge]`` path
     carries per-edge confidence, fact-producer count (ADR-046 D2), and —
     via each hop's node ``visibility`` attr — public/private surface
-    information, so this selector implements four of the ADR's six tiers
-    (see :func:`_graph_path_tier`); "consumer-proven" (tier 1) needs a
-    consumer graph (Phase 4) and a genuinely finer "reduced-confidence name
-    resolution" axis (tier 5, beyond the residual case this collapses into)
-    are both left for a future slice.
+    information, so this selector implements five of the ADR's six tiers
+    (see :func:`_graph_path_tier`). "Consumer-proven" (tier 1) is read
+    straight off *graph*: it applies whenever a consumer graph has been
+    folded in (``impact.consumer_graph.join_consumer_graph``, ADR-057) and is
+    inert — an empty set, exactly as before that module existed — for every
+    graph without one, which is every run without ``--used-by``. Only a
+    genuinely finer "reduced-confidence name resolution" axis (tier 5, beyond
+    the residual case this collapses into) is still left for a future slice.
 
     Ties within a tier keep the shortest path (fewest hops), matching
     :func:`~abicheck.internal_leak.select_preferred_path`'s own tie-break.
@@ -187,7 +226,11 @@ def select_preferred_graph_path(
     if len(paths) == 1:
         return paths[0]
     node_by_id = {n.id: n for n in graph.nodes}
-    return min(paths, key=lambda p: (_graph_path_tier(node_by_id, p), len(p)))
+    consumer_required = _consumer_required_nodes(graph)
+    return min(
+        paths,
+        key=lambda p: (_graph_path_tier(node_by_id, p, consumer_required), len(p)),
+    )
 
 
 def _path_occurrence_id(path: list[GraphEdge]) -> str | None:

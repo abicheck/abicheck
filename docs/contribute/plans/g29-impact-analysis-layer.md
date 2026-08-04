@@ -5,8 +5,10 @@ audited how far the optional L5 source/call/type graph (ADR-031, ADR-044) has
 grown into a real decision-making layer (version-over-version graph diff,
 public reachability, suppression gating, consumer scoping, proof paths) versus
 where it still stops short of a unified model. Phase 1's P0 slice is
-implemented ([PR #607](https://github.com/abicheck/abicheck/pull/607)); Phases
-2–6 are the rest of the review's roadmap, scoped below.
+implemented ([PR #607](https://github.com/abicheck/abicheck/pull/607)); Phase
+2 (ADR-046), Phase 3 (ADR-052) and Phase 4's first slice (ADR-057) have since
+landed, and the rest of Phases 4–6 is the remainder of the review's roadmap,
+scoped below.
 **ADR:** builds on [ADR-044](../adr/044-reachability-aware-suppression.md)
 (reachability-aware suppression) and [ADR-031](../adr/031-source-implementation-graph-augmentation.md)
 (source implementation graph augmentation). Phase 2 onward needs its **own** ADR before
@@ -153,12 +155,20 @@ model:
   `impact_group_id` is currently always an alias of `root_cause_id`;
   making it independently meaningful still needs Phase 6's
   `RootCauseCorrelator`.
-- **G29.5** — A consumer graph (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_COMPILED_FROM_HEADER`,
-  …) that joins with the source graph so a `CONSUMER_REQUIRED_SYMBOL_REMOVED`
-  finding can name the public entry point that produced the dependency, plus
-  an optional `impact-use-cases.yaml` manifest (declared entrypoints/tests,
-  explicitly **not** a reuse of `usecase-registry.yaml`) and best-effort
-  runtime-trace ingestion.
+- **G29.5** (Phase 4, **slice 1 done, ADR-057**) — A consumer graph
+  (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_COMPILED_FROM_HEADER`, …) that joins
+  with the source graph so a `CONSUMER_REQUIRED_SYMBOL_REMOVED` finding can
+  name the public entry point that produced the dependency — **done**
+  (`abicheck/impact/consumer_graph.py`; the join is one shared
+  `binary_symbol://` node id, not a parallel node kind, and the walk reuses
+  ADR-046 D5's `CALL_GRAPH_TRAVERSAL_POLICY` rather than a fresh BFS). This
+  also closed ADR-046 D6's tier 1 ("consumer-proven"), which had been
+  unreachable since it was written. Still open: the optional
+  `impact-use-cases.yaml` manifest (declared entrypoints/tests, explicitly
+  **not** a reuse of `usecase-registry.yaml`) and best-effort runtime-trace
+  ingestion — the three reserved edge kinds ADR-057 registers
+  (`CONSUMER_INSTANTIATES_DECL`/`CONSUMER_COMPILED_FROM_HEADER`/
+  `RUNTIME_FAILED_TO_RESOLVE_SYMBOL`) mark where that work attaches.
 - **G29.6** — The five open graph families (template instantiation, virtual
   dispatch, macro/config, callback/function-pointer, object/archive link
   provenance) implemented behind the same coverage-honesty discipline as the
@@ -502,18 +512,45 @@ section describes, most of it still open:
   `attach_impact_metadata`) for the contract to point at working code rather
   than aspirational surface.
 
-### Phase 4 — Consumer / use-case join
+### Phase 4 — Consumer / use-case join — **slice 1 implemented (ADR-057)**
+
+[ADR-057](../adr/057-consumer-graph-and-impact-join.md) records the slice 1
+decisions.
 
 - `abicheck/impact/consumer_graph.py`: promotes `AppRequirements`
-  (`appcompat.py`) to graph facts — `consumer_binary`/`consumer_object`/
-  `consumer_required_symbol`/`runtime_probe` nodes,
-  `CONSUMER_REQUIRES_SYMBOL`/`CONSUMER_REQUIRES_VERSION`/
-  `CONSUMER_INSTANTIATES_DECL`/`CONSUMER_COMPILED_FROM_HEADER`/
-  `RUNTIME_FAILED_TO_RESOLVE_SYMBOL` edges. Joins with
-  `SOURCE_DECL_MAPS_TO_SYMBOL` so a `CONSUMER_REQUIRED_SYMBOL_REMOVED` finding
-  can report *why* — e.g. "`training-service` requires
-  `detail::train_ops_dispatcher` because its call graph reaches it from public
-  `train()`" — not just "requires missing symbol X".
+  (`appcompat.py`) to graph facts — **done**, with one deliberate deviation
+  from the sketch below. `consumer_binary` is populated;
+  `consumer_object`/`runtime_probe` are registered but reserved (no
+  normalized data source — `AppRequirements` is whole-binary and static);
+  and there is **no** `consumer_required_symbol` node kind at all (ADR-057
+  D1): a requirement is a `CONSUMER_REQUIRES_SYMBOL` edge onto the *existing*
+  `binary_symbol://<symbol>` node, because one shared node id is the whole
+  join mechanism — a parallel node kind would have produced two structurally
+  similar, completely disjoint graphs needing a later name-matching pass to
+  reunite. `CONSUMER_REQUIRES_SYMBOL`/`CONSUMER_REQUIRES_VERSION` are
+  populated; `CONSUMER_INSTANTIATES_DECL`/`CONSUMER_COMPILED_FROM_HEADER`/
+  `RUNTIME_FAILED_TO_RESOLVE_SYMBOL` are reserved. The vocabulary lives in
+  `buildsource/graph_facts.py` (unioned into `source_graph.NODE_KINDS`/
+  `EDGE_KINDS`) because `source_graph.py` is at its 2000-line hard cap and
+  the producer imports it.
+  Joins with `SOURCE_DECL_MAPS_TO_SYMBOL` so a
+  `CONSUMER_REQUIRED_SYMBOL_REMOVED` finding reports *why* — "`training-service`
+  requires `detail::train_ops_dispatcher` because its call graph reaches it
+  from public `train()`" — **done**, wired through `appcompat.scope_diff_to_app`
+  onto the overlay finding it already builds, as `affected_public_roots` +
+  `impact_proof_path` + a prose `reachability_proof_path` (no new
+  `ChangeKind`, no report-schema bump — `impact.engine.assess_change` and
+  every reporter already read those fields). The walk reuses
+  `internal_leak._consumer_compiled_reachability` under ADR-046 D5's
+  `CALL_GRAPH_TRAVERSAL_POLICY` rather than a fresh BFS, so a consumer proof
+  path can never contradict an internal-leak one over the same graph.
+- ADR-046 D6's **tier 1 ("consumer-proven") is now computable** —
+  `graph_impact.select_preferred_graph_path` reads the consumer-required node
+  set off the graph it is already given, so the tier needs no new parameter
+  and stays inert for every run without `--used-by`. Deliberately narrower
+  than "the endpoint is consumer-required": the overapprox check still runs
+  first and still wins, so tier 1 means "consumer-proven *and* exactly
+  resolved" (ADR-057 D4).
 - `abicheck/impact/use_cases.py` + optional `impact-use-cases.yaml` manifest
   (`use_case`/`entrypoints`/`tests`); `use_case`/`test_case` graph nodes,
   `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE`/`TRACE_OBSERVED_ENTRY`/
@@ -607,7 +644,7 @@ validation, consumer/use-case attribution checks.
 
 New:
 ```text
-abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge, relation_key/occurrence_id (Phase 2 D1/D2, DONE)
+abicheck/buildsource/graph_facts.py  # GraphFact/FactConflict/merge, relation_key/occurrence_id (Phase 2 D1/D2, DONE); CONSUMER_NODE_KINDS/CONSUMER_EDGE_KINDS (Phase 4 D1, DONE — here rather than source_graph.py, which is at its line cap)
 abicheck/buildsource/graph_impact.py  # select_preferred_graph_path, attach_impact_metadata, _path_occurrence_id (Phase 2 D6/ADR-052 Slice 6, DONE — landed here, not under impact/)
 abicheck/buildsource/entity_resolver.py  # EntityResolver/EntityConflict (Phase 2 D4, DONE — scoped implementation)
 abicheck/internal_leak.py   # TraversalPolicy + effect_transitions (Phase 2 D5, DONE — landed here, not a separate impact/traversal.py)
@@ -616,12 +653,12 @@ abicheck/impact/
     engine.py           # assess_change(...) (Phase 3 slices 1/7, DONE — ADR-052)
     correlation.py       # RootCauseCorrelator (Phase 6, not started)
     root_causes.py
-    consumer_graph.py    # Phase 4
-    use_cases.py         # Phase 4
+    consumer_graph.py    # Phase 4 slice 1, DONE — ADR-057 (consumer graph + the source join)
+    use_cases.py         # Phase 4, not started
 docs/learn/impact-analysis.md          # Phase 3 slices 1/6/7, DONE (Phase 4 join still open)
 docs/reference/source-graph-schema.md     # Phase 2 D1-D6 identity/merge/traversal-policy schema, DONE
 docs/learn/graph-coverage.md           # Phase 1, DONE
-docs/use/use-case-impact.md        # Phase 4
+docs/use/use-case-impact.md        # Phase 4, not started (needs the manifest design first)
 docs/contribute/detector-impact-contract.md  # DONE, ahead of Phase 5/6 themselves — see Phase 3 section above
 examples/case194.../case205.../           # Phase 6
 ```
@@ -656,8 +693,19 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   `SourceGraphSummary.resolve_entities()` being opt-in and safe to call
   again, sparse `to_dict()` output, and v1-pack (`schema_version: 1`, no
   `entity_resolver` key) load compatibility.
-- New per remaining phase: `tests/test_consumer_graph.py` /
-  `tests/test_use_cases.py` (Phase 4), one `test_diff_<family>.py` per
+- `tests/test_consumer_graph.py` — Phase 4 slice 1 (ADR-057), done: the
+  schema registration and node-id pin that the join rests on,
+  `build_consumer_graph`'s requirement/version edges and library scoping,
+  `join_consumer_graph`'s fold-onto-one-shared-node and its
+  deep-copy/no-mutation guarantee (asserted on object identity and fact
+  membership, not node counts — every count is identical under the shallow
+  bug), `explain_required_symbol(s)`' entry attribution/direct case/four
+  degrade paths/batch equivalence, ADR-046 D6 tier 1 including the
+  overapprox-still-wins rule, and an end-to-end `scope_diff_to_app` class
+  covering both the enriched overlay and the byte-for-byte-unchanged
+  no-graph run.
+- New per remaining phase: `tests/test_use_cases.py` (Phase 4), one
+  `test_diff_<family>.py` per
   Phase 5 graph family, `tests/test_root_cause_correlator.py` (Phase 6).
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once
   `ground_truth.json` is updated (existing harness, no new test file needed).

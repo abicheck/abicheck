@@ -106,10 +106,15 @@ A new detector should:
 
 ## 5. What this contract does *not* require (yet)
 
-- **Consumer-proven evidence** (`select_preferred_graph_path`'s tier 1,
-  a real `--used-by` consumer graph): doesn't exist until
-  [G29 Phase 4](plans/g29-impact-analysis-layer.md#phase-4-consumer-use-case-join).
-  A detector can't claim this tier — don't invent a proxy for it.
+- **Consumer-proven evidence** (`select_preferred_graph_path`'s tier 1). This
+  now exists — [G29 Phase 4 slice 1](plans/g29-impact-analysis-layer.md#phase-4-consumer-use-case-join-slice-1-implemented-adr-057)
+  ([ADR-057](adr/057-consumer-graph-and-impact-join.md)) folds a real
+  `--used-by` consumer's requirements into the graph — but it is still not
+  something a *detector* claims. The tier is derived from
+  `CONSUMER_REQUIRES_SYMBOL` edges present in the graph the selector is
+  already given, so a detector participates by passing its candidate paths to
+  `select_preferred_graph_path` as it already should; don't set a
+  consumer-proven marker yourself, and don't invent a proxy for the evidence.
 - **Computing your own `root_cause_id`/`impact_group_id`.** These *do* exist
   on `ImpactAssessment` (ADR-052 Slice 7), but correctly computing either
   needs whole-`DiffResult` context (which findings elsewhere reference this

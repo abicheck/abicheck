@@ -38,7 +38,9 @@ from .model import AbiSnapshot, Visibility
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from .buildsource.source_graph import SourceGraphSummary
     from .elf_metadata import ElfMetadata
+    from .impact.consumer_graph import ConsumerImpactPath
     from .macho_metadata import MachoMetadata
     from .pe_metadata import PeMetadata
     from .policy_file import PolicyFile
@@ -905,6 +907,98 @@ def _promote_scoped_contract(
         )
 
 
+def _library_source_graph(lib: Path | AbiSnapshot) -> SourceGraphSummary | None:
+    """The L5 source graph embedded in *lib*, or ``None``.
+
+    Only an already-loaded :class:`~abicheck.model.AbiSnapshot` can carry one
+    (``dump --sources``/``--build-info``, or the always-on header-only graph);
+    a bare library ``Path`` here is a real binary this module only ever reads
+    an export/version table from, with no snapshot to attach a graph to. That
+    asymmetry is a real coverage limit of the consumer join, not an oversight
+    — see ADR-057.
+    """
+    build_source = getattr(lib, "build_source", None)
+    if build_source is None:
+        return None
+    graph = getattr(build_source, "source_graph", None)
+    return graph if graph is not None and graph.nodes else None
+
+
+def _consumer_impact_explanations(
+    app_path: Path,
+    app_reqs: AppRequirements,
+    old_lib: Path | AbiSnapshot,
+    symbols: list[str],
+) -> tuple[SourceGraphSummary | None, dict[str, ConsumerImpactPath]]:
+    """Explain each of *symbols* through the joined consumer/source graph
+    (G29 Phase 4, ADR-057).
+
+    The *old* library's graph, not the new one: the symbol is missing from the
+    new library by definition, so only the old side still carries the
+    declaration and call edges that say why the consumer depended on it.
+
+    Returns ``(joined_graph, {symbol: ConsumerImpactPath})`` — both empty/
+    ``None`` whenever no graph is available or nothing could be explained, in
+    which case every finding keeps exactly the shape it had before this join
+    existed.
+    """
+    library_graph = _library_source_graph(old_lib)
+    if library_graph is None or not symbols:
+        return None, {}
+    from .impact.consumer_graph import (
+        build_consumer_graph,
+        explain_required_symbols,
+        join_consumer_graph,
+    )
+
+    # No `symbols=` narrowing needed: _scope_app_symbols_to_library already
+    # reduced app_reqs.undefined_symbols to what this library actually
+    # exports, which is exactly the scoping that parameter exists to apply.
+    consumer_graph = build_consumer_graph(app_path.name, app_reqs)
+    joined = join_consumer_graph(library_graph, consumer_graph)
+    return joined, explain_required_symbols(joined, symbols, consumer=app_path.name)
+
+
+def _format_consumer_impact(
+    explained: ConsumerImpactPath, graph: SourceGraphSummary
+) -> str:
+    """The human-readable half of a consumer impact explanation — the string
+    that replaces "requires missing symbol X" with why it was required.
+
+    Reuses ``source_graph_findings._format_dependency_path`` for the chain
+    itself rather than formatting edges here, so a consumer proof path reads
+    identically to an internal-leak one for the same edges.
+    """
+    entry = explained.public_entries[0] if explained.public_entries else "?"
+    if explained.is_direct():
+        return f"{explained.consumer} requires public entry {entry} directly"
+    from .buildsource.source_graph_findings import _format_dependency_path
+
+    chain = _format_dependency_path(graph, explained.entry_path)
+    return f"{explained.consumer} requires {explained.symbol} via public entry {entry}: {chain}"
+
+
+def _attach_consumer_impact(
+    change: Change, explained: ConsumerImpactPath, graph: SourceGraphSummary
+) -> None:
+    """Attach one :class:`ConsumerImpactPath` to *change* in place.
+
+    Enrichment only — never constructs a finding, never changes a verdict or
+    a severity. The overlay was already ``PROVEN_REACHABLE``/
+    ``consumer_proven`` before this ran; all this adds is *why*.
+    """
+    from .buildsource.graph_impact import attach_impact_metadata
+
+    attach_impact_metadata(
+        change,
+        affected_public_roots=list(explained.public_entries),
+        path=explained.entry_path,
+        graph=graph,
+        alternative_paths=explained.alternative_entry_paths,
+    )
+    change.reachability_proof_path = _format_consumer_impact(explained, graph)
+
+
 def scope_diff_to_app(
     diff: DiffResult,
     app_path: Path,
@@ -993,7 +1087,16 @@ def scope_diff_to_app(
     coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
 
     suppressed_missing: set[str] = set()
-    for sym in uncovered_missing_symbols(missing_symbols, breaking_for_app):
+    uncovered = list(uncovered_missing_symbols(missing_symbols, breaking_for_app))
+    # G29 Phase 4 (ADR-057): one joined consumer/source-graph walk for every
+    # uncovered symbol, computed before the loop so the restricted BFS runs
+    # once per comparison rather than once per missing symbol. Both values are
+    # empty when no L5 graph is available on the old side, which is the
+    # unchanged pre-ADR-057 behavior.
+    joined_graph, consumer_impact = _consumer_impact_explanations(
+        app_path, app_reqs, old_lib, uncovered
+    )
+    for sym in uncovered:
         # public_reachable=True (Codex review, fresh evidence): this overlay
         # only ever exists because a real --used-by consumer binary's own
         # undefined-symbol requirement genuinely resolved to nothing in the
@@ -1011,6 +1114,13 @@ def scope_diff_to_app(
             reachability_kind="consumer_proven",
             reachability_state=ReachabilityState.PROVEN_REACHABLE,
         )
+        # Attached *before* assess_change below, not after: the cached
+        # assessment is built from these very fields, so enriching afterwards
+        # would leave the cache describing the pre-enrichment change and the
+        # proof path would never reach the report.
+        explained = consumer_impact.get(sym)
+        if explained is not None and joined_graph is not None:
+            _attach_consumer_impact(overlay_change, explained, joined_graph)
         # ADR-052 D2 follow-up (G29 Phase 3, scoped implementation): cache
         # this overlay's ImpactAssessment right away. Safe here because
         # suppression.evaluate() below is a pure read of change's fields

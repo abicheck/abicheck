@@ -57,6 +57,8 @@ from .graph_facts import (
     CONF_HIGH as CONF_HIGH,
     CONF_REDUCED as CONF_REDUCED,
     CONF_UNKNOWN as CONF_UNKNOWN,
+    CONSUMER_EDGE_KINDS,  # G29 Phase 4 (ADR-057)
+    CONSUMER_NODE_KINDS,
     FactConflict as FactConflict,
     GraphEdge as GraphEdge,
     GraphFact as GraphFact,
@@ -127,7 +129,7 @@ NODE_KINDS: frozenset[str] = frozenset(
         "version_script",
         "export_map",
         "comdat_group",
-    }
+    } | CONSUMER_NODE_KINDS
 )
 
 #: Edge kinds the graph schema understands (ADR-031 D2).
@@ -166,7 +168,7 @@ EDGE_KINDS: frozenset[str] = frozenset(
         # already creates.
         "ARCHIVE_CONTAINS_OBJECT",
         "OBJECT_DEFINES_SYMBOL",
-    }
+    } | CONSUMER_EDGE_KINDS
 )
 
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
