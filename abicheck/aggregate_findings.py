@@ -37,10 +37,12 @@ folded in as compatible. The per-finding form of it is the reason
 :attr:`FindingMatrixEntry.undetermined_profiles` exists as a third list
 rather than findings being split into just affected/unaffected: a profile
 whose findings were never read must never be reported as *proven clean* of a
-finding. :func:`parse_report_findings` keeps the two cases structurally
-apart at the point of reading — ``None`` means "this report did not
-enumerate its findings", ``()`` means "it did, and there were none" — and
-every rule below propagates that distinction rather than collapsing it.
+finding. :class:`ReportFindings` keeps the two facts structurally apart at
+the point of reading — *what a report listed* and *whether that list was all
+of it* are separate fields — and every rule below propagates the distinction
+rather than collapsing it. Only completeness may clear a profile; the
+findings themselves may always convict one, since seeing a finding proves it
+is there while not seeing one proves nothing.
 """
 
 from __future__ import annotations
@@ -182,30 +184,119 @@ class ReportFinding:
         )
 
 
-def parse_report_findings(data: Mapping[str, Any]) -> tuple[ReportFinding, ...] | None:
-    """Read a report's ``changes[]`` into :class:`ReportFinding` values.
+@dataclass(frozen=True)
+class ReportFindings:
+    """One report's findings, plus whether that list is known to be *all* of
+    them.
 
-    ``None`` means **this report's finding set is unknown** — the report
-    carries no ``changes`` array at all (a ``scan`` report, a hand-built
-    summary), so nothing can be concluded about which findings it does or
-    does not have. An empty tuple means the opposite and much stronger
-    claim: the report *did* enumerate its findings and there were none.
+    The two fields are independent on purpose, and conflating them is the
+    mistake this class exists to make unrepresentable. ``findings`` is what
+    was successfully read; :attr:`complete` is whether reading it accounted
+    for everything the comparison found. A report can carry real findings
+    and still be incomplete — a ``compare-release`` report enumerates its
+    bundle- and matrix-level findings but only *counts* its per-library
+    ones, and a report with one unparseable array element yields the rest
+    plus a known hole.
 
-    Collapsing "didn't say" into "said nothing broke" would let
-    :func:`build_finding_matrix` list a profile as proven unaffected by a
-    finding it never actually looked for — see this module's docstring.
-
-    A non-mapping entry inside the array is skipped rather than failing the
-    load: reports are external artifacts, and one malformed finding must not
-    take a whole CI-matrix aggregation down with it.
+    Only :attr:`complete` may clear a profile of a finding. The findings
+    themselves can always *convict* a profile, complete or not: seeing a
+    finding is proof it is there, whereas not seeing one is proof of
+    nothing unless the list was exhaustive.
     """
-    raw = data.get("changes")
-    if not isinstance(raw, list):
-        return None
-    return tuple(
-        ReportFinding.from_report_entry(entry)
-        for entry in raw
-        if isinstance(entry, Mapping)
+
+    findings: tuple[ReportFinding, ...] = ()
+    complete: bool = False
+
+
+#: Finding arrays a ``compare-release`` report carries instead of ``changes``
+#: (``cli_compare_release_helpers._format_release_json``) — the shape a
+#: ``kind: bundle`` check produces, since a bundle comparison routes through
+#: the per-library release fan-out. Both carry the same
+#: ``kind``/``symbol``/``description``/``old_value``/``new_value`` fields
+#: :class:`ReportFinding` reads, so they need no separate identity path.
+_RELEASE_FINDING_KEYS = ("bundle_findings", "matrix_findings")
+
+
+def _with_bundle_attribution(entry: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Fold a bundle finding's library attribution into its ``description``.
+
+    A ``bundle_findings`` entry keeps ``consumer_library``/``provider_library``
+    as separate fields, so two findings that differ *only* in which library
+    pair they are about are otherwise identical on every field
+    :func:`resolve_report_change_identity` reads — they would reconcile into
+    one entry that is really two. Prefixing the description restores the
+    distinction using ``bundle_models.BundleFinding.to_change``'s own
+    established flattening (``"[consumer ← provider] "``) rather than
+    inventing a second attribution format for the same fact.
+    """
+    consumer = entry.get("consumer_library")
+    provider = entry.get("provider_library")
+    consumer = consumer if isinstance(consumer, str) and consumer else None
+    provider = provider if isinstance(provider, str) and provider else None
+    if consumer and provider:
+        prefix = f"[{consumer} ← {provider}] "
+    elif provider:
+        prefix = f"[{provider}] "
+    elif consumer:
+        prefix = f"[{consumer}] "
+    else:
+        return entry
+    return {**entry, "description": prefix + str(entry.get("description") or "")}
+
+
+def parse_report_findings(data: Mapping[str, Any]) -> ReportFindings:
+    """Read every finding array a report carries into a :class:`ReportFindings`.
+
+    Two report shapes are understood. A ``compare``/``scan`` report puts its
+    whole finding set in ``changes``; a ``compare-release`` report has no
+    ``changes`` at all and instead carries ``bundle_findings`` and
+    ``matrix_findings`` (:data:`_RELEASE_FINDING_KEYS`) alongside per-library
+    entries that are only *counts*. Both are parsed, so a ``kind: bundle``
+    check — which always produces the release shape — participates in the
+    matrix instead of being written off as unknown.
+
+    :attr:`~ReportFindings.complete` is granted **only** for a well-formed
+    ``changes`` array, because that is the one field that carries a
+    comparison's entire finding set. A release report is never complete no
+    matter how many bundle/matrix findings it lists: its per-library
+    findings are not in the document, so it cannot clear a profile of one.
+    Neither is a report with any unparseable array element — the valid
+    entries stay usable (they can still convict a profile), but the hole is
+    recorded rather than silently rounded down to "found nothing", which is
+    the false clean claim :attr:`FindingMatrixEntry.undetermined_profiles`
+    exists to prevent.
+
+    A malformed entry is skipped rather than raising: reports are external
+    artifacts, and one bad finding must not take a whole CI-matrix
+    aggregation down with it.
+    """
+    findings: list[ReportFinding] = []
+    malformed = False
+
+    raw_changes = data.get("changes")
+    enumerated_changes = isinstance(raw_changes, list)
+    if isinstance(raw_changes, list):
+        for entry in raw_changes:
+            if isinstance(entry, Mapping):
+                findings.append(ReportFinding.from_report_entry(entry))
+            else:
+                malformed = True
+
+    for key in _RELEASE_FINDING_KEYS:
+        raw = data.get(key)
+        if not isinstance(raw, list):
+            continue
+        for entry in raw:
+            if isinstance(entry, Mapping):
+                findings.append(
+                    ReportFinding.from_report_entry(_with_bundle_attribution(entry))
+                )
+            else:
+                malformed = True
+
+    return ReportFindings(
+        findings=tuple(findings),
+        complete=enumerated_changes and not malformed,
     )
 
 
@@ -277,11 +368,13 @@ class FindingMatrixEntry:
         }
 
 
-#: One profile's per-check finding sets: one element per check that profile
-#: ran for the target, each either that check's findings or ``None`` when
-#: they are unknown (missing/unreadable/not-comparable/``changes``-less
-#: report). A profile with an empty sequence ran no checks at all.
-ProfileCheckFindings = Sequence["tuple[ReportFinding, ...] | None"]
+#: One profile's per-check finding sets: one :class:`ReportFindings` per check
+#: that profile ran for the target. A check whose report never arrived, was
+#: unreadable, or was not comparable contributes a default ``ReportFindings()``
+#: — no findings, not complete — so "no report" and "a report that didn't
+#: enumerate everything" need no separate representation here: both are simply
+#: not complete. A profile with an empty sequence ran no checks at all.
+ProfileCheckFindings = Sequence["ReportFindings"]
 
 
 def build_finding_matrix(
@@ -290,14 +383,17 @@ def build_finding_matrix(
     """Reconcile every profile's findings into one entry per logical finding.
 
     A profile is *affected* when any of its own checks carries the finding;
-    *undetermined* when it is not affected but at least one of its checks has
-    an unknown finding set; *unaffected* only when every one of its checks
-    enumerated its findings and none of them was this one.
+    *undetermined* when it is not affected but any of its checks fell short
+    of a complete finding set (:attr:`ReportFindings.complete`); *unaffected*
+    only when every one of its checks enumerated its findings in full and
+    none of them was this one.
 
     Affected outranks undetermined outranks unaffected, so a profile that
     reported the finding on one check and failed to report at all on another
     is listed as affected — it demonstrably has the finding — rather than
-    being softened to "we're not sure".
+    being softened to "we're not sure". This is why an incomplete check's
+    findings are still read: they can only ever add a profile to
+    ``affected``, never wrongly clear one.
 
     Entries are ordered by ``(base_target, kinds, symbol, finding_identity)``
     so the output is stable across runs; the identity itself is last only as
@@ -308,8 +404,8 @@ def build_finding_matrix(
         findings_by_target_and_profile.items()
     ):
         profiles = sorted(checks_by_profile)
-        # profile -> its known findings by identity ({} when the profile ran
-        # checks but none of them enumerated findings).
+        # profile -> the findings it reported, by identity ({} when the
+        # profile ran checks but none of them listed a finding).
         known: dict[str, dict[str, ReportFinding]] = {}
         undetermined: set[str] = set()
         for pid in profiles:
@@ -319,11 +415,10 @@ def build_finding_matrix(
                 # A profile present in the grouping with no checks at all has
                 # nothing known about it either.
                 undetermined.add(pid)
-            for check_findings in checks:
-                if check_findings is None:
+            for check in checks:
+                if not check.complete:
                     undetermined.add(pid)
-                    continue
-                for finding in check_findings:
+                for finding in check.findings:
                     by_identity.setdefault(finding.identity, finding)
             known[pid] = by_identity
 

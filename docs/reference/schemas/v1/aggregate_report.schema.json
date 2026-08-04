@@ -205,7 +205,7 @@
         "undetermined_profiles": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Profiles that can be placed in neither list above: at least one of their reports is missing, unreadable, not-comparable, or carries no `changes` array, so whether they have this finding is unknown. Never read as unaffected -- that would claim a profile was checked and found clean when it was never checked at all."
+          "description": "Profiles that can be placed in neither list above: at least one of their reports fell short of a complete finding set -- missing, unreadable, not-comparable, carrying no finding array at all, carrying an unparseable entry, or being a compare-release report (which lists bundle/matrix findings but only per-library counts). Never read as unaffected -- that would claim a profile was checked and found clean when it was never checked at all. An incomplete report can still place a profile in affected_profiles: seeing a finding proves it is there, while not seeing one proves nothing unless the list was exhaustive."
         }
       }
     },

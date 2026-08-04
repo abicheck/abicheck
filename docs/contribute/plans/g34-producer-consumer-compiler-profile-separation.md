@@ -266,16 +266,34 @@ confirmed by reading the workflow, not asserted from a design doc):
       real GCC/Clang/MSVC matrix actually produces.
 - [x] A third list, `undetermined_profiles`, was **added beyond the original
       scope** and is the load-bearing one: a profile whose findings are not
-      fully known (a missing, unreadable, not-comparable, or `changes`-less
-      report among its checks) is neither affected nor unaffected. Without
-      it, this view would answer "profile X is clean of this finding" for a
-      profile that was never checked — the per-finding form of exactly the
-      "an expected target with no report is unknown, never compatible"
-      invariant the rest of `aggregate.py` is built on. `parse_report_findings`
-      keeps the two cases structurally apart (`None` = didn't enumerate,
-      `()` = enumerated and found nothing), and `FindingMatrixEntry.scope`
-      answers `undetermined` ahead of every other value whenever any profile
-      is in that state.
+      fully known is neither affected nor unaffected. Without it, this view
+      would answer "profile X is clean of this finding" for a profile that
+      was never checked — the per-finding form of exactly the "an expected
+      target with no report is unknown, never compatible" invariant the rest
+      of `aggregate.py` is built on. `ReportFindings` carries the findings
+      and a separate `complete` flag so the two facts cannot be conflated,
+      and `FindingMatrixEntry.scope` answers `undetermined` ahead of every
+      other value whenever any profile is in that state. Four things fall
+      short of complete: a missing/unreadable/not-comparable report, a
+      report with no finding array, a report with an unparseable array
+      element, and a `compare-release` report. Only `complete` may *clear* a
+      profile; an incomplete report's findings are still read, since seeing
+      a finding proves it is there while not seeing one proves nothing.
+- [x] Both report shapes participate. A `compare`/`scan` report carries
+      `changes`; a `compare-release` report — what a `kind: bundle` check
+      produces, since a bundle comparison routes through the per-library
+      release fan-out — has no `changes` at all and instead carries
+      `bundle_findings`/`matrix_findings` plus per-library entries that are
+      only *counts*. Both arrays are parsed, so bundle targets reconcile
+      rather than being written off as unknown; the missing per-library
+      detail is exactly why such a report can never be `complete`. A bundle
+      finding's `consumer_library`/`provider_library` are folded into its
+      description using `BundleFinding.to_change`'s own
+      `"[consumer ← provider] "` flattening, so two findings differing only
+      in which library pair they are about stay two findings. (Both this
+      item and the `complete` flag above came from the PR's Codex review;
+      the original slice treated every release report as unknown and let a
+      partially-unparseable `changes` array read as an exhaustive one.)
 - [x] A finding present on every profile and one present on only one are
       distinguished by an explicit `scope` discriminator
       (`all_profiles`/`profile_specific`/`partial`/`undetermined`) in both
@@ -285,13 +303,15 @@ confirmed by reading the workflow, not asserted from a design doc):
       wording:* `aggregate` has `--format json|text` and no Markdown
       renderer, so "JSON/Markdown" landed as JSON + text; adding a Markdown
       format for `aggregate` is separate surface, not part of this phase.
-- [x] `tests/test_aggregate.py`'s `TestFindingMatrix`/
-      `TestReportFindingIdentity` cover the merged/split shapes (same
+- [x] `tests/test_aggregate_findings.py` (a sibling of `test_aggregate.py`,
+      mirroring the source split) covers the merged/split shapes (same
       finding on all profiles, profile-specific, partial), the rich-vs-L0
-      kind collapse, all four undetermined sources, "affected outranks
-      undetermined across one profile's own checks", ordering stability,
-      the malformed-entry and unknown-future-kind degradations, that the
-      gate exit code is unmoved, and schema validation of the new block.
+      kind collapse, every source of `undetermined` including the
+      partially-malformed array and the release report, bundle/matrix
+      findings participating, bundle attribution keeping distinct library
+      pairs apart, "affected outranks undetermined across one profile's own
+      checks", ordering stability, the unknown-future-kind degradation, that
+      the gate exit code is unmoved, and schema validation of the new block.
 
 **Not part of this phase, deliberately:** `finding_matrix` is a reporting
 view only — it never contributes to `exit_code()`. A cross-profile *gate*

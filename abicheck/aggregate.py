@@ -61,6 +61,7 @@ from .aggregate_findings import (
     FINDING_SCOPE_UNDETERMINED as FINDING_SCOPE_UNDETERMINED,
     FindingMatrixEntry as FindingMatrixEntry,
     ReportFinding as ReportFinding,
+    ReportFindings as ReportFindings,
     build_finding_matrix,
     parse_report_findings,
     render_finding_matrix_lines,
@@ -375,12 +376,12 @@ class TargetReport:
     library: str | None = None
     reason: str | None = None  # unavailable, or not_comparable/operational_error detail
     unexpected: bool = False
-    #: This report's enumerated findings, or ``None`` when they are unknown
-    #: (unavailable/unreadable report, a not-comparable or operational-error
-    #: result, or a report carrying no ``changes`` array) — see
-    #: :func:`~abicheck.aggregate_findings.parse_report_findings` for why
-    #: the empty-tuple and ``None`` cases must not be collapsed.
-    findings: tuple[ReportFinding, ...] | None = None
+    #: The findings this report listed, and whether that list is all of them
+    #: (:class:`~abicheck.aggregate_findings.ReportFindings`). ``None`` for an
+    #: unavailable report — one that never arrived, was unreadable, or
+    #: produced a not-comparable/operational-error result, so it listed
+    #: nothing and established nothing.
+    findings: ReportFindings | None = None
 
     @property
     def analyzed(self) -> bool:
@@ -738,9 +739,9 @@ class AggregateResult:
 
         A profile is *affected* when any of its own reports carries the
         finding; *undetermined* when it is not affected but at least one of
-        its reports has an unknown finding set (:func:`~abicheck.
-        aggregate_findings.parse_report_findings`); *unaffected* only when
-        every one of its reports enumerated its findings and none of them was
+        its reports fell short of a complete finding set (:class:`~abicheck.
+        aggregate_findings.ReportFindings`); *unaffected* only when every one
+        of its reports enumerated its findings in full and none of them was
         this one. The reconciliation rules themselves live in
         :func:`~abicheck.aggregate_findings.build_finding_matrix`; this
         property only projects this result's ``TargetReport`` grouping down
@@ -756,7 +757,9 @@ class AggregateResult:
             {
                 base_target: {
                     pid: [
-                        report.findings if report.analyzed else None
+                        report.findings
+                        if report.analyzed and report.findings is not None
+                        else ReportFindings()
                         for report in reports
                     ]
                     for pid, reports in reports_by_profile.items()
@@ -985,12 +988,11 @@ class _LoadedReport:
     head_sha: str | None
     reason: str | None
     path: Path
-    #: ``None`` whenever this report's finding set is unknown — see
-    #: :func:`~abicheck.aggregate_findings.parse_report_findings`. Left
     #: ``None`` on every failure branch below (unreadable, malformed gate,
-    #: operational error, not comparable),
-    #: since none of those establish what the comparison did or did not find.
-    findings: tuple[ReportFinding, ...] | None = None
+    #: operational error, not comparable), since none of those establish what
+    #: the comparison did or did not find. Otherwise the report's own
+    #: :func:`~abicheck.aggregate_findings.parse_report_findings` result.
+    findings: ReportFindings | None = None
 
 
 def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
