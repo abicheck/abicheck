@@ -37,7 +37,10 @@
   "Unknown AST frontend 'android'" before any build/source evidence was
   embedded. The resolved compile context now drops a non-header-AST frontend,
   fixing the new `abi_dump(ast_frontend="android", ...)` path and the
-  pre-existing typed `CompareRequest` one alike.
+  pre-existing typed `CompareRequest` one alike. The downgrade is narrowed to
+  frontends that are *known* but header-less, and a per-input
+  `compile.frontend` is now validated, so a typo still raises rather than
+  silently running the default backend.
 - **`build_info` is held to `ABICHECK_MCP_MAX_FILE_SIZE`** — it accepts a
   `compile_commands.json` (or a Bazel jsonproto), not only a directory, and the
   build-source loader parses it, so an oversized build-info artifact bypassed

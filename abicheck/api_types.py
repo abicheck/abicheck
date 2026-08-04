@@ -286,6 +286,21 @@ def _side_errors(label: str, side: InputSpec) -> list[str]:
       ``validation_errors()``/``validate()`` alone also catches it.
     """
     errors: list[str] = []
+    # The per-side `compile.frontend` was unvalidated: the request-level
+    # `frontend` is checked, but a typo in `InputSpec.compile` reached the
+    # extraction layer and (once the source-ABI-only downgrade existed) was
+    # rewritten to "auto", turning a typo into a successful default-backend
+    # run instead of the `Unknown AST frontend` error it used to raise
+    # (Codex review). Validated here so it fails like every other bad value.
+    if (
+        side.compile is not None
+        and side.compile.frontend.lower() not in SUPPORTED_FRONTENDS
+    ):
+        allowed = ", ".join(sorted(SUPPORTED_FRONTENDS))
+        errors.append(
+            f"unsupported {label} AST frontend {side.compile.frontend!r}: "
+            f"choose from {allowed}"
+        )
     if (
         side.compile is not None
         and side.compile.frontend_context.lower() not in FRONTEND_CONTEXTS

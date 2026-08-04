@@ -233,9 +233,19 @@ def _header_ast_frontend_only(base: CompileContext) -> CompileContext:
     behaviour. The request-level ``frontend`` field still carries the value
     for L4 source-ABI replay, which is the only layer that can act on it.
     """
-    from .api_types import HEADER_AST_FRONTENDS
+    from .api_types import HEADER_AST_FRONTENDS, SUPPORTED_FRONTENDS
 
-    if base.frontend.lower() in HEADER_AST_FRONTENDS:
+    frontend = base.frontend.lower()
+    if frontend in HEADER_AST_FRONTENDS:
+        return base
+    # Only a *known* frontend with no header path is downgraded. An unknown
+    # value falls through untouched so `dumper._resolve_header_backend` still
+    # raises `Unknown AST frontend` for it: rewriting a typo like "clnag" to
+    # "auto" would turn it into a successful default-backend run, trading the
+    # bug this function fixes for a worse one (Codex review). Both request
+    # types now also reject such a value in `validate()`, so this is the
+    # second line of defence rather than the only one.
+    if frontend not in SUPPORTED_FRONTENDS:
         return base
     return dataclasses.replace(base, frontend="auto")
 

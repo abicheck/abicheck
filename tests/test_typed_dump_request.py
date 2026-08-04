@@ -1313,3 +1313,60 @@ class TestAuditOnlyScanRejectsComparisonKnobs:
             lambda req, timeout: {"verdict": "COMPATIBLE"},
         )
         assert json.loads(abi_scan(str(snap_path)))["status"] == "ok"
+
+
+class TestPerInputFrontendIsValidated:
+    """A typo in `InputSpec.compile.frontend` is a usage error, not a default run.
+
+    The source-ABI-only downgrade (`android` → `auto`) originally rewrote
+    *every* non-header frontend, so `CompileContext(frontend="clnag")` turned
+    a typo that used to raise `Unknown AST frontend` into a successful
+    default-backend run — trading one bug for a worse one (Codex review).
+    Fixed on both halves: the value is validated up front, and the downgrade
+    is narrowed to frontends that are actually known-but-header-less.
+    """
+
+    @pytest.mark.parametrize("label", ["dump", "compare"])
+    def test_typo_is_rejected_by_validate(self, snap_path: Path, label: str):
+        spec = InputSpec(path=snap_path, compile=CompileContext(frontend="clnag"))
+        request = (
+            DumpRequest(input=spec)
+            if label == "dump"
+            else CompareRequest(old=spec, new=spec)
+        )
+        errors = request.validation_errors()
+        assert any("unsupported" in e and "'clnag'" in e for e in errors), errors
+
+    def test_typo_raises_rather_than_running(self, snap_path: Path):
+        from abicheck.service import run_dump_request
+
+        with pytest.raises(ValidationError, match="clnag"):
+            run_dump_request(
+                DumpRequest(
+                    input=InputSpec(
+                        path=snap_path, compile=CompileContext(frontend="clnag")
+                    )
+                )
+            )
+
+    def test_downgrade_only_applies_to_a_known_headerless_frontend(self):
+        """`android` is downgraded; an unknown value is left for the extraction
+        layer to reject, so the narrowing cannot silently resurrect the bug."""
+        from abicheck.service_compare_evidence import _header_ast_frontend_only
+
+        assert (
+            _header_ast_frontend_only(CompileContext(frontend="android")).frontend
+            == "auto"
+        )
+        assert (
+            _header_ast_frontend_only(CompileContext(frontend="clnag")).frontend
+            == "clnag"
+        )
+        assert (
+            _header_ast_frontend_only(CompileContext(frontend="clang")).frontend
+            == "clang"
+        )
+
+    def test_a_valid_per_input_frontend_still_passes(self, snap_path: Path):
+        spec = InputSpec(path=snap_path, compile=CompileContext(frontend="castxml"))
+        assert DumpRequest(input=spec).validation_errors() == []
