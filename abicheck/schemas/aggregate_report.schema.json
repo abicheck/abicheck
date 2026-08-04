@@ -83,6 +83,27 @@
         "coverage_blocking": {"type": "boolean"}
       }
     },
+    "contract_coverage": {
+      "type": "object",
+      "description": "Added in schema 1.3. ADR-049 Phase 7's orthogonal contract-coverage axis for the whole target set. Separate from `coverage` above because the two answer different questions and both contribute 1: `coverage` is about a required target reporting at all, this is about a target that did report having the evidence to close its selected --contract domain. Present in every document; exit_contribution is 0 and incomplete_targets empty when no target evaluated a contract. The two can disagree: a target accepting incomplete coverage via contract.unresolved=warn is listed while contributing 0.",
+      "properties": {
+        "exit_contribution": {
+          "type": "integer",
+          "description": "0 or 1, the max over every gated target's own contract_coverage_exit_contribution. Folded into gate.exit_code with max, so it raises a clean 0 to 1 and can never lower a real break's 2/4.",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "incomplete_targets": {
+          "type": "array",
+          "description": "The target ids whose contract coverage was incomplete -- chiefly the why behind a non-zero exit_contribution, but not only that: a target that accepted incomplete coverage via contract.unresolved=warn is listed here too, with its own contract_coverage_exit staying 0. warn accepts incomplete assurance, it does not hide it, so omitting such a target would misreport the matrix as fully covered. Which listed targets actually gated is readable per target.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "targets": {
       "type": "array",
       "description": "Every expected target, in stable id order — analyzed or unavailable.",
@@ -126,6 +147,14 @@
         },
         "report_path": {"type": "string"},
         "library": {"type": "string"},
+        "contract_coverage_exit": {
+          "type": "integer",
+          "description": "ADR-049 Phase 7 (aggregate schema 1.3): this target's own contract-coverage contribution, read verbatim from its report's contract_coverage_exit_contribution -- 0 when the target evaluated no contract, or evaluated one whose evidence closed, or accepted incomplete coverage via contract.unresolved=warn. Folded into the top-level contract_coverage.exit_contribution and thence into gate.exit_code with max. Always present; 0 for an unavailable target, whose absence is already gated on the separate required-coverage axis.",
+          "enum": [
+            0,
+            1
+          ]
+        },
         "reason": {
           "type": "string",
           "description": "Present when the target is unavailable — why it could not be analyzed."

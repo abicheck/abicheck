@@ -42,6 +42,13 @@ Three orthogonal axes, kept separate on purpose (ADR-042):
   they fall back to the legacy verdict→exit mapping.
 * **coverage** — did every *required* target actually report? A required gap is
   a *coverage* failure (exit ``1``), never masqueraded as an ABI break.
+* **contract coverage** — ADR-049 Phase 7's orthogonal axis, read off each
+  report's own ``contract_coverage_exit_contribution`` and folded with ``max``
+  exactly as ``compare`` and ``scan --against`` fold theirs. A target that
+  *did* report but could not close its selected ``--contract`` domain
+  contributes ``1``. Distinct from the coverage axis above (which is about a
+  target reporting at all) and reported separately, so an exit ``1`` always
+  names which axis produced it.
 """
 
 from __future__ import annotations
@@ -52,7 +59,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from .aggregate_findings import (
     FINDING_SCOPE_ALL_PROFILES as FINDING_SCOPE_ALL_PROFILES,
@@ -75,7 +82,14 @@ from .change_registry_types import Verdict
 #: key present at ``1.1`` is unchanged, so a consumer pinned to ``1.1`` keeps
 #: reading a ``1.2`` document correctly; the MINOR bump is what tells a
 #: consumer the new block is available to read at all.
-AGGREGATE_SCHEMA_VERSION = "1.2"
+#:
+#: ``1.3`` adds the top-level ``contract_coverage`` block
+#: (``exit_contribution`` / ``incomplete_targets``) and a
+#: ``contract_coverage_exit`` field on every target entry (ADR-049
+#: Phase 7). Additive in shape, but not inert: the contribution folds
+#: into ``gate.exit_code``, so a matrix whose targets exited ``1`` for
+#: incomplete contract evidence no longer aggregates to ``0``.
+AGGREGATE_SCHEMA_VERSION = "1.3"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -376,6 +390,19 @@ class TargetReport:
     library: str | None = None
     reason: str | None = None  # unavailable, or not_comparable/operational_error detail
     unexpected: bool = False
+    #: ADR-049 Phase 7's contract-coverage contribution for this target
+    #: (``0``/``1``), carried separately from :attr:`gate` because the two are
+    #: orthogonal axes (plan Section 7): a coverage failure may raise a clean
+    #: ``0`` to ``1`` and may never lower a real ABI break's ``4``. ``0`` for
+    #: an unavailable target -- a report that never arrived is a *coverage*
+    #: gap on this aggregate's own axis, already gated as one, and inventing a
+    #: contract-coverage failure for it would double-count the same absence.
+    contract_coverage_exit: int = 0
+    #: Whether the report listed any coverage failure, regardless of whether
+    #: it gated. Separate from the contribution above because
+    #: ``contract.unresolved=warn`` zeroes the floor and changes nothing else
+    #: -- the failures stay listed. Reported, never folded into an exit code.
+    contract_coverage_incomplete: bool = False
     #: The findings this report listed, and whether that list is all of them
     #: (:class:`~abicheck.aggregate_findings.ReportFindings`). ``None`` for an
     #: unavailable report — one that never arrived, was unreadable, or
@@ -417,6 +444,7 @@ class TargetReport:
                 else None
             ),
             "gate": self.gate.to_dict() if self.gate is not None else None,
+            "contract_coverage_exit": self.contract_coverage_exit,
         }
         if self.unexpected:
             d["unexpected"] = True
@@ -597,20 +625,71 @@ class AggregateResult:
             )
         )
 
+    @property
+    def contract_coverage_exit(self) -> int:
+        """ADR-049 Phase 7's contract-coverage contribution for the whole set.
+
+        The max of every gated target's own contribution, folded into
+        :meth:`exit_code` the same way and for the same reason the two CLIs
+        fold theirs (``contract_coverage_exit.fold_coverage_exit``): a ledger
+        that gates ``compare`` and ``scan --against`` but not the command that
+        aggregates their reports is exactly the cross-command divergence plan
+        Section 6.4 forbids — a matrix build could exit ``0`` while a target
+        in it exited ``1`` for incomplete contract evidence.
+
+        ``max`` over targets rather than "any", so the axis stays a floor
+        rather than a count, matching the per-command fold.
+        """
+        gated = list(self.analyzed) + list(self._gated_unexpected)
+        return max((t.contract_coverage_exit for t in gated), default=0)
+
+    @property
+    def contract_coverage_targets(self) -> tuple[str, ...]:
+        """Targets whose contract coverage was incomplete.
+
+        Chiefly the *why* behind :attr:`contract_coverage_exit`, so a reader
+        is not left with a bare exit ``1`` and no target to look at — but not
+        *only* that. A target that accepted incomplete coverage via
+        ``contract.unresolved=warn`` contributes ``0`` while still listing
+        real failures, and deriving this from the contribution alone dropped
+        it from the aggregate entirely: ``incomplete_targets: []`` and no
+        diagnostic, for a matrix in which a contract domain never closed
+        (Codex review, fresh evidence). ``warn`` accepts incomplete assurance;
+        ADR-049 Section 6.2 is explicit that it does not hide it, and an
+        aggregate that omits the target hides it.
+
+        Which of these gated is still readable per target, from each entry's
+        own ``contract_coverage_exit`` — so no reader loses the narrower
+        question by this answering the broader one.
+        """
+        gated = list(self.analyzed) + list(self._gated_unexpected)
+        return tuple(
+            sorted(
+                t.target_id
+                for t in gated
+                if t.contract_coverage_incomplete or t.contract_coverage_exit > 0
+            )
+        )
+
     def exit_code(self) -> int:
         """The single CI gate exit code.
 
         The max of every gated target's own ``severity.exit_code`` (so a
         target's policy-blocked addition contributes ``1``, an API break ``2``,
-        an ABI break ``4`` — never recomputed from the verdict) and a coverage
-        contribution of ``1`` when a required target is missing. ``64`` /
-        malformed-input errors are raised as :class:`AggregateError`, never
-        returned here.
+        an ABI break ``4`` — never recomputed from the verdict), a coverage
+        contribution of ``1`` when a required target is missing, and ADR-049's
+        orthogonal contract-coverage contribution of ``1`` when any target's
+        selected contract domain was short of evidence
+        (:attr:`contract_coverage_exit`). All three fold with ``max``, so the
+        two ``1``-valued axes can raise a clean ``0`` and neither can lower a
+        real break's ``2``/``4``. ``64`` / malformed-input errors are raised as
+        :class:`AggregateError`, never returned here.
         """
         gated = list(self.analyzed) + list(self._gated_unexpected)
         code = max((t.gate.exit_code for t in gated if t.gate is not None), default=0)
         if self.coverage_blocking:
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
+        code = max(code, self.contract_coverage_exit)
         # ``fail`` fails the gate on *any* unexpected report — including one that
         # is unreadable/verdictless (so has no gate to contribute above) — since
         # the policy is "no target outside the expected set is tolerated".
@@ -798,6 +877,34 @@ class AggregateResult:
         lines.append("Compatibility:")
         lines.append("  " + self._render_compatibility_line())
 
+        # Named separately from the required-target coverage line above for
+        # the same reason the JSON block is: a bare exit 1 with neither of
+        # them explained is the failure this axis most easily causes.
+        incomplete = self.contract_coverage_targets
+        if incomplete:
+            lines.append("")
+            lines.append("Contract coverage:")
+            # The contribution is stated separately from the target list
+            # rather than folded into one clause: with `contract.unresolved=
+            # warn` a listed target contributes 0, so "incomplete on X —
+            # contributes 0" would read as a contradiction rather than as the
+            # acceptance it is.
+            lines.append(f"  incomplete on {', '.join(incomplete)}")
+            accepted = tuple(
+                t.target_id
+                for t in list(self.analyzed) + list(self._gated_unexpected)
+                if t.contract_coverage_incomplete and t.contract_coverage_exit == 0
+            )
+            if accepted:
+                lines.append(
+                    f"  accepted via contract.unresolved=warn on "
+                    f"{', '.join(sorted(accepted))} (listed, not gated)"
+                )
+            lines.append(
+                f"  contributes {self.contract_coverage_exit} to the exit code "
+                "(ADR-049 contract-coverage axis)"
+            )
+
         matrix = self.profile_matrix
         if matrix:
             lines.append("")
@@ -950,6 +1057,19 @@ class AggregateResult:
                 "blocking_targets": list(self.blocking_targets),
                 "coverage_blocking": self.coverage_blocking,
             },
+            # ADR-049 Phase 7's orthogonal axis, reported as its own block
+            # rather than folded into "coverage" above: that one is about
+            # whether every required *target reported*, this one about whether
+            # a target that did report had the evidence to close its selected
+            # contract domain. Both contribute 1 and they are not the same
+            # question, so a consumer must be able to tell which raised the
+            # exit ("Reports identify whether exit 1 comes from contract
+            # coverage, gate severity, or aggregate required-target
+            # coverage" -- plan Section 7).
+            "contract_coverage": {
+                "exit_contribution": self.contract_coverage_exit,
+                "incomplete_targets": list(self.contract_coverage_targets),
+            },
             "targets": [t.to_dict() for t in self.targets],
             "unexpected_targets": [t.to_dict() for t in self.unexpected_targets],
             "profile_matrix": [e.to_dict() for e in self.profile_matrix],
@@ -988,11 +1108,147 @@ class _LoadedReport:
     head_sha: str | None
     reason: str | None
     path: Path
+    #: ADR-049 Phase 7's orthogonal contract-coverage contribution, read off
+    #: the report's own ``contract_coverage_exit_contribution`` (schema 2.26).
+    #: ``0`` for every report that carries none -- a run without
+    #: ``--contract-evaluation`` selected no contract domain, so it cannot be
+    #: short of evidence for one.
+    contract_coverage_exit: int = 0
+    #: Whether the report listed any coverage failure at all -- true even
+    #: when the contribution above is ``0`` because ``contract.unresolved=
+    #: warn`` accepted it. Reported, never folded into an exit code.
+    contract_coverage_incomplete: bool = False
     #: ``None`` on every failure branch below (unreadable, malformed gate,
     #: operational error, not comparable), since none of those establish what
     #: the comparison did or did not find. Otherwise the report's own
     #: :func:`~abicheck.aggregate_findings.parse_report_findings` result.
     findings: ReportFindings | None = None
+
+
+def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
+    """The report's own ADR-049 contract-coverage contribution (``0``/``1``).
+
+    Read rather than recomputed: ``contract_coverage_exit_contribution``
+    (report schema 2.26) is the number that actually gated the run that wrote
+    it -- already reflecting the selected ``--contract`` domain and any
+    ``contract.unresolved=warn`` acceptance -- and this aggregate holds none
+    of the evidence needed to answer it again. A per-target run that accepted
+    incomplete coverage must not have the aggregate re-impose it.
+
+    Fails *open*, unlike the ``severity`` gate's ``_MalformedGate``: an absent
+    or unusable value means "this report says nothing about a contract
+    domain", which is the honest reading for every pre-2.26 report and every
+    run without ``--contract-evaluation``. Treating it as a failure would make
+    the aggregate block on reports that never asked the question.
+
+    A ``scan --against`` report carries the field one level down, inside its
+    ``diff`` block (``cli_scan_baseline`` writes it into the summary that
+    becomes ``ScanOutcome.to_dict()['diff']``), so that block is consulted for
+    a scan report too. Without it the aggregate still *failed* -- the scan's
+    own top-level ``exit_code`` already folds the contribution -- but reported
+    ``contract_coverage.exit_contribution: 0`` and an empty
+    ``incomplete_targets`` beside it, hiding which axis caused the failure
+    (Codex review). That is exactly what plan Section 7 requires a report to
+    make identifiable. Keyed on ``scan_schema_version``, mirroring
+    :meth:`GateInfo.from_scan_report`, so arbitrary JSON that merely happens
+    to carry a ``diff`` key is never mined for one. Consulted whenever the
+    root value is *unusable*, not merely absent, so a malformed root key
+    cannot shadow a valid nested one.
+    """
+    for block in _contract_coverage_blocks(data):
+        raw = block.get("contract_coverage_exit_contribution")
+        if _is_valid_contribution(raw):
+            return raw
+    return 0
+
+
+def _contract_coverage_blocks(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Every place a report may carry the contract-coverage keys, outermost
+    first, so the outermost usable value wins and an inner one is only a
+    *fallback* for an unusable outer one.
+
+    Three shapes, all real and all keyed on ``scan_schema_version`` for the
+    nested two (mirroring :meth:`GateInfo.from_scan_report`, so arbitrary JSON
+    that merely happens to carry a ``diff``/``report`` key is never mined):
+
+    * the document root -- a ``compare`` report;
+    * ``diff`` -- ``ScanOutcome.to_dict()``, what ``scan --against`` writes
+      (``cli_scan_baseline`` puts the keys in the summary that becomes that
+      block);
+    * ``report.diff`` -- ``ScanResult.to_dict()``, the *public* envelope
+      ``service_scan.run_scan`` returns, whose ``report`` field is populated
+      from ``ScanOutcome.to_dict()``. A caller serializing that typed result
+      produces a second, equally documented scan shape one level deeper
+      (Codex review, fresh evidence).
+
+    Enumerated once and shared by both readers rather than spelled out in each:
+    they answer different questions off the *same* keys, so a nesting one
+    knows and the other does not is a guaranteed divergence -- and the
+    ``report.diff`` gap existed in both.
+    """
+    blocks: list[Mapping[str, Any]] = [data]
+    if "scan_schema_version" not in data:
+        return blocks
+    diff = data.get("diff")
+    if isinstance(diff, Mapping):
+        blocks.append(diff)
+    report = data.get("report")
+    if isinstance(report, Mapping):
+        nested = report.get("diff")
+        if isinstance(nested, Mapping):
+            blocks.append(nested)
+    return blocks
+
+
+def _is_valid_contribution(raw: object) -> TypeGuard[int]:
+    """Whether *raw* is a usable ``0``/``1`` contract-coverage contribution.
+
+    Exactly ``0`` or ``1``, never merely "a non-negative integer": the axis is
+    defined as a ``0``/``1`` floor, and letting a malformed ``2`` through would
+    make this aggregate exit ``2`` -- indistinguishable from a source/API
+    break -- and emit a ``contract_coverage.exit_contribution`` its own schema
+    rejects (Codex review).
+
+    The ``bool`` rejection has to come *first*, and both the root check and the
+    final check must route through this one predicate rather than spelling the
+    test twice. Testing a root value with a bare ``raw not in (0, 1)`` looks
+    equivalent but is not: ``True == 1`` in Python, so a scan report whose root
+    key is the malformed ``true`` satisfied that membership test, won against a
+    perfectly valid nested ``diff`` value, and was only then rejected by the
+    type check -- reporting ``0`` for a scan whose own exit code had already
+    folded a ``1`` (Codex review, fresh evidence). A *string* root fell through
+    correctly, which is what made the gap easy to miss.
+    """
+    return not isinstance(raw, bool) and isinstance(raw, int) and raw in (0, 1)
+
+
+def _contract_coverage_incomplete(data: Mapping[str, Any]) -> bool:
+    """Whether the report listed any contract-coverage failure at all.
+
+    Tracked *separately* from :func:`_contract_coverage_exit` because the two
+    genuinely differ: ``contract.unresolved=warn`` zeroes the exit floor and
+    changes nothing else, so an accepting target's report still carries a
+    populated ``contract_coverage_failures`` ledger beside a contribution of
+    ``0`` (ADR-049 Section 6.2 -- accepting incomplete assurance is not
+    hiding it). Deriving incompleteness from the contribution alone therefore
+    reported ``incomplete_targets: []`` and printed no diagnostic for a
+    matrix in which a target's contract domain never closed, which is the
+    hiding that mode is explicitly not supposed to do (Codex review, fresh
+    evidence).
+
+    Searches the same blocks as the contribution, through the same shared
+    :func:`_contract_coverage_blocks` -- the two answer different questions
+    off the same keys in the same places, so a nesting one knows and the other
+    does not is a guaranteed divergence. A non-list, or an empty list, is
+    "nothing to report" -- the same fail-open reading as the contribution, and
+    correct for every pre-2.26 report and every run without
+    ``--contract-evaluation``.
+    """
+    for block in _contract_coverage_blocks(data):
+        failures = block.get("contract_coverage_failures")
+        if isinstance(failures, list):
+            return bool(failures)
+    return False
 
 
 def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
@@ -1060,6 +1316,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             head_sha=head_sha,
             reason=None,
             path=path,
+            contract_coverage_exit=_contract_coverage_exit(data),
+            contract_coverage_incomplete=_contract_coverage_incomplete(data),
             # An operational ERROR means *a* library failed, not that nothing
             # was compared: `_format_release_json` emits `bundle_findings`/
             # `matrix_findings` from whatever did complete, regardless of the
@@ -1104,6 +1362,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 head_sha=head_sha,
                 reason=f"not comparable ({kind}){detail}",
                 path=path,
+                contract_coverage_exit=_contract_coverage_exit(data),
+                contract_coverage_incomplete=_contract_coverage_incomplete(data),
             )
     verdict = parse_report_verdict(data)
     gate: GateInfo | None = None
@@ -1137,6 +1397,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         head_sha=head_sha,
         reason=None if verdict is not None else "report carried no ABI verdict",
         path=path,
+        contract_coverage_exit=_contract_coverage_exit(data),
+        contract_coverage_incomplete=_contract_coverage_incomplete(data),
         # Only a report that produced a real verdict has a finding set worth
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.
@@ -1291,6 +1553,8 @@ def aggregate(
             library=report.library,
             reason=report.reason,
             unexpected=unexpected,
+            contract_coverage_exit=report.contract_coverage_exit,
+            contract_coverage_incomplete=report.contract_coverage_incomplete,
             findings=report.findings,
         )
 

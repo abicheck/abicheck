@@ -704,7 +704,7 @@ class TestRendering:
         that updates `aggregate_report.schema.json`, its published mirror,
         and the docs (CodeRabbit review).
         """
-        assert AGGREGATE_SCHEMA_VERSION == "1.2"
+        assert AGGREGATE_SCHEMA_VERSION == "1.3"
 
     def test_json_schema_shape(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
@@ -1254,3 +1254,328 @@ class TestJsonSchema:
         _write_report(tmp_path, LINUX, "API_BREAK")
         d = aggregate_reports_dir(tmp_path, discovered_only=True).to_dict()
         jsonschema.validate(d, load_aggregate_report_schema())
+
+
+class TestContractCoverageAxis:
+    """ADR-049 Phase 7: the contract-coverage ledger gates ``aggregate`` too.
+
+    ``compare`` and ``scan --against`` have folded the contribution since the
+    phase's first slice. A matrix build that aggregates their reports and did
+    *not* fold it exits ``0`` while a target inside it exited ``1`` — the
+    cross-command divergence plan Section 6.4 exists to forbid.
+    """
+
+    def test_an_incomplete_target_raises_a_clean_aggregate_to_one(
+        self, tmp_path: Path
+    ) -> None:
+        _write_report(
+            tmp_path,
+            LINUX,
+            "COMPATIBLE",
+            contract_coverage_exit_contribution=1,
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 1
+        assert result.contract_coverage_targets == (LINUX,)
+        assert result.exit_code() == 1
+        assert not result.passed
+
+    def test_it_never_lowers_a_real_break(self, tmp_path: Path) -> None:
+        # `max`, not replacement: demoting an ABI break to "warnings only"
+        # because a *different* axis contributed 1 would be the exact
+        # inversion the orthogonality rule forbids.
+        _write_report(
+            tmp_path,
+            LINUX,
+            "BREAKING",
+            severity={"exit_code": 4, "blocking": True},
+            contract_coverage_exit_contribution=1,
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 1
+        assert result.exit_code() == 4
+
+    def test_a_report_without_the_key_contributes_nothing(self, tmp_path: Path) -> None:
+        # Every pre-2.26 report, and every run without --contract-evaluation:
+        # no contract domain was selected, so there is none to be short of
+        # evidence for. This is what keeps existing matrices unchanged.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+        assert result.exit_code() == 0
+
+    def test_an_accepted_contribution_is_read_not_recomputed(
+        self, tmp_path: Path
+    ) -> None:
+        # A target run under `contract.unresolved=warn` writes 0 with its
+        # failures still listed. The aggregate holds none of the evidence to
+        # answer the question again, and must not re-impose what that run
+        # explicitly accepted.
+        _write_report(
+            tmp_path,
+            LINUX,
+            "COMPATIBLE",
+            contract_coverage_exit_contribution=0,
+            contract_coverage_failures=[
+                {"provider": "public_header", "side": "old", "suppressible": False}
+            ],
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+        assert result.exit_code() == 0
+        # ...but accepting the floor is not hiding the gap (ADR-049 §6.2).
+        # Deriving incompleteness from the contribution alone reported
+        # `incomplete_targets: []` and printed no diagnostic at all, for a
+        # matrix in which a contract domain never closed (Codex review).
+        assert result.contract_coverage_targets == (LINUX,)
+        assert result.to_dict()["contract_coverage"]["incomplete_targets"] == [LINUX]
+        text = result.render_text()
+        assert "Contract coverage:" in text
+        assert "contract.unresolved=warn" in text
+
+    def test_a_target_with_no_failures_is_not_listed_as_incomplete(
+        self, tmp_path: Path
+    ) -> None:
+        # The converse: the honest listing must not sweep in a target whose
+        # domain closed, or "incomplete" would mean nothing.
+        _write_report(
+            tmp_path,
+            LINUX,
+            "COMPATIBLE",
+            contract_coverage_exit_contribution=0,
+            contract_coverage_failures=[],
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_targets == ()
+        assert "Contract coverage:" not in result.render_text()
+
+    def test_an_accepted_scan_report_is_listed_from_its_nested_diff(
+        self, tmp_path: Path
+    ) -> None:
+        # A `scan --against` report nests the ledger inside `diff`, the same
+        # place the contribution lives -- so the presence check has to consult
+        # it too, or accepting the floor hides a scan target specifically.
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.8",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 0,
+                    "diff": {
+                        "contract_coverage_exit_contribution": 0,
+                        "contract_coverage_failures": [
+                            {"provider": "export_table", "side": "new"}
+                        ],
+                    },
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+        assert result.contract_coverage_targets == (LINUX,)
+
+    @pytest.mark.parametrize(
+        "bad",
+        ["1", True, -1, None, {"exit": 1}, 2, 4],
+        ids=["str", "bool", "negative", "null", "object", "two", "four"],
+    )
+    def test_a_malformed_contribution_fails_open(self, tmp_path: Path, bad) -> None:
+        # Unlike the `severity` gate's fail-closed rule: an unusable value here
+        # means "this report says nothing about a contract domain", and
+        # blocking on it would fail every report that never asked the question.
+        #
+        # `2`/`4` matter beyond ordinary malformed input (Codex review): the
+        # axis is a 0/1 floor, so passing a larger integer straight through
+        # would make the aggregate exit 2 or 4 -- indistinguishable from a
+        # source or ABI break -- off a value no valid report can carry.
+        #
+        # Parametrized rather than looped over per-case temp dirs: deriving a
+        # directory name from the value itself produced `case-dict-{'exit':
+        # 1}`, which is not a legal Windows path (WinError 267).
+        _write_report(
+            tmp_path, LINUX, "COMPATIBLE", contract_coverage_exit_contribution=bad
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+        assert result.exit_code() == 0
+
+    def test_the_axis_is_reported_separately_from_target_coverage(
+        self, tmp_path: Path
+    ) -> None:
+        # Both contribute 1 and they answer different questions ("did every
+        # required target report?" vs "could a reporting target close its
+        # contract domain?"), so an exit 1 must name which one raised it.
+        _write_report(
+            tmp_path, LINUX, "COMPATIBLE", contract_coverage_exit_contribution=1
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        payload = result.to_dict()
+        assert payload["contract_coverage"] == {
+            "exit_contribution": 1,
+            "incomplete_targets": [LINUX],
+        }
+        assert payload["coverage"]["blocking"] is False
+        assert payload["targets"][0]["contract_coverage_exit"] == 1
+        assert "Contract coverage:" in result.render_text()
+
+    def test_a_scan_report_carries_the_field_inside_its_diff_block(
+        self, tmp_path: Path
+    ) -> None:
+        # `cli_scan_baseline` writes the contribution into the summary that
+        # becomes `ScanOutcome.to_dict()['diff']`, so a scan report nests it
+        # one level down. Reading only the root left the aggregate failing
+        # (the scan's own exit_code already folds it) while reporting
+        # exit_contribution 0 and no incomplete targets -- hiding which axis
+        # caused the failure (Codex review).
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.0",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 1,
+                    "diff": {"contract_coverage_exit_contribution": 1},
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 1
+        assert result.contract_coverage_targets == (LINUX,)
+        assert result.to_dict()["contract_coverage"]["exit_contribution"] == 1
+
+    def test_a_non_scan_report_is_not_mined_for_a_nested_field(
+        self, tmp_path: Path
+    ) -> None:
+        # Keyed on `scan_schema_version`, mirroring `GateInfo.from_scan_report`:
+        # arbitrary JSON that happens to carry a `diff` key must not be read
+        # as a contract-coverage contribution.
+        _write_report(
+            tmp_path,
+            LINUX,
+            "COMPATIBLE",
+            diff={"contract_coverage_exit_contribution": 1},
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+
+    def test_a_root_level_value_still_wins_for_a_scan_report(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.0",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 0,
+                    "contract_coverage_exit_contribution": 0,
+                    "diff": {"contract_coverage_exit_contribution": 1},
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+
+    @pytest.mark.parametrize("bad_root", [True, False], ids=["true", "false"])
+    def test_a_boolean_root_does_not_shadow_a_valid_nested_value(
+        self, tmp_path: Path, bad_root
+    ) -> None:
+        # `True == 1` in Python, so a bare `raw not in (0, 1)` membership test
+        # accepted a malformed boolean root as usable, skipped the nested
+        # `diff` fallback, and only then rejected it on type -- reporting 0 for
+        # a scan whose own exit code had already folded a 1. A string root fell
+        # through correctly, which is what hid it (Codex review).
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.8",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 1,
+                    "contract_coverage_exit_contribution": bad_root,
+                    "diff": {"contract_coverage_exit_contribution": 1},
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 1
+        assert result.contract_coverage_targets == (LINUX,)
+
+    def test_a_valid_zero_root_still_wins_over_a_nested_value(
+        self, tmp_path: Path
+    ) -> None:
+        # The converse: the nested block is a *fallback* for an unusable root,
+        # never an override of a usable one. A run that legitimately recorded 0
+        # at the root must not have a stale nested 1 re-imposed on it.
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.8",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 0,
+                    "contract_coverage_exit_contribution": 0,
+                    "diff": {"contract_coverage_exit_contribution": 1},
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+
+    def test_a_service_scan_envelope_is_read_from_report_diff(
+        self, tmp_path: Path
+    ) -> None:
+        # `service_scan.run_scan` returns a typed `ScanResult` whose `report`
+        # field is populated from `ScanOutcome.to_dict()` -- so serializing that
+        # public result nests the ledger one level deeper than `scan --against`
+        # writes it. Reading only a root `diff` reported a 0 contribution and no
+        # incomplete target for a scan whose own exit_code already folded a 1
+        # (Codex review). Both readers share one block enumeration precisely so
+        # a nesting one knows and the other does not cannot happen.
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.8",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 1,
+                    "report": {
+                        "diff": {
+                            "contract_coverage_exit_contribution": 1,
+                            "contract_coverage_failures": [
+                                {"provider": "public_header", "side": "old"}
+                            ],
+                        }
+                    },
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 1
+        assert result.contract_coverage_targets == (LINUX,)
+
+    def test_a_non_scan_report_is_not_mined_for_a_report_diff_block(
+        self, tmp_path: Path
+    ) -> None:
+        # The deeper nesting stays keyed on `scan_schema_version` like the
+        # shallower one: arbitrary JSON carrying a `report` key is not a scan.
+        _write_report(tmp_path, LINUX, "COMPATIBLE")
+        path = tmp_path / f"abi-report-{LINUX}.json"
+        data = json.loads(path.read_text())
+        data["report"] = {"diff": {"contract_coverage_exit_contribution": 1}}
+        path.write_text(json.dumps(data))
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+        assert result.contract_coverage_targets == ()
+
+    def test_an_unavailable_target_contributes_nothing_on_this_axis(
+        self, tmp_path: Path
+    ) -> None:
+        # A report that never arrived is already gated by the required-coverage
+        # axis; inventing a contract-coverage failure for it would double-count
+        # the same absence under two different names.
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 0
+        assert result.contract_coverage_targets == ()
+        assert result.exit_code() == 1  # the required-coverage axis, not this one
