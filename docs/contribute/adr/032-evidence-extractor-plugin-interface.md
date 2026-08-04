@@ -4,7 +4,8 @@
 **Status:** Accepted — implemented (D1–D10). The extractor interface, capability
 model, action-permission ceiling, external-CLI manifest, collection modes, and
 reproducibility ledger ship in `abicheck/buildsource/extractor.py` +
-`extractor_manifest.py` (the package was renamed `evidence/`→`buildsource/`
+`abicheck/buildsource/extractor_manifest.py` (the package was renamed
+`evidence/`→`buildsource/`
 alongside the `EvidencePack`→`BuildSourcePack` rename, ADR-028 amendment).
 **CLI surface note (2026-08-04):** this model was originally driven by
 `collect`'s `--extractor-manifest` / `--allow-build-query` /

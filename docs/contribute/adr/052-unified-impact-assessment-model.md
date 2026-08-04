@@ -19,7 +19,8 @@ one consumer-overlay builder, Slice 9) construct `ImpactAssessment` directly
 and `assess_change` reuses their evidence fields, each verified safe by its
 own pipeline-ordering/purity audit; the remaining two producer sites named
 in D2's original decision (`post_processing.MarkReachability` especially,
-the suppression-safety-critical one; and `source_graph_findings.py`'s nine
+the suppression-safety-critical one; and
+`abicheck/buildsource/source_graph_findings.py`'s nine
 construction sites) are **not** migrated, and `suppression.py` — D2's
 original decision text also named it, but it turns out to construct no
 `Change` of its own — has an unresolved role that needs a documentation
