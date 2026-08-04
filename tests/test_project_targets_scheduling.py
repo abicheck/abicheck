@@ -29,6 +29,8 @@ so every profile written to date resolves exactly where it already ran.
 
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -147,6 +149,99 @@ class TestActionYmlAgreesOnDependencySources:
         action = (REPO_ROOT / "actions" / "check-target" / "action.yml").read_text()
         assert "dependency-source:" in action
         assert "dependency-source: ${{ inputs.dependency-source }}" in action
+
+
+def _resolve_dependency_source(
+    tmp_path: Path, *, source: str, install_deps: str, runner_os: str
+) -> str:
+    """Run `action.yml`'s own "Resolve dependency-source" script.
+
+    Extracted and executed rather than string-matched, so this pins the
+    resolution *behaviour* — a future edit that keeps the same words but
+    changes the branching still fails here.
+    """
+    action = yaml.safe_load((REPO_ROOT / "action.yml").read_text())
+    step = next(
+        s
+        for s in action["runs"]["steps"]
+        if s.get("name") == "Resolve dependency-source"
+    )
+    script = tmp_path / "resolve.sh"
+    script.write_text(step["run"])
+    out = tmp_path / "gh_output"
+    out.write_text("")
+    subprocess.run(
+        ["bash", str(script)],
+        check=True,
+        env={
+            **os.environ,
+            "INPUT_DEPENDENCY_SOURCE": source,
+            "INPUT_INSTALL_DEPS": install_deps,
+            "RUNNER_OS": runner_os,
+            "GITHUB_OUTPUT": str(out),
+        },
+        capture_output=True,
+    )
+    for line in out.read_text().splitlines():
+        if line.startswith("value="):
+            return line.split("=", 1)[1]
+    raise AssertionError("the resolve step wrote no value= output")
+
+
+class TestWindowsDependencySourceDefault:
+    """G34 Phase C made an `os: windows` profile schedulable for the first
+    time — straight into a guaranteed failure, until this (Codex review).
+
+    The unset default is `conda-forge`, and `action.yml` explicitly hard-fails
+    every conda-forge source on Windows (pixi's native-toolchain features
+    don't cover win-64), so a Windows cell that declared no
+    `dependency_source:` never reached analysis at all.
+    """
+
+    def test_windows_defaults_to_system_not_conda_forge(self, tmp_path: Path) -> None:
+        assert (
+            _resolve_dependency_source(
+                tmp_path, source="", install_deps="true", runner_os="Windows"
+            )
+            == "system"
+        )
+
+    @pytest.mark.parametrize("runner_os", ["Linux", "macOS"])
+    def test_other_platforms_keep_the_conda_forge_default(
+        self, tmp_path: Path, runner_os: str
+    ) -> None:
+        assert (
+            _resolve_dependency_source(
+                tmp_path, source="", install_deps="true", runner_os=runner_os
+            )
+            == "conda-forge"
+        )
+
+    def test_an_explicit_conda_forge_on_windows_is_not_rewritten(
+        self, tmp_path: Path
+    ) -> None:
+        """Asking for something unsupported must still say so — the later
+        step's hard error is the right answer there, not a silent
+        substitution."""
+        assert (
+            _resolve_dependency_source(
+                tmp_path,
+                source="conda-forge-clang20",
+                install_deps="true",
+                runner_os="Windows",
+            )
+            == "conda-forge-clang20"
+        )
+
+    def test_install_deps_false_still_wins_on_windows(self, tmp_path: Path) -> None:
+        """The legacy opt-out is checked before the platform default, so an
+        explicit `install-deps: false` is unaffected."""
+        assert (
+            _resolve_dependency_source(
+                tmp_path, source="", install_deps="false", runner_os="Windows"
+            )
+            == "none"
+        )
 
 
 class TestUnroutableOsIsAValidationError:

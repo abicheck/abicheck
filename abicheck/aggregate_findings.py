@@ -384,27 +384,34 @@ def _with_bundle_attribution(entry: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 #: Every field ``compare_report.schema.json``'s ``$defs/change`` marks
-#: ``required``. All three ``compare`` report modes emit all six; an entry
-#: missing one was not written by a conformant producer, so it is no
-#: evidence that the array was enumerated successfully — it resolves to a
-#: *differently* discriminated identity (``old_value``/``new_value`` are part
-#: of the discriminator) while leaving the report ``complete``, which is how
-#: a malformed array could clear another profile's finding (Codex review).
-#: Present-but-``None`` is accepted throughout: that is a producer emitting
-#: the field, not omitting it.
+#: ``required``, mapped to whether the schema also permits ``null`` there.
+#: All three ``compare`` report modes emit all six; an entry missing one —
+#: or carrying ``null`` where the schema says ``"string"`` — was not written
+#: by a conformant producer, so it is no evidence that the array was
+#: enumerated successfully. It resolves to a *differently* discriminated
+#: identity (``old_value``/``new_value`` are part of the discriminator, and
+#: a ``null`` ``symbol`` reads as an empty one) while leaving the report
+#: ``complete``, which is how a malformed array could clear another
+#: profile's finding (Codex review).
+#:
+#: Checking presence alone was not enough, and the nullability split is the
+#: schema's own: ``old_value``/``new_value`` are declared ``["string",
+#: "null"]`` because a finding with no before/after value really does emit
+#: them as ``null``, while ``symbol``/``description``/``kind``/``severity``
+#: are plain ``"string"``.
 #:
 #: The schema is the fact owner; this mirror exists so the check is a cheap
-#: key test rather than a schema validation on every entry, and
-#: ``TestSchemaRequiredFieldsAgree`` asserts the two agree so it cannot
-#: drift.
-_CONFORMANT_CHANGE_FIELDS = (
-    "kind",
-    "symbol",
-    "description",
-    "old_value",
-    "new_value",
-    "severity",
-)
+#: per-key test rather than a full schema validation on every entry, and
+#: ``TestSchemaRequiredFieldsAgree`` asserts both the field set *and* the
+#: nullability agree with it, so neither half can drift.
+_CONFORMANT_CHANGE_FIELDS = {
+    "kind": False,
+    "symbol": False,
+    "description": False,
+    "old_value": True,
+    "new_value": True,
+    "severity": False,
+}
 
 #: Identity fields that must be a plain string when present. A non-string
 #: here does not merely degrade the identity, it silently changes it:
@@ -470,15 +477,34 @@ def _is_usable_finding_entry(entry: object) -> bool:
 
 def _is_conformant_change_entry(entry: Mapping[str, Any]) -> bool:
     """Whether a readable ``changes[]`` *entry* carries every field the
-    compare-report schema requires of one.
+    compare-report schema requires of one, at the type it requires.
 
     Only asked of ``changes``, and only to decide completeness. A readable
     entry that fails here is still a real finding this module keeps -- it
     just stops the array from being treated as the whole story, since an
     entry no conformant producer would have written is not evidence that the
     rest were enumerated successfully either.
+
+    ``null`` is accepted exactly where the schema accepts it (Codex review):
+    a present-but-``null`` ``old_value`` is an ordinary finding with no
+    before-value, while a ``null`` ``symbol`` is schema-invalid *and* reads
+    as an empty spelling, which is precisely the differently-identified
+    entry that must not clear another profile.
     """
-    return all(field in entry for field in _CONFORMANT_CHANGE_FIELDS)
+    for field, nullable in _CONFORMANT_CHANGE_FIELDS.items():
+        if field not in entry:
+            return False
+        value = entry[field]
+        if value is None:
+            if not nullable:
+                return False
+        elif not isinstance(value, (str, list, tuple)):
+            # `str` is what the schema declares; list/tuple are the
+            # structured `old_value`/`new_value` shapes a real producer
+            # emits and `_is_usable_finding_entry` already accepts, so
+            # rejecting them here would mark a genuine report incomplete.
+            return False
+    return True
 
 
 #: What a report says about its own ``changes`` array being *displayed*

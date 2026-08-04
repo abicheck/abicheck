@@ -862,15 +862,61 @@ class TestFindingEntryValidation:
         assert result.complete is False
         assert len(result.findings) == (0 if missing == "kind" else 1)
 
-    def test_a_present_but_null_required_field_is_accepted(self) -> None:
-        """Present-but-`None` is a producer emitting the field, not omitting
-        it — `reporter._change_to_dict` writes `old_value`/`new_value` that
-        way for any finding that carries no before/after value."""
+    @pytest.mark.parametrize("field", ["old_value", "new_value"])
+    def test_null_is_accepted_where_the_schema_allows_it(self, field: str) -> None:
+        """`old_value`/`new_value` are declared `["string", "null"]` because
+        `reporter._change_to_dict` really writes them that way for a finding
+        carrying no before/after value — an ordinary report, not a malformed
+        one."""
         result = parse_report_findings(
-            {"changes": [_change_entry(**{**_MINIMAL, "description": None})]}
+            {"changes": [_change_entry(**{**_MINIMAL, field: None})]}
         )
         assert len(result.findings) == 1
         assert result.complete is True
+
+    @pytest.mark.parametrize("field", ["kind", "symbol", "description", "severity"])
+    def test_null_is_rejected_where_the_schema_requires_a_string(
+        self, field: str
+    ) -> None:
+        """The other four are plain `"string"`. A `null` there is
+        schema-invalid *and* reads as an empty spelling, so the entry
+        resolves to a different identity than the same finding elsewhere —
+        exactly the entry that must not clear another profile (Codex
+        review)."""
+        result = parse_report_findings(
+            {"changes": [_change_entry(**{**_MINIMAL, field: None})]}
+        )
+        assert result.complete is False
+
+    def test_a_wrong_typed_severity_is_readable_but_not_conformant(self) -> None:
+        """`severity` is required by the schema but not part of the identity,
+        so a non-string there leaves the finding perfectly readable while
+        still being something no conformant producer wrote — the one field
+        where the two predicates genuinely disagree."""
+        result = parse_report_findings(
+            {"changes": [_change_entry(**{**_MINIMAL, "severity": 42})]}
+        )
+        assert len(result.findings) == 1
+        assert result.complete is False
+
+    def test_a_null_required_field_still_convicts_its_own_profile(
+        self, tmp_path: Path
+    ) -> None:
+        """Rejected for completeness, kept as a finding — the same asymmetry
+        a missing field gets."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED])
+        _write_report(
+            tmp_path,
+            CLANG,
+            "BREAKING",
+            changes=[_change_entry(**{**_MINIMAL, "symbol": None})],
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        by_kind = {e.kinds: e for e in r.finding_matrix}
+        assert by_kind[("type_size_changed",)].undetermined_profiles == (
+            "linux-clang20",
+        )
+        assert by_kind[("func_removed",)].affected_profiles == ("linux-clang20",)
 
     def test_a_readable_but_non_conformant_entry_still_convicts(
         self, tmp_path: Path
@@ -894,20 +940,34 @@ class TestFindingEntryValidation:
 
 class TestSchemaRequiredFieldsAgree:
     """`_CONFORMANT_CHANGE_FIELDS` mirrors `compare_report.schema.json`'s own
-    `required` list so the check stays a cheap key test. The schema is the
-    fact owner; this is what stops the mirror drifting from it."""
+    `required` list *and* its per-field nullability, so the check stays a
+    cheap per-key test instead of a full validation on every entry. The
+    schema is the fact owner; this is what stops either half drifting."""
 
-    def test_mirror_matches_the_schema(self) -> None:
-        schema = json.loads(
+    @staticmethod
+    def _change_def() -> dict:
+        return json.loads(
             (
                 Path(__file__).resolve().parents[1]
                 / "abicheck"
                 / "schemas"
                 / "compare_report.schema.json"
             ).read_text()
+        )["$defs"]["change"]
+
+    def test_the_field_set_matches_the_schema(self) -> None:
+        assert sorted(_CONFORMANT_CHANGE_FIELDS) == sorted(
+            self._change_def()["required"]
         )
-        required = schema["$defs"]["change"]["required"]
-        assert sorted(_CONFORMANT_CHANGE_FIELDS) == sorted(required)
+
+    def test_the_nullability_matches_the_schema(self) -> None:
+        """Checking presence alone let a `null` `symbol` count as conformant
+        (Codex review); this pins the split that fixed it to its source."""
+        properties = self._change_def()["properties"]
+        for field, nullable in _CONFORMANT_CHANGE_FIELDS.items():
+            declared = properties[field]["type"]
+            allows_null = isinstance(declared, list) and "null" in declared
+            assert allows_null is nullable, field
 
     def test_unusable_entry_cannot_clear_another_profile(self, tmp_path: Path) -> None:
         """The end-to-end consequence: a profile whose findings array holds

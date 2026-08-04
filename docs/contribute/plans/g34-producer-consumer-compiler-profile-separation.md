@@ -268,6 +268,31 @@ confirmed by reading the workflow, not asserted from a design doc):
       in isolation (plain Python, no workflow run), and
       `test_run_plan.py`'s `TestSchedulingProjection` covers the projection
       into target and bundle cells.
+- [x] **The unset `dependency-source` default is OS-aware.** Making Windows
+      cells schedulable for the first time exposed that the existing default
+      is a *Linux/macOS* default: an unset `dependency-source` with
+      `install-deps: true` resolves to `conda-forge`, and `action.yml` then
+      explicitly hard-fails every conda-forge source on Windows (pixi's
+      `native-toolchain*` features don't cover win-64), so a Windows cell
+      declaring no `dependency_source:` — including this plan's own
+      `windows-msvc` example — would have been scheduled straight into an
+      `exit 1` before reaching analysis (Codex review, P1). Fixed in the one
+      place that already owns the fallback rule and already knows the
+      platform: `action.yml`'s own `Resolve dependency-source` step now
+      resolves an unset value to `system` on a Windows runner. That is what
+      the conda-forge-on-Windows error message already tells users to pick,
+      and `install-deps.sh`'s Windows branch warns and continues rather than
+      failing, matching the "toolchain is pre-installed on the image" story
+      an MSVC lane has anyway. Deliberately *not* fixed by injecting a
+      default into the run-plan: that would have made a per-cell value
+      silently outrank the workflow-level `dependency-source` input for
+      Windows cells only. An **explicit** conda-forge* still fails —
+      requesting something unsupported should say so rather than be
+      rewritten — and no existing consumer can regress, since the path this
+      replaces was an unconditional error. `TestWindowsDependencySourceDefault`
+      extracts and *runs* the real resolve script rather than string-matching
+      it, so a future edit that keeps the wording but changes the branching
+      still fails.
 - [ ] Out of scope for this phase, still open: an actual native
       `windows-latest` CI lane exercising a real MSVC profile end-to-end
       through `check-project.yml` — that needs a real fixture project and
@@ -443,6 +468,20 @@ confirmed by reading the workflow, not asserted from a design doc):
       Test fixtures now build `changes[]` entries through one `_change_entry`
       helper that fills the required set — hand-written near-miss fixtures
       are how this validation drifted from producer reality to begin with.
+- [x] **Conformance checks the schema's declared *types*, not just key
+      presence.** A first cut of the split above tested only that each
+      required key existed, so `symbol: null` — schema-invalid, and read as
+      an empty spelling that resolves to a different identity than the same
+      finding elsewhere — still counted as conformant and left the report
+      `complete` (ninth Codex review round). The nullability split is the
+      schema's own: `old_value`/`new_value` are declared `["string",
+      "null"]` because a finding with no before/after value really is
+      emitted that way, while `kind`/`symbol`/`description`/`severity` are
+      plain `"string"`. `_CONFORMANT_CHANGE_FIELDS` became a field →
+      nullable map and `TestSchemaRequiredFieldsAgree` now pins both halves
+      to the schema. `severity` is the one field where the two predicates
+      genuinely disagree — required by the schema but not part of the
+      identity, so a non-string there is readable yet non-conformant.
 - [x] A well-formed array is not by itself proof that nothing else was
       found: `compare --show-only` narrows `changes` (`reporter.to_json`)
       while the verdict, the gate, and the `summary` block all keep
