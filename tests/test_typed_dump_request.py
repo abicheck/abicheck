@@ -614,6 +614,9 @@ class TestAbiScanForwarding:
         monkeypatch.setattr(service, "run_scan_subprocess", _fake_subprocess)
         raw = abi_scan(
             str(snap_path),
+            # These are documented "With ``against``" arguments, and an
+            # audit-only call now rejects them up front.
+            against=str(snap_path),
             build_info=str(build_dir),
             policy="sdk_vendor",
             policy_file=str(policy_file),
@@ -651,7 +654,7 @@ class TestAbiScanForwarding:
             return {"verdict": "COMPATIBLE"}
 
         monkeypatch.setattr(service, "run_scan_subprocess", _fake_subprocess)
-        abi_scan(str(snap_path), suppression_file=str(suppress))
+        abi_scan(str(snap_path), against=str(snap_path), suppression_file=str(suppress))
         assert captured["req"].suppression is not None
 
     def test_unknown_policy_is_a_usage_error(self, snap_path: Path):
@@ -676,7 +679,12 @@ class TestAbiScanForwarding:
             lambda req, timeout: {"verdict": "COMPATIBLE"},
         )
         data = json.loads(
-            abi_scan(str(snap_path), policy="nonsense", policy_file=str(policy_file))
+            abi_scan(
+                str(snap_path),
+                against=str(snap_path),
+                policy="nonsense",
+                policy_file=str(policy_file),
+            )
         )
         assert data["status"] == "ok"
 
@@ -1244,3 +1252,64 @@ class TestDependencySysrootIsForwarded:
             DumpRequest(input=InputSpec(path=snap_path), follow_dependencies=True)
         )
         assert captured["sysroot"] is None
+
+
+class TestAuditOnlyScanRejectsComparisonKnobs:
+    """A one-build audit rejects comparison-only arguments up front.
+
+    `run_scan` already rejects them, but inside the spawned worker, where
+    `run_scan_subprocess` rethrows as `RuntimeError` and the tool reports a
+    sanitized unexpected error — after paying for a process spawn. The check
+    now happens before spawning, reusing the engine's own field list (Codex
+    review).
+    """
+
+    @pytest.mark.parametrize(
+        ("kwargs", "field"),
+        [
+            ({"policy": "sdk_vendor"}, "policy"),
+            ({"contract_evaluation": True}, "contract_evaluation"),
+        ],
+    )
+    def test_rejected_without_against(
+        self, snap_path: Path, monkeypatch, kwargs: dict, field: str
+    ):
+        from abicheck import service
+        from abicheck.mcp_server import abi_scan
+
+        def _never(req, timeout):  # pragma: no cover - must never run
+            raise AssertionError("spawned a worker for a request rejected up front")
+
+        monkeypatch.setattr(service, "run_scan_subprocess", _never)
+        data = json.loads(abi_scan(str(snap_path), **kwargs))
+        assert data["status"] == "error"
+        assert field in data["error"]
+        # The engine's wording is `ScanRequest`-shaped; the tool adds the
+        # argument a caller can actually act on.
+        assert "`against`" in data["error"]
+
+    def test_accepted_with_against(self, snap_path: Path, monkeypatch):
+        from abicheck import service
+        from abicheck.mcp_server import abi_scan
+
+        monkeypatch.setattr(
+            service,
+            "run_scan_subprocess",
+            lambda req, timeout: {"verdict": "COMPATIBLE"},
+        )
+        data = json.loads(
+            abi_scan(str(snap_path), against=str(snap_path), policy="sdk_vendor")
+        )
+        assert data["status"] == "ok"
+
+    def test_plain_audit_still_runs(self, snap_path: Path, monkeypatch):
+        """Defaults must not trip the guard."""
+        from abicheck import service
+        from abicheck.mcp_server import abi_scan
+
+        monkeypatch.setattr(
+            service,
+            "run_scan_subprocess",
+            lambda req, timeout: {"verdict": "COMPATIBLE"},
+        )
+        assert json.loads(abi_scan(str(snap_path)))["status"] == "ok"

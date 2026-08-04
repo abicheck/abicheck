@@ -52,7 +52,7 @@ from .checker_policy import (
 )
 from .compile_context import CompileContext
 from .contract_scoped_promotion import stamp_scoped_result_findings
-from .errors import ProfileMismatchError, ScopeMismatchError
+from .errors import ProfileMismatchError, ScopeMismatchError, ValidationError
 from .mcp_server_inputs import (  # noqa: F401  (re-exported for API stability)
     _ALLOWED_BINARY_SUFFIXES,
     _ALLOWED_OUTPUT_SUFFIXES,
@@ -1802,6 +1802,28 @@ def abi_scan(
             contract_evaluation=contract_evaluation,
             contract_mode=contract_mode,
         )
+
+        # A one-build audit (no `against`) has nothing for the comparison-only
+        # arguments to configure, and `run_scan` rejects them -- but it does so
+        # *inside* the spawned worker, where `run_scan_subprocess` rethrows it
+        # as a RuntimeError this tool then reports as a sanitized unexpected
+        # error, after paying for a process spawn. Checked here instead, so the
+        # caller gets the usage error the CLI would give them (Codex review).
+        # Reuses the engine's own field list rather than restating it: a field
+        # that becomes comparison-only later must not need a second edit here.
+        if base_path is None:
+            from .service_scan import _reject_comparison_only_fields
+
+            try:
+                _reject_comparison_only_fields(req)
+            except ValidationError as exc:
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"{exc} On this tool, set `against` to compare "
+                        "against a baseline, or drop these arguments.",
+                    }
+                )
 
         # Run in a killable child process so a deep/hung scan that exceeds the
         # timeout is *terminated* (process + clang subtree) instead of orphaned to

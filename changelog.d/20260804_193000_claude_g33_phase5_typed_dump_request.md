@@ -63,6 +63,11 @@
   an ordinary auto/castxml pass: it is source-ABI-replay only, and a scan has
   no request-level frontend to carry it into replay. `abi_dump` still accepts
   it, because `DumpRequest.frontend` does.
+- **A one-build `abi_scan` audit rejects comparison-only arguments up front** —
+  `policy`/`policy_file`/`suppression_file`/`contract_evaluation` without
+  `against` were already rejected by the engine, but only inside the spawned
+  worker, so the caller got a sanitized unexpected error after paying for a
+  process spawn instead of the usage error the CLI gives.
 - **The MCP `abi_compare` receipt records the selected `contract_mode`** — the
   persisted `contract_context` named the built-in default domain even when the
   caller selected `exports`/`all`, which since ADR-049 Phase 7 is the domain
