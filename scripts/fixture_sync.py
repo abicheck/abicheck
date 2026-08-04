@@ -72,8 +72,10 @@ def sync_fixtures(
             content = render_fixture(builder, to_dict)
             path = case_dir / filename
             if check:
-                current = path.read_text(encoding="utf-8") if path.is_file() else ""
-                if current != content:
+                # Absence is drift in its own right, checked before the content
+                # comparison: mapping a missing file to "" would let an empty
+                # literal fixture pass --check while nothing is committed.
+                if not path.is_file() or path.read_text(encoding="utf-8") != content:
                     print(f"drift: {path.relative_to(root)}", file=sys.stderr)
                     drift = True
             else:

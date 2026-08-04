@@ -1721,7 +1721,7 @@ def test_extract_from_safe_args_rechecks_deadline_before_walking_ast(
 
     real_loads = clang_ast_run.json.loads
 
-    def _slow_loads(text):
+    def _slow_loads(text: str) -> object:
         time.sleep(0.05)
         return real_loads(text)
 

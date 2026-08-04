@@ -14,7 +14,11 @@ from click.core import ParameterSource
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_options import COMPARE_PROFILES, apply_compare_profile
+from abicheck.cli_options import (
+    COMPARE_PROFILES,
+    _profile_targets_set_input,
+    apply_compare_profile,
+)
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
@@ -158,3 +162,39 @@ class TestProfileEndToEnd:
         )
         assert result.exit_code != 0
         assert "bogus" in result.output or "Invalid value" in result.output
+
+
+class TestProfileOperandClassification:
+    """``_profile_targets_set_input`` decides whether a ``--profile`` default
+    applies to a set input (directory/package) or a single pair."""
+
+    def test_an_unclassifiable_operand_contributes_no_kind_and_is_logged(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Classification here is best-effort — the real dispatch in
+        ``run_compare`` is what reports an unreadable operand. The broad handler
+        logs at debug rather than swallowing silently (bandit B112), so a
+        mis-applied profile default stays diagnosable."""
+        import logging
+
+        from abicheck import cli_resolve
+        from abicheck.cli_options import _profile_targets_set_input
+
+        def _boom(_path: Path) -> str:
+            raise OSError("unreadable operand")
+
+        monkeypatch.setattr(cli_resolve, "classify_compare_operand", _boom)
+        with caplog.at_level(logging.DEBUG, logger="abicheck.cli_options"):
+            assert (
+                _profile_targets_set_input({"old_input": "a.so", "new_input": "b.so"})
+                is False
+            )
+        assert any("unclassifiable operand" in r.message for r in caplog.records)
+
+    def test_a_directory_operand_is_recognised_as_a_set_input(
+        self, tmp_path: Path
+    ) -> None:
+        assert _profile_targets_set_input({"old_input": str(tmp_path)}) is True
+
+    def test_a_missing_operand_key_is_skipped_without_classifying(self) -> None:
+        assert _profile_targets_set_input({"old_input": None}) is False
