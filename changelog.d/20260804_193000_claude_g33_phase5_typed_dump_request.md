@@ -38,6 +38,16 @@
   embedded. The resolved compile context now drops a non-header-AST frontend,
   fixing the new `abi_dump(ast_frontend="android", ...)` path and the
   pre-existing typed `CompareRequest` one alike.
+- **`build_info` is held to `ABICHECK_MCP_MAX_FILE_SIZE`** — it accepts a
+  `compile_commands.json` (or a Bazel jsonproto), not only a directory, and the
+  build-source loader parses it, so an oversized build-info artifact bypassed
+  the limit every other file-shaped MCP input is held to. The guard now lives
+  in the one helper every evidence path goes through.
+- **`abi_scan`'s compile-context arguments are validated** — `ast_frontend` and
+  `frontend_context` were copied into `ScanRequest` unvalidated (it has no
+  `validate()` of its own), so a typo or an uppercased `"DEVICE"` survived into
+  the spawned scan worker to be ignored or resurface as a generic failure. Both
+  tools now reject the same mistake with the same text `abi_dump` produces.
 - **A nonexistent `sources`/`build_info`/`compile_db` path is now a usage
   error on the MCP tools** — these infer an evidence-collection depth from
   being set at all, and only an *explicit* depth arms the depth floor, so a

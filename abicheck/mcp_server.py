@@ -302,11 +302,19 @@ def abi_dump(
                 if dump_manifest
                 else None
             )
+            compile_ctx = _compile_context_from_args(
+                ast_frontend=ast_frontend,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                frontend_context=frontend_context,
+            )
         except ValueError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
         manifest = None
         if manifest_path is not None:
-            _check_file_size(manifest_path, label="dump_manifest")
             from .dump_manifest import load_manifest
 
             manifest = load_manifest(manifest_path)
@@ -322,15 +330,7 @@ def abi_dump(
                 sources=src_path,
                 build_info=bi_path,
                 dump_manifest=manifest,
-                compile=_compile_context_from_args(
-                    ast_frontend=ast_frontend,
-                    gcc_path=gcc_path,
-                    gcc_prefix=gcc_prefix,
-                    gcc_options=gcc_options,
-                    sysroot=sysroot,
-                    nostdinc=nostdinc,
-                    frontend_context=frontend_context,
-                ),
+                compile=compile_ctx,
                 # Same guard as `abi_compare`: this tool size-checks only the
                 # caller-supplied path, so following a GNU ld script's INPUT()
                 # target would reach a file that never went through it.
@@ -1709,12 +1709,17 @@ def abi_scan(
                 _existing_path(build_info, label="build_info") if build_info else None
             )
             base_path = _existing_path(against, label="against") if against else None
+            compile_ctx = _compile_context_from_args(
+                ast_frontend=ast_frontend,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                frontend_context=frontend_context,
+            )
         except ValueError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
-        if cdb_path is not None:
-            _check_file_size(cdb_path, label="compile_db")
-        if base_path is not None:
-            _check_file_size(base_path, label="against")
 
         # ADR-049 Phase 5 §6.4: a `--against` comparison is scoped/suppressed/
         # policy-classified the same way a direct `compare` is, so this tool
@@ -1776,16 +1781,7 @@ def abi_scan(
             seeded=changed_paths is not None,
             budget=Budget(),
             lang=language,
-            compile=_compile_context_from_args(
-                ast_frontend=ast_frontend,
-                gcc_path=gcc_path,
-                gcc_prefix=gcc_prefix,
-                gcc_options=gcc_options,
-                sysroot=sysroot,
-                nostdinc=nostdinc,
-                frontend_context=frontend_context,
-            )
-            or CompileContext(),
+            compile=compile_ctx or CompileContext(),
             policy=policy,
             policy_file=loaded_policy_file,
             suppression=suppression,

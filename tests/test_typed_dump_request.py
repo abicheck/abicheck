@@ -903,3 +903,122 @@ class TestEvidencePathsMustExist:
         data = json.loads(abi_dump(str(snap_path), build_info=str(tmp_path)))
         assert data["status"] == "ok"
         assert captured["build_info"] == tmp_path.resolve()
+
+
+class TestCompileContextArgumentValidation:
+    """The compile-context knobs are validated where both tools assemble them.
+
+    ``abi_dump`` builds a ``DumpRequest`` whose ``validate()`` would catch a
+    typo, but ``abi_scan`` copies straight into a ``ScanRequest``, which has no
+    ``validate()`` — so a misspelled frontend or an uppercased ``"DEVICE"``
+    survived into the spawned scan worker (Codex review, second round).
+    """
+
+    def test_normalizes_frontend_context_case(self):
+        from abicheck.mcp_server_inputs import _compile_context_from_args
+
+        ctx = _compile_context_from_args(frontend_context="DEVICE")
+        assert ctx is not None
+        assert ctx.frontend_context == "device"
+
+    def test_downgrades_a_non_header_ast_frontend(self):
+        """``android`` is a legal ``--ast-frontend`` but not a header backend.
+
+        A ``ScanRequest`` has no request-level frontend field to carry it for
+        L4, and ``_resolve_header_backend`` raises on it — so the compile
+        context gets ``auto``. Here that leaves the context entirely default,
+        which is the right answer: nothing was customised.
+        """
+        from abicheck.mcp_server_inputs import _compile_context_from_args
+
+        assert _compile_context_from_args(ast_frontend="android") is None
+        ctx = _compile_context_from_args(ast_frontend="android", nostdinc=True)
+        assert ctx is not None
+        assert ctx.frontend == "auto"
+
+    @pytest.mark.parametrize(
+        ("kwargs", "fragment"),
+        [
+            ({"ast_frontend": "castxmll"}, "unsupported AST frontend 'castxmll'"),
+            ({"frontend_context": "gpu"}, "unsupported frontend context 'gpu'"),
+        ],
+    )
+    def test_rejects_bad_values(self, kwargs: dict, fragment: str):
+        from abicheck.mcp_server_inputs import _compile_context_from_args
+
+        with pytest.raises(ValueError, match=fragment):
+            _compile_context_from_args(**kwargs)
+
+    @pytest.mark.parametrize("tool", ["abi_dump", "abi_scan"])
+    @pytest.mark.parametrize(
+        ("kwargs", "fragment"),
+        [
+            ({"ast_frontend": "castxmll"}, "unsupported AST frontend"),
+            ({"frontend_context": "gpu"}, "unsupported frontend context"),
+        ],
+    )
+    def test_both_tools_report_the_same_usage_error(
+        self, snap_path: Path, tool: str, kwargs: dict, fragment: str
+    ):
+        """Identical text on both surfaces — the message helpers come from
+        ``api_types``, so this cannot drift from ``DumpRequest.validate()``."""
+        import abicheck.mcp_server as mcp_server
+
+        data = json.loads(getattr(mcp_server, tool)(str(snap_path), **kwargs))
+        assert data["status"] == "error"
+        assert fragment in data["error"]
+
+
+class TestEvidenceFileSizeGuard:
+    """``build_info`` may be a file, so it is held to ``MCP_MAX_FILE_SIZE`` too.
+
+    It accepts a ``compile_commands.json`` (or a Bazel jsonproto), not only a
+    directory, and the build-source loader parses it — so without this an
+    oversized build-info artifact bypassed the limit every other file-shaped
+    input is held to (Codex review, second round).
+    """
+
+    @pytest.fixture()
+    def small_limit(self, monkeypatch):
+        """Shrink the limit on the module object the code under test resolves.
+
+        Not ``from abicheck import mcp_shared`` — under some test-selection
+        orders the suite ends up with two distinct ``abicheck.mcp_shared``
+        module objects, so patching the one *this file* imports can leave the
+        one ``mcp_server_inputs`` holds untouched, and the guard silently
+        reads the original 500 MB. Reaching through the module under test is
+        identity-proof.
+        """
+        from abicheck import mcp_server_inputs
+
+        monkeypatch.setattr(mcp_server_inputs.mcp_shared, "MCP_MAX_FILE_SIZE", 4096)
+
+    @pytest.mark.parametrize("tool", ["abi_dump", "abi_scan"])
+    def test_oversized_build_info_file_is_rejected(
+        self, snap_path: Path, tmp_path: Path, small_limit, tool: str
+    ):
+        import abicheck.mcp_server as mcp_server
+
+        big = tmp_path / "compile_commands.json"
+        big.write_text("[]" + " " * 8192, encoding="utf-8")
+        data = json.loads(
+            getattr(mcp_server, tool)(str(snap_path), build_info=str(big))
+        )
+        assert data["status"] == "error"
+        assert "build_info is" in data["error"] and "exceeds limit" in data["error"]
+
+    def test_a_directory_build_info_is_not_size_checked(
+        self, snap_path: Path, tmp_path: Path, small_limit, monkeypatch
+    ):
+        """A size limit means nothing for a directory — it must not be applied."""
+        from abicheck import service
+        from abicheck.mcp_server import abi_dump
+
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        (build_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+        monkeypatch.setattr(
+            service, "run_dump_request", lambda request, **kw: _snapshot()
+        )
+        data = json.loads(abi_dump(str(snap_path), build_info=str(build_dir)))
+        assert data["status"] == "ok"

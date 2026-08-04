@@ -35,6 +35,7 @@ from __future__ import annotations
 import platform
 from pathlib import Path
 
+from . import mcp_shared
 from .compile_context import CompileContext
 from .mcp_shared import _safe_read_path
 from .model import AbiSnapshot
@@ -278,11 +279,26 @@ def _existing_path(raw: str, *, label: str) -> Path:
     runs for an *explicit* depth, and the whole point of these arguments is
     that they infer one.
 
+    The ``MCP_MAX_FILE_SIZE`` guard is applied here too, for whichever of these
+    resolve to a *file*: ``build_info`` accepts a ``compile_commands.json`` (or
+    a Bazel jsonproto), not only a directory, and the build-source loader
+    parses it — so without this an oversized build-info artifact bypassed the
+    limit every other file-shaped input is held to (Codex review, second
+    round). Folding it in here rather than leaving it to each call site is what
+    makes that impossible to forget again; a directory is skipped, since a
+    size limit means nothing for one.
+
     Raises ValueError with the message the tool returns as its error payload.
     """
     path = _safe_read_path(raw, label=label)
     if not path.exists():
         raise ValueError(f"{label} not found: {path}")
+    if path.is_file():
+        # Module-qualified, per ``mcp_shared``'s own documented rule: these
+        # names are runtime-mutable state (``main()`` overrides the limit from
+        # ``--max-file-size``), so a reader must resolve them through the
+        # module object rather than bind them at import time.
+        mcp_shared._check_file_size(path, label=label)
     return path
 
 
@@ -356,14 +372,48 @@ def _compile_context_from_args(
     ``compile_context_options`` family the ``dump`` and ``scan`` CLIs share via
     one decorator (ADR-037 D3), so they assemble it through one function here
     for the same reason.
+
+    Both values are **validated and normalized here**, not left to the request
+    type (Codex review, second round). ``abi_dump`` builds a ``DumpRequest``
+    whose ``validate()`` would catch a typo, but ``abi_scan`` copies straight
+    into a ``ScanRequest``, which has no ``validate()`` — so a misspelled
+    frontend or an accepted-but-uppercased ``"DEVICE"`` survived into the
+    spawned scan worker, to be ignored when no headers are parsed or to
+    resurface as a generic sanitized worker failure. Validating in the one
+    place both tools assemble the context gives them the CLI's usage error,
+    with the *identical* text ``DumpRequest.validate()`` produces (the message
+    helpers are imported from ``api_types`` rather than restated).
+
+    A non-header-AST frontend (``android``, which is source-ABI only) is
+    downgraded to ``"auto"`` for the *compile context* specifically: it is a
+    legal ``--ast-frontend`` value, but ``dumper._resolve_header_backend``
+    raises on anything outside ``castxml``/``clang``/``hybrid``/``auto``, and
+    a ``ScanRequest`` has no separate request-level frontend field to carry it
+    for L4. ``DumpRequest.frontend`` still receives the caller's value, so the
+    dump path keeps it where the source-ABI layer can act on it.
+
+    Raises ValueError with the message the tool returns as its error payload.
     """
+    from .api_types import (
+        HEADER_AST_FRONTENDS,
+        _frontend_context_errors,
+        _frontend_value_errors,
+    )
+
+    errors = _frontend_value_errors(ast_frontend) + _frontend_context_errors(
+        frontend_context
+    )
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    frontend = ast_frontend.lower()
     context = CompileContext(
         gcc_path=gcc_path,
         gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
         sysroot=_safe_read_path(sysroot, label="sysroot") if sysroot else None,
         nostdinc=nostdinc,
-        frontend=ast_frontend,
-        frontend_context=frontend_context,
+        frontend=frontend if frontend in HEADER_AST_FRONTENDS else "auto",
+        frontend_context=frontend_context.lower(),
     )
     return None if context.is_default else context
