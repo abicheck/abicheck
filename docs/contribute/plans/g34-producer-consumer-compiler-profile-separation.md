@@ -388,14 +388,36 @@ confirmed by reading the workflow, not asserted from a design doc):
       the original slice treated every release report as unknown and let a
       partially-unparseable `changes` array read as an exhaustive one.)
 - [x] An entry must carry the fields the compare-report schema marks
-      *required* on a `changes[]` entry (`symbol`, `description`) before the
-      array counts as enumerated — a `kind` alone is not something a
-      conformant producer wrote, so it is no evidence the array is
-      exhaustive. Present-but-`null` is accepted:
-      `cli_scan_baseline._baseline_finding_dicts` really does emit those keys
-      with `None`, and that is a producer emitting the field rather than
-      omitting it. (Sixth Codex review round — the type-only validation from
-      the third round left the "field absent entirely" hole open.)
+      *required* on a `changes[]` entry before the array counts as
+      enumerated — a `kind` alone is not something a conformant producer
+      wrote, so it is no evidence the array is exhaustive. Present-but-`null`
+      is accepted: a producer really does emit those keys with `None` for a
+      finding carrying no before/after value, and that is emitting the field
+      rather than omitting it. (Sixth Codex review round — the type-only
+      validation from the third round left the "field absent entirely" hole
+      open.)
+- [x] **Readability and conformance are two questions, answered separately.**
+      A first cut folded both into one predicate over `("symbol",
+      "description")`, which was wrong in both directions (seventh/eighth
+      Codex review rounds). Too narrow: `old_value`/`new_value` are
+      `required` by the schema *and* part of the identity discriminator, so
+      an entry omitting them resolved to a different identity while its
+      report stayed `complete` — each profile then listing the other as
+      unaffected. Too broad: `cli_scan_baseline`'s own findings carry no
+      `old_value`/`new_value`/`severity` at all (verified against the
+      producer, not assumed), so simply extending the one predicate would
+      have dropped every `scan --against` finding the round before had just
+      made readable. Split into `_is_usable_finding_entry` (can an identity
+      be resolved — governs whether a finding is *kept*, and a kept finding
+      can only ever convict) and `_is_conformant_change_entry` (did a
+      conformant producer write it — governs whether the array is
+      *exhaustive*, the only thing that can clear a profile). The mirrored
+      required-field list is checked against
+      `compare_report.schema.json`'s own `required` by
+      `TestSchemaRequiredFieldsAgree`, since the schema is the fact owner.
+      Test fixtures now build `changes[]` entries through one `_change_entry`
+      helper that fills the required set — hand-written near-miss fixtures
+      are how this validation drifted from producer reality to begin with.
 - [x] A well-formed array is not by itself proof that nothing else was
       found: `compare --show-only` narrows `changes` (`reporter.to_json`)
       while the verdict, the gate, and the `summary` block all keep

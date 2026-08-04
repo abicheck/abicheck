@@ -383,16 +383,28 @@ def _with_bundle_attribution(entry: Mapping[str, Any]) -> Mapping[str, Any]:
     return {**entry, "description": prefix + str(entry.get("description") or "")}
 
 
-#: Identity fields every real producer emits and the compare-report schema
-#: marks *required* on a ``changes[]`` entry. An entry missing one is not
-#: something a conformant report produced, so it is not evidence that the
-#: array was enumerated successfully — it resolves to a contentless
-#: identity while leaving the report ``complete``, which is how a garbage
-#: array could clear another profile's finding (Codex review). Present-but-
-#: ``None`` is accepted: ``cli_scan_baseline._baseline_finding_dicts`` emits
-#: the keys with ``None`` when a ``Change`` carries no value, and that is a
-#: producer emitting the field, not omitting it.
-_REQUIRED_IDENTITY_FIELDS = ("symbol", "description")
+#: Every field ``compare_report.schema.json``'s ``$defs/change`` marks
+#: ``required``. All three ``compare`` report modes emit all six; an entry
+#: missing one was not written by a conformant producer, so it is no
+#: evidence that the array was enumerated successfully — it resolves to a
+#: *differently* discriminated identity (``old_value``/``new_value`` are part
+#: of the discriminator) while leaving the report ``complete``, which is how
+#: a malformed array could clear another profile's finding (Codex review).
+#: Present-but-``None`` is accepted throughout: that is a producer emitting
+#: the field, not omitting it.
+#:
+#: The schema is the fact owner; this mirror exists so the check is a cheap
+#: key test rather than a schema validation on every entry, and
+#: ``TestSchemaRequiredFieldsAgree`` asserts the two agree so it cannot
+#: drift.
+_CONFORMANT_CHANGE_FIELDS = (
+    "kind",
+    "symbol",
+    "description",
+    "old_value",
+    "new_value",
+    "severity",
+)
 
 #: Identity fields that must be a plain string when present. A non-string
 #: here does not merely degrade the identity, it silently changes it:
@@ -429,13 +441,21 @@ def _is_usable_finding_entry(entry: object) -> bool:
     since coercion would mint an identity from a spelling no producer emitted.
     An absent optional field is fine; that is ordinary, and every report on
     every profile omits the same ones.
+
+    **Readability, not conformance.** Whether a producer wrote every field
+    its schema requires is :func:`_is_conformant_change_entry`'s separate
+    question, because the two answers are used for opposite purposes: this
+    one decides whether a finding is *kept* (and a kept finding can only ever
+    convict a profile), that one decides whether the array counts as
+    *exhaustive* (which is the only thing that can clear one). Collapsing
+    them into one predicate is wrong in both directions -- it would drop
+    every ``scan --against`` finding, since that producer emits no
+    ``old_value``/``new_value``/``severity`` at all.
     """
     if not isinstance(entry, Mapping):
         return False
     kind = entry.get("kind")
     if not isinstance(kind, str) or not kind:
-        return False
-    if any(field not in entry for field in _REQUIRED_IDENTITY_FIELDS):
         return False
     if not all(
         entry.get(field) is None or isinstance(entry.get(field), str)
@@ -446,6 +466,19 @@ def _is_usable_finding_entry(entry: object) -> bool:
         entry.get(field) is None or isinstance(entry.get(field), (str, list, tuple))
         for field in _IDENTITY_VALUE_FIELDS
     )
+
+
+def _is_conformant_change_entry(entry: Mapping[str, Any]) -> bool:
+    """Whether a readable ``changes[]`` *entry* carries every field the
+    compare-report schema requires of one.
+
+    Only asked of ``changes``, and only to decide completeness. A readable
+    entry that fails here is still a real finding this module keeps -- it
+    just stops the array from being treated as the whole story, since an
+    entry no conformant producer would have written is not evidence that the
+    rest were enumerated successfully either.
+    """
+    return all(field in entry for field in _CONFORMANT_CHANGE_FIELDS)
 
 
 #: What a report says about its own ``changes`` array being *displayed*
@@ -501,7 +534,8 @@ def parse_report_findings(data: Mapping[str, Any]) -> ReportFindings:
     a comparison's entire finding set. A release report is never complete no
     matter how many bundle/matrix findings it lists: its per-library
     findings are not in the document, so it cannot clear a profile of one.
-    Neither is a report with any unparseable array element, nor one whose
+    Neither is a report with any unparseable *or* non-conformant
+    (:func:`_is_conformant_change_entry`) array element, nor one whose
     array was narrowed for display rather than enumerated
     (:func:`_changes_array_is_exhaustive`) — the valid entries stay usable
     (they can still convict a profile), but the hole is recorded rather than
@@ -523,6 +557,8 @@ def parse_report_findings(data: Mapping[str, Any]) -> ReportFindings:
         for entry in raw_changes:
             if _is_usable_finding_entry(entry):
                 findings.append(ReportFinding.from_report_entry(entry))
+                if not _is_conformant_change_entry(entry):
+                    malformed = True
             else:
                 malformed = True
 

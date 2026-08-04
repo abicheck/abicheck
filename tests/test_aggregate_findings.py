@@ -40,6 +40,7 @@ import pytest
 
 from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
 from abicheck.aggregate_findings import (
+    _CONFORMANT_CHANGE_FIELDS,
     ReportFinding,
     ReportFindings,
     build_finding_matrix,
@@ -58,6 +59,20 @@ except ImportError:  # pragma: no cover - exercised only when jsonschema absent
     jsonschema = None
 
 LINUX = "linux-x86_64"
+
+
+def _change_entry(**fields: object) -> dict:
+    """A `changes[]` entry carrying every field `compare_report.schema.json`
+    marks *required* on one, defaulted the way a real `reporter.to_json`
+    emits them.
+
+    Hand-written fixtures are how this module's validation drifted from
+    producer reality in the first place (Codex review): an entry that merely
+    *looks* plausible but omits a required field exercises the malformed
+    path, not the ordinary one. Building them through one helper keeps a
+    fixture testing what its name says.
+    """
+    return {"old_value": None, "new_value": None, "severity": "error", **fields}
 
 
 def _write_report(d: Path, target_id: str, verdict: str | None, **extra) -> Path:
@@ -100,11 +115,17 @@ _REMOVED_RICH = {
     "kind": "func_removed",
     "symbol": "_ZN3lib3addEii",
     "description": "Function removed",
+    "old_value": None,
+    "new_value": None,
+    "severity": "error",
 }
 _REMOVED_L0 = {
     "kind": "func_removed_elf_only",
     "symbol": "_ZN3lib3addEii",
     "description": "Exported symbol disappeared",
+    "old_value": None,
+    "new_value": None,
+    "severity": "error",
 }
 _SIZE_CHANGED = {
     "kind": "type_size_changed",
@@ -112,6 +133,7 @@ _SIZE_CHANGED = {
     "description": "size 8 -> 16",
     "old_value": "8",
     "new_value": "16",
+    "severity": "error",
 }
 
 #: One `compare-release` `bundle_findings[]` entry — the shape a `kind: bundle`
@@ -605,11 +627,17 @@ _REMOVED_ITANIUM = {
     "kind": "func_removed",
     "symbol": "_ZN3lib3addEii",
     "description": "Function removed",
+    "old_value": None,
+    "new_value": None,
+    "severity": "error",
 }
 _REMOVED_MSVC = {
     "kind": "func_removed",
     "symbol": "?add@lib@@YAHHH@Z",
     "description": "Function removed",
+    "old_value": None,
+    "new_value": None,
+    "severity": "error",
 }
 #: A *different* overload of that same declaration — indistinguishable from
 #: the one above by qualified name alone, since neither mangling parser
@@ -618,12 +646,18 @@ _REMOVED_ITANIUM_OVERLOAD = {
     "kind": "func_removed",
     "symbol": "_ZN3lib3addEd",
     "description": "Function removed",
+    "old_value": None,
+    "new_value": None,
+    "severity": "error",
 }
 #: The MSVC spelling of yet another overload of the same declaration.
 _REMOVED_MSVC_OTHER_OVERLOAD = {
     "kind": "func_removed",
     "symbol": "?add@lib@@YAHN@Z",
     "description": "Function removed",
+    "old_value": None,
+    "new_value": None,
+    "severity": "error",
 }
 
 MSVC_CHECK = "libfoo@windows-msvc#release@headers"
@@ -680,11 +714,11 @@ class TestCrossAbiReconciliation:
     ) -> None:
         """The withholding must not over-fire: two different declarations
         leave the clean profile provably clean."""
-        other = {
-            "kind": "func_removed",
-            "symbol": "?other@lib@@YAHXZ",
-            "description": "Function removed",
-        }
+        other = _change_entry(
+            kind="func_removed",
+            symbol="?other@lib@@YAHXZ",
+            description="Function removed",
+        )
         _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
         _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [other])
         r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
@@ -698,11 +732,11 @@ class TestCrossAbiReconciliation:
         """The discriminator rides along, so sharing a declaration is not
         enough — the two profiles must be reporting the same *event* before
         either is withheld from a clean verdict."""
-        added = {
-            "kind": "func_added",
-            "symbol": "?add@lib@@YAHHH@Z",
-            "description": "Function added",
-        }
+        added = _change_entry(
+            kind="func_added",
+            symbol="?add@lib@@YAHHH@Z",
+            description="Function added",
+        )
         _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
         _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [added])
         r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
@@ -805,39 +839,75 @@ class TestFindingEntryValidation:
 
     def test_absent_optional_fields_are_fine(self) -> None:
         """Everything past the schema's own required set really is optional —
-        `old_value`/`new_value`/`source_location`/`severity` are all absent
-        from plenty of genuine findings."""
-        result = parse_report_findings(
-            {"changes": [{"kind": "func_removed", "symbol": "x", "description": "d"}]}
-        )
+        `source_location`, `affected_symbols`, and `qualified_name` are all
+        absent from plenty of genuine findings."""
+        result = parse_report_findings({"changes": [_change_entry(**_MINIMAL)]})
         assert len(result.findings) == 1
         assert result.complete is True
 
-    @pytest.mark.parametrize("missing", ["symbol", "description"])
-    def test_required_identity_field_must_be_present(self, missing: str) -> None:
-        """The compare-report schema marks these `required` on a `changes[]`
-        entry, so an entry without one is not something a conformant producer
-        wrote — and an array of such entries is not evidence that anything was
-        enumerated (Codex review)."""
-        entry = {"kind": "func_removed", "symbol": "x", "description": "d"}
+    @pytest.mark.parametrize("missing", list(_CONFORMANT_CHANGE_FIELDS))
+    def test_a_non_conformant_entry_withholds_completeness(self, missing: str) -> None:
+        """`compare_report.schema.json` marks all six `required` on a
+        `changes[]` entry, and every `compare` report mode emits all six — so
+        an entry without one was not written by a conformant producer and is
+        no evidence the rest were enumerated either (Codex review).
+
+        `kind` is the one that also makes the entry unreadable; the other five
+        leave a real finding that is kept, since a kept finding can only ever
+        convict a profile.
+        """
+        entry = _change_entry(**_MINIMAL)
         del entry[missing]
         result = parse_report_findings({"changes": [entry]})
-        assert result.findings == ()
         assert result.complete is False
+        assert len(result.findings) == (0 if missing == "kind" else 1)
 
     def test_a_present_but_null_required_field_is_accepted(self) -> None:
-        """`cli_scan_baseline._baseline_finding_dicts` emits the keys with
-        `None` when a `Change` carries no value. That is a producer emitting
-        the field, not omitting it."""
+        """Present-but-`None` is a producer emitting the field, not omitting
+        it — `reporter._change_to_dict` writes `old_value`/`new_value` that
+        way for any finding that carries no before/after value."""
         result = parse_report_findings(
-            {
-                "changes": [
-                    {"kind": "func_removed", "symbol": "x", "description": None}
-                ]
-            }
+            {"changes": [_change_entry(**{**_MINIMAL, "description": None})]}
         )
         assert len(result.findings) == 1
         assert result.complete is True
+
+    def test_a_readable_but_non_conformant_entry_still_convicts(
+        self, tmp_path: Path
+    ) -> None:
+        """The asymmetry, end to end: the malformed profile cannot clear the
+        other one, but its own finding is still its own."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED])
+        _write_report(
+            tmp_path,
+            CLANG,
+            "BREAKING",
+            changes=[{"kind": "func_removed", "symbol": "_Z3foov", "description": "d"}],
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        by_kind = {e.kinds: e for e in r.finding_matrix}
+        assert by_kind[("type_size_changed",)].undetermined_profiles == (
+            "linux-clang20",
+        )
+        assert by_kind[("func_removed",)].affected_profiles == ("linux-clang20",)
+
+
+class TestSchemaRequiredFieldsAgree:
+    """`_CONFORMANT_CHANGE_FIELDS` mirrors `compare_report.schema.json`'s own
+    `required` list so the check stays a cheap key test. The schema is the
+    fact owner; this is what stops the mirror drifting from it."""
+
+    def test_mirror_matches_the_schema(self) -> None:
+        schema = json.loads(
+            (
+                Path(__file__).resolve().parents[1]
+                / "abicheck"
+                / "schemas"
+                / "compare_report.schema.json"
+            ).read_text()
+        )
+        required = schema["$defs"]["change"]["required"]
+        assert sorted(_CONFORMANT_CHANGE_FIELDS) == sorted(required)
 
     def test_unusable_entry_cannot_clear_another_profile(self, tmp_path: Path) -> None:
         """The end-to-end consequence: a profile whose findings array holds
@@ -989,12 +1059,12 @@ class TestDisplayFilteredReports:
 
 #: `diff_python.py` really passes a list for these findings (e.g.
 #: `new_value=sorted(group)`), and `_change_to_dict` preserves it in JSON.
-_PYTHON_VIOLATION = {
-    "kind": "python_stable_abi_violation",
-    "symbol": "PyFoo",
-    "description": "uses unstable API",
-    "new_value": ["Py_INCREF", "Py_DECREF"],
-}
+_PYTHON_VIOLATION = _change_entry(
+    kind="python_stable_abi_violation",
+    symbol="PyFoo",
+    description="uses unstable API",
+    new_value=["Py_INCREF", "Py_DECREF"],
+)
 
 
 class TestStructuredFindingValues:
@@ -1053,6 +1123,9 @@ _REMOVED_ITANIUM_MACHO = {
     "kind": "func_removed",
     "symbol": "__ZN3lib3addEii",
     "description": "Function removed",
+    "old_value": None,
+    "new_value": None,
+    "severity": "error",
 }
 
 
