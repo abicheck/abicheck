@@ -20,6 +20,15 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          # Full history, unlike every other job here. `adr-status-sync`'s
+          # freshness tripwire answers "have commits touched this module
+          # since the ADR's `**Verified:**` sha", which a depth-1 checkout
+          # cannot resolve at all — the sha isn't present, so the check
+          # would stand down on every CI run and be live only locally,
+          # i.e. disabled in exactly the environment it exists to protect
+          # (Codex review on PR #667).
+          fetch-depth: 0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           # Pinned to the canonical Python (repo_facts.json's

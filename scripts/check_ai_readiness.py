@@ -1662,6 +1662,27 @@ _ADR_MODULE_PATH_RE = re.compile(
 )
 
 
+def _expand_family_shorthand(shorthand: str, anchor: str | None) -> str | None:
+    """Resolve a family shorthand like `_resolver.py` against the last module
+    named in full, e.g. `compatibility_evaluation_config.py` ->
+    `compatibility_evaluation_resolver.py`.
+
+    Real status prose names the first module of a family in full and the rest
+    by suffix, which is readable but left four of ADR-049's own modules
+    untripwired (Codex review). The expansion is only ever *accepted* when it
+    resolves to a real file, so a wrong guess drops the token rather than
+    inventing a tripwire on an unrelated module.
+    """
+    if anchor is None or "/" in shorthand or not shorthand.startswith("_"):
+        return None
+    stem = anchor.rsplit("/", 1)[-1].removesuffix(".py")
+    family, sep, _leaf = stem.rpartition("_")
+    if not sep:
+        return None
+    candidate = f"{family}{shorthand}"
+    return candidate if (PKG / candidate).is_file() else None
+
+
 def _adr_named_modules(status: str) -> list[str]:
     """Package-relative paths of the first-party modules a Status claim names.
 
@@ -1672,13 +1693,20 @@ def _adr_named_modules(status: str) -> list[str]:
     the warning exactly where it matters most (Codex review). A *bare*
     `x.py` has to resolve inside the package, since that's the only thing
     distinguishing a real module reference from an unrelated `verify.py` or
-    `conftest.py` mention.
+    `conftest.py` mention -- with family shorthand (`_resolver.py`) resolved
+    against the last module named in full, see _expand_family_shorthand.
     """
     named = set()
+    anchor: str | None = None
     for m in _ADR_MODULE_PATH_RE.finditer(status):
         path = m.group("path")
         if m.group("prefix") or (PKG / path).is_file():
             named.add(f"abicheck/{path}")
+            anchor = path
+            continue
+        expanded = _expand_family_shorthand(path, anchor)
+        if expanded is not None:
+            named.add(f"abicheck/{expanded}")
     return sorted(named)
 
 
@@ -2075,10 +2103,15 @@ def _repo_is_shallow() -> bool:
     resolve is a typo (ERROR) or simply outside the fetch depth (skip). It is
     deliberately *not* used to gate the freshness query itself — a shallow
     checkout still answers "did anything touch this path since commit X"
-    correctly for the history it does have, and CI runs on shallow clones. An
-    earlier revision skipped the whole check whenever the repo was shallow,
-    which silently disabled the tripwire in exactly the environment it's
-    meant to run in.
+    correctly for the history it does have. An earlier revision skipped the
+    whole check whenever the repo was shallow, which disabled the tripwire
+    wherever history was truncated.
+
+    The `ai-readiness` CI job checks out with `fetch-depth: 0` precisely so
+    this branch is *not* taken there: on a depth-1 checkout no receipt sha
+    resolves, so the tripwire would stand down on every run and be live only
+    on developer machines (Codex review on PR #667). Shallow tolerance
+    remains for any other environment that runs this script.
     """
     shallow = _git_output("rev-parse", "--is-shallow-repository")
     return shallow is None or shallow.strip() != "false"

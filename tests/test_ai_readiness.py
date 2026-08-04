@@ -1010,6 +1010,27 @@ def test_adr_named_modules_keeps_explicit_path_for_deleted_module(car):
     assert "abicheck/also_gone.py" not in named
 
 
+def test_adr_named_modules_expands_family_shorthand(car):
+    """Status prose names the first module of a family in full and the rest
+    by suffix (`_resolver.py`). Without expansion, four of ADR-049's own
+    modules were left untripwired (Codex review on PR #667). An expansion
+    that doesn't resolve to a real file is dropped, so a wrong guess can
+    never invent a tripwire on an unrelated module."""
+    named = car._adr_named_modules(
+        "`abicheck/compatibility_evaluation_config.py`, `_resolver.py`, "
+        "`_packs.py`, `_nonexistent.py`"
+    )
+    assert "abicheck/compatibility_evaluation_resolver.py" in named
+    assert "abicheck/compatibility_evaluation_packs.py" in named
+    assert not any("nonexistent" in path for path in named)
+
+
+def test_adr_named_modules_ignores_shorthand_without_an_anchor(car):
+    """A leading-underscore token with no preceding full module name has
+    nothing to expand against and must not be guessed at."""
+    assert car._adr_named_modules("see `_resolver.py` for details") == []
+
+
 def test_adr_status_sync_allows_index_row_to_abridge(car, tmp_path, monkeypatch):
     """An index cell is an abridgement, not a paraphrase-for-paraphrase copy.
     A status paragraph naming follow-up work the one-line row omits is normal
