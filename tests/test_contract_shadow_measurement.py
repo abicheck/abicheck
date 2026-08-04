@@ -177,15 +177,17 @@ class TestUnresolvedLossMetric:
         counts = shadow.metrics()["gate"]["unresolved_public_break_losses"]
         assert counts["exports"] > 0
 
-    def test_withheld_matches_the_engine_rather_than_a_second_list(self) -> None:
+    @pytest.mark.parametrize("relevance", tuple(ContractRelevance))
+    def test_withheld_matches_the_engine_rather_than_a_second_list(
+        self, relevance: ContractRelevance
+    ) -> None:
         # The one property that makes this metric trustworthy: it must call
         # exactly the relevance values withheld a loss, so it cannot measure
         # a rule the gate stopped applying.
-        for relevance in ContractRelevance:
-            assert shadow._withheld_from_gate(relevance) is (
-                evaluation_status_for(relevance)
-                is CompatibilityEvaluationStatus.NOT_EVALUATED
-            )
+        assert shadow._withheld_from_gate(relevance) is (
+            evaluation_status_for(relevance)
+            is CompatibilityEvaluationStatus.NOT_EVALUATED
+        )
 
     def test_public_losses_are_pinned_by_identity_not_only_count(self) -> None:
         # A budget alone cannot tell "the accepted gaps are still the

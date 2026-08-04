@@ -1257,6 +1257,45 @@ class TestJsonSchema:
         jsonschema.validate(d, load_aggregate_report_schema())
 
 
+class TestWarnAcceptanceProvenance:
+    """`contract.unresolved=warn` is a policy the *target run* set. The
+    aggregate may only say so when the report actually stated a usable
+    contribution — a coverage exit of 0 also covers "said nothing" and
+    "said something unusable", and attributing a policy to either is a
+    claim the report never made (CodeRabbit review)."""
+
+    TARGET = "libfoo"
+    LINE = "accepted via contract.unresolved=warn"
+
+    def _text(self, tmp_path: Path, **extra) -> str:
+        _write_report(
+            tmp_path,
+            self.TARGET,
+            "COMPATIBLE",
+            contract_coverage_failures=[{"provider": "public_header"}],
+            **extra,
+        )
+        return aggregate_reports_dir(
+            tmp_path, expected=_expect(self.TARGET)
+        ).render_text()
+
+    def test_a_declared_zero_is_reported_as_accepted(self, tmp_path: Path):
+        assert self.LINE in self._text(tmp_path, contract_coverage_exit_contribution=0)
+
+    def test_a_malformed_contribution_is_not(self, tmp_path: Path):
+        assert self.LINE not in self._text(
+            tmp_path, contract_coverage_exit_contribution="nope"
+        )
+
+    def test_an_absent_contribution_is_not(self, tmp_path: Path):
+        assert self.LINE not in self._text(tmp_path)
+
+    def test_the_failures_are_still_listed_either_way(self, tmp_path: Path):
+        # Not claiming the policy must not mean hiding the incomplete
+        # evidence — the ledger is unsuppressible.
+        assert "incomplete on" in self._text(tmp_path)
+
+
 class TestScanCoverageIsNotACompatibilityFailure:
     """A `scan --against` report's top-level exit_code is already a fold of
     its compatibility gate and ADR-049's contract-coverage contribution, so

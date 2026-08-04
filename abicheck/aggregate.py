@@ -421,6 +421,11 @@ class TargetReport:
     #: ``contract.unresolved=warn`` zeroes the floor and changes nothing else
     #: -- the failures stay listed. Reported, never folded into an exit code.
     contract_coverage_incomplete: bool = False
+    #: Whether the report stated a usable contribution at all -- see
+    #: :func:`_contract_coverage_declared`. Distinguishes a real
+    #: ``contract.unresolved=warn`` acceptance from a silent or malformed
+    #: one, so prose about the run cannot claim a policy it never set.
+    contract_coverage_declared: bool = False
     #: The findings this report listed, and whether that list is all of them
     #: (:class:`~abicheck.aggregate_findings.ReportFindings`). ``None`` for an
     #: unavailable report — one that never arrived, was unreadable, or
@@ -548,10 +553,12 @@ class ProfileMatrixEntry:
     #:
     #: A profile can be in this list and ``affected`` at once (a real break
     #: plus incomplete evidence), or in this one alone.
-    contract_incomplete_profiles: tuple[str, ...]
     #: profile -> worst analyzed verdict value, or ``None`` when *every*
     #: check for that profile is unavailable (no analyzed check at all).
     verdict_by_profile: dict[str, str | None]
+    #: Declared last, with a default, so adding it cannot break a positional
+    #: construction of this public dataclass (CodeRabbit review).
+    contract_incomplete_profiles: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -944,7 +951,9 @@ class AggregateResult:
             accepted = tuple(
                 t.target_id
                 for t in list(self.analyzed) + list(self._gated_unexpected)
-                if t.contract_coverage_incomplete and t.contract_coverage_exit == 0
+                if t.contract_coverage_incomplete
+                and t.contract_coverage_exit == 0
+                and t.contract_coverage_declared
             )
             if accepted:
                 lines.append(
@@ -1181,11 +1190,33 @@ class _LoadedReport:
     #: when the contribution above is ``0`` because ``contract.unresolved=
     #: warn`` accepted it. Reported, never folded into an exit code.
     contract_coverage_incomplete: bool = False
+    #: Whether the report stated a usable contribution at all -- see
+    #: :func:`_contract_coverage_declared`. Distinguishes a real
+    #: ``contract.unresolved=warn`` acceptance from a silent or malformed
+    #: one, so prose about the run cannot claim a policy it never set.
+    contract_coverage_declared: bool = False
     #: ``None`` on every failure branch below (unreadable, malformed gate,
     #: operational error, not comparable), since none of those establish what
     #: the comparison did or did not find. Otherwise the report's own
     #: :func:`~abicheck.aggregate_findings.parse_report_findings` result.
     findings: ReportFindings | None = None
+
+
+def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
+    """Whether the report actually *stated* a usable coverage contribution.
+
+    :func:`_contract_coverage_exit` fails open, so its ``0`` covers three
+    different situations: the run declared ``0``, the run declared nothing,
+    and the run declared something unusable. That is the right answer for
+    the gate -- none of them may block -- but not for prose *about* the run:
+    only the first is a ``contract.unresolved=warn`` acceptance, and saying
+    so about the other two attributes a policy decision the report never
+    made (CodeRabbit review).
+    """
+    return any(
+        _is_valid_contribution(block.get("contract_coverage_exit_contribution"))
+        for block in _contract_coverage_blocks(data)
+    )
 
 
 def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
@@ -1381,6 +1412,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             path=path,
             contract_coverage_exit=_contract_coverage_exit(data),
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
+            contract_coverage_declared=_contract_coverage_declared(data),
             # An operational ERROR means *a* library failed, not that nothing
             # was compared: `_format_release_json` emits `bundle_findings`/
             # `matrix_findings` from whatever did complete, regardless of the
@@ -1462,6 +1494,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         path=path,
         contract_coverage_exit=_contract_coverage_exit(data),
         contract_coverage_incomplete=_contract_coverage_incomplete(data),
+        contract_coverage_declared=_contract_coverage_declared(data),
         # Only a report that produced a real verdict has a finding set worth
         # reading: a verdictless one is unavailable, and its `changes` array
         # (if any) describes a comparison that never reached a conclusion.
@@ -1618,6 +1651,7 @@ def aggregate(
             unexpected=unexpected,
             contract_coverage_exit=report.contract_coverage_exit,
             contract_coverage_incomplete=report.contract_coverage_incomplete,
+            contract_coverage_declared=report.contract_coverage_declared,
             findings=report.findings,
         )
 

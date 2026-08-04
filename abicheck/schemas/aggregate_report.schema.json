@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://abicheck.github.io/abicheck/schemas/v1/aggregate_report.schema.json",
   "title": "abicheck aggregate report",
-  "description": "Schema for the JSON document produced by `abicheck aggregate --format json`, the multi-target CI fan-in gate. Three axes are kept separate (ADR-042): gate (each report's own recorded severity decision, combined), coverage (did every required target report?), and compatibility (worst verdict, for reporting). The document is versioned via aggregate_schema_version; additive changes (new optional keys) bump the MINOR component, breaking changes bump the MAJOR. Consumers should accept any document whose MAJOR matches theirs and ignore unknown keys.",
+  "description": "Schema for the JSON document produced by `abicheck aggregate --format json`, the multi-target CI fan-in gate. Four axes are kept separate (ADR-042, plus ADR-049 \u00a77): gate (each report's own recorded severity decision, combined), coverage (did every required target report?), compatibility (worst verdict, for reporting), and contract_coverage (added in schema 1.3: did a target that *did* report have the evidence to close its selected --contract domain?). The last two are distinct on purpose \u2014 coverage and contract_coverage both contribute 1 and answer different questions, so an exit of 1 stays attributable to one of them. The document is versioned via aggregate_schema_version; additive changes (new optional keys) bump the MINOR component, breaking changes bump the MAJOR. Consumers should accept any document whose MAJOR matches theirs and ignore unknown keys.",
   "type": "object",
   "required": [
     "aggregate_schema_version",
