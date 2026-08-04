@@ -139,16 +139,25 @@ def _dependency_source(side: InputSpec, fmt: str | None) -> Path | None:
     the *original* path would be no better: ``resolve_dependencies`` needs the
     ELF, not the script that names it.
 
-    So this follows the script the same way ``resolve_input`` does, and only
-    when that side opted into following at all
+    So this follows the script the same way ``resolve_input`` does — including
+    a *chain* of them, since that function recurses (it calls itself on the
+    resolved target with ``follow_linker_scripts`` still set). Following only
+    one hop meant a script naming another script produced a snapshot fine
+    while the dependency scan silently skipped that side, which is exactly the
+    asymmetry this helper exists to remove (Codex review, second round; the
+    first round's fix handled a single hop and called it conservative — it was
+    just inconsistent).
+
+    Following is skipped entirely for a side that opted out
     (``InputSpec.follow_linker_scripts``) — an MCP request that pinned it off
     to keep its size guard authoritative must not get scripts followed here by
     a side door.
 
-    A script naming another script resolves to a non-ELF target and yields
-    ``None``: one hop is what ``resolve_linker_script`` answers, and stopping
-    there is the same conservative "skip rather than guess" direction this
-    function already takes for every other non-ELF input.
+    Cycle-protected: a script naming itself, or a pair naming each other,
+    terminates and yields ``None`` rather than looping. (``resolve_input``'s
+    own recursion guards only the self-reference case, so a two-script cycle
+    would recurse there until Python's stack gives out — real, pre-existing,
+    and not this function's to fix.)
     """
     from .binary_utils import detect_binary_format, resolve_linker_script
 
@@ -156,7 +165,17 @@ def _dependency_source(side: InputSpec, fmt: str | None) -> Path | None:
         return side.path
     if not side.follow_linker_scripts:
         return None
-    target, is_script = resolve_linker_script(side.path)
-    if is_script and target is not None and detect_binary_format(target) == "elf":
-        return target
-    return None
+
+    current = side.path
+    seen = {current.resolve()}
+    while True:
+        target, is_script = resolve_linker_script(current)
+        if not is_script or target is None:
+            return None
+        resolved = target.resolve()
+        if resolved in seen:
+            return None
+        seen.add(resolved)
+        if detect_binary_format(target) == "elf":
+            return target
+        current = target

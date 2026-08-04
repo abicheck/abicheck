@@ -194,6 +194,34 @@ class TestDependencySource:
         spec = InputSpec(path=script, follow_linker_scripts=False)
         assert _dependency_source(spec, None) is None
 
+    def test_a_chain_of_linker_scripts_is_followed_to_the_elf(self, tmp_path):
+        # resolve_input recurses through the whole chain, so a snapshot is
+        # produced fine; stopping at one hop here silently skipped the
+        # dependency scan for that side (Codex review).
+        elf = tmp_path / "libfoo.so.1.2"
+        elf.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        mid = tmp_path / "libfoo.so.1"
+        mid.write_text(f"INPUT({elf})\n", encoding="utf-8")
+        top = tmp_path / "libfoo.so"
+        top.write_text(f"INPUT({mid})\n", encoding="utf-8")
+
+        assert _dependency_source(InputSpec(path=top), None) == elf
+
+    def test_a_self_referencing_script_terminates(self, tmp_path):
+        script = tmp_path / "loop.so"
+        script.write_text(f"INPUT({script})\n", encoding="utf-8")
+        assert _dependency_source(InputSpec(path=script), None) is None
+
+    def test_a_two_script_cycle_terminates(self, tmp_path):
+        # resolve_input's own recursion guards only self-reference, so this
+        # shape would recurse there until the stack gives out; this function
+        # must not inherit that.
+        a = tmp_path / "a.so"
+        b = tmp_path / "b.so"
+        a.write_text(f"INPUT({b})\n", encoding="utf-8")
+        b.write_text(f"INPUT({a})\n", encoding="utf-8")
+        assert _dependency_source(InputSpec(path=a), None) is None
+
     def test_plain_non_elf_input_is_skipped(self, tmp_path):
         snapshot = tmp_path / "old.json"
         snapshot.write_text('{"library": "l"}', encoding="utf-8")
