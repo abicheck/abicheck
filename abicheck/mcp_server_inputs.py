@@ -40,6 +40,12 @@ from .compile_context import CompileContext
 from .mcp_shared import _safe_read_path
 from .model import AbiSnapshot
 
+#: Frontends that really drive header parsing, for the one MCP tool that has
+#: nowhere else to put a source-ABI-only value. Mirrors
+#: ``api_types.HEADER_AST_FRONTENDS`` -- imported lazily there to keep this a
+#: leaf, restated here as a module constant so the check is readable.
+HEADER_AST_FRONTENDS_MCP = frozenset({"auto", "castxml", "clang", "hybrid"})
+
 __all__ = [
     "_ALLOWED_BINARY_SUFFIXES",
     "_ALLOWED_OUTPUT_SUFFIXES",
@@ -51,6 +57,7 @@ __all__ = [
     "_public_header_dir_paths",
     "_resolve_input",
     "_safe_write_path",
+    "_source_abi_only_frontend_error",
     "_validate_public_depth",
 ]
 
@@ -347,6 +354,33 @@ def _contract_mode_error(
             "contract_mode requires contract_evaluation: it selects which "
             "evidence domain the shadow contract evaluator judges against, and "
             "without that flag no contract decision is computed at all"
+        )
+    return None
+
+
+def _source_abi_only_frontend_error(ast_frontend: str) -> str | None:
+    """Reject a source-ABI-only frontend on a tool that cannot carry it.
+
+    ``android`` has no header-AST path, so :func:`_compile_context_from_args`
+    downgrades it to ``"auto"`` for the *compile context*. ``abi_dump`` keeps
+    the caller's value on ``DumpRequest.frontend``, where the source-ABI layer
+    can act on it — but ``ScanRequest`` has no request-level frontend field, so
+    the compile context is the only carrier and the value would be silently
+    lost: the scan would accept a documented argument and then run an ordinary
+    auto/castxml pass instead (Codex review).
+
+    Accepting an argument and quietly doing something else is worse than
+    refusing it, so ``abi_scan`` refuses. Giving ``ScanRequest`` a real
+    request-level frontend, and threading it into the engine's L4 replay, is
+    the feature this defers to — not something to fake with a downgrade.
+    """
+    if ast_frontend.lower() not in HEADER_AST_FRONTENDS_MCP:
+        return (
+            f"ast_frontend={ast_frontend!r} is source-ABI-replay only and has no "
+            "header-AST path, and abi_scan has no request-level frontend to "
+            "carry it into source replay -- so it would be silently ignored. "
+            "Use 'auto', 'castxml', 'clang', or 'hybrid' here, or run abi_dump, "
+            "which does carry it."
         )
     return None
 

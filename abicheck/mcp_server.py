@@ -64,6 +64,7 @@ from .mcp_server_inputs import (  # noqa: F401  (re-exported for API stability)
     _public_header_dir_paths,
     _resolve_input,
     _safe_write_path,
+    _source_abi_only_frontend_error,
     _validate_public_depth,
 )
 from .mcp_server_verdicts import (  # noqa: F401  (re-exported for API stability)
@@ -1669,11 +1670,11 @@ def abi_scan(
         contract_mode: With ``contract_evaluation``: which evidence domain the
             decision is judged against — "public", "exports", or "all". Omitted,
             the domain follows the scan's public-surface scoping.
-        ast_frontend: AST frontend — "auto" (default), "castxml", "clang" or
-            "hybrid" drive L2 header parsing. "android" is source-ABI-replay
-            only: it has no header-AST path, so header parsing falls back to
-            "auto" rather than failing, and it is meaningful only alongside
-            source inputs.
+        ast_frontend: L2 header-AST frontend — "auto" (default), "castxml",
+            "clang", or "hybrid". Unlike ``abi_dump``, "android" is rejected
+            here: it is source-ABI-replay only, and a scan has no
+            request-level frontend to carry it into source replay, so it would
+            be accepted and then silently ignored.
         gcc_path: Explicit compiler binary for the header frontend.
         gcc_prefix: Cross-toolchain prefix for the header frontend.
         gcc_options: Extra compiler flags for the header frontend, as one
@@ -1768,6 +1769,9 @@ def abi_scan(
         contract_error = _contract_mode_error(contract_mode, contract_evaluation)
         if contract_error is not None:
             return json.dumps({"status": "error", "error": contract_error})
+        frontend_error = _source_abi_only_frontend_error(ast_frontend)
+        if frontend_error is not None:
+            return json.dumps({"status": "error", "error": frontend_error})
         from .service import load_suppression_and_policy
 
         suppression, loaded_policy_file = load_suppression_and_policy(

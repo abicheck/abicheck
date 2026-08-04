@@ -116,10 +116,17 @@ def populate_side_dependency_info(
     Whether to call this at all is the caller's opt-in
     (``CompareRequest``/``DumpRequest``'s ``follow_dependencies``): populating
     it costs a full dependency-graph resolution.
+
+    The sysroot comes from this input's own ``compile`` context. It is the only
+    one a typed request can carry, and without it a cross/sysrooted extraction
+    searched the *host* default directories and reported the target's
+    dependencies unresolved -- while the CLI, which forwards ``--sysroot`` here,
+    resolved them for the same input (Codex review).
     """
     elf_path = _dependency_source(side, fmt)
     if elf_path is not None:
-        populate_dependency_info(snap, elf_path, search_paths, None, ld_library_path)
+        sysroot = side.compile.sysroot if side.compile is not None else None
+        populate_dependency_info(snap, elf_path, search_paths, sysroot, ld_library_path)
 
 
 def populate_pair_dependency_info(

@@ -1145,3 +1145,102 @@ class TestContractModeReachesTheReceipt:
 
         abi_compare(str(snap_path), str(snap_path), contract_evaluation=True)
         assert seen["contract_mode"] is None
+
+
+class TestSourceAbiOnlyFrontendOnScan:
+    """`abi_scan` refuses `android` rather than silently substituting `auto`.
+
+    The compile context downgrades a non-header-AST frontend, which is right
+    for `abi_dump` (its `DumpRequest.frontend` still carries the value into
+    source replay) but wrong for `abi_scan`: `ScanRequest` has no
+    request-level frontend field, so the value would vanish and the scan would
+    run an ordinary auto/castxml pass for an argument the tool documents as
+    meaningful (Codex review).
+    """
+
+    def test_scan_rejects_android(self, snap_path: Path):
+        from abicheck.mcp_server import abi_scan
+
+        data = json.loads(abi_scan(str(snap_path), ast_frontend="android"))
+        assert data["status"] == "error"
+        assert "source-ABI-replay only" in data["error"]
+        assert "abi_dump" in data["error"]
+
+    @pytest.mark.parametrize("frontend", ["auto", "castxml", "clang", "hybrid"])
+    def test_scan_accepts_every_header_frontend(
+        self, snap_path: Path, monkeypatch, frontend: str
+    ):
+        from abicheck import service
+        from abicheck.mcp_server import abi_scan
+
+        monkeypatch.setattr(
+            service,
+            "run_scan_subprocess",
+            lambda req, timeout: {"verdict": "COMPATIBLE"},
+        )
+        data = json.loads(abi_scan(str(snap_path), ast_frontend=frontend))
+        assert data["status"] == "ok"
+
+    def test_dump_still_accepts_android(self, snap_path: Path, tmp_path: Path):
+        """The value remains valid where something can act on it."""
+        from abicheck.mcp_server import abi_dump
+
+        data = json.loads(
+            abi_dump(str(snap_path), ast_frontend="android", build_info=str(tmp_path))
+        )
+        assert data["status"] == "ok"
+
+
+class TestDependencySysrootIsForwarded:
+    """`--follow-deps` under a sysroot searches the target, not the host.
+
+    The only sysroot a typed request can carry is the input's own compile
+    context; passing `None` made a cross/sysrooted extraction search host
+    defaults and report the target's dependencies unresolved, where the CLI
+    (which forwards `--sysroot`) resolved them (Codex review).
+    """
+
+    def test_sysroot_comes_from_the_input_compile_context(
+        self, snap_path: Path, monkeypatch
+    ):
+        from abicheck import dependency_info, service
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            dependency_info,
+            "populate_dependency_info",
+            lambda snap, path, search, sysroot, ldpath: captured.update(
+                sysroot=sysroot
+            ),
+        )
+        monkeypatch.setattr(
+            dependency_info, "_dependency_source", lambda side, fmt: side.path
+        )
+        service.run_dump_request(
+            DumpRequest(
+                input=InputSpec(
+                    path=snap_path, compile=CompileContext(sysroot=Path("/opt/sysroot"))
+                ),
+                follow_dependencies=True,
+            )
+        )
+        assert captured["sysroot"] == Path("/opt/sysroot")
+
+    def test_no_compile_context_means_no_sysroot(self, snap_path: Path, monkeypatch):
+        from abicheck import dependency_info, service
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            dependency_info,
+            "populate_dependency_info",
+            lambda snap, path, search, sysroot, ldpath: captured.update(
+                sysroot=sysroot
+            ),
+        )
+        monkeypatch.setattr(
+            dependency_info, "_dependency_source", lambda side, fmt: side.path
+        )
+        service.run_dump_request(
+            DumpRequest(input=InputSpec(path=snap_path), follow_dependencies=True)
+        )
+        assert captured["sysroot"] is None

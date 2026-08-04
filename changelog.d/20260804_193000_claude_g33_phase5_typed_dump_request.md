@@ -54,6 +54,15 @@
   `DumpRequest`/`CompareRequest` parsed less than the equivalent CLI
   invocation. A Tier-2 call never *executes* a build system to discover them,
   unlike the CLI: passive discovery of an existing compile database only.
+- **`--follow-deps` under a sysroot searches the target, not the host** — the
+  typed path passed no sysroot to the dependency resolver, so a cross/sysrooted
+  extraction searched the host defaults and reported the target's dependencies
+  unresolved. It now comes from the input's own compile context, as the CLI's
+  `--sysroot` already did.
+- **`abi_scan` rejects `ast_frontend="android"`** rather than silently running
+  an ordinary auto/castxml pass: it is source-ABI-replay only, and a scan has
+  no request-level frontend to carry it into replay. `abi_dump` still accepts
+  it, because `DumpRequest.frontend` does.
 - **The MCP `abi_compare` receipt records the selected `contract_mode`** — the
   persisted `contract_context` named the built-in default domain even when the
   caller selected `exports`/`all`, which since ADR-049 Phase 7 is the domain

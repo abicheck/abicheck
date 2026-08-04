@@ -176,7 +176,7 @@ Run a deterministic source-intelligence scan (ADR-035 D3/D10 / ADR-043).
 | `suppression_file` | `str \| None` | no | `None` | With ``against``: YAML suppression file filtering known changes out of the comparison. |
 | `contract_evaluation` | `bool` | no | `False` | With ``against``: stamp each comparison finding with its ADR-049 contract decision, exactly as ``abi_compare``'s own argument does. Authoritative since ADR-049 Phase 7 — it changes the verdict and the exit code, and an incomplete contract domain contributes the orthogonal coverage exit. |
 | `contract_mode` | `str \| None` | no | `None` | With ``contract_evaluation``: which evidence domain the decision is judged against — "public", "exports", or "all". Omitted, the domain follows the scan's public-surface scoping. |
-| `ast_frontend` | `str` | no | `auto` | AST frontend — "auto" (default), "castxml", "clang" or "hybrid" drive L2 header parsing. "android" is source-ABI-replay only: it has no header-AST path, so header parsing falls back to "auto" rather than failing, and it is meaningful only alongside source inputs. |
+| `ast_frontend` | `str` | no | `auto` | L2 header-AST frontend — "auto" (default), "castxml", "clang", or "hybrid". Unlike ``abi_dump``, "android" is rejected here: it is source-ABI-replay only, and a scan has no request-level frontend to carry it into source replay, so it would be accepted and then silently ignored. |
 | `gcc_path` | `str \| None` | no | `None` | Explicit compiler binary for the header frontend. |
 | `gcc_prefix` | `str \| None` | no | `None` | Cross-toolchain prefix for the header frontend. |
 | `gcc_options` | `str \| None` | no | `None` | Extra compiler flags for the header frontend, as one shell-quoted string. |
