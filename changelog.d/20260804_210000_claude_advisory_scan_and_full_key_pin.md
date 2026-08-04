@@ -8,8 +8,9 @@
   path definition (`aggregate.contract_coverage_block_paths`, which
   `contract_coverage_blocks` is the reader's own wrapper over) rather than two
   that agree until one changes.
-- `scripts/measure_contract_shadow.py` pins the accepted `public`
-  unresolved-loss findings by their full `case:mode:kind:symbol` key. Pinning
-  only the case name still allowed one accepted gap to be fixed while a
-  different finding *in the same case* regressed, leaving both the count and
-  the case set unchanged.
+- `scripts/measure_contract_shadow.py` no longer pins the accepted `public`
+  unresolved-loss findings by corpus case name alone: that allowed one
+  accepted gap to be fixed while a different finding *in the same case*
+  regressed, leaving both the count and the case set unchanged. (The key was
+  tightened once more after this — see the entry below on
+  `report_finding_id`, which is the identity it ended on.)
