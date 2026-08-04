@@ -586,6 +586,16 @@ class TestBuildFindingMatrixUnit:
         (line,) = render_finding_matrix_lines(matrix)[2:]
         assert "(unknown kind)" in line
 
+    def test_finding_with_no_symbol_renders_without_a_bracket(self) -> None:
+        """A type-level finding carries no symbol, and the rendered line must
+        not grow an empty `[]` for it."""
+        matrix = build_finding_matrix(
+            {"libfoo": {"gcc": [self._findings({"kind": "abi_tag_changed"})]}}
+        )
+        (line,) = render_finding_matrix_lines(matrix)[2:]
+        assert line.startswith("  libfoo abi_tag_changed:")
+        assert "[" not in line
+
     def test_empty_matrix_renders_nothing(self) -> None:
         assert render_finding_matrix_lines([]) == []
 
@@ -759,6 +769,13 @@ class TestKindsAcrossOneProfilesChecks:
         assert entry.affected_profiles == ("linux-gcc14",)
 
 
+#: The smallest entry a conformant producer writes: every field the
+#: compare-report schema marks `required` on a `changes[]` entry that this
+#: module reads. Type-rejection cases build on it so they exercise the type
+#: check rather than tripping the required-field check first.
+_MINIMAL = {"kind": "func_removed", "symbol": "x", "description": "d"}
+
+
 class TestFindingEntryValidation:
     """A mapping is not automatically a usable finding (Codex review)."""
 
@@ -768,17 +785,12 @@ class TestFindingEntryValidation:
             pytest.param({"foo": 1}, id="no-kind"),
             pytest.param({"kind": 42}, id="non-string-kind"),
             pytest.param({"kind": ""}, id="empty-kind"),
-            pytest.param({"kind": "func_removed", "symbol": ["x"]}, id="list-symbol"),
+            pytest.param({**_MINIMAL, "symbol": ["x"]}, id="list-symbol"),
+            pytest.param({**_MINIMAL, "old_value": {"a": 1}}, id="mapping-old-value"),
             pytest.param(
-                {"kind": "func_removed", "old_value": {"a": 1}}, id="mapping-old-value"
+                {**_MINIMAL, "source_location": ["h.h:1"]}, id="list-source-location"
             ),
-            pytest.param(
-                {"kind": "func_removed", "source_location": ["h.h:1"]},
-                id="list-source-location",
-            ),
-            pytest.param(
-                {"kind": "func_removed", "description": 7}, id="non-string-description"
-            ),
+            pytest.param({**_MINIMAL, "description": 7}, id="non-string-description"),
         ],
     )
     def test_unusable_entry_marks_the_report_incomplete(self, entry: dict) -> None:
@@ -792,7 +804,38 @@ class TestFindingEntryValidation:
         assert result.complete is False
 
     def test_absent_optional_fields_are_fine(self) -> None:
-        result = parse_report_findings({"changes": [{"kind": "func_removed"}]})
+        """Everything past the schema's own required set really is optional —
+        `old_value`/`new_value`/`source_location`/`severity` are all absent
+        from plenty of genuine findings."""
+        result = parse_report_findings(
+            {"changes": [{"kind": "func_removed", "symbol": "x", "description": "d"}]}
+        )
+        assert len(result.findings) == 1
+        assert result.complete is True
+
+    @pytest.mark.parametrize("missing", ["symbol", "description"])
+    def test_required_identity_field_must_be_present(self, missing: str) -> None:
+        """The compare-report schema marks these `required` on a `changes[]`
+        entry, so an entry without one is not something a conformant producer
+        wrote — and an array of such entries is not evidence that anything was
+        enumerated (Codex review)."""
+        entry = {"kind": "func_removed", "symbol": "x", "description": "d"}
+        del entry[missing]
+        result = parse_report_findings({"changes": [entry]})
+        assert result.findings == ()
+        assert result.complete is False
+
+    def test_a_present_but_null_required_field_is_accepted(self) -> None:
+        """`cli_scan_baseline._baseline_finding_dicts` emits the keys with
+        `None` when a `Change` carries no value. That is a producer emitting
+        the field, not omitting it."""
+        result = parse_report_findings(
+            {
+                "changes": [
+                    {"kind": "func_removed", "symbol": "x", "description": None}
+                ]
+            }
+        )
         assert len(result.findings) == 1
         assert result.complete is True
 
@@ -811,6 +854,137 @@ class TestFindingEntryValidation:
         result = parse_report_findings({"bundle_findings": [{"symbol": "x"}]})
         assert result.findings == ()
         assert result.complete is False
+
+
+class TestScanReportShape:
+    """`scan --against` is the third report shape, and it keeps its findings
+    under `diff.findings` rather than `changes` (Codex review). Reading them
+    is what keeps a scan-checked profile in the matrix at all — but it can
+    never be complete: only the gating buckets are itemized, and the list is
+    capped."""
+
+    def test_scan_findings_are_read(self) -> None:
+        result = parse_report_findings({"diff": {"findings": [dict(_SIZE_CHANGED)]}})
+        assert len(result.findings) == 1
+
+    def test_scan_findings_are_never_complete(self) -> None:
+        result = parse_report_findings({"diff": {"findings": [dict(_SIZE_CHANGED)]}})
+        assert result.complete is False
+
+    def test_a_non_mapping_diff_block_is_ignored(self) -> None:
+        result = parse_report_findings({"diff": "summary text"})
+        assert result.findings == ()
+        assert result.complete is False
+
+    def test_a_scan_profile_is_affected_not_unknown(self, tmp_path: Path) -> None:
+        """The end-to-end consequence: a scan-checked profile that reported a
+        finding is *affected* by it, while still never clearing another
+        profile's."""
+        _write_report(
+            tmp_path, GCC, "BREAKING", diff={"findings": [dict(_SIZE_CHANGED)]}
+        )
+        _write_findings_report(tmp_path, CLANG, "COMPATIBLE", [])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        (entry,) = r.finding_matrix
+        assert entry.affected_profiles == ("linux-gcc14",)
+        assert entry.unaffected_profiles == ("linux-clang20",)
+
+    def test_a_scan_profile_never_clears_another_profiles_finding(
+        self, tmp_path: Path
+    ) -> None:
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED])
+        _write_report(tmp_path, CLANG, "COMPATIBLE", diff={"findings": []})
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        (entry,) = r.finding_matrix
+        assert entry.unaffected_profiles == ()
+        assert entry.undetermined_profiles == ("linux-clang20",)
+
+
+class TestDisplayFilteredReports:
+    """`compare --show-only` narrows the `changes` array while the verdict,
+    the gate, and the `summary` block keep describing the whole diff — so a
+    well-formed array is not by itself proof that nothing else was found
+    (Codex review)."""
+
+    def test_show_only_filter_flag_withholds_completeness(self) -> None:
+        result = parse_report_findings(
+            {
+                "show_only_filter": "breaking",
+                "summary": {"total_changes": 3},
+                "changes": [dict(_SIZE_CHANGED)],
+            }
+        )
+        assert len(result.findings) == 1
+        assert result.complete is False
+
+    def test_a_count_mismatch_alone_withholds_completeness(self) -> None:
+        """`--report-mode leaf` emits no `show_only_filter` at all, so the
+        summary's own count against the array length is the only signal."""
+        result = parse_report_findings(
+            {"summary": {"total_changes": 3}, "changes": [dict(_SIZE_CHANGED)]}
+        )
+        assert result.complete is False
+
+    def test_an_agreeing_summary_keeps_completeness(self) -> None:
+        result = parse_report_findings(
+            {"summary": {"total_changes": 1}, "changes": [dict(_SIZE_CHANGED)]}
+        )
+        assert result.complete is True
+
+    def test_a_report_without_a_summary_is_unaffected(self) -> None:
+        result = parse_report_findings({"changes": [dict(_SIZE_CHANGED)]})
+        assert result.complete is True
+
+    @pytest.mark.parametrize("mode", ["full", "leaf", "root-cause"])
+    def test_real_reporter_output_round_trips(self, mode: str) -> None:
+        """Against the real producer rather than a hand-built dict, in every
+        report mode — including `leaf`, whose filtered output carries no flag
+        to key on."""
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+        from abicheck.reporter import to_json
+
+        def _result() -> DiffResult:
+            return DiffResult(
+                library="lib",
+                old_version="1",
+                new_version="2",
+                verdict=Verdict.BREAKING,
+                changes=[
+                    Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed foo"),
+                    Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added bar"),
+                ],
+            )
+
+        whole = parse_report_findings(json.loads(to_json(_result(), report_mode=mode)))
+        assert whole.complete is True
+        assert len(whole.findings) == 2
+
+        filtered = parse_report_findings(
+            json.loads(to_json(_result(), report_mode=mode, show_only="breaking"))
+        )
+        assert filtered.complete is False
+        assert len(filtered.findings) == 1
+
+    def test_a_filtered_profile_cannot_clear_another_profiles_finding(
+        self, tmp_path: Path
+    ) -> None:
+        """The end-to-end consequence Codex named: the filtered profile hid
+        the finding rather than not having it."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED])
+        _write_report(
+            tmp_path,
+            CLANG,
+            "BREAKING",
+            changes=[dict(_REMOVED_ITANIUM)],
+            show_only_filter="breaking",
+            summary={"total_changes": 4},
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        by_kind = {e.kinds: e for e in r.finding_matrix}
+        assert by_kind[("type_size_changed",)].undetermined_profiles == (
+            "linux-clang20",
+        )
+        assert by_kind[("func_removed",)].affected_profiles == ("linux-clang20",)
 
 
 #: `diff_python.py` really passes a list for these findings (e.g.
@@ -912,19 +1086,41 @@ class TestManglingComparability:
         r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
         assert {e.scope for e in r.finding_matrix} == {"undetermined"}
 
-    def test_same_entity_across_platform_spellings_is_never_called_clean(
+    def test_same_entity_across_platform_spellings_is_one_finding(
         self, tmp_path: Path
     ) -> None:
         """A Mach-O toolchain's extra leading underscore makes one entity look
-        like two raw symbols. Comparing normalized forms recognizes them as
-        the same, so neither profile may be reported clean of the other."""
+        like two raw symbols. Normalized, the two are byte-identical *complete*
+        Itanium encodings — parameter types included — so they are provably one
+        declaration and reconcile into a single `all_profiles` entry rather
+        than two half-known ones (Codex review)."""
         _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
         _write_findings_report(
             tmp_path, MACOS_CHECK, "BREAKING", [_REMOVED_ITANIUM_MACHO]
         )
         r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MACOS_CHECK))
-        assert {e.scope for e in r.finding_matrix} == {"undetermined"}
-        assert all(e.unaffected_profiles == () for e in r.finding_matrix)
+        (entry,) = r.finding_matrix
+        assert entry.scope == "all_profiles"
+        assert entry.affected_profiles == ("linux-gcc14", "macos-clang")
+        assert entry.undetermined_profiles == ()
+
+    def test_platform_spelling_merge_does_not_merge_distinct_overloads(
+        self, tmp_path: Path
+    ) -> None:
+        """The merge is keyed on the whole normalized mangling, never on the
+        qualified name — so two genuinely different overloads spelled by a
+        Linux and a Mach-O toolchain stay two findings, exactly as two Linux
+        toolchains' would."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM_OVERLOAD])
+        _write_findings_report(
+            tmp_path, MACOS_CHECK, "BREAKING", [_REMOVED_ITANIUM_MACHO]
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MACOS_CHECK))
+        assert [e.scope for e in r.finding_matrix] == [
+            "profile_specific",
+            "profile_specific",
+        ]
+        assert all(e.unaffected_profiles for e in r.finding_matrix)
 
     @pytest.mark.parametrize(
         "symbol,expected",

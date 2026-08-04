@@ -344,6 +344,17 @@ class ReportFindings:
 #: :class:`ReportFinding` reads, so they need no separate identity path.
 _RELEASE_FINDING_KEYS = ("bundle_findings", "matrix_findings")
 
+#: Where a ``scan --against`` report keeps its findings
+#: (``scan_engine.ScanOutcome.to_dict``'s ``diff`` block, filled by
+#: ``cli_scan_baseline``). A third report shape after ``compare`` and
+#: ``compare-release``, and like the release shape it can never be
+#: *complete*: only the gating buckets are itemized (compatible findings are
+#: deliberately left out) and the list is capped at 20 with a
+#: ``findings_truncated`` flag. Parsing it is what keeps a scan-checked
+#: profile from vanishing out of the matrix entirely (Codex review).
+_SCAN_DIFF_KEY = "diff"
+_SCAN_FINDINGS_KEY = "findings"
+
 
 def _with_bundle_attribution(entry: Mapping[str, Any]) -> Mapping[str, Any]:
     """Fold a bundle finding's library attribution into its ``description``.
@@ -371,6 +382,17 @@ def _with_bundle_attribution(entry: Mapping[str, Any]) -> Mapping[str, Any]:
         return entry
     return {**entry, "description": prefix + str(entry.get("description") or "")}
 
+
+#: Identity fields every real producer emits and the compare-report schema
+#: marks *required* on a ``changes[]`` entry. An entry missing one is not
+#: something a conformant report produced, so it is not evidence that the
+#: array was enumerated successfully — it resolves to a contentless
+#: identity while leaving the report ``complete``, which is how a garbage
+#: array could clear another profile's finding (Codex review). Present-but-
+#: ``None`` is accepted: ``cli_scan_baseline._baseline_finding_dicts`` emits
+#: the keys with ``None`` when a ``Change`` carries no value, and that is a
+#: producer emitting the field, not omitting it.
+_REQUIRED_IDENTITY_FIELDS = ("symbol", "description")
 
 #: Identity fields that must be a plain string when present. A non-string
 #: here does not merely degrade the identity, it silently changes it:
@@ -413,6 +435,8 @@ def _is_usable_finding_entry(entry: object) -> bool:
     kind = entry.get("kind")
     if not isinstance(kind, str) or not kind:
         return False
+    if any(field not in entry for field in _REQUIRED_IDENTITY_FIELDS):
+        return False
     if not all(
         entry.get(field) is None or isinstance(entry.get(field), str)
         for field in _IDENTITY_STRING_FIELDS
@@ -424,27 +448,65 @@ def _is_usable_finding_entry(entry: object) -> bool:
     )
 
 
+#: What a report says about its own ``changes`` array being *displayed*
+#: rather than *enumerated*. ``compare --show-only`` narrows the array
+#: (``reporter.to_json``) while the verdict, the gate, and the ``summary``
+#: block all keep describing the whole diff — so a well-formed array is not
+#: by itself proof that nothing else was found (Codex review). Two signals,
+#: because neither covers every report mode: ``show_only_filter`` is emitted
+#: by full and root-cause mode but not by ``--report-mode leaf``, which
+#: instead leaves ``summary.total_changes`` counting the unfiltered diff
+#: against a filtered array.
+_SHOW_ONLY_KEY = "show_only_filter"
+_SUMMARY_KEY = "summary"
+_SUMMARY_TOTAL_KEY = "total_changes"
+
+
+def _changes_array_is_exhaustive(data: Mapping[str, Any], listed: int) -> bool:
+    """Whether *data*'s ``changes`` array holds every finding the run made.
+
+    A count *mismatch* is the general form of the question and a filter flag
+    is one specific answer to it, so both are checked: any future display
+    filter that narrows the array while leaving the summary whole is caught
+    by the count alone. The comparison is deliberately one-directional —
+    only a summary claiming *more* than the array lists withholds
+    completeness, since an array longer than the count would mean something
+    else is wrong and is not this function's question to answer.
+    """
+    if data.get(_SHOW_ONLY_KEY) is not None:
+        return False
+    summary = data.get(_SUMMARY_KEY)
+    if isinstance(summary, Mapping):
+        total = summary.get(_SUMMARY_TOTAL_KEY)
+        if isinstance(total, int) and not isinstance(total, bool) and total > listed:
+            return False
+    return True
+
+
 def parse_report_findings(data: Mapping[str, Any]) -> ReportFindings:
     """Read every finding array a report carries into a :class:`ReportFindings`.
 
-    Two report shapes are understood. A ``compare``/``scan`` report puts its
-    whole finding set in ``changes``; a ``compare-release`` report has no
+    Three report shapes are understood. A ``compare`` report puts its whole
+    finding set in ``changes``; a ``compare-release`` report has no
     ``changes`` at all and instead carries ``bundle_findings`` and
     ``matrix_findings`` (:data:`_RELEASE_FINDING_KEYS`) alongside per-library
-    entries that are only *counts*. Both are parsed, so a ``kind: bundle``
-    check — which always produces the release shape — participates in the
-    matrix instead of being written off as unknown.
+    entries that are only *counts*; a ``scan --against`` report itemizes its
+    gating buckets under ``diff.findings`` (:data:`_SCAN_DIFF_KEY`). All
+    three are parsed, so a ``kind: bundle`` or scan-baseline check — neither
+    of which produces the ``compare`` shape — participates in the matrix
+    instead of being written off as unknown.
 
-    :attr:`~ReportFindings.complete` is granted **only** for a well-formed
-    ``changes`` array, because that is the one field that carries a
-    comparison's entire finding set. A release report is never complete no
+    :attr:`~ReportFindings.complete` is granted **only** for a well-formed,
+    unfiltered ``changes`` array, because that is the one field that carries
+    a comparison's entire finding set. A release report is never complete no
     matter how many bundle/matrix findings it lists: its per-library
     findings are not in the document, so it cannot clear a profile of one.
-    Neither is a report with any unparseable array element — the valid
-    entries stay usable (they can still convict a profile), but the hole is
-    recorded rather than silently rounded down to "found nothing", which is
-    the false clean claim :attr:`FindingMatrixEntry.undetermined_profiles`
-    exists to prevent.
+    Neither is a report with any unparseable array element, nor one whose
+    array was narrowed for display rather than enumerated
+    (:func:`_changes_array_is_exhaustive`) — the valid entries stay usable
+    (they can still convict a profile), but the hole is recorded rather than
+    silently rounded down to "found nothing", which is the false clean claim
+    :attr:`FindingMatrixEntry.undetermined_profiles` exists to prevent.
 
     A malformed entry is skipped rather than raising: reports are external
     artifacts, and one bad finding must not take a whole CI-matrix
@@ -454,7 +516,9 @@ def parse_report_findings(data: Mapping[str, Any]) -> ReportFindings:
     malformed = False
 
     raw_changes = data.get("changes")
-    enumerated_changes = isinstance(raw_changes, list)
+    enumerated_changes = isinstance(raw_changes, list) and _changes_array_is_exhaustive(
+        data, len(raw_changes)
+    )
     if isinstance(raw_changes, list):
         for entry in raw_changes:
             if _is_usable_finding_entry(entry):
@@ -462,8 +526,12 @@ def parse_report_findings(data: Mapping[str, Any]) -> ReportFindings:
             else:
                 malformed = True
 
-    for key in _RELEASE_FINDING_KEYS:
-        raw = data.get(key)
+    scan_diff = data.get(_SCAN_DIFF_KEY)
+    release_arrays = [data.get(key) for key in _RELEASE_FINDING_KEYS]
+    if isinstance(scan_diff, Mapping):
+        release_arrays.append(scan_diff.get(_SCAN_FINDINGS_KEY))
+
+    for raw in release_arrays:
         if not isinstance(raw, list):
             continue
         for entry in raw:
@@ -565,6 +633,60 @@ class FindingMatrixEntry:
 ProfileCheckFindings = Sequence["ReportFindings"]
 
 
+def _merge_equivalent_spellings(
+    known: dict[str, dict[str, list[ReportFinding]]],
+    profiles: Sequence[str],
+) -> dict[str, dict[str, list[ReportFinding]]]:
+    """Re-key findings whose spellings are *provably* the same entity.
+
+    One declaration is spelled ``_ZN3lib3addEii`` by a Linux toolchain and
+    ``__ZN3lib3addEii`` by a Mach-O one — the platform's extra leading
+    underscore, and nothing else. Normalized
+    (:func:`comparable_mangled_symbol`) they are byte-identical *complete*
+    Itanium encodings, parameter types included, so they name one entity;
+    only the primary identity, which keys on the raw symbol, failed to see
+    it. Left split, a Linux and a macOS profile reporting one removal
+    produced two entries where one ``all_profiles`` finding is the truth
+    (Codex review).
+
+    **This is the merge the cross-ABI key may not do, and the difference is
+    the evidence.** ``cross_identity`` only strips to a qualified name, so
+    two profiles matching on it may hold different overloads —
+    :func:`resolve_cross_abi_identity` explains why merging there would
+    assert a pairing nothing establishes. Here the *whole* mangling matches
+    after one platform prefix is removed, which leaves nothing to guess at.
+    Merging is keyed on that equality, never on the qualified name alone.
+    """
+    identities_by_spelling: dict[tuple[str, str], set[str]] = {}
+    for pid in profiles:
+        for identity, findings in known[pid].items():
+            for f in findings:
+                if f.cross_identity and f.comparable_symbol:
+                    identities_by_spelling.setdefault(
+                        (f.cross_identity, f.comparable_symbol), set()
+                    ).add(identity)
+
+    remap: dict[str, str] = {}
+    for identities in identities_by_spelling.values():
+        if len(identities) < 2:
+            continue
+        # Deterministic and opaque: the schema documents the id as a key to
+        # compare, never to parse, so the smallest of the group serves.
+        canonical = min(identities)
+        for identity in identities:
+            remap[identity] = canonical
+    if not remap:
+        return known
+
+    merged: dict[str, dict[str, list[ReportFinding]]] = {}
+    for pid in profiles:
+        by_identity: dict[str, list[ReportFinding]] = {}
+        for identity, findings in known[pid].items():
+            by_identity.setdefault(remap.get(identity, identity), []).extend(findings)
+        merged[pid] = by_identity
+    return merged
+
+
 def _withholds_clean_verdict(
     own: set[tuple[str | None, str]],
     others: set[tuple[str | None, str]],
@@ -660,6 +782,10 @@ def build_finding_matrix(
                 for finding in check.findings:
                     by_identity.setdefault(finding.identity, []).append(finding)
             known[pid] = by_identity
+
+        # Two spellings of one entity become one identity before anything is
+        # counted, so a merged finding is affected/unaffected like any other.
+        known = _merge_equivalent_spellings(known, profiles)
 
         # profile -> cross-ABI declaration key -> the (scheme, normalized
         # symbol) pairs it reported under. Both halves are needed to decide

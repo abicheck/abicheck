@@ -304,15 +304,29 @@ confirmed by reading the workflow, not asserted from a design doc):
       the *same* symbol. That second case is the Mach-O quirk: a macOS
       toolchain prefixes an extra leading underscore, so one entity appears
       as two raw symbols and two primary identities — `comparable_mangled_symbol`
-      recognizes them as one, and the profile stays undetermined rather than
-      being called clean of a finding it demonstrably has. (Fifth Codex
-      review round; the Mach-O sub-case was found while implementing it, and
-      is why the rule compares normalized symbols rather than just schemes.) (An intermediate revision *did* merge when each
+      recognizes them as one. (Fifth Codex review round; the Mach-O sub-case
+      was found while implementing it, and is why the rule compares
+      normalized symbols rather than just schemes.) (An intermediate revision *did* merge when each
       profile contributed exactly one identity; the third Codex review round
       pointed out that cardinality is not evidence — Linux losing
       `add(int, int)` while Windows loses `add(double)` passes that check and
       would have been published as a single all-profiles finding. Reverted to
       withholding only.)
+- [x] **The Mach-O case is a merge, not a withholding.** Withholding was
+      still the wrong answer for it: the two spellings normalize to
+      byte-identical *complete* Itanium encodings, parameter types included,
+      so they are provably one declaration — the exact evidence the
+      cross-ABI case lacks. Left split, a Linux and a macOS profile reporting
+      one removal produced two `undetermined` entries where one
+      `all_profiles` finding is the truth.
+      `_merge_equivalent_spellings` re-keys such identities onto one before
+      the matrix is built, keyed on `(cross_identity, comparable_symbol)` —
+      never on the qualified name alone, so two genuinely different
+      overloads spelled by a Linux and a Mach-O toolchain stay two findings
+      exactly as two Linux toolchains' would. (Sixth Codex review round; the
+      distinction between this merge and the one the third round reverted is
+      *whether the whole mangling matches*, not how many identities each
+      profile contributed.)
 - [x] A finding entry is validated before it counts as *enumerated*: being a
       JSON object is not enough, since one with no `kind` still parses into a
       contentless REDUCED-tier identity and would let a garbage array read as
@@ -345,20 +359,27 @@ confirmed by reading the workflow, not asserted from a design doc):
       of `aggregate.py` is built on. `ReportFindings` carries the findings
       and a separate `complete` flag so the two facts cannot be conflated,
       and `FindingMatrixEntry.scope` answers `undetermined` ahead of every
-      other value whenever any profile is in that state. Four things fall
+      other value whenever any profile is in that state. Six things fall
       short of complete: a missing/unreadable/not-comparable report, a
-      report with no finding array, a report with an unparseable array
-      element, and a `compare-release` report. Only `complete` may *clear* a
-      profile; an incomplete report's findings are still read, since seeing
-      a finding proves it is there while not seeing one proves nothing.
-- [x] Both report shapes participate. A `compare`/`scan` report carries
+      report with no finding array, a report with an unparseable or
+      non-conformant array element, a `compare-release` report, a `scan
+      --against` report (gating buckets only, capped), and a report whose
+      array was narrowed for *display* rather than enumerated. Only
+      `complete` may *clear* a profile; an incomplete report's findings are
+      still read, since seeing a finding proves it is there while not seeing
+      one proves nothing.
+- [x] All three report shapes participate. A `compare` report carries
       `changes`; a `compare-release` report — what a `kind: bundle` check
       produces, since a bundle comparison routes through the per-library
       release fan-out — has no `changes` at all and instead carries
       `bundle_findings`/`matrix_findings` plus per-library entries that are
-      only *counts*. Both arrays are parsed, so bundle targets reconcile
-      rather than being written off as unknown; the missing per-library
-      detail is exactly why such a report can never be `complete`. A bundle
+      only *counts*; a `scan --against` report itemizes its gating buckets
+      under `diff.findings`. All three arrays are parsed, so bundle and
+      scan-baseline targets reconcile rather than being written off as
+      unknown (sixth Codex review round for the scan shape, which previously
+      vanished out of the matrix entirely); the missing per-library detail —
+      and, for scan, the deliberately-omitted compatible findings plus the
+      20-entry cap — is exactly why such a report can never be `complete`. A bundle
       finding's `consumer_library`/`provider_library` are folded into its
       description using `BundleFinding.to_change`'s own
       `"[consumer ← provider] "` flattening, so two findings differing only
@@ -366,6 +387,28 @@ confirmed by reading the workflow, not asserted from a design doc):
       item and the `complete` flag above came from the PR's Codex review;
       the original slice treated every release report as unknown and let a
       partially-unparseable `changes` array read as an exhaustive one.)
+- [x] An entry must carry the fields the compare-report schema marks
+      *required* on a `changes[]` entry (`symbol`, `description`) before the
+      array counts as enumerated — a `kind` alone is not something a
+      conformant producer wrote, so it is no evidence the array is
+      exhaustive. Present-but-`null` is accepted:
+      `cli_scan_baseline._baseline_finding_dicts` really does emit those keys
+      with `None`, and that is a producer emitting the field rather than
+      omitting it. (Sixth Codex review round — the type-only validation from
+      the third round left the "field absent entirely" hole open.)
+- [x] A well-formed array is not by itself proof that nothing else was
+      found: `compare --show-only` narrows `changes` (`reporter.to_json`)
+      while the verdict, the gate, and the `summary` block all keep
+      describing the whole diff, so a profile that *hid* a finding read as
+      one that did not have it. Two signals are checked, because neither
+      covers every report mode — `show_only_filter`, emitted by full and
+      root-cause mode, and a `summary.total_changes` exceeding the array's
+      own length, which is the only signal `--report-mode leaf` leaves. The
+      count comparison is the general form of the question, so any future
+      display filter that narrows the array while leaving the summary whole
+      is caught by it alone. (Seventh Codex review round;
+      `TestDisplayFilteredReports` verifies it against the real producer in
+      all three report modes rather than against hand-built dicts.)
 - [x] A finding present on every profile and one present on only one are
       distinguished by an explicit `scope` discriminator
       (`all_profiles`/`profile_specific`/`partial`/`undetermined`) in both
@@ -379,8 +422,9 @@ confirmed by reading the workflow, not asserted from a design doc):
       mirroring the source split) covers the merged/split shapes (same
       finding on all profiles, profile-specific, partial), the rich-vs-L0
       kind collapse, every source of `undetermined` including the
-      partially-malformed array and the release report, bundle/matrix
-      findings participating, bundle attribution keeping distinct library
+      partially-malformed array, the release report, the scan report, and
+      the display-filtered one, bundle/matrix/scan findings participating,
+      bundle attribution keeping distinct library
       pairs apart, "affected outranks undetermined across one profile's own
       checks", ordering stability, the unknown-future-kind degradation, that
       the gate exit code is unmoved, and schema validation of the new block.

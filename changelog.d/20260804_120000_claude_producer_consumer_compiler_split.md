@@ -29,14 +29,22 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   the same overload" from "each lost a different one". Where the two
   spellings *are* comparable — both Itanium, as a GCC and a Clang profile
   are — their inequality proves distinct overloads and each profile is
-  reported clean of the other's finding as it should be. Both report shapes
-  are read: a `compare`/`scan` report's `changes`, and a `compare-release`
-  report's `bundle_findings`/`matrix_findings` (what a `kind: bundle` check
-  produces). A profile only counts as *unaffected* by a finding when it
-  enumerated its findings in full — a report that is missing, unreadable,
-  not-comparable, carries an unparseable entry, or is a release report
-  (which lists bundle/matrix findings but only per-library counts) is
-  `undetermined` instead, the per-finding form of the invariant `aggregate`
-  is built on. Such a report's findings are still read, since seeing a
-  finding proves it is there while not seeing one proves nothing. Purely a
-  reporting view: the gate exit code is unchanged.
+  reported clean of the other's finding as it should be. The one platform
+  difference that *is* provable is merged: a Mach-O toolchain's extra
+  leading underscore (`__ZN3lib3addEii` vs `_ZN3lib3addEii`) leaves two
+  byte-identical complete manglings once normalized, so a Linux and a macOS
+  profile reporting one removal produce one `all_profiles` entry rather than
+  two half-known ones. All three report shapes are read: a `compare`
+  report's `changes`, a `compare-release` report's
+  `bundle_findings`/`matrix_findings` (what a `kind: bundle` check
+  produces), and a `scan --against` report's `diff.findings`. A profile only
+  counts as *unaffected* by a finding when it enumerated its findings in
+  full — a report that is missing, unreadable, not-comparable, carries an
+  unparseable or non-conformant entry, lists only its gating buckets (a
+  `scan` report, capped at 20), was narrowed for display with
+  `compare --show-only`, or is a release report (which lists bundle/matrix
+  findings but only per-library counts) is `undetermined` instead, the
+  per-finding form of the invariant `aggregate` is built on. Such a report's
+  findings are still read, since seeing a finding proves it is there while
+  not seeing one proves nothing. Purely a reporting view: the gate exit code
+  is unchanged.
