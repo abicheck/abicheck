@@ -45,6 +45,7 @@ from abicheck.aggregate_findings import (
     build_finding_matrix,
     parse_report_findings,
     render_finding_matrix_lines,
+    resolve_cross_abi_identity,
     resolve_report_change_identity,
 )
 
@@ -584,3 +585,140 @@ class TestBuildFindingMatrixUnit:
 
     def test_empty_matrix_renders_nothing(self) -> None:
         assert render_finding_matrix_lines([]) == []
+
+
+#: The same declaration as an Itanium toolchain and MSVC each spell it.
+_REMOVED_ITANIUM = {
+    "kind": "func_removed",
+    "symbol": "_ZN3lib3addEii",
+    "description": "Function removed",
+}
+_REMOVED_MSVC = {
+    "kind": "func_removed",
+    "symbol": "?add@lib@@YAHHH@Z",
+    "description": "Function removed",
+}
+#: A *different* overload of that same declaration — indistinguishable from
+#: the one above by qualified name alone, since neither mangling parser
+#: recovers parameter types.
+_REMOVED_ITANIUM_OVERLOAD = {
+    "kind": "func_removed",
+    "symbol": "_ZN3lib3addEd",
+    "description": "Function removed",
+}
+
+MSVC_CHECK = "libfoo@windows-msvc#release@headers"
+
+
+class TestCrossAbiReconciliation:
+    """Findings spelled under different C++ mangling schemes (Codex review).
+
+    Without this, a Linux profile and a Windows profile reporting one logical
+    removal produced two profile-specific entries, each claiming the *other*
+    profile was clean of it — the false clean claim this module exists to
+    prevent, in the one place the identity model could not see it.
+    """
+
+    def test_itanium_and_msvc_spellings_reconcile_to_one_finding(
+        self, tmp_path: Path
+    ) -> None:
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [_REMOVED_MSVC])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
+        (entry,) = r.finding_matrix
+        assert entry.scope == "all_profiles"
+        assert entry.affected_profiles == ("linux-gcc14", "windows-msvc")
+        assert entry.identity_tier == "normalized"
+
+    def test_unrelated_declarations_do_not_merge(self, tmp_path: Path) -> None:
+        """The merge must not over-fire: two genuinely different declarations
+        stay two findings, and the clean profile really is clean."""
+        other = {
+            "kind": "func_removed",
+            "symbol": "?other@lib@@YAHXZ",
+            "description": "Function removed",
+        }
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [other])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
+        assert [e.scope for e in r.finding_matrix] == [
+            "profile_specific",
+            "profile_specific",
+        ]
+        assert all(e.unaffected_profiles for e in r.finding_matrix)
+
+    def test_ambiguous_overloads_stay_split_but_nobody_is_called_clean(
+        self, tmp_path: Path
+    ) -> None:
+        """Neither mangling parser recovers parameter types, so two overloads
+        share a cross-ABI key. A profile carrying both makes the pairing
+        unguessable — the entries stay separate, and every profile holding a
+        sibling finding on the same declaration is undetermined, never
+        unaffected."""
+        _write_findings_report(
+            tmp_path,
+            GCC,
+            "BREAKING",
+            [_REMOVED_ITANIUM, _REMOVED_ITANIUM_OVERLOAD],
+        )
+        _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [_REMOVED_MSVC])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
+        assert len(r.finding_matrix) == 3
+        assert {e.scope for e in r.finding_matrix} == {"undetermined"}
+        assert all(e.unaffected_profiles == () for e in r.finding_matrix)
+
+    def test_type_level_finding_has_no_cross_abi_key(self) -> None:
+        """`symbol` is a type name, not a mangling — nothing to normalize, and
+        the helper must not guess one."""
+        assert resolve_cross_abi_identity(_SIZE_CHANGED) is None
+
+    def test_finding_with_no_symbol_has_no_cross_abi_key(self) -> None:
+        assert resolve_cross_abi_identity({"kind": "func_removed"}) is None
+
+    def test_extern_c_symbol_has_no_cross_abi_key(self) -> None:
+        """An unmangled C symbol is already scheme-independent."""
+        assert (
+            resolve_cross_abi_identity(
+                {"kind": "func_removed", "symbol": "plain_c", "description": "gone"}
+            )
+            is None
+        )
+
+    def test_cross_abi_key_keeps_a_removal_and_an_addition_apart(self) -> None:
+        """The discriminator rides along, so normalizing the *name* never
+        merges two different events on one declaration."""
+        removed = resolve_cross_abi_identity(_REMOVED_ITANIUM)
+        added = resolve_cross_abi_identity(
+            {**_REMOVED_ITANIUM, "kind": "func_added", "description": "Function added"}
+        )
+        assert removed is not None and added is not None
+        assert removed.primary_id != added.primary_id
+
+
+class TestKindsAcrossOneProfilesChecks:
+    def test_kinds_from_every_check_of_a_profile_are_retained(
+        self, tmp_path: Path
+    ) -> None:
+        """One profile can run several checks for a target (different baseline
+        channels/depths). A depth-`binary` check reports the L0 kind and a
+        depth-`headers` check the rich one; both belong in `kinds` (Codex
+        review — the first sample used to win and the other was dropped)."""
+        headers = "libfoo@linux-gcc14#release@headers"
+        binary = "libfoo@linux-gcc14#release@binary"
+        _write_findings_report(tmp_path, headers, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(
+            tmp_path,
+            binary,
+            "BREAKING",
+            [
+                {
+                    "kind": "func_removed_elf_only",
+                    "symbol": "_ZN3lib3addEii",
+                    "description": "Exported symbol disappeared",
+                }
+            ],
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(headers, binary))
+        (entry,) = r.finding_matrix
+        assert entry.kinds == ("func_removed", "func_removed_elf_only")
+        assert entry.affected_profiles == ("linux-gcc14",)

@@ -173,7 +173,7 @@
         "base_target": {"type": "string"},
         "finding_identity": {
           "type": "string",
-          "description": "The reconciliation key: aggregate_findings.resolve_report_change_identity's primary_id. Deliberately NOT the per-report finding_id, which also hashes description and source_location unconditionally -- right for correlating two runs of the same comparison, too strict across profiles, where a header path or a rendered size can legitimately differ for one logical event. Opaque: compare it for equality, don't parse it."
+          "description": "The reconciliation key: aggregate_findings.resolve_report_change_identity's primary_id, or -- when profiles using different C++ mangling schemes reported the same declaration and the pairing was unambiguous -- the scheme-independent key resolve_cross_abi_identity derived from it. Deliberately NOT the per-report finding_id, which also hashes description and source_location unconditionally -- right for correlating two runs of the same comparison, too strict across profiles, where a header path or a rendered size can legitimately differ for one logical event. Opaque: compare it for equality, don't parse it."
         },
         "identity_tier": {
           "type": "string",
@@ -183,7 +183,7 @@
         "kinds": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Every distinct ChangeKind slug the affected profiles reported this finding under, sorted. Usually one; two when profiles differ in available evidence and the identity model collapses the pair (e.g. func_removed on a profile with DWARF, func_removed_elf_only on one without)."
+          "description": "Every distinct ChangeKind slug the affected profiles reported this finding under, sorted -- across every check each profile ran, not just the first. Usually one; two when profiles (or two checks of one profile, at different depths) differ in available evidence and the identity model collapses the pair (e.g. func_removed where DWARF was available, func_removed_elf_only where it was not)."
         },
         "symbol": {"type": "string", "description": "Representative symbol/type name, from the first affected profile in sorted order."},
         "description": {"type": "string", "description": "Representative description, from the first affected profile in sorted order."},
@@ -205,7 +205,7 @@
         "undetermined_profiles": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Profiles that can be placed in neither list above: at least one of their reports fell short of a complete finding set -- missing, unreadable, not-comparable, carrying no finding array at all, carrying an unparseable entry, or being a compare-release report (which lists bundle/matrix findings but only per-library counts). Never read as unaffected -- that would claim a profile was checked and found clean when it was never checked at all. An incomplete report can still place a profile in affected_profiles: seeing a finding proves it is there, while not seeing one proves nothing unless the list was exhaustive."
+          "description": "Profiles that can be placed in neither list above: at least one of their reports fell short of a complete finding set -- missing, unreadable, not-comparable, carrying no finding array at all, carrying an unparseable entry, or being a compare-release report (which lists bundle/matrix findings but only per-library counts). Never read as unaffected -- that would claim a profile was checked and found clean when it was never checked at all. An incomplete report can still place a profile in affected_profiles: seeing a finding proves it is there, while not seeing one proves nothing unless the list was exhaustive. Also lands here when the profile reported a *sibling* finding sharing this one's cross-ABI declaration key but the pairing was ambiguous (two overloads, which the mangling parsers cannot tell apart): it demonstrably has a finding on the same declaration, so it is precisely the profile that must not be called clean."
         }
       }
     },

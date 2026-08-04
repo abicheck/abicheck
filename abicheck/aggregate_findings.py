@@ -51,6 +51,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from .diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
 from .finding_identity import FindingIdentity, resolve_change_identity
 
 if TYPE_CHECKING:
@@ -140,6 +141,44 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
     return resolve_change_identity(cast("Change", view))
 
 
+def resolve_cross_abi_identity(entry: Mapping[str, Any]) -> FindingIdentity | None:
+    """A mangling-scheme-independent identity for the same finding, or ``None``.
+
+    :func:`resolve_report_change_identity` keys on the raw exported symbol,
+    which is the right, most specific answer *within* one mangling scheme —
+    but the same declaration is spelled ``_ZN3lib3addEii`` by an Itanium
+    toolchain and ``?add@lib@@YAHHH@Z`` by MSVC, so a Linux profile and a
+    Windows profile reporting one logical removal would never reconcile.
+    This recovers the declaration's qualified name from either scheme
+    (``diff_cxx_rules``' pure structural parsers — no demangler subprocess,
+    so it works identically on every host) and re-resolves the identity
+    from that instead, keeping the same discriminator so a removal and an
+    addition on the same declaration still stay apart.
+
+    ``None`` whenever no such name can be recovered: a type-level finding
+    whose ``symbol`` is a type name rather than a mangling, an ``extern "C"``
+    symbol that is already scheme-independent, or a mangling the deliberately
+    conservative parsers decline to model (templates, operators, MSVC special
+    members). Never a guess.
+
+    **Lossy by construction, and its caller must treat it as such.** Neither
+    parser recovers parameter types, so two overloads (``add(int, int)`` and
+    ``add(double)``) reduce to the same identity here. This is a *candidate*
+    key for reconciliation, never a proof that two findings are the same one
+    — :func:`build_finding_matrix` merges on it only when doing so is
+    unambiguous, the same "zero or many candidates are equally unsafe to
+    guess at" rule ``finding_identity.SymbolIdentityIndex.unique_alias_match``
+    applies to alias joins.
+    """
+    symbol = str(entry.get("symbol") or "")
+    if not symbol:
+        return None
+    qualified = itanium_qualified_name(symbol) or msvc_qualified_name(symbol)
+    if not qualified or qualified == symbol:
+        return None
+    return resolve_report_change_identity({**entry, "symbol": qualified})
+
+
 @dataclass(frozen=True)
 class ReportFinding:
     """One entry of a report's ``changes[]``, reduced to what cross-profile
@@ -169,10 +208,18 @@ class ReportFinding:
     symbol: str
     description: str
     severity: str | None = None
+    #: :func:`resolve_cross_abi_identity`'s answer — a candidate key for
+    #: matching this finding against one reported under a *different*
+    #: mangling scheme, or ``None`` when no scheme-independent name could be
+    #: recovered. Never used on its own; see that function's docstring for
+    #: why it is a candidate rather than a proof.
+    cross_identity: str | None = None
+    cross_identity_tier: str | None = None
 
     @classmethod
     def from_report_entry(cls, entry: Mapping[str, Any]) -> ReportFinding:
         identity = resolve_report_change_identity(entry)
+        cross = resolve_cross_abi_identity(entry)
         severity = entry.get("severity")
         return cls(
             identity=identity.primary_id,
@@ -181,6 +228,8 @@ class ReportFinding:
             symbol=str(entry.get("symbol") or ""),
             description=str(entry.get("description") or ""),
             severity=severity if isinstance(severity, str) and severity else None,
+            cross_identity=cross.primary_id if cross is not None else None,
+            cross_identity_tier=cross.tier if cross is not None else None,
         )
 
 
@@ -377,6 +426,62 @@ class FindingMatrixEntry:
 ProfileCheckFindings = Sequence["ReportFindings"]
 
 
+def _merge_cross_abi_identities(
+    known: dict[str, dict[str, list[ReportFinding]]],
+    profiles: Sequence[str],
+) -> dict[str, dict[str, list[ReportFinding]]]:
+    """Re-key findings that differ only by mangling scheme onto one identity.
+
+    Two profiles using different C++ ABIs spell the same declaration
+    differently (``_ZN3lib3addEii`` vs ``?add@lib@@YAHHH@Z``), so one logical
+    removal resolves to two identities and would be reported as two
+    profile-specific findings — each claiming the *other* profile is clean of
+    it, which is the false clean claim this module exists to prevent (Codex
+    review).
+
+    A group of identities sharing one :attr:`ReportFinding.cross_identity` is
+    merged onto that key **only when no single profile carries more than one
+    of them**. That guard is what keeps the merge honest:
+    :func:`resolve_cross_abi_identity` cannot recover parameter types, so
+    ``add(int, int)`` and ``add(double)`` share a cross key — a profile
+    carrying both is telling us there are genuinely two findings here and no
+    way to say which pairs with which across the matrix. Declining to merge
+    there is the same "zero or many candidates are equally unsafe to guess
+    at" rule ``SymbolIdentityIndex.unique_alias_match`` uses; the caller then
+    reports the sibling profiles ``undetermined`` instead of silently
+    splitting them into mutually-clean entries.
+    """
+    identities_by_cross: dict[str, set[str]] = {}
+    for pid in profiles:
+        for identity, findings in known[pid].items():
+            for finding in findings:
+                if finding.cross_identity:
+                    identities_by_cross.setdefault(finding.cross_identity, set()).add(
+                        identity
+                    )
+
+    remap: dict[str, str] = {}
+    for cross, identities in identities_by_cross.items():
+        if len(identities) < 2:
+            continue
+        if any(
+            len(identities & set(known[pid])) > 1 for pid in profiles
+        ):  # two overloads on one profile — cannot pair them across profiles
+            continue
+        for identity in identities:
+            remap[identity] = cross
+    if not remap:
+        return known
+
+    merged: dict[str, dict[str, list[ReportFinding]]] = {}
+    for pid in profiles:
+        by_identity: dict[str, list[ReportFinding]] = {}
+        for identity, findings in known[pid].items():
+            by_identity.setdefault(remap.get(identity, identity), []).extend(findings)
+        merged[pid] = by_identity
+    return merged
+
+
 def build_finding_matrix(
     findings_by_target_and_profile: Mapping[str, Mapping[str, ProfileCheckFindings]],
 ) -> tuple[FindingMatrixEntry, ...]:
@@ -395,6 +500,16 @@ def build_finding_matrix(
     findings are still read: they can only ever add a profile to
     ``affected``, never wrongly clear one.
 
+    Two identities that differ only because their profiles use different
+    mangling schemes are merged first, via
+    :func:`resolve_cross_abi_identity` — but only when every profile carries
+    at most one of them, since that key cannot tell two overloads apart.
+    Where the merge is ambiguous the identities stay separate, and each
+    profile carrying a *sibling* identity from the same group is reported
+    ``undetermined`` rather than ``unaffected``: it demonstrably has a
+    finding on the same declaration, so it is exactly the profile that must
+    not be called clean.
+
     Entries are ordered by ``(base_target, kinds, symbol, finding_identity)``
     so the output is stable across runs; the identity itself is last only as
     a tie-break, since it is a hash-like key nobody reads for ordering.
@@ -404,12 +519,17 @@ def build_finding_matrix(
         findings_by_target_and_profile.items()
     ):
         profiles = sorted(checks_by_profile)
-        # profile -> the findings it reported, by identity ({} when the
-        # profile ran checks but none of them listed a finding).
-        known: dict[str, dict[str, ReportFinding]] = {}
+        # profile -> identity -> every finding that resolved to it. A list,
+        # not one representative: a profile can run several checks for one
+        # target (different baseline channels/depths), and two of them can
+        # legitimately report the same identity under equivalent rich and L0
+        # kinds -- keeping only the first would drop the other from `kinds`,
+        # which the schema promises carries every kind the affected profiles
+        # reported (Codex review).
+        known: dict[str, dict[str, list[ReportFinding]]] = {}
         undetermined: set[str] = set()
         for pid in profiles:
-            by_identity: dict[str, ReportFinding] = {}
+            by_identity: dict[str, list[ReportFinding]] = {}
             checks = checks_by_profile[pid]
             if not checks:
                 # A profile present in the grouping with no checks at all has
@@ -419,8 +539,19 @@ def build_finding_matrix(
                 if not check.complete:
                     undetermined.add(pid)
                 for finding in check.findings:
-                    by_identity.setdefault(finding.identity, finding)
+                    by_identity.setdefault(finding.identity, []).append(finding)
             known[pid] = by_identity
+
+        known = _merge_cross_abi_identities(known, profiles)
+        cross_by_profile = {
+            pid: {
+                f.cross_identity
+                for found in known[pid].values()
+                for f in found
+                if f.cross_identity
+            }
+            for pid in profiles
+        }
 
         all_identities = sorted(
             {identity for found in known.values() for identity in found}
@@ -429,19 +560,42 @@ def build_finding_matrix(
             affected = [pid for pid in profiles if identity in known[pid]]
             affected_set = set(affected)
             rest = [pid for pid in profiles if pid not in affected_set]
-            samples = [known[pid][identity] for pid in affected]
+            samples = [f for pid in affected for f in known[pid][identity]]
             first = samples[0]
+            # A profile carrying a different identity that shares this one's
+            # cross-ABI key has a finding on the same declaration under
+            # another mangling; the merge above declined to pair them, so
+            # this is "cannot tell", never "clean".
+            cross = first.cross_identity
+            sibling = (
+                {pid for pid in rest if cross in cross_by_profile[pid]}
+                if cross
+                else set()
+            )
+            # A merged entry is keyed by the cross-ABI identity, so it must
+            # report *that* identity's tier -- the per-profile mangled-name
+            # tier describes a key this entry is no longer using.
+            merged_on_cross = identity == cross
+            tier = (
+                first.cross_identity_tier or first.identity_tier
+                if merged_on_cross
+                else first.identity_tier
+            )
             entries.append(
                 FindingMatrixEntry(
                     base_target=base_target,
                     finding_identity=identity,
-                    identity_tier=first.identity_tier,
+                    identity_tier=tier,
                     kinds=tuple(sorted({s.kind for s in samples if s.kind})),
                     symbol=first.symbol,
                     description=first.description,
                     affected_profiles=tuple(affected),
-                    unaffected_profiles=tuple(p for p in rest if p not in undetermined),
-                    undetermined_profiles=tuple(p for p in rest if p in undetermined),
+                    unaffected_profiles=tuple(
+                        p for p in rest if p not in undetermined and p not in sibling
+                    ),
+                    undetermined_profiles=tuple(
+                        p for p in rest if p in undetermined or p in sibling
+                    ),
                 )
             )
     entries.sort(key=lambda e: (e.base_target, e.kinds, e.symbol, e.finding_identity))

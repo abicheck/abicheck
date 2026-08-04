@@ -263,7 +263,30 @@ confirmed by reading the workflow, not asserted from a design doc):
       event two profiles report under different kinds (`func_removed` where
       DWARF was available, `func_removed_elf_only` where it wasn't) is one
       entry carrying both `kinds`, not two unrelated findings — the case a
-      real GCC/Clang/MSVC matrix actually produces.
+      real GCC/Clang/MSVC matrix actually produces. `kinds` unions across
+      *every* check a profile ran, not just its first, since one profile can
+      run a `binary`-depth and a `headers`-depth check that report the same
+      event under the two equivalent kinds.
+- [x] Profiles on **different C++ ABIs** reconcile as well, which the
+      mangled-name identity alone could not do: one declaration is spelled
+      `_ZN3lib3addEii` by an Itanium toolchain and `?add@lib@@YAHHH@Z` by
+      MSVC, so a Linux and a Windows profile reporting one logical removal
+      produced two profile-specific entries, each asserting the *other*
+      profile was clean of it. `resolve_cross_abi_identity` recovers the
+      declaration's qualified name from either scheme
+      (`diff_cxx_rules.itanium_qualified_name`/`msvc_qualified_name` — pure
+      structural parsers, no demangler subprocess, so this works identically
+      on every host) and re-resolves the identity from that, keeping the
+      discriminator so a removal and an addition on one declaration still
+      stay apart. **Merged only when unambiguous:** neither parser recovers
+      parameter types, so `add(int, int)` and `add(double)` share the key — a
+      profile carrying both means the pairing is unguessable, and those
+      entries stay split with every sibling-holding profile marked
+      `undetermined` rather than `unaffected`. That is the same "zero or many
+      candidates are equally unsafe to guess at" rule
+      `SymbolIdentityIndex.unique_alias_match` applies to alias joins.
+      (Both this and the `kinds` union above came from the PR's second Codex
+      review round.)
 - [x] A third list, `undetermined_profiles`, was **added beyond the original
       scope** and is the load-bearing one: a profile whose findings are not
       fully known is neither affected nor unaffected. Without it, this view

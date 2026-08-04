@@ -19,7 +19,14 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   Phase 2), so one event two profiles report under different kinds because
   they had different evidence available (`func_removed` with DWARF,
   `func_removed_elf_only` without) reconciles to a single entry carrying both
-  kinds, rather than looking like two unrelated problems. Both report shapes
+  kinds, rather than looking like two unrelated problems. Profiles on
+  different C++ ABIs reconcile too: a declaration spelled `_ZN3lib3addEii` by
+  an Itanium toolchain and `?add@lib@@YAHHH@Z` by MSVC is matched through a
+  scheme-independent key derived from either mangling — but only when the
+  pairing is unambiguous, since that key cannot tell two overloads apart.
+  Where it is ambiguous the entries stay separate and every profile holding a
+  sibling finding on the same declaration is reported `undetermined`, never
+  clean. Both report shapes
   are read: a `compare`/`scan` report's `changes`, and a `compare-release`
   report's `bundle_findings`/`matrix_findings` (what a `kind: bundle` check
   produces). A profile only counts as *unaffected* by a finding when it
