@@ -306,6 +306,154 @@ class TestTheGateFollowsTheDecision:
         assert max(contributions) == legacy_exit_code(result.verdict)
 
 
+class TestExplicitScopeReachesTheGateBeforeItComputes:
+    """ADR-049 §4.3: an explicit consumer/required-symbol contract is the
+    strongest in-contract evidence there is — so it has to be applied
+    *before* the scoped gate reads the finding set.
+
+    Promoting afterwards (which is where the aggregate stamping runs) meant
+    the scoped exit scored the weaker `UNKNOWN_UNRESOLVED` the export path
+    had reached, while the very same run rendered the finding as
+    `IN_CONTRACT` with a `BREAKING` decision. Driven end to end, since the
+    bug is an ordering between two call sites rather than a wrong value in
+    either.
+    """
+
+    @staticmethod
+    def _changed_signature_pair(tmp_path: Path) -> tuple[Path, Path]:
+        """A required symbol that still *exists*, but changed.
+
+        Deliberately not a removal: a removed required symbol is a *missing
+        entrypoint*, which floors the scoped exit at 4 through a separate
+        path and would mask whichever way the gate went.
+        """
+        from abicheck.model import Param
+
+        def snap(version: str, ret: str) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libfoo.so.1",
+                version=version,
+                from_headers=True,
+                functions=[
+                    Function(
+                        name="pub_b",
+                        mangled="_Z5pub_bi",
+                        return_type=ret,
+                        params=[Param(name="x", type="int")],
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
+            )
+
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(snap("1.0", "int")), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(snap("2.0", "long")), encoding="utf-8")
+        return old_p, new_p
+
+    def _run(self, tmp_path: Path, *extra: str) -> int:
+        old_p, new_p = self._changed_signature_pair(tmp_path)
+        return (
+            CliRunner()
+            .invoke(
+                main,
+                [
+                    "compare",
+                    str(old_p),
+                    str(new_p),
+                    "--required-symbol",
+                    "_Z5pub_bi",
+                    "--exit-code-scheme",
+                    "severity",
+                    *extra,
+                ],
+            )
+            .exit_code
+        )
+
+    def test_a_required_symbol_still_gates_under_an_unresolvable_domain(
+        self, tmp_path: Path
+    ) -> None:
+        """`exports` cannot resolve this pair, but the user explicitly
+        declared the symbol part of the contract — which outranks the
+        missing export evidence."""
+        assert (
+            self._run(tmp_path, "--contract-evaluation", "--contract", "exports") == 4
+        )
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            pytest.param((), id="no-contract-evaluation"),
+            pytest.param(("--contract-evaluation", "--contract", "all"), id="all"),
+        ],
+    )
+    def test_it_matches_the_runs_that_never_needed_the_promotion(
+        self, tmp_path: Path, extra: tuple[str, ...]
+    ) -> None:
+        """The two baselines the scoped exit must agree with: the
+        un-opted-in run, and the domain that keeps the finding in contract
+        on its own."""
+        assert self._run(tmp_path, *extra) == 4
+
+
+class TestEveryRendererTellsTheSameStory:
+    """A renderer that reads the unfiltered set contradicts the verdict
+    printed at the top of its own output (Codex review of this PR)."""
+
+    def test_leaf_markdown_does_not_file_it_under_a_verdict_section(self) -> None:
+        """Leaf mode groups purely by `ChangeKind` and returns before the
+        full-mode partition, so it rendered `## Breaking Type Changes`
+        beside a `NO_CHANGE` verdict."""
+        from abicheck.reporter_markdown import to_markdown
+
+        result = _compare(
+            _unreached_public_type_pair(),
+            contract_evaluation=True,
+            contract_mode="public",
+        )
+        leaf = to_markdown(result, report_mode="leaf")
+        assert result.verdict is Verdict.NO_CHANGE
+        assert "Breaking Type Changes" not in leaf
+        assert "Not Evaluated (Contract)" in leaf
+        # Still disclosed, not dropped.
+        assert "type_size_changed" in leaf
+
+    def test_leaf_markdown_keeps_a_scored_finding_in_its_verdict_section(
+        self,
+    ) -> None:
+        """The control: the partition only moves excluded findings."""
+        from abicheck.reporter_markdown import to_markdown
+
+        result = _compare(
+            _unreached_public_type_pair(),
+            contract_evaluation=True,
+            contract_mode="all",
+        )
+        leaf = to_markdown(result, report_mode="leaf")
+        assert "Breaking Type Changes" in leaf
+        assert "Not Evaluated (Contract)" not in leaf
+
+    @pytest.mark.parametrize("report_mode", ["full", "leaf"])
+    def test_the_severity_table_does_not_claim_an_exit_it_will_not_produce(
+        self, report_mode: str
+    ) -> None:
+        """`Exit Impact` is a claim about the gate, so it has to be
+        classified over the set the gate scores — not over every change."""
+        from abicheck.reporter_markdown import to_markdown
+        from abicheck.severity import SeverityConfig, compute_exit_code
+
+        config = SeverityConfig()
+        result = _compare(
+            _unreached_public_type_pair(),
+            contract_evaluation=True,
+            contract_mode="public",
+        )
+        assert compute_exit_code(result.changes, config) == 0
+        text = to_markdown(result, report_mode=report_mode, severity_config=config)
+        assert "causes non-zero exit" not in text
+
+
 class TestAnExcludedFindingCannotLaunderItselfBack:
     """A finding that does not score must not reach the gate *indirectly*.
 

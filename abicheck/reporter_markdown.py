@@ -629,9 +629,24 @@ def _to_markdown_leaf(
             policy_file=result.policy_file,
         )
 
+    # ADR-049 D1: leaf mode groups purely by ChangeKind, so without this a
+    # finding compatibility policy never scored still rendered under
+    # "Breaking Type Changes" beside a NO_CHANGE verdict -- the same
+    # contradiction the full-mode partition exists to prevent, reached by a
+    # different renderer (Codex review, fresh evidence). Partitioned before
+    # the kind grouping, and disclosed in its own non-verdict section below.
+    from .report_model import ReportModel
+
+    not_evaluated = ReportModel.classify_not_evaluated(changes)
+    # Identity, not equality: `Change` is a plain dataclass, so two distinct
+    # findings can compare equal and an `in`-based split would drop the wrong
+    # one (and cost O(n^2) doing it).
+    _excluded_ids = {id(c) for c in not_evaluated}
+    scored = [c for c in changes if id(c) not in _excluded_ids]
+
     # Group root type changes by severity
-    type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
-    non_type_changes = [c for c in changes if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
+    type_changes = [c for c in scored if c.kind in _ROOT_TYPE_CHANGE_KINDS]
+    non_type_changes = [c for c in scored if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
 
     if type_changes:
         lines += _build_leaf_type_sections(type_changes, result.policy)
@@ -641,6 +656,8 @@ def _to_markdown_leaf(
         for c in non_type_changes:
             lines.append(_format_change_md(c))
         lines.append("")
+
+    lines += _build_not_evaluated_section(not_evaluated)
 
     if not changes:
         if show_only and result.changes:
@@ -1146,7 +1163,11 @@ def _build_severity_summary_md(
     "no exit impact" while the report elsewhere names a real, blocking
     finding.
     """
-    from .severity import SeverityLevel, categorize_changes
+    from .severity import (
+        SeverityLevel,
+        categorize_changes,
+        gate_eligible_changes,
+    )
 
     categorized = categorize_changes(
         changes,
@@ -1154,9 +1175,15 @@ def _build_severity_summary_md(
         kind_sets=kind_sets,
         policy_file=policy_file,
     )
+    # ADR-049 D1: the `Count` column above is factual over what is
+    # displayed, but `Exit Impact` is a claim about the *gate* -- so it has
+    # to be classified over the same set `severity.compute_exit_code` scores.
+    # Without this, a comparison whose only finding is a proven-out-of-contract
+    # TYPE_SIZE_CHANGED rendered "causes non-zero exit" beside an exit code of
+    # 0 and a NO_CHANGE verdict (Codex review, fresh evidence).
     exit_categorized = (
         categorize_changes(
-            all_changes,
+            gate_eligible_changes(all_changes),
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,

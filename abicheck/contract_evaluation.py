@@ -58,7 +58,7 @@ its :doc:`implementation plan </contribute/plans/public-contract-default>`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -1665,6 +1665,61 @@ def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
         c.compatibility_evaluation_status = CompatibilityEvaluationStatus.EVALUATED
 
 
+def stamp_scoped_changes(
+    changes: Iterable[Any],
+    *,
+    policy: str | None = None,
+    policy_file: Any = None,
+) -> None:
+    """Promote an explicitly-scoped finding set, decisions included.
+
+    The promotion half of :func:`stamp_scoped_result_findings`, callable on a
+    bare list — which is what the ``--used-by``/``--required-symbol`` paths
+    need, because they compute their *scoped exit code* from one app's or
+    host's relevant changes before the aggregated ``result.scoped_*``
+    collections those paths later expose even exist.
+
+    Ordering matters since ADR-049 Phase 7 made relevance authoritative: an
+    explicit consumer/required-symbol contract is §4.3's strongest
+    in-contract evidence, so a finding it covers must be promoted *before*
+    the scoped gate reads it. Promoting afterwards left the gate scoring a
+    weaker `UNKNOWN_UNRESOLVED` the header/export path had reached, which
+    could report a scoped exit of 0 beside a rendered finding whose own
+    decision says BREAKING (Codex review, confirmed via `--required-symbol`
+    under `--contract exports`).
+    """
+    promoted = [c for c in changes]
+    for change in promoted:
+        stamp_explicit_scope_contract_evaluation(change)
+    _record_scoped_compatibility_decisions(
+        promoted, policy=policy, policy_file=policy_file
+    )
+
+
+def _record_scoped_compatibility_decisions(
+    promoted: list[Any], *, policy: str | None, policy_file: Any
+) -> None:
+    """Recompute each promoted finding's own compatibility decision.
+
+    A promotion to ``IN_CONTRACT`` can turn a finding compare() left
+    ``NOT_EVALUATED`` into an evaluated one, and an evaluated finding owes
+    the report its decision (ADR-049 D1) — computed from the same
+    per-finding classifier the gate uses, rather than left as the stale
+    ``None`` the earlier decision wrote, which would read as "policy
+    declined to score a finding it did score".
+    """
+    if not promoted:
+        return
+    from .severity import effective_verdict_for_change
+
+    for change in promoted:
+        if isinstance(change, dict) or getattr(change, "kind", None) is None:
+            continue
+        change.compatibility_decision = effective_verdict_for_change(
+            change, policy=policy, policy_file=policy_file
+        )
+
+
 def stamp_scoped_result_findings(
     result: Any, *, finding_id: Callable[[Any], str]
 ) -> None:
@@ -1705,31 +1760,18 @@ def stamp_scoped_result_findings(
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
     promoted: list[Any] = []
     if relevant_ids:
-        for c in result.changes:
-            if finding_id(c) in relevant_ids:
-                stamp_explicit_scope_contract_evaluation(c)
-                promoted.append(c)
-    for c in getattr(result, "scoped_only_changes", ()) or ():
-        stamp_explicit_scope_contract_evaluation(c)
-        promoted.append(c)
-    # A promotion to IN_CONTRACT (above) can turn a finding compare() left
-    # NOT_EVALUATED into an evaluated one, and an evaluated finding owes the
-    # report its own compatibility decision (ADR-049 D1). Recomputed here,
-    # from the same policy inputs and the same per-finding classifier the
-    # gate uses, rather than left as the stale `None` the earlier decision
-    # wrote -- a null next to IN_CONTRACT would read as "policy declined to
-    # score a finding it did score".
-    if promoted:
-        from .severity import effective_verdict_for_change
-
-        policy = getattr(result, "policy", None)
-        policy_file = getattr(result, "policy_file", None)
-        for c in promoted:
-            if isinstance(c, dict) or getattr(c, "kind", None) is None:
-                continue
-            c.compatibility_decision = effective_verdict_for_change(
-                c, policy=policy, policy_file=policy_file
-            )
+        promoted.extend(c for c in result.changes if finding_id(c) in relevant_ids)
+    promoted.extend(getattr(result, "scoped_only_changes", ()) or ())
+    # Idempotent by construction, and deliberately still called even though
+    # the `--used-by`/`--required-symbol` paths now promote their own set
+    # earlier (before their scoped exit code): this is the one place that
+    # covers `result.changes` entries and the scoped-only overlay together,
+    # and it is what refreshes the receipt below.
+    stamp_scoped_changes(
+        promoted,
+        policy=getattr(result, "policy", None),
+        policy_file=getattr(result, "policy_file", None),
+    )
     refresh_contract_receipt(result, finding_id=finding_id)
 
 
