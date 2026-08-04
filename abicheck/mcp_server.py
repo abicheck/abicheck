@@ -1342,7 +1342,20 @@ def abi_compare(
                     "blocks_gate": blocks,
                 }
                 if contract_evaluation:
-                    _stamp_explicit_scope_contract_evaluation(missing_entry)
+                    # ADR-049 D1's full shape -- see the identical call in
+                    # `cli_compare_fold`: this entry is often the only
+                    # blocking finding the response carries.
+                    from .contract_evaluation import (
+                        missing_contract_gate_contribution,
+                        stamp_missing_contract_entry,
+                    )
+
+                    stamp_missing_contract_entry(
+                        missing_entry,
+                        gate_contribution=missing_contract_gate_contribution(
+                            severity_config, blocks
+                        ),
+                    )
                 response["changes"].append(missing_entry)
 
             # Recompute summary now that scoped-only changes/missing-contract

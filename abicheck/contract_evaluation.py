@@ -62,7 +62,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .checker_policy import ADDITION_KINDS, ChangeKind
+from .checker_policy import ADDITION_KINDS, ChangeKind, Verdict
 from .checker_types import Change
 from .contract_relevance_types import (
     CONTRACT_REASON_CODES,
@@ -1665,6 +1665,48 @@ def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
         c.compatibility_evaluation_status = CompatibilityEvaluationStatus.EVALUATED
 
 
+def recompute_verdict_after_promotion(
+    result: Any, *, policy: str | None = None, policy_file: Any = None
+) -> None:
+    """Re-derive ``result.verdict`` once an explicit-scope promotion changed
+    which findings compatibility policy scores.
+
+    The scoped promotion mutates the *same* ``Change`` objects the full
+    ``DiffResult`` holds -- by design, so the rendered finding shows the
+    consumer-proven ``IN_CONTRACT`` decision. Since ADR-049 Phase 7 that
+    mutation also moves the finding back onto the compatibility axis, and
+    ``DiffResult``'s verdict buckets are computed *lazily* from the current
+    field state while ``verdict`` was frozen before the promotion. Left
+    alone, one report said ``full_verdict: NO_CHANGE`` beside
+    ``full_summary.breaking: 1`` (Codex review, confirmed via
+    ``--required-symbol`` under ``--contract exports``).
+
+    Recomputing is the right direction rather than reverting the mutation:
+    ADR-049 §4.3 ranks explicit consumer/required-symbol evidence *above*
+    the header/export-derived conclusion, so a finding it proves in-contract
+    genuinely belongs in the full verdict too. A no-op when nothing was
+    promoted onto the axis, and for every run that never opted into contract
+    evaluation.
+    """
+    from .checker_policy import compute_verdict
+    from .contract_gating import is_evaluated
+
+    changes = getattr(result, "changes", None)
+    if not changes:
+        return
+    scored = [c for c in changes if is_evaluated(c)]
+    effective_policy = policy or getattr(result, "policy", None) or "strict_abi"
+    pf = (
+        policy_file if policy_file is not None else getattr(result, "policy_file", None)
+    )
+    verdict = (
+        pf.compute_verdict(scored)
+        if pf is not None
+        else compute_verdict(scored, policy=effective_policy)
+    )
+    result.verdict = verdict
+
+
 def stamp_scoped_changes(
     changes: Iterable[Any],
     *,
@@ -1718,6 +1760,50 @@ def _record_scoped_compatibility_decisions(
         change.compatibility_decision = effective_verdict_for_change(
             change, policy=policy, policy_file=policy_file
         )
+
+
+def missing_contract_gate_contribution(severity_config: Any, blocks: bool) -> int:
+    """What a missing-contract label contributes to the exit code.
+
+    One derivation for the CLI and the MCP tool, mirroring the floor
+    ``_scoped_exit_code`` applies in each: under a severity gate it is
+    ``severity.missing_contract_exit_code``; under the legacy scheme a
+    missing required symbol/version/entrypoint is a hard break, so it is the
+    same ``4`` that scheme maps ``BREAKING`` to. ``0`` when the resolved gate
+    does not block on it at all (e.g. ``--severity-preset info-only``).
+    """
+    from .severity import missing_contract_exit_code
+
+    if not blocks:
+        return 0
+    if severity_config is None:
+        return 4
+    return missing_contract_exit_code(severity_config)
+
+
+def stamp_missing_contract_entry(
+    entry: dict[str, Any], *, gate_contribution: int
+) -> None:
+    """Complete ADR-049 D1's canonical shape on a missing-contract entry.
+
+    A missing ``--required-symbol``/``--used-by`` label has no backing
+    ``Change`` -- callers synthesize a plain dict and emit it directly in
+    their ``changes`` array -- so nothing gives it the per-finding decision
+    fields an ordinary finding gets from ``reporter._change_to_dict``. It
+    got the relevance and the evaluation status but neither the decision nor
+    the contribution, which is conspicuous precisely because this entry is
+    often the *only* blocking finding in the response (Codex review).
+
+    The decision is ``BREAKING`` by construction: the label names a symbol,
+    version or entrypoint the consumer requires and the new library does not
+    provide. *gate_contribution* is supplied by the caller because only it
+    knows the resolved scheme -- ``severity.missing_contract_exit_code``
+    under a severity gate, the legacy floor otherwise -- so the number here
+    is the one that actually applied rather than a re-derivation.
+    """
+    stamp_explicit_scope_contract_evaluation(entry)
+    entry["compatibility_decision"] = Verdict.BREAKING.value
+    entry["gate_contribution"] = gate_contribution
 
 
 def stamp_scoped_result_findings(

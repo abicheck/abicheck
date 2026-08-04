@@ -306,6 +306,49 @@ class TestTheGateFollowsTheDecision:
         assert max(contributions) == legacy_exit_code(result.verdict)
 
 
+class TestScanKeepsWhatItDoesNotScore:
+    """`scan --against` itemizes findings from the compatibility buckets, so
+    filtering those buckets removed excluded findings from its report
+    entirely — not merely from its gate (Codex review).
+
+    That is the one outcome ADR-049 D9 forbids outright: a detector fact has
+    to land in exactly one *visible* outcome, and "gone" is not one of them.
+    """
+
+    @staticmethod
+    def _scan(tmp_path: Path, *extra: str) -> dict:
+        old, new = _removal_pair()
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            ["scan", str(new_p), "--against", str(old_p), "--format", "json", *extra],
+        )
+        payload = json.loads(result.output)
+        return payload.get("report", payload)
+
+    def test_an_excluded_finding_is_still_itemized(self, tmp_path: Path) -> None:
+        report = self._scan(tmp_path, "--contract-evaluation", "--contract", "exports")
+        diff = report["diff"]
+        assert diff["breaking"] == 0
+        assert diff["not_evaluated"] == 1
+        entries = [f for f in diff["findings"] if f["bucket"] == "not_evaluated"]
+        assert [f["kind"] for f in entries] == ["func_removed"]
+        # ...with the reason it did not gate, which is what makes the row
+        # actionable rather than merely present.
+        assert entries[0]["contract_relevance"] == "UNKNOWN_UNRESOLVED"
+        assert entries[0]["contract_reason_code"]
+
+    def test_an_ordinary_scan_is_unchanged(self, tmp_path: Path) -> None:
+        """No opt-in means no excluded findings, so the key is absent rather
+        than present-and-zero — an ordinary scan summary stays byte-identical."""
+        diff = self._scan(tmp_path)["diff"]
+        assert diff["breaking"] == 1
+        assert "not_evaluated" not in diff
+
+
 class TestExplicitScopeReachesTheGateBeforeItComputes:
     """ADR-049 §4.3: an explicit consumer/required-symbol contract is the
     strongest in-contract evidence there is — so it has to be applied
@@ -395,6 +438,94 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         un-opted-in run, and the domain that keeps the finding in contract
         on its own."""
         assert self._run(tmp_path, *extra) == 4
+
+    def test_the_promotion_does_not_leave_the_full_verdict_stale(
+        self, tmp_path: Path
+    ) -> None:
+        """The promotion mutates the same `Change` objects the full result
+        holds, and `DiffResult`'s buckets are computed lazily from the
+        current field state — so a `verdict` frozen before the promotion
+        disagreed with a summary derived after it: `full_verdict: NO_CHANGE`
+        beside `full_summary.breaking: 1` (Codex review).
+
+        Recomputed rather than reverted: ADR-049 §4.3 ranks explicit
+        consumer evidence above the export-derived conclusion, so a finding
+        it proves in-contract belongs in the full verdict too.
+        """
+        old_p, new_p = self._changed_signature_pair(tmp_path)
+        out = tmp_path / "report.json"
+        CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z5pub_bi",
+                "--contract-evaluation",
+                "--contract",
+                "exports",
+                "--format",
+                "json",
+                "-o",
+                str(out),
+            ],
+        )
+        report = json.loads(out.read_text(encoding="utf-8"))
+        assert report["full_verdict"] == "BREAKING"
+        assert report["full_summary"]["breaking"] == 1
+        # The scoped view agrees with it rather than contradicting it.
+        assert report["verdict"] == "BREAKING"
+
+    @pytest.mark.parametrize("scheme", ["legacy", "severity"])
+    def test_a_missing_label_carries_the_whole_canonical_shape(
+        self, tmp_path: Path, scheme: str
+    ) -> None:
+        """A missing required symbol has no backing `Change`, so its
+        synthesized entry got neither decision nor contribution — on what is
+        frequently the response's only blocking finding (Codex review)."""
+        old, new = _removal_pair()
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        out = tmp_path / "report.json"
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                # Absent from both sides, so it stays an uncovered label
+                # rather than being deduped into the real removal finding.
+                "--required-symbol",
+                "_Z7missingv",
+                "--contract-evaluation",
+                "--contract",
+                "exports",
+                "--exit-code-scheme",
+                scheme,
+                "--format",
+                "json",
+                "-o",
+                str(out),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        report = json.loads(out.read_text(encoding="utf-8"))
+        missing = [
+            c
+            for c in report["changes"]
+            if c["kind"].endswith("required_symbol_missing")
+        ]
+        assert missing, [c["kind"] for c in report["changes"]]
+        for entry in missing:
+            assert entry["contract_relevance"] == "IN_CONTRACT"
+            assert entry["compatibility_evaluation_status"] == "EVALUATED"
+            assert entry["compatibility_decision"] == "BREAKING"
+            # The number that actually gated: this label is why the run
+            # exited 4.
+            assert entry["gate_contribution"] == result.exit_code
 
 
 class TestEveryRendererTellsTheSameStory:

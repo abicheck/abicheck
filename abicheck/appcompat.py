@@ -853,7 +853,7 @@ def _compute_symbol_coverage(
 
 
 def _promote_scoped_contract(
-    changes: list[Any], *, policy: str | None, policy_file: Any
+    changes: list[Any], *, policy: str | None, policy_file: Any, diff: Any = None
 ) -> None:
     """Apply ADR-049 §4.3's explicit-scope evidence to a scoped finding set.
 
@@ -879,14 +879,25 @@ def _promote_scoped_contract(
     reason, and the later aggregate pass gives them their decision for the
     report.
     """
-    from .contract_evaluation import stamp_scoped_changes
+    from .contract_evaluation import (
+        recompute_verdict_after_promotion,
+        stamp_scoped_changes,
+    )
+    from .contract_gating import is_evaluated
 
     already_classified = [
         c for c in changes if getattr(c, "contract_relevance", None) is not None
     ]
-    if already_classified:
-        stamp_scoped_changes(
-            already_classified, policy=policy, policy_file=policy_file
+    if not already_classified:
+        return
+    # Whether this promotion actually moves anything back onto the
+    # compatibility axis decides whether the full verdict has gone stale --
+    # checked before, since the promotion is what changes the answer.
+    promoted_onto_axis = any(not is_evaluated(c) for c in already_classified)
+    stamp_scoped_changes(already_classified, policy=policy, policy_file=policy_file)
+    if promoted_onto_axis and diff is not None:
+        recompute_verdict_after_promotion(
+            diff, policy=policy, policy_file=policy_file
         )
 
 
@@ -1045,7 +1056,9 @@ def scope_diff_to_app(
         missing_symbols, missing_versions, breaking_for_app,
         required_count, policy, policy_file,
     )
-    _promote_scoped_contract(breaking_for_app, policy=policy, policy_file=policy_file)
+    _promote_scoped_contract(
+        breaking_for_app, policy=policy, policy_file=policy_file, diff=diff
+    )
 
     return AppCompatResult(
         app_path=str(app_path),
@@ -1259,7 +1272,9 @@ def scope_diff_to_required_symbols(
         missing, [], breaking_for_host, len(required), policy, policy_file,
     )
     coverage = _compute_symbol_coverage(new_exports, len(required), len(missing))
-    _promote_scoped_contract(breaking_for_host, policy=policy, policy_file=policy_file)
+    _promote_scoped_contract(
+        breaking_for_host, policy=policy, policy_file=policy_file, diff=diff
+    )
 
     return PluginHostContractResult(
         old_plugin=old_plugin.library or "old",

@@ -26,4 +26,6 @@
   finding actually contributed to the exit code under whichever gate scheme
   the run resolved). Markdown reports gain a "Not Evaluated (Contract)"
   section and a headline count, so the compatibility summary and the findings
-  below it can no longer disagree.
+  below it can no longer disagree. `scan --against` reports gain a matching
+  `not_evaluated` count and findings bucket (scan schema 1.8), so an excluded
+  fact stays itemized there too.

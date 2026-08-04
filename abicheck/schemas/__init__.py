@@ -421,7 +421,18 @@ REPORT_SCHEMA_VERSION = "2.27"
 #:       and then dropped it, so the evidence those decisions rest on was
 #:       unobservable from a scan. All three are absent without the flag, so
 #:       an ordinary scan is unchanged from 1.6.
-SCAN_SCHEMA_VERSION = "1.7"
+#: 1.8 — the ``diff`` block gained a ``not_evaluated`` count and a matching
+#:       ``not_evaluated`` bucket in ``findings``, under ``scan --against
+#:       --contract-evaluation`` (ADR-049 Phase 7). The four compatibility
+#:       counts became the *evaluated* findings only when relevance became
+#:       authoritative, and this summary itemizes findings from those buckets
+#:       alone — so without this key an excluded fact vanished from the scan
+#:       report entirely rather than merely stopping gating, which is the one
+#:       outcome D9's "exactly one visible outcome" forbids. Each entry
+#:       carries the same relevance/reason fields 1.6 added, which is what
+#:       says why it did not gate. Both are absent when nothing was excluded,
+#:       so an ordinary scan is unchanged from 1.7.
+SCAN_SCHEMA_VERSION = "1.8"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

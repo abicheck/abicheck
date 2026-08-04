@@ -281,11 +281,22 @@ def _fold_scoped_compat_into_text(
                     "reachability_state": ReachabilityState.UNKNOWN.value,
                 }
                 if contract_evaluation:
+                    # ADR-049 D1's full per-finding shape, not just the
+                    # relevance: this entry is frequently the *only* blocking
+                    # finding in the response, so omitting its decision and
+                    # contribution left the one row that explains the exit
+                    # code as the least complete one (Codex review).
                     from .contract_evaluation import (
-                        stamp_explicit_scope_contract_evaluation,
+                        missing_contract_gate_contribution,
+                        stamp_missing_contract_entry,
                     )
 
-                    stamp_explicit_scope_contract_evaluation(entry)
+                    stamp_missing_contract_entry(
+                        entry,
+                        gate_contribution=missing_contract_gate_contribution(
+                            severity_config, blocks
+                        ),
+                    )
                 changes_list.append(entry)
                 # A missing-contract label has no caused_by_type; its
                 # `symbol` (the label) only becomes a *grouping* key if some
