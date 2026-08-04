@@ -31,9 +31,13 @@
 
 ### Fixed
 
-- **Two documentation pages quoted long-superseded schema versions.**
+- **Four documentation pages quoted stale or duplicated schema versions.**
   `docs/use/output-formats.md` showed `report_schema_version` `"1.0"` and
-  `docs/reference/check-target.md` `"2.13"`, against a real `2.26`. The
-  `doc-count-sync` AI-readiness check now reads these values from
-  `abicheck.schemas.current()` and fails on drift, so the next bump cannot
-  leave them behind silently (ADR-055 D3).
+  still claimed a snapshot's `schema_version` "is currently `8`" — the exact
+  bug ADR-055 D3 was written about, alive on a second page after the first
+  was fixed — while `docs/reference/check-target.md` quoted `"2.13"` against
+  a real `2.26`. Where the version was incidental to the sentence, the page
+  now links to the fact owner and holds no copy. Where it must appear
+  literally (a JSON output sample, or the owner page's own statement of the
+  current value), the `doc-count-sync` AI-readiness check reads the expected
+  value from `abicheck.schemas.current()` and fails on drift.

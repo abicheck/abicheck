@@ -642,13 +642,23 @@ def check_changekind_docs(f: Findings) -> None:
 def check_doc_count_sync(f: Findings) -> None:
     """Keep hand-written headline counts in sync with their source of truth.
 
-    Three numbers historically drifted across the docs: the number of `ChangeKind`
+    Four values historically drifted across the docs: the number of `ChangeKind`
     values ("N change types"), the size of the example catalog
-    (`examples/ground_truth.json`), and the snapshot `schema_version` (Codex
-    review — a doc page hand-copying a version number that already has a fact
-    owner, per AGENTS.md's "don't hand-copy a count/version that has a fact
-    owner elsewhere" rule, with nothing catching the next bump forgetting it).
-    Each anchor below pins a specific sentence to a computed value:
+    (`examples/ground_truth.json`), the snapshot `schema_version`, and the
+    compare report's `report_schema_version` (each a doc page hand-copying a
+    number that already has a fact owner, per AGENTS.md's "don't hand-copy a
+    count/version that has a fact owner elsewhere" rule, with nothing catching
+    the next bump forgetting it) — plus the CastXML policy's supported-version
+    range. Each anchor below pins a specific sentence to a computed value:
+
+    Pinning is the *second* line of defence, not the first: where a version is
+    incidental to what a sentence is saying, the page should link to the fact
+    owner and hold no copy at all (ADR-055 D3). An anchor here is for a value
+    that must appear literally — a JSON output sample, or the owner page's own
+    statement of the current value. It only guards the sites someone thought
+    to anchor, which is exactly how the fourth copy on `snapshot-format.md`
+    (its snapshot-vs-report comparison table) sat unchecked until review
+    caught it.
 
     - ERROR if the anchor sentence is present but the number is wrong (the real
       drift bug — forces docs to be updated when a ChangeKind or case is added).
@@ -663,9 +673,13 @@ def check_doc_count_sync(f: Findings) -> None:
             MIN_CASTXML_CLANG_MAJOR,
         )
         from abicheck.checker_policy import ChangeKind
-    except Exception:
+    except ModuleNotFoundError:
         # Package not importable (e.g. pre-install lane) — skip silently, like
-        # the other ChangeKind checks.
+        # the other ChangeKind checks. Deliberately *only* this: a broken
+        # `abicheck.schemas` (or any other import-time failure in an installed
+        # package) is a real defect, and swallowing it here would silently stop
+        # checking every version number below while still reporting success
+        # (CodeRabbit review).
         return
 
     # ADR-055 D3: read every persisted-artifact version through the registry
@@ -767,16 +781,16 @@ def check_doc_count_sync(f: Findings) -> None:
             r"Snapshot format version \(currently `(\d+)`\)",
         ),
         (
-            DOCS / "use/output-formats.md",
-            "compare report_schema_version (scan envelope JSON example)",
-            REPORT_SCHEMA_VERSION,
-            r'"report_schema_version":\s*"([0-9]+\.[0-9]+)"',
+            DOCS / "reference/snapshot-format.md",
+            "snapshot schema_version (snapshot-vs-report comparison table)",
+            SCHEMA_VERSION,
+            r"\*\*Type\*\* \| integer \(currently `(\d+)`\)",
         ),
         (
-            DOCS / "reference/check-target.md",
-            "compare report_schema_version (starting-shape sentence)",
+            DOCS / "use/output-formats.md",
+            "compare report_schema_version (compare report JSON example)",
             REPORT_SCHEMA_VERSION,
-            r'shape \(`report_schema_version: "([0-9]+\.[0-9]+)"`\)',
+            r'"report_schema_version":\s*"([0-9]+\.[0-9]+)"',
         ),
         (
             DOCS / "reference/environment.md",

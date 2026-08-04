@@ -3,17 +3,10 @@
 **Date:** 2026-07-27 (D1–D3); Gap 3/D4 added 2026-07-27 after a second,
 more detailed external review of the same subject was checked line-by-line
 against `mcp_server.py` (see "Amendment" note below Gap 2)
-**Status:** Accepted — implemented (D1–D4). D3 (schema-version registry)
-landed first (`abicheck/schemas/__init__.py`'s `current()`); D1 landed inside
-PR #651, which is why this line and
-[G33](../plans/g33-typed-api-and-mcp-convergence.md) both went on saying
-"D1 not started" for several PRs after it was true — see the "Implementation
-notes" section at the end for what each decision actually became, including
-the two places the implementation deliberately departs from what is proposed
-below. One piece of D1's *context* is deliberately still open rather than
-silently dropped: the two-resolution-path split (the CLI's own
-`cli_resolve._resolve_compare_snapshots`) — that choice is now recorded as a
-decision (option (b)) rather than left unanswered, see D1's own section.
+**Status:** Accepted — implemented (D1–D4). Each decision below carries an
+"As implemented" note recording where the implementation departed from it;
+"Implementation notes" at the end covers what is still open and how this
+line itself went stale.
 Written up after an external API-layer review of `abicheck`
 (CLI/Python/MCP/Actions/schemas) turned out to be largely stale against
 current `main` — G22/ADR-037 already landed the CLI consolidation and the
@@ -306,17 +299,44 @@ existing.
 all six artifact names, backed by each artifact's own constant through a
 function-local import (a module-level one is a real cycle: `run-plan` needs
 `buildsource.run_plan.RUN_PLAN_SCHEMA`, whose module already imports
-`abicheck.schemas` transitively). The consumer half is closed too, though not
-as a doc *generator*: `scripts/check_ai_readiness.py`'s existing
-`doc-count-sync` check now reads its expected snapshot and compare-report
-versions from `schemas.current()` and pins them against the pages that quote
-them. That fits better than generating the pages — these numbers sit inside
-hand-written prose and JSON examples, so a generator would have to own a
-whole page to own one number, whereas the check fails the build on exactly
-the drift D3 was written about. It caught two live instances the moment it
-was added (`docs/use/output-formats.md` claiming `report_schema_version`
-`"1.0"` and `docs/reference/check-target.md` claiming `"2.13"`, against a
-real `2.26`), which is the argument for it over trusting review.
+`abicheck.schemas` transitively).
+
+The consumer half is closed in two layers, because a review round
+(chatgpt-codex-connector on PR #665) correctly pointed out that only one of
+them actually satisfies this repo's own rule:
+
+1. **Delete the copy where the number is incidental.** `docs/AGENTS.md`'s
+   rule is "don't hand-copy a version that has a fact owner — link to it."
+   Three sites were quoting a version whose *value* taught the reader
+   nothing: `docs/reference/check-target.md`'s "the starting shape is the
+   compare-report shape (`report_schema_version: "…"`)",
+   `docs/use/output-formats.md`'s `# e.g. "1.0"` import comment, and — the
+   one that proves the point — that same page's claim that a snapshot's
+   `schema_version` "is currently `8`". That is *the original D3 bug*, alive
+   on a second page: G33 Phase 0 fixed the identical sentence in
+   `docs/use/python-api.md` and nobody noticed the duplicate. All three now
+   link to the owning page instead of restating it.
+2. **Pin what must stay literal.** A JSON snippet showing real output can't
+   carry a link, and a fabricated version in it would misinform a reader
+   matching it against their own file. Those sites keep a real value, gated
+   by `scripts/check_ai_readiness.py`'s `doc-count-sync` check, which now
+   reads its expected values from `schemas.current()`. This is the
+   already-established pattern for `docs/reference/snapshot-format.md` (the
+   snapshot version's own fact owner), not a new exception invented here.
+
+The distinction between the two is *who owns the fact*, not how much effort
+each takes: layer 1 is for pages that were holding a second copy, layer 2 is
+for the owner page and for verbatim output samples. Generating these pages
+was considered and rejected — a generator would have to own a whole page of
+hand-written prose to own one number.
+
+Both mechanisms earned their place immediately. The check caught two live
+stale values on its first run (`report_schema_version` `"1.0"` and `"2.13"`
+against a real `2.26`), and the review that followed caught two *more* it
+structurally could not: a copy nobody had anchored (`snapshot-format.md`'s
+snapshot-vs-report comparison table, now anchored) and the `schema_version 8`
+sentence above. Pinning only catches the sites you thought to pin — which is
+the honest limitation of layer 2, and the reason layer 1 exists.
 
 ### D4. Route `abi_compare` through `run_compare_request`
 
