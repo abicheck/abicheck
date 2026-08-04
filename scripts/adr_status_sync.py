@@ -408,6 +408,46 @@ def _receipt_date_is_real(f: Findings, name: str, raw_date: str) -> bool:
     return True
 
 
+def _warn_if_status_edited_after_verification(
+    f: Findings, name: str, raw_date: str, status: str
+) -> None:
+    """Warn when the Status text was edited after it was last verified.
+
+    A receipt anchors the commit whose **code** was checked, not the text that
+    was there at the time: writing corrected prose about the code as of that
+    commit is the whole point, so comparing the Status at the receipt commit
+    with the current one would flag every honest receipt (the commit that
+    introduced this convention included exactly that shape -- ADR-049's text
+    at `2e43d53` is the wrong text the receipt was written to replace).
+
+    The real hole is the other direction, and the discriminator is the
+    receipt's *date*: in the honest flow the Status edit and the receipt land
+    together, so the Status as of the receipt date already reads as it does
+    now. A *later* Status edit that doesn't move the receipt forward leaves
+    the receipt vouching for claims nobody checked -- which is what this
+    reports (Codex review on PR #667, mechanism corrected).
+    """
+    cutoff = f"{raw_date}T23:59:59"
+    rel = f"docs/contribute/adr/{name}"
+    at_receipt = _git_output("rev-list", "-1", f"--until={cutoff}", "HEAD", "--", rel)
+    if not at_receipt or not at_receipt.strip():
+        # No commit touching this ADR at or before the receipt date -- a fresh
+        # file, or history this checkout doesn't carry. Nothing to compare.
+        return
+    then = _git_output("show", f"{at_receipt.strip()}:{rel}")
+    if then is None:
+        return
+    if (_adr_status_text(then) or "") != status:
+        f.warn(
+            "adr-status-sync",
+            f"docs/contribute/adr/{name}: the Status was edited after "
+            f"{raw_date}, the date its '**Verified:**' receipt records — so "
+            "the receipt now vouches for claims that were not part of what "
+            "was checked; re-read the Status against the code and move the "
+            "receipt forward",
+        )
+
+
 def _check_adr_verification_receipt(
     f: Findings, name: str, text: str, status: str
 ) -> None:
@@ -464,6 +504,7 @@ def _check_adr_verification_receipt(
         # depth, which says nothing about the receipt's validity.
         return
     _check_receipt_is_durably_anchored(f, name, sha)
+    _warn_if_status_edited_after_verification(f, name, value.group("date"), status)
     modules = _adr_named_modules(status)
     if not modules:
         return

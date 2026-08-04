@@ -1143,6 +1143,56 @@ def test_adr_status_sync_rejects_a_future_receipt_date(car, ass, tmp_path, monke
     )
 
 
+def test_adr_status_sync_warns_when_status_edited_after_verification(
+    car, ass, tmp_path, monkeypatch
+):
+    """A Status edited after the receipt's date, without moving the receipt
+    forward, leaves the receipt vouching for claims nobody checked."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    inner = _fake_git(is_ancestor=True)
+
+    def fake(*args: str) -> str | None:
+        if args[0] == "rev-list":
+            return "0123456\n"
+        if args[0] == "show":
+            # the ADR as it read at the receipt date: a different claim
+            return "# ADR-001\n\n**Status:** Accepted — partially implemented.\n"
+        return inner(*args)
+
+    monkeypatch.setattr(ass, "_git_output", fake)
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("vouches for claims" in msg for _, msg in f.warnings), (
+        f"expected a status-edited-after-verification warning, got: {f.warnings}"
+    )
+
+
+def test_adr_status_sync_accepts_a_receipt_written_with_the_status(
+    car, ass, tmp_path, monkeypatch
+):
+    """The honest flow: corrected prose is written *about* the code at the
+    receipt commit and lands together with the receipt, so the Status as of
+    the receipt date already reads as it does now. Comparing the Status *at
+    the receipt commit* instead would flag every honest receipt — including
+    the commit that introduced this convention."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    inner = _fake_git(is_ancestor=True)
+
+    def fake(*args: str) -> str | None:
+        if args[0] == "rev-list":
+            return "0123456\n"
+        if args[0] == "show":
+            return "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        return inner(*args)
+
+    monkeypatch.setattr(ass, "_git_output", fake)
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [] and f.warnings == [], (
+        f"honest receipt wrongly flagged: {f.errors} {f.warnings}"
+    )
+
+
 def test_adr_status_sync_rejects_duplicate_verified_lines(
     car, ass, tmp_path, monkeypatch
 ):
