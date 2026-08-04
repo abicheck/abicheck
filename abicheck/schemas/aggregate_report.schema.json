@@ -9,6 +9,7 @@
     "status",
     "compatibility",
     "coverage",
+    "contract_coverage",
     "gate",
     "targets",
     "unexpected_targets"
@@ -86,6 +87,7 @@
     "contract_coverage": {
       "type": "object",
       "description": "Added in schema 1.3. ADR-049 Phase 7's orthogonal contract-coverage axis for the whole target set. Separate from `coverage` above because the two answer different questions and both contribute 1: `coverage` is about a required target reporting at all, this is about a target that did report having the evidence to close its selected --contract domain. Present in every document; exit_contribution is 0 and incomplete_targets empty when no target evaluated a contract. The two can disagree: a target accepting incomplete coverage via contract.unresolved=warn is listed while contributing 0.",
+      "required": ["exit_contribution", "incomplete_targets"],
       "properties": {
         "exit_contribution": {
           "type": "integer",
@@ -128,7 +130,7 @@
   "$defs": {
     "target": {
       "type": "object",
-      "required": ["target_id", "required", "state", "compatibility_verdict", "gate"],
+      "required": ["target_id", "required", "state", "compatibility_verdict", "gate", "contract_coverage_exit"],
       "properties": {
         "target_id": {"type": "string"},
         "required": {"type": "boolean"},
