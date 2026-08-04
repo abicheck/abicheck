@@ -1637,10 +1637,8 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     Returns a :class:`~abicheck.api_types.CompareResult` (ADR-055 D2), not the
     bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
     gain a field without breaking positional callers, which a tuple cannot.
-    The interim ``run_compare_request_v2`` seam that shipped alongside the
-    tuple is gone — pre-1.0 is exactly when to collapse two names for one
-    thing rather than carry them. ``CompareResult.as_tuple()`` reproduces the
-    old shape for a caller that wants it back in one line.
+    ``CompareResult.as_tuple()`` reproduces the old shape for a caller that
+    wants it back in one line.
 
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`.

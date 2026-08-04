@@ -871,7 +871,7 @@ def abi_compare(
                 )
 
         # ADR-055 D4: one typed request through the Tier-2 chokepoint —
-        # `run_compare_request_v2` resolves both sides, loads policy and
+        # `run_compare_request` resolves both sides, loads policy and
         # suppression, and classifies. This tool used to do all three itself
         # (its own `_resolve_input` pair, its own `PolicyFile.load`/
         # `SuppressionList.load`, and `compare_snapshots` for the middle step

@@ -460,15 +460,15 @@ class CompareRequest:
 class CompareResult:
     """What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
 
-    :func:`abicheck.service.run_compare_request` returns a bare
-    ``tuple[DiffResult, AbiSnapshot, AbiSnapshot]``, so every new thing a
-    comparison resolves has nowhere to land except a fourth tuple slot — a
-    break for every positional caller. This wraps that same tuple (``diff``/
-    ``old_snapshot``/``new_snapshot`` are exactly its three elements, in
-    order) so a future field (a resolved-depth record, ADR-049's evaluation
-    receipt, a coverage summary) is an additive attribute instead. The same
-    reasoning ADR-035 applied to ``ScanRequest``/``ScanResult``, generalized
-    to ``compare``.
+    Returned by :func:`abicheck.service.run_compare_request` and by the
+    ``run_compare`` kwargs shim. Both returned a bare
+    ``tuple[DiffResult, AbiSnapshot, AbiSnapshot]`` before 0.6, which left
+    every new thing a comparison resolves nowhere to land but a fourth tuple
+    slot — a break for every positional caller. As a struct, a future field
+    (a resolved-depth record, ADR-049's evaluation receipt, a coverage
+    summary) is an additive attribute instead. The same reasoning ADR-035
+    applied to ``ScanRequest``/``ScanResult``, generalized to ``compare``.
+    :meth:`as_tuple` reproduces the pre-0.6 shape in one line.
 
     ``suppression`` is the one field beyond that rename, and it is not
     speculative: it is what ADR-055 D4 needed to exist. ``run_compare_request``
@@ -495,10 +495,15 @@ class CompareResult:
     suppression: SuppressionList | None = None
 
     def as_tuple(self) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
-        """Return the legacy ``run_compare_request`` 3-tuple shape.
+        """Return ``(diff, old_snapshot, new_snapshot)`` — the pre-0.6 shape.
 
-        The tuple-returning entry points are implemented in terms of this, so
-        the two shapes cannot drift apart into two orderings.
+        A one-line migration for a caller that unpacked the tuple
+        ``run_compare``/``run_compare_request`` used to return::
+
+            result, old, new = run_compare(...).as_tuple()
+
+        Nothing in abicheck itself returns that shape any more; this exists
+        only so a caller need not restructure to adopt the typed result.
         """
         return self.diff, self.old_snapshot, self.new_snapshot
 

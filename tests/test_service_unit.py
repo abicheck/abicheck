@@ -4563,9 +4563,8 @@ class TestMetadataAttachFailuresAreSwallowed:
 class TestRunCompareRequestTypedResult:
     """ADR-055 D2: the one typed entry point and what it returns.
 
-    ``run_compare_request`` returned a bare 3-tuple until 0.6, briefly
-    alongside a ``run_compare_request_v2`` seam; both collapsed into this one
-    typed function once the pre-1.0 API break was on the table.
+    ``run_compare_request`` returned a bare 3-tuple until 0.6; it and the
+    ``run_compare`` shim both return the typed result now.
     """
 
     def _pair(self, tmp_path):
