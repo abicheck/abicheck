@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 import click
 
+from .api_types import CompareResult
 from .bundle import BundleDiffResult
 from .checker import Change, DiffResult
 from .cli import (
@@ -108,7 +109,7 @@ def _run_compare_pair(
     scope_to_public_surface: bool = True,
     pattern_verdicts: bool = False,
     include_dependencies: bool = True,
-) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
     Routes through the single Tier-2 chokepoint (:func:`service.run_compare`,
@@ -225,7 +226,7 @@ def _compare_one_library(
     try:
         old_dbg = resolve_debug_info(old_path, old_debug_dir) if old_debug_dir else None
         new_dbg = resolve_debug_info(new_path, new_debug_dir) if new_debug_dir else None
-        result, _, _ = _run_compare_pair(
+        compare_result = _run_compare_pair(
             old_path,
             new_path,
             old_h,
@@ -243,6 +244,7 @@ def _compare_one_library(
             scope_to_public_surface=scope_to_public_surface,
             include_dependencies=include_dependencies,
         )
+        result = compare_result.diff
         v = result.verdict.value
         # compatible_additions historically counts *all* compatible changes
         # (additions + quality issues). Emit the quality subset separately so
@@ -616,7 +618,7 @@ def _collect_release_extras(
         old_dbg = resolve_debug_info(old_path, old_debug_dir) if old_debug_dir else None
         new_dbg = resolve_debug_info(new_path, new_debug_dir) if new_debug_dir else None
         try:
-            result, old_snap, _ = _run_compare_pair(
+            compare_result = _run_compare_pair(
                 old_path,
                 new_path,
                 old_h,
@@ -640,6 +642,7 @@ def _collect_release_extras(
                 err=True,
             )
             continue
+        result, old_snap = compare_result.diff, compare_result.old_snapshot
         if worst_verdict == "BREAKING":
             _drop_lockstep_soname_finding(result)
         if collect_diff_results:

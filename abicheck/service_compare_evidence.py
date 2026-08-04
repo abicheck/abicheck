@@ -51,6 +51,7 @@ __all__ = [
     "SideEvidence",
     "effective_frontend",
     "normalized_debug_format",
+    "reject_debug_format_for_non_elf",
     "resolve_compare_request_evidence",
 ]
 
@@ -226,12 +227,51 @@ def resolve_compare_request_evidence(
 
 
 def normalized_debug_format(request: CompareRequest) -> str | None:
-    """``CompareRequest.debug_format`` lowercased for the extraction layer.
+    """``CompareRequest.debug_format`` in the form the extraction layer takes.
 
-    ``validate()`` accepts the same four values the CLI's ``--debug-format``
-    choice does, case-insensitively; every consumer below compares against the
-    lowercase literals (``dumper_debug._resolve_debug_metadata``), so an
-    accepted ``"DWARF"`` has to be normalized once rather than silently
-    behaving as "no format given" (Codex review).
+    Two normalizations, both mirroring what the CLI already does to the same
+    flag (``cli_compare_helpers``/``cli_dump_helpers``), so the typed path
+    behaves identically:
+
+    * lowercased — ``validate()`` accepts the four values case-insensitively,
+      the way ``--debug-format``'s ``case_sensitive=False`` choice does, but
+      ``dumper_debug._resolve_debug_metadata`` compares against lowercase
+      literals only;
+    * ``"auto"`` becomes ``None`` — auto-detection *is* "no format forced" at
+      that layer. Passing the literal string through instead reaches an
+      explicit ``raise ValueError`` for anything outside ``dwarf``/``btf``/
+      ``ctf``, so an accepted, documented value crashed during extraction
+      (Codex review, second round; the first round's fix validated the value
+      but still forwarded it verbatim).
     """
-    return request.debug_format.lower() if request.debug_format is not None else None
+    if request.debug_format is None:
+        return None
+    normalized = request.debug_format.lower()
+    return None if normalized == "auto" else normalized
+
+
+def reject_debug_format_for_non_elf(
+    debug_format: str | None, old_fmt: str | None, new_fmt: str | None
+) -> None:
+    """Raise if a forced ELF debug format meets a PE/Mach-O side.
+
+    The PE and Mach-O dump paths take no debug-format argument, so a forced
+    ``dwarf``/``btf``/``ctf`` is silently dropped there and the run reports
+    success having ignored what the caller asked for. The CLI rejects the
+    combination up front (``cli_compare_helpers._reject_debug_format_for_non_elf``);
+    without this the typed surface claimed that parity without having it
+    (Codex review).
+
+    A JSON-snapshot or dump input has ``fmt is None`` and is unaffected, same
+    as on the CLI side.
+    """
+    from .errors import ValidationError
+
+    if debug_format is None:
+        return
+    for side, binary_fmt in (("old", old_fmt), ("new", new_fmt)):
+        if binary_fmt in ("pe", "macho"):
+            raise ValidationError(
+                f"debug_format={debug_format!r} is only supported for ELF "
+                f"binaries, but the {side} input is {binary_fmt.upper()}."
+            )

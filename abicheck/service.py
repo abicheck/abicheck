@@ -1626,44 +1626,21 @@ def compare_snapshots(
     )
 
 
-def run_compare_request(
-    request: CompareRequest,
-) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+def run_compare_request(request: CompareRequest) -> CompareResult:
     """Compare two ABI inputs described by a :class:`CompareRequest`.
 
-    The single classification chokepoint (ADR-037 D1/D2): every front-end builds
-    a ``CompareRequest`` and calls this, so defaults cannot diverge between
-    invocation paths. The legacy keyword-argument :func:`run_compare` is a thin
-    shim that builds the request and delegates here.
+    The single classification chokepoint (ADR-037 D1/D2): every front-end
+    builds a ``CompareRequest`` and calls this, so defaults cannot diverge
+    between invocation paths. The keyword-argument :func:`run_compare` is a
+    thin shim that builds the request and delegates here.
 
-    Unchanged for every existing caller (ADR-055 D2 is additive): this is now
-    a tuple-shaped view of :func:`run_compare_request_v2`, which owns the
-    implementation. Delegating rather than keeping a second copy is what stops
-    the two shapes from drifting into two resolution behaviours — the failure
-    this ADR exists to prevent, not one to reintroduce inside its own fix.
-
-    Returns:
-        A tuple of (DiffResult, old_snapshot, new_snapshot).
-    Raises:
-        ValidationError: If the request fails :meth:`CompareRequest.validate`.
-        SnapshotError: If either input cannot be loaded.
-    """
-    return run_compare_request_v2(request).as_tuple()
-
-
-def run_compare_request_v2(request: CompareRequest) -> CompareResult:
-    """Compare two ABI inputs and return a typed :class:`CompareResult`.
-
-    ADR-055 D2. Identical work to :func:`run_compare_request` — this is the
-    implementation both entry points share — differing only in the returned
-    shape: a struct whose future fields are additive, instead of a tuple whose
-    fourth element would break every positional caller.
-
-    The ``_v2`` name is deliberate and deliberately temporary: it is an
-    internal migration seam, not user-facing vocabulary a caller types daily
-    the way ``run_scan``/``run_compare_request`` are. Renaming it to something
-    permanent is out of scope for ADR-055 and belongs to whichever follow-up
-    retires the tuple-returning entry point (see that ADR's D2).
+    Returns a :class:`~abicheck.api_types.CompareResult` (ADR-055 D2), not the
+    bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
+    gain a field without breaking positional callers, which a tuple cannot.
+    The interim ``run_compare_request_v2`` seam that shipped alongside the
+    tuple is gone — pre-1.0 is exactly when to collapse two names for one
+    thing rather than carry them. ``CompareResult.as_tuple()`` reproduces the
+    old shape for a caller that wants it back in one line.
 
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`.
@@ -1694,6 +1671,10 @@ def run_compare_request_v2(request: CompareRequest) -> CompareResult:
     if request.depth is not None and request.depth.lower() == "binary":
         old_public_headers = new_public_headers = old_public_header_dirs = new_public_header_dirs = []
     from . import service_compare_evidence as _sce  # ADR-055 D1
+
+    _sce.reject_debug_format_for_non_elf(
+        _sce.normalized_debug_format(request), old_fmt, new_fmt
+    )
     from .cli_buildsource import embed_build_source
     old_evidence, new_evidence = _sce.resolve_compare_request_evidence(request, pair_compile)
     # Codex: "hybrid" (explicit depth="source") and "android" have no real embed_build_source extractor -- reject only a raw tree needing real extraction, never a prebuilt pack or build_info alone (never feeds L4). Mirrors cli.py's own --depth source + --ast-frontend hybrid UsageError.
@@ -1860,7 +1841,7 @@ def run_compare(
     contract_evaluation: bool = False,
     include_dependencies: bool = True,
     contract_mode: str | None = None,
-) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
     Keyword-argument shim over :func:`run_compare_request`: it assembles a
@@ -1873,7 +1854,9 @@ def run_compare(
     parameter it always did (Codex review, PR #551). ``include_dependencies``
     applies to *both* sides — build a ``CompareRequest`` for a per-side override.
     Returns:
-        A tuple of (DiffResult, old_snapshot, new_snapshot).
+        A :class:`~abicheck.api_types.CompareResult`. This returned the bare
+        ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
+        shape back for a caller that unpacks positionally.
     Raises:
         SnapshotError: If either input cannot be loaded.
         ValidationError: If inputs have unrecognised formats.
@@ -1989,7 +1972,6 @@ __all__ = [
     "run_audit",
     "run_compare",
     "run_compare_request",
-    "run_compare_request_v2",
     "run_dump",
     "run_scan",
     "run_scan_set",

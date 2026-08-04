@@ -25,7 +25,6 @@ from abicheck.service import (
     resolve_input,
     run_compare,
     run_compare_request,
-    run_compare_request_v2,
     run_dump,
     sniff_text_format,
 )
@@ -1705,7 +1704,7 @@ class TestRunCompare:
     def test_compare_two_snapshots(self, tmp_path):
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
-        result, old, new = run_compare(old_p, new_p)
+        result, old, new = run_compare(old_p, new_p).as_tuple()
         assert isinstance(result, DiffResult)
         assert isinstance(old, AbiSnapshot)
         assert isinstance(new, AbiSnapshot)
@@ -1717,7 +1716,7 @@ class TestRunCompare:
         sf.write_text(
             "version: 1\nsuppressions:\n  - symbol: foo\n    change_kind: func_removed\n"
         )
-        result, _, _ = run_compare(old_p, new_p, suppress=sf)
+        result, _, _ = run_compare(old_p, new_p, suppress=sf).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_headers_passed_as_public_headers(self, tmp_path, monkeypatch):
@@ -2026,7 +2025,7 @@ class TestCompareRequestAdr055Evidence:
         request = CompareRequest(
             old=InputSpec.of(old_p, sources=src_dir), new=InputSpec.of(new_p)
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert captured["extra_changes"] == [sentinel_change]
         assert sentinel_change in result.changes
 
@@ -2313,7 +2312,7 @@ class TestCompareRequestAdr055Evidence:
             frontend="android",
             has_sources=True,
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_android_frontend_allowed_with_build_info_only(self, tmp_path, monkeypatch):
@@ -2338,7 +2337,7 @@ class TestCompareRequestAdr055Evidence:
             new=InputSpec.of(new_p),
             frontend="android",
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_hybrid_frontend_allowed_without_explicit_source_depth(
@@ -2368,7 +2367,7 @@ class TestCompareRequestAdr055Evidence:
             ),
             new=InputSpec.of(new_p),
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_manifest_forced_includes_feed_pair_wide_cxx20_detection(
@@ -2473,7 +2472,7 @@ class TestCompareRequestAdr055Evidence:
         request = CompareRequest(
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="BUILD"
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_pair_wide_dialect_merges_into_unrelated_side_compile(
@@ -2693,7 +2692,7 @@ class TestCompareRequestDepthSatisfaction:
         request = CompareRequest(
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="source"
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_reports_the_failing_side(self, tmp_path, monkeypatch):
@@ -2726,7 +2725,7 @@ class TestCompareRequestDepthSatisfaction:
         request = CompareRequest(
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="binary"
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_no_depth_skips_the_gate(self, tmp_path, monkeypatch):
@@ -2738,7 +2737,7 @@ class TestCompareRequestDepthSatisfaction:
         )
 
         request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
 
@@ -2818,7 +2817,7 @@ class TestDiagnosticComparisonThreading:
             new=InputSpec(path=new_p),
             diagnostic_comparison=True,
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert result.assurance == "none"
 
     def test_run_compare_shim_raises_by_default(self, tmp_path):
@@ -2828,7 +2827,7 @@ class TestDiagnosticComparisonThreading:
 
     def test_run_compare_shim_diagnostic_comparison_downgrades(self, tmp_path):
         old_p, new_p = self._mismatched_pair(tmp_path)
-        result, _, _ = run_compare(old_p, new_p, diagnostic_comparison=True)
+        result, _, _ = run_compare(old_p, new_p, diagnostic_comparison=True).as_tuple()
         assert result.assurance == "none"
 
     def test_diagnostic_comparison_appended_last_preserves_positional_order(self):
@@ -2904,13 +2903,13 @@ class TestContractEvaluationThreading:
             new=InputSpec(path=new_p),
             contract_evaluation=True,
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert result.changes
         assert any(c.contract_relevance is not None for c in result.changes)
 
     def test_run_compare_shim_contract_evaluation_stamps_relevance(self, tmp_path):
         old_p, new_p = self._changed_pair(tmp_path)
-        result, _, _ = run_compare(old_p, new_p, contract_evaluation=True)
+        result, _, _ = run_compare(old_p, new_p, contract_evaluation=True).as_tuple()
         assert result.changes
         assert any(c.contract_relevance is not None for c in result.changes)
 
@@ -2967,7 +2966,7 @@ class TestParallelOldNewExtraction:
 
         monkeypatch.setattr(service_mod, "resolve_input", _synced_resolve)
 
-        result, old, new = run_compare(old_p, new_p)
+        result, old, new = run_compare(old_p, new_p).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_exception_from_one_side_propagates(self, tmp_path, monkeypatch):
@@ -4561,8 +4560,13 @@ class TestMetadataAttachFailuresAreSwallowed:
         assert snap.numpy_capi is None
 
 
-class TestRunCompareRequestV2:
-    """ADR-055 D2: the typed entry point, and that it did not fork behaviour."""
+class TestRunCompareRequestTypedResult:
+    """ADR-055 D2: the one typed entry point and what it returns.
+
+    ``run_compare_request`` returned a bare 3-tuple until 0.6, briefly
+    alongside a ``run_compare_request_v2`` seam; both collapsed into this one
+    typed function once the pre-1.0 API break was on the table.
+    """
 
     def _pair(self, tmp_path):
         old = AbiSnapshot(library="libtest", version="1.0")
@@ -4574,30 +4578,30 @@ class TestRunCompareRequestV2:
         return CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
 
     def test_returns_a_compare_result(self, tmp_path):
-        result = run_compare_request_v2(self._pair(tmp_path))
+        result = run_compare_request(self._pair(tmp_path))
         assert isinstance(result, CompareResult)
         assert isinstance(result.diff, DiffResult)
         assert result.old_snapshot.version == "1.0"
         assert result.new_snapshot.version == "2.0"
 
-    def test_tuple_entry_point_returns_the_same_three_objects(self, tmp_path):
-        """The legacy shape is a *view* of this one, not a second run.
+    def test_as_tuple_reproduces_the_pre_0_6_shape(self, tmp_path):
+        """The documented one-line migration for a positional caller."""
+        result = run_compare_request(self._pair(tmp_path))
+        diff, old, new = result.as_tuple()
+        assert diff is result.diff
+        assert old is result.old_snapshot
+        assert new is result.new_snapshot
 
-        Asserted on field values rather than identity: the two calls resolve
-        their own snapshots, so identity would only prove they both ran.
-        """
+    def test_the_kwargs_shim_returns_the_same_type(self, tmp_path):
+        # run_compare is the documented one-call entry point; it must not be
+        # the one place still handing back a tuple.
         request = self._pair(tmp_path)
-        diff, old, new = run_compare_request(request)
-        typed = run_compare_request_v2(request)
-        assert (old.version, new.version) == (
-            typed.old_snapshot.version,
-            typed.new_snapshot.version,
+        assert isinstance(
+            run_compare(request.old.path, request.new.path), CompareResult
         )
-        assert diff.verdict == typed.diff.verdict
-        assert len(diff.changes) == len(typed.diff.changes)
 
     def test_suppression_is_none_when_the_request_names_no_file(self, tmp_path):
-        assert run_compare_request_v2(self._pair(tmp_path)).suppression is None
+        assert run_compare_request(self._pair(tmp_path)).suppression is None
 
     def test_carries_the_resolved_suppression_list(self, tmp_path):
         """What ADR-055 D4 needs: the resolved list, without a second load.
@@ -4613,7 +4617,7 @@ class TestRunCompareRequestV2:
             encoding="utf-8",
         )
         request = self._pair(tmp_path).replace(suppress=supp)
-        result = run_compare_request_v2(request)
+        result = run_compare_request(request)
         assert result.suppression is not None
         assert len(result.suppression.rule_identities()) == 1
 
@@ -4636,7 +4640,7 @@ class TestRunCompareRequestV2:
         import dataclasses
 
         base = self._pair(tmp_path)
-        run_compare_request_v2(
+        run_compare_request(
             base.replace(
                 old=dataclasses.replace(
                     base.old, version="old", follow_linker_scripts=False
@@ -4688,7 +4692,7 @@ class TestRunCompareRequestResolutionParity:
 
     def test_debug_parse_fields_reach_both_sides(self, tmp_path, monkeypatch):
         seen = self._stub_dump(monkeypatch)
-        run_compare_request_v2(
+        run_compare_request(
             self._request(tmp_path, dwarf_only=True, debug_format="dwarf")
         )
         assert set(seen) == {"old.so", "new.so"}
@@ -4702,7 +4706,7 @@ class TestRunCompareRequestResolutionParity:
         # Carried as a tuple of pairs so the request stays hashable, but
         # `resolve_input` takes the mapping — the conversion must happen.
         seen = self._stub_dump(monkeypatch)
-        run_compare_request_v2(
+        run_compare_request(
             self._request(tmp_path, include_labels=((Path("/inc"), "proj"),))
         )
         assert seen["old.so"]["include_labels"] == {Path("/inc"): "proj"}
@@ -4711,7 +4715,7 @@ class TestRunCompareRequestResolutionParity:
         self, tmp_path, monkeypatch
     ):
         seen = self._stub_dump(monkeypatch)
-        run_compare_request_v2(self._request(tmp_path))
+        run_compare_request(self._request(tmp_path))
         assert seen["old.so"]["include_labels"] is None
 
     def test_request_stays_hashable_with_include_labels_set(self, tmp_path):
@@ -4739,7 +4743,7 @@ class TestRunCompareRequestResolutionParity:
     ):
         self._stub_dump(monkeypatch)
         calls = self._stub_dependency_population(monkeypatch)
-        run_compare_request_v2(
+        run_compare_request(
             self._request(
                 tmp_path,
                 follow_dependencies=True,
@@ -4756,7 +4760,7 @@ class TestRunCompareRequestResolutionParity:
         # unrelated caller must not start paying for it silently.
         self._stub_dump(monkeypatch)
         calls = self._stub_dependency_population(monkeypatch)
-        run_compare_request_v2(self._request(tmp_path))
+        run_compare_request(self._request(tmp_path))
         assert calls == []
 
     def test_non_elf_sides_are_skipped(self, tmp_path, monkeypatch):
@@ -4768,7 +4772,7 @@ class TestRunCompareRequestResolutionParity:
         new_p = tmp_path / "new.json"
         save_snapshot(AbiSnapshot(library="lib", version="1.0"), old_p)
         save_snapshot(AbiSnapshot(library="lib", version="2.0"), new_p)
-        run_compare_request_v2(
+        run_compare_request(
             CompareRequest(
                 old=InputSpec(path=old_p),
                 new=InputSpec(path=new_p),
@@ -4776,3 +4780,92 @@ class TestRunCompareRequestResolutionParity:
             )
         )
         assert calls == []
+
+
+class TestDebugFormatResolution:
+    """ADR-055 D1 second slice, Codex review round 2: what `debug_format`
+    actually reaches (and doesn't reach) the extraction layer as."""
+
+    def _request(self, tmp_path, **kwargs) -> CompareRequest:
+        old_p = tmp_path / "old.so"
+        new_p = tmp_path / "new.so"
+        for p in (old_p, new_p):
+            p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        return CompareRequest(
+            old=InputSpec(path=old_p), new=InputSpec(path=new_p), **kwargs
+        )
+
+    def _spy(self, monkeypatch) -> dict[str, object]:
+        import abicheck.service as service_mod
+
+        seen: dict[str, object] = {}
+
+        def _fake(path, headers=None, *args, **kwargs):
+            seen["debug_format"] = kwargs.get("debug_format")
+            return AbiSnapshot(library=Path(path).name, version="x")
+
+        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        return seen
+
+    def test_auto_becomes_none_not_the_literal_string(self, tmp_path, monkeypatch):
+        # `_resolve_debug_metadata` raises ValueError for anything outside
+        # dwarf/btf/ctf and treats None as auto-detect, so forwarding the
+        # accepted "auto" verbatim crashed during extraction. The CLI does the
+        # same translation (cli_compare_helpers/cli_dump_helpers).
+        seen = self._spy(monkeypatch)
+        run_compare_request(self._request(tmp_path, debug_format="auto"))
+        assert seen["debug_format"] is None
+
+    def test_auto_is_case_insensitive_too(self, tmp_path, monkeypatch):
+        seen = self._spy(monkeypatch)
+        run_compare_request(self._request(tmp_path, debug_format="AUTO"))
+        assert seen["debug_format"] is None
+
+    def test_an_explicit_format_is_lowercased_and_forwarded(
+        self, tmp_path, monkeypatch
+    ):
+        seen = self._spy(monkeypatch)
+        run_compare_request(self._request(tmp_path, debug_format="BTF"))
+        assert seen["debug_format"] == "btf"
+
+    def test_forced_elf_format_is_rejected_for_a_non_elf_side(self, tmp_path):
+        # The PE/Mach-O dump paths take no debug-format argument, so it would
+        # be silently dropped and the run would report success having ignored
+        # what was asked. The CLI rejects this up front; so does this now.
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        pe = tmp_path / "new.dll"
+        pe.write_bytes(b"MZ" + b"\x00" * 200)
+        request = CompareRequest(
+            old=InputSpec(path=old_p), new=InputSpec(path=pe), debug_format="dwarf"
+        )
+        with pytest.raises(ValidationError, match="only supported for ELF"):
+            run_compare_request(request)
+
+    def test_auto_is_not_rejected_for_a_non_elf_side(self, tmp_path, monkeypatch):
+        # "auto" forces nothing, so there is nothing for a PE side to ignore.
+        self._spy(monkeypatch)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        pe = tmp_path / "new.dll"
+        pe.write_bytes(b"MZ" + b"\x00" * 200)
+        run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old_p), new=InputSpec(path=pe), debug_format="auto"
+            )
+        )
+
+    def test_snapshot_inputs_are_unaffected(self, tmp_path, monkeypatch):
+        # A JSON snapshot has no detected binary format; same as the CLI, that
+        # is not a rejection case.
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(AbiSnapshot(library="l", version="1"), old_p)
+        save_snapshot(AbiSnapshot(library="l", version="2"), new_p)
+        run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old_p),
+                new=InputSpec(path=new_p),
+                debug_format="dwarf",
+            )
+        )

@@ -413,21 +413,11 @@ Compare two ABI inputs and return the classified diff result.
 | `include_dependencies` | `bool` | `True` |
 | `contract_mode` | `str \| None` | `None` |
 
-**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
+**Returns:** `CompareResult`
 
 ## `run_compare_request`
 
 Compare two ABI inputs described by a :class:`CompareRequest`.
-
-| Parameter | Type | Default |
-|---|---|---|
-| `request` | `CompareRequest` | *(required)* |
-
-**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
-
-## `run_compare_request_v2`
-
-Compare two ABI inputs and return a typed :class:`CompareResult`.
 
 | Parameter | Type | Default |
 |---|---|---|

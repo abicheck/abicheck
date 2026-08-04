@@ -30,10 +30,16 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck import cli_compare_release
+from abicheck.api_types import CompareResult
 from abicheck.cli import main
 from abicheck.cli_resolve import _looks_like_application, classify_compare_operand
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
+
+#: Placeholder snapshots for CompareResult stubs — these tests only read
+#: the diff, but the struct requires both sides.
+_SNAP = AbiSnapshot(library="stub", version="0")
+
 
 
 class TestCompareHeaderMarksProvenance:
@@ -968,7 +974,7 @@ class TestCompareDispatch:
         )
         monkeypatch.setattr(
             "abicheck.cli_compare_release._run_compare_pair",
-            lambda *a, **kw: (api_break_diff, None, None),
+            lambda *a, **kw: CompareResult(api_break_diff, _SNAP, _SNAP),
         )
 
         code, out, _ = _invoke(

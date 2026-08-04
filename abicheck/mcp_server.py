@@ -899,7 +899,7 @@ def abi_compare(
             _check_file_size(policy_path, label="policy_file")
 
         def _do_compare() -> CompareResult:
-            from .service import run_compare_request_v2
+            from .service import run_compare_request
 
             request = CompareRequest(
                 old=InputSpec(
@@ -923,7 +923,7 @@ def abi_compare(
                 diagnostic_comparison=diagnostic_comparison,
                 contract_evaluation=contract_evaluation,
             )
-            return run_compare_request_v2(request)
+            return run_compare_request(request)
 
         try:
             compare_result = _call_with_timeout(_do_compare)

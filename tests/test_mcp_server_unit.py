@@ -2910,6 +2910,6 @@ class TestAbiCompareCliParity:
         assert "PolicyFile.load" not in body
         assert "SuppressionList.load" not in body
         assert "compare_snapshots(" not in body
-        assert "run_compare_request_v2(" in body
+        assert "run_compare_request(" in body
         # ...and the module no longer imports the snapshot-diffing verb at all.
         assert not hasattr(mcp_server, "compare_snapshots")

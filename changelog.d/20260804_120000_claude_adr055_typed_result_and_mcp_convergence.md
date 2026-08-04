@@ -36,6 +36,23 @@
 
 ### Changed
 
+- **BREAKING (pre-1.0): `run_compare` and `run_compare_request` return a
+  `CompareResult`, not a 3-tuple.** ADR-055 D2 introduced the typed result
+  beside the tuple and a temporary `run_compare_request_v2` seam; with the
+  project not yet holding API compatibility, the two names collapsed into one
+  rather than being carried indefinitely. A struct can gain a field without
+  breaking positional callers, which a tuple cannot. Migrate a positional
+  caller in one line: `result, old, new = run_compare(...).as_tuple()`.
+- **`CompareRequest.debug_format="auto"` no longer crashes during
+  extraction.** `dumper_debug` raises for anything outside
+  `dwarf`/`btf`/`ctf` and treats `None` as auto-detect, so the accepted
+  `"auto"` had to be translated rather than forwarded — the same translation
+  the CLI already does for `--debug-format auto`.
+- **A forced ELF debug format is rejected when a side is PE or Mach-O.** Those
+  dump paths take no debug-format argument, so the request was silently
+  dropped and the run reported success having ignored it; the CLI has always
+  rejected the combination up front.
+
 - **The MCP `abi_compare` tool now routes through the Tier-2 chokepoint
   (ADR-055 D4).** It previously resolved its own inputs, loaded its own
   policy/suppression files, and used `compare_snapshots` for the middle

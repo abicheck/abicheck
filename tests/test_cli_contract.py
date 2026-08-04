@@ -778,7 +778,7 @@ def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
     old_p = _make_snap_file(tmp_path, "libfoo", "1.0", [_func("foo"), _func("bar")])
     new_p = _make_snap_file(tmp_path, "libfoo", "2.0", [_func("foo")])
 
-    svc_result, _, _ = service.run_compare(old_p, new_p, scope_to_public_surface=True)
+    svc_result, _, _ = service.run_compare(old_p, new_p, scope_to_public_surface=True).as_tuple()
     rel_result, _, _ = _run_compare_pair(
         old_p,
         new_p,
@@ -795,7 +795,7 @@ def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
         old_pdb_path=None,
         new_pdb_path=None,
         scope_to_public_surface=True,
-    )
+    ).as_tuple()
 
     assert svc_result.verdict == rel_result.verdict
     assert sorted(c.kind for c in svc_result.breaking) == sorted(
@@ -817,9 +817,9 @@ def test_run_compare_request_equivalent_to_kwargs_shim(tmp_path: Path) -> None:
     old_p = _make_snap_file(tmp_path, "libbar", "1.0", [_func("a"), _func("b")])
     new_p = _make_snap_file(tmp_path, "libbar", "2.0", [_func("a")])
 
-    shim_result, _, _ = run_compare(old_p, new_p)
+    shim_result, _, _ = run_compare(old_p, new_p).as_tuple()
     req = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
-    req_result, _, _ = run_compare_request(req)
+    req_result, _, _ = run_compare_request(req).as_tuple()
 
     assert shim_result.verdict == req_result.verdict
     assert sorted(c.kind for c in shim_result.breaking) == sorted(
