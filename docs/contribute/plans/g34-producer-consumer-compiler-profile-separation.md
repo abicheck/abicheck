@@ -222,6 +222,25 @@ confirmed by reading the workflow, not asserted from a design doc):
       downstream needed a second pass-through. A profile with no
       `compile.frontend:` (or a run-plan from an older abicheck, where the
       key is absent) falls back to the global input exactly as before.
+      Gated on `kind != 'bundle'` (Codex review): a bundle cell's operand is
+      the `bundle-staging` *directory* it stages its members into, and the
+      root Action rejects every non-`auto` `ast-frontend` for a
+      directory/package operand outright (`action/run.sh`'s
+      `_is_release_style_operand` guard), because the per-library fan-out
+      never threads an L2 compile context to each pair's header dump — so
+      forwarding a profile's `frontend:` there would turn a previously
+      working bundle check into a hard operational error. The fallback for
+      such a cell is the workflow-global input, not the empty string, so a
+      bundle cell behaves exactly as it did before this override existed.
+      **Note the same hazard exists, unfixed, for `compile_gcc_path`/
+      `compile_gcc_options`:** the guard rejects those for a directory
+      operand identically, and `check-project.yml` has forwarded them to
+      every cell including bundles since the P1 toolchain-profile audit.
+      That is a pre-existing bug, not one this phase introduced, and
+      closing it is a behaviour change to already-shipped wiring — it needs
+      its own decision (silently drop, gate the same way, or make the
+      combination a hard `project validate`/`project plan` error the way an
+      unroutable `os:` already is), not a drive-by extension here.
 - [ ] **Still open:** `consumer_compile_ast_frontend` is deliberately *not*
       forwarded, and that absence is pinned by a test rather than left to
       drift. It describes the header-AST pass of the two-pass extraction

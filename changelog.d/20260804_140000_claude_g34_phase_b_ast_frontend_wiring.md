@@ -18,7 +18,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   root action → the CLI flag) already carried the workflow-level input, so
   nothing downstream needed a second pass-through. A profile that sets no
   `frontend:`, or a `run-plan.json` produced before the field existed, falls
-  back to the global input unchanged. The sibling `consumer_compile.frontend`
+  back to the global input unchanged. A `kind: bundle` cell is excluded: its
+  operand is the `bundle-staging` *directory* it stages members into, and the
+  root Action rejects every non-`auto` `ast-frontend` for a directory/package
+  operand outright, because the per-library fan-out never threads an L2
+  compile context to each pair's header dump. Such a cell keeps resolving the
+  workflow-global input exactly as before. The sibling
+  `consumer_compile.frontend`
   is deliberately *not* forwarded, and a test pins that absence: it describes
   the header-AST pass of the two-pass producer/consumer extraction that has
   not been built, so there is only one dump invocation per cell for it to

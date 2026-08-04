@@ -862,13 +862,45 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         without it, every cell in a GCC/Clang matrix resolves the one
         workflow-level frontend, which is exactly the conflation the phase
         exists to remove.
+
+        Gated on `kind != 'bundle'` — see the bundle test below for why.
         """
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["check"])
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
         assert run_step["with"]["ast-frontend"] == (
-            "${{ matrix.compile_ast_frontend || inputs.ast-frontend }}"
+            "${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend "
+            "|| inputs.ast-frontend }}"
         )
+
+    def test_per_cell_ast_frontend_is_not_forwarded_to_bundle_cells(self) -> None:
+        """A bundle cell's `new-library` is the `bundle-staging` *directory*
+        it stages its members into, and the root Action rejects every
+        non-`auto` `ast-frontend` for a directory/package operand outright
+        (`action/run.sh`'s `_is_release_style_operand` guard) — the
+        per-library fan-out never threads an L2 compile context to each
+        pair's header dump, so honouring it is impossible and silently
+        dropping it would parse headers under the wrong frontend.
+
+        So forwarding a profile's `frontend:` onto a bundle cell would turn
+        a previously working bundle check into a hard operational error
+        (Codex review). This asserts the guard clause is present and, just
+        as importantly, that the fallback is the workflow-global input
+        rather than the empty string: a bundle cell must behave exactly as
+        it did before the per-cell override existed, including that guard
+        still firing on a workflow-global non-`auto` value.
+        """
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        expr = run_step["with"]["ast-frontend"]
+        assert "matrix.kind != 'bundle'" in expr, (
+            "a bundle cell compares a directory, where the root Action "
+            "rejects any non-auto ast-frontend outright"
+        )
+        # GitHub's `a && b || c`: when `a` is false the result is `c`, so a
+        # bundle cell lands on the workflow-global input, not ''.
+        assert expr.endswith("|| inputs.ast-frontend }}")
 
     def test_consumer_compile_ast_frontend_is_not_forwarded_anywhere(self) -> None:
         """The consumer overlay's frontend has no consumer *by design*.

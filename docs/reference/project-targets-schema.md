@@ -276,7 +276,10 @@ on an overlay leaves that field empty, deferring to a caller's own global
 forwards the projected `compile_ast_frontend` as that cell's own
 `--ast-frontend`, preferring it over the workflow-level input the same way
 `gcc-path`/`gcc-options` already prefer their per-cell overlay. So the
-example above genuinely runs its producer pass under castxml.
+example above genuinely runs its producer pass under castxml. The one
+exception is a `kind: bundle` check, whose operand is a staging *directory*
+— the root Action rejects any non-`auto` frontend there, so such a cell
+keeps resolving the workflow-global value.
 `consumer_compile.frontend`, by contrast, is still projection only — it
 describes the header-AST pass of the two-pass producer/consumer extraction
 that `consumer_compile:` itself has not built yet, so nothing forwards it;

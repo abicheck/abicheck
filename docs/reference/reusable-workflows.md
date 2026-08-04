@@ -249,9 +249,19 @@ reaches its cells as `compile_ast_frontend` and replaces this workflow's own
 castxml while a Clang/DPC++ profile's cell in the same run uses
 `clang -ast-dump=json`, which one workflow-global value cannot express. A
 profile that sets no `frontend:` falls back to the global input unchanged.
-The sibling `consumer_compile.frontend` is *not* forwarded: it describes the
-consumer half of a two-pass extraction that does not exist yet, so there is
-only one dump invocation per cell for it to steer.
+
+**`kind: bundle` cells are excluded from this override.** A bundle cell's
+operand is the `bundle-staging` *directory* it stages its members into, and
+the root Action rejects every non-`auto` `ast-frontend` for a
+directory/package operand outright — the per-library fan-out never threads an
+L2 compile context to each pair's header dump, so the requested frontend
+could not be applied and silently dropping it would parse headers under the
+wrong one. A bundle cell therefore keeps resolving the workflow-global
+`ast-frontend` input exactly as it did before this override existed.
+
+The sibling `consumer_compile.frontend` is *not* forwarded at all: it
+describes the consumer half of a two-pass extraction that does not exist yet,
+so there is only one dump invocation per cell for it to steer.
 
 Every *other* analysis option above stays global-only, unaffected by these
 three exceptions.
