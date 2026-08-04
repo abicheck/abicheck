@@ -239,8 +239,22 @@ with `toolchain-bindings-path` left empty, the default) falls back to the
 global inputs unchanged — no behavior change for a project that doesn't use
 this. `compiler_family`/`compiler_version` are validated shape-wise but not
 yet projected into any forwarded flag (see `run-plan-schema.md`'s field
-table for why); every *other* analysis option above stays global-only,
-unaffected by this exception.
+table for why).
+
+**Exception: `ast-frontend` also gets a per-cell override**, on the same
+precedence rule (G34 Phase B). A profile's `compile.frontend:`
+([`project-targets-schema.md`](project-targets-schema.md#compilefrontend--consumer_compilefrontend--per-profile-ast-frontend-g34-phase-b))
+reaches its cells as `compile_ast_frontend` and replaces this workflow's own
+`ast-frontend` input there — so a GCC profile's cell can parse headers with
+castxml while a Clang/DPC++ profile's cell in the same run uses
+`clang -ast-dump=json`, which one workflow-global value cannot express. A
+profile that sets no `frontend:` falls back to the global input unchanged.
+The sibling `consumer_compile.frontend` is *not* forwarded: it describes the
+consumer half of a two-pass extraction that does not exist yet, so there is
+only one dump invocation per cell for it to steer.
+
+Every *other* analysis option above stays global-only, unaffected by these
+three exceptions.
 
 **Exception: `dependency-source` also gets a per-cell override**, on the same
 precedence rule (G34 Phase C). A profile's own `dependency_source:`

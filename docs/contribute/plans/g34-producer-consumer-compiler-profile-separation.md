@@ -209,14 +209,32 @@ confirmed by reading the workflow, not asserted from a design doc):
       (`_compile_ast_frontend_for_profile`/
       `_consumer_compile_ast_frontend_for_profile`), for both target and
       bundle checks.
-- [ ] **Still open:** no run-plan consumer yet threads this resolved field
-      into a real `dump`/`compare` invocation's own `--ast-frontend` — a
-      fixture project with one GCC profile (castxml) and one Clang/DPC++
-      profile (direct-clang `icpx`) in the same `.abicheck.yml` producing
-      two cells that actually *invoke* different frontends needs that
-      wiring first; this slice lands the config schema + `run-plan.json`
-      projection only, same "schema first, extraction/merge integration
-      later" split as Phase 0.
+- [x] `check-project.yml`'s check job forwards the resolved field into the
+      cell's real invocation as
+      `ast-frontend: ${{ matrix.compile_ast_frontend || inputs.ast-frontend }}`
+      — the same per-cell-first precedence `gcc-path`/`gcc-options` already
+      use, and the step that makes a per-profile frontend real rather than
+      projected: a GCC profile's cell resolves `castxml` while a Clang/DPC++
+      profile's cell in the same run resolves `clang`, which one
+      workflow-global `--ast-frontend` cannot express. The rest of the chain
+      (`actions/check-target` → root `action.yml` → `INPUT_AST_FRONTEND` →
+      the CLI flag) already existed for the workflow-level input, so nothing
+      downstream needed a second pass-through. A profile with no
+      `compile.frontend:` (or a run-plan from an older abicheck, where the
+      key is absent) falls back to the global input exactly as before.
+- [ ] **Still open:** `consumer_compile_ast_frontend` is deliberately *not*
+      forwarded, and that absence is pinned by a test rather than left to
+      drift. It describes the header-AST pass of the two-pass extraction
+      Phase 0 has not built, so there is only one dump invocation per cell
+      for it to steer — forwarding it would apply a consumer overlay to the
+      producer pass. It becomes wireable when Phase 0's extraction/merge
+      lands, not before.
+- [ ] **Still open:** a fixture project with one GCC profile (castxml) and
+      one Clang/DPC++ profile (direct-clang `icpx`) in the same
+      `.abicheck.yml`, exercising two cells that actually invoke different
+      frontends end to end. The wiring above is what such a fixture would
+      exercise; the fixture itself needs a real DPC++ toolchain on a runner
+      (same G17 dependency as Phase C's own remaining native-MSVC lane).
 - [x] `tests/test_project_targets_compile_frontend.py` (shape validation,
       round-trip, both overlays independent) and `test_run_plan.py`'s
       `TestCompileFrontendOverlayProjection` (target checks, bundle checks,

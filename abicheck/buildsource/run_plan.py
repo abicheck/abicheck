@@ -126,9 +126,16 @@ the same way**, into :attr:`RunPlanCheck.compile_ast_frontend`/
 :attr:`RunPlanCheck.consumer_compile_ast_frontend` -- one of the same four
 values the global ``--ast-frontend`` flag accepts, resolved independently
 per overlay, with no fallback from one overlay's field to the other's.
-Like ``consumer_compile:`` itself, no run-plan consumer yet threads this
-field into a real ``dump``/``compare`` invocation's own ``--ast-frontend``
--- this is config-schema projection only.
+
+:attr:`~RunPlanCheck.compile_ast_frontend` is threaded all the way through:
+``check-project.yml``'s check job forwards it as ``matrix.compile_ast_frontend
+|| inputs.ast-frontend``, the same per-cell-first precedence
+:attr:`~RunPlanCheck.compile_gcc_path` already uses, so a GCC profile's cell
+and a Clang profile's cell in one run genuinely invoke different frontends.
+:attr:`~RunPlanCheck.consumer_compile_ast_frontend` deliberately is not: it
+describes the *consumer* half of the two-pass L2 extraction G34 Phase 0 has
+not built, so there is no second invocation for it to steer, and forwarding
+it onto the producer pass would apply a consumer overlay to the wrong side.
 """
 
 from __future__ import annotations

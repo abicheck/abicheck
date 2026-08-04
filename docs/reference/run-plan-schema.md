@@ -135,10 +135,17 @@ way (G34 Phase B).** [`project-targets-schema.md`'s `compile.frontend`
 section](project-targets-schema.md#compilefrontend--consumer_compilefrontend--per-profile-ast-frontend-g34-phase-b)
 documents the config-schema side; this generator projects each overlay's
 `frontend:` into its own field (`compile_ast_frontend`/
-`consumer_compile_ast_frontend`), resolved independently. No run-plan
-consumer yet threads this field into a real `dump`/`compare` invocation's
-`--ast-frontend` — this is config-schema projection only, same caveat as
-`consumer_compile:` above.
+`consumer_compile_ast_frontend`), resolved independently.
+`check-project.yml`'s check job then forwards `compile_ast_frontend` into
+the cell's real invocation as
+`${{ matrix.compile_ast_frontend || inputs.ast-frontend }}` — the same
+per-cell-first precedence `compile_gcc_path`/`compile_gcc_options` use, so a
+GCC profile's cell and a Clang profile's cell in one run genuinely invoke
+different frontends. `consumer_compile_ast_frontend` is deliberately *not*
+forwarded: it describes the consumer half of the two-pass extraction
+`consumer_compile:` above has not built, so there is only one dump
+invocation per cell for it to steer, and forwarding it would apply a
+consumer overlay to the producer pass.
 
 **A cell schedules itself (G34 Phase C).** `runs_on` and `dependency_source`
 are the two axes `check-project.yml` previously fixed for the whole run: every

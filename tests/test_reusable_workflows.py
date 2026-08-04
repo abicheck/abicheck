@@ -852,6 +852,39 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         # gcc-prefix has no RunPlanCheck counterpart -- stays global-only.
         assert run_step["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
 
+    def test_run_check_target_prefers_per_cell_ast_frontend(self) -> None:
+        """G34 Phase B: the cell's own `profiles.<id>.compile.frontend`
+        (`run_plan.RunPlanCheck.compile_ast_frontend`) drives that cell's
+        `--ast-frontend`, falling back to the workflow-global input when the
+        profile declares no overlay.
+
+        This is the step that makes the field real rather than projected:
+        without it, every cell in a GCC/Clang matrix resolves the one
+        workflow-level frontend, which is exactly the conflation the phase
+        exists to remove.
+        """
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["ast-frontend"] == (
+            "${{ matrix.compile_ast_frontend || inputs.ast-frontend }}"
+        )
+
+    def test_consumer_compile_ast_frontend_is_not_forwarded_anywhere(self) -> None:
+        """The consumer overlay's frontend has no consumer *by design*.
+
+        It describes the header-AST pass of the two-pass producer/consumer
+        extraction G34 Phase 0 has not built yet. There is only one dump
+        invocation per cell today, so forwarding `consumer_compile_ast_frontend`
+        onto it would silently steer the *producer* pass with a consumer
+        setting — worse than leaving the field projected but inert. This
+        pins that absence so wiring it becomes a deliberate act.
+        """
+        for path in (CHECK_PROJECT, CHECK_SINGLE):
+            assert "consumer_compile_ast_frontend" not in path.read_text(
+                encoding="utf-8"
+            ), f"{path.name} forwards a consumer overlay onto the producer pass"
+
     def test_check_job_shell_steps_resolve_their_python_interpreter(self) -> None:
         """G34 Phase C consequence (Codex review): this job can land on a
         Windows runner now, where Git Bash resolves `python` but not
