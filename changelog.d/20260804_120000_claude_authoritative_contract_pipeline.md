@@ -39,7 +39,19 @@
   and a clean exit. SARIF now emits `level: note` with the relevance and
   reason that explain it, JUnit gives it a passing `<testcase>`, and the
   digest's impacted list is over what actually gated. Conserved in all three:
-  downgraded, not dropped.
+  downgraded, not dropped. GitHub workflow annotations follow the same rule
+  (`::notice`, not `::error`), the HTML report gets its own "Not Evaluated
+  (Contract)" section instead of filing the finding under a red verdict
+  heading, and `--show-only`'s `filtered_summary` counts the same evaluated
+  subset the main summary does.
+- **`recommend_release()` no longer claims "no version bump required" on
+  evidence that did not close.** A `NO_CHANGE` verdict reached with findings
+  the contract evaluator could not resolve now reports
+  `state: "review"`/`soname: "not_determined"` with the reason, rather than
+  automation-grade advice resting on the one thing the run says it could not
+  establish. A *proven* out-of-contract exclusion is deliberately unaffected:
+  there "no bump" is well-founded, so the recommendation stays actionable --
+  the same split the orthogonal coverage exit already makes.
 - **`scan --against --contract-evaluation` findings carry ADR-049 D1's
   canonical decision pair** (`compatibility_evaluation_status`,
   `compatibility_decision`, `null` for an unscored row), so a scan row and

@@ -880,6 +880,100 @@ class TestEveryRendererTellsTheSameStory:
         assert "Top impacted symbols" in digest
         assert "Internal" in digest
 
+    def test_the_workflow_annotation_is_a_notice_not_an_error(self) -> None:
+        """A GitHub annotation states how a finding gated. `::error` on a
+        comparison whose verdict is NO_CHANGE and whose gate is clean put a
+        red inline annotation on a passing PR (Codex review)."""
+        from abicheck.annotations import collect_annotations
+
+        (annotation,) = collect_annotations(self._excluded())
+        assert annotation[1].startswith("::notice")
+        assert "Not evaluated (contract)" in annotation[1]
+
+    def test_the_workflow_annotation_is_an_error_for_a_scored_finding(self) -> None:
+        from abicheck.annotations import collect_annotations
+
+        (annotation,) = collect_annotations(self._scored())
+        assert annotation[1].startswith("::error")
+
+    def test_the_html_report_does_not_file_it_under_a_verdict_section(self) -> None:
+        """The HTML page computes its own buckets, so the metric filter alone
+        left the finding under the red "Changed Symbols (1)" heading beside a
+        NO_CHANGE banner and 100% compatibility, with the relevance nowhere on
+        the page (Codex review)."""
+        from abicheck.html_report import generate_html_report
+
+        page = generate_html_report(self._excluded())
+        assert "Changed Symbols" not in page
+        assert "Not Evaluated (Contract)" in page
+        # Disclosed with the reason, which is what makes the section useful
+        # rather than merely non-contradictory.
+        assert "PROVEN_OUT_OF_CONTRACT" in page
+
+    def test_the_html_report_keeps_a_scored_finding_in_its_section(self) -> None:
+        from abicheck.html_report import generate_html_report
+
+        page = generate_html_report(self._scored())
+        assert "Changed Symbols" in page
+        assert "Not Evaluated (Contract)" not in page
+
+    def test_the_filtered_summary_agrees_with_the_main_one(self) -> None:
+        """`--show-only` builds a second set of counters over the *displayed*
+        changes, so the main summary read `breaking: 0` beside
+        `filtered_summary.breaking: 1` in one document (Codex review)."""
+        from abicheck.reporter import to_json
+
+        report = json.loads(to_json(self._excluded(), show_only="breaking"))
+        assert report["summary"]["breaking"] == 0
+        assert report["filtered_summary"]["breaking"] == 0
+        # `total_changes` stays inclusive in both: it counts what is shown.
+        assert report["filtered_summary"]["total_changes"] == 1
+
+
+class TestTheReleaseRecommendationDoesNotOverclaim:
+    """`recommend_release` is documented as automation-grade advice, so a
+    `NO_CHANGE` verdict reached over evidence that did not close must not
+    serialize as a confident "no bump required" (Codex review)."""
+
+    def test_an_unresolved_run_is_review_not_actionable(self) -> None:
+        from abicheck.semver import (
+            ReleaseRecommendationState,
+            SonameAction,
+            recommend_release,
+        )
+
+        result = compare(
+            *_removal_pair(), contract_evaluation=True, contract_mode="exports"
+        )
+        assert result.verdict is Verdict.NO_CHANGE
+        rec = recommend_release(result)
+        assert rec.state is ReleaseRecommendationState.REVIEW
+        assert rec.soname is SonameAction.NOT_DETERMINED
+        assert "could not resolve" in rec.rationale
+
+    def test_a_proven_exclusion_stays_actionable(self) -> None:
+        """The distinction ADR-049 draws, and the one the coverage exit draws
+        too: proven-out-of-contract is a *determination*, so "no bump" really
+        is well-founded. Only the unknown cases are non-actionable."""
+        from abicheck.semver import ReleaseRecommendationState, recommend_release
+
+        result = _compare(
+            _unreached_public_type_pair(),
+            contract_evaluation=True,
+            contract_mode="public",
+        )
+        assert result.verdict is Verdict.NO_CHANGE
+        rec = recommend_release(result)
+        assert rec.state is ReleaseRecommendationState.ACTIONABLE
+
+    def test_a_run_without_the_opt_in_is_unchanged(self) -> None:
+        from abicheck.semver import ReleaseRecommendationState, recommend_release
+
+        old, _ = _removal_pair()
+        rec = recommend_release(compare(old, old))
+        assert rec.state is ReleaseRecommendationState.ACTIONABLE
+        assert "No ABI or API changes detected" in rec.rationale
+
     @pytest.mark.parametrize("report_mode", ["full", "leaf"])
     def test_the_severity_table_does_not_claim_an_exit_it_will_not_produce(
         self, report_mode: str

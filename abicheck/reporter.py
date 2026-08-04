@@ -869,22 +869,35 @@ def _add_show_only_filter(
     changes: list[Change],
     show_only: str,
 ) -> None:
-    """Add show_only_filter + filtered_summary when a show_only filter is active."""
+    """Add show_only_filter + filtered_summary when a show_only filter is active.
+
+    The three verdict counters are over the *evaluated* subset, exactly like
+    the main ``summary`` block (ADR-049 D1) -- a NOT_EVALUATED finding was
+    never scored by compatibility policy, so counting one here reported
+    ``verdict: NO_CHANGE`` and ``summary.breaking: 0`` beside
+    ``filtered_summary.breaking: 1`` in a single document (Codex review,
+    reproduced with ``--show-only breaking`` on a proven-out-of-contract
+    finding). ``total_changes`` stays inclusive, matching the main summary's
+    own rule: it counts what the filter *displays*, not what gated.
+    """
+    from .contract_gating import is_evaluated
+
     d["show_only_filter"] = show_only
+    scored = [c for c in changes if is_evaluated(c)]
     d["filtered_summary"] = {
         "breaking": sum(
             1
-            for c in changes
+            for c in scored
             if result._effective_verdict_for_change(c) == Verdict.BREAKING
         ),
         "source_breaks": sum(
             1
-            for c in changes
+            for c in scored
             if result._effective_verdict_for_change(c) == Verdict.API_BREAK
         ),
         "risk_changes": sum(
             1
-            for c in changes
+            for c in scored
             if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
         ),
         "total_changes": len(changes),

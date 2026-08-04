@@ -711,14 +711,27 @@ def generate_html_report(
     # getattr (like the compatibility_metrics call below) so a lightweight
     # stub result without a real DiffResult's policy machinery still renders.
     _effective_verdict_fn = getattr(result, "_effective_verdict_for_change", None)
+    # ADR-049 D1: a NOT_EVALUATED finding is partitioned out of the three
+    # verdict buckets before they are built, the same way Markdown's own
+    # "Not Evaluated (Contract)" section works. Bucketing one by its raw
+    # effective verdict rendered it under the red "Changed Symbols (1)"
+    # heading on a page whose banner reads NO_CHANGE and whose compatibility
+    # metric reads 100%, with the relevance and reason appearing nowhere
+    # (Codex review, reproduced). It gets its own section below instead --
+    # conserved and explained, not filed under a verdict policy never
+    # reached. Empty for every run without `--contract-evaluation`.
+    from .contract_gating import contract_relevance_of, is_evaluated
+
+    not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
+    scored_changes = [ch for ch in display_changes if is_evaluated(ch)]
     removed = [
-        ch for ch in display_changes if _change_bucket(ch, _effective_verdict_fn) == "removed"
+        ch for ch in scored_changes if _change_bucket(ch, _effective_verdict_fn) == "removed"
     ]
     added = [
-        ch for ch in display_changes if _change_bucket(ch, _effective_verdict_fn) == "added"
+        ch for ch in scored_changes if _change_bucket(ch, _effective_verdict_fn) == "added"
     ]
     changed = [
-        ch for ch in display_changes if _change_bucket(ch, _effective_verdict_fn) == "changed"
+        ch for ch in scored_changes if _change_bucket(ch, _effective_verdict_fn) == "changed"
     ]
 
     # Metrics always use the full (unfiltered) change list. policy/kind_sets/
@@ -921,6 +934,8 @@ def generate_html_report(
 
     sections = _build_sections_html(
         removed, changed, added, suppressed, suppressed_count, _section,
+        not_evaluated=not_evaluated,
+        relevance_of=contract_relevance_of,
     )
 
     if not sections:
@@ -1027,8 +1042,18 @@ def _build_sections_html(
     suppressed: list[object],
     suppressed_count: int,
     section_builder: Callable[[str, str, str, list[object]], str],
+    *,
+    not_evaluated: list[object] | None = None,
+    relevance_of: Callable[[object], object] | None = None,
 ) -> list[str]:
-    """Build ordered section blocks for HTML report body."""
+    """Build ordered section blocks for HTML report body.
+
+    *not_evaluated* (ADR-049 D1) renders last, in its own non-verdict
+    section: those findings were never scored by compatibility policy, so
+    filing them under Removed/Changed/Added would contradict the verdict
+    banner at the top of the same page. Defaults to nothing, so a run without
+    `--contract-evaluation` produces the identical document it always did.
+    """
     sections: list[str] = []
     for title, anchor, css_class, items in (
         ("⛔ Removed Symbols", "removed", "section-removed", removed),
@@ -1044,6 +1069,31 @@ def _build_sections_html(
             f"<h3>🔕 Suppressed Changes ({suppressed_count})</h3>"
             f"<p class='empty'>Details not available (suppressed_changes list is empty).</p>"
             f"</div>"
+        )
+    if not_evaluated:
+        rows = []
+        for ch in not_evaluated:
+            relevance = relevance_of(ch) if relevance_of is not None else None
+            rows.append(
+                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                    html.escape(str(getattr(ch, "symbol", "") or "")),
+                    html.escape(str(getattr(getattr(ch, "kind", None), "value", ""))),
+                    html.escape(str(getattr(relevance, "value", "") or "")),
+                    html.escape(str(getattr(ch, "contract_reason_code", "") or "")),
+                )
+            )
+        sections.append(
+            "<div class='section section-suppressed' id='not-evaluated'>"
+            f"<h3>🔎 Not Evaluated (Contract) ({len(not_evaluated)})</h3>"
+            "<p class='empty'>Compatibility policy did not score these findings: "
+            "the selected contract domain either proved them outside the "
+            "promised contract or could not resolve them. They are reported "
+            "here with the reason, and contributed nothing to the verdict or "
+            "the exit code above.</p>"
+            "<table><thead><tr><th>Symbol</th><th>Kind</th>"
+            "<th>Contract relevance</th><th>Reason</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>"
+            "</div>"
         )
     return sections
 

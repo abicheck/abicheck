@@ -84,7 +84,7 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
     BREAKING_KINDS,
 )
 from .cli import _safe_write_output, _setup_verbosity, main
-from .cli_compare_helpers import _cli_flag, _warn_force_public_ignored
+from .cli_compare_options import _cli_flag, _warn_force_public_ignored
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
