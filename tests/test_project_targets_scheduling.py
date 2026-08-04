@@ -170,17 +170,28 @@ def _resolve_dependency_source(
     script.write_text(step["run"])
     out = tmp_path / "gh_output"
     out.write_text("")
-    subprocess.run(
-        ["bash", str(script)],
-        check=True,
+    # Relative paths, run from *inside* tmp_path. A Windows absolute path
+    # (`C:\Users\...`) reaches Git Bash with its backslashes intact, so the
+    # step's own `>> "$GITHUB_OUTPUT"` redirect fails and bash exits 1 —
+    # the harness breaking, not the thing under test. Under Actions the
+    # runner always hands bash a POSIX path, so this keeps the test
+    # faithful while letting it run on every platform's unit lane.
+    completed = subprocess.run(
+        ["bash", "resolve.sh"],
+        cwd=tmp_path,
         env={
             **os.environ,
             "INPUT_DEPENDENCY_SOURCE": source,
             "INPUT_INSTALL_DEPS": install_deps,
             "RUNNER_OS": runner_os,
-            "GITHUB_OUTPUT": str(out),
+            "GITHUB_OUTPUT": "gh_output",
         },
         capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, (
+        f"the resolve step exited {completed.returncode}\n"
+        f"stdout: {completed.stdout}\nstderr: {completed.stderr}"
     )
     for line in out.read_text().splitlines():
         if line.startswith("value="):

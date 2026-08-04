@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -545,7 +546,10 @@ class TestCheckProjectArtifactNaming:
         sanitize = next(
             s for s in steps if s.get("name") == "Sanitize check-id for artifact name"
         )
-        script = sanitize["run"].split('python3 -c "', 1)[1].rsplit('"', 1)[0]
+        # Split on the flag, not the interpreter name: these steps resolve
+        # their interpreter (`"$PY" -c`) so a Windows-scheduled cell can run
+        # them, and hard-coding `python3` here broke the moment that landed.
+        script = sanitize["run"].split(' -c "', 1)[1].rsplit('"', 1)[0]
 
         def sanitized_id(check_id: str) -> str:
             with tempfile.TemporaryDirectory() as tmp:
@@ -846,6 +850,31 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         )
         # gcc-prefix has no RunPlanCheck counterpart -- stays global-only.
         assert run_step["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
+
+    def test_check_job_shell_steps_resolve_their_python_interpreter(self) -> None:
+        """G34 Phase C consequence (Codex review): this job can land on a
+        Windows runner now, where Git Bash resolves `python` but not
+        necessarily `python3` — the Windows CPython layout ships
+        `python.exe` only. A bare `python3` in any of these steps would fail
+        candidate resolution, and the envelope-writing fallback would fail
+        with it, so the cell produces no report at all.
+        """
+        data = _load(CHECK_PROJECT)
+        # An *invocation* — `python3` followed by a flag or a script — not a
+        # mention. `command -v python3` in the resolver itself is correct, and
+        # so is naming it in a comment.
+        invocation = re.compile(r"\bpython3\s+(?:-|\./|\S+\.py)")
+        offenders = [
+            s.get("name")
+            for s in _steps(data["jobs"]["check"])
+            if invocation.search(s.get("run") or "")
+        ]
+        assert not offenders, (
+            f"{offenders} invoke `python3` directly. This job's runs-on comes "
+            f"from the cell's profile and can be windows-latest — resolve the "
+            f'interpreter instead (PY="$(command -v python3 || command -v '
+            f'python)"), as the other steps here and action/run.sh do.'
+        )
 
     def test_check_job_is_scheduled_on_the_cells_own_runner(self) -> None:
         """G34 Phase C: `runs-on` comes from the cell, not a hardcoded
@@ -1200,7 +1229,9 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         return resolver["run"]
 
     def _inner_python(self) -> str:
-        return self._resolver_script().split('python3 -c "', 1)[1].rsplit('"', 1)[0]
+        # See the sanitizer test above for why this splits on the flag rather
+        # than the interpreter name.
+        return self._resolver_script().split(' -c "', 1)[1].rsplit('"', 1)[0]
 
     def test_resolver_checks_commonpath_against_the_root(self) -> None:
         run = self._inner_python()

@@ -498,12 +498,19 @@ def _is_conformant_change_entry(entry: Mapping[str, Any]) -> bool:
         if value is None:
             if not nullable:
                 return False
-        elif not isinstance(value, (str, list, tuple)):
-            # `str` is what the schema declares; list/tuple are the
-            # structured `old_value`/`new_value` shapes a real producer
-            # emits and `_is_usable_finding_entry` already accepts, so
-            # rejecting them here would mark a genuine report incomplete.
-            return False
+        elif not isinstance(value, str):
+            # The schema declares every one of these a string. The single
+            # carve-out is the structured `old_value`/`new_value` a real
+            # producer emits (``diff_python.py`` passes a list), which
+            # `_is_usable_finding_entry` already accepts and the identity
+            # resolver folds deterministically -- rejecting *those* would
+            # mark a genuine report incomplete. Extending the carve-out to
+            # every field instead, as a first cut did, let `severity: []`
+            # read as conformant (Codex review).
+            if field not in _IDENTITY_VALUE_FIELDS or not isinstance(
+                value, (list, tuple)
+            ):
+                return False
     return True
 
 

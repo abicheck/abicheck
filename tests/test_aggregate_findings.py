@@ -888,16 +888,43 @@ class TestFindingEntryValidation:
         )
         assert result.complete is False
 
-    def test_a_wrong_typed_severity_is_readable_but_not_conformant(self) -> None:
+    @pytest.mark.parametrize(
+        "value", [pytest.param(42, id="int"), pytest.param([], id="empty-list")]
+    )
+    def test_a_wrong_typed_severity_is_readable_but_not_conformant(
+        self, value: object
+    ) -> None:
         """`severity` is required by the schema but not part of the identity,
         so a non-string there leaves the finding perfectly readable while
         still being something no conformant producer wrote — the one field
-        where the two predicates genuinely disagree."""
+        where the two predicates genuinely disagree.
+
+        The list case is its own parameter because the structured-value
+        carve-out that exists for `old_value`/`new_value` must not reach any
+        other field (Codex review): a first cut applied it to all six, so
+        `severity: []` read as conformant.
+        """
         result = parse_report_findings(
-            {"changes": [_change_entry(**{**_MINIMAL, "severity": 42})]}
+            {"changes": [_change_entry(**{**_MINIMAL, "severity": value})]}
         )
         assert len(result.findings) == 1
         assert result.complete is False
+
+    @pytest.mark.parametrize("field", ["old_value", "new_value"])
+    @pytest.mark.parametrize(
+        "value", [pytest.param(["a", "b"], id="list"), pytest.param(("a",), id="tuple")]
+    )
+    def test_the_structured_carve_out_covers_exactly_old_and_new_value(
+        self, field: str, value: object
+    ) -> None:
+        """The other half of the same rule: these two fields really do carry a
+        list from `diff_python.py`, and rejecting that would mark a genuine
+        report incomplete."""
+        result = parse_report_findings(
+            {"changes": [_change_entry(**{**_MINIMAL, field: value})]}
+        )
+        assert len(result.findings) == 1
+        assert result.complete is True
 
     def test_a_null_required_field_still_convicts_its_own_profile(
         self, tmp_path: Path

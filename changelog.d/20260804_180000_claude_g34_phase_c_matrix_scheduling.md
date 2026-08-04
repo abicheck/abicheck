@@ -48,3 +48,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   consumer can regress since the path this replaces was an unconditional
   failure. Reached for real by the per-profile scheduling above, which lets
   an `os: windows` profile run a native check cell for the first time.
+- **`check-project.yml`'s check cells resolve their Python interpreter
+  instead of invoking `python3`.** Git Bash on a Windows runner resolves
+  `python` but not necessarily `python3` — the Windows CPython layout ships
+  `python.exe` only — so candidate resolution would have failed on a
+  natively-scheduled Windows cell, taking the operational-error report
+  fallback down with it and leaving the cell with no report at all. Harmless
+  before this release, when every cell ran on Linux.

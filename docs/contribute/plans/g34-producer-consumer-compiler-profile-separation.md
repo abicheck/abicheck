@@ -293,6 +293,23 @@ confirmed by reading the workflow, not asserted from a design doc):
       extracts and *runs* the real resolve script rather than string-matching
       it, so a future edit that keeps the wording but changes the branching
       still fails.
+- [x] **The `check` job's own shell steps resolve their Python interpreter.**
+      Three of them (`Resolve candidate binary/binaries`, `Synthesize
+      pre-check operational-error report`, `Sanitize check-id for artifact
+      name`) invoked `python3` directly, which Git Bash on a Windows runner
+      does not resolve — the Windows CPython layout ships `python.exe` only.
+      Harmless while every cell ran on Linux; a guaranteed failure the moment
+      this phase let one land on `windows-latest`, and a compounding one:
+      candidate resolution fails, then the envelope-writing fallback fails
+      with it, so the cell produces no report at all rather than an
+      operational-error one (Codex review). All three now resolve the
+      interpreter the way `action/run.sh` already does
+      (`PY="$(command -v python3 || command -v python)"`), and
+      `test_check_job_shell_steps_resolve_their_python_interpreter` fails on
+      any future bare invocation in this job. Two pre-existing tests that
+      extracted these steps' embedded Python by splitting on the literal
+      `python3 -c` broke on the change and now split on the flag instead, so
+      they no longer pin an interpreter name they don't care about.
 - [ ] Out of scope for this phase, still open: an actual native
       `windows-latest` CI lane exercising a real MSVC profile end-to-end
       through `check-project.yml` — that needs a real fixture project and
@@ -482,6 +499,13 @@ confirmed by reading the workflow, not asserted from a design doc):
       to the schema. `severity` is the one field where the two predicates
       genuinely disagree — required by the schema but not part of the
       identity, so a non-string there is readable yet non-conformant.
+- [x] **The structured-value carve-out covers exactly `old_value`/
+      `new_value`.** The type check above initially accepted `str | list |
+      tuple` for *every* required field, so `severity: []` still read as
+      conformant (tenth Codex review round). The carve-out exists for one
+      reason — `diff_python.py` really passes a list for those two fields and
+      the identity resolver folds it — so it is now scoped to them alone;
+      every other required field is a plain string or nothing.
 - [x] A well-formed array is not by itself proof that nothing else was
       found: `compare --show-only` narrows `changes` (`reporter.to_json`)
       while the verdict, the gate, and the `summary` block all keep

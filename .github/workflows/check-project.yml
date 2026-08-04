@@ -577,7 +577,14 @@ jobs:
           MATRIX_JSON: ${{ toJSON(matrix) }}
         run: |
           set -euo pipefail
-          python3 -c "
+          # G34 Phase C: this job can now be scheduled on a Windows runner
+          # (its runs-on comes from the cell's own profile), where Git Bash
+          # resolves `python` but not necessarily `python3` -- the Windows
+          # CPython layout ships `python.exe` only. Resolve it the same way
+          # `action/run.sh` already does rather than assuming a name
+          # (Codex review).
+          PY="$(command -v python3 || command -v python)"
+          "$PY" -c "
           import glob, json, os, shutil, sys
 
           cell = json.loads(os.environ['MATRIX_JSON'])
@@ -751,8 +758,13 @@ jobs:
           else
             MESSAGE="candidate binary resolution failed for '$MATRIX_NAME' -- see the 'Resolve candidate binary/binaries' step's own log for the specific reason."
           fi
+          # See "Resolve candidate binary/binaries" for why the interpreter is
+          # resolved rather than named -- this step matters most on exactly the
+          # path where that one failed, so it must not fail for a second,
+          # unrelated reason.
+          PY="$(command -v python3 || command -v python)"
           set +e
-          ENVELOPE_STDOUT=$(python3 ./.check-project-src/actions/check-target/report_envelope.py \
+          ENVELOPE_STDOUT=$("$PY" ./.check-project-src/actions/check-target/report_envelope.py \
             --mode operational-error \
             --name "$MATRIX_NAME" \
             --profile-id "$MATRIX_PROFILE_ID" \
@@ -905,7 +917,11 @@ jobs:
         env:
           CHECK_ID: ${{ steps.run.outputs.check-id || steps.precheck.outputs.check-id }}
         run: |
-          python3 -c "
+          # Same cross-platform interpreter resolution as the two steps above.
+          # This one runs under `if: always()`, so it is on the path that must
+          # still produce a report artifact when everything else went wrong.
+          PY="$(command -v python3 || command -v python)"
+          "$PY" -c "
           import hashlib
           import os
 

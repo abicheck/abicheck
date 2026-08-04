@@ -43,6 +43,7 @@ from abicheck.buildsource.run_plan import (
     RunPlan,
     RunPlanCheck,
     _compose_gcc_options,
+    _scheduling_fields_for_profile,
     generate_run_plan,
     to_aggregate_manifest,
 )
@@ -1784,6 +1785,16 @@ class TestSchedulingProjection:
         [check] = plan.checks
         assert check.runs_on == "ubuntu-latest"
         assert check.dependency_source == "conda-forge-clang20"
+
+    def test_an_unknown_profile_falls_back_to_the_defaults(self) -> None:
+        """Matches how every other `*_for_profile` helper here treats a
+        profile it cannot find: the cell is generated either way, and a
+        missing profile is a separate, already-reported error rather than
+        this helper's to raise on."""
+        assert _scheduling_fields_for_profile(_parsed(self._RAW), "nope") == (
+            "ubuntu-latest",
+            "",
+        )
 
     def test_an_unroutable_os_raises_rather_than_defaulting(self) -> None:
         """Generation refuses rather than quietly scheduling a non-Linux
