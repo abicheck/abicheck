@@ -35,6 +35,7 @@ import pytest
 
 from abicheck import reporter
 from abicheck.checker import compare
+from abicheck.contract_pipeline import ContractEvaluationStage
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -415,19 +416,29 @@ class TestReportValidatesAgainstSchema:
             assert e["contract_reason_code"] == "terminal_authoritative_exclusion"
             assert e["contract_assurance"] == "complete"
 
+    @staticmethod
+    def _stage_for(old: AbiSnapshot, new: AbiSnapshot) -> ContractEvaluationStage:
+        """The contract-evaluation stage `checker.compare` builds internally."""
+        from abicheck.contract_pipeline import build_contract_stage
+        from abicheck.post_processing import PipelineContext
+
+        return build_contract_stage(
+            old, new,
+            scope_to_public_surface=True, force_public_symbols=None,
+            pp_ctx=PipelineContext(old=old, new=new),
+        )
+
     def test_contract_evaluation_stamps_redundant_bucket(self):
         # Regression (Codex review, PR #658, fresh evidence): a redundant
         # (display-dedup) finding is only restored into the rendered report
         # when the caller passes --show-redundant/scope.show_redundant --
         # entirely in the CLI layer, via cli_helpers_compare.
-        # _merge_redundant_changes, long after _apply_contract_evaluation_shadow
+        # _merge_redundant_changes, long after the contract-evaluation stage
         # already ran over `kept` + out_of_surface only. Without stamping the
         # redundant bucket too, a restored finding rendered with none of the
         # promised contract fields regardless of contract_evaluation=True.
-        from abicheck.checker import _apply_contract_evaluation_shadow
         from abicheck.checker_policy import ChangeKind
         from abicheck.checker_types import Change
-        from abicheck.post_processing import PipelineContext
 
         old = AbiSnapshot(library="lib", version="1")
         new = AbiSnapshot(library="lib", version="2")
@@ -445,14 +456,12 @@ class TestReportValidatesAgainstSchema:
             )
         ]
         assert redundant[0].contract_relevance is None
-        _apply_contract_evaluation_shadow(
-            kept, old, new,
-            scope_to_public_surface=True, force_public_symbols=None,
-            pp_ctx=PipelineContext(old=old, new=new),
-            redundant=redundant,
-        )
+        self._stage_for(old, new).classify(kept + redundant)
         assert redundant[0].contract_relevance is not None
         assert redundant[0].contract_reason_code is not None
+        # ADR-049 D1: the status travels with the relevance, so a restored
+        # redundant finding also states whether policy scored it.
+        assert redundant[0].compatibility_evaluation_status is not None
 
     def test_contract_evaluation_stamps_reconciled_bucket(self):
         # Regression (Codex review, PR #658, fresh evidence): a finding
@@ -460,14 +469,12 @@ class TestReportValidatesAgainstSchema:
         # header-parse phantom the build's active defines prove never
         # happened) stays visible in its own audit ledger
         # (reporter._add_reconciled, build_context_reconciled.changes) --
-        # but reconciliation runs *before* _apply_contract_evaluation_shadow
+        # but reconciliation runs *before* contract classification
         # (checker.compare's own pipeline order), so the cleared finding
         # never reached `kept` and its ledger entry silently lost the
         # contract decision it would otherwise carry.
-        from abicheck.checker import _apply_contract_evaluation_shadow
         from abicheck.checker_policy import ChangeKind
         from abicheck.checker_types import Change
-        from abicheck.post_processing import PipelineContext
 
         old = AbiSnapshot(library="lib", version="1")
         new = AbiSnapshot(library="lib", version="2")
@@ -481,14 +488,10 @@ class TestReportValidatesAgainstSchema:
             )
         ]
         assert reconciled[0].contract_relevance is None
-        _apply_contract_evaluation_shadow(
-            kept, old, new,
-            scope_to_public_surface=True, force_public_symbols=None,
-            pp_ctx=PipelineContext(old=old, new=new),
-            reconciled=reconciled,
-        )
+        self._stage_for(old, new).classify(kept + reconciled)
         assert reconciled[0].contract_relevance is not None
         assert reconciled[0].contract_reason_code is not None
+        assert reconciled[0].compatibility_evaluation_status is not None
 
     def test_contract_evaluation_stamps_reconciled_bucket_end_to_end(self):
         # Same fix, exercised through a real --reconcile-build-context

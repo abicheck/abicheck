@@ -41,6 +41,7 @@ from .checker_policy import (
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
+from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
 from .report_summary import build_summary, surface_breakdown
 from .semver import recommend_release
@@ -629,9 +630,24 @@ def _to_markdown_leaf(
             policy_file=result.policy_file,
         )
 
+    # ADR-049 D1: leaf mode groups purely by ChangeKind, so without this a
+    # finding compatibility policy never scored still rendered under
+    # "Breaking Type Changes" beside a NO_CHANGE verdict -- the same
+    # contradiction the full-mode partition exists to prevent, reached by a
+    # different renderer (Codex review, fresh evidence). Partitioned before
+    # the kind grouping, and disclosed in its own non-verdict section below.
+    from .report_model import ReportModel
+
+    not_evaluated = ReportModel.classify_not_evaluated(changes)
+    # Identity, not equality: `Change` is a plain dataclass, so two distinct
+    # findings can compare equal and an `in`-based split would drop the wrong
+    # one (and cost O(n^2) doing it).
+    _excluded_ids = {id(c) for c in not_evaluated}
+    scored = [c for c in changes if id(c) not in _excluded_ids]
+
     # Group root type changes by severity
-    type_changes = [c for c in changes if c.kind in _ROOT_TYPE_CHANGE_KINDS]
-    non_type_changes = [c for c in changes if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
+    type_changes = [c for c in scored if c.kind in _ROOT_TYPE_CHANGE_KINDS]
+    non_type_changes = [c for c in scored if c.kind not in _ROOT_TYPE_CHANGE_KINDS]
 
     if type_changes:
         lines += _build_leaf_type_sections(type_changes, result.policy)
@@ -641,6 +657,8 @@ def _to_markdown_leaf(
         for c in non_type_changes:
             lines.append(_format_change_md(c))
         lines.append("")
+
+    lines += _build_not_evaluated_section(not_evaluated)
 
     if not changes:
         if show_only and result.changes:
@@ -992,7 +1010,7 @@ def _to_markdown_root_cause(
                 # genuinely needs the caller's own --contract-evaluation
                 # intent threaded through explicitly.
                 if contract_evaluation:
-                    from .contract_evaluation import (
+                    from .contract_scoped_promotion import (
                         stamp_explicit_scope_contract_evaluation,
                     )
 
@@ -1146,7 +1164,11 @@ def _build_severity_summary_md(
     "no exit impact" while the report elsewhere names a real, blocking
     finding.
     """
-    from .severity import SeverityLevel, categorize_changes
+    from .severity import (
+        SeverityLevel,
+        categorize_changes,
+        gate_eligible_changes,
+    )
 
     categorized = categorize_changes(
         changes,
@@ -1154,9 +1176,15 @@ def _build_severity_summary_md(
         kind_sets=kind_sets,
         policy_file=policy_file,
     )
+    # ADR-049 D1: the `Count` column above is factual over what is
+    # displayed, but `Exit Impact` is a claim about the *gate* -- so it has
+    # to be classified over the same set `severity.compute_exit_code` scores.
+    # Without this, a comparison whose only finding is a proven-out-of-contract
+    # TYPE_SIZE_CHANGED rendered "causes non-zero exit" beside an exit code of
+    # 0 and a NO_CHANGE verdict (Codex review, fresh evidence).
     exit_categorized = (
         categorize_changes(
-            all_changes,
+            gate_eligible_changes(all_changes),
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,
@@ -1326,6 +1354,44 @@ def _build_severity_sections(
     return lines
 
 
+def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
+    """Disclose the findings compatibility policy did not score (ADR-049 D1).
+
+    These are real detector facts that carry no verdict: contract evaluation
+    either proved the entity outside the declared contract, or could not
+    resolve it from the evidence the run had. They are deliberately absent
+    from the four verdict sections above -- filing an unscored finding under
+    "Breaking Changes" would contradict the verdict printed at the top of the
+    same report -- so this section is what keeps them visible, with the
+    relevance and reason code that explain *why* they did not gate.
+
+    Empty (and so entirely absent) unless the run opted into
+    ``--contract-evaluation``.
+    """
+    if not not_evaluated:
+        return []
+    lines: list[str] = [
+        "## 🔍 Not Evaluated (Contract)",
+        "",
+        "> These findings were detected but **not scored** by compatibility",
+        "> policy: each is either proven outside the declared contract or",
+        "> unresolved for want of evidence (ADR-049). They contribute nothing",
+        "> to the verdict or the gate. Incomplete evidence is reported",
+        "> separately on the contract-coverage axis, which has its own exit",
+        "> code — uncertainty is never silently treated as compatible.",
+        "",
+    ]
+    for c in not_evaluated:
+        relevance = getattr(c, "contract_relevance", None)
+        reason = getattr(c, "contract_reason_code", None)
+        label = getattr(relevance, "value", None) or "UNKNOWN"
+        suffix = f" ({reason})" if reason else ""
+        lines.append(f"- **{c.kind.value}**: {c.description}")
+        lines.append(f"  > Contract: {label}{suffix}")
+    lines.append("")
+    return lines
+
+
 def _build_environment_drift_section(changes: list[Change]) -> list[str]:
     """Group environment/toolchain-drift findings under one heading.
 
@@ -1471,9 +1537,16 @@ def to_review_digest(
     # the same way it already is in the counts table and merge-effect phrase
     # above — otherwise this section could list a finding the rest of the
     # digest reports as compatible, or omit one it reports as breaking.
+    # ADR-049 D1: and over the findings compatibility policy actually scored,
+    # for the same reason -- the merge-effect phrase above is derived from the
+    # verdict, which a NOT_EVALUATED finding did not reach, so listing one
+    # here printed "safe to merge" directly above the symbol it says is
+    # impacted (Codex review). The excluded finding keeps its own disclosed
+    # section elsewhere in the report; this list is the digest of what gated.
     impacted = [
         c
         for c in result.changes
+        if is_evaluated(c)
         if result._effective_verdict_for_change(c)
         in (Verdict.BREAKING, Verdict.API_BREAK)
     ]
@@ -1594,8 +1667,17 @@ def to_markdown(
         f"| Source-level breaks | {len(result.source_breaks)} |",
         f"| Deployment risk changes | {len(result.risk)} |",
         f"| Compatible changes | {len(result.compatible)} |",
-        "",
     ]
+    # ADR-049 D1/D11: when contract evaluation excluded findings from the
+    # compatibility axis, say so in the headline table. The four counts above
+    # are now over the *evaluated* findings only, so a reader who sees a
+    # `NO_CHANGE` verdict beside a populated "Not Evaluated" section has the
+    # count that reconciles them rather than an apparent contradiction. The
+    # row is absent for every run that did not opt in, where it is always 0.
+    not_evaluated_total = len(result.not_evaluated)
+    if not_evaluated_total:
+        lines.append(f"| Not evaluated (contract) | {not_evaluated_total} |")
+    lines.append("")
 
     # When most of the breaking count is RTTI / internal-namespace churn, say so
     # up front — otherwise a huge count from a library lacking -fvisibility=hidden
@@ -1636,6 +1718,8 @@ def to_markdown(
         compatible,
         severity_config=severity_config,
     )
+
+    lines += _build_not_evaluated_section(model.not_evaluated)
 
     lines += _build_environment_drift_section(changes)
 

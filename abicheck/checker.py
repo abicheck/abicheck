@@ -43,6 +43,11 @@ from .checker_types import (  # noqa: F401
 )
 from .comparability import check_contracts_comparable
 from .confidence import _compute_confidence
+from .contract_pipeline import (
+    ContractEvaluationStage,
+    build_contract_stage,
+    evaluated_for_policy,
+)
 from .detector_registry import registry as _detector_registry
 from .diff_elf_layout import (  # noqa: F401 — triggers detector registration
     _diff_elf_layout,
@@ -162,8 +167,32 @@ def _compute_verdict_for(
     all_unsuppressed: list[Change],
     policy: str,
     policy_file: PolicyFile | None,
+    stage: ContractEvaluationStage | None = None,
 ) -> Verdict:
-    """Compute verdict using either a PolicyFile or the named policy profile."""
+    """Compute verdict using either a PolicyFile or the named policy profile.
+
+    *stage* (ADR-049 D9) is the authoritative contract-relevance stage, set
+    only when the caller opted into ``contract_evaluation=True``. When
+    present, contract relevance is classified *first* and compatibility
+    policy then runs over the ``EVALUATED`` findings alone: a finding proven
+    outside the declared contract, or one whose required evidence is missing,
+    has no compatibility decision and no gate contribution (D1).
+
+    Classification happens here rather than at each call site because "before
+    the verdict" is several points in ``compare()`` -- the two opt-in
+    ``--surface-metrics``/``--pattern-verdicts`` steps append findings and
+    recompute -- and a finding that reached the policy unclassified would be
+    scored under exactly the pre-ADR-049 rule this ordering replaces.
+    ``stage.classify`` is idempotent, so passing an already-classified list
+    costs a set lookup per finding.
+
+    With *stage* ``None`` (every run that did not opt in, which is the
+    default) this is bit-for-bit the previous behaviour: no finding carries a
+    relevance, so none is excluded.
+    """
+    if stage is not None:
+        stage.classify(all_unsuppressed)
+        all_unsuppressed = evaluated_for_policy(all_unsuppressed)
     if policy_file is not None:
         return policy_file.compute_verdict(all_unsuppressed)
     return compute_verdict(all_unsuppressed, policy=policy)
@@ -225,6 +254,7 @@ def _apply_surface_metrics(
     policy: str,
     policy_file: PolicyFile | None,
     current_verdict: Verdict,
+    stage: ContractEvaluationStage | None = None,
 ) -> tuple[list[Change], Verdict]:
     """Compute aggregate surface-metric findings (ADR-027 A1/D1.2) and return
     the updated *kept* list and (possibly recomputed) *verdict*.
@@ -232,6 +262,11 @@ def _apply_surface_metrics(
     Called only when ``surface_metrics=True``.  *current_verdict* is the
     verdict already established before this step; it is returned unchanged
     when no new metric findings are visible.
+
+    *stage* is forwarded to the verdict recomputation so this step's own
+    freshly-appended findings are contract-classified before they can score
+    (ADR-049 D9) — they are appended after the first classification pass, so
+    without it they would reach compatibility policy unclassified.
     """
     from .diff_surface_metrics import diff_surface_metrics
 
@@ -247,7 +282,9 @@ def _apply_surface_metrics(
     # making the CLI/JSON summary inconsistent with the finding set. Recompute
     # so NO_CHANGE flips to COMPATIBLE when the only findings are these
     # roll-ups (ADR-027 review).
-    return kept, _compute_verdict_for(kept + verdict_redundant, policy, policy_file)
+    return kept, _compute_verdict_for(
+        kept + verdict_redundant, policy, policy_file, stage
+    )
 
 
 def _filter_pattern_synthetic(
@@ -324,12 +361,18 @@ def _apply_pattern_verdicts_step(
     policy_file: PolicyFile | None,
     evidence_tier: EvidenceTier,
     current_verdict: Verdict,
+    stage: ContractEvaluationStage | None = None,
 ) -> tuple[list[Change], Verdict, list[dict[str, object]]]:
     """Apply ADR-027 A4 pattern-aware verdict modulation.
 
     Returns the updated *kept* list, (possibly recomputed) *verdict*, and the
     *pattern_modulations* ledger.  Called only when ``pattern_verdicts=True``.
     *current_verdict* is returned unchanged when pattern_modulations is empty.
+
+    *stage* is forwarded for the same reason as in
+    :func:`_apply_surface_metrics`: this step's synthetic findings are
+    appended after the first contract-classification pass, so the verdict
+    recomputation is where they must be classified (ADR-049 D9).
     """
     from .pattern_verdicts import apply_pattern_verdicts
 
@@ -353,7 +396,7 @@ def _apply_pattern_verdicts_step(
     if pattern_modulations:
         return (
             kept,
-            _compute_verdict_for(kept + verdict_redundant, policy, policy_file),
+            _compute_verdict_for(kept + verdict_redundant, policy, policy_file, stage),
             pattern_modulations,
         )
     return kept, current_verdict, pattern_modulations
@@ -471,6 +514,7 @@ def _apply_soname_policy(
     new: AbiSnapshot,
     *,
     versioned_scheme_soname_relink_required: bool = False,
+    stage: ContractEvaluationStage | None = None,
 ) -> list[Change]:
     """Apply ELF version-node demotion and SONAME bump-policy check.
 
@@ -480,6 +524,17 @@ def _apply_soname_policy(
 
     Runs after post-processing so downstream dedup/rename collapsing is
     already settled before the policy reads ``kept + verdict_redundant``.
+
+    *stage* (ADR-049 D9) makes this policy read the same finding set
+    compatibility policy will. The SONAME check *derives a new finding* from
+    the presence of breaking ones, so an excluded finding reaching it does
+    not merely fail to be ignored — it manufactures a
+    ``soname_bump_recommended`` advisory that is itself ``NOT_APPLICABLE``,
+    hence evaluated, hence able to move a ``NO_CHANGE`` verdict to
+    ``COMPATIBLE`` and, under a policy that escalates the advisory, to gate.
+    A change proven outside the contract must not be able to launder itself
+    into the gate through a derived finding (Codex review, confirmed with a
+    proven-out-of-contract layout change against an unchanged SONAME).
     """
     from .diff_versioning import demote_internal_version_node_findings
     from .elf_metadata import ElfMetadata as _ElfMetadata
@@ -492,9 +547,16 @@ def _apply_soname_policy(
     # spurious bump recommendation (validation parity class A — nettle 3.6→3.7).
     demote_internal_version_node_findings(kept + verdict_redundant, _old_elf, _new_elf)
 
-    soname_changes = check_soname_bump_policy(
-        kept + verdict_redundant, _old_elf, _new_elf
-    )
+    # Classify before deriving, not after: everything appended to `kept` up to
+    # this point (the declared-floor, wheel and numpy checks above included) is
+    # covered, and `classify` is idempotent, so the later verdict computation
+    # re-runs over the same findings for free.
+    policy_input = kept + verdict_redundant
+    if stage is not None:
+        stage.classify(policy_input)
+        policy_input = evaluated_for_policy(policy_input)
+
+    soname_changes = check_soname_bump_policy(policy_input, _old_elf, _new_elf)
     if versioned_scheme_soname_relink_required:
         soname_changes = [
             c
@@ -543,264 +605,6 @@ def _internal_namespaces(policy_file: PolicyFile | None) -> tuple[str, ...]:
     if policy_file is None or not policy_file.internal_namespaces:
         return ()
     return tuple(policy_file.internal_namespaces)
-
-
-def _apply_contract_evaluation_shadow(
-    kept: list[Change],
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-    scope_to_public_surface: bool,
-    force_public_symbols: set[str] | None,
-    pp_ctx: PipelineContext,
-    redundant: list[Change] | None = None,
-    suppressed: list[Change] | None = None,
-    reconciled: list[Change] | None = None,
-    contract_mode: str | None = None,
-    policy: str = "strict_abi",
-    policy_file: PolicyFile | None = None,
-    suppression: SuppressionList | None = None,
-) -> object:
-    """Attach ADR-049 Phase 3's shadow contract-relevance decision to every
-    *kept* finding **and** every finding public-surface scoping already
-    demoted to ``pp_ctx.out_of_surface``, in place. Called only when
-    ``contract_evaluation=True``.
-
-    *redundant* (Codex review, fresh evidence) is ``DiffResult.
-    redundant_changes`` -- display-dedup findings folded into a causing
-    change by default, restored into the rendered report only when the
-    caller passes ``--show-redundant``/``scope.show_redundant: true``. That
-    restore happens entirely in the CLI layer
-    (``cli_helpers_compare._merge_redundant_changes``), long after this
-    function already ran, so without stamping the bucket here too, a
-    restored redundant finding would render with none of the promised
-    contract fields regardless of ``contract_evaluation=True``. Stamped the
-    same way as every other finding -- a redundant change is an ordinary
-    entity finding once restored, not a different evidence tier.
-
-    *suppressed* (Codex review, fresh evidence) is ``DiffResult.
-    suppressed_changes`` -- a finding a ``--suppress`` rule matched and
-    removed from ``kept``, but which stays visible in the ADR-013 audit
-    trail (``reporter._suppressed_change_entry``). Suppression happens
-    throughout the pipeline, both before and after this shadow evaluator
-    would otherwise run, so without stamping this bucket too, a suppressed
-    finding's audit entry silently lost its contract decision even though
-    the finding itself is still rendered -- suppression is a display/gate
-    decision, not a reason to erase what contract relevance was already
-    established (or would be established) for the underlying finding.
-
-    *reconciled* (Codex review, fresh evidence) is ``DiffResult.
-    reconciled_changes`` -- a finding ``--reconcile-build-context`` cleared
-    from ``kept`` because the build's active preprocessor defines prove it
-    a context-free header-parse phantom (a conditional field's phantom
-    add/remove the build proves never actually happened), but which stays
-    visible in its own audit ledger (``reporter._add_reconciled``,
-    ``build_context_reconciled.changes``). Reconciliation runs *before*
-    this shadow evaluator (so a reconciled finding never reaches ``kept``
-    in the first place), so without stamping this bucket too, its audit
-    entry would report none of the promised contract fields even though
-    the finding is still reported -- the same "moved to an audit bucket,
-    not entitled to lose its contract decision" reasoning as *redundant*/
-    *suppressed* above.
-
-    Purely additive -- never consulted by verdict computation, policy, or
-    exit-code logic (see ``Change.contract_relevance``'s own docstring).
-    This is the "produce relevance/assurance/reasons in reports, but leave
-    the old gate authoritative" half of Phase 3's own gate (ADR-049 plan
-    Section 9); the shadow evaluator itself already existed
-    (``contract_evaluation.py``) but was never called from ``compare()``.
-
-    Demoted (``out_of_surface``) findings are included, not just ``kept``:
-    a private/system-header finding ``FilterNonPublicSurface`` already moved
-    out of ``kept`` is exactly the false-positive-reduction case Phase 3
-    exists to measure (Codex review, fresh evidence) -- each already carries
-    that step's own ``Change.surface_exclusion_reason``, which
-    ``evaluate_change_contract_relevance`` consults directly via its
-    already-excluded-by-pipeline fast path (``contract_evaluation.py``'s own
-    module docstring), resolving it to ``PROVEN_OUT_OF_CONTRACT`` without
-    needing fresh surface evidence for that finding specifically.
-
-    ``pp_ctx.public_surface_allowlist`` (the ``--post-manifest`` committed-
-    export set) is forwarded too, mirroring ``force_public_symbols`` above:
-    a ``kept`` finding committed by POST-manifest despite private-header
-    provenance never gets a ``surface_exclusion_reason`` set either (the
-    same "pipeline made an unconditional decision this module can't
-    otherwise see" shape), so without forwarding it a fresh
-    ``classify_change_surface`` recomputation could wrongly reach
-    ``PROVEN_OUT_OF_CONTRACT`` for a finding POST-manifest already proved
-    committed (Codex review, fresh evidence).
-
-    Returns ADR-049 Phase 4's :class:`~abicheck.contract_evidence.PersistedContractContext`
-    for this comparison -- the observed provider ledger every stamped
-    decision now references (Phase 3's "every shadow delta has evidence"
-    gate), the resolved evaluation context, and the decision receipt.
-    Always a real context, never ``None``: a comparison with zero findings
-    still observed both sides' providers, and recording that is the point of
-    a ledger (an empty evidence block would be a different, false claim).
-    ``DiffResult.contract_context`` is ``None`` only for a caller that never
-    opted in, so this function was never called. Typed as ``object`` for the
-    same circular-import reason as that field.
-    """
-    from .compatibility_evaluation_wiring import resolve_legacy_contract_mode
-    from .contract_context import build_persisted_context, suppression_config_for
-    from .contract_evaluation import (
-        evaluate_snapshot_pair_contract_relevance,
-        evidence_refs_for_change,
-    )
-    from .contract_evidence_collect import collect_contract_evidence
-    from .contract_relevance_types import coerce_contract_mode
-    from .export_surface import compute_export_surface
-    from .surface import compute_public_surface
-
-    surf_old = pp_ctx.surf_old
-    surf_new = pp_ctx.surf_new
-    if surf_old is None or surf_new is None:
-        # FilterNonPublicSurface only populates pp_ctx.surf_old/surf_new on
-        # the header-scoping path (_run_scope) -- a POST-manifest-only run
-        # (public_surface_allowlist set) or scope_to_public_surface=False
-        # never computes them, so compute independently here (mirroring
-        # that step's own call) rather than leave shadow evaluation
-        # entirely unresolvable for those runs.
-        surf_old = compute_public_surface(old)
-        surf_new = compute_public_surface(new)
-
-    # ADR-049 D7 precedence: an explicit `--contract` (EXPLICIT_CLI) outranks
-    # the legacy `--scope-public-headers`/`--no-scope-public-headers` alias
-    # (LEGACY_ALIAS), which is itself the exact alias for contract=all /
-    # contract=public per D2's table. Resolved through Phase 1's own
-    # `resolve_legacy_contract_mode` rather than re-deriving the mapping
-    # here, so the two cannot drift; this is the first live caller of that
-    # wiring, which Phase 1 landed and deliberately left uncalled.
-    mode_provenance = None
-    if contract_mode is not None:
-        mode = coerce_contract_mode(contract_mode)
-    else:
-        # `scope_public_headers_is_explicit=True` is unconditional on
-        # purpose (CodeRabbit review): this core verb receives only the
-        # resolved boolean, never whether a user typed the flag, and the
-        # pre-Phase-6 behaviour for an absent `contract_mode` is exactly the
-        # alias mapping. Passing `False` would contribute no candidate at
-        # all, fall through to the built-in default, and silently change the
-        # evidence domain of every legacy caller.
-        mode, mode_provenance = resolve_legacy_contract_mode(
-            scope_public_headers=scope_to_public_surface,
-            scope_public_headers_is_explicit=True,
-        )
-
-    # `exports` is rooted in the binary's own export table, so it needs its
-    # own evidence provider rather than the header-derived surfaces above.
-    # Computed for *every* opted-in comparison, not only when `exports` is the
-    # selected mode: the persisted `contract_evidence` block is
-    # policy-independent by contract, and collecting it conditionally on the
-    # original run's mode would make a later `exports` re-evaluation
-    # (`contract_replay.reevaluate_from_evidence`) answer
-    # `UNKNOWN_UNRESOLVED` for a snapshot pair whose export tables were fully
-    # observable -- the exact "re-evaluate under a different contract without
-    # re-reading the binaries" guarantee this phase advertises (Codex review,
-    # fresh evidence). The cost is one export-table match per side, paid only
-    # under `--contract-evaluation`, which is off by default.
-    exports_old = compute_export_surface(old)
-    exports_new = compute_export_surface(new)
-
-    all_changes = (
-        kept
-        + pp_ctx.out_of_surface
-        + (redundant or [])
-        + (suppressed or [])
-        + (reconciled or [])
-    )
-    forced_public = frozenset(force_public_symbols) if force_public_symbols else None
-    # `is not None`, not truthiness: `post_manifest.parse_manifest()`
-    # explicitly supports a manifest committing to *no* exports, and that
-    # empty allowlist actively scopes every concrete export out --
-    # `post_processing` itself branches on `is not None` for exactly that
-    # reason. Collapsing it to `None` here made the persisted ledger and
-    # configuration claim no manifest was selected at all, so the resulting
-    # exclusions cited header evidence instead of the manifest that caused
-    # them (Codex review, fresh evidence).
-    committed_exports = (
-        frozenset(pp_ctx.public_surface_allowlist)
-        if pp_ctx.public_surface_allowlist is not None
-        else None
-    )
-    decisions = evaluate_snapshot_pair_contract_relevance(
-        all_changes,
-        surf_old,
-        surf_new,
-        mode=mode,
-        force_public_symbols=forced_public,
-        public_surface_allowlist=committed_exports,
-        exports_old=exports_old,
-        exports_new=exports_new,
-    )
-    # ADR-049 Phase 3's observed provider ledger (plan Section 4.1).
-    # Collected for *both* providers whenever the export surfaces were
-    # computed at all, and always for the header provider: the block is
-    # policy-independent by contract, so a later re-evaluation under a
-    # different mode can read it without the original run having had to
-    # anticipate that mode (plan Section 5.1).
-    evidence = collect_contract_evidence(
-        old,
-        new,
-        surf_old,
-        surf_new,
-        exports_old=exports_old,
-        exports_new=exports_new,
-        public_surface_allowlist=pp_ctx.public_surface_allowlist,
-        force_public_symbols=force_public_symbols,
-    )
-    for change, decision in zip(all_changes, decisions, strict=True):
-        change.contract_relevance = decision.relevance
-        change.contract_reason_code = decision.reason_code
-        change.contract_assurance = decision.assurance
-        change.contract_evidence_refs = evidence_refs_for_change(
-            change,
-            decision,
-            mode=mode,
-            block=evidence,
-            force_public_symbols=forced_public,
-            public_surface_allowlist=committed_exports,
-        )
-
-    # The report's own per-finding id, taken from the dependency-free
-    # `finding_identity` leaf module rather than from `reporter_markdown`
-    # (which re-exports it): importing the renderer here would close a
-    # `checker -> reporter_markdown -> checker` cycle the
-    # `import-cycle-growth` gate rejects. Keying the receipt any other way
-    # loses findings: a coarse `kind:symbol` key is shared by two findings of
-    # one kind on one symbol (two parameters of the same function), silently
-    # dropping one recorded decision and making the receipt uncorrelatable
-    # with the report (Codex review, fresh evidence).
-    from .finding_identity import report_finding_id
-
-    return build_persisted_context(
-        evidence,
-        mode=mode,
-        mode_provenance=mode_provenance,
-        policy=policy,
-        # `policy` here is already `effective_policy` -- the policy file's own
-        # `base_policy` when one was supplied, which *replaces* the `policy`
-        # argument rather than merging with it. Say which input it came from.
-        policy_from_file=policy_file is not None,
-        internal_namespaces=_internal_namespaces(policy_file),
-        # `PolicyFile` is the one place that can tell "no policy file" from
-        # "a policy file that wrote `internal_namespaces: []`" -- the tuple
-        # above collapses both to `()`. Forwarded so the provenance receipt
-        # keeps that distinction (CodeRabbit review).
-        internal_namespaces_stated=bool(
-            policy_file is not None and policy_file.internal_namespaces_stated
-        ),
-        # Keyed by the ChangeKind *slug*, which is what the typed config's
-        # `overrides` field takes (and what a persisted receipt must carry --
-        # a `ChangeKind` member is not JSON).
-        policy_overrides=(
-            {kind.value: verdict for kind, verdict in policy_file.overrides.items()}
-            if policy_file is not None and policy_file.overrides
-            else None
-        ),
-        suppressions=suppression_config_for(suppression),
-        changes=all_changes,
-        finding_id=report_finding_id,
-    )
 
 
 def _old_public_symbol_count(old: AbiSnapshot) -> int | None:
@@ -859,23 +663,37 @@ def compare(
             ordinary diff whose ``DiffResult.assurance`` is stamped
             ``"none"``, so the caller can still see *a* result but knows not
             to trust it the way an ordinary comparable diff is trusted.
-        contract_evaluation: ADR-049 Phase 3 (shadow contract evaluator,
-            ``contract_evaluation.py``). When True, stamps every retained
-            finding's ``Change.contract_relevance``/``contract_reason_code``/
-            ``contract_assurance`` from
+        contract_evaluation: ADR-049 contract evaluation. When True, stamps
+            every finding's ``Change.contract_relevance``/
+            ``contract_reason_code``/``contract_assurance`` from
             :func:`~abicheck.contract_evaluation.evaluate_snapshot_pair_contract_relevance`
             -- ``contract=public`` when *scope_to_public_surface* is True,
             ``contract=all`` otherwise (the exact `--no-scope-public-headers`
-            alias, per the ADR-049 plan). Also stamps each finding's
-            ``contract_evidence_refs`` (Phase 3's provider ledger: which
-            observed evidence records the decision rests on) and populates
-            ``DiffResult.contract_context`` with Phase 4's three persisted
-            blocks, so the decision can later be replayed or re-evaluated
-            under a different contract without re-reading either binary
-            (:mod:`abicheck.contract_replay`). Purely additive and
-            non-authoritative: it changes no verdict, exit code, or existing
-            report field, and defaults to off so every existing caller
-            behaves exactly as before.
+            alias, per the ADR-049 plan) unless *contract_mode* says
+            otherwise. Also stamps each finding's ``contract_evidence_refs``
+            (Phase 3's provider ledger: which observed evidence records the
+            decision rests on) and populates ``DiffResult.contract_context``
+            with Phase 4's three persisted blocks, so the decision can later
+            be replayed or re-evaluated under a different contract without
+            re-reading either binary (:mod:`abicheck.contract_replay`).
+
+            **Authoritative as of ADR-049 Phase 7, no longer a shadow
+            field.** Relevance is classified *before* compatibility policy
+            (D9's normative order), and policy then scores only the
+            ``EVALUATED`` findings -- ``IN_CONTRACT`` and ``NOT_APPLICABLE``.
+            A ``PROVEN_OUT_OF_CONTRACT``, ``UNKNOWN_UNPROVEN`` or
+            ``UNKNOWN_UNRESOLVED`` finding is ``NOT_EVALUATED``: its
+            ``compatibility_decision`` is ``None`` (JSON ``null``, not a
+            sixth verdict meaning "compatible") and it contributes nothing
+            to the verdict or the change gate, while staying fully present
+            in ``DiffResult.changes`` and every audit ledger -- D9 conserves
+            every detector fact in exactly one visible outcome, and the
+            orthogonal contract-coverage ledger still contributes its own
+            exit ``1`` for the unresolved case.
+
+            Off by default, so every existing caller behaves exactly as
+            before: with no opt-in, no finding carries a relevance and none
+            is excluded from anything.
         contract_mode: ADR-049 Phase 6 -- which evidence domain
             *contract_evaluation* judges against: ``"public"`` (header-derived
             declared surface), ``"exports"`` (the binary's own export table
@@ -883,9 +701,10 @@ def compare(
             ``"all"`` (no root/closure evidence required). ``None`` keeps the
             legacy derivation from *scope_to_public_surface* described above;
             an explicit value outranks it, per ADR-049 D7's precedence
-            (``explicit_cli`` > ``legacy_alias``). Selects the *domain* only
-            -- like *contract_evaluation* itself, it remains
-            non-authoritative and changes no verdict or exit code.
+            (``explicit_cli`` > ``legacy_alias``). Selects the *domain*
+            only -- which evidence a relevance decision is made against, not
+            whether that decision is authoritative (it is, per
+            *contract_evaluation* above).
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
@@ -900,8 +719,8 @@ def compare(
 
     Note:
         *contract_mode* is **inert unless** *contract_evaluation* is set:
-        the shadow evaluator is the only thing that reads it, and it does
-        not run otherwise. This Tier-1 verb deliberately does not reject
+        the contract-evaluation stage is the only thing that reads it, and
+        it does not run otherwise. This Tier-1 verb deliberately does not reject
         that combination, though every Tier-2 front end does
         (``service.compare_snapshots``, ``api_types.CompareRequest.
         validation_errors``, and the ``compare`` CLI all raise a usage
@@ -990,6 +809,31 @@ def compare(
         collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
     )
+
+    # ADR-049 D9 — contract relevance is classified *before* compatibility
+    # policy, not after it. Post-processing has settled canonical identity,
+    # dedup and the explicit consumer/manifest scope by this point, which is
+    # exactly the input the normative pipeline order calls for; everything
+    # below that computes or recomputes a verdict routes through
+    # `_compute_verdict_for(..., stage)`, which classifies first and then
+    # scores the EVALUATED findings alone.
+    #
+    # Building the stage here rather than at the end is what makes the
+    # decision authoritative instead of shadow: until this ordering landed,
+    # a finding the evaluator labelled PROVEN_OUT_OF_CONTRACT had already
+    # driven the verdict (and the process exit) by the time it was labelled.
+    # `None` — and therefore no behaviour change at all — for every run that
+    # did not opt into `contract_evaluation=True`, which remains the default.
+    stage: ContractEvaluationStage | None = None
+    if contract_evaluation:
+        stage = build_contract_stage(
+            old,
+            new,
+            scope_to_public_surface=scope_to_public_surface,
+            force_public_symbols=force_public_symbols,
+            pp_ctx=pp_ctx,
+            contract_mode=contract_mode,
+        )
 
     # Verdict computed on unsuppressed semantic changes.
     # NOTE: opaque_filtered changes are intentionally excluded from verdict
@@ -1165,10 +1009,11 @@ def compare(
         versioned_scheme_soname_relink_required=(
             pp_ctx.versioned_scheme_soname_relink_required
         ),
+        stage=stage,
     )
 
     all_unsuppressed = kept + verdict_redundant
-    verdict = _compute_verdict_for(all_unsuppressed, policy, policy_file)
+    verdict = _compute_verdict_for(all_unsuppressed, policy, policy_file, stage)
     effective_policy = policy_file.base_policy if policy_file is not None else policy
 
     # opaque_filtered changes are visible under --show-redundant for audit, but their
@@ -1217,6 +1062,7 @@ def compare(
             policy,
             policy_file,
             verdict,
+            stage,
         )
 
     # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
@@ -1237,29 +1083,70 @@ def compare(
             policy_file,
             evidence_tier,
             verdict,
+            stage,
         )
 
-    # ADR-049 Phase 3: shadow contract-relevance evaluation (opt-in). Runs
-    # last, over the final `kept` list, so every finding added by any
-    # earlier opt-in step above (surface metrics, pattern verdicts, the
-    # declared-floor/wheel checks) also gets a shadow decision, not just the
-    # post-processing-stage subset. Never affects `verdict` or any exit code.
+    # ADR-049 D9's closing half. Relevance itself was already decided above,
+    # ahead of compatibility policy; what is left here is to (a) classify the
+    # audit ledgers — findings that never reach `kept`, so no verdict
+    # computation would have classified them, but which are still rendered
+    # and are entitled to the same contract fields; (b) record each finding's
+    # own compatibility decision, now that policy (including the pattern-
+    # verdict modulations directly above) has finished; and (c) persist the
+    # Phase 4 context over every finding the stage saw.
+    #
+    # `kept` is passed again deliberately: `classify` is idempotent, so this
+    # only picks up anything a late step appended, and doing it here means no
+    # future step can be added between the last verdict and the receipt
+    # without its findings being covered.
+    #
+    # Each ledger is here for its own reason, every one a review finding
+    # (Codex, PR #658) that cost a cycle to discover — none of them is
+    # "everything in scope, for symmetry":
+    #
+    # - `pp_ctx.out_of_surface`: a private/system-header finding
+    #   `FilterNonPublicSurface` already demoted is exactly the
+    #   false-positive-reduction case contract evaluation exists to measure.
+    #   Each already carries that step's `surface_exclusion_reason`, which
+    #   `evaluate_change_contract_relevance` consults directly, resolving it
+    #   without needing fresh surface evidence for that finding.
+    # - `redundant_for_report`: a display-dedup finding is restored into the
+    #   rendered report by `--show-redundant`, entirely in the CLI layer
+    #   (`cli_helpers_compare._merge_redundant_changes`) and long after this
+    #   runs — so an unstamped one would render with none of the promised
+    #   contract fields despite `contract_evaluation=True`.
+    # - `suppressed`: suppression is a display/gate decision, not a reason to
+    #   erase the contract relevance of the finding underneath it, which the
+    #   ADR-013 audit trail still shows.
+    # - `reconciled`: `--reconcile-build-context` clears these from `kept`
+    #   *before* any of this, so they would otherwise never be classified at
+    #   all, while still being rendered in their own ledger.
+    #
+    # `pp_ctx.public_surface_allowlist` and `force_public_symbols` reach the
+    # decision through the stage itself (`build_contract_stage`): a `kept`
+    # finding committed by POST-manifest despite private-header provenance
+    # never gets a `surface_exclusion_reason`, so without them a from-scratch
+    # recomputation could reach PROVEN_OUT_OF_CONTRACT for a finding the
+    # manifest already proved committed.
     contract_context: object | None = None
-    if contract_evaluation:
-        contract_context = _apply_contract_evaluation_shadow(
-            kept,
-            old,
-            new,
-            scope_to_public_surface,
-            force_public_symbols,
-            pp_ctx,
-            redundant=redundant_for_report,
-            suppressed=suppressed,
-            reconciled=reconciled,
-            contract_mode=contract_mode,
+    if stage is not None:
+        stage.classify(
+            kept
+            + pp_ctx.out_of_surface
+            + redundant_for_report
+            + suppressed
+            + reconciled
+        )
+        stage.record_compatibility_decisions(
+            stage.changes,
+            policy=effective_policy,
+            policy_file=policy_file,
+        )
+        contract_context = stage.build_context(
             policy=effective_policy,
             policy_file=policy_file,
             suppression=suppression,
+            internal_namespaces=_internal_namespaces(policy_file),
         )
 
     return DiffResult(

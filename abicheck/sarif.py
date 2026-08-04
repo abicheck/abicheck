@@ -41,6 +41,7 @@ from abicheck.checker_policy import (
     impact_for,
     policy_for,
 )
+from abicheck.contract_gating import contract_relevance_of, is_evaluated
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
@@ -342,6 +343,22 @@ def _result_for(
         properties["rootCause"] = root_display
 
     level = _severity(change, result, severity_config)
+    # ADR-049 D1/D9: compatibility policy did not score this finding, so it
+    # contributed nothing to the verdict or the exit code -- emitting
+    # `level: "error"` for it published a SARIF run whose annotations say
+    # "error" beside a `NO_CHANGE` verdict and a clean exit (Codex review,
+    # reproduced with a proven-out-of-contract type-size change). Downgraded
+    # rather than dropped: D9 requires every detector fact to land in exactly
+    # one *visible* outcome, and the relevance/reason below say why it is a
+    # note. The same shape the scoped-gate downgrade below already uses.
+    if not is_evaluated(change):
+        level = "note"
+        properties["compatibilityEvaluationStatus"] = "NOT_EVALUATED"
+        relevance = contract_relevance_of(change)
+        if relevance is not None:
+            properties["contractRelevance"] = relevance.value
+        if change.contract_reason_code:
+            properties["contractReasonCode"] = change.contract_reason_code
     if relevant_ids is not None:
         is_relevant = _finding_id(change) in relevant_ids
         properties["relevantToGate"] = is_relevant

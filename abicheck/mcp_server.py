@@ -53,10 +53,7 @@ from .checker_policy import (
     policy_for,
     policy_kind_sets,
 )
-from .contract_evaluation import (
-    stamp_explicit_scope_contract_evaluation,
-    stamp_scoped_result_findings,
-)
+from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .mcp_shared import (
     _audit_log,
@@ -505,22 +502,38 @@ def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
     return "breaking"  # fail-safe for unknown kinds
 
 
-def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
+def _mcp_change_entry(
+    c: Any,
+    policy: str,
+    *,
+    severity_config: Any = None,
+    kind_sets: Any = None,
+    policy_file: Any = None,
+) -> dict[str, object]:
     """Build ``abi_compare``'s top-level, compact ``changes``/scoped-only
     entry for one ``Change``.
 
-    Also attaches ADR-049 Phase 3's shadow contract-evaluation fields
-    (``contract_relevance``/``contract_reason_code``/``contract_assurance``)
-    via ``reporter._add_contract_evaluation_fields`` -- the same helper the
-    full ``response["report"]`` JSON already uses for its own ``changes``
-    entries. Without this, a caller opting into ``contract_evaluation=True``
-    saw the shadow decision in ``response["report"]["changes"]`` but not in
-    this top-level, more commonly consumed array, silently losing the
-    result the caller asked for (Codex review, fresh evidence). A no-op
-    when *c* was never stamped (``contract_evaluation`` not requested),
-    mirroring that helper's own documented default.
+    Also attaches ADR-049's per-finding contract-evaluation fields
+    (``contract_relevance``/``contract_reason_code``/``contract_assurance``,
+    plus D1's ``compatibility_evaluation_status``/``compatibility_decision``/
+    ``gate_contribution``) via ``reporter._add_contract_evaluation_fields``
+    -- the same helper the full ``response["report"]`` JSON already uses for
+    its own ``changes`` entries. Without this, a caller opting into
+    ``contract_evaluation=True`` saw the decision in
+    ``response["report"]["changes"]`` but not in this top-level, more
+    commonly consumed array, silently losing the result the caller asked for
+    (Codex review, fresh evidence). A no-op when *c* was never stamped
+    (``contract_evaluation`` not requested), mirroring that helper's own
+    documented default.
+
+    Unlike the audit-ledger entries that helper also serializes, these
+    findings *do* reach a gate -- they are ``result.changes`` (and the
+    scoped-only overlay, which the scoped gate scores) -- so the run's own
+    gate inputs are threaded in and the emitted ``gate_contribution`` is the
+    number that actually applied, not a default ``0``.
     """
     from .reporter import _add_contract_evaluation_fields
+    from .severity import gate_contribution_for_change
 
     entry: dict[str, object] = {
         "kind": c.kind.value,
@@ -531,17 +544,15 @@ def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
         "new_value": c.new_value,
         "source_location": c.source_location,
     }
-    _add_contract_evaluation_fields(entry, c)
+    _add_contract_evaluation_fields(
+        entry,
+        c,
+        gate_contribution=gate_contribution_for_change(
+            c, severity_config, policy=policy,
+            kind_sets=kind_sets, policy_file=policy_file,
+        ),
+    )
     return entry
-
-
-#: ADR-049 section 4.3 item 1's strongest public-evidence tier -- moved to
-#: ``contract_evaluation.stamp_explicit_scope_contract_evaluation`` (Codex
-#: review: originally private to this module, leaving the ``compare`` CLI's
-#: own ``--contract-evaluation`` + ``--used-by``/``--required-symbol``
-#: combination unable to reuse it). Aliased here so every existing call
-#: site below keeps working unchanged.
-_stamp_explicit_scope_contract_evaluation = stamp_explicit_scope_contract_evaluation
 
 
 @mcp.tool()
@@ -746,8 +757,12 @@ def abi_compare(
             whose report is stamped ``assurance: "none"``, so the caller can
             still see *a* result but knows not to trust it fully. Not needed,
             and does nothing, on a comparable pair.
-        contract_evaluation: ADR-049 Phase 3's shadow contract evaluator
-            (non-authoritative). When True, each finding in the response's
+        contract_evaluation: ADR-049's contract-relevance evaluator.
+            **Authoritative since Phase 7** — relevance is classified before
+            compatibility policy, and policy scores only the findings it
+            evaluates, so enabling this can change ``verdict``,
+            ``compatibility_decision`` and ``exit_code``. When True, each
+            finding in the response's
             ``changes``/``out_of_surface_changes`` lists gains a
             ``contract_relevance`` (``IN_CONTRACT``/``PROVEN_OUT_OF_CONTRACT``/
             ``UNKNOWN_UNPROVEN``/``UNKNOWN_UNRESOLVED``/``NOT_APPLICABLE``),
@@ -760,10 +775,13 @@ def abi_compare(
             ``report`` gains a ``contract_context`` block: the observed
             provider evidence, the resolved evaluation context, and the
             decision receipt, so a decision can be replayed or re-evaluated
-            later without re-reading the binaries. The per-finding decisions
-            are advisory: they never change ``verdict`` or which findings
-            appear. **The orthogonal contract-coverage axis is not** (ADR-049
-            Phase 7): when the selected contract domain cannot be closed on
+            later without re-reading the binaries. A finding this evaluator
+            does not evaluate carries ``compatibility_evaluation_status:
+            "NOT_EVALUATED"``, a ``null`` ``compatibility_decision`` and
+            ``gate_contribution: 0`` — it stays fully reported and keeps its
+            ``ChangeKind``, it just did not gate. **A second, orthogonal
+            contract-coverage axis** (ADR-049 Phase 7): when the selected
+            contract domain cannot be closed on
             the available evidence, that contributes ``1`` to ``exit_code``,
             so an otherwise compatible comparison can return ``exit_code: 1``.
             The contribution never lowers a real break's ``2``/``4``. The
@@ -1265,9 +1283,32 @@ def abi_compare(
                 "compatible": len(result.compatible),
                 "total_changes": len(result.changes),
             },
-            "changes": [_mcp_change_entry(c, active_policy) for c in result.changes],
+            "changes": [
+                _mcp_change_entry(
+                    c, active_policy,
+                    severity_config=severity_config,
+                    kind_sets=result._effective_kind_sets(),
+                    policy_file=result.policy_file,
+                )
+                for c in result.changes
+            ],
             "suppressed_count": result.suppressed_count,
         }
+        # ADR-049 D1: `gate_contribution` is the number that *actually*
+        # gated, and under used_by/required_symbols the scoped gate is what
+        # this response's `exit_code` reports -- so a full-library number on
+        # a finding the selected consumer never uses is stale here for the
+        # same reason it is in the CLI's JSON fold. This response embedded a
+        # correctly-zeroed CLI report (`_fold_scoped_compat_into_text` below)
+        # beside a top-level `changes` array still carrying `4` on a run that
+        # exited 0 -- one document disagreeing with itself (Codex review,
+        # reproduced). Shared helper, so the two front ends cannot drift.
+        # Runs before the scoped-only/missing-contract fold-in below: those
+        # are the scoped gate's own findings and must keep their numbers.
+        if scoped_key is not None:
+            from .contract_gating import zero_scoped_out_gate_contributions
+
+            zero_scoped_out_gate_contributions(response, result)
         if coverage is not None:
             response["contract_coverage"] = coverage
         if scoped_key is not None:
@@ -1288,7 +1329,14 @@ def abi_compare(
             scoped_only = getattr(result, "scoped_only_changes", ()) or ()
             for c in scoped_only:
                 if _finding_id(c) not in existing_ids:
-                    response["changes"].append(_mcp_change_entry(c, active_policy))
+                    response["changes"].append(
+                        _mcp_change_entry(
+                            c, active_policy,
+                            severity_config=severity_config,
+                            kind_sets=result._effective_kind_sets(),
+                            policy_file=result.policy_file,
+                        )
+                    )
             from .finding_identity import missing_contract_kind
             from .severity import missing_contract_exit_code
 
@@ -1323,7 +1371,20 @@ def abi_compare(
                     "blocks_gate": blocks,
                 }
                 if contract_evaluation:
-                    _stamp_explicit_scope_contract_evaluation(missing_entry)
+                    # ADR-049 D1's full shape -- see the identical call in
+                    # `cli_compare_fold`: this entry is often the only
+                    # blocking finding the response carries.
+                    from .contract_scoped_promotion import (
+                        missing_contract_gate_contribution,
+                        stamp_missing_contract_entry,
+                    )
+
+                    stamp_missing_contract_entry(
+                        missing_entry,
+                        gate_contribution=missing_contract_gate_contribution(
+                            severity_config, blocks
+                        ),
+                    )
                 response["changes"].append(missing_entry)
 
             # Recompute summary now that scoped-only changes/missing-contract
@@ -1333,8 +1394,22 @@ def abi_compare(
             # total_changes: 0 alongside a BREAKING verdict/nonzero exit_code,
             # since the per-category counts were computed from result.changes
             # before the fold-in (CodeRabbit review).
+            # ADR-049 D1: `impact` is derived from the ChangeKind alone, so a
+            # NOT_EVALUATED finding still carries "breaking" -- tallying it
+            # here would put `summary.breaking: 1` beside a verdict policy
+            # never scored it into, the same contradiction the four
+            # DiffResult buckets are already filtered to avoid
+            # (`checker_types._evaluated_changes`). `total_changes` stays
+            # inclusive: the finding is reported, it just did not gate.
+            # Not reachable through today's `abi_compare`, whose arguments
+            # carry no contract-domain selector (see `mcp_compare_receipt`),
+            # so every finding surviving public-surface scoping resolves
+            # IN_CONTRACT -- the guard is what keeps that true by
+            # construction rather than by that argument (CodeRabbit review).
             impact_tally = {"breaking": 0, "api_break": 0, "risk": 0, "compatible": 0}
             for c in response["changes"]:
+                if c.get("compatibility_evaluation_status") == "NOT_EVALUATED":
+                    continue
                 impact_tally[c["impact"]] = impact_tally.get(c["impact"], 0) + 1
             response["summary"] = {
                 "breaking": impact_tally["breaking"],
@@ -1395,6 +1470,11 @@ def abi_compare(
                 # independent dict copies, so stamping "changes" alone
                 # leaves the root-cause copy of this same finding unstamped
                 # (Codex review, fresh evidence).
+                from .contract_scoped_promotion import (
+                    missing_contract_gate_contribution,
+                    stamp_missing_contract_entry,
+                )
+
                 candidate_lists = [response["report"].get("changes")]
                 for group in response["report"].get("root_causes") or ():
                     if isinstance(group, dict):
@@ -1407,7 +1487,20 @@ def abi_compare(
                             isinstance(entry, dict)
                             and entry.get("kind") == missing_kind
                         ):
-                            _stamp_explicit_scope_contract_evaluation(entry)
+                            # The *same* helper (and the same resolved
+                            # contribution) the top-level entry above uses,
+                            # rather than the relevance-only stamp: the fold
+                            # already applies it to its own copies today, so
+                            # this re-stamp is idempotent -- but stamping a
+                            # strict subset of the fields here is how the two
+                            # arrays would silently diverge again the moment
+                            # it stops (CodeRabbit review).
+                            stamp_missing_contract_entry(
+                                entry,
+                                gate_contribution=missing_contract_gate_contribution(
+                                    severity_config, blocks
+                                ),
+                            )
         else:
             response["report"] = rendered
 

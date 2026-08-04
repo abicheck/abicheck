@@ -319,7 +319,21 @@ from typing import Any
 #:       contribution, so ``contract_coverage_exit_contribution`` is the
 #:       number that actually gated the run (folded with ``max``, and ``0``
 #:       when ``contract.unresolved=warn`` accepted the failures below it).
-REPORT_SCHEMA_VERSION = "2.26"
+#: 2.27 — ADR-049 D1's canonical per-finding shape completes, alongside the
+#:       contract decision becoming *authoritative* (Phase 7): every entry
+#:       that already carries ``contract_relevance`` now also carries
+#:       ``compatibility_evaluation_status`` (``EVALUATED``/``NOT_EVALUATED``),
+#:       ``compatibility_decision`` (the finding's own ``Verdict``, or JSON
+#:       ``null`` when policy did not run — ``null`` is not a sixth verdict)
+#:       and ``gate_contribution`` (what the finding actually contributed to
+#:       the exit code; ``0`` for a ``NOT_EVALUATED`` finding and for every
+#:       audit-ledger entry, none of which reach a gate). Additive in shape,
+#:       but unlike 2.23/2.25 not advisory in effect: under
+#:       ``--contract-evaluation``, a ``NOT_EVALUATED`` finding no longer
+#:       contributes to ``verdict``, ``severity``, or the exit code, and the
+#:       four ``summary`` counts are over the evaluated findings only. Absent,
+#:       and bit-for-bit unchanged, for a run that did not opt in.
+REPORT_SCHEMA_VERSION = "2.27"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:
@@ -407,7 +421,27 @@ REPORT_SCHEMA_VERSION = "2.26"
 #:       and then dropped it, so the evidence those decisions rest on was
 #:       unobservable from a scan. All three are absent without the flag, so
 #:       an ordinary scan is unchanged from 1.6.
-SCAN_SCHEMA_VERSION = "1.7"
+#: 1.8 — the ``diff`` block gained a ``not_evaluated`` count and a matching
+#:       ``not_evaluated`` bucket in ``findings``, under ``scan --against
+#:       --contract-evaluation`` (ADR-049 Phase 7). The four compatibility
+#:       counts became the *evaluated* findings only when relevance became
+#:       authoritative, and this summary itemizes findings from those buckets
+#:       alone — so without this key an excluded fact vanished from the scan
+#:       report entirely rather than merely stopping gating, which is the one
+#:       outcome D9's "exactly one visible outcome" forbids. Each entry
+#:       carries the same relevance/reason fields 1.6 added, which is what
+#:       says why it did not gate. Both are absent when nothing was excluded,
+#:       so an ordinary scan is unchanged from 1.7.
+#:       Every ``findings`` row under ``--contract-evaluation`` also gains
+#:       ADR-049 D1's ``compatibility_evaluation_status`` and
+#:       ``compatibility_decision`` (``null`` for a ``NOT_EVALUATED`` row),
+#:       matching what the equivalent ``compare`` finding already carries --
+#:       section 6.4 requires the two commands to be comparable field by
+#:       field, and a row stating only the relevance was not (Codex review).
+#:       Not ``gate_contribution``: that is a property of a severity gate
+#:       ``scan --against`` does not run. Absent without the opt-in, so an
+#:       ordinary scan is still unchanged.
+SCAN_SCHEMA_VERSION = "1.8"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

@@ -36,7 +36,7 @@ imports ``reporter`` — ``reporter`` depends on this module one-directionally.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .checker_policy import Verdict
@@ -111,10 +111,18 @@ class ReportModel:
     """Classified, filtered, summarised view of a :class:`DiffResult`.
 
     ``changes`` is the display set (after any ``show_only`` filter); the four
-    bucket lists partition it by canonical verdict; ``summary`` is the headline
-    metric roll-up. The verdict counts on ``result`` itself are unfiltered and
-    remain the source of truth for the gate — the buckets here are the *display*
-    partition of the (possibly filtered) change set.
+    verdict buckets partition the *evaluated* part of it, ``not_evaluated``
+    holds the rest, and ``summary`` is the headline metric roll-up. The
+    verdict counts on ``result`` itself are unfiltered and remain the source
+    of truth for the gate — the buckets here are the *display* partition of
+    the (possibly filtered) change set.
+
+    ``not_evaluated`` (ADR-049 D1) is the findings compatibility policy did
+    not score: proven outside the declared contract, or unresolved for want
+    of evidence. They have no verdict to bucket by, which is precisely why
+    they need a bucket of their own — dropping them from the display would
+    hide a real detector fact, and filing them under a verdict would claim a
+    decision policy never made.
     """
 
     result: DiffResult
@@ -124,6 +132,7 @@ class ReportModel:
     risk: list[Change]
     compatible: list[Change]
     summary: ReportSummary
+    not_evaluated: list[Change] = field(default_factory=list)
 
     @staticmethod
     def classify(
@@ -131,13 +140,30 @@ class ReportModel:
         result: DiffResult,
     ) -> tuple[list[Change], list[Change], list[Change], list[Change]]:
         """Split *changes* into (breaking, source_breaks, risk, compatible) by the
-        effective per-finding verdict (canonical severity, ADR-036)."""
+        effective per-finding verdict (canonical severity, ADR-036).
+
+        Findings contract evaluation left ``NOT_EVALUATED`` are excluded from
+        all four buckets (ADR-049 D1) and returned by
+        :meth:`classify_not_evaluated` instead — the partition is over the
+        compatibility axis, and those findings are not on it. Without
+        ``--contract-evaluation`` nothing is excluded.
+        """
+        from .contract_gating import is_evaluated
+
         ev = result._effective_verdict_for_change
-        breaking = [c for c in changes if ev(c) == Verdict.BREAKING]
-        source_breaks = [c for c in changes if ev(c) == Verdict.API_BREAK]
-        risk = [c for c in changes if ev(c) == Verdict.COMPATIBLE_WITH_RISK]
-        compatible = [c for c in changes if ev(c) == Verdict.COMPATIBLE]
+        scored = [c for c in changes if is_evaluated(c)]
+        breaking = [c for c in scored if ev(c) == Verdict.BREAKING]
+        source_breaks = [c for c in scored if ev(c) == Verdict.API_BREAK]
+        risk = [c for c in scored if ev(c) == Verdict.COMPATIBLE_WITH_RISK]
+        compatible = [c for c in scored if ev(c) == Verdict.COMPATIBLE]
         return breaking, source_breaks, risk, compatible
+
+    @staticmethod
+    def classify_not_evaluated(changes: list[Change]) -> list[Change]:
+        """The complement of :meth:`classify` — the unscored findings."""
+        from .contract_gating import is_evaluated
+
+        return [c for c in changes if not is_evaluated(c)]
 
     def verdict_of(self, change: Change) -> Verdict:
         """Canonical per-finding verdict (policy + ADR-027 A4 overrides)."""
@@ -190,4 +216,5 @@ class ReportModel:
             risk=risk,
             compatible=compatible,
             summary=build_summary(result),
+            not_evaluated=cls.classify_not_evaluated(changes),
         )

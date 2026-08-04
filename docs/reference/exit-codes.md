@@ -14,6 +14,28 @@ generated: false
 
 **Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `scan` and `deps` have their own narrower contracts, documented below.
 
+## Contract relevance decides what the gate sees (ADR-049)
+
+Under `--contract-evaluation`, each finding's contract relevance is classified
+**before** compatibility policy runs, and policy then scores only the
+`EVALUATED` findings — those whose relevance is `IN_CONTRACT` or
+`NOT_APPLICABLE`. A `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN` or
+`UNKNOWN_UNRESOLVED` finding is `NOT_EVALUATED`: its `compatibility_decision`
+is JSON `null` and its `gate_contribution` is `0`, so it moves neither the
+verdict nor the exit code.
+
+This is a real change to what a command exits with, and it goes in both
+directions: a change proven outside the declared contract stops blocking, and
+a change one domain cannot resolve stops being reported as an ABI break. What
+it never does is make either disappear — an excluded finding keeps its
+`ChangeKind`, stays in `changes` and in the audit ledgers, and is rendered
+with the relevance and reason code that say why it did not gate. The
+unresolved case is answered on the separate axis below, which is what stops
+missing evidence from being the cheapest way to pass.
+
+**Without `--contract-evaluation` no finding carries a relevance**, so every
+finding is scored exactly as before and every exit code below is unchanged.
+
 ## Contract-coverage contribution (ADR-049)
 
 `compare` and `scan --against` carry an **orthogonal contract-coverage axis**

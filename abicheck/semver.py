@@ -51,7 +51,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .checker_policy import ADDITION_KINDS, ChangeKind, Verdict, has_binary_evidence
-from .checker_types import DiffResult
+from .checker_types import Change, DiffResult
+from .contract_relevance_types import ContractRelevance
 
 
 class SemverBump(str, Enum):
@@ -128,6 +129,18 @@ _COHERENCE_CONFLICT_KINDS = frozenset(
         ChangeKind.COMPILE_CONTEXT_CONFLICT,
         ChangeKind.SOURCE_SURFACE_DSO_MISMATCH,
         ChangeKind.HEADER_BINARY_CONTEXT_MISMATCH,
+    }
+)
+
+#: The two ADR-049 relevance values that mean "the evidence ran out", as
+#: opposed to ``PROVEN_OUT_OF_CONTRACT``, which is a positive determination.
+#: Exactly the set the contract-coverage exit gates on, so a recommendation
+#: and that exit code cannot disagree about whether the run established
+#: anything.
+_UNRESOLVED_CONTRACT_RELEVANCES = frozenset(
+    {
+        ContractRelevance.UNKNOWN_UNRESOLVED,
+        ContractRelevance.UNKNOWN_UNPROVEN,
     }
 )
 
@@ -209,6 +222,30 @@ def _soname_action_for_break(kinds: set[ChangeKind]) -> tuple[SonameAction, str]
     )
 
 
+def _unresolved_contract_findings(result: DiffResult) -> list[Change]:
+    """Findings the contract evaluator could not resolve, if any.
+
+    ADR-049 splits "not evaluated" into two very different statements, and a
+    release recommendation must not treat them alike: ``PROVEN_OUT_OF_CONTRACT``
+    is a positive determination (the finding really is outside the promised
+    contract, so it genuinely does not warrant a bump), while
+    ``UNKNOWN_UNRESOLVED``/``UNKNOWN_UNPROVEN`` mean the evidence ran out. Only
+    the latter are returned here -- the same split the orthogonal
+    contract-coverage exit already makes, so the recommendation and that exit
+    code cannot disagree about whether the run established anything.
+
+    Empty for every run that did not pass ``--contract-evaluation``: nothing
+    carries a relevance, so nothing is unresolved.
+    """
+    from .contract_gating import contract_relevance_of
+
+    return [
+        c
+        for c in result.changes
+        if contract_relevance_of(c) in _UNRESOLVED_CONTRACT_RELEVANCES
+    ]
+
+
 def recommend_release(result: DiffResult) -> ReleaseRecommendation:
     """Derive a :class:`ReleaseRecommendation` from a comparison result.
 
@@ -221,8 +258,33 @@ def recommend_release(result: DiffResult) -> ReleaseRecommendation:
     kinds = {c.kind for c in result.changes}
     has_additions = bool(kinds & ADDITION_KINDS)
     incoherent_kinds = kinds & _COHERENCE_CONFLICT_KINDS
+    unresolved = _unresolved_contract_findings(result)
 
     if verdict == Verdict.NO_CHANGE:
+        # ADR-049 D1: a NO_CHANGE verdict reached with findings the contract
+        # evaluator could not resolve is not the same claim as one reached
+        # with nothing to report. Compatibility policy never scored those
+        # findings, and the orthogonal coverage axis exits 1 precisely
+        # because the evidence did not close -- so "no version bump required"
+        # would be automation-grade advice resting on the one thing the run
+        # itself says it could not establish (Codex review, reproduced under
+        # `--contract exports` with no export table). A *proven* exclusion is
+        # deliberately not treated this way: there the finding really is
+        # outside the promised contract, "no bump" is well-founded, and the
+        # recommendation stays actionable.
+        if unresolved:
+            return ReleaseRecommendation(
+                SemverBump.NONE,
+                SonameAction.NOT_DETERMINED,
+                "No ABI or API changes were scored, but this comparison could "
+                f"not resolve {len(unresolved)} finding(s) against the "
+                "selected contract domain "
+                f"({', '.join(sorted({c.kind.value for c in unresolved}))}) — "
+                "so abicheck cannot confirm that no version bump is required. "
+                "Close the contract evidence (see the contract-coverage "
+                "ledger) and re-run before treating this as a proven no-op.",
+                state=ReleaseRecommendationState.REVIEW,
+            )
         return ReleaseRecommendation(
             SemverBump.NONE,
             SonameAction.NO_BUMP_NEEDED,

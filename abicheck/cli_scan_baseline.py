@@ -265,6 +265,22 @@ def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
     against the lightweight fakes the surrounding tests and sibling modules
     build, and requiring a real enum here would have broken it for exactly
     those callers (CodeRabbit review).
+
+    Includes ADR-049 D1's ``compatibility_evaluation_status`` /
+    ``compatibility_decision`` pair, and for the same reason as everything
+    else here: a `scan --against --contract-evaluation` row that carried
+    relevance but not the decision could not be compared field-by-field with
+    the `compare` finding for the same fact, which is exactly the
+    cross-command divergence this projection exists to prevent (Codex
+    review). ``compatibility_decision`` is JSON ``null`` for a
+    ``NOT_EVALUATED`` row and must stay that way -- ``null`` records that
+    policy never ran, which is not a verdict.
+
+    Not ``gate_contribution``, deliberately: ``scan --against`` computes its
+    own exit code from its own verdict and budget rules, so a per-finding
+    number copied from ``compare``'s severity gate would be a claim about a
+    gate this command does not run. The status/decision pair is a property of
+    the finding; the contribution is a property of the gate.
     """
     relevance = getattr(c, "contract_relevance", None)
     if relevance is None:
@@ -274,6 +290,13 @@ def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
     assurance = getattr(c, "contract_assurance", None)
     if assurance is not None:
         entry["contract_assurance"] = getattr(assurance, "value", str(assurance))
+    from .contract_gating import evaluation_status_of
+
+    status = evaluation_status_of(c)
+    if status is not None:
+        entry["compatibility_evaluation_status"] = status.value
+    decision = getattr(c, "compatibility_decision", None)
+    entry["compatibility_decision"] = getattr(decision, "value", None)
     refs = getattr(c, "contract_evidence_refs", None)
     if refs is not None:
         entry["contract_evidence_refs"] = list(refs)
@@ -482,6 +505,21 @@ def _run_baseline_compare(
         "risk": len(diff.risk),
         "compatible": len(diff.compatible),
     }
+    # ADR-049 D9 conserves every detector fact in exactly one visible
+    # outcome. The four buckets above are the *compatibility* axis, so since
+    # Phase 7 they exclude findings contract evaluation did not score -- and
+    # this summary itemizes findings from those buckets alone, so an
+    # excluded fact disappeared from the scan report altogether rather than
+    # merely stopping gating (Codex review, confirmed with a
+    # `PROVEN_OUT_OF_CONTRACT` removal: `NO_CHANGE`, all counts zero, no
+    # findings at all). Emitted only when non-empty, so an ordinary scan's
+    # summary is byte-identical to before.
+    # Duck-typed like the other optional reads in this function: a
+    # `DiffResult` always has the property, but this module is also driven
+    # with lightweight stand-ins that model only the buckets they exercise.
+    not_evaluated = list(getattr(diff, "not_evaluated", ()) or ())
+    if not_evaluated:
+        summary["not_evaluated"] = len(not_evaluated)
     # ADR-049 Phase 5 §6.4 names *detector provenance* among the fields the
     # two commands must agree on, and `compare`'s JSON report has carried it
     # since long before this Gate (`reporter._add_detectors`) while `scan
@@ -511,12 +549,22 @@ def _run_baseline_compare(
     # capped so a large diff cannot blow up the always-on scan output. Counts
     # (not dicts) decide truncation for each bucket so a large diff never
     # builds more finding dicts than the cap can ever keep (CodeRabbit review).
-    total_gating = len(diff.breaking) + len(diff.source_breaks) + len(diff.risk)
+    total_gating = (
+        len(diff.breaking)
+        + len(diff.source_breaks)
+        + len(diff.risk)
+        + len(not_evaluated)
+    )
     findings: list[dict[str, Any]] = []
     for bucket_name, bucket_changes in (
         ("breaking", diff.breaking),
         ("api_break", diff.source_breaks),
         ("risk", diff.risk),
+        # Last, and in its own bucket: these carry no verdict, so filing them
+        # under one would claim a decision policy never made. `_baseline_finding_dicts`
+        # already emits each one's relevance and reason, which is what says
+        # why it did not gate.
+        ("not_evaluated", not_evaluated),
     ):
         remaining = _MAX_BASELINE_FINDINGS - len(findings)
         if remaining <= 0:

@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from abicheck.checker_types import DiffResult
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
@@ -81,6 +82,23 @@ def _compare(tmp_path: Path, pair, *extra: str):
     return CliRunner().invoke(main, ["compare", str(old_p), str(new_p), *extra])
 
 
+def _compare_result(
+    pair: tuple[AbiSnapshot, AbiSnapshot], *, contract_mode: str
+) -> DiffResult:
+    """The `DiffResult` the CLI would gate on, for the fold-level assertions.
+
+    `fold_coverage_exit`/`_coverage_message` take the result and a base exit,
+    so a test of the *fold* needs the former without going through a process
+    exit that has already folded it.
+    """
+    from abicheck import checker
+
+    old, new = pair
+    return checker.compare(
+        old, new, contract_evaluation=True, contract_mode=contract_mode
+    )
+
+
 class TestTheCoverageExitIsApplied:
     def test_an_unresolvable_domain_exits_1_on_an_otherwise_clean_run(
         self, tmp_path: Path
@@ -117,20 +135,55 @@ class TestTheCoverageExitIsApplied:
         result = _compare(tmp_path, _compatible_pair())
         assert result.exit_code == 0, result.output
 
-    def test_the_coverage_axis_never_lowers_a_real_abi_break(
-        self, tmp_path: Path
-    ) -> None:
+    def test_the_coverage_axis_never_lowers_a_real_abi_break(self) -> None:
         """`max`, not replacement. A coverage failure raising 4 to 1 would
         turn a removed export into "warnings only" -- the axes are
-        orthogonal and the compatibility one is more severe when it speaks."""
+        orthogonal and the compatibility one is more severe when it speaks.
+
+        Asserted at :func:`fold_coverage_exit` over a run whose ledger really
+        did fail, rather than end to end. Once contract relevance became
+        authoritative (Phase 7) the two conditions stopped co-occurring for
+        an entity finding under one domain: a domain short of the evidence
+        needed to close is, by construction, also short of what it takes to
+        resolve that domain's findings, so the compatibility axis is silent
+        in exactly the runs whose ledger fails. The fold is where the claim
+        lives, and it holds for any base the compatibility axis hands it.
+        """
+        from abicheck.contract_coverage_exit import fold_coverage_exit
+
+        result = _compare_result(_compatible_pair(), contract_mode="exports")
+        assert fold_coverage_exit(0, result) == 1
+        assert fold_coverage_exit(2, result) == 2
+        assert fold_coverage_exit(4, result) == 4
+
+    def test_an_unresolvable_break_exits_1_not_4(self, tmp_path: Path) -> None:
+        """ADR-049 D1: "uncertainty itself never becomes an ABI break".
+
+        The other half of the pairing above, and the behaviour change Phase 7
+        made: a removal the selected domain cannot resolve is
+        `UNKNOWN_UNRESOLVED`, so compatibility policy does not score it and
+        the run's only nonzero contribution is the coverage axis's own 1 --
+        `NOT_CHECKABLE`, not `BREAKING`. The fact itself is conserved: it is
+        still in the report, labelled with why it did not gate.
+        """
         result = _compare(
             tmp_path,
             _breaking_pair(),
+            "--format",
+            "json",
             "--contract-evaluation",
             "--contract",
             "exports",
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == 1, result.output
+        report = json.loads(result.output)
+        removals = [c for c in report["changes"] if c["kind"] == "func_removed"]
+        assert removals, report["changes"]
+        for c in removals:
+            assert c["contract_relevance"] == "UNKNOWN_UNRESOLVED"
+            assert c["compatibility_evaluation_status"] == "NOT_EVALUATED"
+            assert c["compatibility_decision"] is None
+            assert c["gate_contribution"] == 0
 
     def test_the_applied_exit_agrees_with_the_reported_contribution(
         self, tmp_path: Path
@@ -235,22 +288,24 @@ class TestTheGatingConditionIsVisible:
         assert result.exit_code == 1, result.output
         assert "Contract coverage incomplete" in result.output
 
-    def test_it_does_not_claim_a_floor_it_did_not_apply(self, tmp_path: Path) -> None:
-        """Beside a real ABI break `max` keeps the 4, so "Exit code floored to
-        1" would be a false statement about what happened. The incomplete
-        coverage is still reported -- it is why part of the comparison could
-        not be checked -- but as a contribution, not a status change."""
-        result = _compare(
-            tmp_path,
-            _breaking_pair(),
-            "--contract-evaluation",
-            "--contract",
-            "exports",
-        )
-        assert result.exit_code == 4, result.output
-        assert "Contract coverage incomplete" in result.output
-        assert "floored" not in result.output
-        assert "which stands" in result.output
+    def test_it_does_not_claim_a_floor_it_did_not_apply(self) -> None:
+        """Beside a higher compatibility exit `max` keeps that code, so "Exit
+        code floored to 1" would be a false statement about what happened.
+        The incomplete coverage is still reported -- it is why part of the
+        comparison could not be checked -- but as a contribution, not a
+        status change.
+
+        Asserted on the message itself, for the same reason
+        `test_the_coverage_axis_never_lowers_a_real_abi_break` moved to the
+        fold: a domain whose ledger fails no longer produces a 4 alongside
+        it, so the base exit has to come from the caller here rather than
+        from a fixture that cannot exist.
+        """
+        from abicheck.contract_coverage_exit import _coverage_message
+
+        message = _coverage_message(["old/export_table"], 1, 4)
+        assert "floored" not in message
+        assert "which stands" in message
 
     def test_the_tie_case_claims_neither_flooring_nor_being_below(self) -> None:
         """`base_exit == floor` is its own case. "Floored" would claim a change
@@ -457,9 +512,21 @@ class TestArtifactsAgreeWithTheProcessExit:
         assert invocation["exitCode"] == 0, invocation
         assert "contract coverage" not in invocation["exitCodeDescription"], invocation
 
-    def test_a_breaking_run_keeps_its_own_higher_code(self, tmp_path: Path) -> None:
-        """`max`, not "1 when the ledger fails" — the same orthogonality claim
-        the process fold makes, asserted where the artifact states it."""
+    @pytest.mark.parametrize(("mode", "expected"), [("public", 4), ("exports", 1)])
+    def test_the_artifact_states_the_exit_the_process_took(
+        self, tmp_path: Path, mode: str, expected: int
+    ) -> None:
+        """The artifact's own exit contract must be the process's, whichever
+        axis produced it.
+
+        Both directions are covered by the two domains, which is what makes
+        this the orthogonality assertion at the artifact level: under
+        `public` the removal is in contract, so the compatibility axis
+        speaks and its 4 stands over the coverage axis; under `exports` it is
+        unresolvable, so compatibility is silent and the coverage 1 is the
+        whole answer. A SARIF `exitCode: 0` beside a process that exited
+        non-zero is the failure this guards.
+        """
         out = tmp_path / "report.sarif"
         result = _compare(
             tmp_path,
@@ -470,13 +537,13 @@ class TestArtifactsAgreeWithTheProcessExit:
             str(out),
             "--contract-evaluation",
             "--contract",
-            "exports",
+            mode,
         )
-        assert result.exit_code == 4, result.output
+        assert result.exit_code == expected, result.output
         invocation = json.loads(out.read_text(encoding="utf-8"))["runs"][0][
             "invocations"
         ][0]
-        assert invocation["exitCode"] == 4, invocation
+        assert invocation["exitCode"] == expected, invocation
 
 
 class TestTheExitCodeContractIsDocumented:
@@ -542,13 +609,24 @@ class TestCompareAndScanFoldTheAxisIdentically:
     """
 
     @pytest.mark.parametrize(
-        ("pair", "expected"), [(_compatible_pair(), 1), (_breaking_pair(), 4)]
+        ("pair", "mode", "expected"),
+        [
+            # Compatible + unresolvable domain: the coverage axis alone.
+            (_compatible_pair(), "exports", 1),
+            # A real break the selected domain resolves: the compatibility
+            # axis alone, and both commands must agree on that too -- parity
+            # is about the whole fold, not only its coverage half.
+            (_breaking_pair(), "public", 4),
+            # A break the selected domain cannot resolve: neither command may
+            # call uncertainty a break, and neither may call it clean.
+            (_breaking_pair(), "exports", 1),
+        ],
     )
     def test_both_commands_reach_the_same_exit(
-        self, tmp_path: Path, pair, expected: int
+        self, tmp_path: Path, pair, mode: str, expected: int
     ) -> None:
         old_p, new_p = _write(tmp_path, *pair)
-        common = ["--contract-evaluation", "--contract", "exports"]
+        common = ["--contract-evaluation", "--contract", mode]
         runner = CliRunner()
         compare = runner.invoke(main, ["compare", str(old_p), str(new_p), *common])
         scan = runner.invoke(
@@ -690,8 +768,20 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
     def test_warn_never_moves_the_compatibility_axis(
         self, tmp_path: Path, mode: str
     ) -> None:
-        """It accepts missing *coverage*, never a real break."""
-        result = _compare(
+        """It accepts missing *coverage*, never a real break.
+
+        Asserted as "identical to the same run without the pack, except that
+        the coverage floor is gone" rather than as a fixed exit code: what
+        `warn` may change is one axis, so comparing the two runs is the
+        statement, and it holds in both domains -- `public`, where the break
+        is in contract and the 4 must survive the pack, and `exports`, where
+        the compatibility axis was already silent and only the accepted
+        coverage 1 falls away.
+        """
+        without = _compare(
+            tmp_path, _breaking_pair(), "--contract-evaluation", "--contract", mode
+        )
+        with_warn = _compare(
             tmp_path,
             _breaking_pair(),
             "--contract-evaluation",
@@ -700,4 +790,8 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
             "--pack",
             str(self._warn_pack(tmp_path)),
         )
-        assert result.exit_code == 4, result.output
+        expected = 4 if mode == "public" else 0
+        assert with_warn.exit_code == expected, with_warn.output
+        # The compatibility axis is untouched: the only difference the pack
+        # is allowed to make is dropping a coverage floor of 1.
+        assert without.exit_code == max(with_warn.exit_code, 1), without.output

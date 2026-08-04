@@ -84,7 +84,7 @@ from .checker_policy import (  # noqa: F401 - re-export for tests
     BREAKING_KINDS,
 )
 from .cli import _safe_write_output, _setup_verbosity, main
-from .cli_compare_helpers import _cli_flag, _warn_force_public_ignored
+from .cli_compare_options import _cli_flag, _warn_force_public_ignored
 from .cli_options import (
     artifact_set_options,
     compile_context_options,
@@ -1002,14 +1002,16 @@ def _run_artifact_set(
     "contract_evaluation",
     is_flag=True,
     default=False,
-    help="With --against: stamp each comparison finding with ADR-049 Phase 3's "
-    "shadow contract decision (contract_relevance / contract_reason_code / "
+    help="With --against: stamp each comparison finding with its ADR-049 "
+    "contract decision (contract_relevance / contract_reason_code / "
     "contract_assurance / contract_evidence_refs), exactly as `compare "
-    "--contract-evaluation` does. The per-finding decisions are advisory: "
-    "they never change the verdict or which findings appear. It CAN change "
-    "the exit code, through one orthogonal axis -- if the selected domain's "
-    "evidence is incomplete the contract-coverage ledger contributes exit 1 "
-    "(folded with max, so it never lowers a 2/4). Set "
+    "--contract-evaluation` does. The decisions are authoritative (ADR-049 "
+    "Phase 7): relevance is classified before compatibility policy, which "
+    "then scores only IN_CONTRACT/NOT_APPLICABLE findings -- so this changes "
+    "the verdict and the exit code, while the excluded findings stay in the "
+    "report with the reason they did not gate. Separately, if the selected "
+    "domain's evidence is incomplete the orthogonal contract-coverage ledger "
+    "contributes exit 1 (folded with max, so it never lowers a 2/4). Set "
     "contract.unresolved=warn via a `kind: contract` --pack to accept "
     "incomplete coverage; the failures stay reported either way.",
 )
@@ -1022,10 +1024,10 @@ def _run_artifact_set(
     "against ('public' header-derived surface, 'exports' the binary's own "
     "export table plus its type closure, 'all' every entity). Omitted, the "
     "domain follows --scope-public-headers/--no-scope-public-headers. "
-    "Requires --contract-evaluation. The per-finding decisions are advisory, "
-    "but the selected domain is what the contract-coverage axis is answered "
-    "against, and that axis can contribute exit 1 (mirrors `compare "
-    "--contract`).",
+    "Requires --contract-evaluation. The domain decides which findings "
+    "compatibility policy scores, so it can change the verdict and the exit "
+    "code, and it is also what the orthogonal contract-coverage axis is "
+    "answered against (mirrors `compare --contract`).",
 )
 @pack_option  # ADR-049 D8: --pack (requires --against; see _COMPARISON_ONLY_FLAGS)
 @lang_option

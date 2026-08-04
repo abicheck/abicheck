@@ -74,7 +74,20 @@ from .checker_policy import (
     effective_category,
     policy_kind_sets,
 )
+from .contract_gating import is_evaluated
 from .errors import PolicyError
+
+
+def gate_eligible_changes(changes: Sequence[HasKind]) -> list[HasKind]:
+    """The findings the change gate scores (ADR-049 D1).
+
+    One predicate shared by :func:`compute_exit_code` and
+    :func:`compute_gate_decision` so an exit code and the categories blamed
+    for it are always derived from the same set -- the two disagreeing is the
+    class of bug ``compute_gate_decision`` was introduced to close.
+    """
+    return [c for c in changes if is_evaluated(c)]
+
 
 #: Pre-computed (breaking, api_break, compatible, risk) kind sets.
 KindSets = tuple[
@@ -564,9 +577,16 @@ def compute_exit_code(
     per change before classifying severity.
 
     Returns 0 if no category at error level has findings.
+
+    ADR-049 D1: a finding contract evaluation left ``NOT_EVALUATED`` --
+    proven outside the declared contract, or unresolved for want of evidence
+    -- contributes ``0`` and is skipped here. It keeps its place in the
+    report and in every ledger; what it loses is the ability to gate. Every
+    finding is evaluated for a run that did not opt into
+    ``--contract-evaluation``, so this is inert by default.
     """
     worst = 0
-    for change in changes:
+    for change in gate_eligible_changes(changes):
         cat = classify_effective_change(
             change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
         )
@@ -575,6 +595,50 @@ def compute_exit_code(
             if code > worst:
                 worst = code
     return worst
+
+
+def gate_contribution_for_change(
+    change: HasKind,
+    config: SeverityConfig | None,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> int:
+    """What one finding contributes to the process exit code.
+
+    ADR-049 D1 makes this a per-finding report field, so it has to be the
+    number that actually applied rather than a plausible one:
+
+    - a ``NOT_EVALUATED`` finding contributes ``0`` -- it is not on the
+      compatibility axis at all;
+    - under the severity scheme, a finding contributes its category's exit
+      code when that category is configured ``error``, and ``0`` otherwise --
+      which is exactly what :func:`compute_exit_code` folds with ``max``;
+    - under the legacy scheme (*config* ``None``), it contributes its own
+      effective verdict's legacy exit code. The overall legacy exit is
+      ``legacy_exit_code`` of the worst evaluated verdict, and both mappings
+      are monotone in the same verdict order, so folding these with ``max``
+      reproduces it.
+
+    This is deliberately *not* a new gate: every value it can return is one
+    :func:`compute_exit_code` or :func:`legacy_exit_code` would already have
+    produced for the same finding.
+    """
+    if not is_evaluated(change):
+        return 0
+    if config is None:
+        return legacy_exit_code(
+            effective_verdict_for_change(
+                change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            )
+        )
+    category = classify_effective_change(
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
+    if config.level_for(category) != SeverityLevel.ERROR:
+        return 0
+    return _CATEGORY_EXIT_CODES[category]
 
 
 @dataclass(frozen=True)
@@ -726,11 +790,16 @@ def compute_gate_decision(
             blocking_categories=(),
         )
 
+    # ADR-049 D1 -- applied here as well as inside compute_exit_code, so the
+    # blamed categories are computed over the same set the exit code was.
+    # `categorize_changes` itself is deliberately left unfiltered: it is also
+    # the *display* partition, where a not-evaluated finding still belongs.
+    gated = gate_eligible_changes(changes)
     exit_code = compute_exit_code(
-        changes, severity_config, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        gated, severity_config, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
     )
     categorized = categorize_changes(
-        changes, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        gated, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
     )
     blocking_categories = tuple(
         cat.value

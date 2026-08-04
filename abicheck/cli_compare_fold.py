@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .contract_gating import zero_scoped_out_gate_contributions
+
 # Maps a rendered change's "severity" label (report_model.VERDICT_PRESENTATION,
 # and the "breaking"/"compatible" literals _resolve_scoped_gate_findings' missing-
 # contract entries use) to the summary-block key it contributes to -- shared by
@@ -190,6 +192,20 @@ def _fold_scoped_compat_into_text(
             scoped_only, missing_labels, blocks, missing_kind = (
                 _resolve_scoped_gate_findings(result, severity_config, show_only)
             )
+            # ADR-049 D1: `gate_contribution` is defined as the number that
+            # *actually* gated, and under --used-by/--required-symbol the
+            # scoped gate is what the run exits on -- this fold is where it
+            # replaces the primary verdict and severity block. A full-diff
+            # finding the selected consumer does not use contributes nothing
+            # to that gate, so leaving its full-library number in place
+            # published `gate_contribution: 4` on a run that exited 0 (Codex
+            # review, reproduced with a removal outside the required-symbol
+            # contract). Only entries that already carry the field are
+            # touched, so a run without --contract-evaluation is unaffected.
+            # Called here, *before* the scoped-only/missing-contract fold-in
+            # below: those are the scoped gate's own findings and only the
+            # ones tracked in `scoped_relevant_finding_ids` would survive it.
+            zero_scoped_out_gate_contributions(payload, result)
             # G29 Phase 3 slice 3 (ADR-052, Codex review): these synthetic
             # entries are appended to `changes` after `_to_json_root_cause`
             # already grouped `result.changes` into `root_causes` -- without
@@ -212,6 +228,11 @@ def _fold_scoped_compat_into_text(
                     policy=result.policy or "strict_abi",
                     kind_sets=eff_sets,
                     policy_file=result.policy_file,
+                    # ADR-049 D1's per-finding `gate_contribution` is only
+                    # truthful if it is computed under the scheme the run
+                    # exits on -- a scoped-only finding does reach the scoped
+                    # gate, so this is not one of the always-0 ledger cases.
+                    severity_config=severity_config,
                     # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
                     # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
                     # is proven by the real consumer's own import table/execution,
@@ -276,11 +297,22 @@ def _fold_scoped_compat_into_text(
                     "reachability_state": ReachabilityState.UNKNOWN.value,
                 }
                 if contract_evaluation:
-                    from .contract_evaluation import (
-                        stamp_explicit_scope_contract_evaluation,
+                    # ADR-049 D1's full per-finding shape, not just the
+                    # relevance: this entry is frequently the *only* blocking
+                    # finding in the response, so omitting its decision and
+                    # contribution left the one row that explains the exit
+                    # code as the least complete one (Codex review).
+                    from .contract_scoped_promotion import (
+                        missing_contract_gate_contribution,
+                        stamp_missing_contract_entry,
                     )
 
-                    stamp_explicit_scope_contract_evaluation(entry)
+                    stamp_missing_contract_entry(
+                        entry,
+                        gate_contribution=missing_contract_gate_contribution(
+                            severity_config, blocks
+                        ),
+                    )
                 changes_list.append(entry)
                 # A missing-contract label has no caused_by_type; its
                 # `symbol` (the label) only becomes a *grouping* key if some
@@ -370,6 +402,7 @@ def _fold_scoped_compat_into_text(
                         policy=result.policy or "strict_abi",
                         kind_sets=eff_sets,
                         policy_file=result.policy_file,
+                        severity_config=severity_config,
                         evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                     )
                     severity = entry.get("severity")
@@ -487,7 +520,7 @@ def _fold_scoped_compat_into_text(
                     # (unlike JSON) silently dropped the contract decision
                     # for this exact finding shape.
                     if contract_evaluation:
-                        from .contract_evaluation import (
+                        from .contract_scoped_promotion import (
                             stamp_explicit_scope_contract_evaluation,
                         )
 

@@ -852,6 +852,59 @@ def _compute_symbol_coverage(
     return (required_count - missing_count) / required_count * 100.0
 
 
+def _promote_scoped_contract(
+    changes: list[Change],
+    *,
+    policy: str | None,
+    policy_file: PolicyFile | None,
+    diff: DiffResult | None = None,
+) -> None:
+    """Apply ADR-049 §4.3's explicit-scope evidence to a scoped finding set.
+
+    A finding this module has just decided is relevant to a concrete
+    consumer's imports (or to an explicitly required entrypoint) *is* that
+    ADR's strongest in-contract evidence -- stronger than, and independent
+    of, the header/export-derived relevance ``compare()`` reached. Since
+    ADR-049 Phase 7 made relevance authoritative, that has to be applied
+    here, at the point the relevance is decided, rather than by a later
+    stamping pass: both the CLI and the MCP tool compute their *scoped exit
+    code* from these lists immediately, so a promotion that ran afterwards
+    left the gate scoring a weaker ``UNKNOWN_UNRESOLVED`` while the same run
+    rendered the finding as ``IN_CONTRACT`` with a ``BREAKING`` decision
+    (Codex review, confirmed via ``--required-symbol`` under
+    ``--contract exports``).
+
+    Deliberately limited to findings that *already carry* a contract
+    relevance: that is true exactly when the caller opted into
+    ``contract_evaluation=True``, so a run that did not opt in keeps every
+    finding unstamped -- and an unstamped finding already gates, per
+    ``contract_gating``'s documented default. Synthetic scoped-only findings
+    this module creates are likewise left alone here; they gate for the same
+    reason, and the later aggregate pass gives them their decision for the
+    report.
+    """
+    from .contract_gating import is_evaluated
+    from .contract_scoped_promotion import (
+        recompute_verdict_after_promotion,
+        stamp_scoped_changes,
+    )
+
+    already_classified = [
+        c for c in changes if getattr(c, "contract_relevance", None) is not None
+    ]
+    if not already_classified:
+        return
+    # Whether this promotion actually moves anything back onto the
+    # compatibility axis decides whether the full verdict has gone stale --
+    # checked before, since the promotion is what changes the answer.
+    promoted_onto_axis = any(not is_evaluated(c) for c in already_classified)
+    stamp_scoped_changes(already_classified, policy=policy, policy_file=policy_file)
+    if promoted_onto_axis and diff is not None:
+        recompute_verdict_after_promotion(
+            diff, policy=policy, policy_file=policy_file
+        )
+
+
 def scope_diff_to_app(
     diff: DiffResult,
     app_path: Path,
@@ -1006,6 +1059,9 @@ def scope_diff_to_app(
     verdict = _compute_appcompat_verdict(
         missing_symbols, missing_versions, breaking_for_app,
         required_count, policy, policy_file,
+    )
+    _promote_scoped_contract(
+        breaking_for_app, policy=policy, policy_file=policy_file, diff=diff
     )
 
     return AppCompatResult(
@@ -1220,6 +1276,9 @@ def scope_diff_to_required_symbols(
         missing, [], breaking_for_host, len(required), policy, policy_file,
     )
     coverage = _compute_symbol_coverage(new_exports, len(required), len(missing))
+    _promote_scoped_contract(
+        breaking_for_host, policy=policy, policy_file=policy_file, diff=diff
+    )
 
     return PluginHostContractResult(
         old_plugin=old_plugin.library or "old",

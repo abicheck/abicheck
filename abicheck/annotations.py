@@ -33,6 +33,7 @@ from .checker_policy import (
     ChangeKind,
     Verdict,
 )
+from .contract_gating import is_evaluated
 
 if TYPE_CHECKING:
     from .severity import IssueCategory, KindSets, SeverityConfig
@@ -352,6 +353,27 @@ def collect_annotations(
     annotations: list[tuple[int, str]] = []
 
     for change in diff_result.changes:
+        # ADR-049 D1: an annotation states how a finding gated, and a
+        # NOT_EVALUATED finding did not -- compatibility policy never scored
+        # it. Emitting `::error` for one put a red GitHub annotation on a
+        # comparison whose verdict is NO_CHANGE and whose compatibility gate
+        # is clean (Codex review, reproduced with a proven-out-of-contract
+        # type-size change). Demoted to `::notice` rather than dropped: the
+        # fact stays surfaced in the workflow log, it just stops claiming to
+        # be a break. Only reachable under `--contract-evaluation`.
+        if not is_evaluated(change):
+            annotations.append(
+                (
+                    _SEVERITY_ORDER.get("notice", 99),
+                    _format_annotation(
+                        "notice",
+                        change,
+                        f"Not evaluated (contract): {change.kind.value}",
+                        change.description,
+                    ),
+                )
+            )
+            continue
         category = _category_for_change_severity(
             change, kind_sets,
             policy=diff_result.policy, policy_file=diff_result.policy_file,

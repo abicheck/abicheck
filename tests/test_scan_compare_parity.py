@@ -601,6 +601,14 @@ _SHARED_FINDING_FIELDS = (
     "contract_reason_code",
     "contract_assurance",
     "contract_evidence_refs",
+    # ADR-049 D1's canonical pair. Both commands must state whether policy
+    # scored the finding, and what it decided -- a scan row carrying only the
+    # relevance could not be compared with the `compare` finding for the same
+    # fact, which is the divergence this Gate exists to catch (Codex review).
+    # `gate_contribution` is deliberately *not* here: it is a property of a
+    # gate `scan --against` does not run (see `_add_contract_fields`).
+    "compatibility_evaluation_status",
+    "compatibility_decision",
 )
 
 #: The three gating buckets `scan --against`'s summary itemizes. `compare`'s

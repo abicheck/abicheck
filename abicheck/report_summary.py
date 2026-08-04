@@ -146,8 +146,17 @@ def compatibility_metrics(
 
 
 def build_summary(result: DiffResult) -> ReportSummary:
+    # ADR-049 D1: the percentages are the compatibility axis, so they read the
+    # same evaluated subset the four buckets below do. Passing every change
+    # here let a run report `verdict: NO_CHANGE` and `breaking: 0` beside
+    # `binary_compatibility_pct: 0.0` and `affected_pct: 100.0`, because the
+    # metrics still counted a finding contract evaluation had excluded (Codex
+    # review, confirmed with a proven-out-of-contract layout change).
+    # `total_changes` deliberately stays over *all* changes: it is a count of
+    # what the report shows, not of what scored, and an excluded finding is
+    # still shown.
     metrics = compatibility_metrics(
-        result.changes,
+        result._evaluated_changes(),
         result.old_symbol_count,
         policy=result.policy,
         kind_sets=result._effective_kind_sets(),

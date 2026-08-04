@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
+from .contract_gating import is_evaluated
 from .reporter import _finding_id, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
 
@@ -128,7 +129,18 @@ def _is_failure(
     it is out of scope for the gate this testsuite now reports (CLI-audit P1:
     JUnit failures must follow the scoped gate, not just the full-library
     verdict).
+
+    A finding compatibility policy never scored (ADR-049 D1's
+    ``NOT_EVALUATED``, only reachable under ``--contract-evaluation``) can
+    never fail here either, for the same reason and by the same rule: it
+    contributed nothing to the verdict or the exit code, so reporting one
+    ``<failure>`` beside a ``NO_CHANGE`` verdict and a clean exit was the bug
+    (Codex review, reproduced with a proven-out-of-contract type-size
+    change). It still gets its own passing ``<testcase>`` -- D9 requires the
+    fact to stay visible, it just is not a failure.
     """
+    if not is_evaluated(change):
+        return False
     if relevant_ids is not None and _finding_id(change) not in relevant_ids:
         return False
     if severity_config is not None:

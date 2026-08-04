@@ -458,7 +458,27 @@ def _to_json_leaf(
         # contract_relevance/contract_reason_code/contract_assurance even
         # though the identical finding kept them under --report-mode full
         # (Codex review, fresh evidence).
-        _add_contract_evaluation_fields(entry, c)
+        #
+        # The gate contribution is computed, not left at the helper's default
+        # `0`: that default is right for the audit ledgers (an out-of-surface
+        # or suppressed finding reaches no gate), but a leaf entry is an
+        # ordinary `result.changes` finding that does. Without this, an
+        # evaluated `type_size_changed` driving a real exit 4 serialized as
+        # `compatibility_decision: BREAKING` beside `gate_contribution: 0`
+        # under --report-mode leaf alone (Codex review, fresh evidence).
+        from .severity import gate_contribution_for_change
+
+        _add_contract_evaluation_fields(
+            entry,
+            c,
+            gate_contribution=gate_contribution_for_change(
+                cast(HasKind, c),
+                severity_config,
+                policy=effective_policy,
+                kind_sets=eff_sets,
+                policy_file=result.policy_file,
+            ),
+        )
         return entry
 
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]
@@ -470,6 +490,7 @@ def _to_json_leaf(
             root_cause=_rc_lookup.get(_finding_id(c)),
             policy_file=result.policy_file,
             evidence_tiers=result.evidence_tiers,
+            severity_config=severity_config,
         )
         for c in non_type_changes
     ]
@@ -651,6 +672,7 @@ def _to_json_root_cause(
             policy_file=result.policy_file,
             root_cause=_rc_lookup.get(_finding_id(c)),
             evidence_tiers=result.evidence_tiers,
+            severity_config=severity_config,
         )
         for c in changes
     }
@@ -847,22 +869,35 @@ def _add_show_only_filter(
     changes: list[Change],
     show_only: str,
 ) -> None:
-    """Add show_only_filter + filtered_summary when a show_only filter is active."""
+    """Add show_only_filter + filtered_summary when a show_only filter is active.
+
+    The three verdict counters are over the *evaluated* subset, exactly like
+    the main ``summary`` block (ADR-049 D1) -- a NOT_EVALUATED finding was
+    never scored by compatibility policy, so counting one here reported
+    ``verdict: NO_CHANGE`` and ``summary.breaking: 0`` beside
+    ``filtered_summary.breaking: 1`` in a single document (Codex review,
+    reproduced with ``--show-only breaking`` on a proven-out-of-contract
+    finding). ``total_changes`` stays inclusive, matching the main summary's
+    own rule: it counts what the filter *displays*, not what gated.
+    """
+    from .contract_gating import is_evaluated
+
     d["show_only_filter"] = show_only
+    scored = [c for c in changes if is_evaluated(c)]
     d["filtered_summary"] = {
         "breaking": sum(
             1
-            for c in changes
+            for c in scored
             if result._effective_verdict_for_change(c) == Verdict.BREAKING
         ),
         "source_breaks": sum(
             1
-            for c in changes
+            for c in scored
             if result._effective_verdict_for_change(c) == Verdict.API_BREAK
         ),
         "risk_changes": sum(
             1
-            for c in changes
+            for c in scored
             if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
         ),
         "total_changes": len(changes),
@@ -965,6 +1000,7 @@ def _add_changes_block(
     effective_policy: str,
     eff_sets: KindSets | None,
     show_only: str | None = None,
+    severity_config: SeverityConfig | None = None,
 ) -> None:
     """Add changes list and optional redundant-count / pattern-modulations fields.
 
@@ -986,6 +1022,7 @@ def _add_changes_block(
             policy_file=result.policy_file,
             root_cause=_rc_lookup.get(_finding_id(c)),
             evidence_tiers=result.evidence_tiers,
+            severity_config=severity_config,
         )
         for c in changes
     ]
@@ -1070,7 +1107,15 @@ def to_json(
             policy_file=result.policy_file,
         )
 
-    _add_changes_block(d, result, changes, effective_policy, eff_sets, show_only)
+    _add_changes_block(
+        d,
+        result,
+        changes,
+        effective_policy,
+        eff_sets,
+        show_only,
+        severity_config=severity_config,
+    )
     _add_suppression(d, result)
     _add_surface_scope(d, result)
     _add_reconciled(d, result)
@@ -1188,18 +1233,32 @@ def _reviewer_action_for_change(
     return _ADDITION_REVIEWER_ACTION.get(kind_val, _DEFAULT_ADDITION_REVIEWER_ACTION)
 
 
-def _add_contract_evaluation_fields(d: dict[str, object], c: object) -> None:
-    """Attach ADR-049 Phase 3's shadow contract-relevance decision fields to
-    *d*, if *c* carries one.
+def _add_contract_evaluation_fields(
+    d: dict[str, object],
+    c: object,
+    *,
+    gate_contribution: int = 0,
+) -> None:
+    """Attach ADR-049's per-finding contract decision fields to *d*, if *c*
+    carries one.
 
     Shared by :func:`_change_to_dict` (ordinary ``changes`` entries) and
     :func:`_add_surface_scope` (``out_of_surface_changes`` entries) so a
-    demoted finding's shadow decision is exposed in reports the same way a
-    kept finding's already is (Codex review, fresh evidence) -- before this,
-    only ``checker.py``'s ``_apply_contract_evaluation_shadow`` stamped
-    ``out_of_surface`` findings at all, but no report path serialized what
-    it stamped there. ``None`` (the default, and every existing caller that
-    doesn't opt into ``contract_evaluation=True``) emits nothing.
+    demoted finding's decision is exposed in reports the same way a kept
+    finding's already is (Codex review, fresh evidence) -- before this,
+    only ``checker.py`` stamped ``out_of_surface`` findings at all, but no
+    report path serialized what it stamped there. ``None`` (the default, and
+    every existing caller that doesn't opt into ``contract_evaluation=True``)
+    emits nothing.
+
+    *gate_contribution* completes ADR-049 D1's canonical per-finding shape.
+    It defaults to ``0`` because that is the true answer for every audit
+    ledger this helper serializes -- an out-of-surface, suppressed,
+    reconciled or redundant finding is not in ``DiffResult.changes`` and so
+    reaches no gate. Only the ``changes`` path passes a computed value, from
+    :func:`~abicheck.severity.gate_contribution_for_change`, so the number a
+    consumer reads is the one the run's own gate folded rather than a
+    plausible re-derivation of it.
     """
     contract_relevance = getattr(c, "contract_relevance", None)
     if contract_relevance is None:
@@ -1209,6 +1268,19 @@ def _add_contract_evaluation_fields(d: dict[str, object], c: object) -> None:
     contract_assurance = getattr(c, "contract_assurance", None)
     if contract_assurance is not None:
         d["contract_assurance"] = contract_assurance.value
+    # ADR-049 D1's canonical trio. `compatibility_decision` is JSON `null`
+    # for a NOT_EVALUATED finding and must stay that way: `null` records that
+    # compatibility policy never ran, which is a different statement from any
+    # verdict -- including COMPATIBLE -- that a renderer might be tempted to
+    # fill in.
+    from .contract_gating import evaluation_status_of
+
+    status = evaluation_status_of(c)
+    if status is not None:
+        d["compatibility_evaluation_status"] = status.value
+    decision = getattr(c, "compatibility_decision", None)
+    d["compatibility_decision"] = getattr(decision, "value", None)
+    d["gate_contribution"] = gate_contribution
     # ADR-049 Phase 3's provider-evidence ledger: which `contract_evidence`
     # provider records this decision rests on. Emitted even when empty --
     # `[]` is the real answer for a non-entity finding (its relevance follows
@@ -1249,6 +1321,7 @@ def _change_to_dict(
     evidence_status_override: EvidenceStatus | None = None,
     root_cause: tuple[str, str] | None = None,
     evidence_tiers: Sequence[str] = (),
+    severity_config: SeverityConfig | None = None,
 ) -> dict[str, object]:
     """Convert a Change to a JSON-serializable dict with impact and metadata.
 
@@ -1272,6 +1345,11 @@ def _change_to_dict(
     :func:`~.checker_policy.has_binary_evidence`'s own convention), it
     downgrades an otherwise ``ARTIFACT_PROVEN`` status to ``UNATTRIBUTED``
     for a comparison positively known to have never examined a real binary.
+
+    ``severity_config`` is the run's resolved gate configuration, when it has
+    one — it decides ADR-049's per-finding ``gate_contribution`` (see the call
+    to :func:`~abicheck.severity.gate_contribution_for_change` below). ``None``
+    means the legacy verdict-based scheme, not "no gate".
     """
     kind = getattr(c, "kind", None)
     if isinstance(kind, ChangeKind) and kind_sets:
@@ -1391,7 +1469,29 @@ def _change_to_dict(
     d["reachability_state"] = assessment.reachability_state.value
     if assessment.has_signal():
         d["impact_assessment"] = assessment.to_dict()
-    _add_contract_evaluation_fields(d, c)
+    # ADR-049 D1's `gate_contribution`, computed for a `changes` entry (the
+    # only findings that reach a gate at all) from the same severity/legacy
+    # scheme the run itself exits on -- see
+    # `severity.gate_contribution_for_change`. `severity_config` is None on
+    # the legacy scheme, where the contribution is the finding's own
+    # verdict-to-exit mapping.
+    from .severity import gate_contribution_for_change
+
+    _add_contract_evaluation_fields(
+        d,
+        c,
+        gate_contribution=(
+            gate_contribution_for_change(
+                cast(HasKind, c),
+                severity_config,
+                policy=policy,
+                kind_sets=kind_sets,
+                policy_file=policy_file,
+            )
+            if isinstance(kind, ChangeKind)
+            else 0
+        ),
+    )
     return d
 
 
