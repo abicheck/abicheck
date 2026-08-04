@@ -4942,6 +4942,42 @@ class TestComparePipelinePhases:
         assert pair.old_evidence.collect_mode == pair.new_evidence.collect_mode == "off"
 
 
+    def test_layer_coverage_rows_reach_the_result(self, tmp_path, monkeypatch):
+        """The one branch in `classify_compare_pair` nothing else exercises.
+
+        ``prepare_embedded_build_source`` only returns layer-coverage rows when
+        the snapshots actually carry embedded L3-L5 evidence, so a plain
+        snapshot pair leaves this assignment unexecuted. Stubbing that helper
+        checks the wiring itself: rows it produces are attached to the
+        ``DiffResult``, and the metrics call still receives the extra changes.
+        """
+        from abicheck import cli_buildsource
+        from abicheck.service import classify_compare_pair, resolve_compare_request
+
+        rows = [{"layer": "L3", "covered": 1}]
+        attached: list[object] = []
+
+        def _fake_prepare(*_args, **_kwargs):
+            return [], rows, {"elapsed": 0.0}, []
+
+        def _fake_attach(result, metrics, extra, **_kwargs):
+            attached.append((result, metrics, extra))
+
+        monkeypatch.setattr(
+            cli_buildsource, "prepare_embedded_build_source", _fake_prepare
+        )
+        monkeypatch.setattr(cli_buildsource, "attach_evidence_metrics", _fake_attach)
+
+        old_p = self._snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._snap_file(tmp_path, "libtest", "2.0")
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        result = classify_compare_pair(request, resolve_compare_request(request))
+
+        assert result.diff.layer_coverage == rows
+        assert len(attached) == 1
+        assert attached[0][0] is result.diff
+
+
 class TestResolveSidesSequentially:
     """ADR-050 D6 / G32 Phase E, generalised by ADR-055 D1.
 
