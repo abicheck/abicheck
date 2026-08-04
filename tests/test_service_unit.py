@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from abicheck.api_types import CompareRequest, InputSpec
+from abicheck.api_types import CompareRequest, CompareResult, InputSpec
 from abicheck.checker_types import DiffResult
 from abicheck.comparability import compute_extraction_contract
 from abicheck.errors import ScopeMismatchError, SnapshotError, ValidationError
@@ -1704,7 +1704,7 @@ class TestRunCompare:
     def test_compare_two_snapshots(self, tmp_path):
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
-        result, old, new = run_compare(old_p, new_p)
+        result, old, new = run_compare(old_p, new_p).as_tuple()
         assert isinstance(result, DiffResult)
         assert isinstance(old, AbiSnapshot)
         assert isinstance(new, AbiSnapshot)
@@ -1716,7 +1716,7 @@ class TestRunCompare:
         sf.write_text(
             "version: 1\nsuppressions:\n  - symbol: foo\n    change_kind: func_removed\n"
         )
-        result, _, _ = run_compare(old_p, new_p, suppress=sf)
+        result, _, _ = run_compare(old_p, new_p, suppress=sf).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_headers_passed_as_public_headers(self, tmp_path, monkeypatch):
@@ -2025,7 +2025,7 @@ class TestCompareRequestAdr055Evidence:
         request = CompareRequest(
             old=InputSpec.of(old_p, sources=src_dir), new=InputSpec.of(new_p)
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert captured["extra_changes"] == [sentinel_change]
         assert sentinel_change in result.changes
 
@@ -2312,7 +2312,7 @@ class TestCompareRequestAdr055Evidence:
             frontend="android",
             has_sources=True,
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_android_frontend_allowed_with_build_info_only(self, tmp_path, monkeypatch):
@@ -2337,7 +2337,7 @@ class TestCompareRequestAdr055Evidence:
             new=InputSpec.of(new_p),
             frontend="android",
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_hybrid_frontend_allowed_without_explicit_source_depth(
@@ -2367,7 +2367,7 @@ class TestCompareRequestAdr055Evidence:
             ),
             new=InputSpec.of(new_p),
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_manifest_forced_includes_feed_pair_wide_cxx20_detection(
@@ -2379,7 +2379,7 @@ class TestCompareRequestAdr055Evidence:
         signal goes undetected, letting the pair disagree on dialect."""
         from types import SimpleNamespace
 
-        from abicheck import service as service_mod
+        from abicheck import service_scan
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
@@ -2393,7 +2393,13 @@ class TestCompareRequestAdr055Evidence:
             captured["old_headers"] = list(old_headers)
             return None
 
-        monkeypatch.setattr(service_mod, "pair_wide_cxx20_std_override", _fake_override)
+        # ADR-055 D1: the pair-wide scan runs in the shared
+        # `service_compare_pipeline`, which imports this helper from the module
+        # that defines it rather than through `service`'s re-export -- so the
+        # spy belongs on `service_scan`, where it lives.
+        monkeypatch.setattr(
+            service_scan, "pair_wide_cxx20_std_override", _fake_override
+        )
 
         request = CompareRequest(
             old=InputSpec.of(old_p, dump_manifest=manifest), new=InputSpec.of(new_p)
@@ -2472,7 +2478,7 @@ class TestCompareRequestAdr055Evidence:
         request = CompareRequest(
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="BUILD"
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_pair_wide_dialect_merges_into_unrelated_side_compile(
@@ -2482,14 +2488,17 @@ class TestCompareRequestAdr055Evidence:
         dialect (e.g. only a sysroot) must not silently discard the pair-wide
         C++20 heuristic's override for that side -- it should be merged in
         unless the side already pins its own explicit standard."""
-        from abicheck import service as service_mod
+        from abicheck import service_scan
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
 
+        # ADR-055 D1: spied on `service_scan` (where it is defined) rather than
+        # `service` (which only re-exports it) -- the shared compare pipeline
+        # imports it from the defining module.
         monkeypatch.setattr(
-            service_mod,
+            service_scan,
             "pair_wide_cxx20_std_override",
             lambda *a, **k: ("-std=gnu++20",),
         )
@@ -2692,7 +2701,7 @@ class TestCompareRequestDepthSatisfaction:
         request = CompareRequest(
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="source"
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_reports_the_failing_side(self, tmp_path, monkeypatch):
@@ -2725,7 +2734,7 @@ class TestCompareRequestDepthSatisfaction:
         request = CompareRequest(
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="binary"
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_no_depth_skips_the_gate(self, tmp_path, monkeypatch):
@@ -2737,7 +2746,7 @@ class TestCompareRequestDepthSatisfaction:
         )
 
         request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
 
 
@@ -2817,7 +2826,7 @@ class TestDiagnosticComparisonThreading:
             new=InputSpec(path=new_p),
             diagnostic_comparison=True,
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert result.assurance == "none"
 
     def test_run_compare_shim_raises_by_default(self, tmp_path):
@@ -2827,7 +2836,7 @@ class TestDiagnosticComparisonThreading:
 
     def test_run_compare_shim_diagnostic_comparison_downgrades(self, tmp_path):
         old_p, new_p = self._mismatched_pair(tmp_path)
-        result, _, _ = run_compare(old_p, new_p, diagnostic_comparison=True)
+        result, _, _ = run_compare(old_p, new_p, diagnostic_comparison=True).as_tuple()
         assert result.assurance == "none"
 
     def test_diagnostic_comparison_appended_last_preserves_positional_order(self):
@@ -2903,13 +2912,13 @@ class TestContractEvaluationThreading:
             new=InputSpec(path=new_p),
             contract_evaluation=True,
         )
-        result, _, _ = run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
         assert result.changes
         assert any(c.contract_relevance is not None for c in result.changes)
 
     def test_run_compare_shim_contract_evaluation_stamps_relevance(self, tmp_path):
         old_p, new_p = self._changed_pair(tmp_path)
-        result, _, _ = run_compare(old_p, new_p, contract_evaluation=True)
+        result, _, _ = run_compare(old_p, new_p, contract_evaluation=True).as_tuple()
         assert result.changes
         assert any(c.contract_relevance is not None for c in result.changes)
 
@@ -2966,7 +2975,7 @@ class TestParallelOldNewExtraction:
 
         monkeypatch.setattr(service_mod, "resolve_input", _synced_resolve)
 
-        result, old, new = run_compare(old_p, new_p)
+        result, old, new = run_compare(old_p, new_p).as_tuple()
         assert isinstance(result, DiffResult)
 
     def test_exception_from_one_side_propagates(self, tmp_path, monkeypatch):
@@ -4558,3 +4567,497 @@ class TestMetadataAttachFailuresAreSwallowed:
         snap = self._snap()
         _try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
         assert snap.numpy_capi is None
+
+
+class TestRunCompareRequestTypedResult:
+    """ADR-055 D2: the one typed entry point and what it returns.
+
+    ``run_compare_request`` returned a bare 3-tuple until 0.6; it and the
+    ``run_compare`` shim both return the typed result now.
+    """
+
+    def _pair(self, tmp_path):
+        old = AbiSnapshot(library="libtest", version="1.0")
+        new = AbiSnapshot(library="libtest", version="2.0")
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(old, old_p)
+        save_snapshot(new, new_p)
+        return CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+
+    def test_returns_a_compare_result(self, tmp_path):
+        result = run_compare_request(self._pair(tmp_path))
+        assert isinstance(result, CompareResult)
+        assert isinstance(result.diff, DiffResult)
+        assert result.old_snapshot.version == "1.0"
+        assert result.new_snapshot.version == "2.0"
+
+    def test_as_tuple_reproduces_the_pre_0_6_shape(self, tmp_path):
+        """The documented one-line migration for a positional caller."""
+        result = run_compare_request(self._pair(tmp_path))
+        diff, old, new = result.as_tuple()
+        assert diff is result.diff
+        assert old is result.old_snapshot
+        assert new is result.new_snapshot
+
+    def test_the_kwargs_shim_returns_the_same_type(self, tmp_path):
+        # run_compare is the documented one-call entry point; it must not be
+        # the one place still handing back a tuple.
+        request = self._pair(tmp_path)
+        assert isinstance(
+            run_compare(request.old.path, request.new.path), CompareResult
+        )
+
+    def test_suppression_is_none_when_the_request_names_no_file(self, tmp_path):
+        assert run_compare_request(self._pair(tmp_path)).suppression is None
+
+    def test_carries_the_resolved_suppression_list(self, tmp_path):
+        """What ADR-055 D4 needs: the resolved list, without a second load.
+
+        ``DiffResult`` carries the resolved policy file but never the
+        suppression list, so before this a front end applying post-
+        classification scoping (``appcompat.scope_diff_to_app``) had to load
+        the same file again itself.
+        """
+        supp = tmp_path / "suppress.yaml"
+        supp.write_text(
+            "version: 1\nsuppressions:\n  - symbol: _Z1gone\n    reason: test\n",
+            encoding="utf-8",
+        )
+        request = self._pair(tmp_path).replace(suppress=supp)
+        result = run_compare_request(request)
+        assert result.suppression is not None
+        assert len(result.suppression.rule_identities()) == 1
+
+    def test_follow_linker_scripts_is_forwarded_per_side(self, tmp_path, monkeypatch):
+        """ADR-055 D4: the MCP server's resource guard is request surface.
+
+        ``resolve_input`` follows a GNU ld linker script by default; the MCP
+        tools must not, because they size-check only the caller-supplied path.
+        """
+        import abicheck.service as service_mod
+
+        captured: dict[str, object] = {}
+        original = service_mod.resolve_input
+
+        def _spy(path, headers=None, includes=None, version="", lang="c++", **kwargs):
+            captured[version] = kwargs.get("follow_linker_scripts")
+            return original(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _spy)
+        import dataclasses
+
+        base = self._pair(tmp_path)
+        run_compare_request(
+            base.replace(
+                old=dataclasses.replace(
+                    base.old, version="old", follow_linker_scripts=False
+                ),
+                new=dataclasses.replace(base.new, version="new"),
+            )
+        )
+        assert captured["old"] is False
+        # Unset stays the historical default rather than inheriting the other side.
+        assert captured["new"] is True
+
+
+class TestRunCompareRequestResolutionParity:
+    """ADR-055 D1, second slice: the last concepts the CLI's own resolution
+    (``cli_resolve._resolve_compare_snapshots``) could express and the typed
+    request could not — ``--dwarf-only``, ``--debug-format``, ADR-050 D1's
+    include labels, and ``--follow-deps``."""
+
+    def _elf_pair(self, tmp_path) -> tuple[Path, Path]:
+        old_p = tmp_path / "old.so"
+        new_p = tmp_path / "new.so"
+        for p in (old_p, new_p):
+            p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        return old_p, new_p
+
+    def _stub_dump(self, monkeypatch) -> dict[str, dict[str, object]]:
+        """Record resolve_input's debug kwargs per side, without a real parse."""
+        import abicheck.service as service_mod
+
+        seen: dict[str, dict] = {}
+
+        def _fake(path, headers=None, *args, **kwargs):
+            seen[Path(path).name] = {
+                k: kwargs.get(k)
+                for k in ("dwarf_only", "debug_format", "include_labels")
+            }
+            return AbiSnapshot(library=Path(path).name, version="x")
+
+        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        return seen
+
+    def _request(self, tmp_path, **kwargs) -> CompareRequest:
+        old_p, new_p = self._elf_pair(tmp_path)
+        return CompareRequest(
+            old=InputSpec(path=old_p, version="old"),
+            new=InputSpec(path=new_p, version="new"),
+            **kwargs,
+        )
+
+    def test_debug_parse_fields_reach_both_sides(self, tmp_path, monkeypatch):
+        seen = self._stub_dump(monkeypatch)
+        run_compare_request(
+            self._request(tmp_path, dwarf_only=True, debug_format="dwarf")
+        )
+        assert set(seen) == {"old.so", "new.so"}
+        for side in seen.values():
+            assert side["dwarf_only"] is True
+            assert side["debug_format"] == "dwarf"
+
+    def test_include_labels_are_converted_back_to_a_mapping(
+        self, tmp_path, monkeypatch
+    ):
+        # Carried as a tuple of pairs so the request stays hashable, but
+        # `resolve_input` takes the mapping — the conversion must happen.
+        seen = self._stub_dump(monkeypatch)
+        run_compare_request(
+            self._request(tmp_path, include_labels=((Path("/inc"), "proj"),))
+        )
+        assert seen["old.so"]["include_labels"] == {Path("/inc"): "proj"}
+
+    def test_include_labels_default_passes_none_not_an_empty_mapping(
+        self, tmp_path, monkeypatch
+    ):
+        seen = self._stub_dump(monkeypatch)
+        run_compare_request(self._request(tmp_path))
+        assert seen["old.so"]["include_labels"] is None
+
+    def test_request_stays_hashable_with_include_labels_set(self, tmp_path):
+        # The property InputSpec's own docstring claims for the whole request.
+        request = self._request(tmp_path, include_labels=((Path("/inc"), "proj"),))
+        assert hash(request) == hash(request.replace())
+
+    def _stub_dependency_population(
+        self, monkeypatch
+    ) -> list[tuple[str, list[Path], str]]:
+        import abicheck.dependency_info as dep_mod
+
+        calls: list[tuple] = []
+        monkeypatch.setattr(
+            dep_mod,
+            "populate_dependency_info",
+            lambda snap, so_path, search_paths, sysroot, ld_library_path: calls.append(
+                (Path(so_path).name, list(search_paths), ld_library_path)
+            ),
+        )
+        return calls
+
+    def test_follow_dependencies_populates_both_elf_sides(
+        self, tmp_path, monkeypatch
+    ):
+        self._stub_dump(monkeypatch)
+        calls = self._stub_dependency_population(monkeypatch)
+        run_compare_request(
+            self._request(
+                tmp_path,
+                follow_dependencies=True,
+                dependency_search_paths=(Path("/opt/lib"),),
+                ld_library_path="/usr/lib",
+            )
+        )
+        assert [c[0] for c in calls] == ["old.so", "new.so"]
+        assert calls[0][1] == [Path("/opt/lib")]
+        assert calls[0][2] == "/usr/lib"
+
+    def test_follow_dependencies_is_opt_in(self, tmp_path, monkeypatch):
+        # It costs a full dependency-graph resolution per side, so an
+        # unrelated caller must not start paying for it silently.
+        self._stub_dump(monkeypatch)
+        calls = self._stub_dependency_population(monkeypatch)
+        run_compare_request(self._request(tmp_path))
+        assert calls == []
+
+    def test_non_elf_sides_are_skipped(self, tmp_path, monkeypatch):
+        # resolve_dependencies reads ELF DT_NEEDED entries; a PE/Mach-O side
+        # has nothing for it to do.
+        self._stub_dump(monkeypatch)
+        calls = self._stub_dependency_population(monkeypatch)
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(AbiSnapshot(library="lib", version="1.0"), old_p)
+        save_snapshot(AbiSnapshot(library="lib", version="2.0"), new_p)
+        run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old_p),
+                new=InputSpec(path=new_p),
+                follow_dependencies=True,
+            )
+        )
+        assert calls == []
+
+
+class TestDebugFormatResolution:
+    """ADR-055 D1 second slice, Codex review round 2: what `debug_format`
+    actually reaches (and doesn't reach) the extraction layer as."""
+
+    def _request(self, tmp_path, **kwargs) -> CompareRequest:
+        old_p = tmp_path / "old.so"
+        new_p = tmp_path / "new.so"
+        for p in (old_p, new_p):
+            p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        return CompareRequest(
+            old=InputSpec(path=old_p), new=InputSpec(path=new_p), **kwargs
+        )
+
+    def _spy(self, monkeypatch) -> dict[str, object]:
+        import abicheck.service as service_mod
+
+        seen: dict[str, object] = {}
+
+        def _fake(path, headers=None, *args, **kwargs):
+            seen["debug_format"] = kwargs.get("debug_format")
+            return AbiSnapshot(library=Path(path).name, version="x")
+
+        monkeypatch.setattr(service_mod, "run_dump", _fake)
+        return seen
+
+    def test_auto_becomes_none_not_the_literal_string(self, tmp_path, monkeypatch):
+        # `_resolve_debug_metadata` raises ValueError for anything outside
+        # dwarf/btf/ctf and treats None as auto-detect, so forwarding the
+        # accepted "auto" verbatim crashed during extraction. The CLI does the
+        # same translation (cli_compare_helpers/cli_dump_helpers).
+        seen = self._spy(monkeypatch)
+        run_compare_request(self._request(tmp_path, debug_format="auto"))
+        assert seen["debug_format"] is None
+
+    def test_auto_is_case_insensitive_too(self, tmp_path, monkeypatch):
+        seen = self._spy(monkeypatch)
+        run_compare_request(self._request(tmp_path, debug_format="AUTO"))
+        assert seen["debug_format"] is None
+
+    def test_an_explicit_format_is_lowercased_and_forwarded(
+        self, tmp_path, monkeypatch
+    ):
+        seen = self._spy(monkeypatch)
+        run_compare_request(self._request(tmp_path, debug_format="BTF"))
+        assert seen["debug_format"] == "btf"
+
+    def test_forced_elf_format_is_rejected_for_a_non_elf_side(self, tmp_path):
+        # The PE/Mach-O dump paths take no debug-format argument, so it would
+        # be silently dropped and the run would report success having ignored
+        # what was asked. The CLI rejects this up front; so does this now.
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        pe = tmp_path / "new.dll"
+        pe.write_bytes(b"MZ" + b"\x00" * 200)
+        request = CompareRequest(
+            old=InputSpec(path=old_p), new=InputSpec(path=pe), debug_format="dwarf"
+        )
+        with pytest.raises(ValidationError, match="only supported for ELF"):
+            run_compare_request(request)
+
+    def test_auto_is_not_rejected_for_a_non_elf_side(self, tmp_path, monkeypatch):
+        # "auto" forces nothing, so there is nothing for a PE side to ignore.
+        self._spy(monkeypatch)
+        old_p = tmp_path / "old.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        pe = tmp_path / "new.dll"
+        pe.write_bytes(b"MZ" + b"\x00" * 200)
+        run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old_p), new=InputSpec(path=pe), debug_format="auto"
+            )
+        )
+
+    def test_snapshot_inputs_are_unaffected(self, tmp_path, monkeypatch):
+        # A JSON snapshot has no detected binary format; same as the CLI, that
+        # is not a rejection case.
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        save_snapshot(AbiSnapshot(library="l", version="1"), old_p)
+        save_snapshot(AbiSnapshot(library="l", version="2"), new_p)
+        run_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old_p),
+                new=InputSpec(path=new_p),
+                debug_format="dwarf",
+            )
+        )
+
+
+class TestComparePipelinePhases:
+    """ADR-055 D1: ``run_compare_request`` is the composition of the two
+    phases in ``service_compare_pipeline``, and those phases are what the
+    native ``compare`` CLI now shares instead of its own resolution copy."""
+
+    def _snap_file(self, tmp_path, name, version):
+        from abicheck.serialization import save_snapshot
+
+        path = tmp_path / f"{name}-{version}.json"
+        save_snapshot(
+            AbiSnapshot(
+                library=name,
+                version=version,
+                functions=[
+                    Function(
+                        name="foo",
+                        mangled="foo",
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                        is_extern_c=True,
+                    )
+                ],
+            ),
+            path,
+        )
+        return path
+
+    def test_run_compare_request_equals_resolve_then_classify(self, tmp_path):
+        from abicheck.service import (
+            classify_compare_pair,
+            resolve_compare_request,
+            run_compare_request,
+        )
+
+        old_p = self._snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._snap_file(tmp_path, "libtest", "2.0")
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+
+        composed = classify_compare_pair(request, resolve_compare_request(request))
+        one_call = run_compare_request(request)
+
+        assert [c.kind for c in composed.diff.changes] == [
+            c.kind for c in one_call.diff.changes
+        ]
+        assert composed.diff.verdict == one_call.diff.verdict
+        assert composed.old_snapshot.version == one_call.old_snapshot.version
+        assert composed.new_snapshot.version == one_call.new_snapshot.version
+
+    def test_resolve_phase_returns_both_sides_and_their_evidence(self, tmp_path):
+        from abicheck.service import resolve_compare_request
+
+        old_p = self._snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._snap_file(tmp_path, "libtest", "2.0")
+        pair = resolve_compare_request(
+            CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        )
+        assert pair.old.version == "1.0"
+        assert pair.new.version == "2.0"
+        # A JSON snapshot has no detected binary format, same as on the CLI.
+        assert pair.old_fmt is None and pair.new_fmt is None
+        assert pair.old_evidence.collect_mode == pair.new_evidence.collect_mode == "off"
+
+
+    def test_layer_coverage_rows_reach_the_result(self, tmp_path, monkeypatch):
+        """The one branch in `classify_compare_pair` nothing else exercises.
+
+        ``prepare_embedded_build_source`` only returns layer-coverage rows when
+        the snapshots actually carry embedded L3-L5 evidence, so a plain
+        snapshot pair leaves this assignment unexecuted. Stubbing that helper
+        checks the wiring itself: rows it produces are attached to the
+        ``DiffResult``, and the metrics call still receives the extra changes.
+        """
+        from abicheck import cli_buildsource
+        from abicheck.service import classify_compare_pair, resolve_compare_request
+
+        rows = [{"layer": "L3", "covered": 1}]
+        attached: list[object] = []
+
+        def _fake_prepare(*_args, **_kwargs):
+            return [], rows, {"elapsed": 0.0}, []
+
+        def _fake_attach(result, metrics, extra, **_kwargs):
+            attached.append((result, metrics, extra))
+
+        monkeypatch.setattr(
+            cli_buildsource, "prepare_embedded_build_source", _fake_prepare
+        )
+        monkeypatch.setattr(cli_buildsource, "attach_evidence_metrics", _fake_attach)
+
+        old_p = self._snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._snap_file(tmp_path, "libtest", "2.0")
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        result = classify_compare_pair(request, resolve_compare_request(request))
+
+        assert result.diff.layer_coverage == rows
+        assert len(attached) == 1
+        assert attached[0][0] is result.diff
+
+
+class TestResolveSidesSequentially:
+    """ADR-050 D6 / G32 Phase E, generalised by ADR-055 D1.
+
+    A manifest-driven dump sizes its per-TU worker pool from a live
+    ``MemAvailable`` reading, so two starting concurrently size two full pools
+    off the same reading and jointly overcommit. That guard used to be
+    implicit — the native ``compare`` CLI simply resolved sequentially, and
+    ``run_compare_request`` was documented as unable to reach a manifest at
+    all. ``InputSpec.dump_manifest`` made that documentation stale: the typed
+    path could reach a manifest *and* resolved concurrently. Now that both
+    front ends share one resolution, the guard is explicit and lives with it.
+    """
+
+    def _request(self, tmp_path, *, old_manifest=None, new_manifest=None):
+        return CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so", dump_manifest=old_manifest),
+            new=InputSpec(path=tmp_path / "new.so", dump_manifest=new_manifest),
+        )
+
+    def test_plain_pair_may_resolve_concurrently(self, tmp_path, monkeypatch):
+        from abicheck.service import resolve_sides_sequentially
+
+        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
+        assert resolve_sides_sequentially(self._request(tmp_path)) is False
+
+    @pytest.mark.parametrize("side", ["old", "new"])
+    def test_a_dump_manifest_on_either_side_forces_sequential(
+        self, tmp_path, monkeypatch, side
+    ):
+        from types import SimpleNamespace
+
+        from abicheck.service import resolve_sides_sequentially
+
+        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
+        manifest = SimpleNamespace(translation_units=[])
+        request = self._request(tmp_path, **{f"{side}_manifest": manifest})
+        assert resolve_sides_sequentially(request) is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "no", "NO", " 0 "])
+    def test_env_opt_out_forces_sequential(self, tmp_path, monkeypatch, value):
+        from abicheck.service import resolve_sides_sequentially
+
+        monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", value)
+        assert resolve_sides_sequentially(self._request(tmp_path)) is True
+
+    def test_manifest_request_really_resolves_one_side_at_a_time(
+        self, tmp_path, monkeypatch
+    ):
+        """The behavioural half: not just the predicate, but the resolution.
+
+        Without the guard this is exactly the double-pool-sizing case — two
+        manifest dumps in a ``ThreadPoolExecutor``, overlapping in time.
+        """
+        import time
+        from types import SimpleNamespace
+
+        from abicheck import service as service_mod
+        from abicheck.service import resolve_compare_request
+
+        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
+        spans: list[tuple[str, float, float]] = []
+
+        def _fake_resolve(path, headers, includes, version, lang, **kwargs):
+            start = time.monotonic()
+            time.sleep(0.05)
+            spans.append((version, start, time.monotonic()))
+            return AbiSnapshot(library="libtest", version=version)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve)
+        old_p = tmp_path / "old.so"
+        new_p = tmp_path / "new.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        manifest = SimpleNamespace(translation_units=[])
+        resolve_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old_p, version="old", dump_manifest=manifest),
+                new=InputSpec(path=new_p, version="new", dump_manifest=manifest),
+            )
+        )
+        assert len(spans) == 2
+        (_old_v, _old_start, old_end), (_new_v, new_start, _new_end) = spans
+        assert new_start >= old_end

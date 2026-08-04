@@ -21,7 +21,13 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
+from abicheck.api_types import CompareResult
 from abicheck.cli import main
+from abicheck.model import AbiSnapshot
+
+#: Placeholder snapshots for the CompareResult stubs below — these tests read
+#: only the diff, but the struct carries both sides.
+_SNAP = AbiSnapshot(library="stub", version="0")
 
 # ---------------------------------------------------------------------------
 # compare-release error paths
@@ -577,7 +583,7 @@ class TestCompareReleaseErrorPaths:
 
         monkeypatch.setattr(
             "abicheck.cli_compare_release._run_compare_pair",
-            lambda *a, **kw: (result, object(), None),
+            lambda *a, **kw: CompareResult(result, _SNAP, _SNAP),
         )
         monkeypatch.setattr(
             "abicheck.annotations.is_github_actions", lambda: True,
@@ -628,13 +634,13 @@ class TestCompareReleaseErrorPaths:
             # A fresh DiffResult each call, mirroring the real re-run —
             # asserts the suppression is applied per-call, not by mutating a
             # shared fixture.
-            return (
+            return CompareResult(
                 DiffResult(
                     old_version="1", new_version="2", library="libfoo.so",
                     changes=[c], verdict=Verdict.COMPATIBLE,
                 ),
-                object(),
-                None,
+                _SNAP,
+                _SNAP,
             )
 
         monkeypatch.setattr(

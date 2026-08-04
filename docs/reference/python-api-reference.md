@@ -44,7 +44,26 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `contract_evaluation` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
 | `depth` | `str \| None` | `None` |
+| `dwarf_only` | `bool` | `False` |
+| `debug_format` | `str \| None` | `None` |
+| `include_labels` | `tuple[tuple[Path, str], ...]` | `()` |
+| `follow_dependencies` | `bool` | `False` |
+| `dependency_search_paths` | `tuple[Path, ...]` | `()` |
+| `ld_library_path` | `str` | `''` |
 | `frontend_context` | `str` | `'host'` |
+
+## `CompareResult`
+
+What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `diff` | `DiffResult` | *(required)* |
+| `old_snapshot` | `AbiSnapshot` | *(required)* |
+| `new_snapshot` | `AbiSnapshot` | *(required)* |
+| `suppression` | `SuppressionList \| None` | `None` |
 
 ## `CompileContext`
 
@@ -98,6 +117,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `dump_manifest` | `DumpManifest \| None` | `None` |
 | `compile` | `CompileContext \| None` | `None` |
 | `public_header_dirs` | `tuple[Path, ...]` | `()` |
+| `follow_linker_scripts` | `bool` | `True` |
 
 ## `LayerResult`
 
@@ -126,6 +146,21 @@ Where/how a result is rendered — the invocation-level output choice.
 |---|---|---|
 | `fmt` | `str` | `'text'` |
 | `path` | `Path \| None` | `None` |
+
+## `ResolvedComparePair`
+
+Both sides of a comparison, resolved and ready to classify.
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `old` | `AbiSnapshot` | *(required)* |
+| `new` | `AbiSnapshot` | *(required)* |
+| `old_fmt` | `str \| None` | *(required)* |
+| `new_fmt` | `str \| None` | *(required)* |
+| `old_evidence` | `SideEvidence` | *(required)* |
+| `new_evidence` | `SideEvidence` | *(required)* |
 
 ## `ScanArtifactResult`
 
@@ -211,6 +246,17 @@ Result of :func:`run_scan_set` — the ``--artifact-set`` sibling of :class:`Sca
 | `bundle_findings` | `list[Any]` | `[]` |
 | `bundle_verdict` | `str \| None` | `None` |
 | `bundle_incomplete` | `bool` | `False` |
+
+## `classify_compare_pair`
+
+Classify an already-resolved pair — the second half of ``run_compare_request``.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `request` | `CompareRequest` | *(required)* |
+| `pair` | `ResolvedComparePair` | *(required)* |
+
+**Returns:** `CompareResult`
 
 ## `collect_metadata`
 
@@ -316,6 +362,19 @@ Render comparison result in the requested output format.
 
 **Returns:** `str`
 
+## `resolve_compare_request`
+
+Resolve both sides of *request* into a classifiable pair.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `request` | `CompareRequest` | *(required)* |
+| *(keyword-only below)* | | |
+| `notify` | `Callable[[str], None] \| None` | `None` |
+| `allow_parallel` | `bool` | `True` |
+
+**Returns:** `ResolvedComparePair`
+
 ## `resolve_input`
 
 Auto-detect input type and return an ABI snapshot.
@@ -393,7 +452,7 @@ Compare two ABI inputs and return the classified diff result.
 | `include_dependencies` | `bool` | `True` |
 | `contract_mode` | `str \| None` | `None` |
 
-**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
+**Returns:** `CompareResult`
 
 ## `run_compare_request`
 
@@ -403,7 +462,7 @@ Compare two ABI inputs described by a :class:`CompareRequest`.
 |---|---|---|
 | `request` | `CompareRequest` | *(required)* |
 
-**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`
+**Returns:** `CompareResult`
 
 ## `run_dump`
 

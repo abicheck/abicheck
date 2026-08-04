@@ -339,7 +339,10 @@ class TestToolTimeouts:
             time.sleep(1.0)
             return AbiSnapshot(library="x", version="1.0")
 
-        monkeypatch.setattr(ms, "_resolve_input", _slow)
+        # The slow work now lives behind the Tier-2 chokepoint (ADR-055 D4),
+        # so stubbing the MCP-local wrapper would no longer stall anything --
+        # the timeout would still be exercised, but against a fast call.
+        monkeypatch.setattr(service, "resolve_input", _slow)
         data = json.loads(abi_compare(str(old), str(new)))
         assert data["status"] == "error"
         assert "abi_compare timed out" in data["error"]
@@ -377,7 +380,9 @@ class TestToolTimeouts:
             time.sleep(2.0)
             return AbiSnapshot(library="x", version="1.0")
 
-        monkeypatch.setattr(ms, "_resolve_input", _slow)
+        # Stubbed at the service layer for the same reason as
+        # test_abi_compare_timeout above (ADR-055 D4).
+        monkeypatch.setattr(service, "resolve_input", _slow)
         started = time.monotonic()
         data = json.loads(abi_compare(str(old), str(new)))
         elapsed = time.monotonic() - started

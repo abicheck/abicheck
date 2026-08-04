@@ -24,16 +24,14 @@ Provides framework-agnostic functions for the core abicheck operations:
 
 from __future__ import annotations
 
-import concurrent.futures
 import functools
 import hashlib
 import importlib as _importlib
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .api_types import CompareRequest, InputSpec, OutputSpec
+from .api_types import CompareRequest, CompareResult, InputSpec, OutputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
@@ -42,7 +40,6 @@ from .errors import AbicheckError, SnapshotError, ValidationError
 from .header_utils import (
     deferred_token_dirs,
     resolve_inferred_header_roots,
-    split_public_header_inputs,
 )
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .serialization import load_snapshot
@@ -84,7 +81,6 @@ if TYPE_CHECKING:
     from .dwarf_metadata import DwarfMetadata
     from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
-    from .service_compare_evidence import SideEvidence
     from .suppression import SuppressionList
 
 _logger = logging.getLogger(__name__)
@@ -1625,168 +1621,34 @@ def compare_snapshots(
     )
 
 
-def run_compare_request(
-    request: CompareRequest,
-) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+def run_compare_request(request: CompareRequest) -> CompareResult:
     """Compare two ABI inputs described by a :class:`CompareRequest`.
 
-    The single classification chokepoint (ADR-037 D1/D2): every front-end builds
-    a ``CompareRequest`` and calls this, so defaults cannot diverge between
-    invocation paths. The legacy keyword-argument :func:`run_compare` is a thin
-    shim that builds the request and delegates here.
-    Returns:
-        A tuple of (DiffResult, old_snapshot, new_snapshot).
+    The single classification chokepoint (ADR-037 D1/D2): every front-end
+    builds a ``CompareRequest`` and calls this, so defaults cannot diverge
+    between invocation paths. The keyword-argument :func:`run_compare` is a
+    thin shim that builds the request and delegates here.
+
+    Exactly the composition of the two phases in
+    :mod:`abicheck.service_compare_pipeline` —
+    :func:`~abicheck.service_compare_pipeline.resolve_compare_request` then
+    :func:`~abicheck.service_compare_pipeline.classify_compare_pair`. A front
+    end that must configure the run between them (the native ``compare`` CLI's
+    ADR-049 ``resolve_and_apply``, whose ``--pack`` can move the policy file
+    and severity levels the classification is scored under) calls the two
+    phases directly rather than keeping a second resolution implementation.
+
+    Returns a :class:`~abicheck.api_types.CompareResult` (ADR-055 D2), not the
+    bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
+    gain a field without breaking positional callers, which a tuple cannot.
+    ``CompareResult.as_tuple()`` reproduces the old shape for a caller that
+    wants it back in one line.
+
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`.
         SnapshotError: If either input cannot be loaded.
     """
-    request.validate()
-    # validate() accepts lang case-insensitively; the ELF dump path does case-sensitive lang == "c" checks, so normalise here. android (no header-AST path) falls back to "auto" for the binary dump.
-    lang = request.lang.lower()
-    # CodeRabbit review: this check moved into api_types.py's validation_errors() (Tier-2 pre-flight), reached via request.validate() above -- no longer duplicated here.
-    from .api_types import HEADER_AST_FRONTENDS
-    frontend_lower = request.frontend.lower()
-    header_backend = frontend_lower if frontend_lower in HEADER_AST_FRONTENDS else "auto"
-    old_fmt = detect_binary_format(request.old.path)
-    new_fmt = detect_binary_format(request.new.path)
-    # Pair-wide C++20 dialect resolution (P0 fix); folded into each side's effective CompileContext below. A dump_manifest replaces `headers` (empty), so its own forced_includes must feed the same C++20 scan too (Codex review) or a manifest-only side's C++20 signal goes undetected.
-    def _manifest_forced_includes(dm: object) -> list[Path]:
-        return [inc for tu in getattr(dm, "translation_units", ()) for inc in tu.forced_includes]
-    pair_compile: CompileContext | None = None
-    override = pair_wide_cxx20_std_override(lang, list(request.old.headers) + _manifest_forced_includes(request.old.dump_manifest), list(request.new.headers) + _manifest_forced_includes(request.new.dump_manifest), None, ())
-    if override is not None:
-        pair_compile = CompileContext(gcc_option_tokens=override)
-    # request.{old,new}.headers double as the public-header set for provenance tagging. Split into files/directories before tagging: an unsplit directory entry corrupts scope_fingerprint. InputSpec.public_header_dirs is unioned in afterward.
-    old_public_headers, old_public_header_dirs = split_public_header_inputs(request.old.headers)
-    new_public_headers, new_public_header_dirs = split_public_header_inputs(request.new.headers)
-    old_public_header_dirs += list(request.old.public_header_dirs)
-    new_public_header_dirs += list(request.new.public_header_dirs)
-    # Codex: binary depth clears evidence.headers, but a headerless dump still fingerprints these -- clear too, else differing lists spuriously ScopeMismatchError.
-    if request.depth is not None and request.depth.lower() == "binary":
-        old_public_headers = new_public_headers = old_public_header_dirs = new_public_header_dirs = []
-    from . import service_compare_evidence as _sce  # ADR-055 D1
-    from .cli_buildsource import embed_build_source
-    old_evidence, new_evidence = _sce.resolve_compare_request_evidence(request, pair_compile)
-    # Codex: "hybrid" (explicit depth="source") and "android" have no real embed_build_source extractor -- reject only a raw tree needing real extraction, never a prebuilt pack or build_info alone (never feeds L4). Mirrors cli.py's own --depth source + --ast-frontend hybrid UsageError.
-    from .buildsource.inline import is_pack_dir
-    from .cli_buildsource_helpers import _is_inputs_pack_dir
-    def _is_raw_source_tree(p: Path | None) -> bool:
-        return p is not None and not (is_pack_dir(p) or _is_inputs_pack_dir(p))
-    if frontend_lower == "android" and any(_is_raw_source_tree(s.sources) for s in (request.old, request.new)):
-        raise ValidationError("the 'android' AST frontend's source-ABI replay is not yet wired into run_compare_request's inline evidence collection for a raw source tree -- pass a prebuilt evidence pack directory instead, or use has_sources=True with no inline sources/build_info.")
-    if request.depth is not None and request.depth.lower() == "source":
-        for side, evidence in ((request.old, old_evidence), (request.new, new_evidence)):
-            if _is_raw_source_tree(side.sources) and _sce.effective_frontend(evidence.compile, header_backend) == "hybrid":
-                raise ValidationError("depth='source' is incompatible with the 'hybrid' AST frontend: L4 source-ABI replay has no dual-backend hybrid extractor. Use 'castxml' or 'clang' for a depth='source' request.")
-    def _resolve_side(
-        side: InputSpec,
-        evidence: SideEvidence,
-        fmt: str | None,
-        public_headers: list[Path],
-        public_header_dirs: list[Path],
-    ) -> AbiSnapshot:
-        snap = resolve_input(
-            side.path,
-            evidence.headers,
-            list(side.includes),
-            side.version,
-            lang,
-            is_elf=True if fmt == "elf" else None,
-            pdb_path=side.pdb,
-            debug_roots=list(side.debug_roots) or None,
-            enable_debuginfod=request.enable_debuginfod,
-            debuginfod_url=request.debuginfod_url,
-            header_backend=header_backend,
-            compile=evidence.compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            include_dependencies=side.include_dependencies,
-            dump_manifest=evidence.dump_manifest,
-        )
-        if side.sources or side.build_info:
-            # Codex: same roots as resolve_input, plus dump_manifest's declared-public roots only (project_owned TU includes are private, so dump_manifest_public_roots not dump_manifest_header_roots).
-            # Codex: a malformed pack raises click.ClickException deep inside embed_build_source -- no place in this Tier-2 API's ValidationError/SnapshotError contract.
-            import click
-
-            from .dumper_scoping import dump_manifest_public_roots
-            try:
-                embed_build_source(snap, build_info=side.build_info, sources=side.sources, collect_mode=evidence.collect_mode, extractor=_sce.effective_frontend(evidence.compile, header_backend), public_headers=tuple(str(p) for p in public_headers), public_header_dirs=tuple(str(p) for p in public_header_dirs) + tuple(str(p) for p in dump_manifest_public_roots(evidence.dump_manifest)), quiet=True)
-            except click.ClickException as exc:
-                raise SnapshotError(str(exc)) from exc
-        return snap
-
-    def _resolve_old_side() -> AbiSnapshot:
-        return _resolve_side(request.old, old_evidence, old_fmt, old_public_headers, old_public_header_dirs)
-    def _resolve_new_side() -> AbiSnapshot:
-        return _resolve_side(request.new, new_evidence, new_fmt, new_public_headers, new_public_header_dirs)
-
-    # Old/new resolution has no data dependency on each other until they're
-    # both fed into compare_snapshots() below, so run them concurrently —
-    # they're each dominated by a castxml/DWARF subprocess call and XML/JSON
-    # parsing, not CPU held under the GIL the whole time. Threads (not
-    # processes) avoid pickling the request/callables across a process
-    # boundary. On a memory-constrained runner comparing two large ABI
-    # surfaces (e.g. oneDAL-scale headers), two concurrent header-AST
-    # frontends roughly double peak RSS versus one at a time — set
-    # ABICHECK_PARALLEL_EXTRACTION=0 to fall back to the old sequential
-    # behavior if that trade-off doesn't fit.
-    if os.environ.get("ABICHECK_PARALLEL_EXTRACTION", "1").strip().lower() in (
-        "0",
-        "false",
-        "no",
-    ):
-        old = _resolve_old_side()
-        new = _resolve_new_side()
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            old_future = pool.submit(_resolve_old_side)
-            new_future = pool.submit(_resolve_new_side)
-            old = old_future.result()
-            new = new_future.result()
-    # Codex: an explicitly requested depth (e.g. "source") that a raw input actually failed to reach (no usable compile database/extractor/linkable declarations) previously diffed whatever weaker evidence embed_build_source produced with no signal -- mirrors dump's own check_requested_depth_satisfied hard-fail, but raises ValidationError (a Tier-2 API has no ClickException concept) instead of reusing that CLI-only exception type.
-    if request.depth is not None:
-        from .cli_dump_helpers import _DEPTH_RANK, _gated_source_label
-        requested_rank = _DEPTH_RANK.get(request.depth.lower(), 0)  # validate() already restricts depth to USER_DEPTHS
-        for side_label, snap in (("old", old), ("new", new)):
-            effective = _gated_source_label(snap.build_source, snap)
-            if _DEPTH_RANK.get(effective, 0) < requested_rank:
-                raise ValidationError(f"depth={request.depth!r} was requested for the {side_label} side but the resolved snapshot only reached {effective!r} evidence depth. Supply the evidence this rung needs (headers, a build/compile database, or --sources with linkable declarations) or lower depth to match what is actually available.")
-    # Codex (known, accepted limitation, not fixed here): this is a floor, not a ceiling -- a side whose input is itself an already-serialized JSON snapshot with richer embedded evidence than `depth` requested (e.g. depth="binary" against an old.json that already embeds header/build/source facts) still diffs with all of it. resolve_input's `fmt == "json"` branch (above) returns `load_snapshot(path)` verbatim, ignoring headers/depth entirely -- matching the CLI's own long-documented default ("compare old.json new.json reads build-info + source facts embedded in each snapshot", cli_options.py), which `--depth` has never projected down for a pre-built snapshot either (it only dials how deep *fresh* inline extraction goes for a raw, non-JSON input). Capping/rejecting a richer pre-existing snapshot would diverge Tier-2 behavior from that established CLI contract and needs its own scoped design, not a drive-by extension of this floor check.
-    suppression, pf = load_suppression_and_policy(
-        request.suppress, request.policy, request.policy_file_path
-    )
-    # ADR-055 D1 (Codex review, P1 x2): diff the embedded evidence into
-    # extra_changes, or a source-only change reads as artifact-only
-    # compatible. The four Nones are the out-of-band pack-override params --
-    # reusing the raw sources/build_info paths would make _resolve_side_pack
-    # try (and fail) to reload them as packs; None uses embedded facts.
-    from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
-    extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = prepare_embedded_build_source(
-        old, new, old_evidence.collect_mode, None, None, None, None, None, policy_file=pf, quiet=True,
-    )
-    result = compare_snapshots(
-        old,
-        new,
-        suppression=suppression,
-        policy=request.policy,
-        policy_file=pf,
-        scope_to_public_surface=request.scope_public,
-        force_public_symbols=(set(request.force_public_symbols) if request.force_public_symbols else None),
-        extra_changes=extra_changes,
-        public_surface_allowlist=(set(request.public_surface_allowlist) if request.public_surface_allowlist is not None else None),
-        pattern_verdicts=request.pattern_verdicts,
-        reconcile_build_context=request.reconcile_build_context,
-        env_matrix=load_env_matrix(request.env_matrix_path),
-        diagnostic_comparison=request.diagnostic_comparison,
-        contract_evaluation=request.contract_evaluation,
-        contract_mode=request.contract_mode,
-    )
-    if layer_coverage_rows:
-        result.layer_coverage = layer_coverage_rows
-    attach_evidence_metrics(result, evidence_metrics, extra_changes or [], quiet=True)
-    result.old_metadata = collect_metadata(request.old.path)
-    result.new_metadata = collect_metadata(request.new.path)
-    return result, old, new
+    return classify_compare_pair(request, resolve_compare_request(request))
 
 
 def run_compare(
@@ -1817,7 +1679,7 @@ def run_compare(
     contract_evaluation: bool = False,
     include_dependencies: bool = True,
     contract_mode: str | None = None,
-) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
     Keyword-argument shim over :func:`run_compare_request`: it assembles a
@@ -1830,7 +1692,9 @@ def run_compare(
     parameter it always did (Codex review, PR #551). ``include_dependencies``
     applies to *both* sides — build a ``CompareRequest`` for a per-side override.
     Returns:
-        A tuple of (DiffResult, old_snapshot, new_snapshot).
+        A :class:`~abicheck.api_types.CompareResult`. This returned the bare
+        ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
+        shape back for a caller that unpacks positionally.
     Raises:
         SnapshotError: If either input cannot be loaded.
         ValidationError: If inputs have unrecognised formats.
@@ -1876,6 +1740,19 @@ def run_compare(
         contract_mode=contract_mode,
     )
     return run_compare_request(request)
+
+# ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
+# the leaf module ``service_compare_pipeline`` so the native ``compare`` CLI can
+# run its Click-dependent ADR-049 ``resolve_and_apply`` step between them and
+# still share this resolution instead of keeping a second copy. Re-exported here
+# so ``from abicheck.service import resolve_compare_request`` works and
+# ``run_compare_request`` above resolves both names at call time. ──────────────
+from .service_compare_pipeline import (  # noqa: E402,F401
+    ResolvedComparePair,
+    classify_compare_pair,
+    resolve_compare_request,
+    resolve_sides_sequentially,
+)
 
 # ── Output rendering (extracted to leaf module service_render, a non-
 # importing-us leaf) to stay under the AI-readiness size cap; re-exported
@@ -1925,6 +1802,7 @@ from .service_scan import (  # noqa: E402,F401
 __all__ = [
     "Budget",
     "CompareRequest",
+    "CompareResult",
     "CompileContext",
     "CostEstimate",
     "InputSpec",
@@ -1933,7 +1811,9 @@ __all__ = [
     "ScanArtifactResult",
     "ScanRequest",
     "ScanResult",
+    "ResolvedComparePair",
     "ScanSetResult",
+    "classify_compare_pair",
     "collect_metadata",
     "compare_snapshots",
     "detect_binary_format",
@@ -1941,6 +1821,7 @@ __all__ = [
     "expand_header_inputs",
     "load_suppression_and_policy",
     "render_output",
+    "resolve_compare_request",
     "resolve_input",
     "run_audit",
     "run_compare",

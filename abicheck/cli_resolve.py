@@ -37,7 +37,7 @@ import click
 
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
-from .header_utils import iter_directory_headers, split_public_header_inputs
+from .header_utils import iter_directory_headers
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -360,51 +360,18 @@ def _populate_dependency_info(
     sysroot: Path | None,
     ld_library_path: str,
 ) -> None:
-    """Resolve transitive deps and store DependencyInfo in the snapshot."""
-    from .binder import BindingStatus, compute_bindings
-    from .model import DependencyInfo
-    from .resolver import resolve_dependencies
+    """Back-compat alias — the implementation now lives in the service layer.
 
-    graph = resolve_dependencies(
-        so_path,
-        search_paths=search_paths or None,
-        sysroot=sysroot,
-        ld_library_path=ld_library_path,
-    )
-    bindings = compute_bindings(graph)
+    ADR-055 D1's second slice gave ``run_compare_request`` ``--follow-deps``
+    parity, so this gained a second caller outside the CLI. It reads only
+    leaf modules (``binder``/``model``/``resolver``), so it moved to the leaf
+    ``dependency_info`` module both layers can depend on rather than either
+    importing the other (AGENTS.md's rule for exactly this shape). Kept as a
+    name here because ``cli.py`` imports and re-exports it.
+    """
+    from .dependency_info import populate_dependency_info
 
-    summary: dict[str, int] = {}
-    for b in bindings:
-        summary[b.status.value] = summary.get(b.status.value, 0) + 1
-
-    missing = [
-        {"consumer": b.consumer, "symbol": b.symbol, "version": b.version}
-        for b in bindings
-        if b.status == BindingStatus.MISSING
-    ]
-
-    snap.dependency_info = DependencyInfo(
-        nodes=[
-            {
-                "path": str(node.path),
-                "soname": node.soname,
-                "needed": node.needed,
-                "depth": node.depth,
-                "resolution_reason": node.resolution_reason,
-            }
-            for node in sorted(graph.nodes.values(), key=lambda n: (n.depth, n.soname))
-        ],
-        edges=[
-            {"consumer": consumer, "provider": provider}
-            for consumer, provider in graph.edges
-        ],
-        unresolved=[
-            {"consumer": consumer, "soname": soname}
-            for consumer, soname in graph.unresolved
-        ],
-        bindings_summary=summary,
-        missing_symbols=missing,
-    )
+    populate_dependency_info(snap, so_path, search_paths, sysroot, ld_library_path)
 
 
 def _is_supported_compare_input(path: Path) -> bool:
@@ -569,73 +536,85 @@ def _resolve_compare_snapshots(
     handles a ``SourceGraphSummary`` from any evidence tier uniformly, so
     populating it here from headers alone (no build system required) makes it
     reachable from plain ``compare``.
+
+    **ADR-055 D1: this no longer resolves anything itself.** It assembles a
+    :class:`~abicheck.api_types.CompareRequest` from ``compare``'s loose
+    arguments and hands it to the shared
+    :func:`abicheck.service.resolve_compare_request`, which is the same
+    resolution the typed Python API and the MCP ``abi_compare`` tool run. It
+    kept a parallel implementation until now only because
+    ``run_compare_request`` was one function with no seam for ``compare``'s
+    Click-dependent ADR-049 ``resolve_and_apply`` step to sit in; splitting
+    that function into its two phases removed the reason for the copy. What
+    stays CLI-specific is exactly what is genuinely CLI-specific: the
+    ``click.echo`` notifier, translating the framework-free errors into
+    ``click`` exceptions (the contract ``_resolve_input`` documented), and
+    ``allow_parallel=False`` to keep both sides resolving sequentially the way
+    this path always has.
     """
-    old_backend = old_header_backend or header_backend
-    new_backend = new_header_backend or header_backend
-    # compare's --header is documented as "Public header file or directory"
-    # (unlike dump's split -H/--public-header, compare has no lower-level
-    # "parse only, don't classify" mode) — so the same paths given via
-    # --header double as the public-header set for provenance tagging. Split
-    # into files/directories first (not passed through unsplit): a directory
-    # entry fingerprinted as an individual file identity corrupts
-    # compute_extraction_contract's scope_fingerprint common-root computation
-    # (see split_public_header_inputs's docstring) — a single `-H <dir>`
-    # umbrella otherwise made a byte-identical self-comparison spuriously
-    # raise ScopeMismatchError.
-    old_public_headers, old_public_header_dirs = split_public_header_inputs(old_h)
-    new_public_headers, new_public_header_dirs = split_public_header_inputs(new_h)
-    old = _resolve_input(
-        old_input,
-        old_h,
-        old_inc,
-        old_version,
-        lang,
-        is_elf=True if old_fmt == "elf" else None,
-        pdb_path=old_pdb_path if old_pdb_path else pdb_path,
+    from .api_types import CompareRequest, InputSpec
+    from .errors import SnapshotError, ValidationError
+
+    def _side_compile(backend_override: str | None) -> CompileContext | None:
+        # The per-side --old/new-ast-frontend rides on that side's own
+        # CompileContext.frontend, which `_run_dump_uncached` documents as
+        # outranking the bare both-sides `header_backend`. The caller has
+        # already neutralised `compile_context.frontend` to "auto" for exactly
+        # this reason, so there is nothing to lose by replacing it.
+        if backend_override is None:
+            return compile_context
+        import dataclasses
+
+        from .compile_context import CompileContext as _CompileContext
+
+        base = compile_context if compile_context is not None else _CompileContext()
+        return dataclasses.replace(base, frontend=backend_override)
+
+    request = CompareRequest(
+        old=InputSpec(
+            path=old_input,
+            headers=tuple(old_h),
+            includes=tuple(old_inc),
+            version=old_version,
+            pdb=old_pdb_path if old_pdb_path else pdb_path,
+            debug_roots=tuple(old_debug_roots or ()),
+            include_dependencies=include_dependencies,
+            dump_manifest=old_dump_manifest,
+            compile=_side_compile(old_header_backend),
+        ),
+        new=InputSpec(
+            path=new_input,
+            headers=tuple(new_h),
+            includes=tuple(new_inc),
+            version=new_version,
+            pdb=new_pdb_path if new_pdb_path else pdb_path,
+            debug_roots=tuple(new_debug_roots or ()),
+            include_dependencies=include_dependencies,
+            dump_manifest=new_dump_manifest,
+            compile=_side_compile(new_header_backend),
+        ),
+        lang=lang,
+        frontend=header_backend,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
-        debug_roots=old_debug_roots,
+        include_labels=tuple((include_labels or {}).items()),
+        follow_dependencies=follow_deps,
+        dependency_search_paths=tuple(search_paths),
+        ld_library_path=ld_library_path,
         enable_debuginfod=enable_debuginfod,
         debuginfod_url=debuginfod_url,
-        header_backend=old_backend,
-        compile=compile_context,
-        public_headers=old_public_headers,
-        public_header_dirs=old_public_header_dirs,
-        include_labels=include_labels,
-        dump_manifest=old_dump_manifest,
-        include_dependencies=include_dependencies,
     )
-    new = _resolve_input(
-        new_input,
-        new_h,
-        new_inc,
-        new_version,
-        lang,
-        is_elf=True if new_fmt == "elf" else None,
-        pdb_path=new_pdb_path if new_pdb_path else pdb_path,
-        dwarf_only=dwarf_only,
-        debug_format=debug_format,
-        debug_roots=new_debug_roots,
-        enable_debuginfod=enable_debuginfod,
-        debuginfod_url=debuginfod_url,
-        header_backend=new_backend,
-        compile=compile_context,
-        public_headers=new_public_headers,
-        public_header_dirs=new_public_header_dirs,
-        include_labels=include_labels,
-        dump_manifest=new_dump_manifest,
-        include_dependencies=include_dependencies,
-    )
-    if follow_deps:
-        if old_fmt == "elf":
-            _populate_dependency_info(
-                old, old_input, list(search_paths), None, ld_library_path
-            )
-        if new_fmt == "elf":
-            _populate_dependency_info(
-                new, new_input, list(search_paths), None, ld_library_path
-            )
-    return old, new
+    from . import service
+
+    try:
+        pair = service.resolve_compare_request(
+            request, notify=_click_notify, allow_parallel=False
+        )
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
+    return pair.old, pair.new
 
 
 # ── Set-input (directory/package) compare guards (ADR-037 D3/D12) ─────────────

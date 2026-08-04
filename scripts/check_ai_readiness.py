@@ -642,13 +642,23 @@ def check_changekind_docs(f: Findings) -> None:
 def check_doc_count_sync(f: Findings) -> None:
     """Keep hand-written headline counts in sync with their source of truth.
 
-    Three numbers historically drifted across the docs: the number of `ChangeKind`
+    Four values historically drifted across the docs: the number of `ChangeKind`
     values ("N change types"), the size of the example catalog
-    (`examples/ground_truth.json`), and the snapshot `schema_version` (Codex
-    review — a doc page hand-copying a version number that already has a fact
-    owner, per AGENTS.md's "don't hand-copy a count/version that has a fact
-    owner elsewhere" rule, with nothing catching the next bump forgetting it).
-    Each anchor below pins a specific sentence to a computed value:
+    (`examples/ground_truth.json`), the snapshot `schema_version`, and the
+    compare report's `report_schema_version` (each a doc page hand-copying a
+    number that already has a fact owner, per AGENTS.md's "don't hand-copy a
+    count/version that has a fact owner elsewhere" rule, with nothing catching
+    the next bump forgetting it) — plus the CastXML policy's supported-version
+    range. Each anchor below pins a specific sentence to a computed value:
+
+    Pinning is the *second* line of defence, not the first: where a version is
+    incidental to what a sentence is saying, the page should link to the fact
+    owner and hold no copy at all (ADR-055 D3). An anchor here is for a value
+    that must appear literally — a JSON output sample, or the owner page's own
+    statement of the current value. It only guards the sites someone thought
+    to anchor, which is exactly how the fourth copy on `snapshot-format.md`
+    (its snapshot-vs-report comparison table) sat unchecked until review
+    caught it.
 
     - ERROR if the anchor sentence is present but the number is wrong (the real
       drift bug — forces docs to be updated when a ChangeKind or case is added).
@@ -656,17 +666,30 @@ def check_doc_count_sync(f: Findings) -> None:
       guard silently stopped covering that spot — update the regex here).
     """
     try:
+        from abicheck import schemas
         from abicheck.castxml_policy import (
             MAX_CASTXML,
             MIN_CASTXML,
             MIN_CASTXML_CLANG_MAJOR,
         )
         from abicheck.checker_policy import ChangeKind
-        from abicheck.serialization import SCHEMA_VERSION
-    except Exception:
+    except ModuleNotFoundError:
         # Package not importable (e.g. pre-install lane) — skip silently, like
-        # the other ChangeKind checks.
+        # the other ChangeKind checks. Deliberately *only* this: a broken
+        # `abicheck.schemas` (or any other import-time failure in an installed
+        # package) is a real defect, and swallowing it here would silently stop
+        # checking every version number below while still reporting success
+        # (CodeRabbit review).
         return
+
+    # ADR-055 D3: read every persisted-artifact version through the registry
+    # rather than importing each artifact's own constant here. That is what
+    # gives `schemas.current()` a consumer instead of leaving it a lookup
+    # nothing calls — the registry exists precisely because a version number
+    # with no single queryable owner is how `docs/use/python-api.md` came to
+    # claim schema_version 8 against a real 17.
+    SCHEMA_VERSION = schemas.current("snapshot")
+    REPORT_SCHEMA_VERSION = schemas.current("compare")
 
     n_kinds = len(list(ChangeKind))
 
@@ -756,6 +779,18 @@ def check_doc_count_sync(f: Findings) -> None:
             "snapshot schema_version (field table)",
             SCHEMA_VERSION,
             r"Snapshot format version \(currently `(\d+)`\)",
+        ),
+        (
+            DOCS / "reference/snapshot-format.md",
+            "snapshot schema_version (snapshot-vs-report comparison table)",
+            SCHEMA_VERSION,
+            r"\*\*Type\*\* \| integer \(currently `(\d+)`\)",
+        ),
+        (
+            DOCS / "use/output-formats.md",
+            "compare report_schema_version (compare report JSON example)",
+            REPORT_SCHEMA_VERSION,
+            r'"report_schema_version":\s*"([0-9]+\.[0-9]+)"',
         ),
         (
             DOCS / "reference/environment.md",
@@ -1133,6 +1168,24 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # through already-member modules, not a new dependency direction.
         # No init deadlock.
         #
+        # `service_compare_pipeline` joins the same SCC (ADR-055 D1), for the
+        # same reason `l0_export_delta` and `scan_engine` above do: it is a
+        # *split* of an existing member, not a new dependency direction.
+        # `run_compare_request`'s body was one function that both resolved and
+        # classified, which left the native `compare` CLI no seam to run its
+        # Click-dependent ADR-049 `resolve_and_apply` step in — so the CLI kept
+        # a second resolution implementation of its own. Splitting that body
+        # into `resolve_compare_request` / `classify_compare_pair` removed the
+        # reason for the copy. The extracted module reaches
+        # `cli_buildsource`/`cli_dump_helpers`/`cli_buildsource_helpers` and
+        # `service` itself function-locally — the *identical* set of edges
+        # `service.run_compare_request` already had before the split, moved
+        # rather than added — and `service` imports it back at its module-load
+        # tail. It imports only `api_types`/`errors` (both leaves) at module
+        # load, so the package still imports cleanly: no init deadlock. Net
+        # effect on the graph is a *reduction*, since `cli_resolve` no longer
+        # carries its own copy of the resolution this module now owns.
+        #
         # `cli_config`, `cli_doctor`, and `cli_graph` also join this same SCC —
         # each already had its own standalone `{"cli", "cli_X"}` entry above,
         # which covers the trivial two-node cycle from `cli`'s tail-of-module
@@ -1197,6 +1250,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "l0_export_delta",
                 "scan_engine",
                 "service",
+                "service_compare_pipeline",
                 "service_scan",
             }
         ),

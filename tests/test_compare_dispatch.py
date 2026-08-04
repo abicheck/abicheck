@@ -30,10 +30,16 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck import cli_compare_release
+from abicheck.api_types import CompareResult
 from abicheck.cli import main
 from abicheck.cli_resolve import _looks_like_application, classify_compare_operand
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
+
+#: Placeholder snapshots for CompareResult stubs — these tests only read
+#: the diff, but the struct requires both sides.
+_SNAP = AbiSnapshot(library="stub", version="0")
+
 
 
 class TestCompareHeaderMarksProvenance:
@@ -49,7 +55,7 @@ class TestCompareHeaderMarksProvenance:
     def test_resolve_compare_snapshots_passes_header_as_public_header(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from abicheck import cli_resolve
+        from abicheck import cli_resolve, service
 
         calls: list[dict] = []
 
@@ -57,7 +63,11 @@ class TestCompareHeaderMarksProvenance:
             calls.append({"path": path, "headers": headers, "version": version, **kwargs})
             return _snap(version=version)
 
-        monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+        # ADR-055 D1: `_resolve_compare_snapshots` no longer resolves anything
+        # itself -- it builds a CompareRequest and delegates to the shared
+        # `service.resolve_compare_request`, so the spy belongs on the service
+        # function that shared pipeline actually calls.
+        monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
 
         old_h = [tmp_path / "old.h"]
         new_h = [tmp_path / "new.h"]
@@ -86,7 +96,7 @@ class TestResolveCompareSnapshotsDependencyScope:
     def test_defaults_to_filtered_on_both_sides(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from abicheck import cli_resolve
+        from abicheck import cli_resolve, service
 
         calls: list[dict] = []
 
@@ -94,7 +104,7 @@ class TestResolveCompareSnapshotsDependencyScope:
             calls.append(kwargs)
             return _snap(version=version)
 
-        monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+        monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
 
         cli_resolve._resolve_compare_snapshots(
             tmp_path / "old.so", tmp_path / "new.so",
@@ -112,7 +122,7 @@ class TestResolveCompareSnapshotsDependencyScope:
     def test_include_dependencies_true_reaches_both_sides(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from abicheck import cli_resolve
+        from abicheck import cli_resolve, service
 
         calls: list[dict] = []
 
@@ -120,7 +130,7 @@ class TestResolveCompareSnapshotsDependencyScope:
             calls.append(kwargs)
             return _snap(version=version)
 
-        monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+        monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
 
         cli_resolve._resolve_compare_snapshots(
             tmp_path / "old.so", tmp_path / "new.so",
@@ -144,22 +154,25 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
     ``_resolve_input`` for old, then new -- never concurrently.
 
     This is the specific path ADR-050 D6/G32 Phase E's "a manifest-driven
-    compare can launch two full-sized per-TU pools at once" concern is
-    actually about for the native CLI: unlike ``service.run_compare_request``
-    (which does resolve old/new concurrently via a ``ThreadPoolExecutor``, but
-    has no ``dump_manifest`` field on ``CompareRequest``/``InputSpec`` at all,
-    so it can never reach a manifest-driven dump), ``_resolve_compare_snapshots``
-    is what actually threads ``old_dump_manifest``/``new_dump_manifest``
-    through to ``resolve_input`` -- and it already resolves both sides with
-    two plain, sequential calls, so a manifest-driven compare here can never
-    size two per-TU pools off the same ``MemAvailable`` reading at once. A
-    regression back to concurrent resolution here (e.g. mirroring
-    ``run_compare_request``'s own ``ThreadPoolExecutor``) would reintroduce
-    exactly that double-pool-sizing risk, so this guards against it directly.
+    compare can launch two full-sized per-TU pools at once" concern is about:
+    a manifest-driven dump sizes its own per-TU pool from a live
+    ``MemAvailable`` reading, so two starting together size two full pools off
+    the same reading and jointly overcommit.
+
+    ADR-055 D1 moved the resolution itself into the shared
+    ``service_compare_pipeline``, which *can* resolve concurrently — so the
+    guard is now two things, and this asserts the CLI half. The CLI passes
+    ``allow_parallel=False``, which is unconditional and covers a plain
+    (manifest-free) compare like the one below; the shared
+    ``resolve_sides_sequentially`` covers the manifest case for every other
+    front end, including ``run_compare_request``, which reaches a
+    manifest-driven dump through ``InputSpec.dump_manifest`` and would
+    otherwise have had the very risk this test was written about
+    (``TestResolveSidesSequentially`` in ``tests/test_service_unit.py``).
     """
     import time
 
-    from abicheck import cli_resolve
+    from abicheck import cli_resolve, service
 
     calls: list[tuple[str, float, float]] = []
 
@@ -170,7 +183,7 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
         calls.append((version, start, end))
         return _snap(version=version)
 
-    monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+    monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
 
     old_h = [tmp_path / "old.h"]
     new_h = [tmp_path / "new.h"]
@@ -968,7 +981,7 @@ class TestCompareDispatch:
         )
         monkeypatch.setattr(
             "abicheck.cli_compare_release._run_compare_pair",
-            lambda *a, **kw: (api_break_diff, None, None),
+            lambda *a, **kw: CompareResult(api_break_diff, _SNAP, _SNAP),
         )
 
         code, out, _ = _invoke(
@@ -1218,3 +1231,107 @@ class TestDirectoryComparison:
         # The standalone compare-release command was removed; no deprecation note.
         assert "deprecated" not in (result.stderr or "")
 
+
+
+class TestCompareCliSharesServiceResolution:
+    """ADR-055 D1: the native ``compare`` CLI no longer resolves inputs itself.
+
+    ``cli_resolve._resolve_compare_snapshots`` kept a second implementation of
+    what ``service.run_compare_request`` already did, because that function was
+    one unit with no seam for ``compare``'s Click-dependent ADR-049
+    ``resolve_and_apply`` step. Splitting it into
+    ``resolve_compare_request``/``classify_compare_pair`` removed the reason
+    for the copy, so this pins that the CLI really delegates rather than
+    merely producing a similar answer.
+    """
+
+    def test_delegates_to_the_shared_resolution(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from abicheck import cli_resolve, service
+
+        seen: list[object] = []
+
+        def _spy(request, **kwargs):
+            seen.append((request, kwargs))
+            from abicheck.service_compare_pipeline import ResolvedComparePair
+
+            # The CLI reads only the two snapshots off the pair; the evidence
+            # fields belong to the classification phase it runs on its own.
+            return ResolvedComparePair(
+                old=_snap(version="old"),
+                new=_snap(version="new"),
+                old_fmt="elf",
+                new_fmt="elf",
+                old_evidence=None,
+                new_evidence=None,
+            )
+
+        monkeypatch.setattr(service, "resolve_compare_request", _spy)
+        old, new = cli_resolve._resolve_compare_snapshots(
+            tmp_path / "old.so", tmp_path / "new.so",
+            "elf", "elf",
+            [tmp_path / "old.h"], [tmp_path / "new.h"],
+            [], [],
+            "1.0", "2.0",
+            "c++",
+            None, None, None,
+            True, "dwarf", True, (tmp_path / "libs",), "/opt/lib",
+        )
+        assert (old.version, new.version) == ("old", "new")
+        assert len(seen) == 1
+        request, kwargs = seen[0]
+        # The CLI's own concerns stay the CLI's: a click notifier, and the
+        # sequential resolution this path has always used.
+        assert kwargs["allow_parallel"] is False
+        assert kwargs["notify"] is cli_resolve._click_notify
+        # Every loose argument became request surface rather than a private
+        # resolution parameter.
+        assert request.old.path == tmp_path / "old.so"
+        assert request.old.headers == (tmp_path / "old.h",)
+        assert request.new.version == "2.0"
+        assert request.dwarf_only is True
+        assert request.debug_format == "dwarf"
+        assert request.follow_dependencies is True
+        assert request.dependency_search_paths == (tmp_path / "libs",)
+        assert request.ld_library_path == "/opt/lib"
+
+    def test_translates_service_errors_into_click_exceptions(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The contract ``_resolve_input`` documented survives the move.
+
+        ``ValidationError`` (unusable input) stays exit 64 via
+        ``click.UsageError``; ``SnapshotError`` (operational failure) stays a
+        plain ``click.ClickException``.
+        """
+        import click
+
+        from abicheck import cli_resolve, service
+        from abicheck.errors import SnapshotError, ValidationError
+
+        def _call() -> None:
+            cli_resolve._resolve_compare_snapshots(
+                tmp_path / "old.so", tmp_path / "new.so",
+                "elf", "elf", [], [], [], [], "1.0", "2.0", "c++",
+                None, None, None, False, None, False, (), "",
+            )
+
+        def _raise(exc):
+            def _inner(request, **kwargs):
+                raise exc
+
+            return _inner
+
+        monkeypatch.setattr(
+            service, "resolve_compare_request", _raise(ValidationError("bad input"))
+        )
+        with pytest.raises(click.UsageError, match="bad input"):
+            _call()
+
+        monkeypatch.setattr(
+            service, "resolve_compare_request", _raise(SnapshotError("cannot load"))
+        )
+        with pytest.raises(click.ClickException, match="cannot load") as excinfo:
+            _call()
+        assert not isinstance(excinfo.value, click.UsageError)

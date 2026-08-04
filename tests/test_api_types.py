@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.api_types import CompareRequest, InputSpec, OutputSpec
+from abicheck.api_types import CompareRequest, CompareResult, InputSpec, OutputSpec
 from abicheck.errors import ValidationError
 
 
@@ -79,6 +79,18 @@ class TestInputSpec:
         spec = InputSpec.of("lib.so", public_header_dirs=["a", "b"])
         assert spec.public_header_dirs == (Path("a"), Path("b"))
 
+    # ── ADR-055 D4: follow_linker_scripts ─────────────────────────────────────
+
+    def test_follow_linker_scripts_defaults_true(self):
+        # Matches `resolve_input`'s own default, so no pre-existing caller's
+        # behaviour changes just because the field appeared.
+        assert InputSpec.of("lib.so").follow_linker_scripts is True
+        assert InputSpec(path=Path("lib.so")).follow_linker_scripts is True
+
+    def test_of_passes_through_follow_linker_scripts(self):
+        spec = InputSpec.of("lib.so", follow_linker_scripts=False)
+        assert spec.follow_linker_scripts is False
+
     def test_of_passes_through_compile_and_dump_manifest(self):
         from abicheck.compile_context import CompileContext
 
@@ -107,6 +119,17 @@ class TestCompareRequestDefaults:
         # ADR-055 D1
         assert req.depth is None
         assert req.frontend_context == "host"
+
+    def test_adr055_resolution_parity_defaults(self):
+        # ADR-055 D1's second slice: additive, so an existing caller's
+        # behaviour is unchanged until it opts in.
+        req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
+        assert req.dwarf_only is False
+        assert req.debug_format is None
+        assert req.include_labels == ()
+        assert req.follow_dependencies is False
+        assert req.dependency_search_paths == ()
+        assert req.ld_library_path == ""
 
     def test_is_frozen(self):
         req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
@@ -352,3 +375,75 @@ class TestOutputSpec:
         out = OutputSpec(fmt="json")
         with pytest.raises(dataclasses.FrozenInstanceError):
             out.fmt = "sarif"  # type: ignore[misc]
+
+
+class TestCompareResult:
+    """ADR-055 D2: the typed result wrapper."""
+
+    def _result(self):
+        from abicheck.checker_types import DiffResult
+        from abicheck.model import AbiSnapshot
+
+        diff = DiffResult(old_version="1.0", new_version="2.0", library="lib")
+        old = AbiSnapshot(library="lib", version="1.0")
+        new = AbiSnapshot(library="lib", version="2.0")
+        return CompareResult(diff=diff, old_snapshot=old, new_snapshot=new), diff, old, new
+
+    def test_as_tuple_matches_the_legacy_return_shape(self):
+        # The whole point of the wrapper is that it is a *rename* of the tuple,
+        # not a reordering — a caller unpacking either must see the same three
+        # objects in the same order.
+        result, diff, old, new = self._result()
+        assert result.as_tuple() == (diff, old, new)
+
+    def test_suppression_defaults_to_none(self):
+        result, _diff, _old, _new = self._result()
+        assert result.suppression is None
+
+    def test_carries_the_resolved_suppression_list(self):
+        from abicheck.suppression import SuppressionList
+
+        _result, diff, old, new = self._result()
+        suppression = SuppressionList([])  # empty rule set is enough here
+        result = CompareResult(
+            diff=diff, old_snapshot=old, new_snapshot=new, suppression=suppression
+        )
+        assert result.suppression is suppression
+        # ...and it stays out of the tuple view, which is the legacy shape.
+        assert result.as_tuple() == (diff, old, new)
+
+    def test_is_frozen(self):
+        result, _diff, _old, new = self._result()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            result.old_snapshot = new  # type: ignore[misc]
+
+
+class TestDebugFormatValidation:
+    """ADR-055 D1 second slice (Codex review): the newly-exposed
+    ``debug_format`` must fail through this module's ``ValidationError``
+    contract, and accept the same spellings the CLI's case-insensitive
+    ``--debug-format`` choice does."""
+
+    def _request(self, debug_format):
+        return CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), debug_format=debug_format
+        )
+
+    @pytest.mark.parametrize("value", ["auto", "dwarf", "btf", "ctf"])
+    def test_cli_choice_values_are_accepted(self, value):
+        assert self._request(value).validation_errors() == []
+
+    @pytest.mark.parametrize("value", ["DWARF", "Btf", "CTF"])
+    def test_accepted_case_insensitively_like_the_cli_choice(self, value):
+        # click.Choice(..., case_sensitive=False) — an API caller typing
+        # "DWARF" must not behave differently from the CLI caller who did.
+        assert self._request(value).validation_errors() == []
+
+    def test_a_typo_is_a_validation_error_not_a_raw_valueerror(self):
+        # Without this it reached dumper_debug._resolve_debug_metadata, whose
+        # comparisons are lowercase-only, and surfaced as a bare ValueError.
+        with pytest.raises(ValidationError, match="unsupported debug format"):
+            self._request("dwraf").validate()
+
+    def test_none_stays_valid(self):
+        assert self._request(None).validation_errors() == []

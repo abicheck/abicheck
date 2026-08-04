@@ -36,12 +36,21 @@ Gap 1 documents: ``CompareRequest`` previously had no way to express
 per-side ``CompileContext`` feature set at all, so a Python caller wanting
 that had to fall back to loose keyword arguments on lower-level functions.
 ``service.run_compare_request`` reads these new fields directly (see its own
-docstring for exactly how); it does not yet match every capability of the
-CLI's own, separately-maintained ``cli_resolve._resolve_compare_snapshots``
-(project-config ``source.method`` inference, the set-input evidence-flag
-rejection guard, per-side AST-frontend override) — migrating the CLI onto
-this path, or extending it further to match, is deliberately left as
-follow-up work (ADR-055's own "Two-resolution-path finding").
+docstring for exactly how). A second D1 slice then closed the rest of the
+gap against the CLI's own, then separately-maintained
+``cli_resolve._resolve_compare_snapshots`` — ``dwarf_only``,
+``debug_format``, ``include_labels``, and ``--follow-deps``. A third slice
+then removed that second implementation outright: ``run_compare_request``
+was split into its two phases (``service_compare_pipeline``), which gave the
+CLI's Click-dependent ADR-049 ``resolve_and_apply`` step a seam to run in —
+the thing that had made a shared resolution look impossible — and
+``_resolve_compare_snapshots`` now builds one of these requests and
+delegates. So this really is the one resolution every front end uses.
+ADR-055's "Two-resolution-path finding", first answered as option (b), is
+recorded as settled the other way in D1's "Structural half" note.
+
+ADR-055 D2 adds :class:`CompareResult`, the result side of the same pair, and
+D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.
 """
 
 from __future__ import annotations
@@ -54,8 +63,11 @@ from typing import TYPE_CHECKING, Any
 from .errors import ValidationError
 
 if TYPE_CHECKING:
+    from .checker_types import DiffResult
     from .compile_context import CompileContext
     from .dump_manifest import DumpManifest
+    from .model import AbiSnapshot
+    from .suppression import SuppressionList
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
 SUPPORTED_LANGS = frozenset({"c", "c++"})
@@ -66,6 +78,14 @@ SUPPORTED_LANGS = frozenset({"c", "c++"})
 #: pre-captured header-abi dump and has no header-AST path), so selecting it
 #: without source inputs is a validation error (D9).
 SUPPORTED_FRONTENDS = frozenset({"auto", "castxml", "clang", "hybrid", "android"})
+
+#: ELF debug formats ``--debug-format`` accepts, matching its ``click.Choice``
+#: exactly (including ``auto``). Compared case-insensitively, the way that
+#: choice is declared ``case_sensitive=False`` -- so an API caller passing
+#: ``"DWARF"`` behaves like the CLI caller who typed it, instead of reaching
+#: ``dumper_debug._resolve_debug_metadata`` and failing its lowercase-only
+#: comparison there (Codex review).
+SUPPORTED_DEBUG_FORMATS = frozenset({"auto", "dwarf", "btf", "ctf"})
 
 #: The subset of :data:`SUPPORTED_FRONTENDS` valid for header-AST parsing.
 #: "hybrid" (G28 Phase 3) runs both castxml and clang and merges them —
@@ -133,6 +153,17 @@ class InputSpec:
     # already inferred by splitting `headers` into files/dirs
     # (`split_public_header_inputs`) -- mirrors `--public-header-dir`.
     public_header_dirs: tuple[Path, ...] = ()
+    # ADR-055 D4: whether resolving `path` may follow a GNU ld linker script's
+    # INPUT()/GROUP() target to the real library. Default True matches
+    # `resolve_input`'s own default (and therefore every pre-existing caller);
+    # the MCP server sets it False because it enforces MCP_MAX_FILE_SIZE on the
+    # *caller-supplied* path before resolving, and following a script would
+    # reach a target that never went through that guard -- a tiny script
+    # pointing at a huge library would otherwise defeat the resource limit.
+    # Without this field, routing `abi_compare` through `run_compare_request`
+    # (D4) would have silently dropped that guard, so it is request surface,
+    # not an MCP-local wrapper concern.
+    follow_linker_scripts: bool = True
 
     @classmethod
     def of(
@@ -150,6 +181,7 @@ class InputSpec:
         dump_manifest: DumpManifest | None = None,
         compile: CompileContext | None = None,
         public_header_dirs: Iterable[Path | str] | None = None,
+        follow_linker_scripts: bool = True,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -165,6 +197,7 @@ class InputSpec:
             dump_manifest=dump_manifest,
             compile=compile,
             public_header_dirs=_path_tuple(public_header_dirs),
+            follow_linker_scripts=follow_linker_scripts,
         )
 
 
@@ -255,6 +288,33 @@ class CompareRequest:
     # since a binary-only depth request that still carries headers would
     # otherwise silently keep running L2.
     depth: str | None = None
+    # ADR-055 D1, second slice: the last four concepts `compare`'s own
+    # resolution (`cli_resolve._resolve_compare_snapshots`) could express and
+    # this request could not, so a Python/MCP caller had to drop to loose
+    # kwargs on `resolve_input` to reach them. All both-sides, mirroring the
+    # CLI flags they come from, which are single-valued too.
+    #
+    # `--dwarf-only` / `--debug-format`: restrict a side's debug-info parse to
+    # DWARF, or pin which debug format is read, instead of auto-detecting.
+    dwarf_only: bool = False
+    # Validated against SUPPORTED_DEBUG_FORMATS and lowercased before use, so a
+    # typo fails through this module's ValidationError contract rather than a
+    # raw ValueError deep in extraction, and "DWARF" works here exactly as it
+    # does for the CLI's case-insensitive choice.
+    debug_format: str | None = None
+    # ADR-050 D1's resolved `path -> label` map for a labeled include set.
+    # A tuple of pairs rather than a `dict` so the request stays hashable, the
+    # property `InputSpec`'s own docstring calls out; `run_compare_request`
+    # converts it back for `resolve_input`.
+    include_labels: tuple[tuple[Path, str], ...] = ()
+    # `--follow-deps` / `--search-path` / `--ld-library-path`: after both
+    # sides resolve, populate each ELF side's transitive `DependencyInfo`.
+    # Off by default, matching the CLI flag: it costs a full dependency-graph
+    # resolution per side, so it stays opt-in rather than becoming a silent
+    # cost for every typed caller.
+    follow_dependencies: bool = False
+    dependency_search_paths: tuple[Path, ...] = ()
+    ld_library_path: str = ""
     # ADR-055 D1 / ADR-050: request-level default for `CompileContext.
     # frontend_context` (`--frontend-context`, host|device), applied to a
     # side whose own `InputSpec.compile.frontend_context` reads as the class
@@ -316,6 +376,14 @@ class CompareRequest:
         # helpers from the CLI/service import-cycle-allowlisted cluster this
         # leaf module deliberately stays out of, so it's checked at runtime
         # in service.run_compare_request instead of here.
+        if (
+            self.debug_format is not None
+            and self.debug_format.lower() not in SUPPORTED_DEBUG_FORMATS
+        ):
+            allowed = ", ".join(sorted(SUPPORTED_DEBUG_FORMATS))
+            errors.append(
+                f"unsupported debug format {self.debug_format!r}: choose from {allowed}"
+            )
         if not self.policy:
             errors.append("policy profile name must not be empty")
         # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
@@ -391,11 +459,65 @@ class CompareRequest:
         return replace(self, **changes)
 
 
+@dataclass(frozen=True)
+class CompareResult:
+    """What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
+
+    Returned by :func:`abicheck.service.run_compare_request` and by the
+    ``run_compare`` kwargs shim. Both returned a bare
+    ``tuple[DiffResult, AbiSnapshot, AbiSnapshot]`` before 0.6, which left
+    every new thing a comparison resolves nowhere to land but a fourth tuple
+    slot — a break for every positional caller. As a struct, a future field
+    (a resolved-depth record, ADR-049's evaluation receipt, a coverage
+    summary) is an additive attribute instead. The same reasoning ADR-035
+    applied to ``ScanRequest``/``ScanResult``, generalized to ``compare``.
+    :meth:`as_tuple` reproduces the pre-0.6 shape in one line.
+
+    ``suppression`` is the one field beyond that rename, and it is not
+    speculative: it is what ADR-055 D4 needed to exist. ``run_compare_request``
+    resolves the suppression list internally from
+    ``CompareRequest.suppress``, but a front end applying a *post*-
+    classification concern still needs the resolved object — ``appcompat``'s
+    ``scope_diff_to_app(..., suppression=...)`` is the concrete case. Without
+    it here, the MCP server would have had to keep its own
+    ``SuppressionList.load`` call purely to re-derive a value the service had
+    already loaded, which is precisely the duplication D4 removes. The
+    resolved policy file needs no equivalent field — ``DiffResult.policy_file``
+    already carries it.
+
+    Placed here rather than in ``service.py`` (where ADR-055's own file sketch
+    put it) so the request and its result live in one leaf module: this one is
+    already "typed request/response structs", imports nothing at runtime from
+    the service layer, and keeps a caller able to type-annotate a result
+    without importing ``service``'s much heavier graph.
+    """
+
+    diff: DiffResult
+    old_snapshot: AbiSnapshot
+    new_snapshot: AbiSnapshot
+    suppression: SuppressionList | None = None
+
+    def as_tuple(self) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+        """Return ``(diff, old_snapshot, new_snapshot)`` — the pre-0.6 shape.
+
+        A one-line migration for a caller that unpacked the tuple
+        ``run_compare``/``run_compare_request`` used to return::
+
+            result, old, new = run_compare(...).as_tuple()
+
+        Nothing in abicheck itself returns that shape any more; this exists
+        only so a caller need not restructure to adopt the typed result.
+        """
+        return self.diff, self.old_snapshot, self.new_snapshot
+
+
 __all__ = [
     "HEADER_AST_FRONTENDS",
+    "SUPPORTED_DEBUG_FORMATS",
     "SUPPORTED_FRONTENDS",
     "SUPPORTED_LANGS",
     "CompareRequest",
+    "CompareResult",
     "InputSpec",
     "OutputSpec",
 ]

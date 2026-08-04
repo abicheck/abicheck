@@ -60,7 +60,7 @@ def test_run_compare_return_annotation_appears_in_generated_reference():
     gen = _load_gen()
     content = gen.OUT_PATH.read_text(encoding="utf-8")
     section = content.split("## `run_compare`", 1)[1].split("## `run_compare_request`", 1)[0]
-    assert "**Returns:** `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`" in section
+    assert "**Returns:** `CompareResult`" in section
 
 
 def test_keyword_only_parameters_are_marked_in_generated_reference():

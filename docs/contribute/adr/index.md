@@ -149,5 +149,5 @@ against the code as unverified, regardless of how confident it reads.
 | [052](052-unified-impact-assessment-model.md) | Unified Impact Assessment Model (G29 Phase 3, slices 1-9) | Accepted — slices 1-9 implemented |
 | [053](053-tu-link-unit-dso-attribution.md) | TU → Link-Unit → DSO Source-Evidence Attribution | Accepted — implemented (core algorithm + validator; CLI/Action pipeline wiring deferred, see D5) |
 | [054](054-cli-project-integration-surface-consolidation.md) | CLI Project-Integration Surface Consolidation | Accepted — implemented |
-| [055](055-typed-request-result-completeness-and-schema-registry.md) | Typed Request/Result Completeness and a Schema-Version Registry | Proposed — D3 (schema registry) implemented; D1/D2/D4 not started |
+| [055](055-typed-request-result-completeness-and-schema-registry.md) | Typed Request/Result Completeness and a Schema-Version Registry | Accepted — implemented (D1-D4), including D1's structural half: the CLI, typed API, and MCP now share one input resolution |
 | [056](056-multi-artifact-library-set-scan.md) | Multi-Artifact / Library-Set `scan` | Proposed — partially implemented (Phases 1-4's engine/detector/CLI/Action slice shipped ahead of formal sign-off; MCP half, example catalog, and `--dry-run` estimator deferred); see [G35](../plans/g35-multi-artifact-scan.md) |

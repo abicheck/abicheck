@@ -544,7 +544,7 @@ It is described by a versioned [JSON Schema](https://json-schema.org/) (draft
 
 ```python
 from abicheck.schemas import (
-    REPORT_SCHEMA_VERSION,        # e.g. "1.0"
+    REPORT_SCHEMA_VERSION,        # the MAJOR.MINOR this build emits
     COMPARE_REPORT_SCHEMA_PATH,   # pathlib.Path to the .schema.json
     load_compare_report_schema,   # -> dict
 )
@@ -556,7 +556,9 @@ Every JSON report carries a top-level `report_schema_version` field
 > **Two version numbers, two contracts.** `report_schema_version` (above)
 > versions the **comparison report** emitted by `compare`. It is distinct from
 > the `schema_version` integer inside a **snapshot** (`.abi.json`) produced by
-> `dump` — that one versions the on-disk ABI surface and is currently `8`.
+> `dump` — that one versions the on-disk ABI surface, and its current value
+> lives on its own fact-owner page
+> ([Snapshot format](../reference/snapshot-format.md)), not here.
 > `abicheck dump --format json` writes a **snapshot** (carrying `schema_version`),
 > not a report, so it has no `report_schema_version`. A report and a snapshot can
 > carry different version numbers at the same time; consumers should read
@@ -576,7 +578,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "1.0",
+  "report_schema_version": "2.26",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

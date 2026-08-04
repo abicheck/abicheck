@@ -30,22 +30,34 @@ runs the comparison, and returns the classified result.
 from pathlib import Path
 from abicheck.service import run_compare
 
-result, old_snapshot, new_snapshot = run_compare(
+result = run_compare(
     old_input=Path("libfoo.so.1"),
     new_input=Path("libfoo.so.2"),
     old_headers=[Path("include/v1/foo.h")],
     new_headers=[Path("include/v2/foo.h")],
 )
 
-print(result.verdict)       # Verdict.BREAKING, Verdict.COMPATIBLE, ...
-print(len(result.changes))  # number of detected changes
-for change in result.changes:
+print(result.diff.verdict)       # Verdict.BREAKING, Verdict.COMPATIBLE, ...
+print(len(result.diff.changes))  # number of detected changes
+for change in result.diff.changes:
     print(change.kind, change.name)
 ```
 
-`run_compare` returns a `tuple[DiffResult, AbiSnapshot, AbiSnapshot]`. It raises
+`run_compare` returns a `CompareResult` — `diff` (the `DiffResult`),
+`old_snapshot`, `new_snapshot`, and the resolved `suppression` list. It raises
 `SnapshotError` if an input cannot be loaded and `ValidationError` for an
 unrecognised input format (both from `abicheck.errors`).
+
+!!! note "Changed in 0.6"
+    `run_compare` and `run_compare_request` returned a bare
+    `tuple[DiffResult, AbiSnapshot, AbiSnapshot]` before 0.6. A struct can gain
+    a field without breaking positional callers, which a tuple cannot — so the
+    typed result became the only shape rather than a second one alongside it
+    (ADR-055 D2). To migrate a positional caller in one line:
+
+    ```python
+    result, old_snapshot, new_snapshot = run_compare(...).as_tuple()
+    ```
 
 ### Common keyword arguments
 

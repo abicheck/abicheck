@@ -231,17 +231,34 @@ class TestPerSideHeaderBackend:
         assert calls[1].get("header_backend") == "clang"
 
     def test_resolve_compare_snapshots_routes_backend_per_side(self, monkeypatch):
-        """Direct unit: _resolve_compare_snapshots derives per-side backend and
-        forwards it to each side's _resolve_input (None inherits the shared one)."""
-        from abicheck import cli_resolve
+        """Direct unit: ``_resolve_compare_snapshots`` gives each side its own
+        AST frontend, and a ``None`` override inherits the shared one.
 
-        seen: list[str] = []
+        ADR-055 D1 changed *how* it travels, not whether it does. That helper
+        now builds a ``CompareRequest`` and delegates to the shared
+        ``service.resolve_compare_request``, and a ``CompareRequest`` has one
+        request-level ``frontend`` — so a per-side override rides on that
+        side's own ``InputSpec.compile.frontend``, which
+        ``_run_dump_uncached`` documents as outranking the bare both-sides
+        ``header_backend``. The end-to-end tests above (which spy on
+        ``dumper.dump``, past that resolution) pin the effective backend each
+        side is really parsed with; this pins the transport.
+        """
+        from abicheck import cli_resolve, service
+
+        seen: list[tuple[str, str | None]] = []
 
         def fake_resolve_input(_input, _h, _inc, _ver, _lang, **kwargs):
-            seen.append(kwargs["header_backend"])
+            compile_ctx = kwargs.get("compile")
+            seen.append(
+                (
+                    kwargs["header_backend"],
+                    compile_ctx.frontend if compile_ctx is not None else None,
+                )
+            )
             return AbiSnapshot(library="libfoo.so", version=_ver)
 
-        monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+        monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
         old, new = cli_resolve._resolve_compare_snapshots(
             Path("old.json"), Path("new.json"), None, None,
             [], [], [], [], "1.0", "2.0", "c++",
@@ -251,7 +268,10 @@ class TestPerSideHeaderBackend:
             old_header_backend=None,        # inherits castxml
             new_header_backend="clang",     # overrides
         )
-        assert seen == ["castxml", "clang"]
+        # Old side: no override, so nothing pins a per-side frontend and the
+        # shared "castxml" is what it parses with. New side: the override is
+        # carried on its own compile context and outranks the shared value.
+        assert seen == [("castxml", None), ("castxml", "clang")]
         assert old.version == "1.0" and new.version == "2.0"
 
 
