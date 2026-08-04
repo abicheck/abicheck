@@ -175,17 +175,27 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 #: `type_reachability.directly_referenced_stdlib_types` reaching the
 #: evaluator, which today receives surfaces and no snapshot; that is a
 #: threaded parameter and its own change, not a drive-by here.
-#: Full finding keys (`case:mode:kind:symbol`), not case names. A case can
-#: emit several findings, so pinning only the case still let one accepted
-#: gap be fixed while a *different* finding in the same case regressed --
-#: the count and the case set both stay identical, which is the exact
-#: substitution the identity pin exists to catch (Codex review).
+#: Full finding keys (`case:mode:kind:symbol:finding_id`), not case names.
+#: A case can emit several findings, so pinning only the case let one
+#: accepted gap be fixed while a *different* finding in the same case
+#: regressed -- count and case set both identical. The trailing
+#: `report_finding_id` closes the remaining gap: two findings can share a
+#: kind and a symbol, so kind+symbol alone still admitted a substitution
+#: (Codex review, twice).
+#:
+#: The id changes when the finding's own content does (it covers old/new
+#: value, location and description). That is the intended semantics -- a
+#: changed finding is a different finding -- but it does mean an unrelated
+#: detector-wording change can trip this gate. Re-run
+#: `python scripts/measure_contract_shadow.py --json` and update these
+#: entries deliberately; do not widen the key to make a failure go away.
 UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES = (
-    "ambiguous_namespaced_leaf:public:type_size_changed:Cache",
+    "ambiguous_namespaced_leaf:public:type_size_changed:Cache:6c6732052b32c3ad",
     "public_std_string_typedef_alias_layout_changed:public:type_size_changed:"
-    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >",
+    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    ":a136b571e0c96a81",
     "public_stdlib_type_used_directly_layout_changed:public:type_size_changed:"
-    "vector<int, std::allocator<int> >",
+    "vector<int, std::allocator<int> >:24d8295b1b1fd647",
 )
 #: A replayed decision that out-claims the live one that wrote it. The
 #: persisted evaluator may only ever *weaken*, so this baseline is 0 and is
@@ -424,7 +434,17 @@ def measure_case(case: Case, mode: ContractMode) -> ModeMeasurement:
                 if relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT:
                     out.proven_losses.append(key)
                 else:
-                    out.unresolved_losses.append(key)
+                    # Pinned by the *report's own* finding id, not by
+                    # kind+symbol. Two distinct findings can share a kind
+                    # and a symbol (two parameter changes on one function,
+                    # differing only in old/new value) -- so a coarser key
+                    # let an allowlisted loss be fixed while a same-kind,
+                    # same-symbol sibling regressed, with the count, the
+                    # case set and the key all unchanged (Codex review).
+                    # The readable prefix is kept ahead of it so a failure
+                    # still says *what* regressed, not only that something
+                    # did.
+                    out.unresolved_losses.append(f"{key}:{_finding_id(change)}")
             if (
                 case.internal_noise
                 and relevance is ContractRelevance.PROVEN_OUT_OF_CONTRACT

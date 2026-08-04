@@ -1263,51 +1263,45 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     return 0
 
 
+def contract_coverage_block_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:
+    """Key paths within *data* that may carry a contract-coverage block.
+
+    The single definition of *where these fields live*. Two consumers need
+    it and they need it to agree exactly: this module reads the blocks, and
+    ``buildsource.check_report._neutralize_gate`` zeroes them for
+    ``gate-mode: advisory``. A hand-written copy of the traversal there
+    already missed the scan-shaped nested block once (Codex review), so the
+    shape is stated once and both sides derive from it.
+
+    Paths rather than the blocks themselves, because a writer additionally
+    has to *rebind* each container it touches -- ``augment_report`` copies
+    only the top level, so mutating a nested block in place would reach back
+    into the caller's own report (Codex review, again).
+    """
+    paths: list[tuple[str, ...]] = [()]
+    # A `compare` report may carry an unrelated `diff` key; only a scan
+    # report nests its coverage fields, so the marker gates the descent.
+    if "scan_schema_version" not in data:
+        return paths
+    if isinstance(data.get("diff"), Mapping):
+        paths.append(("diff",))
+    report = data.get("report")
+    if isinstance(report, Mapping) and isinstance(report.get("diff"), Mapping):
+        paths.append(("report", "diff"))
+    return paths
+
+
 def contract_coverage_blocks(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     """Every block of *data* that may carry a contract-coverage contribution.
 
-    Public because it is a *contract between a reader and a writer*, not an
-    implementation detail of this module: ``buildsource.check_report.
-    _neutralize_gate`` has to zero the contribution in exactly the blocks
-    this function hands back. A local copy of the traversal there missed the
-    scan-shaped nested field and let an advisory scan gate CI anyway (Codex
-    review) -- so the two share one definition rather than two that agree
-    until one changes.
+    The read-side view of :func:`contract_coverage_block_paths`.
     """
-    """Every place a report may carry the contract-coverage keys, outermost
-    first, so the outermost usable value wins and an inner one is only a
-    *fallback* for an unusable outer one.
-
-    Three shapes, all real and all keyed on ``scan_schema_version`` for the
-    nested two (mirroring :meth:`GateInfo.from_scan_report`, so arbitrary JSON
-    that merely happens to carry a ``diff``/``report`` key is never mined):
-
-    * the document root -- a ``compare`` report;
-    * ``diff`` -- ``ScanOutcome.to_dict()``, what ``scan --against`` writes
-      (``cli_scan_baseline`` puts the keys in the summary that becomes that
-      block);
-    * ``report.diff`` -- ``ScanResult.to_dict()``, the *public* envelope
-      ``service_scan.run_scan`` returns, whose ``report`` field is populated
-      from ``ScanOutcome.to_dict()``. A caller serializing that typed result
-      produces a second, equally documented scan shape one level deeper
-      (Codex review, fresh evidence).
-
-    Enumerated once and shared by both readers rather than spelled out in each:
-    they answer different questions off the *same* keys, so a nesting one
-    knows and the other does not is a guaranteed divergence -- and the
-    ``report.diff`` gap existed in both.
-    """
-    blocks: list[Mapping[str, Any]] = [data]
-    if "scan_schema_version" not in data:
-        return blocks
-    diff = data.get("diff")
-    if isinstance(diff, Mapping):
-        blocks.append(diff)
-    report = data.get("report")
-    if isinstance(report, Mapping):
-        nested = report.get("diff")
-        if isinstance(nested, Mapping):
-            blocks.append(nested)
+    blocks: list[Mapping[str, Any]] = []
+    for path in contract_coverage_block_paths(data):
+        node: Any = data
+        for key in path:
+            node = node[key]
+        blocks.append(node)
     return blocks
 
 

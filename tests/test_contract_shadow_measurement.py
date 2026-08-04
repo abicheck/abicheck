@@ -25,6 +25,7 @@ FP-rate gate.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -205,18 +206,48 @@ class TestUnresolvedLossMetric:
         # review). Every pinned entry must therefore carry the full
         # `case:mode:kind:symbol` key.
         for key in shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES:
-            assert key.count(":") >= 3, key
+            assert key.count(":") >= 4, key
             assert ":public:" in key, key
+            # ...and ends in the report's own finding id, which is what
+            # separates two findings sharing a kind and a symbol.
+            assert re.fullmatch(r"[0-9a-f]{8,}", key.rsplit(":", 1)[-1]), key
+
+    def test_the_pin_uses_the_same_identity_the_receipt_does(self) -> None:
+        # Not a second spelling of "which finding is this": the trailing
+        # component must be `report_finding_id`, the id the decision receipt
+        # is already keyed by (Codex review).
+        from abicheck.contract_relevance_types import ContractMode
+
+        case = next(
+            c for c in shadow.CORPUS if c.name == "ambiguous_namespaced_leaf"
+        )
+        measurement = shadow.measure_case(case, ContractMode.PUBLIC)
+        (loss,) = measurement.unresolved_losses
+        assert loss in shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES
+
+    def test_a_same_kind_same_symbol_substitution_is_caught(self) -> None:
+        # The gap the previous, kind+symbol-only pin still admitted: swap
+        # the finding id alone and the pin must fire.
+        known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
+        original = next(
+            k for k in known if k.startswith("ambiguous_namespaced_leaf:")
+        )
+        sibling = original.rsplit(":", 1)[0] + ":ffffffffffffffff"
+        assert sibling not in known
+        # Everything up to the id is identical, so every coarser projection
+        # -- case name, and case:mode:kind:symbol -- sees no change at all.
+        assert sibling.rsplit(":", 1)[0] == original.rsplit(":", 1)[0]
 
     def test_an_intra_case_substitution_is_caught(self) -> None:
         # The executable proof that the tightening was not cosmetic: swap
         # one finding for another *within* a pinned case and the pin fires,
         # where a case-name projection saw nothing.
         known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
-        original = "ambiguous_namespaced_leaf:public:type_size_changed:Cache"
-        assert original in known
+        original = next(
+            k for k in known if k.startswith("ambiguous_namespaced_leaf:")
+        )
         swapped = (known - {original}) | {
-            "ambiguous_namespaced_leaf:public:type_field_removed:Cache"
+            "ambiguous_namespaced_leaf:public:type_field_removed:Cache:0000000000000000"
         }
         assert swapped - known  # the full-key pin sees the substitution
         assert not {k.split(":", 1)[0] for k in swapped} - {

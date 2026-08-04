@@ -630,6 +630,34 @@ class TestAugmentReport:
         for block in blocks:
             assert block.get("contract_coverage_exit_contribution", 0) == 0
 
+    def test_a_read_only_nested_mapping_is_left_alone_rather_than_crashing(self):
+        # `contract_coverage_block_paths` admits any Mapping, but only a
+        # `dict` can be rebound and written. A caller that built its report
+        # programmatically with an immutable view would otherwise raise on
+        # assignment part-way through neutralization, leaving a half-
+        # neutralized report -- worse than not neutralizing that block.
+        from types import MappingProxyType
+
+        out = augment_report(
+            {
+                "scan_schema_version": "1.8",
+                "exit_code": 1,
+                "verdict": "NO_CHANGE",
+                "diff": MappingProxyType(
+                    {"verdict": "NO_CHANGE", "contract_coverage_exit_contribution": 1}
+                ),
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        # The root gate is still neutralized; the unwritable block is skipped
+        # intact rather than partially rewritten.
+        assert out["exit_code"] == 0
+        assert out["diff"]["contract_coverage_exit_contribution"] == 1
+
     def test_deferred_keeps_its_contract_coverage_contribution(self):
         # `deferred` exists so the trailing aggregate computes the gate from
         # the real values -- neutralizing it there would blind that

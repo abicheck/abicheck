@@ -258,20 +258,35 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     # advisory scan's nested contribution intact and the trailing aggregate
     # folded it back into the CI exit anyway (Codex review, reproduced).
     #
-    # The traversal is imported rather than re-derived here. A local copy is
-    # what produced that bug: it agreed with the reader for the compare shape
-    # and silently disagreed for the scan one. Imported inside the function
-    # to keep this module's import graph a leaf (`run_plan` already reaches
-    # into `..aggregate` the same way); `aggregate` never imports back.
-    from ..aggregate import contract_coverage_blocks
+    # The path set is imported rather than re-derived. A local copy is what
+    # produced that bug: it agreed with the reader for the compare shape and
+    # silently disagreed for the scan one. Imported inside the function to
+    # keep this module's import graph a leaf (`run_plan` already reaches into
+    # `..aggregate` the same way); `aggregate` never imports back.
+    #
+    # Each container along a path is *rebound to a copy* before anything is
+    # written. `augment_report` copies only the top level, so writing through
+    # a nested mapping in place reached back into the caller's own report and
+    # silently rewrote its authoritative contribution -- breaking this
+    # module's documented "*report* itself is never mutated" contract (Codex
+    # review). Copying per path is cheap and, unlike a blanket deepcopy,
+    # leaves the report's large `changes` payload untouched.
+    from ..aggregate import contract_coverage_block_paths
 
-    for block in contract_coverage_blocks(report):
-        if not isinstance(block, dict):
-            continue
-        if _is_valid_coverage_contribution(
-            block.get("contract_coverage_exit_contribution")
-        ):
-            block["contract_coverage_exit_contribution"] = 0
+    for path in contract_coverage_block_paths(report):
+        node: dict[str, Any] = report
+        for key in path:
+            child = node[key]
+            if not isinstance(child, dict):
+                break
+            copied = dict(child)
+            node[key] = copied
+            node = copied
+        else:
+            if _is_valid_coverage_contribution(
+                node.get("contract_coverage_exit_contribution")
+            ):
+                node["contract_coverage_exit_contribution"] = 0
 
 
 def _is_valid_coverage_contribution(raw: object) -> bool:
