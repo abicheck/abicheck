@@ -1205,6 +1205,61 @@ class TestSourceAbiOnlyFrontendOnScan:
         assert data["status"] == "ok"
 
 
+class TestSourceReplayUsesTheSelectedCompiler:
+    """L4 source-ABI replay invokes the compiler the request selected.
+
+    `embed_build_source` defaults `clang_bin` to a bare "clang"; the `dump`
+    CLI and `scan_engine` both override it from `--gcc-path`/`--gcc-prefix`,
+    and the typed path did not. On a hermetic or cross-toolchain host where
+    only the requested compiler works, that made an omitted `depth` return a
+    weaker snapshot and an explicit `depth="source"` fail, even though the
+    caller supplied the right compiler (Codex review).
+    """
+
+    @pytest.fixture
+    def replayed_with(self, monkeypatch):
+        from abicheck import cli_buildsource
+
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            cli_buildsource,
+            "embed_build_source",
+            lambda snap, **kwargs: captured.update(kwargs),
+        )
+        return captured
+
+    def _run(self, snap_path: Path, tmp_path: Path, ctx) -> None:
+        from abicheck import service
+
+        sources = tmp_path / "src"
+        sources.mkdir(exist_ok=True)
+        service.run_dump_request(
+            DumpRequest(input=InputSpec(path=snap_path, sources=sources, compile=ctx))
+        )
+
+    def test_gcc_path_reaches_source_replay(
+        self, snap_path: Path, tmp_path: Path, replayed_with: dict
+    ):
+        self._run(snap_path, tmp_path, CompileContext(gcc_path="/opt/oneapi/icpx"))
+        assert replayed_with["clang_bin"] == "/opt/oneapi/icpx"
+
+    def test_no_compile_context_keeps_the_default(
+        self, snap_path: Path, tmp_path: Path, replayed_with: dict
+    ):
+        self._run(snap_path, tmp_path, None)
+        assert replayed_with["clang_bin"] == "clang"
+
+    def test_a_cl_style_driver_is_not_excluded(
+        self, snap_path: Path, tmp_path: Path, replayed_with: dict
+    ):
+        # L4 re-drives a CL compile unit with `--driver-mode=cl` itself, so
+        # unlike the S2 pre-scan it must NOT fall back off a CL-mode driver
+        # (`exclude_cl_style=False`) -- doing so would replay an Intel DPC++
+        # build through a plain clang that cannot parse it.
+        self._run(snap_path, tmp_path, CompileContext(gcc_path="/opt/dpcpp-cl"))
+        assert replayed_with["clang_bin"] == "/opt/dpcpp-cl"
+
+
 class TestDependencySysrootIsForwarded:
     """`--follow-deps` under a sysroot searches the target, not the host.
 

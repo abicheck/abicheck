@@ -57,6 +57,13 @@
   so a `DumpRequest`/`CompareRequest` parsed less than the equivalent CLI
   invocation. A Tier-2 call never *executes* a build system to discover them,
   unlike the CLI: passive discovery of an existing compile database only.
+- **L4 source-ABI replay invokes the compiler the request selected** — the
+  typed path left `embed_build_source`'s `clang_bin` at its bare `"clang"`
+  default, where the `dump` CLI and `scan_engine` both override it from
+  `--gcc-path`/`--gcc-prefix`. On a hermetic or cross-toolchain host where
+  only the requested compiler works, that made an omitted `depth` silently
+  return a weaker snapshot and an explicit `depth="source"` fail, even though
+  the caller supplied the right compiler.
 - **`--follow-deps` under a sysroot searches the target, not the host** — the
   typed path passed no sysroot to the dependency resolver, so a cross/sysrooted
   extraction searched the host defaults and reported the target's dependencies

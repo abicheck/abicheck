@@ -236,8 +236,10 @@ def embed_side_build_source(
 
     from . import service_compare_evidence as _sce
     from .cli_buildsource import embed_build_source
+    from .dumper_clang import resolve_source_frontend_clang_bin
     from .dumper_scoping import dump_manifest_public_roots
 
+    ctx = evidence.compile
     try:
         embed_build_source(
             snap,
@@ -245,6 +247,22 @@ def embed_side_build_source(
             sources=side.sources,
             collect_mode=evidence.collect_mode,
             extractor=_sce.effective_frontend(evidence.compile, header_backend),
+            # L4 source-ABI replay must invoke the compiler this input's own L2
+            # header AST was pointed at (`gcc_path`/`gcc_prefix`), not
+            # `embed_build_source`'s bare "clang" default -- the same fix
+            # `scan_engine` and the `dump` CLI already carry. Without it a
+            # typed request naming a non-default toolchain (e.g. icpx) replayed
+            # L4 through a plain "clang" that may not understand the real
+            # build's flags, so an omitted `depth` silently returned a weaker
+            # snapshot and an explicit `depth="source"` failed (Codex review).
+            # `exclude_cl_style=False` because L4 re-drives a CL compile unit
+            # with `--driver-mode=cl` itself; only the S2 pre-scan needs the
+            # exclusion.
+            clang_bin=resolve_source_frontend_clang_bin(
+                ctx.gcc_path if ctx else None,
+                ctx.gcc_prefix if ctx else None,
+                exclude_cl_style=False,
+            ),
             public_headers=tuple(str(p) for p in public_headers),
             public_header_dirs=tuple(str(p) for p in public_header_dirs)
             + tuple(str(p) for p in dump_manifest_public_roots(evidence.dump_manifest)),
