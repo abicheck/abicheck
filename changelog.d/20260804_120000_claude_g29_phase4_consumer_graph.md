@@ -9,7 +9,10 @@
   `consumer_required_symbol_removed` finding names the public entry point
   behind the dependency — "`training-service` requires
   `detail::train_ops_dispatcher` via public entry `train`" — in its existing
-  `impact_assessment.proof_path`/`affected_public_roots` fields. No new
+  `impact_assessment.proof_path`/`affected_public_roots` fields. Works for a
+  real-binary OLD as well as a saved-snapshot one — `scope_diff_to_app` takes
+  the resolved old snapshot separately, for graph lookup only, so the path
+  operand keeps owning every export/version read. No new
   `ChangeKind`, no report-schema change, and no verdict, finding set, or exit
   code changes. With no graph, no captured declaration, or no
   consumer-compiled public entry reaching the symbol, the finding is exactly

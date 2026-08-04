@@ -582,7 +582,9 @@ class TestScopeDiffToAppConsumerImpact:
         )
         return old, new
 
-    def _run(self, tmp_path: Path, *, with_graph: bool):
+    def _run(
+        self, tmp_path: Path, *, with_graph: bool, old_as_path: bool = False
+    ):
         old, new = self._snapshots(with_graph=with_graph)
         diff = DiffResult(
             old_version="1.0",
@@ -592,11 +594,27 @@ class TestScopeDiffToAppConsumerImpact:
             verdict=Verdict.COMPATIBLE,
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv", _DISPATCHER})
+        # The shape every real caller produces for a real binary OLD: the
+        # positional operand is the *path*, and the snapshot carrying the
+        # graph arrives separately (Codex review on PR #672).
+        old_operand: Path | AbiSnapshot = old
+        old_snapshot: AbiSnapshot | None = None
+        if old_as_path:
+            old_operand = tmp_path / "libtrain.so.1"
+            old_operand.write_bytes(b"\x7fELF" + b"\x00" * 100)
+            old_snapshot = old
         with patch(
             "abicheck.appcompat.parse_app_requirements", return_value=reqs
-        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"), patch(
+            "abicheck.appcompat._lib_elf_meta",
+            side_effect=lambda lib: old.elf if lib is old_operand else new.elf,
+        ):
             result = scope_diff_to_app(
-                diff, tmp_path / "training-service", old, new
+                diff,
+                tmp_path / "training-service",
+                old_operand,
+                new,
+                old_snapshot=old_snapshot,
             )
         (overlay,) = [
             c
@@ -605,8 +623,10 @@ class TestScopeDiffToAppConsumerImpact:
         ]
         return result, overlay
 
-    def _overlay(self, tmp_path: Path, *, with_graph: bool) -> Change:
-        return self._run(tmp_path, with_graph=with_graph)[1]
+    def _overlay(
+        self, tmp_path: Path, *, with_graph: bool, old_as_path: bool = False
+    ) -> Change:
+        return self._run(tmp_path, with_graph=with_graph, old_as_path=old_as_path)[1]
 
     def test_overlay_names_the_public_entry_behind_the_requirement(
         self, tmp_path: Path
@@ -666,3 +686,29 @@ class TestScopeDiffToAppConsumerImpact:
         assert overlay.affected_public_roots is None
         assert overlay.impact_proof_path is None
         assert overlay.reachability_proof_path is None
+
+    def test_a_real_binary_old_still_gets_the_join_via_old_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        """The regression Codex caught: every caller passes the *path* when
+        OLD is a real binary (``cli_compare_helpers``/``mcp_server``'s
+        ``old_input if detect_binary_format(...) else old_snapshot``,
+        ``check_appcompat``'s own dump), so reading the graph off that operand
+        alone made the join fire only for a saved-JSON OLD — the inverse of
+        the primary usage, skipping exactly the ``--old-sources`` runs that
+        asked for the richest evidence."""
+        overlay = self._overlay(tmp_path, with_graph=True, old_as_path=True)
+        assert overlay.affected_public_roots == ["train"]
+        assert overlay.impact_proof_path is not None
+        assert overlay.impact_assessment is not None
+        assert overlay.impact_assessment.proof_path is not None
+        assert overlay.impact_assessment.proof_path.root == "train"
+
+    def test_old_snapshot_is_graph_lookup_only(self, tmp_path: Path) -> None:
+        """It must not change which symbols read as missing — the path
+        operand still owns every export/version read."""
+        via_path, _ = self._run(tmp_path, with_graph=True, old_as_path=True)
+        via_snapshot, _ = self._run(tmp_path, with_graph=True)
+        assert via_path.missing_symbols == via_snapshot.missing_symbols
+        assert via_path.verdict == via_snapshot.verdict
+        assert via_path.required_symbols == via_snapshot.required_symbols

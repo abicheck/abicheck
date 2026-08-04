@@ -599,6 +599,12 @@ def _apply_used_by_scoping(
         scoped = scope_diff_to_app(
             result, app, old_lib, new_lib,
             policy=policy, policy_file=policy_file, suppression=suppression,
+            # ADR-057: old_lib above is the *path* whenever OLD is a real
+            # binary, and a path carries no L5 graph -- pass the snapshot
+            # compare's own pipeline already resolved so the consumer-impact
+            # join can explain why a consumer required a removed symbol.
+            # Graph lookup only; old_lib still owns every export/version read.
+            old_snapshot=old_snapshot,
         )
         if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
             from .checker_policy import ChangeKind, ReachabilityState

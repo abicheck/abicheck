@@ -202,6 +202,35 @@ The **old** library's graph is used, not the new one: the symbol is missing
 from the new library by definition, so only the old side still carries the
 declaration and call edges that explain the dependency.
 
+### D7 — The old snapshot is threaded separately from the old operand
+
+Post-review addition (Codex on PR #672), and the difference between this
+slice working and not working in practice.
+
+`scope_diff_to_app`'s `old_lib` operand is `Path | AbiSnapshot`, and every
+caller resolves it the same way — `old_input if
+detect_binary_format(old_input) is not None else old_snapshot`
+(`cli_compare_helpers._apply_used_by_scoping`, `mcp_server`'s identical line;
+`check_appcompat` likewise passes the path it just dumped from). So for a
+**real binary OLD** — the primary usage — the operand is a `Path`, and
+reading the graph off that operand alone meant the join fired *only* when OLD
+happened to be a saved JSON snapshot. That is the inverse of what a user
+would expect, and it silently skipped exactly the runs that asked for the
+richest evidence: `compare old.so new.so --used-by app --old-sources ...`
+produced a full L5 graph and then never consulted it.
+
+The fix is a separate `old_snapshot` keyword, consulted first by
+`_library_source_graph` and used for **graph lookup only** — `old_lib` keeps
+owning every binary/export/version read, so the two can never disagree about
+what the library exports. All three call sites pass the snapshot they already
+hold for that same path. `tests/test_consumer_graph.py` pins both halves: the
+path-operand-plus-snapshot shape produces the enriched overlay, and the
+missing-symbol/verdict/required-symbol results are identical either way.
+
+This is worth stating plainly rather than burying in a changelog line,
+because the failure mode was invisible: nothing errored, no test failed, and
+the finding simply came out exactly as it did before the feature existed.
+
 ## Consequences
 
 - The top of ADR-046 D6's preference order is reachable for the first time.
@@ -243,11 +272,14 @@ declaration and call edges that explain the dependency.
   application; the schema already supports several `consumer_binary` nodes and
   `explain_required_symbols` would need no change, but nothing constructs that
   shape today, so it is untested and unclaimed.
-- **A `Path`-only old library still gets no join.** The graph is read off an
-  `AbiSnapshot`'s embedded pack; a bare library path here is a binary this
-  module only reads an export/version table from. Closing that would mean
-  `appcompat` dumping a snapshot of its own, which is a different (and much
-  more expensive) contract than "scope an already-computed diff".
+- **An old library with genuinely no snapshot anywhere gets no join.** The
+  graph is read off an `AbiSnapshot`'s embedded pack, so a caller that only
+  ever had a bare path — and never dumped or loaded a snapshot of it — has
+  nothing to offer. `scope_diff_to_app`'s `old_snapshot` parameter (D7 below)
+  covers every in-tree caller, all of which *do* hold one; closing the
+  residual case would mean `appcompat` dumping a snapshot of its own, a
+  different and much more expensive contract than "scope an already-computed
+  diff".
 - **`case194`** (G29 Phase 6's `consumer → symbol ← public entry` example
   fixture). This slice's end-to-end coverage is at the `scope_diff_to_app`
   level with synthetic snapshots; a real compiled fixture pair belongs with the
