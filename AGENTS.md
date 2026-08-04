@@ -269,6 +269,40 @@ Core pipeline (in order of data flow):
      own `scope_to_public_surface` default agrees with
      `BUILT_IN_DEFAULT_CONTRACT_MODE` by construction. A leaf; nothing
      imports back into the server
+   - `pack_application.py` — ADR-049 D8's *application* layer: what turns a
+     selected `--pack` manifest into something the engine runs, rather than
+     a line in the receipt (a first `--pack` was reverted before merge for
+     being exactly that). Deliberately not a second resolver — it reads back
+     off the already-resolved `CompatibilityEvaluationConfig` only the
+     fields whose `ValueProvenance.source_kind` is `pack_manifest`, so a
+     value D7 precedence ruled out is unreachable from here, and folds them
+     into the two objects the run is scored from: a `PolicyFile`
+     (`policy.overrides`, `surface.internal_namespaces`) and the resolved
+     compare config (`gate.exit_code_scheme`, `gate.severity.*`). Ordering
+     matters: the config is resolved from the *explicitly given*
+     `--policy-file` and only then folded, since folding first would present
+     a pack's override to the resolver as an explicit one.
+     `UNAPPLIED_PACK_FIELDS` is the enforcement half — a routable field with
+     no engine consumer (`contract.overlays`, `assurance.require_evidence`)
+     is a usage error rather than a silently inert assignment, and it is the
+     complement of what is applied, so a newly-routable field is applied or
+     listed, never neither. `contract.unresolved` left that list in Phase 7,
+     when the coverage exit gave it a consumer. Three more routes are
+     rejected for adjacent reasons: a field whose consumer only runs under
+     `--contract-evaluation` when that flag is absent
+     (`CONTRACT_EVALUATION_ONLY_FIELDS`), a value the runtime does not act on
+     (`INERT_PACK_VALUES`), and a manifest whose `assignments` mapping is
+     empty — each is a pack recorded as active configuration that changes
+     nothing, which is the single failure all of these guard. `compare`
+     takes all three kinds; `scan --against` takes policy/contract and
+     rejects a gate pack, having no gate of its own. Two review findings
+     worth not rediscovering: the gate application must *read* the resolved
+     `gate.exit_code_scheme` rather than re-derive one (re-deriving let a
+     severity-only gate pack override an explicit `--exit-code-scheme
+     legacy`), and manifest validity is checked ahead of `compare`'s
+     `--dry-run` emit — but pack-vs-pack conflict detection is not, since
+     D8 exempts a field another layer states and those layers aren't
+     resolved that early
    - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
      evaluator: one `ContractEvaluationDecision` (relevance + stable reason
      code + assurance) per already-emitted finding. Stamped onto findings
@@ -305,9 +339,27 @@ Core pipeline (in order of data flow):
      one place suppression is applied — cannot see one;
      `suppression_reaches_coverage_failures()` is the executable *proof* of
      that, not its enforcement. `coverage_exit_contribution()` states §6.1's
-     `0`/`1`; nothing applies it, since the independent coverage exit is
-     Phase 7's. Emitted by `reporter.py` under `--contract-evaluation`
+     `0`/`1`. Emitted by `reporter.py` under `--contract-evaluation`
      (report schema 2.26), `[]` rather than omitted when a domain closed
+   - `contract_coverage_exit.py` — ADR-049 Phase 7: the step that turns the
+     ledger's `0`/`1` into a real exit code. Deliberately the *only* place
+     that fold happens, and it is `max` — §7's orthogonality means a
+     coverage failure raises a clean `0` to `1` and can never lower a gate's
+     `2`/`4` (that would demote a real ABI break to "warnings only"), and it
+     never rewrites a finding's compatibility decision or gate contribution.
+     `compare` folds it inside `cli._exit_with_severity_or_verdict` rather
+     than at each call site, so a command cannot pick up a compatibility
+     exit and forget the orthogonal one; `cli_scan_baseline.py` folds the
+     same function, since a ledger gating one command and not the other is
+     exactly §6.4's cross-command divergence. `contract.unresolved=warn`
+     (D9) zeroes the floor and changes nothing else — the failures stay
+     listed and unsuppressible, because accepting incomplete assurance is
+     not hiding it. `reporter.py` emits *this* function's answer as
+     `contract_coverage_exit_contribution`, so the number a user reads is
+     the one that gated them. `0` whenever no contract context exists: a run
+     without `--contract-evaluation` has no selected domain to be short of
+     evidence for, which is what keeps every pre-existing invocation's exit
+     code unchanged
    - `contract_context.py` / `contract_context_io.py` / `contract_replay.py`
      — ADR-049 Phase 4's assembly, JSON round-trip, and the two procedures
      D6 names. `checker.compare(..., contract_evaluation=True)` returns a
@@ -595,6 +647,18 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, without `--severity-*` flags): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with any `--severity-*` flag): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE
+- **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
+  `scan --against` alike:** under `--contract-evaluation`, a selected
+  `--contract` domain whose required evidence is incomplete contributes
+  **1**, folded with `max` (`contract_coverage_exit.py`). It raises a clean
+  `0` to `1` and never lowers a `2`/`4`, and it never rewrites a finding's
+  compatibility decision or gate contribution. Without
+  `--contract-evaluation` the contribution is always `0`, so every
+  pre-existing invocation is unchanged. Every consumer that publishes an
+  exit status folds it and explains it — the two CLIs, the MCP
+  `abi_compare` tool (top-level `contract_coverage` block), and the
+  composite Action (`verdict: COVERAGE_INCOMPLETE`)
 - `compat` command: 0 = compatible, 1 = BREAKING, 2 = API_BREAK (source-level), 3-11 = errors (see `compat/cli.py:_classify_compat_error_exit_code`)
 - `64` = usage error (bad flags/inputs; `cli._EXIT_USAGE_ERROR`) — applies across commands
 - Full per-command matrix: `docs/reference/exit-codes.md`

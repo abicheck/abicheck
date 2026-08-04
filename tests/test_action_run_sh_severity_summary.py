@@ -39,14 +39,27 @@ import pytest
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = "case $VERDICT in"
 _END_MARKER = "    esac"
+#: The case block calls shared helpers (``_json_report_src`` and friends), so
+#: extracting it alone runs a snippet whose lookups all silently answer empty
+#: -- every branch then takes its "no report available" fallback and the tests
+#: pass on a script that never asked the question. Their definitions are
+#: extracted with it, from the first one to the first mode dispatch below them.
+_HELPERS_START = "_json_report_src() {"
+_HELPERS_END = 'if [[ "$MODE" == "deps-compare" ]]; then'
 
 
 def _verdict_case_region() -> str:
-    """The Job Summary's ``case $VERDICT in ... esac`` block, verbatim."""
+    """The Job Summary's ``case $VERDICT in ... esac`` block and its helpers."""
     text = RUN_SH.read_text(encoding="utf-8")
+    helpers_start = text.index(_HELPERS_START)
+    helpers = text[helpers_start : text.index(_HELPERS_END, helpers_start)]
+    # A renamed helper would otherwise silently restore the vacuous state
+    # this extraction exists to avoid: every lookup answers empty, every
+    # branch takes its fallback, and the tests still pass.
+    assert "_json_report_src()" in helpers and "_severity_gate_exit()" in helpers
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start) + len(_END_MARKER)
-    return text[start:end]
+    return helpers + "\n" + text[start:end]
 
 
 def _bash_executable() -> str:

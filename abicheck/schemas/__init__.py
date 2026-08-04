@@ -271,10 +271,11 @@ from typing import Any
 #:       ``contract_reason_code`` (a stable slug, e.g.
 #:       "public_root_membership"/"required_evidence_incomplete"/
 #:       "non_entity_finding"), and ``contract_assurance`` (one of
-#:       "complete"/"partial"/"unavailable"). Purely additive and
-#:       shadow: absent for every existing caller that doesn't pass
-#:       ``contract_evaluation=True`` (the default), and never affects
-#:       ``verdict``, ``severity``, or any exit code.
+#:       "complete"/"partial"/"unavailable"). Absent for every existing
+#:       caller that doesn't pass ``contract_evaluation=True`` (the
+#:       default). These per-finding decisions never affect ``verdict`` or
+#:       ``severity``; the sibling contract-coverage ledger added in 2.26
+#:       does contribute an orthogonal exit floor (ADR-049 Phase 7).
 #:   2.24: added the optional top-level ``suppression_audit`` object, present
 #:       only when the caller opts into ``compare --audit-suppressions``
 #:       (``--suppress`` also required). ``total_rules`` (int),
@@ -313,10 +314,11 @@ from typing import Any
 #:       rather than omitted. The ledger is **derived** from
 #:       ``contract_context``, not a second observation: the same provider
 #:       record is a failure under one domain and advisory under another
-#:       (Section 7), so it is answered per selected mode. Purely additive
-#:       and advisory, same as 2.23/2.25: the exit contribution is *stated*,
-#:       never applied — the independent coverage exit is ADR-049 Phase 7's,
-#:       alongside the default flip.
+#:       (Section 7), so it is answered per selected mode. Unlike 2.23/2.25,
+#:       this one is not purely advisory: ADR-049 Phase 7 applies the
+#:       contribution, so ``contract_coverage_exit_contribution`` is the
+#:       number that actually gated the run (folded with ``max``, and ``0``
+#:       when ``contract.unresolved=warn`` accepted the failures below it).
 REPORT_SCHEMA_VERSION = "2.26"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

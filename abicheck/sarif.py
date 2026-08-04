@@ -530,10 +530,11 @@ def _coverage_notifications(result: object) -> dict[str, object]:
     list, because "checked, nothing missing" and "never checked" are
     different states and a consumer must be able to tell them apart.
 
-    ``level: "error"`` regardless of the ledger's advisory exit status: the
-    notification describes the evidence, not the gate, and the gate's own
-    ``executionSuccessful``/``exitCode`` are deliberately left untouched --
-    the independent coverage exit is ADR-049 Phase 7's.
+    ``level: "error"`` regardless of what the ledger contributed: the
+    notification describes the evidence, not the gate. ``executionSuccessful``
+    stays untouched (the tool ran to completion either way), but the
+    invocation's ``exitCode`` *is* folded with the coverage floor now that
+    ADR-049 Phase 7 applies it -- see :func:`to_sarif`.
     """
     from .contract_coverage_ledger import coverage_failures_for_context
 
@@ -781,6 +782,49 @@ def to_sarif(
     scoped_gate = _scoped_gate_properties(result)
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
 
+    # ADR-049 Phase 7: the orthogonal contract-coverage floor, folded into the
+    # invocation's exit code exactly as the process folds it. This block is
+    # SARIF's own machine-readable exit contract, and the comment below states
+    # it mirrors what the CLI really exits with -- so leaving it out published
+    # `exitCode: 0` beside a process that exited 1, and a consumer reading the
+    # artifact accepted a run its own notifications said was gated (Codex
+    # review, reproduced). `max`, for the same reason the process uses it: the
+    # axis raises a clean 0 and never lowers a real break's code.
+    #
+    # `executionSuccessful` stays True and is *not* folded: per the SARIF spec
+    # it reports whether the tool ran to completion, not whether it found
+    # blocking issues -- the spec's own example pairs `exitCode: 1` with
+    # `executionSuccessful: true`. Incomplete evidence is a finding about the
+    # comparison, not a failed execution.
+    from .contract_coverage_exit import coverage_exit_floor
+
+    _coverage_floor = coverage_exit_floor(result)
+    _base_exit_code = (
+        scoped_exit_code
+        if scoped_exit_code is not None
+        else severity_gate["exitCode"]
+        if severity_gate is not None
+        else (
+            4
+            if result.verdict == Verdict.BREAKING
+            else 2
+            if result.verdict == Verdict.API_BREAK
+            else 0
+        )
+    )
+    _exit_code = max(_base_exit_code, _coverage_floor)
+    _exit_description = (
+        f"{scoped_gate['gateVerdict']} (scoped: {scoped_gate['gateScope']})"
+        if scoped_gate is not None
+        else f"{result.verdict.value} (severity-gated)"
+        if severity_gate is not None
+        else result.verdict.value
+    )
+    if _coverage_floor:
+        # Names the axis rather than only moving the number, so a reader of
+        # the artifact alone can tell a coverage floor from a gate decision.
+        _exit_description += " + incomplete contract coverage (exit 1)"
+
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
         "version": "2.1.0",
@@ -824,26 +868,8 @@ def to_sarif(
                         # exits with (CLI-audit P1 fix; matches
                         # cli_compare_helpers.run_compare's unconditional
                         # sys.exit(scoped_exit_code) when scoping was requested).
-                        "exitCode": (
-                            scoped_exit_code
-                            if scoped_exit_code is not None
-                            else severity_gate["exitCode"]
-                            if severity_gate is not None
-                            else (
-                                4
-                                if result.verdict == Verdict.BREAKING
-                                else 2
-                                if result.verdict == Verdict.API_BREAK
-                                else 0
-                            )
-                        ),
-                        "exitCodeDescription": (
-                            f"{scoped_gate['gateVerdict']} (scoped: {scoped_gate['gateScope']})"
-                            if scoped_gate is not None
-                            else f"{result.verdict.value} (severity-gated)"
-                            if severity_gate is not None
-                            else result.verdict.value
-                        ),
+                        "exitCode": _exit_code,
+                        "exitCodeDescription": _exit_description,
                     }
                 ],
                 "results": sarif_results,

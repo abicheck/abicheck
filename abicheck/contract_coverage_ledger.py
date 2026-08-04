@@ -60,15 +60,15 @@ it answers, for a real run's rules and this ledger, whether any rule
 matched a failure. The answer must be empty, and a test asserts it stays so
 for rules deliberately written to match one.
 
-**Advisory, like everything else in ADR-049 Phase 3-6.** The plan gives this
-ledger an independent exit `1` contribution ("The sibling contract-coverage
-ledger may contribute exit `1`; it never rewrites the null compatibility
-decision or the finding's zero gate contribution"). That contribution is
-Phase 7's, along with the default flip: this module computes and reports the
-ledger, and :func:`coverage_exit_contribution` states what it *would*
-contribute, without any caller wiring it to a real exit code yet. Reporting
-the number before acting on it is the same order every other part of this
-feature followed.
+**Gating, as of ADR-049 Phase 7 -- but only through one narrow channel.**
+The plan gives this ledger an independent exit `1` contribution ("The
+sibling contract-coverage ledger may contribute exit `1`; it never rewrites
+the null compatibility decision or the finding's zero gate contribution").
+It was reported and inert through Phases 3-6, deliberately, so a consumer
+could see the number before it bit; `contract_coverage_exit` now folds it
+into the process exit status. This module stays the pure derivation and
+gains no knowledge of exit codes, which is what keeps the number a report
+states identical to the one that gated the run.
 """
 
 from __future__ import annotations
@@ -281,10 +281,11 @@ def coverage_exit_contribution(failures: Sequence[CoverageFailure]) -> int:
 
     Section 6.1: "The sibling contract-coverage ledger may contribute exit
     `1`; it never rewrites the null compatibility decision or the finding's
-    zero gate contribution." Stated here and reported; no caller wires it to
-    a real exit code, which is Phase 7's job alongside the default flip.
-    Computing it now is what lets a consumer see what the flip will do before
-    it does it.
+    zero gate contribution." Derived here and reported; ADR-049 Phase 7
+    *applies* it -- `contract_coverage_exit.fold_coverage_exit` folds it into
+    the process exit status with ``max``. This function stays the pure
+    derivation, so the number a report states and the number that gated the
+    run cannot diverge.
     """
     return 1 if failures else 0
 

@@ -104,6 +104,7 @@ from .compatibility_evaluation_wiring import (
     internal_namespaces_candidate,
     legacy_contract_mode_candidate,
     load_selected_packs,
+    policy_file_pins_internal_namespaces,
     resolve_pack_field_assignments,
     resolve_policy_pack_overrides,
     resolve_selected_packs,
@@ -1046,12 +1047,9 @@ def resolve_compatibility_evaluation_config(
     # of this mapping, so the value is a marker rather than the real resolved
     # value (which several of these fields do not have yet at this point).
     pinned_contract: dict[str, Hashable] = {}
-    if explicit.policy_file is not None and (
-        explicit.policy_file.internal_namespaces
-        # An explicit `internal_namespaces: []` states "none", so it pins the
-        # field exactly as a populated list does (Codex review).
-        or explicit.policy_file.internal_namespaces_stated
-    ):
+    # One shared predicate, so what the resolver treats as "stated elsewhere"
+    # and what a front end treats as shadowing cannot drift apart.
+    if policy_file_pins_internal_namespaces(explicit.policy_file):
         pinned_contract[INTERNAL_NAMESPACES_FIELD] = _STATED_ELSEWHERE
     pinned_gate: dict[str, Hashable] = {}
     if (

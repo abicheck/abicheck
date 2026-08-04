@@ -252,6 +252,48 @@ modify the final process exit status. Treat the table above as `compare` semanti
 
 ---
 
+## Reusable packs (`--pack`)
+
+A `--policy-file` is one project's own overrides. When the *same* overrides
+should be shared across projects, put them in a **pack** — a small versioned
+YAML document (`id`/`version`/`kind`/`assignments`) selected with
+`compare --pack` or `scan --against ... --pack` (repeatable):
+
+```yaml
+id: vendor_sdk_relaxations
+version: 1
+kind: policy
+assignments:
+  func_removed: warn
+```
+
+A pack really configures the run: it changes the verdict and the exit code
+exactly as the equivalent `--policy-file` overrides would. It just never wins
+against one — an explicitly stated value (a `--policy-file` override, an
+`--exit-code-scheme`, a `--severity-*` flag, a `--profile`, or `.abicheck.yml`)
+always outranks a pack, and two selected packs disagreeing about the same
+field are a usage error rather than a silent last-one-wins.
+
+`kind: contract` and `kind: gate` packs carry the other two namespaces
+(internal namespaces and `contract.unresolved`; and the exit-code scheme /
+severity levels). `contract.unresolved` needs `--contract-evaluation` to have
+any effect — it configures the contract-coverage exit, which is only computed
+when a domain is selected to measure coverage of — so assigning it without
+that flag is a usage error rather than a silently inert setting.
+
+Where each form is accepted follows from what a command has to configure:
+a `kind: gate` pack is **compare-only**, because a `scan`'s exit code follows
+its compatibility verdict directly and so has no gate to move; `scan --pack`
+requires `--against`, since a pack's only application there is the baseline
+comparison; and `--pack` is rejected on a directory/package (release)
+`compare`, whose per-library fan-out dispatches before the effective
+configuration is resolved. Each of those is a usage error rather than a
+silently ignored flag.
+
+For the full field vocabulary, the precedence rules, and what a resolution
+receipt records, see
+[Compatibility evaluation configuration](../reference/compatibility-evaluation-config.md).
+
 ## Extending Policies
 
 Built-in profiles are defined in `abicheck/checker_policy.py`:

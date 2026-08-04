@@ -72,7 +72,7 @@ from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .change_registry_types import Verdict
 from .compatibility_evaluation_config import (
@@ -116,6 +116,30 @@ BUILT_IN_DEFAULT_CONTRACT_MODE = LEGACY_SCOPE_FLAG_CONTRACT_MODE[
     LegacyScopeFlag.SCOPE_PUBLIC_HEADERS
 ]
 _BUILT_IN_DEFAULT_MODE = BUILT_IN_DEFAULT_CONTRACT_MODE  # backward-compatible alias
+
+
+def policy_file_pins_internal_namespaces(policy_file: Any) -> bool:
+    """Does *policy_file* state ``surface.internal_namespaces``?
+
+    The single definition of D7's "another layer already states this field"
+    for this one field. The resolver uses it to build `pinned_contract` (so a
+    selected pack never overrides a stated value), and
+    ``cli_compare_receipt.validate_pack_manifests`` uses it to know whether a
+    pack's assignment can reach runtime at all before precedence is resolved.
+    Shared rather than restated: a second copy is a second thing that can
+    disagree with the resolver about what shadows what (Codex review, which
+    caught a coarser "was any --policy-file given" proxy treating a file that
+    only sets `base_policy` as shadowing).
+
+    An explicit ``internal_namespaces: []`` states "none", so it pins the
+    field exactly as a populated list does.
+    """
+    if policy_file is None:
+        return False
+    return bool(
+        getattr(policy_file, "internal_namespaces", None)
+        or getattr(policy_file, "internal_namespaces_stated", False)
+    )
 
 
 def legacy_contract_mode_candidate(
@@ -375,8 +399,49 @@ def load_selected_packs(
     re-digest every manifest per call, and a manifest edited *between* those
     reads would produce receipt entries carrying different identities for
     what is meant to be one configuration (CodeRabbit review).
+
+    Also where a selected-but-empty manifest is rejected, for the same
+    reason: emptiness is a property of the file, and asking it *here* asks it
+    of the revision that will configure the run. An earlier arrangement asked
+    it from the front ends before resolution, which left the window this
+    function's own one-read rule exists to close -- a generated or
+    concurrently edited pack that was non-empty at the front end's read and
+    ``assignments: {}`` at the resolver's would be recorded as selected,
+    supply no field provenance, pass every later check, and succeed as
+    exactly the decorative pack the rule rejects (Codex review). Every path
+    that resolves or validates packs loads through here, so one call site
+    covers `compare`, `compare --dry-run`, `scan`, the MCP tools and the
+    typed API.
     """
-    return [(str(path), load_pack_manifest(path)) for path in pack_paths]
+    entries = [(str(path), load_pack_manifest(path)) for path in pack_paths]
+    check_packs_assign_something(entries)
+    return entries
+
+
+def check_packs_assign_something(entries: Sequence[tuple[str, LoadedPack]]) -> None:
+    """Reject a loaded manifest whose ``assignments`` mapping is empty.
+
+    The decorative pack in its purest form: selected, recorded in the receipt
+    as active configuration, and changing no verdict, finding or exit code.
+
+    Its own named function rather than an inline loop in
+    :func:`load_selected_packs` so the rule can be tested directly on
+    entries, and so it reads as a rule rather than as loading trivia.
+
+    It cannot instead be asked of the *resolved* configuration, where every
+    other pack rejection lives: a pack whose value an explicit
+    ``--policy-file`` outranks also supplies no provenance, so "recorded but
+    contributed nothing" would be indistinguishable there from D8 precedence
+    working correctly.
+    """
+    for path, pack in entries:
+        if not pack.assignments:
+            raise PackManifestError(
+                f"{path}: assigns nothing. A pack that is selected, recorded "
+                "as active configuration, and changes no verdict, finding or "
+                "exit code is the failure this check exists to prevent -- "
+                "give it an assignment or drop the --pack."
+            )
 
 
 def resolve_selected_packs(

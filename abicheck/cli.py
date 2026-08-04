@@ -82,6 +82,7 @@ from .cli_options import (
     lang_option,
     normalize_sided_options,
     output_options,
+    pack_option,
     policy_options,
     profile_option,
     release_options,
@@ -1158,7 +1159,9 @@ def _announce_exit_scheme(
         )
     else:
         click.echo(
-            "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break). "
+            "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break; "
+            "with --contract-evaluation, 1=incomplete contract coverage, an "
+            "orthogonal axis that never lowers a 2/4). "
             "Pass --exit-code-scheme severity (or a --severity-* setting) for the "
             "severity-aware scheme.",
             err=True,
@@ -1167,8 +1170,16 @@ def _announce_exit_scheme(
 
 def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
+    fmt: str | None = None, stat: bool = False, secondary_fmt: str | None = None,
 ) -> None:
-    """Exit with the appropriate code for the resolved exit-code scheme."""
+    """Exit with the appropriate code for the resolved exit-code scheme.
+
+    ADR-049 Phase 7: the contract-coverage axis is folded in here rather than
+    at each call site, so a command cannot acquire a compatibility exit and
+    forget the orthogonal one. `fold_coverage_exit` reads the floor off
+    *result*'s own persisted context and is `0` when the run recorded none.
+    """
+    from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
     from .severity import compute_exit_code, legacy_exit_code
     if scheme == "severity":
         assert sev_config is not None
@@ -1180,12 +1191,12 @@ def _exit_with_severity_or_verdict(
             kind_sets=eff_sets,
             policy_file=result.policy_file,
         )
-        if exit_code != 0:
-            sys.exit(exit_code)
     else:
-        code = legacy_exit_code(result.verdict)
-        if code != 0:
-            sys.exit(code)
+        exit_code = legacy_exit_code(result.verdict)
+    announce_coverage_floor(result, base_exit=exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
+    exit_code = fold_coverage_exit(exit_code, result)
+    if exit_code != 0:
+        sys.exit(exit_code)
 
 
 def _log_one_side_debug(
@@ -1803,6 +1814,7 @@ def _embed_inline_source_side(
                    "diff is trusted. Not needed, and does nothing, on a "
                    "comparable pair.")
 @contract_options  # ADR-049: --contract-evaluation/--contract/--audit-suppressions
+@pack_option  # ADR-049 D8: --pack
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -1827,6 +1839,14 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       1  Error-level findings in addition or quality_issues only
       2  Error-level findings in potential_breaking (but not abi_breaking)
       4  Error-level findings in abi_breaking
+    \b
+    Orthogonal to both tables (ADR-049 Phase 7): with --contract-evaluation,
+    incomplete contract coverage of the selected --contract domain
+    contributes exit 1. It is folded with max, so it raises a clean 0 to 1
+    and never lowers a 2/4 — under the legacy scheme, 1 can only mean this.
+    Without --contract-evaluation there is no domain to be short of evidence
+    for and the tables above are exhaustive. Set contract.unresolved=warn
+    (via a `kind: contract` --pack) to accept incomplete coverage.
     \b
     Invalid invocation (bad arguments/options, unreadable or unrecognised
     input) exits 64, outside the result space above, so it is never mistaken

@@ -227,32 +227,210 @@ def resolve_cli_config(
     )
 
 
+def dry_run_scheme_label(resolved_cfg: Any, pack_paths: Collection[Any]) -> str:
+    """How ``compare --dry-run`` should describe the exit-code scheme.
+
+    The renderer was previously handed the *raw* ``--exit-code-scheme`` value,
+    so it printed "legacy (0/2/4)" whenever the flag was absent -- including
+    when ``.abicheck.yml`` configured severity and the real run therefore used
+    the severity scheme. That predates ``--pack`` and is wrong for the plain
+    config case too, so this reports the *resolved* scheme instead (Codex
+    review, reproduced against a config-only run with no pack involved).
+
+    A selected pack is called out rather than resolved: a gate pack can move
+    the scheme, but resolving one here is not safe. The configuration cannot
+    be resolved before the ``--policy-file`` this command loads much later,
+    and a *partial* resolution would run D8 conflict detection against
+    different pins than the real one -- which can reject a pack pair the real
+    run accepts. Saying the scheme may still move is honest; asserting one
+    computed under different precedence would not be.
+    """
+    scheme = getattr(resolved_cfg, "exit_code_scheme", None)
+    label = "legacy (0/2/4)" if scheme == "legacy" else (scheme or "legacy (0/2/4)")
+    return f"{label}; a selected --pack may adjust it" if pack_paths else label
+
+
+def _shadowed_inert_fields(policy_file_path: Any) -> frozenset[str]:
+    """Which `INERT_PACK_VALUES` fields a `--policy-file` already states.
+
+    Loaded here rather than proxied on "a path was given": a file setting
+    only `base_policy` shadows nothing, and treating it as shadowing skipped
+    a rejection the real run then made (Codex review). The predicate is the
+    resolver's own, so this cannot disagree with `pinned_contract`.
+
+    A file that fails to load yields "nothing shadowed" rather than raising:
+    the real run loads it properly a moment later and reports that failure
+    with its own `--policy-file` framing. This is also the only place that
+    reads it early, and it runs only when `--pack` is selected, so no
+    pre-existing invocation changes.
+
+    Only the three failures `PolicyFile.load` documents are swallowed. A
+    blanket `except Exception` here would also absorb whatever the *caller's*
+    own `PackManifestError` handling is meant to see, and would hide a real
+    defect in the loader behind a silently-empty answer (CodeRabbit review).
+    """
+    if policy_file_path is None:
+        return frozenset()
+    from .compatibility_evaluation_wiring import policy_file_pins_internal_namespaces
+    from .policy_file import PolicyFile
+
+    try:
+        loaded = PolicyFile.load(policy_file_path)
+    except (ValueError, OSError, ImportError):
+        return frozenset()
+    if policy_file_pins_internal_namespaces(loaded):
+        return frozenset({"surface.internal_namespaces"})
+    return frozenset()
+
+
+def validate_pack_manifests(
+    pack_paths: Collection[Any],
+    *,
+    policy_file_path: Any = None,
+    contract_evaluation: bool = True,
+) -> None:
+    """Reject an unusable ``--pack`` manifest before anything else runs.
+
+    Called ahead of ``compare``'s ``--dry-run`` emit, where that command
+    already validates every other flag combination: a dry run must not report
+    "ok" for an invocation the identical real run rejects with exit 64. The
+    full pack *resolution* cannot move that early -- it needs the
+    ``--policy-file`` the command loads much later -- but manifest validity
+    is a property of the manifests alone, so a malformed document, an unknown
+    ``kind``/``ChangeKind`` slug, an unroutable field, or an assignment this
+    build resolves but does not apply is answerable here (Codex and
+    CodeRabbit review, both reproduced).
+
+    Pack-vs-pack *conflict* detection deliberately stays behind: D8 exempts a
+    field another layer already states, so the answer depends on layers not
+    resolved yet. Checking it here would make a dry run *stricter* than the
+    real run -- the same divergence in the other direction.
+
+    Reads the manifests a second time (the resolver loads its own). That is
+    inherent to validating before resolution rather than an oversight: the
+    two answer different questions, and the resolver's own "one read per
+    resolution" rule is about not splitting *one* resolution's identities
+    across two reads, which this does not do.
+
+    Raises :class:`~abicheck.errors.PackManifestError`; the caller maps it to
+    a usage error.
+    """
+    if not pack_paths:
+        return
+    from .pack_application import check_pack_fields_applied
+
+    check_pack_fields_applied(
+        list(pack_paths),
+        shadowed_fields=_shadowed_inert_fields(policy_file_path),
+        contract_evaluation=contract_evaluation,
+    )
+
+
+def resolve_and_apply(
+    params: Mapping[str, Any],
+    *,
+    resolved_cfg: Any,
+    policy: str,
+    contract_evaluation: bool = False,
+    **kwargs: Any,
+) -> tuple[Any, Any, Any]:
+    """Resolve this invocation's configuration, then let its packs configure it.
+
+    Returns ``(config, policy_file, resolved_cfg)``: the resolved
+    configuration (``None`` when nothing would read one -- see
+    :func:`record_resolved_config`), and the policy file and compare config
+    the comparison should actually run with.
+
+    The selected packs are read from ``params['pack_paths']`` and nowhere
+    else. An earlier revision also took them as a keyword and let that
+    overwrite the ``params`` entry, so the two could silently disagree -- and
+    the branches below read only the keyword, meaning a caller that filled
+    ``params`` alone would have its packs *recorded in the receipt and
+    applied to nothing*. That is precisely the decorative-``--pack``
+    regression this module exists to prevent, so there is one source
+    (CodeRabbit review).
+
+    Both halves come from the *same* resolution, which is what makes
+    ``--pack`` real rather than decorative: the resolver has already applied
+    D7 precedence and D8 conflict detection, and
+    :func:`~abicheck.pack_application.pack_application` reads back only the
+    fields whose provenance names a pack. Nothing here decides precedence.
+
+    The order matters and is not incidental: the configuration is resolved
+    from the *explicitly given* ``policy_file`` (``kwargs['policy_file']``),
+    and only then are the packs' contributions folded into a new one. Folding
+    first would present a pack's override to the resolver as an explicitly
+    stated ``--policy-file`` value -- outranking the packs it came from, and
+    misreported in the receipt.
+
+    Raises what the canonical resolver and the pack loader raise; mapping
+    those onto exit 64 is the caller's job, as both modules document.
+    """
+    pack_paths = tuple(params.get("pack_paths") or ())
+    if not contract_evaluation and not pack_paths:
+        # Nothing would read a resolution: no context exists to record one
+        # onto, and no pack can contribute to the run. Resolving anyway would
+        # make every ordinary `compare` newly able to fail on a D7 conflict
+        # it never previously computed.
+        return None, kwargs.get("policy_file"), resolved_cfg
+    config = resolve_cli_config(params, **kwargs)
+    policy_file = kwargs.get("policy_file")
+    if not pack_paths:
+        return config, policy_file, resolved_cfg
+    from .pack_application import (
+        apply_to_compare_config,
+        check_resolved_config_applies_packs,
+        pack_application,
+        policy_file_with_packs,
+    )
+
+    # Checked again here -- but against the *resolution*, not a second read of
+    # the files. `validate_pack_manifests` ran much earlier (before the
+    # dry-run emit) and validated whatever was on disk then; re-reading here
+    # would only move that window rather than close it, since the resolver had
+    # already loaded its own copy. Asking the resolved config is exact: it is
+    # the revision that configures the run, by construction.
+    # `contract_evaluation` is passed because a field like
+    # `contract.unresolved` only has a consumer when a domain is selected --
+    # accepting it otherwise would record active configuration that reads
+    # back as nothing, the decorative-pack failure again (Codex review).
+    check_resolved_config_applies_packs(config, contract_evaluation=contract_evaluation)
+
+    application = pack_application(config, policy_file=policy_file)
+    return (
+        config,
+        policy_file_with_packs(policy_file, application, base_policy=policy),
+        apply_to_compare_config(resolved_cfg, application),
+    )
+
+
 def record_resolved_config(
     result: Any,
     resolved_cfg: Any,
-    project_cfg: Any,
-    *,
-    params: Mapping[str, Any],
-    typed: Collection[str],
-    project_path: Path | None = None,
-    policy_file: Any = None,
-    suppression: Any = None,
-    suppress_path: Path | None = None,
-    run_profile: Mapping[str, Any] | None = None,
-    policy_option: str | None = None,
-    policy_path: Path | None = None,
-    policy_sha256: str | None = None,
-    project_sha256: str | None = None,
-    symbols_list: Any = None,
+    config: Any,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
-    A no-op unless ``--contract-evaluation`` produced a context. Runs before
-    any report is rendered, so every output path sees one configuration
-    resolved by the canonical resolver rather than the core verb's
-    argument-shaped reconstruction, and sees the gate the run was actually
-    scored with rather than :class:`GateConfig`'s built-in defaults.
+    A no-op unless ``--contract-evaluation`` produced a context (and unless
+    the caller resolved a *config* at all -- a run with neither
+    ``--contract-evaluation`` nor ``--pack`` resolves nothing, since nothing
+    would read the result). Runs before any report is rendered, so every
+    output path sees one configuration resolved by the canonical resolver
+    rather than the core verb's argument-shaped reconstruction, and sees the
+    gate the run was actually scored with rather than :class:`GateConfig`'s
+    built-in defaults.
+
+    *config* arrives already resolved rather than being resolved here: since
+    ADR-049's ``--pack`` landed, the same object also *configures* the run
+    (``pack_application``), and it has to exist before the comparison for
+    that. Resolving a second time here would re-read every pack manifest --
+    the "one read per resolution" rule ``resolve_compatibility_evaluation_config``
+    keeps internally, for the same reason -- and would be handed the
+    already-pack-folded policy file, so the receipt would report a pack's
+    contribution as an explicitly stated ``--policy-file`` override.
     """
+    if config is None:
+        return
     from .contract_evidence import PersistedContractContext
 
     ctx = getattr(result, "contract_context", None)
@@ -264,21 +442,6 @@ def record_resolved_config(
     )
     from .contract_context import with_resolved_config, with_resolved_gate
 
-    config = resolve_cli_config(
-        params,
-        typed=typed,
-        project_cfg=project_cfg,
-        project_path=project_path,
-        policy_file=policy_file,
-        suppression=suppression,
-        suppress_path=suppress_path,
-        run_profile=run_profile,
-        policy_option=policy_option,
-        policy_path=policy_path,
-        policy_sha256=policy_sha256,
-        project_sha256=project_sha256,
-        symbols_list=symbols_list,
-    )
     ctx = with_resolved_config(ctx, config)
     # The values the run was scored with, with the canonical resolver's
     # provenance -- see this module's docstring for why the two halves come

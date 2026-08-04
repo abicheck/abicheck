@@ -91,6 +91,7 @@ from .cli_options import (
     env_matrix_option,
     lang_option,
     merge_compile_config,
+    pack_option,
     policy_options,
     resolve_compile_context,
     scope_options,
@@ -299,7 +300,9 @@ def _render_text(out: ScanOutcome) -> str:
 
 
 def _resolve_changed_seed(
-    changed_paths_opt: tuple[str, ...], since: str | None, sources: Path | None,
+    changed_paths_opt: tuple[str, ...],
+    since: str | None,
+    sources: Path | None,
 ) -> tuple[list[str], str, bool]:
     """Resolve the changed-path seed → ``(changed, changed_src, seeded)``.
 
@@ -317,8 +320,6 @@ def _resolve_changed_seed(
             return [], f"--since {since} (seed failed; broad scope)", False
         return git_changed, f"--since {since}", True
     return [], "none (no diff seed; broad scope)", False
-
-
 
 
 def _parse_abi3_floor(abi3: str | None) -> tuple[int, int] | None:
@@ -359,7 +360,8 @@ def _resolve_auto_source_method(
 
 
 def _scan_explicit_flags(
-    source_method: str | None, depth: str | None,
+    source_method: str | None,
+    depth: str | None,
 ) -> tuple[bool, bool]:
     """The two deliberately-distinct 'explicit' notions (ADR-037), as a pair.
 
@@ -436,16 +438,24 @@ def render_scan_dry_run(
         f"format: {fmt}",
         "dry-run exit codes: 0 valid, 1 requested depth not satisfiable, "
         "64 usage error (a real scan run's exit codes are 0 compatible, "
+        "1 incomplete contract coverage (--contract-evaluation only), "
         "2 API break, 4 ABI break, 5 budget overflow, "
         "6 not_comparable)",
     )
     try:
         req = ScanRequest(
-            binaries=[artifact], headers=headers, includes=includes,
-            sources=sources, build_info=effective_build_info,
-            mode="pr", source_method=resolved.value, depth=eff_depth_enum.value,
-            changed_paths=list(changed), seeded=seeded,
-            budget=Budget(total_timeout=budget_s), lang=lang,
+            binaries=[artifact],
+            headers=headers,
+            includes=includes,
+            sources=sources,
+            build_info=effective_build_info,
+            mode="pr",
+            source_method=resolved.value,
+            depth=eff_depth_enum.value,
+            changed_paths=list(changed),
+            seeded=seeded,
+            budget=Budget(total_timeout=budget_s),
+            lang=lang,
         )
         estimates = estimate_scan(req, resolved_level=(resolved, eff_depth_enum))
         total = sum(e.est_seconds for e in estimates)
@@ -474,6 +484,27 @@ def _emit_scan_report(outcome: ScanOutcome, fmt: str, output: Path | None) -> No
         click.echo(f"Report written to {output}", err=True)
     else:
         click.echo(text)
+
+    # ADR-049 §7: a coverage-gated exit must say so. `scan --format json`
+    # carries the ledger in its own summary; every other renderer ignores
+    # those keys, so without this the command prints "Verdict: NO_CHANGE"
+    # and then fails with no explanation (Codex review).
+    if fmt != "json":
+        from .cli_compare_helpers import _verdict_exit_code
+        from .contract_coverage_exit import coverage_diagnostic_from_summary
+
+        # `outcome.exit_code` has ALREADY had the coverage floor folded in
+        # by `_run_baseline_compare`, so passing it would make the notice
+        # say "contributes 1 to an exit that was already 1" for a run where
+        # coverage is exactly what raised 0 to 1 (Codex review). The
+        # pre-coverage value is the verdict's own code, which is what that
+        # fold took as its base.
+        notice = coverage_diagnostic_from_summary(
+            outcome.diff_summary,
+            base_exit=_verdict_exit_code(outcome.verdict),
+        )
+        if notice is not None:
+            click.echo(notice, err=True)
 
     if outcome.exit_code != 0:
         sys.exit(outcome.exit_code)
@@ -590,6 +621,9 @@ _COMPARISON_ONLY_FLAGS = {
     "env_matrix_path": "--env-matrix",
     "contract_evaluation": "--contract-evaluation",
     "contract_mode": "--contract",
+    # ADR-049 D8: a pack's only application here is the baseline comparison's
+    # policy file, so without one it would configure nothing.
+    "pack_paths": "--pack",
 }
 
 
@@ -712,9 +746,7 @@ def _run_artifact_set(
     budget_s = _parse_budget(budget)
     abi3_floor = _parse_abi3_floor(abi3)
     enabled_checks, severities = _parse_crosschecks(crosschecks)
-    bsp = tuple(
-        s.strip() for s in bundle_system_providers.split(",") if s.strip()
-    )
+    bsp = tuple(s.strip() for s in bundle_system_providers.split(",") if s.strip())
 
     req = ScanRequest(
         binaries=list(discovered.values()),
@@ -785,7 +817,9 @@ def _run_artifact_set(
 
 
 @main.command("scan")
-@click.argument("artifact", type=click.Path(exists=True, path_type=Path), required=False)
+@click.argument(
+    "artifact", type=click.Path(exists=True, path_type=Path), required=False
+)
 @artifact_set_options
 @click.option(
     "-H",
@@ -971,8 +1005,13 @@ def _run_artifact_set(
     help="With --against: stamp each comparison finding with ADR-049 Phase 3's "
     "shadow contract decision (contract_relevance / contract_reason_code / "
     "contract_assurance / contract_evidence_refs), exactly as `compare "
-    "--contract-evaluation` does. Advisory only -- it never changes the "
-    "verdict, the exit code, or which findings appear.",
+    "--contract-evaluation` does. The per-finding decisions are advisory: "
+    "they never change the verdict or which findings appear. It CAN change "
+    "the exit code, through one orthogonal axis -- if the selected domain's "
+    "evidence is incomplete the contract-coverage ledger contributes exit 1 "
+    "(folded with max, so it never lowers a 2/4). Set "
+    "contract.unresolved=warn via a `kind: contract` --pack to accept "
+    "incomplete coverage; the failures stay reported either way.",
 )
 @click.option(
     "--contract",
@@ -983,9 +1022,12 @@ def _run_artifact_set(
     "against ('public' header-derived surface, 'exports' the binary's own "
     "export table plus its type closure, 'all' every entity). Omitted, the "
     "domain follows --scope-public-headers/--no-scope-public-headers. "
-    "Requires --contract-evaluation, and is advisory exactly like it "
-    "(mirrors `compare --contract`).",
+    "Requires --contract-evaluation. The per-finding decisions are advisory, "
+    "but the selected domain is what the contract-coverage axis is answered "
+    "against, and that axis can contribute exit 1 (mirrors `compare "
+    "--contract`).",
 )
+@pack_option  # ADR-049 D8: --pack (requires --against; see _COMPARISON_ONLY_FLAGS)
 @lang_option
 @click.option(
     "--allow-build-query",
@@ -1003,8 +1045,13 @@ def _run_artifact_set(
     show_default=True,
     help="Output format.",
 )
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
-              help="Write output to this path (default: stdout).")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write output to this path (default: stdout).",
+)
 @verbose_option
 @compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
@@ -1038,6 +1085,7 @@ def scan_cmd(
     env_matrix_path: Path | None,
     contract_evaluation: bool,
     contract_mode: str | None,
+    pack_paths: tuple[Path, ...],
     lang: str,
     allow_build_query: bool,
     fmt: str,
@@ -1064,6 +1112,11 @@ def scan_cmd(
     \b
     Exit codes:
       0  compatible (or advisory-only findings)
+      1  incomplete contract coverage (ADR-049 Phase 7): with
+         --contract-evaluation, the selected --contract domain's required
+         evidence could not be closed. Orthogonal — folded with max, so it
+         raises a clean 0 and never lowers a 2/4, and it never changes the
+         compatibility verdict. Only reachable with --contract-evaluation
       2  source-level / API break (incl. API_BREAK cross-source findings)
       4  ABI break (from the --against comparison)
       5  --budget overflow
@@ -1143,9 +1196,7 @@ def scan_cmd(
         )
         return
     if bundle_system_providers:
-        raise click.UsageError(
-            "--bundle-system-providers requires --artifact-set."
-        )
+        raise click.UsageError("--bundle-system-providers requires --artifact-set.")
     # The mutual-exclusion check above already guarantees exactly one of
     # ARTIFACT/--artifact-set is set, and the --artifact-set branch always
     # returns -- so `artifact` is non-None on every path reaching here.
@@ -1373,7 +1424,7 @@ def scan_cmd(
     # Resolved here because this is where the Click context is: which flags
     # the user actually typed is a question only the front end can answer.
     resolved_config = None
-    if against is not None and contract_evaluation:
+    if against is not None and (contract_evaluation or pack_paths):
         from .cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
         from .compatibility_evaluation_resolver import (
             FieldResolutionError,
@@ -1400,6 +1451,47 @@ def scan_cmd(
                 suppress_path=suppress,
                 symbols_list=_symbols_list,
             )
+            if pack_paths:
+                # ADR-049 D8: a pack that reached the receipt and not the
+                # engine is exactly what got the flag reverted once before, so
+                # its contributions are folded into the policy file the
+                # baseline comparison runs with. `gate_supported=False`
+                # because a scan's exit code follows its verdict directly --
+                # the same reason `cli_scan_receipt._without_gate_settings`
+                # blanks the gate rather than reporting one it never used.
+                from .pack_application import (
+                    check_resolved_config_applies_packs,
+                    pack_application,
+                    policy_file_with_packs,
+                )
+
+                # Emptiness is not asked here: it is a property of the file,
+                # and `load_selected_packs` -- which the resolution above
+                # already went through -- rejects an empty manifest on the
+                # very revision that configured this run. Asking it again
+                # from a second read would only move that window, not close
+                # it (Codex review).
+                #
+                # Everything else is asked of the resolution, not a second
+                # read of the files -- same reasoning as the compare path:
+                # the resolver already loaded its own copy, so re-reading
+                # would validate a revision that is not the one configuring
+                # the run (Codex review, raised for compare and then here).
+                check_resolved_config_applies_packs(
+                    resolved_config,
+                    gate_supported=False,
+                    gate_reason=(
+                        "a scan's exit code follows its compatibility verdict "
+                        "directly, so it has no severity or exit-code scheme "
+                        "for a gate pack to move (compare does)"
+                    ),
+                    contract_evaluation=contract_evaluation,
+                )
+                policy_file = policy_file_with_packs(
+                    policy_file,
+                    pack_application(resolved_config, policy_file=policy_file),
+                    base_policy=policy,
+                )
         except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
             # A D7 same-tier conflict or a D8 pack conflict is a usage error,
             # exactly as it is for `compare` -- not a traceback out of a
@@ -1439,7 +1531,9 @@ def scan_cmd(
     # so a seeded scan escalates by risk and an unseeded one falls back to the
     # preset. Only when --depth was omitted entirely -- a pinned rung stays
     # deterministic.
-    sm, is_auto, auto_method = _resolve_auto_source_method(None, dp, False, seeded, risk)
+    sm, is_auto, auto_method = _resolve_auto_source_method(
+        None, dp, False, seeded, risk
+    )
     resolved, eff_depth_enum = resolve_level(
         mode=scan_mode,
         source_method=sm,
@@ -1452,7 +1546,8 @@ def scan_cmd(
     # the current library target, never a zero-TU no-op, whether --depth source
     # was pinned explicitly or reached via the auto/PR preset.
     collect_mode = level_to_collect_mode(
-        resolved, eff_depth_enum,
+        resolved,
+        eff_depth_enum,
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
     headers, baseline_header, sources, build_info, compile_db = _normalize_depth_inputs(
@@ -1468,15 +1563,27 @@ def scan_cmd(
     if dry_run:
         from .dry_run import emit_dry_run
 
-        emit_dry_run(render_scan_dry_run(
-            artifact=artifact, against=against,
-            headers=list(headers), includes=list(includes),
-            sources=sources, effective_build_info=effective_build_info,
-            changed=changed, changed_src=changed_src, seeded=seeded,
-            depth=depth, eff_depth_enum=eff_depth_enum, resolved=resolved,
-            collect_mode=collect_mode, budget_s=budget_s, lang=lang,
-            header_backend=header_backend, fmt=fmt,
-        ))
+        emit_dry_run(
+            render_scan_dry_run(
+                artifact=artifact,
+                against=against,
+                headers=list(headers),
+                includes=list(includes),
+                sources=sources,
+                effective_build_info=effective_build_info,
+                changed=changed,
+                changed_src=changed_src,
+                seeded=seeded,
+                depth=depth,
+                eff_depth_enum=eff_depth_enum,
+                resolved=resolved,
+                collect_mode=collect_mode,
+                budget_s=budget_s,
+                lang=lang,
+                header_backend=header_backend,
+                fmt=fmt,
+            )
+        )
 
     # --- run the engine core (the shared orchestration; ADR-035 D10) ----------
     # The classify→tier→level→compare body lives in ``run_scan_core`` so the CLI,
@@ -1572,6 +1679,3 @@ def scan_cmd(
         drain_build_dir_cleanups(build_dir_cleanups)
 
     _emit_scan_report(core.outcome, fmt, output)
-
-
-

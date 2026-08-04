@@ -1146,6 +1146,11 @@ def _scan_request_config(req: ScanRequest) -> Any:
                 "public_symbols": tuple(sorted(req.force_public_symbols or ())),
                 "public_symbols_list": None,
                 "contract_mode": req.contract_mode,
+                # A `ScanRequest` has no pack field: ADR-049 D8 packs are a
+                # CLI selector today, so the API resolves none rather than
+                # letting the key resolve as "not stated" by omission (which
+                # is what the declared-params guard exists to prevent).
+                "pack_paths": (),
             },
             typed={"policy", "scope_public_headers"},
             policy_file=req.policy_file,

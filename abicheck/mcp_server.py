@@ -762,8 +762,19 @@ def abi_compare(
             ``report`` gains a ``contract_context`` block: the observed
             provider evidence, the resolved evaluation context, and the
             decision receipt, so a decision can be replayed or re-evaluated
-            later without re-reading the binaries. This is advisory only: it never
-            changes ``verdict``, ``exit_code``, or which findings appear.
+            later without re-reading the binaries. The per-finding decisions
+            are advisory: they never change ``verdict`` or which findings
+            appear. **The orthogonal contract-coverage axis is not** (ADR-049
+            Phase 7): when the selected contract domain cannot be closed on
+            the available evidence, that contributes ``1`` to ``exit_code``,
+            so an otherwise compatible comparison can return ``exit_code: 1``.
+            The contribution never lowers a real break's ``2``/``4``. The
+            response's top-level ``contract_coverage`` block states what was
+            found and what it contributed, whatever ``output_format`` is
+            selected. Accepting incomplete coverage requires
+            ``contract.unresolved: warn``, which only a ``kind: contract``
+            pack can state and which **this tool does not expose** — it is
+            available on the ``compare`` and ``scan`` CLIs via ``--pack``.
             Default False; the response is unchanged from today's shape
             unless this is set.
     """
@@ -1204,6 +1215,24 @@ def abi_compare(
         # with the full-library verdict kept as `full_verdict` for context (Codex
         # review — a caller that only reads `verdict` must not see the full
         # library's BREAKING alongside a scoped-compatible exit_code: 0).
+        # ADR-049 §7: the coverage axis is orthogonal and gates every front
+        # end, not only the CLI ones. Without this the tool could return
+        # `exit_code: 0` beside a report stating the coverage contribution
+        # was 1, so a client gating on the top-level code accepts a run its
+        # own report says was gated (Codex review).
+        # The block goes beside the code it explains, for *every* format: only
+        # the JSON report carries the ledger, so a markdown/sarif/html request
+        # otherwise got a change-free report next to `exit_code: 1` with no
+        # diagnostic anywhere (Codex review). The CLI's own rule -- stay quiet
+        # when the rendered report already says it -- does not transfer: there
+        # the notice is a second copy on stderr beside a piped document, here
+        # it is a sibling key a client would have to branch on `output_format`
+        # to find.
+        from .contract_coverage_exit import coverage_response_block, fold_coverage_exit
+
+        coverage = coverage_response_block(result, base_exit=exit_code)
+        exit_code = fold_coverage_exit(exit_code, result)
+
         response: dict[str, Any] = {
             "status": "ok",
             "verdict": scoped_verdict_value if scoped_verdict_value is not None else result.verdict.value,
@@ -1220,6 +1249,8 @@ def abi_compare(
             "changes": [_mcp_change_entry(c, active_policy) for c in result.changes],
             "suppressed_count": result.suppressed_count,
         }
+        if coverage is not None:
+            response["contract_coverage"] = coverage
         if scoped_key is not None:
             response[scoped_key] = scoped_payload
             # Scoped-only changes/missing-contract labels are relevant to the

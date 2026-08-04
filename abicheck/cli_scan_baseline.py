@@ -559,22 +559,25 @@ def _run_baseline_compare(
     context = context_block(diff)
     if context is not None:
         summary["contract_context"] = context
-        from .contract_coverage_ledger import (
-            coverage_exit_contribution,
-            coverage_failures_for_context,
-        )
+        from .contract_coverage_exit import coverage_exit_for_context
+        from .contract_coverage_ledger import coverage_failures_for_context
 
         # The sibling unsuppressible ledger, on the same terms `compare`
         # reports it (plan Section 6.1) -- a coverage failure is not a
         # finding, so it belongs beside the diff's findings, not among them.
         failures = coverage_failures_for_context(diff.contract_context)
         summary["contract_coverage_failures"] = [f.to_dict() for f in failures]
-        summary["contract_coverage_exit_contribution"] = coverage_exit_contribution(
-            failures
+        summary["contract_coverage_exit_contribution"] = coverage_exit_for_context(
+            diff.contract_context
         )
 
     from .cli_compare_helpers import _verdict_exit_code
+    from .contract_coverage_exit import fold_coverage_exit
 
     verdict = diff.verdict.value
-    exit_code = _verdict_exit_code(diff.verdict)
+    # ADR-049 §7/§6.4: the coverage axis is orthogonal to the verdict and is
+    # folded identically here and in `compare`. Parity is the point -- a
+    # ledger that gated one command and not the other would be exactly the
+    # cross-command divergence §6.4's Gate exists to catch.
+    exit_code = fold_coverage_exit(_verdict_exit_code(diff.verdict), diff)
     return verdict, exit_code, summary

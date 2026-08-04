@@ -14,24 +14,44 @@ generated: false
 
 **Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `scan` and `deps` have their own narrower contracts, documented below.
 
-> **Proposed contract-aware extension (not implemented):**
-> [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
-> reserves an orthogonal contract-coverage contribution for future contract
-> evaluation. Complete coverage of the mode-selected evidence domain contributes
-> `0`; missing, partial, stale, failed, contradictory, or identity-incomplete
-> **required domain evidence** produces `UNKNOWN_UNRESOLVED`,
-> `analysis_status=NOT_CHECKABLE`, and contributes `1` by default. Unrelated
-> provider failures are advisory. The configured `GateDecision` independently
-> contributes `0/1/2/4`: a compatible addition can block, and a breaking finding
-> can be demoted. Only legacy output without a gate block falls back from
-> compatibility verdict to `2`/`4`. Command aggregation folds gate and coverage
-> contributions using its existing rules. Ordinary change suppressions cannot
-> clear provider/domain coverage; the explicit proposed
-> `unresolved_behavior=warn` control is the permissive override. Existing
-> command-specific `5`, `8`, and `64` behavior remains as documented below.
-> Reports will distinguish contract coverage exit `1` from severity or
-> aggregate required-target coverage. Until ADR-049 is implemented, the tables
-> below describe the actual released command behavior.
+## Contract-coverage contribution (ADR-049)
+
+`compare` and `scan --against` carry an **orthogonal contract-coverage axis**
+under `--contract-evaluation`. Complete coverage of the mode-selected evidence
+domain contributes `0`; missing, partial, stale, failed, contradictory, or
+identity-incomplete **required domain evidence** produces
+`UNKNOWN_UNRESOLVED`, `analysis_status=NOT_CHECKABLE`, and contributes `1`.
+Unrelated provider failures stay advisory.
+
+The axis is folded with `max`, so it raises a clean `0` to `1` and **never
+lowers** a gate's `2`/`4` — missing coverage cannot demote a real ABI break to
+"warnings only". It never rewrites a finding's compatibility decision or its
+gate contribution either; it is a floor on the exit status alone. Both
+commands fold it identically.
+
+**Without `--contract-evaluation` there is no selected domain, so the
+contribution is always `0`** and every other exit code below is unchanged.
+
+Ordinary change suppressions cannot clear a provider/domain coverage failure —
+a coverage failure is not a finding, so the suppression machinery structurally
+cannot reach one. To accept incomplete contract assurance, set
+`contract.unresolved: warn` (for example via a `kind: contract` pack). That
+zeroes this contribution and changes nothing else: the failures remain listed
+in `contract_coverage_failures` in every report.
+
+Reports state the applied number in `contract_coverage_exit_contribution`,
+which distinguishes contract coverage exit `1` from severity or aggregate
+required-target coverage. The MCP `abi_compare` tool states the same thing in
+its response's top-level `contract_coverage` block, for every `output_format`
+rather than only the one whose rendered report carries the ledger. The
+composite GitHub Action reads the same field and publishes
+`verdict: COVERAGE_INCOMPLETE` rather than labelling the axis a severity-policy
+or operational failure; on `compare`, where exit `1` is shared, it uses the
+report's pre-fold `severity.exit_code` to tell the two apart. The configured `GateDecision` independently
+contributes `0/1/2/4`: a compatible addition can block, and a breaking finding
+can be demoted. Only legacy output without a gate block falls back from
+compatibility verdict to `2`/`4`. Existing command-specific `5`, `8`, and `64`
+behavior is as documented below.
 
 ## Commands removed in the ADR-043 CLI reset
 

@@ -18,14 +18,23 @@ generated: false
     (`abicheck.compatibility_evaluation_frontend`) and is fully tested.
     `abicheck compare --contract-evaluation` resolves one such object per run
     and reports it, as the `contract_context.evaluation_context` block of its
-    JSON report — but only as an audit record: it changes no verdict, no
-    finding, and no exit code. Every other command, and every `compare` run
-    without that flag, resolves nothing. Applying the object in the
-    authoritative comparison path is the rest of
+    JSON report.
+
+    **Two parts of it are live and do change results.** A selected `--pack`
+    really configures the run — a `kind: policy` pack overriding a
+    `ChangeKind` moves the verdict and the exit code (see "Selecting a
+    pack" below). And under `--contract-evaluation` the contract-coverage
+    ledger contributes an orthogonal exit `1` when the selected domain's
+    evidence is incomplete (ADR-049 Phase 7; see
+    [Exit Codes](exit-codes.md)).
+
+    Everything else on this page is still resolution only: the per-finding
+    contract decisions change no verdict and no finding, and a `compare` run
+    *without* `--contract-evaluation` — and every other command — resolves
+    nothing at all, so its behaviour is unchanged. Making those decisions
+    authoritative, and the default flip, are the rest of
     [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
-    Phase 5, and the default flip is Phase 7. Pack manifests (below) have
-    no CLI flag yet either — they are reachable from the Python API only.
-    Today's live behaviour is documented in
+    Phase 7. Today's live behaviour is also documented in
     [Configuration File](config-file.md) and [Exit Codes](exit-codes.md).
 
 ADR-049 D7 requires that **one** typed object carry every setting that decides
@@ -173,11 +182,11 @@ assignments:
   gate.severity.addition: error
 ```
 
-| `kind` | Assignable fields |
-|---|---|
-| `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` |
-| `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` |
-| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` |
+| `kind` | Assignable fields | Applied today |
+|---|---|---|
+| `contract` | `contract.unresolved`, `contract.overlays`, `surface.internal_namespaces`, `assurance.require_evidence` | `surface.internal_namespaces` and `contract.unresolved` |
+| `policy` | any `ChangeKind` slug → `break` / `warn` / `risk` / `ignore` | all |
+| `gate` | `gate.exit_code_scheme`, `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare` only) |
 
 Deliberately **not** assignable: `contract.mode` (which evidence domain a run
 judges against stays the user's own per-run choice — ADR-049 D3 forbids a
@@ -191,6 +200,29 @@ with each other. Load order is never a tiebreak.
 
 An unknown `ChangeKind` slug in a `kind: policy` pack is a hard error, exactly
 as in a `--policy-file`, so a renamed kind cannot silently disable a rule.
+
+### Selecting a pack
+
+`compare --pack PATH` and `scan --against ... --pack PATH` select one
+(repeatable). A selected pack **configures the run**: a `kind: policy` pack
+overriding `func_removed` changes the verdict and the exit code, and a
+`kind: gate` pack's severity moves what blocks CI. That is worth stating
+plainly, because the opposite would be worse than having no flag — a first
+version of `--pack` reached the receipt and never the engine, and was reverted
+before merge for exactly that reason.
+
+The "Applied today" column above is enforced, not documentation:
+a manifest assigning a field this build resolves but does not yet act on is a
+usage error naming the field and the reason, rather than an assignment silently
+recorded as active configuration (`abicheck.pack_application`). The same rule
+rejects a `kind: gate` pack on `scan`, whose exit code follows its
+compatibility verdict directly and so has no gate to move.
+
+Two further restrictions, both for the same "configure or reject" reason:
+`--pack` needs `--against` on `scan` (a pack's only application there is the
+baseline comparison's policy), and it is rejected on a directory/package
+(release) `compare`, whose per-library fan-out dispatches before the effective
+configuration is resolved.
 
 ## The resolution receipt
 

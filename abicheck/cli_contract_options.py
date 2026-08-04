@@ -18,15 +18,15 @@
 A leaf under :mod:`abicheck.cli_options`, which re-exports the name so
 existing import paths are unchanged.
 
-The split happened while a since-removed ``--pack`` flag pushed ``cli.py``
-past its 2000-line hard limit, and moving these 41 lines into
-``cli_options.py`` pushed *that* file over the same limit. With ``--pack``
-gone, inlining them again would put ``cli.py`` at exactly 2000 -- passing,
-but with zero headroom, so the next option added anywhere in that file
-fails the gate. Kept split for that reason rather than the original one:
-41 lines of option definitions for one cohesive concept is what this module
-is for, and the alternative both times -- trimming their help text to buy
-space -- would shrink a feature's user-facing documentation to make room for
+The split happened while ``--pack`` first pushed ``cli.py`` past its
+2000-line hard limit, and moving these option definitions into
+``cli_options.py`` pushed *that* file over the same limit. ``--pack`` was
+then reverted before merge (it configured nothing; see
+:mod:`abicheck.pack_application`) and has since come back for real, so the
+original reason applies again as written -- but the split would be right
+either way: option definitions for one cohesive concept is what this module
+is for, and the alternative both times, trimming their help text to buy
+space, would shrink a feature's user-facing documentation to make room for
 its own code.
 
 One decorator rather than a copy per command: `tests/test_cli_contract.py`
@@ -40,6 +40,7 @@ cannot pull a new member into the CLI-registration import cycle the
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypeVar
 
 import click
@@ -48,6 +49,42 @@ import click
 #: type var is invariant over the decorated object, so a plain callable
 #: alias keeps these composable with every other option decorator.
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+#: ADR-049 D8's pack selector. Separate from :func:`contract_options` because
+#: the two answer different questions and are not registered on the same set
+#: of commands: ``--pack`` configures the run (it changes verdicts and exit
+#: codes), while the contract options only ask for an advisory decision.
+def pack_option(f: F) -> F:
+    """Attach the repeatable ``--pack`` manifest selector."""
+    # Assigned rather than returned inline, matching `contract_options` below:
+    # the click decorator is untyped, so returning its result directly is an
+    # `Any` return from a function declared to return `F` (mypy no-any-return).
+    f = click.option("--pack", "pack_paths", multiple=True,
+                  type=click.Path(exists=True, dir_okay=False, path_type=Path),
+                  help="Select an ADR-049 D8 pack manifest (repeatable). A pack is a "
+                       "small versioned YAML document (id/version/kind/assignments) "
+                       "carrying one reusable piece of configuration. 'kind: policy' "
+                       "assigns ChangeKind slugs to break/warn/risk/ignore, exactly as "
+                       "--policy-file's overrides do; 'kind: contract' assigns "
+                       "surface.internal_namespaces and contract.unresolved (the "
+                       "latter needs --contract-evaluation, which is what computes "
+                       "the coverage it configures); 'kind: gate' assigns "
+                       "gate.exit_code_scheme and gate.severity.<category>. Composition "
+                       "is D8's: an explicitly stated value (--policy-file, "
+                       "--exit-code-scheme, --severity-*, a --profile, or .abicheck.yml) "
+                       "always outranks a pack, and two selected packs assigning "
+                       "different values to the same field are a usage error unless "
+                       "something else already states it. A manifest assigning a field "
+                       "this build resolves but does not yet apply is rejected rather "
+                       "than silently recorded, as is --pack on a directory/package "
+                       "(release) comparison, whose per-library fan-out dispatches "
+                       "before the effective configuration is resolved. On `scan` "
+                       "this requires --against (a pack's only application there is "
+                       "the baseline comparison) and a 'kind: gate' pack is rejected, "
+                       "since a scan's exit code follows its verdict directly and has "
+                       "no gate to move.")(f)
+    return f
 
 
 #: ADR-049's three contract-evaluation options, as one decorator -- see this
@@ -71,9 +108,11 @@ def contract_options(f: F) -> F:
                        "declaration is not. 'all': every entity, no root or closure "
                        "evidence required. Omitted, the domain follows "
                        "--scope-public-headers/--no-scope-public-headers as before; an "
-                       "explicit value outranks those. Requires --contract-evaluation, "
-                       "and is advisory exactly like it: selecting a domain never "
-                       "changes verdict, exit_code, or which findings appear.")(f)
+                       "explicit value outranks those. Requires --contract-evaluation. "
+                       "Selecting a domain never changes the verdict or which findings "
+                       "appear, but it does select which evidence the contract-coverage "
+                       "axis is answered against, and that axis can contribute exit 1 -- "
+                       "see --contract-evaluation.")(f)
     f = click.option("--contract-evaluation", "contract_evaluation", is_flag=True, default=False,
                   help="ADR-049 Phase 3's shadow contract evaluator (non-authoritative; "
                        "pick its evidence domain with --contract). Stamps each finding in "
@@ -92,7 +131,15 @@ def contract_options(f: F) -> F:
                        "top-level contract_context block (the observed provider evidence, "
                        "the resolved evaluation context, and the decision receipt), so a "
                        "decision can be replayed or re-evaluated later without re-reading "
-                       "the binaries. Advisory only: it never changes verdict, exit_code, "
-                       "or which findings appear. Default off; the report is unchanged "
-                       "unless this is set.")(f)
+                       "the binaries. The per-finding decisions are advisory: they never "
+                       "change the verdict or which findings appear. **This flag can "
+                       "still affect the exit code**, through one orthogonal axis: if the "
+                       "selected domain's required evidence is incomplete, the "
+                       "contract-coverage ledger contributes exit 1 (ADR-049 Phase 7). It "
+                       "is folded with max, so it never lowers an ABI break's 2/4, and a "
+                       "run without this flag is unaffected. Set contract.unresolved=warn "
+                       "(e.g. via a `kind: contract` --pack) to accept incomplete "
+                       "coverage: that zeroes the contribution while still reporting "
+                       "every failure. Default off; the report is unchanged unless this "
+                       "is set.")(f)
     return f

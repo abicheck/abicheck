@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -442,19 +443,21 @@ class TestObservedOverlaysSurvive:
         have scored the run, and — worse — a file removed after the
         comparison started would fail an otherwise-finished run during
         receipt generation (Codex review, fresh evidence). Simulated by
-        deleting the file at the moment the receipt is recorded.
+        deleting the file at the moment the configuration is resolved.
         """
         import abicheck.cli_compare_receipt as receipt
 
         listed = tmp_path / "public.txt"
         listed.write_text("api_b\n", encoding="utf-8")
-        real = receipt.record_resolved_config
+        real = receipt.resolve_and_apply
 
-        def _delete_then_record(*args, **kwargs):
+        def _delete_then_resolve(
+            params: dict, **kwargs: Any
+        ) -> tuple[Any, Any, Any]:
             listed.unlink()
-            return real(*args, **kwargs)
+            return real(params, **kwargs)
 
-        monkeypatch.setattr(receipt, "record_resolved_config", _delete_then_record)
+        monkeypatch.setattr(receipt, "resolve_and_apply", _delete_then_resolve)
         ctx = _context(tmp_path, "--public-symbols-list", str(listed))
 
         prov = ctx["field_provenance"]["surface.explicit_scope"]
@@ -546,8 +549,17 @@ class TestOverlayProvenanceEdges:
         assert provenance["surface.explicit_scope"].selected_by
 
     def test_a_stated_overlay_selector_survives_alongside_the_observed_one(self):
-        """A `kind: contract` pack can assign `contract.overlays`, and those
-        selectors are a different set from the providers the ledger observed.
+        """A run can state `contract.overlays` — via `--post-manifest`/
+        `--public-symbol`, or an API request as here — and those selectors are
+        a different set from the providers the ledger observed.
+
+        Deliberately not "a `kind: contract` pack can assign it", which this
+        docstring used to say: a pack assigning `contract.overlays` is now a
+        usage error (`pack_application.UNAPPLIED_PACK_FIELDS` — the field
+        routes and resolves, but the overlay kinds it names have no concrete
+        input to point at). The merge under test is unaffected either way,
+        since it is about a stated value meeting an observed one whatever
+        stated it (CodeRabbit review).
 
         Replacing one with the other dropped a real selection and its receipt
         (CodeRabbit review), so the value is their union and the entries
@@ -636,15 +648,16 @@ class TestWiringContract:
 
         seen: dict = {}
 
-        def _spy(result, resolved_cfg, project_cfg, **kwargs):
-            seen.update(kwargs)
+        def _spy(params: dict, **kwargs: Any) -> tuple[Any, Any, Any]:
+            seen.update(params)
+            return None, kwargs.get("policy_file"), kwargs["resolved_cfg"]
 
-        monkeypatch.setattr(receipt, "record_resolved_config", _spy)
+        monkeypatch.setattr(receipt, "resolve_and_apply", _spy)
         old_p, new_p = _write_pair(tmp_path)
         CliRunner().invoke(
             main, ["compare", str(old_p), str(new_p), "--format", "json"]
         )
-        assert set(seen["params"]) == set(COMPARE_CONFIG_PARAMS)
+        assert set(seen) == set(COMPARE_CONFIG_PARAMS)
 
     def test_a_resolution_usage_error_becomes_exit_64(self, tmp_path, monkeypatch):
         """The resolver documents mapping its errors to an exit code as the
@@ -656,7 +669,7 @@ class TestWiringContract:
         def _boom(*args, **kwargs):
             raise FieldResolutionError("contract.mode: two explicit values")
 
-        monkeypatch.setattr(receipt, "record_resolved_config", _boom)
+        monkeypatch.setattr(receipt, "resolve_and_apply", _boom)
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
@@ -696,5 +709,5 @@ class TestWiringContract:
             contract_context = None
 
         result = _Result()
-        record_resolved_config(result, object(), None, params={}, typed=())
+        record_resolved_config(result, object(), None)
         assert result.contract_context is None
