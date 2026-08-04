@@ -45,6 +45,12 @@ def snap_path(tmp_path: Path) -> Path:
     return p
 
 
+def _write_yaml(directory: Path, name: str, body: str) -> Path:
+    path = directory / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
 # ===================================================================
 # DumpRequest validation
 # ===================================================================
@@ -1208,22 +1214,33 @@ class TestDependencySysrootIsForwarded:
     (which forwards `--sysroot`) resolved them (Codex review).
     """
 
-    def test_sysroot_comes_from_the_input_compile_context(
-        self, snap_path: Path, monkeypatch
-    ):
-        from abicheck import dependency_info, service
+    @pytest.fixture
+    def resolved_sysroot(self, monkeypatch):
+        """Capture the sysroot the dependency resolver is actually given.
+
+        Records it out of `**kwargs` as well as the positional slot, so this
+        keeps asserting on the real value rather than raising `TypeError`
+        if `populate_side_dependency_info` ever switches to keyword
+        arguments (CodeRabbit review).
+        """
+        from abicheck import dependency_info
 
         captured: dict[str, object] = {}
-        monkeypatch.setattr(
-            dependency_info,
-            "populate_dependency_info",
-            lambda snap, path, search, sysroot, ldpath: captured.update(
-                sysroot=sysroot
-            ),
-        )
+
+        def _record(snap, path, search=None, sysroot=None, ldpath=None, **kwargs):
+            captured["sysroot"] = kwargs.get("sysroot", sysroot)
+
+        monkeypatch.setattr(dependency_info, "populate_dependency_info", _record)
         monkeypatch.setattr(
             dependency_info, "_dependency_source", lambda side, fmt: side.path
         )
+        return captured
+
+    def test_sysroot_comes_from_the_input_compile_context(
+        self, snap_path: Path, resolved_sysroot: dict
+    ):
+        from abicheck import service
+
         service.run_dump_request(
             DumpRequest(
                 input=InputSpec(
@@ -1232,26 +1249,17 @@ class TestDependencySysrootIsForwarded:
                 follow_dependencies=True,
             )
         )
-        assert captured["sysroot"] == Path("/opt/sysroot")
+        assert resolved_sysroot["sysroot"] == Path("/opt/sysroot")
 
-    def test_no_compile_context_means_no_sysroot(self, snap_path: Path, monkeypatch):
-        from abicheck import dependency_info, service
+    def test_no_compile_context_means_no_sysroot(
+        self, snap_path: Path, resolved_sysroot: dict
+    ):
+        from abicheck import service
 
-        captured: dict[str, object] = {}
-        monkeypatch.setattr(
-            dependency_info,
-            "populate_dependency_info",
-            lambda snap, path, search, sysroot, ldpath: captured.update(
-                sysroot=sysroot
-            ),
-        )
-        monkeypatch.setattr(
-            dependency_info, "_dependency_source", lambda side, fmt: side.path
-        )
         service.run_dump_request(
             DumpRequest(input=InputSpec(path=snap_path), follow_dependencies=True)
         )
-        assert captured["sysroot"] is None
+        assert resolved_sysroot["sysroot"] is None
 
 
 class TestAuditOnlyScanRejectsComparisonKnobs:
@@ -1265,15 +1273,48 @@ class TestAuditOnlyScanRejectsComparisonKnobs:
     """
 
     @pytest.mark.parametrize(
-        ("kwargs", "field"),
+        ("build_kwargs", "field"),
         [
-            ({"policy": "sdk_vendor"}, "policy"),
-            ({"contract_evaluation": True}, "contract_evaluation"),
+            (lambda _tmp: ({"policy": "sdk_vendor"}), "policy"),
+            (lambda _tmp: ({"contract_evaluation": True}), "contract_evaluation"),
+            # These two are worth pinning separately rather than trusting the
+            # first two to stand in for them: the tool reads, size-checks and
+            # *parses* both files before reaching the guard, so they take a
+            # materially different path to the same rejection. The engine's
+            # field list is what the guard reuses, and it names the
+            # `ScanRequest` field (`suppression`), not the argument that set
+            # it (CodeRabbit review).
+            (
+                lambda tmp: {
+                    "policy_file": str(
+                        _write_yaml(tmp, "policy.yml", "base_policy: strict_abi\n")
+                    )
+                },
+                "policy_file",
+            ),
+            (
+                lambda tmp: {
+                    "suppression_file": str(
+                        _write_yaml(
+                            tmp,
+                            "suppressions.yaml",
+                            "version: 1\nsuppressions: []\n",
+                        )
+                    )
+                },
+                "suppression",
+            ),
         ],
     )
     def test_rejected_without_against(
-        self, snap_path: Path, monkeypatch, kwargs: dict, field: str
+        self,
+        snap_path: Path,
+        tmp_path: Path,
+        monkeypatch,
+        build_kwargs,
+        field: str,
     ):
+        kwargs = build_kwargs(tmp_path)
         from abicheck import service
         from abicheck.mcp_server import abi_scan
 

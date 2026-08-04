@@ -52,9 +52,9 @@
   the spawned scan worker to be ignored or resurface as a generic failure. Both
   tools now reject the same mistake with the same text `abi_dump` produces.
 - **The typed path seeds the build's L2 include dirs, as the CLI does** — with
-  headers plus `sources`/`build_info` but no explicit include dirs, the public-
-  header parse could not see the include dirs the build already knows, so a
-  `DumpRequest`/`CompareRequest` parsed less than the equivalent CLI
+  headers plus `sources`/`build_info` but no explicit include dirs, the
+  public-header parse could not see the include dirs the build already knows,
+  so a `DumpRequest`/`CompareRequest` parsed less than the equivalent CLI
   invocation. A Tier-2 call never *executes* a build system to discover them,
   unlike the CLI: passive discovery of an existing compile database only.
 - **`--follow-deps` under a sysroot searches the target, not the host** — the

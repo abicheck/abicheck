@@ -128,7 +128,7 @@ def _seeded_includes(
         return list(side.includes), []
     from .buildsource.l2_seed import seed_l2_includes
 
-    compile = evidence.compile
+    ctx = evidence.compile
     return seed_l2_includes(
         headers=evidence.headers,
         includes=side.includes,
@@ -136,8 +136,8 @@ def _seeded_includes(
         build_info=side.build_info,
         build_config=None,
         defer_cleanup=None,
-        gcc_options=compile.gcc_options if compile is not None else None,
-        gcc_option_tokens=compile.gcc_option_tokens if compile is not None else (),
+        gcc_options=ctx.gcc_options if ctx is not None else None,
+        gcc_option_tokens=ctx.gcc_option_tokens if ctx is not None else (),
         allow_inferred_build_query=False,
     )
 
