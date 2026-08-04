@@ -608,7 +608,8 @@ def render_markdown(m: dict[str, object]) -> str:
         f"{gate['unevidenced_deltas']} unevidenced delta(s), "
         f"{gate['fact_losses']} unexplained fact loss(es), "
         f"{gate['replay_strengthenings']} replay strengthening(s) "
-        "(all baselines 0)",
+        "(these four baselines are 0; the unresolved-loss budgets below are "
+        "per-domain and not all zero)",
         "",
         "Unresolved public-break losses (a real break withheld from the gate "
         "because the decision could not resolve it), per domain against its "
