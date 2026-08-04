@@ -17,6 +17,7 @@ the opt-in `--verify-runtime` old-consumer/new-library execution probe
 (`consumer_runtime_load_failed`, `RISK`-tier), and worked examples
 (`case192`/`case193`) exercising the headline scenario and its deliberate
 counter-example end to end.
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---

@@ -21,6 +21,7 @@ detail) found it true only for the final snapshot-diffing step, not for the
 tool as a whole — see Gap 3 below, now folded in as D4 rather than left a
 Non-goal. This ADR proposes closing all four; it does not implement anything
 itself beyond D3.
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** (pending)
 
 ---

@@ -34,6 +34,11 @@ ROOT = Path(__file__).resolve().parent.parent
 # the script runs as the first CI step before `pip install -e .`).
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+# ...and this script's own directory, so the sibling gate modules below import
+# whether this file is run directly (Python adds it automatically) or loaded
+# from its path by `tests/test_ai_readiness.py` (Python doesn't).
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 PKG = ROOT / "abicheck"
 TESTS = ROOT / "tests"
 DOCS = ROOT / "docs"
@@ -45,6 +50,15 @@ ACTION = ROOT / "action"
 CONTRIB_CLANG_PLUGIN = ROOT / "contrib" / "abicheck-clang-plugin"
 GITHUB_DIR = ROOT / ".github"
 AGENT_EVALS = ROOT / "agent-evals"
+
+# Sibling gate module (imported after the sys.path setup above). It owns the
+# ADR Status *parsing* helpers as well as its own check, so `adr-index-nav-sync`
+# below reads them from there rather than keeping a second copy.
+from adr_status_sync import (  # noqa: E402
+    _ADR_FILE_RE,
+    _adr_status_text,
+    check_adr_status_sync,
+)
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -1622,23 +1636,6 @@ def check_mkdocs_nav_coverage(f: Findings) -> None:
 # Check: every ADR is in both index.md and mkdocs.yml nav
 # ---------------------------------------------------------------------------
 
-#: Matches an ADR filename's leading number, e.g. "020" from
-#: "020-build-context-capture.md". Two files may legitimately share a number
-#: (020a/020b, 021a/021b are sibling sub-ADRs) — this check is per-file, not
-#: per-number, so that's not flagged here.
-_ADR_FILE_RE = re.compile(r"^\d{3}-.+\.md$")
-
-#: An ADR's status, either as an inline bold label ("**Status:** Accepted —
-#: ...") or as its own heading ("## Status\n\nAccepted — ..."). Both
-#: conventions are in active use across the existing 51 ADRs.
-_ADR_STATUS_INLINE_START_RE = re.compile(r"^\*\*Status:\*\*[ \t]*(.*)$")
-_ADR_STATUS_HEADING_START_RE = re.compile(r"^## Status[ \t]*$")
-#: A line that ends the Status paragraph's continuation: a new bolded
-#: field label (`**Decision maker:** ...`), a heading, or a `---` rule.
-_ADR_STATUS_CONTINUATION_STOP_RE = re.compile(
-    r"^\s*\*\*[^*\n]+:\*\*|^\s*#|^\s*-{3,}\s*$"
-)
-
 #: (?<!!) excludes image syntax (`![alt](src)` / `![alt][label]`) -- an
 #: image embed is not a navigable link, even though its bracket/paren shape
 #: otherwise matches the same pattern as a real link.
@@ -1811,46 +1808,6 @@ def _links_to_another_adr(
         ):
             return True
     return False
-
-
-def _adr_status_text(text: str) -> str | None:
-    """Return the full Status paragraph -- not just its first physical line
-    -- for either the inline (`**Status:** ...`) or heading (`## Status`)
-    convention. Several real ADRs already wrap their status across multiple
-    lines; capturing only the first line would hide a genuine replacement
-    link that happens to fall on a continuation line from
-    _links_to_another_adr()."""
-    lines = text.split("\n")
-    start: int | None = None
-    first_content: str | None = None
-    for i, line in enumerate(lines):
-        m = _ADR_STATUS_INLINE_START_RE.match(line)
-        if m:
-            start, first_content = i, m.group(1)
-            break
-        if _ADR_STATUS_HEADING_START_RE.match(line):
-            j = i + 1
-            while j < len(lines) and not lines[j].strip():
-                j += 1
-            # An empty "## Status" section immediately followed by the next
-            # heading/field (no actual status content) must not treat that
-            # structural line as the status text -- leave start unset so
-            # this reports as a missing Status, not a bogus one.
-            if j < len(lines) and not _ADR_STATUS_CONTINUATION_STOP_RE.match(lines[j]):
-                start, first_content = j, lines[j]
-            break
-    if start is None:
-        return None
-    parts = [first_content] if first_content is not None else []
-    j = start + 1
-    while j < len(lines):
-        nxt = lines[j]
-        if not nxt.strip() or _ADR_STATUS_CONTINUATION_STOP_RE.match(nxt):
-            break
-        parts.append(nxt)
-        j += 1
-    result = " ".join(p.strip() for p in parts).strip()
-    return result or None
 
 
 def _index_links_to_adr(
@@ -2547,6 +2504,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "examples-readme-sync": check_examples_readme_sync,
     "mkdocs-nav-coverage": check_mkdocs_nav_coverage,
     "adr-index-nav-sync": check_adr_index_and_nav_sync,
+    "adr-status-sync": check_adr_status_sync,
     "banned-imports": check_banned_imports,
     "cli-contract": check_cli_contract,
     "license-header": check_license_header,

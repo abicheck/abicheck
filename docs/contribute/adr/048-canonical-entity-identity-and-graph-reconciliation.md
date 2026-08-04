@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-20
 **Status:** Accepted — implemented.
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** (pending — recorded per repository convention;
 implemented under the G31 Phase B scope doc's own "needs its own ADR" gate,
 the same bar ADR-044 D1 set.)

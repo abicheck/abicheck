@@ -1,22 +1,37 @@
 # ADR-049: Contract Relevance and Compatibility Configuration
 
 **Date:** 2026-07-21
-**Status:** Accepted (2026-07-26). Phase 0 and Phase 1 slices 1–3 are
-implemented (`abicheck/contract_relevance_types.py`,
-`abicheck/compatibility_evaluation_config.py`,
+**Status:** Accepted (2026-07-26) — Phases 0–6 implemented, Phase 7
+partially. Phase 0's vocabulary (`abicheck/contract_relevance_types.py`)
+and Phase 1's typed config, precedence resolver, pack manifests, and
+per-field front-end wiring (`abicheck/compatibility_evaluation_config.py`,
 `abicheck/compatibility_evaluation_resolver.py`,
-`abicheck/compatibility_evaluation_packs.py`). Phase 2's identity primitive
-(`abicheck/finding_identity.py`) is implemented and its first live call site
-is wired: `diff_filtering.py`'s cross-detector dedup key now uses
-`resolve_change_identity`. `diff_symbols.py`'s own old/new matching engine
-remains unwired (deliberately deferred, see the plan's Phase 2 section).
-Phase 3's shadow evaluator (`abicheck/contract_evaluation.py`) is
-implemented for `ContractMode.PUBLIC`/`ALL` only (`EXPORTS` raises
-`NotImplementedError` — no export-root-closure evidence provider exists
-yet) and is not called from any pipeline stage. Nothing here is wired into
-the CLI, contract/compatibility policy, or reports yet — see
+`abicheck/compatibility_evaluation_packs.py`,
+`abicheck/compatibility_evaluation_wiring.py`,
+`abicheck/compatibility_evaluation_frontend.py`) are in place.
+Phase 2's identity primitive (`abicheck/finding_identity.py`) is fully
+wired — `diff_filtering.py`'s cross-detector dedup key resolves through
+`resolve_change_identity`, and `diff_symbols.py`'s own old/new function and
+variable matching joins through `SymbolIdentityIndex`. Phase 3's shadow
+evaluator (`abicheck/contract_evaluation.py`) is stamped onto findings
+under `compare --contract-evaluation`, in all three domains — `exports`
+gained its evidence provider (`abicheck/export_surface.py`), so it no
+longer raises. Phase 4 persists the evidence ledger and contract context
+and replays/re-evaluates from it (`abicheck/contract_evidence_collect.py`,
+`contract_context.py`, `contract_replay.py`); Phase 5 routes both the
+`compare` CLI and the MCP `abi_compare` tool through one resolved config
+(`abicheck/cli_compare_receipt.py`, `mcp_compare_receipt.py`), adds the
+unsuppressible coverage ledger (`contract_coverage_ledger.py`) and applies
+`--pack` manifests (`pack_application.py`); Phase 6 selects the evidence
+domain (`compare --contract public|exports|all`). Phase 7's coverage-exit
+slice landed (`abicheck/contract_coverage_exit.py`). **Still open:** making
+the contract decision authoritative (the evaluator still runs *after*
+`verdict`, over the final `kept` list, so it changes no verdict, finding,
+or exit code), flipping `--contract-evaluation` on by default, and
+`aggregate` folding the coverage ledger into its own axis — see
 `docs/contribute/plans/public-contract-default.md`'s "Work breakdown" for
-current per-phase progress.
+per-phase detail.
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** napetrov
 
 ## Context

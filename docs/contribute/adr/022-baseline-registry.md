@@ -1,15 +1,21 @@
 # ADR-022: Baseline Registry and Snapshot Distribution
 
 **Date:** 2026-03-23
-**Status:** Accepted — **partially implemented**. The `BaselineRegistry` protocol,
-`BaselineKey`/`BaselineMetadata` models, and the filesystem backend are shipped
-(`abicheck/baseline.py`, `abicheck/cli_baseline.py`) — `abicheck baseline
-push/pull/list/delete` default to `file:///path/to/baselines`. The git-native
-backend (default per the original decision below), OCI backend, signing/
-verification, `.abicheck.yml` registry config, auto-detection, and the
-retention/`baseline gc` command remain **not implemented**. Treat the sections
-below as the original design intent, not current behavior — see "Implementation
-status" at the end of this ADR for the as-shipped summary.
+**Status:** Accepted — **not implemented**; the slice that once shipped was
+deleted. The `BaselineRegistry` protocol, `BaselineKey`/`BaselineMetadata`
+models, the filesystem backend, and the `abicheck baseline
+push/pull/list/delete` command group were removed by
+[ADR-043](043-cli-pre-1.0-surface-reset.md)'s D4 — which additionally records
+"recreating a baseline registry, in any form" as an explicit non-goal — and
+nothing under those names remains in the tree. The git-native backend
+(default per the original decision below), OCI backend, signing/verification,
+`.abicheck.yml` registry config, auto-detection, and the retention/`baseline
+gc` command were never implemented. What a user needs this for today is a
+plain JSON snapshot compared via `scan --against OLD` (ADR-043 D4's
+replacement column), plus the CI-facing baseline lifecycle ADR-047/G30 owns —
+see the amendment below. Treat this ADR as a design record, not current
+behavior.
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** Nikolay Petrov
 
 **Amendment (2026-07-27):** the CI-facing half of "baseline lifecycle" this
@@ -344,22 +350,27 @@ baselines:
 
 ## Implementation status (as shipped)
 
+Phases 1, 2, 4, and 6 did ship once, and were then deleted wholesale by
+ADR-043 D4 — so this table records what happened to each phase, not a
+partially-shipped feature a reader could still use:
+
 | Phase | Scope | Status |
 |-------|-------|--------|
-| 1 | `BaselineRegistry` protocol + `BaselineKey`/`BaselineMetadata` | **Done** |
-| 2 | Filesystem backend | **Done** — the only backend; `abicheck baseline` defaults to it (`file:///path/to/baselines`) |
+| 1 | `BaselineRegistry` protocol + `BaselineKey`/`BaselineMetadata` | Shipped, then **removed** (ADR-043 D4) |
+| 2 | Filesystem backend | Shipped, then **removed** (ADR-043 D4) |
 | 3 | Git-native backend | Not implemented |
-| 4 | CLI `baseline push/pull/list/delete` | **Done** (against the filesystem backend) |
-| 5 | `--baseline` flag on `compare` | Not implemented — pull then compare explicitly |
-| 6 | SHA-256 checksum generation/verification | **Done** |
+| 4 | CLI `baseline push/pull/list/delete` | Shipped, then **removed** (ADR-043 D4) |
+| 5 | `--baseline` flag on `compare` | Not implemented — and `scan`'s own `--baseline` was itself renamed `--against` (ADR-043 D5) |
+| 6 | SHA-256 checksum generation/verification | Shipped, then **removed** with the backend (ADR-043 D4) |
 | 7 | `.abicheck.yml` registry config block | Not implemented |
 | 8 | Auto-detection (version/platform) | Not implemented |
 | 9 | OCI backend | Not implemented |
 | 10 | Signing (GPG/sigstore) | Not implemented |
 | 11 | Retention policy / `baseline gc` | Not implemented |
-| 12 | GitHub Action integration | Not implemented |
+| 12 | GitHub Action integration | Superseded — ADR-047/G30's `release-contract` and `accepted-main` channels (see the amendment above) |
 
 The git-native-default framing in the Decision/Consequences sections above
-describes the *original* design intent; the shipped default is the filesystem
-backend. Update this table (and flip the top-of-file status line back to
-"implemented") as the remaining phases land.
+describes the *original* design intent. Do **not** flip the top-of-file status
+line back to "implemented" by re-landing phases 1-4: ADR-043 D4 lists
+recreating a baseline registry as an explicit non-goal, so reviving this
+design needs a new ADR superseding that decision, not an update to this table.

@@ -8,6 +8,7 @@ fixture so the script's expectations match reality.
 
 from __future__ import annotations
 
+import datetime as _dt
 import importlib.util
 import sys
 from pathlib import Path
@@ -48,6 +49,7 @@ def test_script_imports(car):
         "mypy-baseline",
         "examples-ground-truth",
         "mkdocs-nav-coverage",
+        "adr-status-sync",
         "banned-imports",
         "license-header",
     }
@@ -912,6 +914,564 @@ def test_adr_status_text_rejects_empty_heading_style_status(car):
     (regression test for the gap flagged in PR #619 review)."""
     text = "# ADR-001\n\n## Status\n\n## Context\n\nBody.\n"
     assert car._adr_status_text(text) is None
+
+
+@pytest.fixture(scope="module")
+def ass(car):
+    """The sibling gate module `scripts/adr_status_sync.py`.
+
+    Imported through `car` rather than by path: loading check_ai_readiness
+    puts `scripts/` on sys.path, which is exactly the wiring under test."""
+    import adr_status_sync
+
+    return adr_status_sync
+
+
+def test_first_party_roots_agree_with_the_readiness_script(car, ass):
+    """adr_status_sync keeps a local copy of the first-party root names to
+    stay a leaf module; this is the check that keeps the copy honest, so a
+    root added to FIRST_PARTY_PY_ROOTS can't silently go untracked here."""
+    from_script = {p.name for p in car.FIRST_PARTY_PY_ROOTS}
+    # CONTRIB_CLANG_PLUGIN is nested (contrib/abicheck-clang-plugin); the
+    # status-sync side keys on the *top* path segment, so it lists "contrib".
+    from_script = {
+        "contrib" if name.startswith("abicheck-") else name for name in from_script
+    }
+    assert from_script <= set(ass.FIRST_PARTY_ROOT_NAMES), (
+        f"first-party roots drifted: {from_script - set(ass.FIRST_PARTY_ROOT_NAMES)}"
+    )
+
+
+def _write_status_sync_fixture(
+    tmp_path, monkeypatch, ass, *, adr_status: str, index_status: str
+):
+    """Build a minimal one-ADR docs tree for check_adr_status_sync."""
+    fake_docs = tmp_path / "docs"
+    adr_dir = fake_docs / "contribute" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        f"| # | Title | Status |\n|---|---|---|\n"
+        f"| [001](001-example.md) | Example | {index_status} |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        f"# ADR-001\n\n**Status:** {adr_status}\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(ass, "ROOT", tmp_path)
+    monkeypatch.setattr(ass, "DOCS", fake_docs)
+    return adr_dir
+
+
+def test_adr_status_sync_holds(car):
+    """The live tree must be free of ADR-vs-index status contradictions and
+    of malformed/unknown verification receipts."""
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"ADR status drift: {f.errors}"
+
+
+def test_adr_status_sync_catches_implementation_contradiction(
+    car, ass, tmp_path, monkeypatch
+):
+    """The regression this check exists for: ADR-056's own file said
+    "partially implemented" while the index table said "not implemented"."""
+    _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Proposed — partially implemented (see the plan).",
+        index_status="Proposed — not implemented; see the plan",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("nothing implemented" in msg for _, msg in f.errors), (
+        f"expected an implementation contradiction, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_catches_decision_word_mismatch(
+    car, ass, tmp_path, monkeypatch
+):
+    _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Proposed — implemented",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("decision is" in msg for _, msg in f.errors), (
+        f"expected a decision-word mismatch, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_rejects_unrecognized_decision_word(
+    car, ass, tmp_path, monkeypatch
+):
+    """A typo'd decision word must be reported, not treated as "nothing to
+    compare" -- that would silently disable the decision check for exactly
+    the ADR whose metadata is already broken (Codex review on PR #667)."""
+    _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Acceptd — implemented.",
+        index_status="Proposed — implemented",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("recognized decision word" in msg for _, msg in f.errors), (
+        f"expected an unrecognized-decision-word error, got: {f.errors}"
+    )
+
+
+def test_adr_named_modules_keeps_explicit_path_for_deleted_module(ass):
+    """A module named in full and since deleted or renamed is the case most
+    likely to have invalidated the claim that names it, so the explicit path
+    stays a tripwire even though it no longer resolves at HEAD. A *bare* name
+    still has to resolve, since that's all that separates a real module
+    reference from an unrelated `verify.py` mention (Codex review on #667)."""
+    named = ass._adr_named_modules(
+        "implemented in `abicheck/gone_module.py`; see also `also_gone.py` "
+        "and `abicheck/checker.py`"
+    )
+    assert "abicheck/gone_module.py" in named
+    assert "abicheck/checker.py" in named
+    assert "abicheck/also_gone.py" not in named
+
+
+def test_adr_named_modules_tracks_first_party_paths_outside_the_package(ass):
+    """A Status may name a first-party file outside `abicheck/` — ADR-037's
+    already names `tests/test_cli_contract.py`. Forcing every match under the
+    package dropped those silently, so the gate promised to track something it
+    didn't (Codex review on #667). A path under a non-first-party tree is
+    still ignored."""
+    named = ass._adr_named_modules(
+        "enforced by `tests/test_cli_contract.py` and `scripts/verify.py`, "
+        "unlike `docs/example.py`"
+    )
+    assert "tests/test_cli_contract.py" in named
+    assert "scripts/verify.py" in named
+    assert not any(path.startswith("docs/") for path in named)
+
+
+def test_adr_named_modules_does_not_anchor_shorthand_on_a_non_package_path(ass):
+    """Shorthand expands against the package, so a `tests/...` path must not
+    anchor it — that would build a candidate under the wrong tree."""
+    named = ass._adr_named_modules(
+        "`tests/test_compatibility_evaluation.py`, `_resolver.py`"
+    )
+    assert named == ["tests/test_compatibility_evaluation.py"]
+
+
+def test_adr_status_sync_allows_index_row_to_abridge(car, ass, tmp_path, monkeypatch):
+    """An index cell is an abridgement, not a paraphrase-for-paraphrase copy.
+    A status paragraph naming follow-up work the one-line row omits is normal
+    editing, not drift -- a stricter prototype flagged 15 of 56 real ADRs."""
+    _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status=(
+            "Accepted — implemented (phases 1-7); follow-ups #2 and #3 remain "
+            "open and are deliberately deferred, see the plan."
+        ),
+        index_status="Accepted — implemented",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"abridged index row wrongly flagged: {f.errors}"
+
+
+def test_adr_named_modules_does_not_guess_family_shorthand(ass):
+    """Shorthand (`_resolver.py` after `compatibility_evaluation_config.py`)
+    is deliberately not resolved. Guessing it produced a different wrong
+    answer in each of three review rounds — nested anchors lost their
+    directory, `source_graph.py` + `_findings.py` wants the family appended
+    where `graph_facts.py` + `_impact.py` wants it replaced, and an expanded
+    path could not survive deletion without also fabricating one from a bad
+    guess. A Status that wants a module watched names it in full."""
+    named = ass._adr_named_modules(
+        "`abicheck/compatibility_evaluation_config.py` and `_resolver.py`"
+    )
+    assert named == ["abicheck/compatibility_evaluation_config.py"]
+
+
+def test_adr_status_sync_rejects_an_impossible_receipt_date(
+    car, ass, tmp_path, monkeypatch
+):
+    """`2026-99-99` matches the value regex's shape but is not a date, so it
+    would otherwise record a verification that cannot have happened."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** main@abc1234 on 2026-99-99\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("not a real calendar date" in msg for _, msg in f.errors), (
+        f"expected an impossible-date error, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_rejects_a_future_receipt_date(car, ass, tmp_path, monkeypatch):
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    future = _dt.date.today() + _dt.timedelta(days=30)
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        f"**Verified:** main@abc1234 on {future.isoformat()}\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("in the future" in msg for _, msg in f.errors), (
+        f"expected a future-date error, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_warns_when_status_edited_after_verification(
+    car, ass, tmp_path, monkeypatch
+):
+    """A Status edited after the receipt's date, without moving the receipt
+    forward, leaves the receipt vouching for claims nobody checked."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    inner = _fake_git(is_ancestor=True)
+
+    def fake(*args: str) -> str | None:
+        if args[0] == "rev-list":
+            return "0123456\n"
+        if args[0] == "show":
+            # the ADR as it read at the receipt date: a different claim
+            return "# ADR-001\n\n**Status:** Accepted — partially implemented.\n"
+        return inner(*args)
+
+    monkeypatch.setattr(ass, "_git_output", fake)
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("vouches for claims" in msg for _, msg in f.warnings), (
+        f"expected a status-edited-after-verification warning, got: {f.warnings}"
+    )
+
+
+def test_adr_status_sync_accepts_a_receipt_written_with_the_status(
+    car, ass, tmp_path, monkeypatch
+):
+    """The honest flow: corrected prose is written *about* the code at the
+    receipt commit and lands together with the receipt, so the Status as of
+    the receipt date already reads as it does now. Comparing the Status *at
+    the receipt commit* instead would flag every honest receipt — including
+    the commit that introduced this convention."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    inner = _fake_git(is_ancestor=True)
+
+    def fake(*args: str) -> str | None:
+        if args[0] == "rev-list":
+            return "0123456\n"
+        if args[0] == "show":
+            return "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        return inner(*args)
+
+    monkeypatch.setattr(ass, "_git_output", fake)
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [] and f.warnings == [], (
+        f"honest receipt wrongly flagged: {f.errors} {f.warnings}"
+    )
+
+
+def test_adr_status_sync_rejects_duplicate_verified_lines(
+    car, ass, tmp_path, monkeypatch
+):
+    """Two receipts — what a merge resolution or careless edit produces —
+    make "which commit was this verified at?" ambiguous. Validating only the
+    first would leave a malformed or conflicting second one in the file with
+    the gate still green (Codex review on #667)."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n"
+        "**Verified:** main@def5678 on 2026-02-02\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("exactly one is allowed" in msg for _, msg in f.errors), (
+        f"expected a duplicate-receipt error, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_ignores_a_verified_example_in_the_body(
+    car, ass, tmp_path, monkeypatch
+):
+    """An ADR *documenting* the receipt convention — a fenced, deliberately
+    incomplete `**Verified:**` example — must not have that example read as
+    its own live receipt and fail a required CI job (Codex review on #667).
+    Only the leading metadata block counts."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n\n"
+        "## Context\n\nThe convention is:\n\n"
+        "```\n**Verified:** <ref>@<sha> on <YYYY-MM-DD>\n```\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"a documented example was read as a receipt: {f.errors}"
+
+
+def test_adr_metadata_block_covers_heading_style_status(ass):
+    """A few ADRs write their status as a `## Status` section (ADR-036,
+    ADR-042). Ending the metadata block at the first `##` would put their
+    status — and any receipt after it — outside the block, so a receipt added
+    to one of those would be silently ignored: the same quiet no-op this gate
+    exists to catch."""
+    block = ass._adr_metadata_block(
+        "# ADR-036\n\n## Status\n\nAccepted — core implemented.\n\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n\n## Context\n\nBody.\n"
+    )
+    assert ass._ADR_VERIFIED_START_RE.search(block) is not None
+    assert "Body." not in block
+
+
+def _receipt_fixture(tmp_path, monkeypatch, ass):
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n",
+        encoding="utf-8",
+    )
+    return adr_dir
+
+
+def _fake_git(*, has_default_ref=True, is_ancestor=True):
+    def run(*args: str) -> str | None:
+        if args[0] == "rev-parse" and "--is-shallow-repository" in args:
+            return "false\n"
+        if args[0] == "rev-parse":
+            return "deadbee\n" if has_default_ref else None
+        if args[0] == "merge-base":
+            return "" if is_ancestor else None
+        return ""  # cat-file exists; git log finds nothing
+
+    return run
+
+
+def test_adr_status_sync_rejects_receipt_anchored_to_a_branch_only_commit(
+    car, ass, tmp_path, monkeypatch
+):
+    """A receipt naming a commit that exists only on the branch adding it is a
+    delayed-action failure: the commit vanishes on squash-merge, and because
+    the ai-readiness job checks out full history the unresolvable sha is an
+    error, not a tolerated skip — so a required job passes on the PR and then
+    fails on main forever (Codex review on #667)."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    monkeypatch.setattr(ass, "_git_output", _fake_git(is_ancestor=False))
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("not reachable from" in msg for _, msg in f.errors), (
+        f"expected a durable-anchor error, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_accepts_receipt_on_the_default_branch(
+    car, ass, tmp_path, monkeypatch
+):
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    monkeypatch.setattr(ass, "_git_output", _fake_git(is_ancestor=True))
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"a default-branch receipt was wrongly flagged: {f.errors}"
+
+
+def test_adr_status_sync_asks_git_the_right_ancestry_question(
+    car, ass, tmp_path, monkeypatch
+):
+    """`git merge-base --is-ancestor A B` means "A is an ancestor of B", so
+    swapping the operands inverts the check — and every other test here stubs
+    `_git_output` wholesale, so a swap would leave them all green. Assert the
+    actual argv."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    calls: list[tuple[str, ...]] = []
+    inner = _fake_git(is_ancestor=True)
+
+    def recording(*args: str) -> str | None:
+        calls.append(args)
+        return inner(*args)
+
+    monkeypatch.setattr(ass, "_git_output", recording)
+    car.check_adr_status_sync(car.Findings())
+    ancestry = [c for c in calls if c[0] == "merge-base"]
+    assert ancestry, f"no ancestry query was made: {calls}"
+    assert ancestry[0] == ("merge-base", "--is-ancestor", "abc1234", "origin/main"), (
+        f"receipt sha and default-branch ref are in the wrong order: {ancestry[0]}"
+    )
+
+
+def test_adr_status_sync_skips_anchor_check_without_a_default_branch_ref(
+    car, ass, tmp_path, monkeypatch
+):
+    """A clone with no `main`/`origin/main` can't answer the question, and
+    guessing would fail honest work."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    monkeypatch.setattr(
+        ass, "_git_output", _fake_git(has_default_ref=False, is_ancestor=False)
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"unresolvable default branch must skip: {f.errors}"
+
+
+def test_adr_status_sync_rejects_malformed_verified_line(
+    car, ass, tmp_path, monkeypatch
+):
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** yesterday, by me\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("malformed" in msg for _, msg in f.errors), (
+        f"expected a malformed-receipt error, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_warns_when_named_module_moved_since_verification(
+    car, ass, tmp_path, monkeypatch
+):
+    """The document-vs-*code* tripwire: a commit touching a module the status
+    paragraph names, after the recorded verification commit, means nobody has
+    re-read the claim since the code moved."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented in "
+        "`abicheck/contract_evaluation.py`.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ass, "_git_output", lambda *a: "" if a[0] == "cat-file" else "deadbee\n"
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == []
+    assert any("verified at abc1234" in msg for _, msg in f.warnings), (
+        f"expected a staleness warning, got: {f.warnings}"
+    )
+
+
+def test_adr_status_sync_accepts_current_verification_receipt(
+    car, ass, tmp_path, monkeypatch
+):
+    """No commits since the receipt -- nothing to warn about."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented in "
+        "`abicheck/contract_evaluation.py`.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ass, "_git_output", lambda *a: "")
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == []
+    assert f.warnings == []
+
+
+def test_adr_status_sync_tolerates_unknown_sha_on_shallow_checkout(
+    car, ass, tmp_path, monkeypatch
+):
+    """A receipt whose commit predates the fetch depth is not a typo. CI runs
+    on shallow clones, so this must not be an error there -- while a complete
+    checkout, which can tell the difference, still reports it."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n",
+        encoding="utf-8",
+    )
+
+    def fake_git(*args: str) -> str | None:
+        if args[0] == "cat-file":
+            return None  # commit not present in this checkout
+        if args[0] == "rev-parse":
+            return "true\n"  # shallow
+        return ""
+
+    monkeypatch.setattr(ass, "_git_output", fake_git)
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"shallow checkout must not error: {f.errors}"
+
+    monkeypatch.setattr(
+        ass,
+        "_git_output",
+        lambda *a: (
+            None if a[0] == "cat-file" else ("false\n" if a[0] == "rev-parse" else "")
+        ),
+    )
+    f2 = car.Findings()
+    car.check_adr_status_sync(f2)
+    assert any("doesn't exist" in msg for _, msg in f2.errors), (
+        f"complete checkout must report an unknown sha, got: {f2.errors}"
+    )
 
 
 def test_no_hard_file_size_violations(car):

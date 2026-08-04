@@ -15,6 +15,7 @@ for a hypothetical caller — none needs the one-call path yet), not an
 oversight; should `CompareRequest` gain manifest support later,
 `run_compare_request`'s existing `ABICHECK_PARALLEL_EXTRACTION` sequential
 fallback is already the right lever to route it through.
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** (pending — recorded per repository convention.)
 
 **Amendments:**

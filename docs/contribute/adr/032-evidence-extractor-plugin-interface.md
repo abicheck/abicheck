@@ -4,10 +4,18 @@
 **Status:** Accepted — implemented (D1–D10). The extractor interface, capability
 model, action-permission ceiling, external-CLI manifest, collection modes, and
 reproducibility ledger ship in `abicheck/buildsource/extractor.py` +
-`extractor_manifest.py` (the package was renamed `evidence/`→`buildsource/`
-alongside the `EvidencePack`→`BuildSourcePack` rename, ADR-028 amendment),
-wired into `collect`
-(`--extractor-manifest` / `--allow-build-query` / `--collection-mode`). **Amended 2026-06-12** (ADR-028 source-tree model) — see Amendment below.
+`abicheck/buildsource/extractor_manifest.py` (the package was renamed
+`evidence/`→`buildsource/`
+alongside the `EvidencePack`→`BuildSourcePack` rename, ADR-028 amendment).
+**CLI surface note (2026-08-04):** this model was originally driven by
+`collect`'s `--extractor-manifest` / `--allow-build-query` /
+`--collection-mode` flags. [ADR-043](043-cli-pre-1.0-surface-reset.md)'s D4
+deleted the `collect` command (replaced by `dump --sources`/`--build-info`),
+and of those three only `--allow-build-query` still exists as CLI surface —
+the D1-D10 model itself is unaffected, since D4 kept the underlying Python
+functions and only removed their Click registrations, but a manifest or
+collection-mode is no longer selectable from the command line. **Amended
+2026-06-12** (ADR-028 source-tree model) — see Amendment below.
 **Scope note (see ADR-038):** the D1–D10 model here governs *executing*
 extractors — adapters and external CLI tools that run under the D5 action
 ceiling. It predates and does not cover the `abicheck_inputs/` pack family
@@ -17,6 +25,7 @@ parsing, no compiler invocation, no D5 action to permission) and is not an
 "extractor" in this ADR's sense — see ADR-038's "shared consumer" section
 (`abicheck_inputs/` and `merge`) for the executing/non-executing split
 spelled out explicitly.
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -138,7 +147,10 @@ Manifests are trusted-by-operator, never auto-discovered. abicheck does
 not scan `PATH`, the working tree, or any plugin directory for manifests;
 an external extractor runs only when the operator registers it explicitly
 — via a config entry (e.g. `extractors:` in the project config) or a
-per-run `--extractor-manifest <path>` flag. A manifest's declared
+per-run `--extractor-manifest <path>` flag. **(Historical: that flag lived on
+`collect`, which ADR-043 D4 deleted; see the CLI surface note at the top of
+this ADR. The trusted-by-operator rule below is unchanged — only the
+command-line route to it is gone.)** A manifest's declared
 `allowed_actions` are a ceiling, not a grant: at run time they are
 intersected with the actions permitted for the run (D5), so a manifest
 cannot escalate beyond what the operator enabled.

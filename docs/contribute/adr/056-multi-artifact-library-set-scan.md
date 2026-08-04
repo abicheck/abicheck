@@ -3,7 +3,10 @@
 **Date:** 2026-07-29
 **Status:** Proposed — partially implemented (see
 [G35](../plans/g35-multi-artifact-scan.md)'s "Implementation status" note
-for what shipped ahead of formal sign-off vs. what remains deferred).
+for what shipped ahead of formal sign-off vs. what remains deferred). The
+shipped slice lives in `abicheck/service_scan.py`, `abicheck/bundle.py`, and
+`abicheck/cli_scan.py`.
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** (pending)
 
 ---
