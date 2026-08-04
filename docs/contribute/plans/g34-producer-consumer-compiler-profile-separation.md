@@ -499,6 +499,41 @@ confirmed by reading the workflow, not asserted from a design doc):
       to the schema. `severity` is the one field where the two predicates
       genuinely disagree — required by the schema but not part of the
       identity, so a non-string there is readable yet non-conformant.
+- [x] **Structured values are validated element-wise, and so is
+      `affected_symbols`.** Checking only the container let
+      `old_value: [{"bad": 1}]` through, which `_stringify_change_value`
+      folds into the spelling `"{'bad': 1}"` — an identity no producer
+      wrote (eleventh Codex review round). `affected_symbols` was worse:
+      the adapter `str()`-coerced every element, so a `[123]` became the
+      spelling `"123"` and could *collide* with an unrelated profile's
+      genuine `"123"` symbol — and `resolve_change_identity` folds that
+      whole set into `header_binary_context_mismatch`'s discriminator. It
+      is no longer coerced (a non-conformant array reads as absent) and is
+      validated in conformance despite being optional, since it is
+      identity-bearing when present.
+- [x] **Same scheme is proof of distinctness for Itanium only.** An MSVC
+      decoration can encode the *target ABI* rather than the declaration:
+      ARM64EC inserts a `$$h` tag, so one declaration is spelled
+      `?add@lib@@YAHHH@Z` on x64 and `?add@lib@@$$hYAHHH@Z` on ARM64EC —
+      verified, both reduce to `lib::add` through `msvc_qualified_name`.
+      Two Windows profiles on different targets were therefore reported
+      clean of each other's identical removal (eleventh Codex review
+      round). MSVC pairs now withhold; Itanium keeps its precision, which
+      matters because a GCC/Clang matrix is the commonest configuration
+      there is. Withheld rather than normalized away, because `$$h` is the
+      decoration this module can *name*, not demonstrably the only one —
+      and withholding needs no such proof, which is this module's whole
+      asymmetry.
+- [x] **A `compare-release` report that errored still contributes its
+      findings.** `_format_release_json` emits `bundle_findings`/
+      `matrix_findings` for whatever completed, independent of the
+      top-level verdict, but `aggregate._load_report_file` returned early
+      on `ERROR` and dropped them — losing real evidence from the profile
+      most likely to differ (eleventh Codex review round). They are now
+      parsed and explicitly marked incomplete at that call site, where the
+      reason (the run errored) lives, so they convict their own profile and
+      clear no other. The forced blocking exit an `ERROR` report already
+      carries is unchanged, with a test pinning it.
 - [x] **The structured-value carve-out covers exactly `old_value`/
       `new_value`.** The type check above initially accepted `str | list |
       tuple` for *every* required field, so `severity: []` still read as

@@ -731,9 +731,10 @@ class TestPreCheckOperationalErrorReport:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior."
+            "These steps run under the Actions runner's own `shell: bash` "
+            "-- this test exercises that real POSIX bash behavior, which a "
+            "Windows test runner cannot provide (plain 'bash' there is the "
+            "System32 WSL launcher, not Git Bash)."
         ),
     )
     def test_precheck_script_writes_a_valid_operational_error_report_end_to_end(
@@ -973,9 +974,14 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."
@@ -1267,9 +1273,14 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."
@@ -1296,9 +1307,14 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."
@@ -1325,9 +1341,14 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."
@@ -1347,9 +1368,14 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."
@@ -1375,9 +1401,14 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."
@@ -1400,9 +1431,14 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."
@@ -1439,9 +1475,14 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."
@@ -1472,9 +1513,14 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason=(
-            "The actual reusable workflow only ever runs on runs-on: "
-            "ubuntu-latest -- this test exercises that real Linux bash "
-            "behavior. On windows-latest CI runners, plain 'bash' on PATH "
+            "These steps run under the Actions runner's own `shell: bash`, "
+            "which is a real POSIX bash on every platform -- this test "
+            "exercises that behavior. (The check job's runs-on now comes "
+            "from the cell's profile and can be windows-latest, so the "
+            "older wording here, that the workflow only ever runs on "
+            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
+            "*test* cannot get is a POSIX bash on a Windows test runner: "
+            "plain 'bash' on PATH "
             "resolves to the System32 WSL launcher (not Git Bash) and fails "
             "before running anything if no WSL distro is installed, which "
             "isn't a bug in the workflow script itself."

@@ -47,4 +47,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   per-finding form of the invariant `aggregate` is built on. Such a report's
   findings are still read, since seeing a finding proves it is there while
   not seeing one proves nothing. Purely a reporting view: the gate exit code
-  is unchanged.
+  is unchanged. Two Windows profiles on different targets (x64 vs ARM64EC,
+  whose `$$h` decoration marks the target rather than the declaration) are
+  likewise never reported clean of each other's identical finding, while a
+  GCC/Clang matrix keeps full precision — Itanium encodes nothing but the
+  declaration, so there inequality really is proof. A `compare-release`
+  report whose run hit an operational error still contributes the findings
+  it did collect, marked incomplete.

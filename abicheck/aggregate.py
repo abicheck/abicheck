@@ -49,7 +49,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -995,6 +995,18 @@ class _LoadedReport:
     findings: ReportFindings | None = None
 
 
+def _incomplete_findings(data: dict[str, Any]) -> ReportFindings:
+    """Whatever findings *data* lists, explicitly not accounted as exhaustive.
+
+    For a report whose run did not finish cleanly. `parse_report_findings`
+    already refuses completeness to every release-shaped document, so this
+    is belt-and-braces rather than the only guard — but it states the
+    intent at the call site, where the reason (the run errored) actually
+    lives, instead of relying on a property of the shape it happens to have.
+    """
+    return replace(parse_report_findings(data), complete=False)
+
+
 def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
     try:
         data = json.loads(path.read_text())
@@ -1048,6 +1060,15 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             head_sha=head_sha,
             reason=None,
             path=path,
+            # An operational ERROR means *a* library failed, not that nothing
+            # was compared: `_format_release_json` emits `bundle_findings`/
+            # `matrix_findings` from whatever did complete, regardless of the
+            # top-level verdict (Codex review). Dropping them would lose real
+            # evidence from the one profile most likely to differ. Never
+            # complete, though — a run that errored cannot account for
+            # everything, so these findings can convict their own profile and
+            # clear no other.
+            findings=_incomplete_findings(data),
         )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a

@@ -140,8 +140,18 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
         return value if isinstance(value, str) and value else None
 
     affected_raw = entry.get("affected_symbols")
+    # Strings only, never coerced. `resolve_change_identity` uses the whole
+    # set as `header_binary_context_mismatch`'s discriminator, so `str()`-ing
+    # a `[123]` would mint the spelling `"123"` and let it collide with an
+    # unrelated profile's genuine `"123"` — inventing identity evidence out
+    # of a malformed report (Codex review). A non-conformant array is read as
+    # absent here and separately withholds completeness, so it can still
+    # convict its own profile and never clears another's.
     affected = (
-        [str(s) for s in affected_raw] if isinstance(affected_raw, list) else None
+        list(affected_raw)
+        if isinstance(affected_raw, list)
+        and all(isinstance(s, str) for s in affected_raw)
+        else None
     )
     view = _ReportChangeView(
         kind=str(entry.get("kind") or ""),
@@ -475,6 +485,20 @@ def _is_usable_finding_entry(entry: object) -> bool:
     )
 
 
+def _is_string_sequence(value: object) -> bool:
+    """Whether *value* is a list/tuple whose every element is a string.
+
+    The shape every real producer of a structured `old_value`/`new_value`
+    or an `affected_symbols` array emits. Checking only the container and
+    not its elements let `[{"bad": 1}]` through, which
+    ``_stringify_change_value`` then folds to the spelling ``"{'bad': 1}"``
+    — an identity no producer wrote (Codex review).
+    """
+    return isinstance(value, (list, tuple)) and all(
+        isinstance(item, str) for item in value
+    )
+
+
 def _is_conformant_change_entry(entry: Mapping[str, Any]) -> bool:
     """Whether a readable ``changes[]`` *entry* carries every field the
     compare-report schema requires of one, at the type it requires.
@@ -507,10 +531,16 @@ def _is_conformant_change_entry(entry: Mapping[str, Any]) -> bool:
             # mark a genuine report incomplete. Extending the carve-out to
             # every field instead, as a first cut did, let `severity: []`
             # read as conformant (Codex review).
-            if field not in _IDENTITY_VALUE_FIELDS or not isinstance(
-                value, (list, tuple)
-            ):
+            if field not in _IDENTITY_VALUE_FIELDS or not _is_string_sequence(value):
                 return False
+    # Optional, but identity-bearing when present: `resolve_change_identity`
+    # folds the whole `affected_symbols` set into one kind's discriminator,
+    # so a non-string element there is producer output no schema describes
+    # (Codex review). Absent is ordinary and stays fine.
+    if "affected_symbols" in entry and not _is_string_sequence(
+        entry["affected_symbols"]
+    ):
+        return False
     return True
 
 
@@ -771,12 +801,23 @@ def _withholds_clean_verdict(
     - **Different schemes** (Itanium vs MSVC) are not comparable without a
       type-encoding translator this module does not have, so nothing can be
       concluded and the clean verdict is withheld.
-    - **Same scheme, different symbol** is proof of distinctness — an Itanium
+    - **Both Itanium, different symbol** is proof of distinctness —
       ``_ZN3lib3addEii`` and ``_ZN3lib3addEd`` encode different parameter
-      types — so the other profile really is clean of *this* finding and
-      must be reported as such (Codex review: withholding here cost real
-      precision on the commonest configuration of all, a GCC and a Clang
-      profile that both mangle Itanium).
+      types, and Itanium puts nothing else in the mangling — so the other
+      profile really is clean of *this* finding and must be reported as such
+      (Codex review: withholding here cost real precision on the commonest
+      configuration of all, a GCC and a Clang profile that both mangle
+      Itanium).
+    - **Both MSVC, different symbol** proves nothing, unlike its Itanium
+      counterpart, because an MSVC decoration can encode the *target ABI*
+      rather than the declaration: ARM64EC inserts a ``$$h`` tag, so one
+      declaration is spelled ``?add@lib@@YAHHH@Z`` on x64 and
+      ``?add@lib@@$$hYAHHH@Z`` on ARM64EC — verified: both reduce to
+      ``lib::add`` through :func:`msvc_qualified_name`. Two Windows profiles
+      on different targets would otherwise be reported clean of each other's
+      identical removal (Codex review). Withheld rather than normalized,
+      since ``$$h`` is the decoration this module can *name*, not
+      demonstrably the only one — and withholding needs no such proof.
     - **Same scheme, same symbol** is the same entity spelled differently
       across platforms (a Mach-O toolchain prefixes an extra underscore,
       normalized by :func:`comparable_mangled_symbol`). Withheld, because
@@ -784,13 +825,17 @@ def _withholds_clean_verdict(
       *primary* identity, which keys on the raw symbol, that failed to
       recognize it.
 
-    Returns ``True`` when any of *others* is either not comparable to, or
-    equal to, something in *own*.
+    Returns ``True`` when any of *others* is not *provably* a different
+    entity from everything in *own*.
     """
-    own_schemes = {scheme for scheme, _ in own}
-    own_symbols = {symbol for _, symbol in own}
+    own_by_scheme: dict[str | None, set[str]] = {}
+    for scheme, symbol in own:
+        own_by_scheme.setdefault(scheme, set()).add(symbol)
     return any(
-        scheme not in own_schemes or symbol in own_symbols for scheme, symbol in others
+        scheme not in own_by_scheme
+        or scheme != MANGLING_ITANIUM
+        or symbol in own_by_scheme[scheme]
+        for scheme, symbol in others
     )
 
 

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -170,12 +171,12 @@ def _resolve_dependency_source(
     script.write_text(step["run"])
     out = tmp_path / "gh_output"
     out.write_text("")
-    # Relative paths, run from *inside* tmp_path. A Windows absolute path
-    # (`C:\Users\...`) reaches Git Bash with its backslashes intact, so the
-    # step's own `>> "$GITHUB_OUTPUT"` redirect fails and bash exits 1 —
-    # the harness breaking, not the thing under test. Under Actions the
-    # runner always hands bash a POSIX path, so this keeps the test
-    # faithful while letting it run on every platform's unit lane.
+    # Relative paths, run from inside tmp_path — a Windows absolute path
+    # would reach a POSIX bash with its backslashes intact and break the
+    # step's own `>> "$GITHUB_OUTPUT"` redirect. (That was also my first
+    # theory for why this class failed on the Windows lane; it was not the
+    # cause — see the skipif above for the real one — but the relative form
+    # is correct on its own merits, so it stays.)
     completed = subprocess.run(
         ["bash", "resolve.sh"],
         cwd=tmp_path,
@@ -199,6 +200,20 @@ def _resolve_dependency_source(
     raise AssertionError("the resolve step wrote no value= output")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "This runs the step's own bash script, and the Actions runner "
+        "provides a real POSIX bash for it on every platform -- including "
+        "the windows-latest cell this fix is *about*. What a Windows *test* "
+        "runner cannot provide is that bash: plain 'bash' on PATH there is "
+        "the System32 WSL launcher, not Git Bash, and with no WSL distro "
+        "installed it prints an install hint and exits 1 before running "
+        "anything. Same reason every bash-invoking test in "
+        "test_reusable_workflows.py skips here; the Linux and macOS lanes "
+        "cover this logic in full."
+    ),
+)
 class TestWindowsDependencySourceDefault:
     """G34 Phase C made an `os: windows` profile schedulable for the first
     time — straight into a guaranteed failure, until this (Codex review).

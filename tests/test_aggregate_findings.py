@@ -965,6 +965,87 @@ class TestFindingEntryValidation:
         assert by_kind[("func_removed",)].affected_profiles == ("linux-clang20",)
 
 
+class TestStructuredElementValidation:
+    """A structured value's *elements* are identity evidence too (Codex
+    review). Checking only the container let `[{"bad": 1}]` through, which
+    `_stringify_change_value` folds into the spelling `"{'bad': 1}"` — an
+    identity no producer wrote."""
+
+    @pytest.mark.parametrize("field", ["old_value", "new_value"])
+    def test_a_non_string_element_withholds_completeness(self, field: str) -> None:
+        result = parse_report_findings(
+            {"changes": [_change_entry(**{**_MINIMAL, field: [{"bad": 1}]})]}
+        )
+        assert len(result.findings) == 1
+        assert result.complete is False
+
+    def test_affected_symbols_elements_are_validated_too(self) -> None:
+        """Optional, but `resolve_change_identity` folds the whole set into
+        `header_binary_context_mismatch`'s discriminator."""
+        result = parse_report_findings(
+            {"changes": [_change_entry(**{**_MINIMAL, "affected_symbols": [123]})]}
+        )
+        assert len(result.findings) == 1
+        assert result.complete is False
+
+    def test_a_string_affected_symbols_array_stays_conformant(self) -> None:
+        result = parse_report_findings(
+            {"changes": [_change_entry(**{**_MINIMAL, "affected_symbols": ["a", "b"]})]}
+        )
+        assert result.complete is True
+
+    def test_a_non_string_element_is_not_coerced_into_a_spelling(self) -> None:
+        """The sharper half: `str(123)` would mint `"123"` and let a malformed
+        report collide with an unrelated profile's genuine `"123"` symbol."""
+        entry = {**_MINIMAL, "kind": "header_binary_context_mismatch"}
+        invented = ReportFinding.from_report_entry(
+            _change_entry(**{**entry, "affected_symbols": [123]})
+        )
+        genuine = ReportFinding.from_report_entry(
+            _change_entry(**{**entry, "affected_symbols": ["123"]})
+        )
+        assert invented.identity != genuine.identity
+
+
+class TestMsvcTargetDecorations:
+    """Same scheme, different symbol is proof of distinctness for Itanium but
+    not for MSVC: an MSVC decoration can encode the *target ABI* rather than
+    the declaration (Codex review)."""
+
+    #: The same declaration as `_REMOVED_MSVC`, as ARM64EC spells it — the
+    #: `$$h` tag is a target marker, not a different overload.
+    _ARM64EC = {
+        "kind": "func_removed",
+        "symbol": "?add@lib@@$$hYAHHH@Z",
+        "description": "Function removed",
+        "old_value": None,
+        "new_value": None,
+        "severity": "error",
+    }
+
+    def test_both_spellings_reduce_to_one_declaration(self) -> None:
+        assert cross_abi_declaration("?add@lib@@YAHHH@Z") == "lib::add"
+        assert cross_abi_declaration("?add@lib@@$$hYAHHH@Z") == "lib::add"
+
+    def test_two_msvc_targets_do_not_clear_each_other(self, tmp_path: Path) -> None:
+        arm64ec = "libfoo@windows-arm64ec#release@headers"
+        _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [_REMOVED_MSVC])
+        _write_findings_report(tmp_path, arm64ec, "BREAKING", [self._ARM64EC])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(MSVC_CHECK, arm64ec))
+        assert all(e.unaffected_profiles == () for e in r.finding_matrix)
+        assert {e.scope for e in r.finding_matrix} == {"undetermined"}
+
+    def test_itanium_keeps_its_precision(self, tmp_path: Path) -> None:
+        """The withholding is scheme-specific, not a retreat to the old
+        blanket rule — a GCC/Clang matrix is the commonest configuration
+        there is and must still resolve cleanly."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(tmp_path, CLANG, "BREAKING", [_REMOVED_ITANIUM_OVERLOAD])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        assert all(e.unaffected_profiles for e in r.finding_matrix)
+        assert {e.scope for e in r.finding_matrix} == {"profile_specific"}
+
+
 class TestSchemaRequiredFieldsAgree:
     """`_CONFORMANT_CHANGE_FIELDS` mirrors `compare_report.schema.json`'s own
     `required` list *and* its per-field nullability, so the check stays a
