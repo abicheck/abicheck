@@ -43,7 +43,9 @@ from abicheck.aggregate_findings import (
     ReportFinding,
     ReportFindings,
     build_finding_matrix,
+    comparable_mangled_symbol,
     cross_abi_declaration,
+    mangling_scheme,
     parse_report_findings,
     render_finding_matrix_lines,
     resolve_cross_abi_identity,
@@ -867,3 +869,78 @@ class TestStructuredFindingValues:
         assert entry.affected_profiles == ("linux-gcc14",)
         assert entry.undetermined_profiles == ()
         assert entry.scope == "profile_specific"
+
+
+MACOS_CHECK = "libfoo@macos-clang#release@headers"
+
+#: The same declaration and the same overload as `_REMOVED_ITANIUM`, spelled
+#: the way a Mach-O toolchain spells it — one extra leading underscore.
+_REMOVED_ITANIUM_MACHO = {
+    "kind": "func_removed",
+    "symbol": "__ZN3lib3addEii",
+    "description": "Function removed",
+}
+
+
+class TestManglingComparability:
+    """Withholding a clean verdict is for spellings that *cannot be compared*,
+    not for every pair sharing a qualified name (Codex review).
+
+    Two Itanium manglings encode their parameter types, so their inequality
+    is proof of distinctness — treating that as ambiguous cost real precision
+    on the commonest configuration there is: a GCC profile and a Clang
+    profile, both mangling Itanium.
+    """
+
+    def test_same_scheme_different_overloads_are_provably_distinct(
+        self, tmp_path: Path
+    ) -> None:
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(tmp_path, CLANG, "BREAKING", [_REMOVED_ITANIUM_OVERLOAD])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        assert [e.scope for e in r.finding_matrix] == [
+            "profile_specific",
+            "profile_specific",
+        ]
+        assert all(e.unaffected_profiles for e in r.finding_matrix)
+        assert all(e.undetermined_profiles == () for e in r.finding_matrix)
+
+    def test_incomparable_schemes_still_withhold(self, tmp_path: Path) -> None:
+        """The Itanium/MSVC pair keeps the old, conservative answer."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [_REMOVED_MSVC])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
+        assert {e.scope for e in r.finding_matrix} == {"undetermined"}
+
+    def test_same_entity_across_platform_spellings_is_never_called_clean(
+        self, tmp_path: Path
+    ) -> None:
+        """A Mach-O toolchain's extra leading underscore makes one entity look
+        like two raw symbols. Comparing normalized forms recognizes them as
+        the same, so neither profile may be reported clean of the other."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(
+            tmp_path, MACOS_CHECK, "BREAKING", [_REMOVED_ITANIUM_MACHO]
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MACOS_CHECK))
+        assert {e.scope for e in r.finding_matrix} == {"undetermined"}
+        assert all(e.unaffected_profiles == () for e in r.finding_matrix)
+
+    @pytest.mark.parametrize(
+        "symbol,expected",
+        [
+            ("_ZN3lib3addEii", "itanium"),
+            ("__ZN3lib3addEii", "itanium"),
+            ("?add@lib@@YAHHH@Z", "msvc"),
+            ("plain_c", None),
+            ("Foo", None),
+            ("", None),
+        ],
+    )
+    def test_mangling_scheme(self, symbol: str, expected: str | None) -> None:
+        assert mangling_scheme(symbol) == expected
+
+    def test_platform_prefix_is_normalized_away(self) -> None:
+        assert comparable_mangled_symbol("__ZN3lib3addEii") == "_ZN3lib3addEii"
+        assert comparable_mangled_symbol("_ZN3lib3addEii") == "_ZN3lib3addEii"
+        assert comparable_mangled_symbol("?add@lib@@YAHHH@Z") == "?add@lib@@YAHHH@Z"

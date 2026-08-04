@@ -26,7 +26,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   neither profile is reported clean of the other's finding — but the two are
   never merged into a single entry, since no mangling parser recovers
   parameter types and nothing in a report distinguishes "both profiles lost
-  the same overload" from "each lost a different one". Both report shapes
+  the same overload" from "each lost a different one". Where the two
+  spellings *are* comparable — both Itanium, as a GCC and a Clang profile
+  are — their inequality proves distinct overloads and each profile is
+  reported clean of the other's finding as it should be. Both report shapes
   are read: a `compare`/`scan` report's `changes`, and a `compare-release`
   report's `bundle_findings`/`matrix_findings` (what a `kind: bundle` check
   produces). A profile only counts as *unaffected* by a finding when it

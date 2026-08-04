@@ -182,6 +182,46 @@ def cross_abi_declaration(symbol: str) -> str | None:
     return qualified
 
 
+#: Mangling schemes this module can tell apart. Two symbols in the *same*
+#: scheme are directly comparable — their inequality is proof they name
+#: different entities — while an Itanium/MSVC pair is not comparable at all
+#: without a type-encoding translator this module deliberately does not have.
+MANGLING_ITANIUM = "itanium"
+MANGLING_MSVC = "msvc"
+
+
+def mangling_scheme(symbol: str) -> str | None:
+    """Which C++ mangling scheme *symbol* is encoded in, or ``None``.
+
+    ``None`` for anything the structural parsers decline to model — a type
+    name, an ``extern "C"`` symbol, a template or operator mangling. Decided
+    by which parser actually accepts the symbol rather than by re-deriving
+    prefix rules, so this can never disagree with
+    :func:`cross_abi_declaration` about what a symbol is.
+    """
+    if not symbol:
+        return None
+    if itanium_qualified_name(symbol):
+        return MANGLING_ITANIUM
+    if msvc_qualified_name(symbol):
+        return MANGLING_MSVC
+    return None
+
+
+def comparable_mangled_symbol(symbol: str) -> str:
+    """*symbol* with platform spelling differences normalized away.
+
+    A Mach-O toolchain prefixes its Itanium manglings with an extra leading
+    underscore (``__ZN3lib3addEii`` for the same declaration Linux spells
+    ``_ZN3lib3addEii``), so two profiles can carry byte-different symbols for
+    one entity. Comparing raw strings would read that as two distinct
+    overloads; comparing these normalized forms does not.
+    """
+    if symbol.startswith("__Z"):
+        return symbol[1:]
+    return symbol
+
+
 def resolve_cross_abi_identity(entry: Mapping[str, Any]) -> FindingIdentity | None:
     """A mangling-scheme-independent identity for *entry*, or ``None``.
 
@@ -246,6 +286,12 @@ class ReportFinding:
     #: The scheme-independent declaration name behind
     #: :attr:`cross_identity` (``lib::add``), for display and grouping.
     cross_declaration: str | None = None
+    #: :func:`mangling_scheme` and :func:`comparable_mangled_symbol` for this
+    #: finding's own ``symbol`` — together they decide whether another
+    #: profile's finding on the same declaration is *provably* a different
+    #: one or merely indistinguishable.
+    mangling: str | None = None
+    comparable_symbol: str = ""
 
     @classmethod
     def from_report_entry(cls, entry: Mapping[str, Any]) -> ReportFinding:
@@ -261,6 +307,8 @@ class ReportFinding:
             severity=severity if isinstance(severity, str) and severity else None,
             cross_identity=cross.primary_id if cross is not None else None,
             cross_declaration=cross_abi_declaration(str(entry.get("symbol") or "")),
+            mangling=mangling_scheme(str(entry.get("symbol") or "")),
+            comparable_symbol=comparable_mangled_symbol(str(entry.get("symbol") or "")),
         )
 
 
@@ -517,6 +565,44 @@ class FindingMatrixEntry:
 ProfileCheckFindings = Sequence["ReportFindings"]
 
 
+def _withholds_clean_verdict(
+    own: set[tuple[str | None, str]],
+    others: set[tuple[str | None, str]],
+) -> bool:
+    """Whether another profile's findings on this declaration make a clean
+    verdict unsafe to state.
+
+    *own* and *others* are ``(mangling scheme, comparable symbol)`` pairs for
+    findings that already share a cross-ABI declaration key — same qualified
+    name, same discriminator. What separates "provably a different overload"
+    from "cannot tell" is whether the two spellings are comparable at all:
+
+    - **Different schemes** (Itanium vs MSVC) are not comparable without a
+      type-encoding translator this module does not have, so nothing can be
+      concluded and the clean verdict is withheld.
+    - **Same scheme, different symbol** is proof of distinctness — an Itanium
+      ``_ZN3lib3addEii`` and ``_ZN3lib3addEd`` encode different parameter
+      types — so the other profile really is clean of *this* finding and
+      must be reported as such (Codex review: withholding here cost real
+      precision on the commonest configuration of all, a GCC and a Clang
+      profile that both mangle Itanium).
+    - **Same scheme, same symbol** is the same entity spelled differently
+      across platforms (a Mach-O toolchain prefixes an extra underscore,
+      normalized by :func:`comparable_mangled_symbol`). Withheld, because
+      the profile demonstrably has this very finding — it is only the
+      *primary* identity, which keys on the raw symbol, that failed to
+      recognize it.
+
+    Returns ``True`` when any of *others* is either not comparable to, or
+    equal to, something in *own*.
+    """
+    own_schemes = {scheme for scheme, _ in own}
+    own_symbols = {symbol for _, symbol in own}
+    return any(
+        scheme not in own_schemes or symbol in own_symbols for scheme, symbol in others
+    )
+
+
 def build_finding_matrix(
     findings_by_target_and_profile: Mapping[str, Mapping[str, ProfileCheckFindings]],
 ) -> tuple[FindingMatrixEntry, ...]:
@@ -577,15 +663,19 @@ def build_finding_matrix(
                     by_identity.setdefault(finding.identity, []).append(finding)
             known[pid] = by_identity
 
-        cross_by_profile = {
-            pid: {
-                f.cross_identity
-                for found in known[pid].values()
-                for f in found
-                if f.cross_identity
-            }
-            for pid in profiles
+        # profile -> cross-ABI declaration key -> the (scheme, normalized
+        # symbol) pairs it reported under. Both halves are needed to decide
+        # whether that profile's finding is *provably* a different one.
+        cross_by_profile: dict[str, dict[str, set[tuple[str | None, str]]]] = {
+            pid: {} for pid in profiles
         }
+        for pid in profiles:
+            for found in known[pid].values():
+                for f in found:
+                    if f.cross_identity:
+                        cross_by_profile[pid].setdefault(f.cross_identity, set()).add(
+                            (f.mangling, f.comparable_symbol)
+                        )
 
         all_identities = sorted(
             {identity for found in known.values() for identity in found}
@@ -602,7 +692,14 @@ def build_finding_matrix(
             # this is "cannot tell", never "clean".
             cross = first.cross_identity
             sibling = (
-                {pid for pid in rest if cross in cross_by_profile[pid]}
+                {
+                    pid
+                    for pid in rest
+                    if _withholds_clean_verdict(
+                        {(s.mangling, s.comparable_symbol) for s in samples},
+                        cross_by_profile[pid].get(cross, set()),
+                    )
+                }
                 if cross
                 else set()
             )

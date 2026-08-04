@@ -290,7 +290,23 @@ confirmed by reading the workflow, not asserted from a design doc):
       finding on the same declaration under another mangling is reported
       `undetermined`, and the shared declaration is exposed on the entry so a
       consumer can present the two together without the report claiming they
-      are one finding. (An intermediate revision *did* merge when each
+      are one finding.
+- [x] **Withholding applies only where the spellings cannot be compared.**
+      Sharing a qualified name is not itself ambiguity: two Itanium manglings
+      encode their parameter types, so `_ZN3lib3addEii` vs `_ZN3lib3addEd`
+      *proves* two distinct overloads, and reporting either profile as
+      merely undetermined threw away real precision on the commonest
+      configuration of all — a GCC and a Clang profile, both Itanium. The
+      clean verdict is now withheld only when the other profile's spelling
+      is in a *different* scheme (Itanium vs MSVC, not comparable without a
+      type-encoding translator this module does not have) or normalizes to
+      the *same* symbol. That second case is the Mach-O quirk: a macOS
+      toolchain prefixes an extra leading underscore, so one entity appears
+      as two raw symbols and two primary identities — `comparable_mangled_symbol`
+      recognizes them as one, and the profile stays undetermined rather than
+      being called clean of a finding it demonstrably has. (Fifth Codex
+      review round; the Mach-O sub-case was found while implementing it, and
+      is why the rule compares normalized symbols rather than just schemes.) (An intermediate revision *did* merge when each
       profile contributed exactly one identity; the third Codex review round
       pointed out that cardinality is not evidence — Linux losing
       `add(int, int)` while Windows loses `add(double)` passes that check and
