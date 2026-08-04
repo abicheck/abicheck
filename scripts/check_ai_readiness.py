@@ -1639,6 +1639,46 @@ _ADR_STATUS_CONTINUATION_STOP_RE = re.compile(
     r"^\s*\*\*[^*\n]+:\*\*|^\s*#|^\s*-{3,}\s*$"
 )
 
+#: An ADR's optional, opt-in verification receipt: the commit a maintainer
+#: last checked this ADR's Status claims against, plus the date they did it.
+#: Absent means "nobody has recorded a check" -- which is the honest default
+#: for the ADRs written before this convention existed, and why the freshness
+#: check below is opt-in rather than retrofitted onto every file.
+_ADR_VERIFIED_START_RE = re.compile(r"^\*\*Verified:\*\*[ \t]*(.*)$", re.MULTILINE)
+_ADR_VERIFIED_VALUE_RE = re.compile(
+    r"^(?P<ref>[A-Za-z0-9._/-]+)@(?P<sha>[0-9a-f]{7,40})[ \t]+on[ \t]+"
+    r"(?P<date>\d{4}-\d{2}-\d{2})\s*$"
+)
+
+#: A first-party module named inside a Status paragraph, either fully
+#: ("`abicheck/contract_evaluation.py`") or bare ("`contract_replay.py`") --
+#: real status lines mix both freely, often naming the first module of a
+#: family in full and the rest of the family bare. These are what a Status
+#: claim is *about* ("the shadow evaluator is implemented in X"), so a commit
+#: touching one after the recorded verification is exactly the signal that the
+#: claim needs re-reading. A bare name is only accepted when it resolves to a
+#: real file in the package, which is what keeps an unrelated `verify.py` or
+#: `conftest.py` mention out.
+_ADR_MODULE_PATH_RE = re.compile(
+    r"\b(?:abicheck/)?([A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*\.py)\b"
+)
+
+
+def _adr_named_modules(status: str) -> list[str]:
+    """Package-relative paths of the first-party modules a Status claim names."""
+    named = set()
+    for candidate in _ADR_MODULE_PATH_RE.findall(status):
+        if (PKG / candidate).is_file():
+            named.add(f"abicheck/{candidate}")
+    return sorted(named)
+
+
+#: One row of the ADR index's status table: `| [NNN](file.md) | Title | Status |`.
+_ADR_INDEX_ROW_RE = re.compile(
+    r"^\|\s*\[[^\]]+\]\((?P<file>\d{3}-[^)]+\.md)\)\s*\|[^|]*\|(?P<status>.*)\|\s*$",
+    re.MULTILINE,
+)
+
 #: (?<!!) excludes image syntax (`![alt](src)` / `![alt][label]`) -- an
 #: image embed is not a navigable link, even though its bracket/paren shape
 #: otherwise matches the same pattern as a real link.
@@ -1951,6 +1991,205 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
                 f"docs/contribute/adr/{md.name}: status is 'Superseded' "
                 "but doesn't link to its replacement ADR",
             )
+
+
+# ---------------------------------------------------------------------------
+# Check: an ADR's Status claim agrees with the index, and its recorded
+# verification hasn't been outrun by the code it names
+# ---------------------------------------------------------------------------
+
+
+#: The decision half of a Status line -- the only vocabulary that is genuinely
+#: closed. The implementation half is deliberately left as prose (see the
+#: "Status field convention" section of docs/contribute/adr/index.md for why a
+#: structured frontmatter schema was considered and rejected).
+_ADR_DECISION_WORDS: frozenset[str] = frozenset(
+    {"accepted", "proposed", "superseded", "deprecated", "rejected"}
+)
+
+#: "not implemented" / "not started" / "not yet implemented" -- a claim that
+#: *nothing* has shipped. Matched ahead of the bare "implemented" below, since
+#: the negative phrase contains the positive one as a substring.
+_ADR_IMPL_NONE_RE = re.compile(r"\bnot\s+(?:yet\s+)?(?:implemented|started)\b", re.I)
+_ADR_IMPL_SOME_RE = re.compile(r"\bimplemented\b", re.I)
+
+
+def _adr_decision_word(status: str) -> str | None:
+    """The leading decision word of a Status claim, or None when the claim
+    doesn't open with one from the closed vocabulary."""
+    lead = re.split(r"[\s—:.,;()-]", status.strip(), maxsplit=1)[0].strip("*").lower()
+    return lead if lead in _ADR_DECISION_WORDS else None
+
+
+def _adr_impl_claim(status: str) -> str | None:
+    """Coarsely classify a Status claim's *implementation* half as "none"
+    (nothing shipped) or "some" (anything shipped, partially or fully), or
+    None when it makes no implementation claim at all.
+
+    Deliberately only two buckets. An earlier prototype tried to distinguish
+    "fully implemented" from "partially implemented" by keyword and flagged 15
+    of 56 ADRs, nearly all of them false positives: the index cell is an
+    *abridgement* of a status paragraph that often runs a dozen lines, so it
+    routinely omits a follow-up the full paragraph mentions. Paraphrase is not
+    drift. A flat contradiction -- one side says nothing shipped, the other
+    says something did -- is, and that is what this reports.
+    """
+    none_m = _ADR_IMPL_NONE_RE.search(status)
+    some_m = _ADR_IMPL_SOME_RE.search(status)
+    if none_m and (some_m is None or none_m.start() <= some_m.start()):
+        return "none"
+    if some_m:
+        return "some"
+    return None
+
+
+def _git_output(*args: str) -> str | None:
+    """Run a read-only git command in the repo, or None if git is unusable
+    (not installed, not a repository, command failed)."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(ROOT), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _repo_is_shallow() -> bool:
+    """True when this checkout has truncated history (or git can't say).
+
+    Used for exactly one decision: whether a `**Verified:**` sha that doesn't
+    resolve is a typo (ERROR) or simply outside the fetch depth (skip). It is
+    deliberately *not* used to gate the freshness query itself — a shallow
+    checkout still answers "did anything touch this path since commit X"
+    correctly for the history it does have, and CI runs on shallow clones. An
+    earlier revision skipped the whole check whenever the repo was shallow,
+    which silently disabled the tripwire in exactly the environment it's
+    meant to run in.
+    """
+    shallow = _git_output("rev-parse", "--is-shallow-repository")
+    return shallow is None or shallow.strip() != "false"
+
+
+def _check_adr_verification_receipt(
+    f: Findings, name: str, text: str, status: str
+) -> None:
+    """Validate an ADR's opt-in `**Verified:**` receipt and warn when the code
+    it points at has moved on.
+
+    The receipt records the commit at which a maintainer last checked this
+    ADR's Status claims against the tree. Every first-party module path the
+    Status paragraph *names* is then a tripwire: a commit touching one after
+    that point means the prose describing it may no longer hold. That is a
+    WARN, not an ERROR -- a change to a named module doesn't prove the claim
+    went stale, it proves nobody has re-read it since the code moved.
+    """
+    m = _ADR_VERIFIED_START_RE.search(text)
+    if m is None:
+        return
+    value = _ADR_VERIFIED_VALUE_RE.match(m.group(1).strip())
+    if value is None:
+        f.err(
+            "adr-status-sync",
+            f"docs/contribute/adr/{name}: malformed '**Verified:**' line "
+            f"({m.group(1).strip()!r}); expected '<ref>@<sha> on YYYY-MM-DD', "
+            "e.g. 'main@2e43d53 on 2026-08-04'",
+        )
+        return
+    sha = value.group("sha")
+    if _git_output("cat-file", "-e", f"{sha}^{{commit}}") is None:
+        if not _repo_is_shallow():
+            f.err(
+                "adr-status-sync",
+                f"docs/contribute/adr/{name}: '**Verified:**' names commit "
+                f"{sha}, which doesn't exist in this repository",
+            )
+        # On a shallow checkout the commit may simply predate the fetch
+        # depth, which says nothing about the receipt's validity.
+        return
+    modules = _adr_named_modules(status)
+    if not modules:
+        return
+    log = _git_output("log", "--format=%h", f"{sha}..HEAD", "--", *modules)
+    if not log or not log.strip():
+        return
+    commits = log.split()
+    f.warn(
+        "adr-status-sync",
+        f"docs/contribute/adr/{name}: Status was verified at {sha} but "
+        f"{len(commits)} commit(s) have touched the module(s) it names since "
+        f"({', '.join(modules)}) — re-read the claim against the code and "
+        "move the '**Verified:**' line forward, or correct the claim",
+    )
+
+
+def check_adr_status_sync(f: Findings) -> None:
+    """Keep an ADR's own Status line and its row in the ADR index from
+    contradicting each other, and keep an opt-in verification receipt honest.
+
+    Two separate failure modes, found by a 2026-08 status review:
+
+    1. *Document-vs-document drift.* ADR-056's own file said "partially
+       implemented" while the index table said "not implemented" — a reader
+       gets a different answer depending on which page they open. Only a flat
+       contradiction is reported (see _adr_impl_claim); the index cell is
+       allowed to abridge, because that's what an index is for.
+    2. *Document-vs-code drift.* ADR-049's Status said its shadow evaluator
+       "is not called from any pipeline stage" and that nothing was "wired
+       into the CLI ... or reports" — five merged PRs after that had stopped
+       being true. No comparison between two prose documents can catch this;
+       only re-reading the code can. What the `**Verified:**` receipt adds is
+       the *tripwire*: record which commit you checked at, and this check
+       tells the next reader when the modules that claim names have changed
+       underneath it.
+    """
+    adr_dir = DOCS / "contribute" / "adr"
+    if not adr_dir.is_dir():
+        return
+    index_text = _read(adr_dir / "index.md")
+    rows = {
+        m.group("file"): m.group("status").strip()
+        for m in _ADR_INDEX_ROW_RE.finditer(index_text)
+    }
+    for md in sorted(adr_dir.glob("*.md")):
+        if md.name == "index.md" or not _ADR_FILE_RE.match(md.name):
+            continue
+        text = _read(md)
+        # Raw text, not _strip_adr_link_noise'd: the module paths the
+        # freshness tripwire keys on are written as inline code, which that
+        # stripper (correctly, for its own link-scanning purpose) removes.
+        status = _adr_status_text(text)
+        row = rows.get(md.name)
+        if status is None or row is None:
+            # A missing Status line is adr-index-nav-sync's error to report,
+            # and a missing index row is its "not linked from index.md" error.
+            # Reporting either twice would just be noise.
+            continue
+        file_decision, row_decision = (
+            _adr_decision_word(status),
+            _adr_decision_word(row),
+        )
+        if file_decision and row_decision and file_decision != row_decision:
+            f.err(
+                "adr-status-sync",
+                f"docs/contribute/adr/{md.name}: decision is "
+                f"'{file_decision}' in the ADR but '{row_decision}' in "
+                "docs/contribute/adr/index.md",
+            )
+        file_impl, row_impl = _adr_impl_claim(status), _adr_impl_claim(row)
+        if file_impl and row_impl and file_impl != row_impl:
+            said = {"none": "nothing implemented", "some": "something implemented"}
+            f.err(
+                "adr-status-sync",
+                f"docs/contribute/adr/{md.name}: the ADR claims "
+                f"{said[file_impl]} but docs/contribute/adr/index.md claims "
+                f"{said[row_impl]}",
+            )
+        _check_adr_verification_receipt(f, md.name, text, status)
 
 
 # ---------------------------------------------------------------------------
@@ -2547,6 +2786,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "examples-readme-sync": check_examples_readme_sync,
     "mkdocs-nav-coverage": check_mkdocs_nav_coverage,
     "adr-index-nav-sync": check_adr_index_and_nav_sync,
+    "adr-status-sync": check_adr_status_sync,
     "banned-imports": check_banned_imports,
     "cli-contract": check_cli_contract,
     "license-header": check_license_header,

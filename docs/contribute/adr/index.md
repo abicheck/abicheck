@@ -23,6 +23,44 @@ is to keep encoding the same three facts in that one line, explicitly:
 it, where the current behavior is documented instead>
 ```
 
+### The `**Verified:**` receipt (opt-in)
+
+A 2026-08 status review found the residual half of the same problem, which no
+amount of status *prose* solves: ADR-049's Status said its shadow evaluator
+"is not called from any pipeline stage" and that nothing was wired into the
+CLI or reports, and five merged PRs later that was simply false. The status
+line was internally consistent, agreed with the index row, and was wrong —
+because the code moved and nobody re-read it. Comparing two documents cannot
+catch that; only re-reading the code can.
+
+So a second, **optional** metadata line records when someone last did:
+
+```
+**Verified:** <ref>@<sha> on <YYYY-MM-DD>
+```
+
+placed directly after the Status paragraph. It means "a maintainer checked
+this ADR's Status claims against the tree at that commit" — nothing more. It
+is opt-in precisely so it stays truthful: an ADR without one has simply never
+been checked, which is the honest state of most of the files below and is not
+an error. Adding one you didn't actually perform is worse than having none.
+
+What it buys is a tripwire rather than a promise. `adr-status-sync` (in
+`scripts/check_ai_readiness.py`) reads the first-party module paths the Status
+paragraph *names* and warns when commits after the recorded sha have touched
+any of them — i.e. when the code a claim describes has moved out from under
+it. That's a WARN, not an ERROR: a changed module doesn't prove the claim went
+stale, it proves nobody has re-read it since. Move the line forward when you
+re-check, or correct the claim.
+
+The same check ERRORs on a flat *contradiction* between an ADR's own Status
+and its row in the table below — one side claiming nothing is implemented
+while the other claims something is (which is exactly how ADR-056's row went
+stale). It deliberately does **not** require the two to paraphrase each other:
+the index cell is an abridgement of a paragraph that often runs a dozen lines,
+and an earlier prototype that compared them more strictly flagged 15 of 56
+ADRs, nearly all false positives.
+
 Good examples already in this table: ADR-022 ("partially implemented" +
 naming exactly which backend shipped), ADR-037 (distinguishes "the contract
 is implemented" from "enforcement is advisory until 1.0"), ADR-025 ("Proposed,
@@ -87,11 +125,11 @@ against the code as unverified, regardless of how confident it reads.
 | [046](046-source-graph-identity-v2-and-evidence-merge.md) | Source Graph Identity v2 — USR-Based Entity Resolution and Evidence-Preserving Merge | Accepted — D1-D6 all implemented, each to the documented scope (D4 is a deliberately scoped subset of the originally sketched full rewrite; see ADR for exactly what's covered per decision) |
 | [047](047-github-actions-integration-model.md) | GitHub Actions Integration Model — Project Lifecycle Over Aggregate-Centric Design | Accepted — substantially implemented (P0 and the main P1 lifecycle implemented; P2 partially implemented, see ADR); see [G30](../plans/g30-github-actions-integration-model.md) |
 | [048](048-canonical-entity-identity-and-graph-reconciliation.md) | Canonical Entity Identity and Graph Reconciliation (G31 Phase B) | Accepted — implemented |
-| [049](049-contract-relevance-and-compatibility-configuration.md) | Contract Relevance and Compatibility Configuration | Accepted (2026-07-26) — Phase 0 and Phase 1 slices 1-2 implemented (vocabulary, config, resolver, first legacy-mode wiring); live shadow evaluator and detection/gate/report wiring not yet started |
+| [049](049-contract-relevance-and-compatibility-configuration.md) | Contract Relevance and Compatibility Configuration | Accepted (2026-07-26) — Phases 0-6 implemented (vocabulary, typed config/resolver/packs, finding identity, shadow evaluator in all three contract domains, persisted evidence context + replay, one resolved config per front end, `--contract` domain selection); Phase 7 partially (coverage exit landed; authoritative decision, default flip, and `aggregate` folding still open) |
 | [050](050-comparability-contract-and-multi-tu-manifest.md) | Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest | Accepted — implemented (Phase 0 and Phases A-E; D1-D6); see [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) |
 | [051](051-documentation-operational-model.md) | Documentation Operational Model (Ownership Registry + Docs-Contract Gate) | Accepted — Stages 1-4 implemented; Stage 5 explicitly deferred |
 | [052](052-unified-impact-assessment-model.md) | Unified Impact Assessment Model (G29 Phase 3, slices 1-9) | Accepted — slices 1-9 implemented |
 | [053](053-tu-link-unit-dso-attribution.md) | TU → Link-Unit → DSO Source-Evidence Attribution | Accepted — implemented (core algorithm + validator; CLI/Action pipeline wiring deferred, see D5) |
 | [054](054-cli-project-integration-surface-consolidation.md) | CLI Project-Integration Surface Consolidation | Accepted — implemented |
 | [055](055-typed-request-result-completeness-and-schema-registry.md) | Typed Request/Result Completeness and a Schema-Version Registry | Proposed — D3 (schema registry) implemented; D1/D2/D4 not started |
-| [056](056-multi-artifact-library-set-scan.md) | Multi-Artifact / Library-Set `scan` | Proposed — not implemented; see [G35](../plans/g35-multi-artifact-scan.md) |
+| [056](056-multi-artifact-library-set-scan.md) | Multi-Artifact / Library-Set `scan` | Proposed — partially implemented (Phases 1-4's engine/detector/CLI/Action slice shipped ahead of formal sign-off; MCP half, example catalog, and `--dry-run` estimator deferred); see [G35](../plans/g35-multi-artifact-scan.md) |

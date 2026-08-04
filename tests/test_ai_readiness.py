@@ -48,6 +48,7 @@ def test_script_imports(car):
         "mypy-baseline",
         "examples-ground-truth",
         "mkdocs-nav-coverage",
+        "adr-status-sync",
         "banned-imports",
         "license-header",
     }
@@ -912,6 +913,206 @@ def test_adr_status_text_rejects_empty_heading_style_status(car):
     (regression test for the gap flagged in PR #619 review)."""
     text = "# ADR-001\n\n## Status\n\n## Context\n\nBody.\n"
     assert car._adr_status_text(text) is None
+
+
+def _write_status_sync_fixture(
+    tmp_path, monkeypatch, car, *, adr_status: str, index_status: str
+):
+    """Build a minimal one-ADR docs tree for check_adr_status_sync."""
+    fake_docs = tmp_path / "docs"
+    adr_dir = fake_docs / "contribute" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "index.md").write_text(
+        f"| # | Title | Status |\n|---|---|---|\n"
+        f"| [001](001-example.md) | Example | {index_status} |\n",
+        encoding="utf-8",
+    )
+    (adr_dir / "001-example.md").write_text(
+        f"# ADR-001\n\n**Status:** {adr_status}\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(car, "ROOT", tmp_path)
+    monkeypatch.setattr(car, "DOCS", fake_docs)
+    return adr_dir
+
+
+def test_adr_status_sync_holds(car):
+    """The live tree must be free of ADR-vs-index status contradictions and
+    of malformed/unknown verification receipts."""
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"ADR status drift: {f.errors}"
+
+
+def test_adr_status_sync_catches_implementation_contradiction(
+    car, tmp_path, monkeypatch
+):
+    """The regression this check exists for: ADR-056's own file said
+    "partially implemented" while the index table said "not implemented"."""
+    _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        car,
+        adr_status="Proposed — partially implemented (see the plan).",
+        index_status="Proposed — not implemented; see the plan",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("nothing implemented" in msg for _, msg in f.errors), (
+        f"expected an implementation contradiction, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_catches_decision_word_mismatch(car, tmp_path, monkeypatch):
+    _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        car,
+        adr_status="Accepted — implemented.",
+        index_status="Proposed — implemented",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("decision is" in msg for _, msg in f.errors), (
+        f"expected a decision-word mismatch, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_allows_index_row_to_abridge(car, tmp_path, monkeypatch):
+    """An index cell is an abridgement, not a paraphrase-for-paraphrase copy.
+    A status paragraph naming follow-up work the one-line row omits is normal
+    editing, not drift -- a stricter prototype flagged 15 of 56 real ADRs."""
+    _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        car,
+        adr_status=(
+            "Accepted — implemented (phases 1-7); follow-ups #2 and #3 remain "
+            "open and are deliberately deferred, see the plan."
+        ),
+        index_status="Accepted — implemented",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"abridged index row wrongly flagged: {f.errors}"
+
+
+def test_adr_status_sync_rejects_malformed_verified_line(car, tmp_path, monkeypatch):
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        car,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** yesterday, by me\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("malformed" in msg for _, msg in f.errors), (
+        f"expected a malformed-receipt error, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_warns_when_named_module_moved_since_verification(
+    car, tmp_path, monkeypatch
+):
+    """The document-vs-*code* tripwire: a commit touching a module the status
+    paragraph names, after the recorded verification commit, means nobody has
+    re-read the claim since the code moved."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        car,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented in "
+        "`abicheck/contract_evaluation.py`.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        car, "_git_output", lambda *a: "" if a[0] == "cat-file" else "deadbee\n"
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == []
+    assert any("verified at abc1234" in msg for _, msg in f.warnings), (
+        f"expected a staleness warning, got: {f.warnings}"
+    )
+
+
+def test_adr_status_sync_accepts_current_verification_receipt(
+    car, tmp_path, monkeypatch
+):
+    """No commits since the receipt -- nothing to warn about."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        car,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented in "
+        "`abicheck/contract_evaluation.py`.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(car, "_git_output", lambda *a: "")
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == []
+    assert f.warnings == []
+
+
+def test_adr_status_sync_tolerates_unknown_sha_on_shallow_checkout(
+    car, tmp_path, monkeypatch
+):
+    """A receipt whose commit predates the fetch depth is not a typo. CI runs
+    on shallow clones, so this must not be an error there -- while a complete
+    checkout, which can tell the difference, still reports it."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        car,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n",
+        encoding="utf-8",
+    )
+
+    def fake_git(*args: str) -> str | None:
+        if args[0] == "cat-file":
+            return None  # commit not present in this checkout
+        if args[0] == "rev-parse":
+            return "true\n"  # shallow
+        return ""
+
+    monkeypatch.setattr(car, "_git_output", fake_git)
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"shallow checkout must not error: {f.errors}"
+
+    monkeypatch.setattr(
+        car,
+        "_git_output",
+        lambda *a: (
+            None if a[0] == "cat-file" else ("false\n" if a[0] == "rev-parse" else "")
+        ),
+    )
+    f2 = car.Findings()
+    car.check_adr_status_sync(f2)
+    assert any("doesn't exist" in msg for _, msg in f2.errors), (
+        f"complete checkout must report an unknown sha, got: {f2.errors}"
+    )
 
 
 def test_no_hard_file_size_violations(car):
