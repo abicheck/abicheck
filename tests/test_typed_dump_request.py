@@ -1326,6 +1326,48 @@ class TestSourceAbiOnlyFrontendOnScan:
         assert data["status"] == "ok"
 
 
+class TestRawSourceUnderAndroidIsRejected:
+    """`android` source-ABI replay is not wired into inline collection.
+
+    `DumpRequest.frontend` accepts `android` (unlike the per-input
+    `compile.frontend`, which is header-AST only), but a raw source tree
+    under it has no extractor — so it is a usage error rather than a
+    silently weaker snapshot. The sibling of the `hybrid` rule below.
+    """
+
+    def test_a_raw_source_tree_under_android_raises(
+        self, snap_path: Path, tmp_path: Path
+    ):
+        from abicheck import service
+
+        sources = tmp_path / "raw"
+        sources.mkdir()
+        (sources / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+        with pytest.raises(ValidationError, match="'android' AST frontend"):
+            service.run_dump_request(
+                DumpRequest(
+                    input=InputSpec(path=snap_path, sources=sources),
+                    frontend="android",
+                )
+            )
+
+    def test_has_sources_without_inline_sources_is_allowed(
+        self, snap_path: Path, monkeypatch
+    ):
+        # The error message names this as the way through; if it stopped
+        # working the message would be actively misleading.
+        from abicheck import service
+
+        snap = service.run_dump_request(
+            DumpRequest(
+                input=InputSpec(path=snap_path),
+                frontend="android",
+                has_sources=True,
+            )
+        )
+        assert snap.library == "libfoo.so.1"
+
+
 class TestRawSourceUnderHybridIsRejected:
     """`depth="source"` + the `hybrid` frontend is a usage error, not a
     silently weaker result — `hybrid` has no real L4 extractor. Mirrors
