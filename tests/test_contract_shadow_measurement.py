@@ -187,6 +187,22 @@ class TestUnresolvedLossMetric:
                 is CompatibilityEvaluationStatus.NOT_EVALUATED
             )
 
+    def test_public_losses_are_pinned_by_identity_not_only_count(self) -> None:
+        # A budget alone cannot tell "the accepted gaps are still the
+        # accepted gaps" from "one was fixed and a different case regressed"
+        # -- the total is the same either way (Codex review).
+        measured = shadow.metrics()["gate"]["unresolved_public_break_cases"]
+        assert sorted(measured["public"]) == sorted(
+            shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES
+        )
+
+    def test_the_known_list_is_consistent_with_the_budget(self) -> None:
+        # Two statements of the same fact; if they drift, one of them is
+        # lying about what is accepted.
+        assert len(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES) == (
+            shadow.UNRESOLVED_LOSS_BASELINE["public"]
+        )
+
     def test_merge_carries_every_list_accumulator(self) -> None:
         # `_merge` used to name each accumulator by hand and silently dropped
         # `unresolved_losses` when it was added: `measure_case` classified

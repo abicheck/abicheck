@@ -1257,6 +1257,79 @@ class TestJsonSchema:
         jsonschema.validate(d, load_aggregate_report_schema())
 
 
+class TestScanCoverageIsNotACompatibilityFailure:
+    """A `scan --against` report's top-level exit_code is already a fold of
+    its compatibility gate and ADR-049's contract-coverage contribution, so
+    reading it whole as the compatibility gate double-counted a
+    coverage-only failure — the target blocked and its profile read as
+    affected, where the equivalent `compare` report did not (Codex review).
+
+    Scan emits 0/2/4/5/6 and has no native 1, which is what makes a raw 1
+    attributable to the coverage axis rather than a guess."""
+
+    CHECK = "libfoo@linux-gcc14#release@headers"
+
+    def _run(self, tmp_path: Path, exit_code: int, contribution: int | None):
+        diff: dict = {"verdict": "NO_CHANGE"}
+        if contribution is not None:
+            diff["contract_coverage_exit_contribution"] = contribution
+        _write_report(
+            tmp_path,
+            self.CHECK,
+            "NO_CHANGE",
+            scan_schema_version="1.8",
+            exit_code=exit_code,
+            diff=diff,
+        )
+        return aggregate_reports_dir(tmp_path, expected=_expect(self.CHECK))
+
+    def test_coverage_only_exit_does_not_block_compatibility(self, tmp_path: Path):
+        res = self._run(tmp_path, 1, 1)
+        assert res.blocking_targets == ()
+        (entry,) = res.profile_matrix
+        assert entry.affected_profiles == ()
+
+    def test_but_it_still_raises_the_exit_on_its_own_axis(self, tmp_path: Path):
+        # Moved axis, not dropped: the failure must still gate.
+        res = self._run(tmp_path, 1, 1)
+        assert res.exit_code() == 1
+        assert res.contract_coverage_exit == 1
+        (entry,) = res.profile_matrix
+        assert entry.contract_incomplete_profiles == ("linux-gcc14",)
+
+    def test_it_matches_the_equivalent_compare_report(self, tmp_path: Path):
+        # The whole point: one situation, one answer, whichever command
+        # produced the report.
+        scan = self._run(tmp_path, 1, 1)
+        other = tmp_path / "compare"
+        other.mkdir()
+        _write_report(
+            other, self.CHECK, "NO_CHANGE", contract_coverage_exit_contribution=1
+        )
+        cmp_res = aggregate_reports_dir(other, expected=_expect(self.CHECK))
+        assert scan.blocking_targets == cmp_res.blocking_targets
+        assert scan.exit_code() == cmp_res.exit_code()
+        assert (
+            scan.profile_matrix[0].affected_profiles
+            == cmp_res.profile_matrix[0].affected_profiles
+        )
+
+    @pytest.mark.parametrize("code", [5, 6])
+    def test_a_real_scan_failure_still_blocks(self, tmp_path: Path, code: int):
+        # 5 (budget overflow) and 6 (NOT_COMPARABLE) both map to 1 too, and
+        # are genuine compatibility-gate failures — discriminating on the
+        # raw code is what keeps them blocking.
+        res = self._run(tmp_path, code, 1)
+        assert res.blocking_targets == (self.CHECK,)
+        assert res.profile_matrix[0].affected_profiles == ("linux-gcc14",)
+
+    def test_an_unattributed_exit_one_still_blocks(self, tmp_path: Path):
+        # Fail closed: a bare 1 with nothing claiming responsibility for it
+        # is not evidence that coverage caused it.
+        res = self._run(tmp_path, 1, None)
+        assert res.blocking_targets == (self.CHECK,)
+
+
 class TestContractCoverageProfileMatrix:
     """The profile matrix must name a profile whose only problem is contract
     coverage. Before ``contract_incomplete_profiles`` existed, such a run

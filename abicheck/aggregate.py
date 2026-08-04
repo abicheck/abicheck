@@ -341,6 +341,24 @@ class GateInfo:
         code = data.get("exit_code")
         if not isinstance(code, int) or isinstance(code, bool):
             raise _MalformedGate("scan report 'exit_code' is missing or not an integer")
+        # A scan report's `exit_code` is already a *fold* of two orthogonal
+        # axes — its own compatibility gate and ADR-049 Phase 7's
+        # contract-coverage contribution, which `cli_scan_baseline` folds in
+        # with `max`. Reading the folded number as the compatibility gate
+        # therefore double-counts a coverage-only failure: it landed the
+        # target in `blocking_targets` and made its profile `affected`, so a
+        # `NO_CHANGE` scan target read as a compatibility problem where the
+        # equivalent `compare` report did not (Codex review, reproduced).
+        #
+        # Scan's own scheme is what makes this separable rather than a guess:
+        # it emits 0/2/4/5/6 and has no native 1, so a *raw* 1 can only be
+        # the orthogonal contribution. Discriminating on the raw code matters
+        # — 5 (budget overflow) and 6 (NOT_COMPARABLE) both map to 1 below
+        # and are real compatibility-gate failures that must keep blocking.
+        # The report must also state the contribution itself; a bare 1 with
+        # nothing to attribute it to stays blocking, fail-closed.
+        if code == COVERAGE_INCOMPLETE_EXIT and _contract_coverage_exit(data) == 1:
+            return cls(exit_code=0, blocking=False, from_report=True)
         # Map scan's own scheme onto the aggregate gate scheme: 0/2/4 pass
         # through; any other scan failure (e.g. 5 budget overflow, or a
         # nonsensical value) is a non-ABI failure that still blocks, folded to

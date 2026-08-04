@@ -563,6 +563,16 @@ def metrics(
                 mode: len(m.unresolved_losses)
                 for mode, m in sorted(measurements.items())
             },
+            # The *identities*, not only the count. A budget alone cannot
+            # tell "the accepted gaps are still the accepted gaps" from "one
+            # was fixed and a different case regressed to UNKNOWN_*" -- the
+            # total is 2 either way, so a count-only gate would swap an
+            # accepted gap for a fresh false negative silently (Codex
+            # review).
+            "unresolved_public_break_cases": {
+                mode: sorted({key.split(":", 1)[0] for key in m.unresolved_losses})
+                for mode, m in sorted(measurements.items())
+            },
             "unevidenced_deltas": sum(
                 len(m.unevidenced_deltas) for m in measurements.values()
             ),
@@ -714,6 +724,31 @@ def main(argv: list[str] | None = None) -> int:
     # a drop means an evaluator fix landed and the budget it was measured
     # against is now stale -- leaving that unsaid is how a ceiling silently
     # stops being a ceiling.
+    # `public` is additionally pinned by identity: it is the domain a future
+    # default flip targets and the one whose budget is an evaluator gap
+    # rather than an evidence limit, so a *new* case appearing there is a
+    # regression even when an old one left at the same time. The other
+    # domains stay count-only -- `exports`' 20 tracks which corpus pairs
+    # happen to carry export tables, which is not a claim worth pinning.
+    cases = gate["unresolved_public_break_cases"]
+    assert isinstance(cases, dict)
+    unexpected = sorted(set(cases.get("public", ())) - set(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES))
+    if unexpected:
+        print(
+            "ERROR: unresolved public-break loss in case(s) not on the known "
+            f"list: {', '.join(unexpected)} (known: "
+            f"{', '.join(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)})",
+            file=sys.stderr,
+        )
+        failed = True
+    fixed = sorted(set(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES) - set(cases.get("public", ())))
+    if fixed:
+        print(
+            f"NOTE: known unresolved public-break case(s) no longer losing: "
+            f"{', '.join(fixed)} -- drop them from the known list.",
+            file=sys.stderr,
+        )
+
     unresolved = gate["unresolved_public_break_losses"]
     assert isinstance(unresolved, dict)
     for domain, count in sorted(unresolved.items()):
