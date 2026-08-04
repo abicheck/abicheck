@@ -26,6 +26,24 @@
   domain selector (`public`/`exports`/`all`), which `CompareRequest` already
   carried but no MCP caller could set.
 
+### Fixed
+
+- **An `android` AST frontend no longer fails the whole extraction** — `android`
+  is source-ABI only, with no header-AST path, so both pipelines already fall
+  back to `auto` for the bare header backend. But an explicit
+  `CompileContext.frontend` takes *precedence* over that argument inside
+  `run_dump`, and the header-backend resolver rejects anything outside
+  `castxml`/`clang`/`hybrid`/`auto` — so a run that named `android` died with
+  "Unknown AST frontend 'android'" before any build/source evidence was
+  embedded. The resolved compile context now drops a non-header-AST frontend,
+  fixing the new `abi_dump(ast_frontend="android", ...)` path and the
+  pre-existing typed `CompareRequest` one alike.
+- **A nonexistent `sources`/`build_info`/`compile_db` path is now a usage
+  error on the MCP tools** — these infer an evidence-collection depth from
+  being set at all, and only an *explicit* depth arms the depth floor, so a
+  typo silently collected nothing and still reported success. The `dump`/`scan`
+  CLIs reject the same input via `click.Path(exists=True)`.
+
 ### Changed
 
 - **`abi_dump` routes through the Tier-2 chokepoint** — it builds one

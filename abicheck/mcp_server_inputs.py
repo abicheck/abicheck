@@ -46,6 +46,7 @@ __all__ = [
     "_compile_context_from_args",
     "_contract_mode_error",
     "_detect_binary_format",
+    "_existing_path",
     "_public_header_dir_paths",
     "_resolve_input",
     "_safe_write_path",
@@ -263,6 +264,26 @@ def _resolve_input(
         public_headers=public_headers,
         public_header_dirs=public_header_dirs,
     )
+
+
+def _existing_path(raw: str, *, label: str) -> Path:
+    """Resolve a caller-supplied evidence path, requiring it to exist.
+
+    :func:`_safe_read_path` contains a path but does not check existence, and
+    for the *evidence* inputs that is not enough: ``sources``/``build_info``
+    infer a collect mode from being set at all, so a typo produced a run that
+    collected nothing and still answered ``status: "ok"`` — a silently weaker
+    baseline, where the CLI's ``click.Path(exists=True)`` rejects it outright
+    (Codex review, P1). The depth floor does not catch this either: it only
+    runs for an *explicit* depth, and the whole point of these arguments is
+    that they infer one.
+
+    Raises ValueError with the message the tool returns as its error payload.
+    """
+    path = _safe_read_path(raw, label=label)
+    if not path.exists():
+        raise ValueError(f"{label} not found: {path}")
+    return path
 
 
 def _public_header_dir_paths(raw_dirs: list[str] | None) -> list[Path]:

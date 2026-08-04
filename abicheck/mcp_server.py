@@ -60,6 +60,7 @@ from .mcp_server_inputs import (  # noqa: F401  (re-exported for API stability)
     _compile_context_from_args,
     _contract_mode_error,
     _detect_binary_format,
+    _existing_path,
     _public_header_dir_paths,
     _resolve_input,
     _safe_write_path,
@@ -286,20 +287,25 @@ def abi_dump(
             depth = _validate_public_depth(depth)
         except ValueError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
-        src_path = _safe_read_path(sources, label="sources") if sources else None
-        bi_path = (
-            _safe_read_path(build_info, label="build_info") if build_info else None
-        )
+        # Existence is checked, not just containment: `sources`/`build_info`
+        # infer a collect mode from being set at all, and only an *explicit*
+        # depth arms the floor -- so a typo would otherwise collect nothing
+        # and still answer "ok" (Codex review, P1). The CLI's own
+        # `click.Path(exists=True)` rejects the same input.
+        try:
+            src_path = _existing_path(sources, label="sources") if sources else None
+            bi_path = (
+                _existing_path(build_info, label="build_info") if build_info else None
+            )
+            manifest_path = (
+                _existing_path(dump_manifest, label="dump_manifest")
+                if dump_manifest
+                else None
+            )
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
         manifest = None
-        if dump_manifest:
-            manifest_path = _safe_read_path(dump_manifest, label="dump_manifest")
-            if not manifest_path.exists():
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"dump_manifest not found: {manifest_path}",
-                    }
-                )
+        if manifest_path is not None:
             _check_file_size(manifest_path, label="dump_manifest")
             from .dump_manifest import load_manifest
 
@@ -1689,16 +1695,24 @@ def abi_scan(
             phd_paths = _public_header_dir_paths(public_header_dirs)
         except ValueError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
-        src_path = _safe_read_path(sources, label="sources") if sources else None
-        cdb_path = (
-            _safe_read_path(compile_db, label="compile_db") if compile_db else None
-        )
+        # Same existence rule as `abi_dump` (Codex review, P1): every one of
+        # these infers evidence collection from being set, and the `scan` CLI
+        # declares all four `click.Path(exists=True)`. `sources`/`compile_db`
+        # predate this PR and carried the identical hole -- fixed alongside
+        # `build_info` rather than left as a knowingly-broken twin.
+        try:
+            src_path = _existing_path(sources, label="sources") if sources else None
+            cdb_path = (
+                _existing_path(compile_db, label="compile_db") if compile_db else None
+            )
+            bi_path = (
+                _existing_path(build_info, label="build_info") if build_info else None
+            )
+            base_path = _existing_path(against, label="against") if against else None
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
         if cdb_path is not None:
             _check_file_size(cdb_path, label="compile_db")
-        bi_path = (
-            _safe_read_path(build_info, label="build_info") if build_info else None
-        )
-        base_path = _safe_read_path(against, label="against") if against else None
         if base_path is not None:
             _check_file_size(base_path, label="against")
 

@@ -764,3 +764,142 @@ class TestMissingFileArguments:
         data = json.loads(abi_scan(str(snap_path), **{arg: str(tmp_path / "no.yml")}))
         assert data["status"] == "error"
         assert f"{arg} not found" in data["error"]
+
+
+class TestAndroidFrontendIsNotAHeaderBackend:
+    """``android`` must never reach ``resolve_input`` as the compile context's
+    frontend (Codex review, P2).
+
+    It is in ``SUPPORTED_FRONTENDS`` but not ``HEADER_AST_FRONTENDS``: source-ABI
+    only, no header-AST path. Both pipelines already map the bare
+    ``header_backend`` to ``"auto"`` for it — but ``service._run_dump_uncached``
+    gives an explicit ``compile.frontend`` *precedence* over that argument, and
+    ``dumper._resolve_header_backend`` raises for anything outside
+    castxml/clang/hybrid/auto. So a resolved context still carrying "android"
+    failed the whole extraction with "Unknown AST frontend 'android'", before
+    any build/source evidence was embedded.
+    """
+
+    def _spy_on_compile_context(self, monkeypatch) -> dict[str, object]:
+        """Record the ``compile.frontend`` that actually reaches ``resolve_input``."""
+        from abicheck import service
+
+        captured: dict[str, object] = {}
+        original = service.resolve_input
+
+        def _spy(path, headers=None, includes=None, version="", lang="c++", **kwargs):
+            ctx = kwargs.get("compile")
+            captured["frontend"] = None if ctx is None else ctx.frontend
+            return original(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service, "resolve_input", _spy)
+        return captured
+
+    def test_dump_request_downgrades_android_to_auto(
+        self, snap_path: Path, tmp_path: Path, monkeypatch
+    ):
+        from abicheck import service
+
+        captured = self._spy_on_compile_context(monkeypatch)
+        service.run_dump_request(
+            DumpRequest(
+                input=InputSpec(
+                    path=snap_path,
+                    build_info=tmp_path,
+                    compile=CompileContext(frontend="android"),
+                ),
+                frontend="android",
+            )
+        )
+        assert captured["frontend"] == "auto"
+
+    def test_compare_request_downgrades_android_to_auto(
+        self, snap_path: Path, tmp_path: Path, monkeypatch
+    ):
+        """The same defect existed for a typed ``compare`` caller, which is why
+        the fix lives in the shared resolution rather than at either caller."""
+        from abicheck import service
+        from abicheck.api_types import CompareRequest
+
+        captured = self._spy_on_compile_context(monkeypatch)
+        side = InputSpec(
+            path=snap_path,
+            build_info=tmp_path,
+            compile=CompileContext(frontend="android"),
+        )
+        service.run_compare_request(
+            CompareRequest(old=side, new=side, frontend="android")
+        )
+        assert captured["frontend"] == "auto"
+
+    def test_a_real_header_frontend_is_left_alone(self, snap_path: Path, monkeypatch):
+        from abicheck import service
+
+        captured = self._spy_on_compile_context(monkeypatch)
+        service.run_dump_request(
+            DumpRequest(
+                input=InputSpec(
+                    path=snap_path, compile=CompileContext(frontend="clang")
+                ),
+                frontend="clang",
+            )
+        )
+        assert captured["frontend"] == "clang"
+
+    def test_android_reaches_the_tool_without_failing(
+        self, snap_path: Path, tmp_path: Path
+    ):
+        """End to end: `abi_dump(ast_frontend="android", ...)` used to fail."""
+        from abicheck.mcp_server import abi_dump
+
+        data = json.loads(
+            abi_dump(str(snap_path), ast_frontend="android", build_info=str(tmp_path))
+        )
+        assert data["status"] == "ok"
+
+
+class TestEvidencePathsMustExist:
+    """A nonexistent evidence path is a usage error, not a weaker result.
+
+    ``sources``/``build_info``/``compile_db`` infer a collect mode from being
+    *set*, and only an explicit ``depth`` arms the floor — so a typo used to
+    collect nothing and still answer ``status: "ok"`` (Codex review, P1). The
+    CLI declares all of these ``click.Path(exists=True)``.
+    """
+
+    @pytest.mark.parametrize("arg", ["sources", "build_info"])
+    def test_abi_dump_rejects_a_missing_path(
+        self, snap_path: Path, tmp_path: Path, arg: str
+    ):
+        from abicheck.mcp_server import abi_dump
+
+        data = json.loads(abi_dump(str(snap_path), **{arg: str(tmp_path / "nope")}))
+        assert data["status"] == "error"
+        assert f"{arg} not found" in data["error"]
+
+    @pytest.mark.parametrize("arg", ["sources", "build_info", "compile_db", "against"])
+    def test_abi_scan_rejects_a_missing_path(
+        self, snap_path: Path, tmp_path: Path, arg: str
+    ):
+        from abicheck.mcp_server import abi_scan
+
+        data = json.loads(abi_scan(str(snap_path), **{arg: str(tmp_path / "nope")}))
+        assert data["status"] == "error"
+        assert f"{arg} not found" in data["error"]
+
+    def test_an_existing_path_still_resolves(
+        self, snap_path: Path, tmp_path: Path, monkeypatch
+    ):
+        from abicheck import service
+        from abicheck.mcp_server import abi_dump
+
+        captured: dict[str, object] = {}
+
+        def _fake(request, **kwargs):
+            captured["build_info"] = request.input.build_info
+            return _snapshot()
+
+        monkeypatch.setattr(service, "run_dump_request", _fake)
+        data = json.loads(abi_dump(str(snap_path), build_info=str(tmp_path)))
+        assert data["status"] == "ok"
+        assert captured["build_info"] == tmp_path.resolve()

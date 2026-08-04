@@ -207,8 +207,37 @@ def _compile_context(
             else None
         )
     if frontend_context != "host" and base.frontend_context == "host":
-        return dataclasses.replace(base, frontend_context=frontend_context)
-    return base
+        base = dataclasses.replace(base, frontend_context=frontend_context)
+    return _header_ast_frontend_only(base)
+
+
+def _header_ast_frontend_only(base: CompileContext) -> CompileContext:
+    """Strip a non-header-AST ``frontend`` from a resolved compile context.
+
+    ``android`` is a member of ``SUPPORTED_FRONTENDS`` but not of
+    ``HEADER_AST_FRONTENDS``: it is source-ABI only, with no header-AST path.
+    Both pipelines already honour that when computing the bare
+    ``header_backend`` (anything outside ``HEADER_AST_FRONTENDS`` falls back to
+    ``"auto"``) — but ``service._run_dump_uncached`` gives an explicit
+    ``compile.frontend`` *precedence* over that argument, and
+    ``dumper._resolve_header_backend`` raises ``ValidationError`` for anything
+    outside ``castxml``/``clang``/``hybrid``/``auto``. So a resolved context
+    still carrying ``"android"`` made the whole extraction fail with "Unknown
+    AST frontend 'android'" before any build/source evidence was embedded —
+    for a value both front ends document as accepted (Codex review, P2).
+
+    Fixed here rather than at either caller because the invariant is about
+    what may reach ``resolve_input``, and it holds for both: a
+    ``CompareRequest`` whose ``InputSpec.compile.frontend`` is ``"android"``
+    failed identically (verified), so nothing can be relying on the old
+    behaviour. The request-level ``frontend`` field still carries the value
+    for L4 source-ABI replay, which is the only layer that can act on it.
+    """
+    from .api_types import HEADER_AST_FRONTENDS
+
+    if base.frontend.lower() in HEADER_AST_FRONTENDS:
+        return base
+    return dataclasses.replace(base, frontend="auto")
 
 
 def resolve_side_evidence(
