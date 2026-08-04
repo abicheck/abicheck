@@ -212,6 +212,11 @@ def _fold_scoped_compat_into_text(
                     policy=result.policy or "strict_abi",
                     kind_sets=eff_sets,
                     policy_file=result.policy_file,
+                    # ADR-049 D1's per-finding `gate_contribution` is only
+                    # truthful if it is computed under the scheme the run
+                    # exits on -- a scoped-only finding does reach the scoped
+                    # gate, so this is not one of the always-0 ledger cases.
+                    severity_config=severity_config,
                     # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
                     # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
                     # is proven by the real consumer's own import table/execution,
@@ -370,6 +375,7 @@ def _fold_scoped_compat_into_text(
                         policy=result.policy or "strict_abi",
                         kind_sets=eff_sets,
                         policy_file=result.policy_file,
+                        severity_config=severity_config,
                         evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                     )
                     severity = entry.get("severity")

@@ -319,7 +319,21 @@ from typing import Any
 #:       contribution, so ``contract_coverage_exit_contribution`` is the
 #:       number that actually gated the run (folded with ``max``, and ``0``
 #:       when ``contract.unresolved=warn`` accepted the failures below it).
-REPORT_SCHEMA_VERSION = "2.26"
+#: 2.27 — ADR-049 D1's canonical per-finding shape completes, alongside the
+#:       contract decision becoming *authoritative* (Phase 7): every entry
+#:       that already carries ``contract_relevance`` now also carries
+#:       ``compatibility_evaluation_status`` (``EVALUATED``/``NOT_EVALUATED``),
+#:       ``compatibility_decision`` (the finding's own ``Verdict``, or JSON
+#:       ``null`` when policy did not run — ``null`` is not a sixth verdict)
+#:       and ``gate_contribution`` (what the finding actually contributed to
+#:       the exit code; ``0`` for a ``NOT_EVALUATED`` finding and for every
+#:       audit-ledger entry, none of which reach a gate). Additive in shape,
+#:       but unlike 2.23/2.25 not advisory in effect: under
+#:       ``--contract-evaluation``, a ``NOT_EVALUATED`` finding no longer
+#:       contributes to ``verdict``, ``severity``, or the exit code, and the
+#:       four ``summary`` counts are over the evaluated findings only. Absent,
+#:       and bit-for-bit unchanged, for a run that did not opt in.
+REPORT_SCHEMA_VERSION = "2.27"
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

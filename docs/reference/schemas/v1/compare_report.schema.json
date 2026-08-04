@@ -1398,7 +1398,7 @@
         },
         "contract_relevance": {
           "type": "string",
-          "description": "ADR-049 Phase 3 (schema 2.23): present only when the caller opted into compare(..., contract_evaluation=True) -- a still non-authoritative shadow evaluation that changes no verdict, severity, or exit code. Whether this finding's subject is confirmed within the evaluated contract's evidence domain (IN_CONTRACT), confirmed outside it (PROVEN_OUT_OF_CONTRACT), not about a contract entity at all (NOT_APPLICABLE, e.g. SONAME/RPATH/DT_NEEDED changes), or the evaluator could not resolve it either way (UNKNOWN_UNRESOLVED -- the only unresolved value this evaluator emits; see contract_reason_code). UNKNOWN_UNPROVEN is a fifth ADR-049 value this evaluator never emits (see contract_evaluation.py's own module docstring) but is included here since the enum is shared with a future authoritative evaluator.",
+          "description": "ADR-049 (schema 2.27, authoritative since Phase 7): present only when the caller opted into compare(..., contract_evaluation=True). Classified BEFORE compatibility policy (D9's pipeline order), and it decides whether policy runs at all: see compatibility_evaluation_status. Whether this finding's subject is confirmed within the evaluated contract's evidence domain (IN_CONTRACT), confirmed outside it (PROVEN_OUT_OF_CONTRACT), not about a contract entity at all (NOT_APPLICABLE, e.g. SONAME/RPATH/DT_NEEDED changes), or the evaluator could not resolve it either way (UNKNOWN_UNRESOLVED -- the only unresolved value this evaluator emits; see contract_reason_code). UNKNOWN_UNPROVEN is a fifth ADR-049 value this evaluator never emits (see contract_evaluation.py's own module docstring), kept in the enum because the closed-world claim it makes is a provider-completeness question, not an evaluator one.",
           "enum": [
             "IN_CONTRACT",
             "UNKNOWN_UNRESOLVED",
@@ -1419,6 +1419,34 @@
             "partial",
             "unavailable"
           ]
+        },
+        "compatibility_evaluation_status": {
+          "type": "string",
+          "description": "ADR-049 D1 (schema 2.27): whether compatibility policy scored this finding. EVALUATED for IN_CONTRACT and NOT_APPLICABLE relevance; NOT_EVALUATED for PROVEN_OUT_OF_CONTRACT, UNKNOWN_UNPROVEN and UNKNOWN_UNRESOLVED. A NOT_EVALUATED finding is still a conserved detector fact -- it stays in `changes` and in every ledger -- but it contributes nothing to the verdict or the gate. Present only alongside contract_relevance.",
+          "enum": [
+            "EVALUATED",
+            "NOT_EVALUATED"
+          ]
+        },
+        "compatibility_decision": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ADR-049 D1 (schema 2.27): this finding's own compatibility verdict under the effective policy, or null when compatibility_evaluation_status is NOT_EVALUATED. null records that policy never ran -- it is not a sixth verdict and must not be read as COMPATIBLE. Present only alongside contract_relevance.",
+          "enum": [
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK",
+            "API_BREAK",
+            "BREAKING",
+            null
+          ]
+        },
+        "gate_contribution": {
+          "type": "integer",
+          "description": "ADR-049 D1 (schema 2.27): what this finding contributed to the process exit code, under whichever gate scheme the run resolved (severity-aware category exit code when its category is configured `error`, else the legacy verdict-to-exit mapping). 0 for a NOT_EVALUATED finding, and 0 for every audit-ledger entry (out-of-surface, suppressed, reconciled, redundant), none of which reach a gate. Orthogonal to contract_coverage_exit_contribution, which is a run-level axis rather than a per-finding one. Present only alongside contract_relevance.",
+          "minimum": 0
         },
         "contract_evidence_refs": {
           "type": "array",

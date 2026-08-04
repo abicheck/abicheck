@@ -303,17 +303,36 @@ Core pipeline (in order of data flow):
      `--dry-run` emit — but pack-vs-pack conflict detection is not, since
      D8 exempts a field another layer states and those layers aren't
      resolved that early
-   - `contract_evaluation.py` — ADR-049 Phase 3's shadow contract-relevance
-     evaluator: one `ContractEvaluationDecision` (relevance + stable reason
-     code + assurance) per already-emitted finding. Stamped onto findings
-     only under `compare --contract-evaluation`; never consulted by verdict,
-     policy, or exit-code logic. Which evidence domain it judges against is
+   - `contract_evaluation.py` — ADR-049's contract-relevance evaluator: one
+     `ContractEvaluationDecision` (relevance + stable reason code +
+     assurance) per already-emitted finding. Computed only under `compare
+     --contract-evaluation`. Which evidence domain it judges against is
      selected by `compare --contract public|exports|all` (ADR-049 Phase 6);
      omitted, the domain still follows `--scope-public-headers`/
      `--no-scope-public-headers`, and an explicit value outranks that legacy
      alias via `compatibility_evaluation_wiring.resolve_legacy_contract_mode`
-     (D7 precedence). Selecting a domain is as advisory as the evaluator
-     itself — no verdict, exit code, or finding set changes
+     (D7 precedence). **No longer advisory** — see `contract_pipeline.py`
+     below: since ADR-049 Phase 7 the decision runs *before* compatibility
+     policy and determines whether policy scores the finding at all, so
+     selecting a domain can change a verdict, a finding set, and an exit code
+   - `contract_pipeline.py` — ADR-049 D9's normative order, made executable:
+     relevance is classified *before* compatibility policy, and policy then
+     scores only the `EVALUATED` findings (`IN_CONTRACT`/`NOT_APPLICABLE`).
+     Split into `build_contract_stage()` (the expensive half — mode
+     resolution, both sides' public and export surfaces, the provider-evidence
+     ledger; once per comparison) and `ContractEvaluationStage.classify()`
+     (idempotent per finding, called at each point `compare()` computes or
+     recomputes a verdict, since `--surface-metrics`/`--pattern-verdicts`
+     append findings after the first pass). `record_compatibility_decisions()`
+     and `build_context()` close the run: D1's per-finding
+     `compatibility_decision` (JSON `null` for a `NOT_EVALUATED` finding —
+     "policy did not run", not a sixth verdict) and Phase 4's persisted
+     context over every finding the stage saw, ledgers included. Decides no
+     exit code itself; `contract_gating.py` is the leaf predicate
+     `checker._compute_verdict_for` and `severity.compute_exit_code`/
+     `compute_gate_decision` share so the verdict and the gate cannot exclude
+     different sets. An **unstamped** finding is evaluated, which is what
+     keeps every run without `--contract-evaluation` bit-for-bit unchanged
    - `contract_evidence_collect.py` — ADR-049 Phase 3's *observed provider
      ledger* (plan §4.1) and the raw type graph Phase 4 persists. Produces
      one `EvidenceSearchRecord` per (provider, side) — `public_header`,

@@ -53,8 +53,9 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 #: ADR-049 D8's pack selector. Separate from :func:`contract_options` because
 #: the two answer different questions and are not registered on the same set
-#: of commands: ``--pack`` configures the run (it changes verdicts and exit
-#: codes), while the contract options only ask for an advisory decision.
+#: of commands: ``--pack`` configures the run, while the contract options ask
+#: for a decision about each finding. Both change verdicts and exit codes --
+#: the contract options since ADR-049 Phase 7 made relevance authoritative.
 def pack_option(f: F) -> F:
     """Attach the repeatable ``--pack`` manifest selector."""
     # Assigned rather than returned inline, matching `contract_options` below:
@@ -109,14 +110,15 @@ def contract_options(f: F) -> F:
                        "evidence required. Omitted, the domain follows "
                        "--scope-public-headers/--no-scope-public-headers as before; an "
                        "explicit value outranks those. Requires --contract-evaluation. "
-                       "Selecting a domain never changes the verdict or which findings "
-                       "appear, but it does select which evidence the contract-coverage "
-                       "axis is answered against, and that axis can contribute exit 1 -- "
-                       "see --contract-evaluation.")(f)
+                       "The domain is authoritative (ADR-049 Phase 7): it decides which "
+                       "findings compatibility policy scores, so it can change the "
+                       "verdict and the exit code -- a finding one domain proves outside "
+                       "the contract is one another domain gates on. It also selects "
+                       "which evidence the orthogonal contract-coverage axis is answered "
+                       "against -- see --contract-evaluation.")(f)
     f = click.option("--contract-evaluation", "contract_evaluation", is_flag=True, default=False,
-                  help="ADR-049 Phase 3's shadow contract evaluator (non-authoritative; "
-                       "pick its evidence domain with --contract). Stamps each finding in "
-                       "the report with a "
+                  help="ADR-049's contract evaluator (pick its evidence domain with "
+                       "--contract). Stamps each finding in the report with a "
                        "contract_relevance (IN_CONTRACT/PROVEN_OUT_OF_CONTRACT/"
                        "UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/NOT_APPLICABLE), "
                        "contract_reason_code, and -- when resolved -- contract_assurance "
@@ -131,15 +133,20 @@ def contract_options(f: F) -> F:
                        "top-level contract_context block (the observed provider evidence, "
                        "the resolved evaluation context, and the decision receipt), so a "
                        "decision can be replayed or re-evaluated later without re-reading "
-                       "the binaries. The per-finding decisions are advisory: they never "
-                       "change the verdict or which findings appear. **This flag can "
-                       "still affect the exit code**, through one orthogonal axis: if the "
-                       "selected domain's required evidence is incomplete, the "
-                       "contract-coverage ledger contributes exit 1 (ADR-049 Phase 7). It "
-                       "is folded with max, so it never lowers an ABI break's 2/4, and a "
-                       "run without this flag is unaffected. Set contract.unresolved=warn "
+                       "the binaries. **The decisions are authoritative** (ADR-049 "
+                       "Phase 7): relevance is classified before compatibility policy, "
+                       "and policy scores only IN_CONTRACT/NOT_APPLICABLE findings. A "
+                       "finding proven outside the contract, or unresolved for want of "
+                       "evidence, is NOT_EVALUATED -- null compatibility_decision, no "
+                       "gate contribution -- so this flag changes verdicts and exit "
+                       "codes. Nothing is hidden: such findings stay in the report with "
+                       "the relevance and reason that explain why they did not gate. "
+                       "Uncertainty is not treated as compatible either -- if the "
+                       "selected domain's required evidence is incomplete, the orthogonal "
+                       "contract-coverage ledger contributes exit 1, folded with max so "
+                       "it never lowers an ABI break's 2/4. Set contract.unresolved=warn "
                        "(e.g. via a `kind: contract` --pack) to accept incomplete "
                        "coverage: that zeroes the contribution while still reporting "
-                       "every failure. Default off; the report is unchanged unless this "
-                       "is set.")(f)
+                       "every failure. Default off; a run without this flag is "
+                       "unaffected in every respect.")(f)
     return f

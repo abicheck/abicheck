@@ -507,22 +507,38 @@ def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
     return "breaking"  # fail-safe for unknown kinds
 
 
-def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
+def _mcp_change_entry(
+    c: Any,
+    policy: str,
+    *,
+    severity_config: Any = None,
+    kind_sets: Any = None,
+    policy_file: Any = None,
+) -> dict[str, object]:
     """Build ``abi_compare``'s top-level, compact ``changes``/scoped-only
     entry for one ``Change``.
 
-    Also attaches ADR-049 Phase 3's shadow contract-evaluation fields
-    (``contract_relevance``/``contract_reason_code``/``contract_assurance``)
-    via ``reporter._add_contract_evaluation_fields`` -- the same helper the
-    full ``response["report"]`` JSON already uses for its own ``changes``
-    entries. Without this, a caller opting into ``contract_evaluation=True``
-    saw the shadow decision in ``response["report"]["changes"]`` but not in
-    this top-level, more commonly consumed array, silently losing the
-    result the caller asked for (Codex review, fresh evidence). A no-op
-    when *c* was never stamped (``contract_evaluation`` not requested),
-    mirroring that helper's own documented default.
+    Also attaches ADR-049's per-finding contract-evaluation fields
+    (``contract_relevance``/``contract_reason_code``/``contract_assurance``,
+    plus D1's ``compatibility_evaluation_status``/``compatibility_decision``/
+    ``gate_contribution``) via ``reporter._add_contract_evaluation_fields``
+    -- the same helper the full ``response["report"]`` JSON already uses for
+    its own ``changes`` entries. Without this, a caller opting into
+    ``contract_evaluation=True`` saw the decision in
+    ``response["report"]["changes"]`` but not in this top-level, more
+    commonly consumed array, silently losing the result the caller asked for
+    (Codex review, fresh evidence). A no-op when *c* was never stamped
+    (``contract_evaluation`` not requested), mirroring that helper's own
+    documented default.
+
+    Unlike the audit-ledger entries that helper also serializes, these
+    findings *do* reach a gate -- they are ``result.changes`` (and the
+    scoped-only overlay, which the scoped gate scores) -- so the run's own
+    gate inputs are threaded in and the emitted ``gate_contribution`` is the
+    number that actually applied, not a default ``0``.
     """
     from .reporter import _add_contract_evaluation_fields
+    from .severity import gate_contribution_for_change
 
     entry: dict[str, object] = {
         "kind": c.kind.value,
@@ -533,7 +549,14 @@ def _mcp_change_entry(c: Any, policy: str) -> dict[str, object]:
         "new_value": c.new_value,
         "source_location": c.source_location,
     }
-    _add_contract_evaluation_fields(entry, c)
+    _add_contract_evaluation_fields(
+        entry,
+        c,
+        gate_contribution=gate_contribution_for_change(
+            c, severity_config, policy=policy,
+            kind_sets=kind_sets, policy_file=policy_file,
+        ),
+    )
     return entry
 
 
@@ -1246,7 +1269,15 @@ def abi_compare(
                 "compatible": len(result.compatible),
                 "total_changes": len(result.changes),
             },
-            "changes": [_mcp_change_entry(c, active_policy) for c in result.changes],
+            "changes": [
+                _mcp_change_entry(
+                    c, active_policy,
+                    severity_config=severity_config,
+                    kind_sets=result._effective_kind_sets(),
+                    policy_file=result.policy_file,
+                )
+                for c in result.changes
+            ],
             "suppressed_count": result.suppressed_count,
         }
         if coverage is not None:
@@ -1269,7 +1300,14 @@ def abi_compare(
             scoped_only = getattr(result, "scoped_only_changes", ()) or ()
             for c in scoped_only:
                 if _finding_id(c) not in existing_ids:
-                    response["changes"].append(_mcp_change_entry(c, active_policy))
+                    response["changes"].append(
+                        _mcp_change_entry(
+                            c, active_policy,
+                            severity_config=severity_config,
+                            kind_sets=result._effective_kind_sets(),
+                            policy_file=result.policy_file,
+                        )
+                    )
             from .finding_identity import missing_contract_kind
             from .severity import missing_contract_exit_code
 

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.checker_policy import ChangeKind
+from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change
 from abicheck.contract_evaluation import (
     ContractEvaluationDecision,
@@ -674,9 +674,10 @@ class TestExportsMode:
 class TestContractModeSelection:
     """ADR-049 Phase 6: ``--contract`` selects the evidence domain.
 
-    Advisory exactly like ``--contract-evaluation`` itself -- these pin the
-    selection, its precedence, and that it stays non-authoritative, never a
-    verdict or exit code.
+    These pin the selection and its precedence. Since Phase 7 the selection
+    is *authoritative* -- the domain decides which findings compatibility
+    policy scores -- so what stays pinned is that a run which never opted in
+    is untouched, not that an opted-in run cannot differ.
     """
 
     @staticmethod
@@ -727,12 +728,38 @@ class TestContractModeSelection:
             ContractRelevance.IN_CONTRACT
         )
 
-    def test_selecting_a_mode_changes_no_verdict(self) -> None:
-        baseline = self._compare().verdict
-        assert {
-            self._compare(contract_evaluation=True, contract_mode=mode).verdict
-            for mode in ("public", "exports", "all")
-        } == {baseline}
+    def test_the_selected_domain_decides_whether_the_finding_scores(self) -> None:
+        """ADR-049 D1/D9: relevance runs before compatibility policy, so the
+        domain that answers it is what decides the verdict.
+
+        On this pair the layout change is to a public-header type that no
+        export reaches and no public root closes over. Under `all` -- which
+        makes no root/closure claim at all -- it is in contract and scores,
+        matching the un-opted-in baseline. Under both evidence-requiring
+        domains it is *proven* out of contract, so policy does not score it
+        and the verdict differs. That difference is the feature: a
+        proven-private change is exactly what those domains are selected to
+        stop gating on.
+        """
+        scored = self._compare(contract_evaluation=True, contract_mode="all")
+        assert scored.verdict is self._compare().verdict is Verdict.BREAKING
+        for mode in ("public", "exports"):
+            unscored = self._compare(contract_evaluation=True, contract_mode=mode)
+            assert unscored.verdict is Verdict.NO_CHANGE, mode
+            # Conserved, not deleted: still reported, with the reason it did
+            # not gate (ADR-049 D9's "exactly one visible outcome").
+            internal = {c.symbol: c for c in unscored.changes}["Internal"]
+            assert internal.contract_relevance is (
+                ContractRelevance.PROVEN_OUT_OF_CONTRACT
+            ), mode
+            assert internal.compatibility_decision is None, mode
+            assert internal in unscored.not_evaluated, mode
+
+    def test_a_run_that_never_opted_in_scores_everything(self) -> None:
+        """The default path is untouched by every domain above."""
+        baseline = self._compare()
+        assert baseline.not_evaluated == []
+        assert all(c.contract_relevance is None for c in baseline.changes)
 
     def test_no_mode_stamps_nothing_without_contract_evaluation(self) -> None:
         result = self._compare(contract_mode="exports")

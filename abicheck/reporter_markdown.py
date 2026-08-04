@@ -1326,6 +1326,44 @@ def _build_severity_sections(
     return lines
 
 
+def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
+    """Disclose the findings compatibility policy did not score (ADR-049 D1).
+
+    These are real detector facts that carry no verdict: contract evaluation
+    either proved the entity outside the declared contract, or could not
+    resolve it from the evidence the run had. They are deliberately absent
+    from the four verdict sections above -- filing an unscored finding under
+    "Breaking Changes" would contradict the verdict printed at the top of the
+    same report -- so this section is what keeps them visible, with the
+    relevance and reason code that explain *why* they did not gate.
+
+    Empty (and so entirely absent) unless the run opted into
+    ``--contract-evaluation``.
+    """
+    if not not_evaluated:
+        return []
+    lines: list[str] = [
+        "## 🔍 Not Evaluated (Contract)",
+        "",
+        "> These findings were detected but **not scored** by compatibility",
+        "> policy: each is either proven outside the declared contract or",
+        "> unresolved for want of evidence (ADR-049). They contribute nothing",
+        "> to the verdict or the gate. Incomplete evidence is reported",
+        "> separately on the contract-coverage axis, which has its own exit",
+        "> code — uncertainty is never silently treated as compatible.",
+        "",
+    ]
+    for c in not_evaluated:
+        relevance = getattr(c, "contract_relevance", None)
+        reason = getattr(c, "contract_reason_code", None)
+        label = getattr(relevance, "value", None) or "UNKNOWN"
+        suffix = f" ({reason})" if reason else ""
+        lines.append(f"- **{c.kind.value}**: {c.description}")
+        lines.append(f"  > Contract: {label}{suffix}")
+    lines.append("")
+    return lines
+
+
 def _build_environment_drift_section(changes: list[Change]) -> list[str]:
     """Group environment/toolchain-drift findings under one heading.
 
@@ -1594,8 +1632,17 @@ def to_markdown(
         f"| Source-level breaks | {len(result.source_breaks)} |",
         f"| Deployment risk changes | {len(result.risk)} |",
         f"| Compatible changes | {len(result.compatible)} |",
-        "",
     ]
+    # ADR-049 D1/D11: when contract evaluation excluded findings from the
+    # compatibility axis, say so in the headline table. The four counts above
+    # are now over the *evaluated* findings only, so a reader who sees a
+    # `NO_CHANGE` verdict beside a populated "Not Evaluated" section has the
+    # count that reconciles them rather than an apparent contradiction. The
+    # row is absent for every run that did not opt in, where it is always 0.
+    not_evaluated_total = len(result.not_evaluated)
+    if not_evaluated_total:
+        lines.append(f"| Not evaluated (contract) | {not_evaluated_total} |")
+    lines.append("")
 
     # When most of the breaking count is RTTI / internal-namespace churn, say so
     # up front — otherwise a huge count from a library lacking -fvisibility=hidden
@@ -1636,6 +1683,8 @@ def to_markdown(
         compatible,
         severity_config=severity_config,
     )
+
+    lines += _build_not_evaluated_section(model.not_evaluated)
 
     lines += _build_environment_drift_section(changes)
 

@@ -33,7 +33,11 @@ from .checker_policy import (
     Verdict,
     policy_kind_sets as _policy_kind_sets,
 )
-from .contract_relevance_types import ContractAssurance, ContractRelevance
+from .contract_relevance_types import (
+    CompatibilityEvaluationStatus,
+    ContractAssurance,
+    ContractRelevance,
+)
 from .detectors import DetectorResult
 from .impact.model import ImpactAssessment
 from .model import AbiSnapshot
@@ -290,6 +294,23 @@ class Change:
     # follows from its `ChangeKind` alone). Kept as a flat tuple for the same
     # circular-import reason as the three fields above.
     contract_evidence_refs: tuple[str, ...] | None = None
+    # ADR-049 D1's other half of the canonical per-finding shape, and the one
+    # that makes the contract decision *authoritative* rather than shadow:
+    # whether compatibility policy ran for this finding, and what it decided.
+    # `IN_CONTRACT`/`NOT_APPLICABLE` findings are EVALUATED and carry their
+    # `Verdict`; the other three relevance values are NOT_EVALUATED and carry
+    # `None` -- which is JSON `null` in reports, deliberately *not* a new
+    # compatibility verdict meaning "fine". A NOT_EVALUATED finding also
+    # contributes nothing to the change gate (`contract_gating.py`), while
+    # staying fully present in `DiffResult.changes` and every audit ledger:
+    # ADR-049 D9 conserves every detector fact in exactly one visible outcome.
+    # Both are `None` for a run that never opted into contract evaluation (the
+    # default), which is what keeps the legacy pipeline bit-for-bit unchanged
+    # -- `contract_gating.is_evaluated` reads an unstamped finding as
+    # evaluated. Stamped by `contract_pipeline.ContractEvaluationStage`, in
+    # `checker.compare`, *before* the verdict is computed.
+    compatibility_evaluation_status: CompatibilityEvaluationStatus | None = None
+    compatibility_decision: Verdict | None = None
 
 
 @dataclass
@@ -480,12 +501,43 @@ class DiffResult:
             policy_file=self.policy_file,
         )
 
+    def _evaluated_changes(self) -> list[Change]:
+        """The findings compatibility policy actually classified (ADR-049 D1).
+
+        The four verdict buckets below are the *compatibility* axis, and the
+        overall ``verdict`` is computed from exactly this set — so a finding
+        contract evaluation left ``NOT_EVALUATED`` must not appear in them,
+        or a report would count a "breaking change" the verdict it sits next
+        to deliberately did not score. Such findings are not lost: they are
+        still in ``changes``, they are listed by :attr:`not_evaluated`, and
+        every renderer discloses them with their relevance and reason.
+
+        Without ``--contract-evaluation`` no finding carries a relevance at
+        all, so this returns ``changes`` unchanged and every bucket is
+        exactly what it was before ADR-049.
+        """
+        from .contract_gating import is_evaluated
+
+        return [c for c in self.changes if is_evaluated(c)]
+
+    @property
+    def not_evaluated(self) -> list[Change]:
+        """Findings compatibility policy did not score (ADR-049 D1).
+
+        ``PROVEN_OUT_OF_CONTRACT``, ``UNKNOWN_UNPROVEN`` and
+        ``UNKNOWN_UNRESOLVED`` findings, in ``changes`` order. Empty for
+        every run that did not opt into ``--contract-evaluation``.
+        """
+        from .contract_gating import is_evaluated
+
+        return [c for c in self.changes if not is_evaluated(c)]
+
     @property
     def breaking(self) -> list[Change]:
         """Changes classified as BREAKING under the active policy."""
         return [
             c
-            for c in self.changes
+            for c in self._evaluated_changes()
             if self._effective_verdict_for_change(c) == Verdict.BREAKING
         ]
 
@@ -494,7 +546,7 @@ class DiffResult:
         """Changes classified as API_BREAK under the active policy."""
         return [
             c
-            for c in self.changes
+            for c in self._evaluated_changes()
             if self._effective_verdict_for_change(c) == Verdict.API_BREAK
         ]
 
@@ -503,7 +555,7 @@ class DiffResult:
         """Changes classified as COMPATIBLE under the active policy."""
         return [
             c
-            for c in self.changes
+            for c in self._evaluated_changes()
             if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE
         ]
 
@@ -512,7 +564,7 @@ class DiffResult:
         """Changes classified as COMPATIBLE_WITH_RISK under the active policy."""
         return [
             c
-            for c in self.changes
+            for c in self._evaluated_changes()
             if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
         ]
 

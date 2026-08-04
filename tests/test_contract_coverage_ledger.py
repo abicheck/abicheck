@@ -285,7 +285,10 @@ class TestReportIntegration:
                 str(out),
             ],
         )
-        assert res.exit_code in (0, 2, 4), res.output
+        # 1 is the coverage axis's own contribution (ADR-049 Phase 7), which
+        # `exports` reaches on this pair by construction -- this helper is
+        # about the ledger the run *writes*, not the code it exits with.
+        assert res.exit_code in (0, 1, 2, 4), res.output
         return json.loads(out.read_text(encoding="utf-8"))
 
     def test_a_missing_export_table_is_a_coverage_failure_under_exports(
@@ -329,15 +332,30 @@ class TestReportIntegration:
         report = json.loads(out.read_text(encoding="utf-8"))
         assert "contract_coverage_failures" not in report
 
-    def test_the_ledger_does_not_change_the_verdict_or_exit_code(
+    def test_the_ledger_does_not_rewrite_a_finding_or_its_verdict(
         self, tmp_path: Path
     ) -> None:
-        """Advisory, like the rest of ADR-049 Phase 3-6: the independent
-        coverage exit is Phase 7's. A run with a non-zero *stated*
-        contribution must still exit on its compatibility verdict alone."""
+        """The ledger is a second, orthogonal axis -- not a way to restate
+        the compatibility one.
+
+        On this pair the selected `exports` domain cannot resolve the removal
+        (ADR-049 D1), so compatibility policy does not score it and the
+        verdict is `NO_CHANGE`. That is the *relevance* axis doing its work
+        before policy; the ledger's own job is the independent `1`, and what
+        it must not do is rewrite the finding, its kind, or its decision.
+        """
         report = self._report(tmp_path, "exports")
         assert report["contract_coverage_exit_contribution"] == 1
-        assert report["verdict"] == "BREAKING"
+        assert report["verdict"] == "NO_CHANGE"
+        # The detector fact is conserved and still says what it is.
+        removals = [c for c in report["changes"] if c["kind"] == "func_removed"]
+        assert removals, report["changes"]
+        assert all(c["compatibility_decision"] is None for c in removals)
+        # ...and the same run under a domain that *can* resolve it scores it,
+        # which is what makes the exclusion above a decision rather than a
+        # blanket demotion.
+        resolved = self._report(tmp_path, "public")
+        assert resolved["verdict"] == "BREAKING"
 
     def test_the_ledger_matches_what_the_python_api_derives(
         self, tmp_path: Path
@@ -385,17 +403,23 @@ class TestDownstreamConsumers:
         assert all(n["properties"]["suppressible"] is False for n in notifications)
         assert all(n["level"] == "error" for n in notifications)
 
-    def test_sarif_leaves_the_gate_alone(self) -> None:
-        """The notification describes the evidence, not the gate: the
-        independent coverage exit is Phase 7's, so this run's own
-        `executionSuccessful`/`exitCode` must be untouched."""
+    def test_sarif_reports_coverage_without_calling_the_run_a_failure(self) -> None:
+        """The notification describes the evidence, not whether the tool ran.
+
+        Per the SARIF spec `executionSuccessful` reports whether the tool
+        completed, not whether it found blocking issues, so a coverage
+        failure must leave it `true` -- while `exitCode` does carry the
+        coverage axis, since the artifact publishes the same exit contract
+        the process does.
+        """
         from abicheck.sarif import to_sarif
 
         with_ctx = to_sarif(self._result())["runs"][0]["invocations"][0]
         old, new = _pair_without_export_table()
         plain = to_sarif(compare(old, new))["runs"][0]["invocations"][0]
-        assert with_ctx["executionSuccessful"] == plain["executionSuccessful"]
-        assert with_ctx["exitCode"] == plain["exitCode"]
+        assert with_ctx["executionSuccessful"] == plain["executionSuccessful"] is True
+        assert with_ctx["exitCode"] == 1
+        assert plain["exitCode"] == 4
 
     def test_sarif_omits_the_key_entirely_without_contract_evaluation(self) -> None:
         """Absent, not empty: a run that never checked and one that checked

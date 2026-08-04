@@ -3943,12 +3943,52 @@ unsuppressible. `reporter.py` now emits the *applied* number rather than a
 hypothetical one — a field named "exit contribution" that disagreed with the
 actual exit status would be a trap once the number bites.
 
-What remains, in dependency order: making the contract decision authoritative
-(today the shadow evaluator runs *after* `verdict` is computed, over the final
-`kept` list, so a `NOT_EVALUATED` finding still scores — reordering that is
-the large, FP-rate/tier-accuracy-sensitive piece); flipping
-`--contract-evaluation` on by default; and `aggregate` folding the ledger
-into its coverage axis.
+**Updated (2026-08-04): the contract decision is now authoritative.** The
+reorder landed: `contract_pipeline.py` holds the stage, `checker.compare`
+builds it immediately after post-processing (canonical identity, dedup and
+the explicit consumer/manifest scope are settled by then, which is the input
+D9's order calls for), and every path that computes or recomputes a verdict
+goes through `_compute_verdict_for(..., stage)` — which classifies first and
+then scores the `EVALUATED` findings alone. "Before the verdict" turned out
+to be several points rather than one, since `--surface-metrics` and
+`--pattern-verdicts` append findings and recompute, so classification is
+idempotent per finding and called at each of them rather than assumed to
+have happened once.
+
+The gate follows the same predicate (`contract_gating.is_evaluated`, shared
+by `severity.compute_exit_code`/`compute_gate_decision`), and D1's canonical
+per-finding shape is emitted: `compatibility_evaluation_status`,
+`compatibility_decision` (JSON `null` when policy did not run) and
+`gate_contribution` (the number the run's own gate folded, not a
+re-derivation). Two display consequences were part of the same change rather
+than deferred, because leaving them would have made reports self-
+contradictory: the four compatibility buckets (`DiffResult.breaking` and
+siblings, and therefore every summary built from them) are over the evaluated
+findings only, and markdown gained a "Not Evaluated (Contract)" section plus
+a headline count — a `NO_CHANGE` verdict printed above a "Breaking Changes"
+section listing the finding it deliberately did not score is worse than
+either half alone.
+
+Verified against the gates this reorder is most likely to move: the full unit
+suite (22844 passed) and golden tests, the FP-rate gate (0/0, no delta), and
+the per-tier accuracy gate (top-tier correct, under-call monotonic). Twelve
+existing tests asserted the pre-Phase-7 advisory contract and were updated to
+the normative one rather than made to pass — the substantive ones being that
+`exports` on a header-only breaking pair now exits `1` (`UNKNOWN_UNRESOLVED`,
+`NOT_CHECKABLE`) instead of `4`, and that selecting a domain *does* change a
+verdict. The orthogonality claim ("coverage never lowers a real break") moved
+to `fold_coverage_exit` itself: once relevance is authoritative, a domain
+short of the evidence to close is by construction also short of what it takes
+to resolve that domain's findings, so the two conditions no longer co-occur
+end to end for an entity finding, and the fold is where the claim actually
+lives.
+
+What remains, in dependency order: flipping `--contract-evaluation` on by
+default (this reorder is its precondition, not a substitute for the migration
+corpus §10.3 calls for — and release/package fan-out, `aggregate` and the MCP
+tool do not yet resolve the same config, so a flip today would give
+single-library and release comparisons different semantics); and `aggregate`
+folding the ledger into its coverage axis.
 
 SARIF's invocation exit code is **no longer** on that list: it publishes its
 own machine-readable exit contract, so leaving it unfolded meant an artifact

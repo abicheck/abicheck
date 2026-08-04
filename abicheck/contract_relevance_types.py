@@ -179,6 +179,24 @@ EVALUATED_RELEVANCE: frozenset[ContractRelevance] = frozenset(
 ``NOT_EVALUATED`` (ADR-049 D1)."""
 
 
+def evaluation_status_for(
+    relevance: ContractRelevance,
+) -> CompatibilityEvaluationStatus:
+    """Return the :class:`CompatibilityEvaluationStatus` *relevance* implies.
+
+    The mapping is ADR-049 D1's, and it is a function of the relevance value
+    alone -- deriving it anywhere else (a report renderer, a gate) is how the
+    two axes drift apart. :data:`EVALUATED_RELEVANCE` stays the membership
+    set this reads; this is the one-line total function over it, so a caller
+    never has to remember which direction the set is phrased in.
+    """
+    return (
+        CompatibilityEvaluationStatus.EVALUATED
+        if relevance in EVALUATED_RELEVANCE
+        else CompatibilityEvaluationStatus.NOT_EVALUATED
+    )
+
+
 # --------------------------------------------------------------------------
 # D5 / D6: provider evidence-search records (EvidenceSearchRecord).
 # --------------------------------------------------------------------------

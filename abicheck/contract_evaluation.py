@@ -1641,16 +1641,28 @@ def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
     # (the non-entity meaning).
     from .contract_evidence_collect import EXPLICIT_SCOPE_EVIDENCE_REF
 
+    # ADR-049 D1: relevance decides whether compatibility policy runs, so a
+    # promotion to IN_CONTRACT must carry the status with it. Leaving a
+    # stale NOT_EVALUATED behind would be worse than not stamping at all --
+    # `contract_gating.is_evaluated` reads the stamped status first, so the
+    # gate would keep excluding a finding this call just proved a real
+    # consumer depends on.
+    from .contract_relevance_types import CompatibilityEvaluationStatus
+
     if is_dict:
         c["contract_relevance"] = ContractRelevance.IN_CONTRACT.value
         c["contract_reason_code"] = _EXPLICIT_SCOPE_REASON_CODE
         c["contract_assurance"] = ContractAssurance.COMPLETE.value
         c["contract_evidence_refs"] = [EXPLICIT_SCOPE_EVIDENCE_REF]
+        c["compatibility_evaluation_status"] = (
+            CompatibilityEvaluationStatus.EVALUATED.value
+        )
     else:
         c.contract_relevance = ContractRelevance.IN_CONTRACT
         c.contract_reason_code = _EXPLICIT_SCOPE_REASON_CODE
         c.contract_assurance = ContractAssurance.COMPLETE
         c.contract_evidence_refs = (EXPLICIT_SCOPE_EVIDENCE_REF,)
+        c.compatibility_evaluation_status = CompatibilityEvaluationStatus.EVALUATED
 
 
 def stamp_scoped_result_findings(
@@ -1691,12 +1703,33 @@ def stamp_scoped_result_findings(
     for other reasons.
     """
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
+    promoted: list[Any] = []
     if relevant_ids:
         for c in result.changes:
             if finding_id(c) in relevant_ids:
                 stamp_explicit_scope_contract_evaluation(c)
+                promoted.append(c)
     for c in getattr(result, "scoped_only_changes", ()) or ():
         stamp_explicit_scope_contract_evaluation(c)
+        promoted.append(c)
+    # A promotion to IN_CONTRACT (above) can turn a finding compare() left
+    # NOT_EVALUATED into an evaluated one, and an evaluated finding owes the
+    # report its own compatibility decision (ADR-049 D1). Recomputed here,
+    # from the same policy inputs and the same per-finding classifier the
+    # gate uses, rather than left as the stale `None` the earlier decision
+    # wrote -- a null next to IN_CONTRACT would read as "policy declined to
+    # score a finding it did score".
+    if promoted:
+        from .severity import effective_verdict_for_change
+
+        policy = getattr(result, "policy", None)
+        policy_file = getattr(result, "policy_file", None)
+        for c in promoted:
+            if isinstance(c, dict) or getattr(c, "kind", None) is None:
+                continue
+            c.compatibility_decision = effective_verdict_for_change(
+                c, policy=policy, policy_file=policy_file
+            )
     refresh_contract_receipt(result, finding_id=finding_id)
 
 
