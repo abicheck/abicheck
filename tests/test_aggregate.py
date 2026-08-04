@@ -880,6 +880,7 @@ class TestProfileMatrix:
                 "affected_profiles": ["linux-gcc14"],
                 "incomplete_profiles": [],
                 "unanalyzed_profiles": [],
+                "contract_incomplete_profiles": [],
                 "verdict_by_profile": {
                     "linux-clang20": "COMPATIBLE",
                     "linux-gcc14": "BREAKING",
@@ -1254,6 +1255,69 @@ class TestJsonSchema:
         _write_report(tmp_path, LINUX, "API_BREAK")
         d = aggregate_reports_dir(tmp_path, discovered_only=True).to_dict()
         jsonschema.validate(d, load_aggregate_report_schema())
+
+
+class TestContractCoverageProfileMatrix:
+    """The profile matrix must name a profile whose only problem is contract
+    coverage. Before ``contract_incomplete_profiles`` existed, such a run
+    raised the aggregate exit to 1 while every list in the matrix stayed
+    empty, so nothing said which profile caused it (Codex review)."""
+
+    CHECK = "libfoo@linux-gcc14#release@headers"
+
+    def _result(self, tmp_path: Path, **extra):
+        _write_report(tmp_path, self.CHECK, "COMPATIBLE", **extra)
+        return aggregate_reports_dir(tmp_path, expected=_expect(self.CHECK))
+
+    def test_a_contract_incomplete_profile_is_named(self, tmp_path: Path):
+        res = self._result(tmp_path, contract_coverage_exit_contribution=1)
+        assert res.exit_code() == 1
+        (entry,) = res.profile_matrix
+        assert entry.contract_incomplete_profiles == ("linux-gcc14",)
+
+    def test_it_does_not_become_affected(self, tmp_path: Path):
+        # ADR-049 §7 keeps the coverage axis orthogonal to compatibility:
+        # a clean verdict with a clean gate is not "affected" just because
+        # its contract domain never closed, or a reader could no longer tell
+        # which axis produced the exit of 1.
+        res = self._result(tmp_path, contract_coverage_exit_contribution=1)
+        (entry,) = res.profile_matrix
+        assert entry.affected_profiles == ()
+        assert entry.incomplete_profiles == ()
+        assert entry.unanalyzed_profiles == ()
+
+    def test_a_clean_profile_is_not_listed(self, tmp_path: Path):
+        res = self._result(tmp_path, contract_coverage_exit_contribution=0)
+        (entry,) = res.profile_matrix
+        assert entry.contract_incomplete_profiles == ()
+        assert res.exit_code() == 0
+
+    def test_warn_accepted_evidence_is_still_named(self, tmp_path: Path):
+        # contract.unresolved=warn zeroes the exit contribution but the
+        # failures stay listed -- the profile is still short of evidence,
+        # which is exactly what this field reports.
+        res = self._result(
+            tmp_path,
+            contract_coverage_exit_contribution=0,
+            contract_coverage_failures=[{"provider": "public_header"}],
+        )
+        (entry,) = res.profile_matrix
+        assert entry.contract_incomplete_profiles == ("linux-gcc14",)
+        assert res.exit_code() == 0
+
+    def test_it_agrees_with_the_top_level_block(self, tmp_path: Path):
+        # Both use one predicate; if they ever diverge a reader gets two
+        # different answers to "which targets are short of evidence".
+        res = self._result(tmp_path, contract_coverage_exit_contribution=1)
+        (entry,) = res.profile_matrix
+        assert bool(entry.contract_incomplete_profiles) is bool(
+            res.contract_coverage_targets
+        )
+
+    def test_the_rendered_line_says_so(self, tmp_path: Path):
+        res = self._result(tmp_path, contract_coverage_exit_contribution=1)
+        text = res.render_text()
+        assert "contract evidence incomplete on linux-gcc14" in text
 
 
 class TestContractCoverageAxis:

@@ -166,7 +166,7 @@
     "profile_matrix_entry": {
       "type": "object",
       "description": "Added in schema 1.1. One logical target's outcome across every profile that checked it.",
-      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "verdict_by_profile"],
+      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "contract_incomplete_profiles", "verdict_by_profile"],
       "properties": {
         "base_target": {"type": "string"},
         "profiles": {
@@ -188,6 +188,11 @@
           "type": "array",
           "items": {"type": "string"},
           "description": "Subset of profiles with zero analyzed checks at all (every check for that profile is unavailable, required or optional) -- verdict_by_profile[pid] is null for these. Distinct from incomplete_profiles: a profile can have some analyzed result and still be incomplete, but a profile here has none at all, so it must never be described as clean."
+        },
+        "contract_incomplete_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Added in schema 1.3. Subset of profiles with at least one check whose ADR-049 contract-coverage axis is short of evidence -- the profile-level view of the top-level contract_coverage.incomplete_targets, using the same predicate. Deliberately separate from affected_profiles, which is defined by verdict and gate: ADR-049 \u00a77 keeps the coverage axis orthogonal to compatibility and asks reports to identify which axis produced an exit of 1, so folding it in would answer \"which profile\" by destroying \"which axis\". A profile can appear here and in affected_profiles at once."
         },
         "verdict_by_profile": {
           "type": "object",

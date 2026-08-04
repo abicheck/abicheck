@@ -510,6 +510,27 @@ class ProfileMatrixEntry:
     #: check for this profile at all) still lands here, since the ambiguity
     #: is about the *verdict*, not the coverage gate.
     unanalyzed_profiles: tuple[str, ...]
+    #: Subset of ``profiles`` with at least one check whose own ADR-049
+    #: contract-coverage axis is short of evidence -- the profile-level view
+    #: of :attr:`AggregateResult.contract_coverage_targets`, using the same
+    #: predicate so the two can never name different targets.
+    #:
+    #: Deliberately its own field rather than folding into
+    #: ``affected_profiles`` (Codex review). The complaint that prompted it
+    #: was real: a profile whose only problem was contract coverage raised
+    #: the aggregate exit to ``1`` while every list here stayed empty, so
+    #: nothing named the profile responsible. But ``affected`` is defined in
+    #: terms of verdict and gate, both compatibility concepts, and ADR-049
+    #: §7 makes the coverage axis orthogonal to those -- it "never rewrites
+    #: a finding's compatibility decision or gate contribution", and §7 asks
+    #: reports to identify *which* axis produced an exit of 1. Folding it in
+    #: would answer "which profile" by destroying "which axis", and it would
+    #: contradict the same call made one level up, where ``contract_coverage``
+    #: is a separate block from ``coverage`` for exactly this reason.
+    #:
+    #: A profile can be in this list and ``affected`` at once (a real break
+    #: plus incomplete evidence), or in this one alone.
+    contract_incomplete_profiles: tuple[str, ...]
     #: profile -> worst analyzed verdict value, or ``None`` when *every*
     #: check for that profile is unavailable (no analyzed check at all).
     verdict_by_profile: dict[str, str | None]
@@ -521,6 +542,7 @@ class ProfileMatrixEntry:
             "affected_profiles": list(self.affected_profiles),
             "incomplete_profiles": list(self.incomplete_profiles),
             "unanalyzed_profiles": list(self.unanalyzed_profiles),
+            "contract_incomplete_profiles": list(self.contract_incomplete_profiles),
             "verdict_by_profile": dict(self.verdict_by_profile),
         }
 
@@ -752,11 +774,21 @@ class AggregateResult:
             affected = []
             incomplete = []
             unanalyzed = []
+            contract_incomplete = []
             verdict_by_profile: dict[str, str | None] = {}
             for pid in profiles:
                 reports = reports_by_profile[pid]
                 if any(r.compatibility_verdict is None and r.required for r in reports):
                     incomplete.append(pid)
+                # Same predicate as `contract_coverage_targets`, and checked
+                # before the `continue` below: a profile can be short of
+                # contract evidence whether or not any of its checks
+                # produced a verdict.
+                if any(
+                    r.contract_coverage_incomplete or r.contract_coverage_exit > 0
+                    for r in reports
+                ):
+                    contract_incomplete.append(pid)
                 verdicts = [
                     r.compatibility_verdict
                     for r in reports
@@ -780,6 +812,7 @@ class AggregateResult:
                     affected_profiles=tuple(affected),
                     incomplete_profiles=tuple(incomplete),
                     unanalyzed_profiles=tuple(unanalyzed),
+                    contract_incomplete_profiles=tuple(contract_incomplete),
                     verdict_by_profile=verdict_by_profile,
                 )
             )
@@ -947,6 +980,18 @@ class AggregateResult:
                     line += (
                         f" [incomplete coverage on "
                         f"{', '.join(entry.incomplete_profiles)}]"
+                    )
+                if entry.contract_incomplete_profiles:
+                    # Qualifies whatever precedes it, exactly as the
+                    # incomplete-coverage suffix above does -- including a
+                    # "clean" line, which stays accurate: clean is a
+                    # statement about compatibility, and this is the
+                    # orthogonal evidence axis saying the domain never
+                    # closed. Without it a profile that raised the exit to 1
+                    # on contract coverage alone read as flatly clean.
+                    line += (
+                        f" [contract evidence incomplete on "
+                        f"{', '.join(entry.contract_incomplete_profiles)}]"
                     )
                 lines.append(line)
 
