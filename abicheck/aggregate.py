@@ -408,6 +408,12 @@ class TargetReport:
     library: str | None = None
     reason: str | None = None  # unavailable, or not_comparable/operational_error detail
     unexpected: bool = False
+    #: The findings this report listed, and whether that list is all of them
+    #: (:class:`~abicheck.aggregate_findings.ReportFindings`). ``None`` for an
+    #: unavailable report — one that never arrived, was unreadable, or
+    #: produced a not-comparable/operational-error result, so it listed
+    #: nothing and established nothing.
+    findings: ReportFindings | None = None
     #: ADR-049 Phase 7's contract-coverage contribution for this target
     #: (``0``/``1``), carried separately from :attr:`gate` because the two are
     #: orthogonal axes (plan Section 7): a coverage failure may raise a clean
@@ -415,6 +421,13 @@ class TargetReport:
     #: an unavailable target -- a report that never arrived is a *coverage*
     #: gap on this aggregate's own axis, already gated as one, and inventing a
     #: contract-coverage failure for it would double-count the same absence.
+    #:
+    #: Declared after ``findings``, with the two below, so adding them cannot
+    #: shift an existing positional construction of this public dataclass: a
+    #: caller passing ``TargetReport(..., unexpected, report_findings)`` would
+    #: otherwise bind its ``ReportFindings`` here, and ``exit_code()``'s
+    #: ``max()`` would compare it against an int (Codex review -- the same
+    #: call already made for :class:`ProfileMatrixEntry`).
     contract_coverage_exit: int = 0
     #: Whether the report listed any coverage failure, regardless of whether
     #: it gated. Separate from the contribution above because
@@ -426,12 +439,6 @@ class TargetReport:
     #: ``contract.unresolved=warn`` acceptance from a silent or malformed
     #: one, so prose about the run cannot claim a policy it never set.
     contract_coverage_declared: bool = False
-    #: The findings this report listed, and whether that list is all of them
-    #: (:class:`~abicheck.aggregate_findings.ReportFindings`). ``None`` for an
-    #: unavailable report — one that never arrived, was unreadable, or
-    #: produced a not-comparable/operational-error result, so it listed
-    #: nothing and established nothing.
-    findings: ReportFindings | None = None
 
     @property
     def analyzed(self) -> bool:

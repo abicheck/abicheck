@@ -5,7 +5,8 @@
   report, so zeroing only the document root left the aggregate — which reads
   the nested block — folding it back into the CI exit, and an advisory scan
   still gated. The neutralizer and the aggregate now share one block
-  traversal (`aggregate.contract_coverage_blocks`) rather than keeping two
+  path definition (`aggregate.contract_coverage_block_paths`, which
+  `contract_coverage_blocks` is the reader's own wrapper over) rather than two
   that agree until one changes.
 - `scripts/measure_contract_shadow.py` pins the accepted `public`
   unresolved-loss findings by their full `case:mode:kind:symbol` key. Pinning

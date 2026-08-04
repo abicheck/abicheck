@@ -630,33 +630,40 @@ class TestAugmentReport:
         for block in blocks:
             assert block.get("contract_coverage_exit_contribution", 0) == 0
 
-    def test_a_read_only_nested_mapping_is_left_alone_rather_than_crashing(self):
-        # `contract_coverage_block_paths` admits any Mapping, but only a
-        # `dict` can be rebound and written. A caller that built its report
-        # programmatically with an immutable view would otherwise raise on
-        # assignment part-way through neutralization, leaving a half-
-        # neutralized report -- worse than not neutralizing that block.
+    def test_a_read_only_nested_mapping_is_neutralized_too(self):
+        """An immutable nested block must still be neutralized, not skipped.
+
+        `contract_coverage_block_paths` admits any `Mapping`, and the
+        aggregate reads any `Mapping` — so skipping a non-`dict` one left its
+        contribution at 1 and an advisory check still gated CI (CodeRabbit
+        review, reproduced). Copying into a real `dict` and rebinding is what
+        makes an unwritable block writable *and* keeps the caller's own
+        container untouched.
+        """
         from types import MappingProxyType
 
+        proxy = MappingProxyType(
+            {"verdict": "NO_CHANGE", "contract_coverage_exit_contribution": 1}
+        )
+        original = {
+            "scan_schema_version": "1.8",
+            "exit_code": 1,
+            "verdict": "NO_CHANGE",
+            "diff": proxy,
+        }
         out = augment_report(
-            {
-                "scan_schema_version": "1.8",
-                "exit_code": 1,
-                "verdict": "NO_CHANGE",
-                "diff": MappingProxyType(
-                    {"verdict": "NO_CHANGE", "contract_coverage_exit_contribution": 1}
-                ),
-            },
+            original,
             name="libfoo",
             profile_id="linux-gcc14",
             baseline_channel="release",
             requested_depth="headers",
             gate_mode="advisory",
         )
-        # The root gate is still neutralized; the unwritable block is skipped
-        # intact rather than partially rewritten.
         assert out["exit_code"] == 0
-        assert out["diff"]["contract_coverage_exit_contribution"] == 1
+        assert out["diff"]["contract_coverage_exit_contribution"] == 0
+        # The caller's immutable view is neither written through nor swapped.
+        assert original["diff"] is proxy
+        assert proxy["contract_coverage_exit_contribution"] == 1
 
     def test_deferred_keeps_its_contract_coverage_contribution(self):
         # `deferred` exists so the trailing aggregate computes the gate from
@@ -676,22 +683,32 @@ class TestAugmentReport:
         )
         assert out["contract_coverage_exit_contribution"] == 1
 
-    def test_advisory_does_not_invent_a_contribution_that_was_never_stated(self):
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param({}, id="absent"),
+            pytest.param(
+                {"contract_coverage_exit_contribution": "nope"}, id="malformed"
+            ),
+        ],
+    )
+    def test_advisory_does_not_invent_a_contribution_that_was_never_stated(
+        self, payload: dict
+    ):
         # An absent or unusable value stays absent/unusable rather than
         # becoming a 0 the run never declared -- otherwise an advisory run
         # would look like it had answered the coverage question.
-        for payload in ({}, {"contract_coverage_exit_contribution": "nope"}):
-            out = augment_report(
-                {"verdict": "COMPATIBLE", "severity": {"exit_code": 0}, **payload},
-                name="libfoo",
-                profile_id="linux-gcc14",
-                baseline_channel="release",
-                requested_depth="headers",
-                gate_mode="advisory",
-            )
-            assert out.get("contract_coverage_exit_contribution") == payload.get(
-                "contract_coverage_exit_contribution"
-            )
+        out = augment_report(
+            {"verdict": "COMPATIBLE", "severity": {"exit_code": 0}, **payload},
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out.get("contract_coverage_exit_contribution") == payload.get(
+            "contract_coverage_exit_contribution"
+        )
 
     def test_advisory_neutralize_is_a_no_op_when_report_has_no_gate_block(self):
         out = augment_report(

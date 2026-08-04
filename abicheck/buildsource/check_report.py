@@ -276,17 +276,27 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     for path in contract_coverage_block_paths(report):
         node: dict[str, Any] = report
         for key in path:
-            child = node[key]
-            if not isinstance(child, dict):
-                break
-            copied = dict(child)
+            # Copied into a real `dict` whatever Mapping flavour the block
+            # was, then rebound. Skipping a non-`dict` Mapping instead was
+            # wrong: the aggregate reads *any* Mapping, so a
+            # `MappingProxyType` block kept its contribution and an advisory
+            # check still gated CI (CodeRabbit review, reproduced). The copy
+            # is also what makes this safe -- an immutable mapping cannot be
+            # written through, and the caller's own nested container must not
+            # be touched either way.
+            #
+            # No type guard here: `contract_coverage_block_paths` only emits
+            # a path whose every node it has already checked is a `Mapping`,
+            # so a guard would be unreachable by construction -- and an
+            # unreachable branch is a worse guarantee than the single
+            # definition that actually enforces it.
+            copied = dict(node[key])
             node[key] = copied
             node = copied
-        else:
-            if _is_valid_coverage_contribution(
-                node.get("contract_coverage_exit_contribution")
-            ):
-                node["contract_coverage_exit_contribution"] = 0
+        if _is_valid_coverage_contribution(
+            node.get("contract_coverage_exit_contribution")
+        ):
+            node["contract_coverage_exit_contribution"] = 0
 
 
 def _is_valid_coverage_contribution(raw: object) -> bool:
