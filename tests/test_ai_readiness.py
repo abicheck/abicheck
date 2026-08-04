@@ -1079,6 +1079,16 @@ def test_adr_named_modules_expands_family_shorthand(ass):
     assert not any("nonexistent" in path for path in named)
 
 
+def test_adr_named_modules_expands_shorthand_inside_the_anchors_package(ass):
+    """A nested family must resolve in its own package: dropping the anchor's
+    directory looked for a non-existent top-level module and silently omitted
+    the sibling from the freshness pathspec (Codex review on #667)."""
+    named = ass._adr_named_modules(
+        "`abicheck/buildsource/graph_facts.py` and `_impact.py`"
+    )
+    assert "abicheck/buildsource/graph_impact.py" in named
+
+
 def test_adr_named_modules_ignores_shorthand_without_an_anchor(ass):
     """A leading-underscore token with no preceding full module name has
     nothing to expand against and must not be guessed at."""
@@ -1197,6 +1207,30 @@ def test_adr_status_sync_accepts_receipt_on_the_default_branch(
     f = car.Findings()
     car.check_adr_status_sync(f)
     assert f.errors == [], f"a default-branch receipt was wrongly flagged: {f.errors}"
+
+
+def test_adr_status_sync_asks_git_the_right_ancestry_question(
+    car, ass, tmp_path, monkeypatch
+):
+    """`git merge-base --is-ancestor A B` means "A is an ancestor of B", so
+    swapping the operands inverts the check — and every other test here stubs
+    `_git_output` wholesale, so a swap would leave them all green. Assert the
+    actual argv."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    calls: list[tuple[str, ...]] = []
+    inner = _fake_git(is_ancestor=True)
+
+    def recording(*args: str) -> str | None:
+        calls.append(args)
+        return inner(*args)
+
+    monkeypatch.setattr(ass, "_git_output", recording)
+    car.check_adr_status_sync(car.Findings())
+    ancestry = [c for c in calls if c[0] == "merge-base"]
+    assert ancestry, f"no ancestry query was made: {calls}"
+    assert ancestry[0] == ("merge-base", "--is-ancestor", "abc1234", "origin/main"), (
+        f"receipt sha and default-branch ref are in the wrong order: {ancestry[0]}"
+    )
 
 
 def test_adr_status_sync_skips_anchor_check_without_a_default_branch_ref(

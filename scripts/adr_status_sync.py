@@ -194,14 +194,22 @@ def _expand_family_shorthand(shorthand: str, anchor: str | None) -> str | None:
     untripwired (Codex review). The expansion is only ever *accepted* when it
     resolves to a real file, so a wrong guess drops the token rather than
     inventing a tripwire on an unrelated module.
+
+    The anchor's directory is carried over, so a nested family resolves in its
+    own package: `buildsource/graph_facts.py` + `_impact.py` ->
+    `buildsource/graph_impact.py`, not the non-existent top-level
+    `graph_impact.py` that an earlier revision looked for and silently dropped
+    (Codex review on PR #667).
     """
     if anchor is None or "/" in shorthand or not shorthand.startswith("_"):
         return None
-    stem = anchor.rsplit("/", 1)[-1].removesuffix(".py")
-    family, sep, _leaf = stem.rpartition("_")
+    parent, _sep, base = anchor.rpartition("/")
+    family, sep, _leaf = base.removesuffix(".py").rpartition("_")
     if not sep:
         return None
     candidate = f"{family}{shorthand}"
+    if parent:
+        candidate = f"{parent}/{candidate}"
     return candidate if (PKG / candidate).is_file() else None
 
 
