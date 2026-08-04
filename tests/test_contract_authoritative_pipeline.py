@@ -306,6 +306,134 @@ class TestTheGateFollowsTheDecision:
         assert max(contributions) == legacy_exit_code(result.verdict)
 
 
+class TestTheGateContributionIsAlwaysTheAppliedNumber:
+    """`gate_contribution` is defined as what actually gated. Two ways it
+    drifted from that (Codex review), both about a *second* gate replacing
+    the first after the per-finding number was already written."""
+
+    @staticmethod
+    def _uncovered_break_pair(tmp_path: Path) -> tuple[Path, Path]:
+        """A public removal that a required-symbol contract does not cover."""
+        common = {"library": "libfoo.so.1", "from_headers": True}
+        old = AbiSnapshot(
+            version="1.0",
+            functions=[_fn("keep", "_Z4keepv"), _fn("other", "_Z5otherv")],
+            **common,
+        )
+        new = AbiSnapshot(version="2.0", functions=[_fn("keep", "_Z4keepv")], **common)
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        return old_p, new_p
+
+    def test_a_scoped_out_finding_contributes_zero(self, tmp_path: Path) -> None:
+        """Under `--required-symbol` the scoped gate is what the process
+        exits on, so a finding outside that contract contributes nothing —
+        publishing `4` beside an exit of `0` was the bug."""
+        old_p, new_p = self._uncovered_break_pair(tmp_path)
+        out = tmp_path / "report.json"
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--required-symbol",
+                "_Z4keepv",
+                "--contract-evaluation",
+                "--contract",
+                "all",
+                "--format",
+                "json",
+                "-o",
+                str(out),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        report = json.loads(out.read_text(encoding="utf-8"))
+        removal = next(c for c in report["changes"] if c["kind"] == "func_removed")
+        assert removal["gate_contribution"] == 0
+        # The compatibility axis is untouched: the removal is still breaking,
+        # and `full_verdict` still says so. Only the gate claim changed.
+        assert removal["compatibility_decision"] == "BREAKING"
+        assert report["full_verdict"] == "BREAKING"
+
+    def test_an_unscoped_run_keeps_the_full_contribution(self, tmp_path: Path) -> None:
+        """The control: without scoping there is no second gate, so the
+        full-library number is the applied one."""
+        old_p, new_p = self._uncovered_break_pair(tmp_path)
+        out = tmp_path / "report.json"
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract-evaluation",
+                "--contract",
+                "all",
+                "--format",
+                "json",
+                "-o",
+                str(out),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        report = json.loads(out.read_text(encoding="utf-8"))
+        removal = next(c for c in report["changes"] if c["kind"] == "func_removed")
+        assert removal["gate_contribution"] == 4
+
+
+class TestPromotionNeverLowersAVerdict:
+    """The recomputation `appcompat`'s promotion triggers must combine with
+    the standing verdict, not replace it (Codex review)."""
+
+    @staticmethod
+    def _stamped(kind: ChangeKind, symbol: str) -> Change:
+        change = Change(kind, symbol, "x")
+        change.contract_relevance = ContractRelevance.IN_CONTRACT
+        change.compatibility_evaluation_status = CompatibilityEvaluationStatus.EVALUATED
+        return change
+
+    def test_a_redundant_findings_contribution_is_not_dropped(self) -> None:
+        """`compare()` scores `kept + verdict_redundant`, and that set is not
+        recoverable from the `DiffResult` — `redundant_changes` also carries
+        `opaque_filtered`, which is deliberately excluded from the verdict.
+        Recomputing from `changes` alone therefore lowered BREAKING to
+        COMPATIBLE on an unrelated promotion."""
+        from abicheck.checker_types import DiffResult
+        from abicheck.contract_evaluation import recompute_verdict_after_promotion
+
+        result = DiffResult(
+            old_version="1",
+            new_version="2",
+            library="lib",
+            changes=[self._stamped(ChangeKind.ENUM_MEMBER_ADDED, "E")],
+            verdict=Verdict.BREAKING,
+            redundant_changes=[Change(ChangeKind.FUNC_REMOVED, "gone", "removed")],
+        )
+        recompute_verdict_after_promotion(result, policy="strict_abi")
+        assert result.verdict is Verdict.BREAKING
+
+    def test_it_still_raises_a_verdict_the_promotion_earns(self) -> None:
+        """The control: monotone means it may only go up, not that it is
+        frozen — the promotion's whole purpose is to make a proven-in-contract
+        finding score."""
+        from abicheck.checker_types import DiffResult
+        from abicheck.contract_evaluation import recompute_verdict_after_promotion
+
+        result = DiffResult(
+            old_version="1",
+            new_version="2",
+            library="lib",
+            changes=[self._stamped(ChangeKind.FUNC_REMOVED, "pub")],
+            verdict=Verdict.NO_CHANGE,
+        )
+        recompute_verdict_after_promotion(result, policy="strict_abi")
+        assert result.verdict is Verdict.BREAKING
+
+
 class TestScanKeepsWhatItDoesNotScore:
     """`scan --against` itemizes findings from the compatibility buckets, so
     filtering those buckets removed excluded findings from its report

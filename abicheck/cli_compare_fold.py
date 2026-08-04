@@ -190,6 +190,26 @@ def _fold_scoped_compat_into_text(
             scoped_only, missing_labels, blocks, missing_kind = (
                 _resolve_scoped_gate_findings(result, severity_config, show_only)
             )
+            # ADR-049 D1: `gate_contribution` is defined as the number that
+            # *actually* gated, and under --used-by/--required-symbol the
+            # scoped gate is what the run exits on -- this fold is where it
+            # replaces the primary verdict and severity block. A full-diff
+            # finding the selected consumer does not use contributes nothing
+            # to that gate, so leaving its full-library number in place
+            # published `gate_contribution: 4` on a run that exited 0 (Codex
+            # review, reproduced with a removal outside the required-symbol
+            # contract). Only entries that already carry the field are
+            # touched, so a run without --contract-evaluation is unaffected.
+            _scoped_ids = (
+                getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
+            )
+            for _entry in changes_list:
+                if (
+                    isinstance(_entry, dict)
+                    and "gate_contribution" in _entry
+                    and _entry.get("finding_id") not in _scoped_ids
+                ):
+                    _entry["gate_contribution"] = 0
             # G29 Phase 3 slice 3 (ADR-052, Codex review): these synthetic
             # entries are appended to `changes` after `_to_json_root_cause`
             # already grouped `result.changes` into `root_causes` -- without

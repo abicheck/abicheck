@@ -1690,6 +1690,7 @@ def recompute_verdict_after_promotion(
     """
     from .checker_policy import compute_verdict
     from .contract_gating import is_evaluated
+    from .severity import _VERDICT_ORDER
 
     changes = getattr(result, "changes", None)
     if not changes:
@@ -1699,12 +1700,32 @@ def recompute_verdict_after_promotion(
     pf = (
         policy_file if policy_file is not None else getattr(result, "policy_file", None)
     )
-    verdict = (
+    recomputed = (
         pf.compute_verdict(scored)
         if pf is not None
         else compute_verdict(scored, policy=effective_policy)
     )
-    result.verdict = verdict
+    # Combined monotonically with the standing verdict, never assigned over
+    # it. Two reasons, and the second is the one that bites:
+    #
+    # 1. A promotion only ever moves findings *onto* the compatibility axis
+    #    (NOT_EVALUATED -> EVALUATED), never off it, so the correct new
+    #    verdict is by construction no weaker than the old one. Taking the
+    #    stronger of the two is the exact answer, not a safety margin.
+    # 2. `checker.compare()` computes its verdict from `kept +
+    #    verdict_redundant` -- non-rename redundant findings score too -- and
+    #    that set is *not* recoverable from the returned `DiffResult`:
+    #    `redundant_changes` is `redundant + opaque_filtered`, and
+    #    `opaque_filtered` is deliberately excluded from the verdict while
+    #    rename halves are excluded as well. Recomputing from `changes` alone
+    #    therefore dropped a redundant child's stronger verdict and *lowered*
+    #    `full_verdict` from BREAKING to COMPATIBLE on any unrelated scoped
+    #    promotion (Codex review, reproduced). Keeping the stronger of the
+    #    two preserves whatever those findings contributed, without this
+    #    function having to reconstruct a set the result no longer
+    #    distinguishes.
+    if _VERDICT_ORDER.index(recomputed) > _VERDICT_ORDER.index(result.verdict):
+        result.verdict = recomputed
 
 
 def stamp_scoped_changes(
