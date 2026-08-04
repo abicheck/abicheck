@@ -2379,7 +2379,7 @@ class TestCompareRequestAdr055Evidence:
         signal goes undetected, letting the pair disagree on dialect."""
         from types import SimpleNamespace
 
-        from abicheck import service as service_mod
+        from abicheck import service_scan
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
@@ -2393,7 +2393,13 @@ class TestCompareRequestAdr055Evidence:
             captured["old_headers"] = list(old_headers)
             return None
 
-        monkeypatch.setattr(service_mod, "pair_wide_cxx20_std_override", _fake_override)
+        # ADR-055 D1: the pair-wide scan runs in the shared
+        # `service_compare_pipeline`, which imports this helper from the module
+        # that defines it rather than through `service`'s re-export -- so the
+        # spy belongs on `service_scan`, where it lives.
+        monkeypatch.setattr(
+            service_scan, "pair_wide_cxx20_std_override", _fake_override
+        )
 
         request = CompareRequest(
             old=InputSpec.of(old_p, dump_manifest=manifest), new=InputSpec.of(new_p)
@@ -2482,14 +2488,17 @@ class TestCompareRequestAdr055Evidence:
         dialect (e.g. only a sysroot) must not silently discard the pair-wide
         C++20 heuristic's override for that side -- it should be merged in
         unless the side already pins its own explicit standard."""
-        from abicheck import service as service_mod
+        from abicheck import service_scan
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
 
+        # ADR-055 D1: spied on `service_scan` (where it is defined) rather than
+        # `service` (which only re-exports it) -- the shared compare pipeline
+        # imports it from the defining module.
         monkeypatch.setattr(
-            service_mod,
+            service_scan,
             "pair_wide_cxx20_std_override",
             lambda *a, **k: ("-std=gnu++20",),
         )
@@ -4868,3 +4877,151 @@ class TestDebugFormatResolution:
                 debug_format="dwarf",
             )
         )
+
+
+class TestComparePipelinePhases:
+    """ADR-055 D1: ``run_compare_request`` is the composition of the two
+    phases in ``service_compare_pipeline``, and those phases are what the
+    native ``compare`` CLI now shares instead of its own resolution copy."""
+
+    def _snap_file(self, tmp_path, name, version):
+        from abicheck.serialization import save_snapshot
+
+        path = tmp_path / f"{name}-{version}.json"
+        save_snapshot(
+            AbiSnapshot(
+                library=name,
+                version=version,
+                functions=[
+                    Function(
+                        name="foo",
+                        mangled="foo",
+                        return_type="int",
+                        visibility=Visibility.PUBLIC,
+                        is_extern_c=True,
+                    )
+                ],
+            ),
+            path,
+        )
+        return path
+
+    def test_run_compare_request_equals_resolve_then_classify(self, tmp_path):
+        from abicheck.service import (
+            classify_compare_pair,
+            resolve_compare_request,
+            run_compare_request,
+        )
+
+        old_p = self._snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._snap_file(tmp_path, "libtest", "2.0")
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+
+        composed = classify_compare_pair(request, resolve_compare_request(request))
+        one_call = run_compare_request(request)
+
+        assert [c.kind for c in composed.diff.changes] == [
+            c.kind for c in one_call.diff.changes
+        ]
+        assert composed.diff.verdict == one_call.diff.verdict
+        assert composed.old_snapshot.version == one_call.old_snapshot.version
+        assert composed.new_snapshot.version == one_call.new_snapshot.version
+
+    def test_resolve_phase_returns_both_sides_and_their_evidence(self, tmp_path):
+        from abicheck.service import resolve_compare_request
+
+        old_p = self._snap_file(tmp_path, "libtest", "1.0")
+        new_p = self._snap_file(tmp_path, "libtest", "2.0")
+        pair = resolve_compare_request(
+            CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        )
+        assert pair.old.version == "1.0"
+        assert pair.new.version == "2.0"
+        # A JSON snapshot has no detected binary format, same as on the CLI.
+        assert pair.old_fmt is None and pair.new_fmt is None
+        assert pair.old_evidence.collect_mode == pair.new_evidence.collect_mode == "off"
+
+
+class TestResolveSidesSequentially:
+    """ADR-050 D6 / G32 Phase E, generalised by ADR-055 D1.
+
+    A manifest-driven dump sizes its per-TU worker pool from a live
+    ``MemAvailable`` reading, so two starting concurrently size two full pools
+    off the same reading and jointly overcommit. That guard used to be
+    implicit — the native ``compare`` CLI simply resolved sequentially, and
+    ``run_compare_request`` was documented as unable to reach a manifest at
+    all. ``InputSpec.dump_manifest`` made that documentation stale: the typed
+    path could reach a manifest *and* resolved concurrently. Now that both
+    front ends share one resolution, the guard is explicit and lives with it.
+    """
+
+    def _request(self, tmp_path, *, old_manifest=None, new_manifest=None):
+        return CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so", dump_manifest=old_manifest),
+            new=InputSpec(path=tmp_path / "new.so", dump_manifest=new_manifest),
+        )
+
+    def test_plain_pair_may_resolve_concurrently(self, tmp_path, monkeypatch):
+        from abicheck.service import resolve_sides_sequentially
+
+        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
+        assert resolve_sides_sequentially(self._request(tmp_path)) is False
+
+    @pytest.mark.parametrize("side", ["old", "new"])
+    def test_a_dump_manifest_on_either_side_forces_sequential(
+        self, tmp_path, monkeypatch, side
+    ):
+        from types import SimpleNamespace
+
+        from abicheck.service import resolve_sides_sequentially
+
+        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
+        manifest = SimpleNamespace(translation_units=[])
+        request = self._request(tmp_path, **{f"{side}_manifest": manifest})
+        assert resolve_sides_sequentially(request) is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "no", "NO", " 0 "])
+    def test_env_opt_out_forces_sequential(self, tmp_path, monkeypatch, value):
+        from abicheck.service import resolve_sides_sequentially
+
+        monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", value)
+        assert resolve_sides_sequentially(self._request(tmp_path)) is True
+
+    def test_manifest_request_really_resolves_one_side_at_a_time(
+        self, tmp_path, monkeypatch
+    ):
+        """The behavioural half: not just the predicate, but the resolution.
+
+        Without the guard this is exactly the double-pool-sizing case — two
+        manifest dumps in a ``ThreadPoolExecutor``, overlapping in time.
+        """
+        import time
+        from types import SimpleNamespace
+
+        from abicheck import service as service_mod
+        from abicheck.service import resolve_compare_request
+
+        monkeypatch.delenv("ABICHECK_PARALLEL_EXTRACTION", raising=False)
+        spans: list[tuple[str, float, float]] = []
+
+        def _fake_resolve(path, headers, includes, version, lang, **kwargs):
+            start = time.monotonic()
+            time.sleep(0.05)
+            spans.append((version, start, time.monotonic()))
+            return AbiSnapshot(library="libtest", version=version)
+
+        monkeypatch.setattr(service_mod, "resolve_input", _fake_resolve)
+        old_p = tmp_path / "old.so"
+        new_p = tmp_path / "new.so"
+        old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        new_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
+        manifest = SimpleNamespace(translation_units=[])
+        resolve_compare_request(
+            CompareRequest(
+                old=InputSpec(path=old_p, version="old", dump_manifest=manifest),
+                new=InputSpec(path=new_p, version="new", dump_manifest=manifest),
+            )
+        )
+        assert len(spans) == 2
+        (_old_v, _old_start, old_end), (_new_v, new_start, _new_end) = spans
+        assert new_start >= old_end

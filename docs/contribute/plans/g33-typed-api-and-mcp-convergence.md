@@ -1,8 +1,9 @@
 # G33 — Typed API convergence: schema registry, Request/Result completeness, MCP dedup
 
-**Status:** Phases 0-4 done (ADR-055 D1-D4 all implemented); Phase 5
-unblocked but not started; Phase 6 is a standing constraint, not work —
-see per-phase status below
+**Status:** Phases 0-4 done (ADR-055 D1-D4 all implemented, including D1's
+deferred structural half — the CLI now shares one resolution with the typed
+and MCP paths); Phase 5 unblocked but not started; Phase 6 is a standing
+constraint, not work — see per-phase status below
 **Normative decision:** [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md)
 (Accepted — implemented)
 **Related:** ADR-037 (G22, CLI consolidation — done), ADR-049 (contract relevance,
@@ -227,10 +228,30 @@ real delta — `dwarf_only`, `debug_format`, ADR-050 D1's `include_labels`, and
 implementation moved to the new leaf module `abicheck/dependency_info.py`
 that both layers depend on.
 
-So the two paths now differ in structure, not in what they can express.
-Migrating the CLI onto `run_compare_request` remains possible as its own
-change, gated on its own before/after parity evidence across the CLI's flag
-matrix.
+So the two paths differed in structure, not in what they could express.
+
+**Structural half — now done, and the decision flipped to (a).** Doing the
+migration showed why (b) had looked inevitable: `run_compare_request` was one
+function that both resolved and classified, and the native `compare` CLI must
+run its Click-dependent ADR-049 `resolve_and_apply` between those two steps —
+it needs the Click context to answer "did the user type this?", and a `--pack`
+it selects can move the policy file and severity levels the classification is
+then scored under. With no seam, the CLI could reuse neither half.
+
+So the change was not "call `run_compare_request` from the CLI" but splitting
+it at its real joint into `abicheck/service_compare_pipeline.py`:
+`resolve_compare_request` (validate → evidence → both snapshots →
+`--follow-deps` → depth floor), `classify_compare_pair` (suppression/policy →
+embedded build-source diff → `compare_snapshots` → metrics), and
+`run_compare_request` as exactly their composition.
+`cli_resolve._resolve_compare_snapshots` now builds a `CompareRequest` and
+delegates; it resolves nothing itself. What stays CLI-specific is the
+`click.echo` notifier, the `ValidationError`/`SnapshotError` → `click`
+exception translation, and `allow_parallel=False` — the CLI's long-standing
+sequential resolution, kept deliberately rather than flipped as a side effect
+(see ADR-055 D1's "Structural half" note, which also records the
+`IMPORT_CYCLE_ALLOWLIST` sign-off and the stale-guard defect the unification
+surfaced on the typed path).
 
 ### Phase 3 — `CompareResult` wrapper (ADR-055 D2)
 
@@ -379,6 +400,6 @@ All met:
   implemented".
 
 Remaining work tracked elsewhere, not reopening this plan: Phase 5
-(`abi_dump`/`abi_scan` parity) is unblocked and still open, and migrating the
-CLI onto `run_compare_request` is a possible future change under Phase 2's
-recorded decision (b).
+(`abi_dump`/`abi_scan` parity) is unblocked and still open. Migrating the CLI
+onto the shared resolution — Phase 2's deferred structural half — is **done**;
+see that phase's "Structural half" note.

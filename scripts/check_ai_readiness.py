@@ -1168,6 +1168,24 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # through already-member modules, not a new dependency direction.
         # No init deadlock.
         #
+        # `service_compare_pipeline` joins the same SCC (ADR-055 D1), for the
+        # same reason `l0_export_delta` and `scan_engine` above do: it is a
+        # *split* of an existing member, not a new dependency direction.
+        # `run_compare_request`'s body was one function that both resolved and
+        # classified, which left the native `compare` CLI no seam to run its
+        # Click-dependent ADR-049 `resolve_and_apply` step in — so the CLI kept
+        # a second resolution implementation of its own. Splitting that body
+        # into `resolve_compare_request` / `classify_compare_pair` removed the
+        # reason for the copy. The extracted module reaches
+        # `cli_buildsource`/`cli_dump_helpers`/`cli_buildsource_helpers` and
+        # `service` itself function-locally — the *identical* set of edges
+        # `service.run_compare_request` already had before the split, moved
+        # rather than added — and `service` imports it back at its module-load
+        # tail. It imports only `api_types`/`errors` (both leaves) at module
+        # load, so the package still imports cleanly: no init deadlock. Net
+        # effect on the graph is a *reduction*, since `cli_resolve` no longer
+        # carries its own copy of the resolution this module now owns.
+        #
         # `cli_config`, `cli_doctor`, and `cli_graph` also join this same SCC —
         # each already had its own standalone `{"cli", "cli_X"}` entry above,
         # which covers the trivial two-node cycle from `cli`'s tail-of-module
@@ -1232,6 +1250,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "l0_export_delta",
                 "scan_engine",
                 "service",
+                "service_compare_pipeline",
                 "service_scan",
             }
         ),

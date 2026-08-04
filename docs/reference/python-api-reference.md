@@ -147,6 +147,21 @@ Where/how a result is rendered — the invocation-level output choice.
 | `fmt` | `str` | `'text'` |
 | `path` | `Path \| None` | `None` |
 
+## `ResolvedComparePair`
+
+Both sides of a comparison, resolved and ready to classify.
+
+*Dataclass.*
+
+| Field | Type | Default |
+|---|---|---|
+| `old` | `AbiSnapshot` | *(required)* |
+| `new` | `AbiSnapshot` | *(required)* |
+| `old_fmt` | `str \| None` | *(required)* |
+| `new_fmt` | `str \| None` | *(required)* |
+| `old_evidence` | `SideEvidence` | *(required)* |
+| `new_evidence` | `SideEvidence` | *(required)* |
+
 ## `ScanArtifactResult`
 
 One member's :class:`ScanResult`, with the identity that result alone doesn't carry (ADR-056 — neither `ScanResult` nor its nested report carries a binary path or library name anywhere).
@@ -231,6 +246,17 @@ Result of :func:`run_scan_set` — the ``--artifact-set`` sibling of :class:`Sca
 | `bundle_findings` | `list[Any]` | `[]` |
 | `bundle_verdict` | `str \| None` | `None` |
 | `bundle_incomplete` | `bool` | `False` |
+
+## `classify_compare_pair`
+
+Classify an already-resolved pair — the second half of ``run_compare_request``.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `request` | `CompareRequest` | *(required)* |
+| `pair` | `ResolvedComparePair` | *(required)* |
+
+**Returns:** `CompareResult`
 
 ## `collect_metadata`
 
@@ -335,6 +361,19 @@ Render comparison result in the requested output format.
 | `contract_evaluation` | `bool` | `False` |
 
 **Returns:** `str`
+
+## `resolve_compare_request`
+
+Resolve both sides of *request* into a classifiable pair.
+
+| Parameter | Type | Default |
+|---|---|---|
+| `request` | `CompareRequest` | *(required)* |
+| *(keyword-only below)* | | |
+| `notify` | `Callable[[str], None] \| None` | `None` |
+| `allow_parallel` | `bool` | `True` |
+
+**Returns:** `ResolvedComparePair`
 
 ## `resolve_input`
 

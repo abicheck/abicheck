@@ -235,11 +235,68 @@ rather than reasoning about them, and all four are now on `CompareRequest`:
 both layers depend on — the shape AGENTS.md prescribes when a CLI helper
 gains a service-layer caller, instead of either importing the other.
 
-So the two paths now differ in *structure*, not in what they can express.
-Migrating the CLI onto `run_compare_request` remains a separate,
-independently-reviewable change needing its own before/after parity evidence
-over the CLI's full flag matrix — the kind of work that goes wrong when
-bundled into another decision's PR.
+So the two paths differed in *structure*, not in what they could express.
+
+**Structural half — now done too, and the answer flipped to (a).** The note
+above deferred migrating the CLI onto `run_compare_request` as separate work.
+That work is now landed, and doing it exposed *why* option (b) had looked
+inevitable: `run_compare_request` was one function that both resolved and
+classified, and the native `compare` CLI must run its Click-dependent ADR-049
+`resolve_and_apply` step **between** those two — the step needs the Click
+context to answer "did the user type this?", and a `--pack` it selects can
+move the policy file and severity levels the classification is then scored
+under. With no seam, the CLI could reuse neither half, so it kept a copy.
+
+The fix was therefore not "call `run_compare_request` from the CLI" but
+splitting it at its real joint (`abicheck/service_compare_pipeline.py`):
+
+| | |
+|---|---|
+| `resolve_compare_request(request, *, notify, allow_parallel)` | validate → resolve both sides' evidence → resolve both snapshots → `--follow-deps` enrichment → enforce the requested depth |
+| `classify_compare_pair(request, pair)` | load suppression/policy → diff embedded build-source evidence → `compare_snapshots` → attach coverage/metrics |
+| `run_compare_request(request)` | exactly their composition — one call for a caller that needs no seam |
+
+`cli_resolve._resolve_compare_snapshots` now builds a `CompareRequest` and
+calls `resolve_compare_request`; it resolves nothing itself. What stays
+CLI-specific is what genuinely is: the `click.echo` progress notifier,
+translating `ValidationError`/`SnapshotError` into `click.UsageError`/
+`click.ClickException` (the contract `_resolve_input` documented), and
+`allow_parallel=False`.
+
+That last one is deliberate and is *not* a leftover divergence.
+`allow_parallel` is the caller's **permission** to resolve both sides
+concurrently, not a demand — the shared `resolve_sides_sequentially` can
+still veto it. The CLI declines the permission because it has always resolved
+sequentially and its two dumps write interleaving progress notes to one
+stderr; flipping it to concurrent extraction changes the memory and output
+profile of every existing `compare` invocation, which deserves its own
+evidence rather than riding along with the removal of a duplicate.
+
+**A real defect the unification surfaced.** The sequential-resolution guard
+`tests/test_compare_dispatch.py` pinned for the CLI (ADR-050 D6 / G32 Phase
+E: a manifest-driven dump sizes its per-TU worker pool from a live
+`MemAvailable` reading, so two starting together size two full pools off the
+same reading and jointly overcommit) rested on a claim that had gone stale —
+that `run_compare_request` "has no `dump_manifest` field on
+`CompareRequest`/`InputSpec` at all, so it can never reach a manifest-driven
+dump". D1's own first slice added `InputSpec.dump_manifest`, so the typed
+path could reach a manifest *and* resolved concurrently: it had the exact
+risk the CLI test was written to prevent. `resolve_sides_sequentially` now
+states the rule once, for every front end — a `dump_manifest` on either side
+(or `ABICHECK_PARALLEL_EXTRACTION=0`) forces sequential resolution.
+
+**Import-cycle allowlist sign-off (AGENTS.md "What NOT to do").**
+`service_compare_pipeline` is added to `IMPORT_CYCLE_ALLOWLIST`'s existing
+CLI-registration/service-routing SCC. This is the `l0_export_delta` /
+`scan_engine` precedent, not a new dependency direction: the module is a
+*split of an existing member*, reaching `cli_buildsource`/`cli_dump_helpers`/
+`cli_buildsource_helpers`/`service` function-locally — the identical edge set
+`service.run_compare_request` already had, relocated rather than added — and
+`service` imports it back at its module-load tail. It imports only
+`api_types`/`dependency_info`/`errors` (leaves) at module load, so the package
+still imports cleanly. The net effect on the graph is a *reduction*:
+`cli_resolve` no longer carries its own copy of this resolution. This ADR is
+the record AGENTS.md asks for.
 
 ### D2. Typed `Result` wrappers for the existing typed-request verbs
 
@@ -471,13 +528,17 @@ exists and has no CLI-comparable rendering path here. The sibling
 |---|---|
 | `abicheck/api_types.py` | `InputSpec.sources`/`build_info`/`dump_manifest`/`compile`/`public_header_dirs` + `CompareRequest.depth`/`frontend_context` (D1); `InputSpec.follow_linker_scripts` (D4); `CompareResult` (D2 — here, not `service.py`, see its "As implemented" note) |
 | `abicheck/service_compare_evidence.py` | D1's resolution wiring, split out of `service.py` |
+| `abicheck/service_compare_pipeline.py` | D1's structural half: `resolve_compare_request`/`classify_compare_pair`/`resolve_sides_sequentially` — `run_compare_request`'s two phases, split out so the CLI shares them |
+| `abicheck/cli_resolve.py` | `_resolve_compare_snapshots` builds a `CompareRequest` and delegates to `resolve_compare_request`; it resolves nothing itself (D1 structural half) |
 | `abicheck/service.py` | `run_compare_request` returns `CompareResult`, and so does the `run_compare` kwargs shim (D2, after the 0.6 API break — no `_v2` function exists); per-side `follow_linker_scripts` forwarding (D4) |
 | `abicheck/schemas/__init__.py` | `current(name)` registry (D3) |
+| `scripts/check_ai_readiness.py` | `service_compare_pipeline` added to the existing SCC in `IMPORT_CYCLE_ALLOWLIST` (D1 structural half — sign-off recorded in D1 above) |
 | `scripts/check_ai_readiness.py` | `doc-count-sync` reads snapshot/compare versions from `schemas.current()` and pins the pages quoting them (D3's consumer half) |
 | `abicheck/mcp_server.py` | `abi_compare` builds a `CompareRequest` and calls `run_compare_request`; no local resolve, no policy/suppression load, no `compare_snapshots` import (D4) |
 | `docs/reference/python-api-reference.md`, `docs/reference/mcp-tools-reference.md` | Regenerated (generated files) |
 | `tests/test_api_types.py` | Field defaults for D1/D4; `TestCompareResult` (D2) |
-| `tests/test_service_unit.py` | `TestCompareRequestAdr055Evidence` (D1); `TestRunCompareRequestV2` (D2, incl. per-side `follow_linker_scripts`) |
+| `tests/test_service_unit.py` | `TestCompareRequestAdr055Evidence` (D1); `TestRunCompareRequestTypedResult` (D2, incl. per-side `follow_linker_scripts`); `TestComparePipelinePhases` + `TestResolveSidesSequentially` (D1 structural half) |
+| `tests/test_compare_dispatch.py` | `TestCompareCliSharesServiceResolution`: the CLI really delegates, and still translates the service errors into the `click` exceptions `_resolve_input` promised |
 | `tests/test_mcp_server_unit.py` | `TestAbiCompareCliParity`: the source-level D4 gate plus CLI-parity over a flag matrix |
 | `tests/test_mcp_server_coverage.py` | `TestAbiCompareTool` repointed to the service-layer names `abi_compare` now reaches |
 

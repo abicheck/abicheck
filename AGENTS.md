@@ -418,6 +418,16 @@ Core pipeline (in order of data flow):
    - `type_metadata.py`, `dwarf_utils.py` — shared type helpers
    - `change_registry.py` — change kind registry
    - `service.py` — service layer (Python API)
+   - `service_compare_pipeline.py` — ADR-055 D1: `run_compare_request`'s two
+     phases (`resolve_compare_request` / `classify_compare_pair`), split so
+     the native `compare` CLI can run its Click-dependent ADR-049
+     `resolve_and_apply` step between them and still share one resolution
+     with the typed API and MCP instead of keeping a second copy.
+     `resolve_sides_sequentially` owns the one rule about resolving both
+     sides concurrently (a `dump_manifest` on either side, or
+     `ABICHECK_PARALLEL_EXTRACTION=0`, forces sequential — a manifest dump
+     sizes its per-TU pool off a live `MemAvailable` reading, so two at once
+     jointly overcommit)
    - `stack_checker.py`, `stack_report.py`, `stack_html.py` — stack analysis
 9. **Build-source evidence (optional L3–L5 layers)** — `buildsource/` package
    (collect/merge/source-ABI replay/source graph; ADR-028…033). See

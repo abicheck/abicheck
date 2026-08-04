@@ -33,8 +33,36 @@
   names it — for any side that hasn't opted out via
   `InputSpec.follow_linker_scripts`.
 
+- **`resolve_compare_request` and `classify_compare_pair` — `run_compare_request`'s
+  two phases, now separately callable (ADR-055 D1).** Resolution (validate,
+  resolve both sides' evidence and snapshots, `--follow-deps` enrichment,
+  depth floor) and classification (suppression/policy, embedded build-source
+  diff, `compare_snapshots`, metrics) are individually reusable;
+  `run_compare_request` is exactly their composition, so a caller that needs
+  no seam is unaffected. `ResolvedComparePair` is the value between them.
+
 ### Changed
 
+- **The native `compare` CLI now shares the typed path's input resolution
+  (ADR-055 D1's structural half).** `cli_resolve._resolve_compare_snapshots`
+  was a second implementation of what `run_compare_request` already did — it
+  existed because `compare` must run its Click-dependent ADR-049
+  `resolve_and_apply` *between* resolving and classifying, and
+  `run_compare_request` was one function with no seam for that. Splitting it
+  into the two phases above removed the reason for the copy: the CLI helper
+  now builds a `CompareRequest` and delegates. Behaviour is unchanged, down
+  to the details that are genuinely CLI-specific — the `click.echo` progress
+  notifier, `ValidationError`/`SnapshotError` still surfacing as
+  `click.UsageError`/`click.ClickException`, and both sides still resolving
+  sequentially.
+- **A `--dump-manifest` comparison never resolves both sides at once, on any
+  front end.** The CLI resolved sequentially and so was safe; the typed
+  `run_compare_request` resolved concurrently and was documented as unable to
+  reach a manifest-driven dump at all — which stopped being true when
+  `InputSpec.dump_manifest` was added. Since a manifest dump sizes its per-TU
+  worker pool from a live `MemAvailable` reading, two starting together sized
+  two full pools off the same reading. `resolve_sides_sequentially` now states
+  the rule once for every caller.
 - **BREAKING (pre-1.0): `run_compare` and `run_compare_request` return a
   `CompareResult`, not a 3-tuple.** With the project not yet holding API
   compatibility, the typed result became the only shape rather than a second
