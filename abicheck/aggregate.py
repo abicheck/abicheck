@@ -54,11 +54,27 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .aggregate_findings import (
+    FINDING_SCOPE_ALL_PROFILES as FINDING_SCOPE_ALL_PROFILES,
+    FINDING_SCOPE_PARTIAL as FINDING_SCOPE_PARTIAL,
+    FINDING_SCOPE_PROFILE_SPECIFIC as FINDING_SCOPE_PROFILE_SPECIFIC,
+    FINDING_SCOPE_UNDETERMINED as FINDING_SCOPE_UNDETERMINED,
+    FindingMatrixEntry as FindingMatrixEntry,
+    ReportFinding as ReportFinding,
+    build_finding_matrix,
+    parse_report_findings,
+    render_finding_matrix_lines,
+)
 from .change_registry_types import Verdict
 
 #: Machine-readable schema version of the ``to_dict()`` / ``--format json``
 #: output. Bump on any incompatible change to that structure.
-AGGREGATE_SCHEMA_VERSION = "1.1"
+#:
+#: ``1.2`` added the additive ``finding_matrix`` block (G34 Phase D) — every
+#: key present at ``1.1`` is unchanged, so a consumer pinned to ``1.1`` keeps
+#: reading a ``1.2`` document correctly; the MINOR bump is what tells a
+#: consumer the new block is available to read at all.
+AGGREGATE_SCHEMA_VERSION = "1.2"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -359,6 +375,12 @@ class TargetReport:
     library: str | None = None
     reason: str | None = None  # unavailable, or not_comparable/operational_error detail
     unexpected: bool = False
+    #: This report's enumerated findings, or ``None`` when they are unknown
+    #: (unavailable/unreadable report, a not-comparable or operational-error
+    #: result, or a report carrying no ``changes`` array) — see
+    #: :func:`~abicheck.aggregate_findings.parse_report_findings` for why
+    #: the empty-tuple and ``None`` cases must not be collapsed.
+    findings: tuple[ReportFinding, ...] | None = None
 
     @property
     def analyzed(self) -> bool:
@@ -641,12 +663,7 @@ class AggregateResult:
         checked either, so calling it "clean" would claim confidence this
         result does not have.
         """
-        by_target: dict[str, dict[str, list[TargetReport]]] = {}
-        for t in self.targets:
-            pid = t.profile_id
-            if pid is None:
-                continue
-            by_target.setdefault(t.base_target, {}).setdefault(pid, []).append(t)
+        by_target = self._reports_by_target_and_profile()
 
         entries = []
         for base_target in sorted(by_target):
@@ -687,6 +704,68 @@ class AggregateResult:
                 )
             )
         return tuple(entries)
+
+    def _reports_by_target_and_profile(
+        self,
+    ) -> dict[str, dict[str, list[TargetReport]]]:
+        """``base_target -> profile_id -> that profile's reports``.
+
+        Shared by :attr:`profile_matrix` and :attr:`finding_matrix` so both
+        views group identically — a target present in one and absent from
+        the other would be a contradiction, not two opinions.
+        """
+        grouped: dict[str, dict[str, list[TargetReport]]] = {}
+        for t in self.targets:
+            pid = t.profile_id
+            if pid is None:
+                continue
+            grouped.setdefault(t.base_target, {}).setdefault(pid, []).append(t)
+        return grouped
+
+    # --- finding matrix (G34 Phase D) ---------------------------------------
+    @property
+    def finding_matrix(self) -> tuple[FindingMatrixEntry, ...]:
+        """Every distinct finding across the profiles of each logical target,
+        with its own affected/unaffected/undetermined profile lists.
+
+        Where :attr:`profile_matrix` reconciles *verdicts* per profile, this
+        reconciles the individual findings behind them, keyed by
+        :func:`~abicheck.aggregate_findings.resolve_report_change_identity`.
+        Same participation rule as :attr:`profile_matrix`: only targets whose
+        ``target_id`` is ``check_id``-shaped (so a profile can be parsed out)
+        are grouped, and ``unexpected_targets`` are excluded. Empty in the
+        common single-profile case, which is not an error.
+
+        A profile is *affected* when any of its own reports carries the
+        finding; *undetermined* when it is not affected but at least one of
+        its reports has an unknown finding set (:func:`~abicheck.
+        aggregate_findings.parse_report_findings`); *unaffected* only when
+        every one of its reports enumerated its findings and none of them was
+        this one. The reconciliation rules themselves live in
+        :func:`~abicheck.aggregate_findings.build_finding_matrix`; this
+        property only projects this result's ``TargetReport`` grouping down
+        to the plain per-check finding sets that function takes.
+
+        An *unavailable* report contributes ``None`` (unknown) even if it
+        carried a ``changes`` array: a verdictless or synthetic-verdict
+        (not-comparable, operational-error) leg describes a comparison that
+        never reached a conclusion, so its finding list cannot clear a
+        profile of anything.
+        """
+        return build_finding_matrix(
+            {
+                base_target: {
+                    pid: [
+                        report.findings if report.analyzed else None
+                        for report in reports
+                    ]
+                    for pid, reports in reports_by_profile.items()
+                }
+                for base_target, reports_by_profile in (
+                    self._reports_by_target_and_profile().items()
+                )
+            }
+        )
 
     # --- rendering ----------------------------------------------------------
     def render_text(self) -> str:
@@ -760,6 +839,8 @@ class AggregateResult:
                         f"{', '.join(entry.incomplete_profiles)}]"
                     )
                 lines.append(line)
+
+        lines.extend(render_finding_matrix_lines(self.finding_matrix))
 
         lines.append("Coverage:")
         if self.coverage is CoverageStatus.COMPLETE:
@@ -869,6 +950,7 @@ class AggregateResult:
             "targets": [t.to_dict() for t in self.targets],
             "unexpected_targets": [t.to_dict() for t in self.unexpected_targets],
             "profile_matrix": [e.to_dict() for e in self.profile_matrix],
+            "finding_matrix": [e.to_dict() for e in self.finding_matrix],
         }
 
 
@@ -903,6 +985,12 @@ class _LoadedReport:
     head_sha: str | None
     reason: str | None
     path: Path
+    #: ``None`` whenever this report's finding set is unknown — see
+    #: :func:`~abicheck.aggregate_findings.parse_report_findings`. Left
+    #: ``None`` on every failure branch below (unreadable, malformed gate,
+    #: operational error, not comparable),
+    #: since none of those establish what the comparison did or did not find.
+    findings: tuple[ReportFinding, ...] | None = None
 
 
 def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
@@ -1026,6 +1114,10 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         head_sha=head_sha,
         reason=None if verdict is not None else "report carried no ABI verdict",
         path=path,
+        # Only a report that produced a real verdict has a finding set worth
+        # reading: a verdictless one is unavailable, and its `changes` array
+        # (if any) describes a comparison that never reached a conclusion.
+        findings=parse_report_findings(data) if verdict is not None else None,
     )
 
 
@@ -1176,6 +1268,7 @@ def aggregate(
             library=report.library,
             reason=report.reason,
             unexpected=unexpected,
+            findings=report.findings,
         )
 
     targets = tuple(

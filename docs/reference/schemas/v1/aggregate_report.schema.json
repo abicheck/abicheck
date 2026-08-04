@@ -97,6 +97,11 @@
       "type": "array",
       "description": "Added in schema 1.1 (status-review item 5): every distinct base_target among `targets` whose target_id is check_id-shaped (ADR-047 §7 target@profile#baseline_channel@requested_depth), grouped across the profiles that checked it — so a project running one target under several toolchain profiles sees one logical entry instead of unrelated-looking target rows. Empty when no target carries a parseable profile (the common single-profile case).",
       "items": {"$ref": "#/$defs/profile_matrix_entry"}
+    },
+    "finding_matrix": {
+      "type": "array",
+      "description": "Added in schema 1.2 (G34 Phase D): per-finding cross-profile reconciliation. Where profile_matrix answers 'which profiles are affected', this answers 'which finding is the one that differs' — every distinct logical finding across the profiles of each base_target, keyed by the same tiered identity model diff_filtering.py uses as its cross-detector dedup key (ADR-049 Phase 2), so a finding one profile reports with rich DWARF evidence and another reports from symbols alone reconciles to one entry. Empty when no target carries a parseable profile, or when no profile's report enumerated its findings.",
+      "items": {"$ref": "#/$defs/finding_matrix_entry"}
     }
   },
   "$defs": {
@@ -157,6 +162,50 @@
           "type": "object",
           "additionalProperties": {"type": ["string", "null"]},
           "description": "profile -> verdict value, or null when that profile's target report is unavailable."
+        }
+      }
+    },
+    "finding_matrix_entry": {
+      "type": "object",
+      "description": "Added in schema 1.2. One logical finding, reconciled across every profile that checked its target. The three profile lists partition that target's profiles and never overlap.",
+      "required": ["base_target", "finding_identity", "identity_tier", "kinds", "symbol", "description", "scope", "affected_profiles", "unaffected_profiles", "undetermined_profiles"],
+      "properties": {
+        "base_target": {"type": "string"},
+        "finding_identity": {
+          "type": "string",
+          "description": "The reconciliation key: aggregate_findings.resolve_report_change_identity's primary_id. Deliberately NOT the per-report finding_id, which also hashes description and source_location unconditionally -- right for correlating two runs of the same comparison, too strict across profiles, where a header path or a rendered size can legitimately differ for one logical event. Opaque: compare it for equality, don't parse it."
+        },
+        "identity_tier": {
+          "type": "string",
+          "enum": ["canonical", "normalized", "reduced"],
+          "description": "Confidence of the identity that matched these profiles' findings. A 'reduced' match is a weaker claim that two profiles' findings are really the same one."
+        },
+        "kinds": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Every distinct ChangeKind slug the affected profiles reported this finding under, sorted. Usually one; two when profiles differ in available evidence and the identity model collapses the pair (e.g. func_removed on a profile with DWARF, func_removed_elf_only on one without)."
+        },
+        "symbol": {"type": "string", "description": "Representative symbol/type name, from the first affected profile in sorted order."},
+        "description": {"type": "string", "description": "Representative description, from the first affected profile in sorted order."},
+        "scope": {
+          "type": "string",
+          "enum": ["all_profiles", "profile_specific", "partial", "undetermined"],
+          "description": "How this finding is distributed. 'undetermined' wins over every other answer whenever any profile's findings are unknown -- a finding is never called profile-specific while a profile that might also carry it was never read."
+        },
+        "affected_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Profiles whose reports carry this finding, sorted. A profile that reported it on one check and failed to report at all on another is listed here, not as undetermined -- it demonstrably has the finding."
+        },
+        "unaffected_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Profiles whose findings are fully known and do not include this one, sorted -- a positive statement that the profile was checked and is clean of it."
+        },
+        "undetermined_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Profiles that can be placed in neither list above: at least one of their reports is missing, unreadable, not-comparable, or carries no `changes` array, so whether they have this finding is unknown. Never read as unaffected -- that would claim a profile was checked and found clean when it was never checked at all."
         }
       }
     },

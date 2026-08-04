@@ -283,6 +283,18 @@ gate but not in required coverage. The `--format json` output is versioned
 (`aggregate_schema_version`) and carries the three axes separately under
 `gate` / `coverage` / `compatibility`.
 
+When targets are checked under several toolchain profiles (report ids of the
+form `target@profile#channel@depth`), two additional reporting-only blocks
+group them back together: `profile_matrix` (one entry per logical target,
+with `affected_profiles`/`verdict_by_profile`) and `finding_matrix` (one
+entry per distinct *finding*, with `affected_profiles` /
+`unaffected_profiles` / `undetermined_profiles` and a `scope` of
+`all_profiles` / `profile_specific` / `partial` / `undetermined`). A profile
+whose report is missing, unreadable, not-comparable, or carries no `changes`
+array is `undetermined` — never reported as clean of a finding it was never
+checked for. Neither block affects the exit code; the full field list is in
+[`aggregate_report.schema.json`](schemas/v1/aggregate_report.schema.json).
+
 ---
 
 ## Application- and plugin-scoped comparisons (`compare --used-by`/`--required-symbol`)

@@ -90,15 +90,16 @@ confirmed by reading the workflow, not asserted from a design doc):
   resolve to a Clang 12 executable with no error — the snapshot honestly
   records what actually ran, but nothing fails the gated check for the
   mismatch itself.
-- **No per-finding cross-profile reconciliation.** `aggregate` (G32/ADR-050,
-  done) already produces `affected_profiles`/`incomplete_profiles`/
-  `unanalyzed_profiles` and a `verdict_by_profile` map at the *target*
-  level, but does not merge the *same logical finding* appearing in two
-  different profiles' reports into one entry with its own
-  `affected_profiles` list — this was flagged as an explicit open item
-  in `docs/contribute/plans/index.md`'s G32 row ("this is pure
-  target-level aggregation, not per-finding reconciliation") and is not a
-  new gap this review discovered, just one this plan's Phase D closes.
+- ~~**No per-finding cross-profile reconciliation.**~~ **Closed by Phase D.**
+  `aggregate` (G32/ADR-050, done) already produced
+  `affected_profiles`/`incomplete_profiles`/`unanalyzed_profiles` and a
+  `verdict_by_profile` map at the *target* level, but did not merge the
+  *same logical finding* appearing in two different profiles' reports into
+  one entry with its own `affected_profiles` list — flagged as an explicit
+  open item in `docs/contribute/plans/index.md`'s G32 row ("this is pure
+  target-level aggregation, not per-finding reconciliation"), not a new gap
+  this review discovered. `AggregateResult.finding_matrix` now does it; see
+  Phase D below.
 
 ## Goal & acceptance criteria
 
@@ -247,25 +248,55 @@ confirmed by reading the workflow, not asserted from a design doc):
       in G17 (real-world validation corpus) once the scheduling mechanism
       itself lands here.
 
-### Phase D — per-finding cross-profile reconciliation (M, depends on G32)
+### Phase D — per-finding cross-profile reconciliation (M, depends on G32) — **done**
 
-- [ ] A new aggregate stage (extending `abicheck/aggregate*.py`'s existing
-      per-profile grouping, G32/ADR-050) computes a stable per-finding
-      identity (reusing `finding_identity.py`'s tiered
-      canonical/normalized/reduced resolution, ADR-049 Phase 2 — the same
-      identity model `diff_filtering.py`'s cross-detector dedup key
-      already uses) across every profile's report for one target, and
-      emits one entry per distinct finding with its own
-      `affected_profiles`/`unaffected_profiles` lists instead of the
-      finding appearing once per profile report.
-- [ ] A finding present in every analyzed profile and one present in only
-      one profile are visibly distinguished in the aggregate JSON/Markdown
-      output (not just inferable by cross-referencing per-profile reports
-      by hand).
-- [ ] `tests/test_aggregate*.py` gains a fixture with the same finding
-      appearing (with the same reduced identity) in two profile reports
-      and a profile-specific finding appearing in only one, asserting the
-      merged/split output shape.
+- [x] `AggregateResult.finding_matrix` (`abicheck/aggregate.py`) extends the
+      existing per-profile grouping (G32/ADR-050) with a per-finding one,
+      keyed by `aggregate_findings.resolve_report_change_identity` — a new
+      read-back adapter that runs the *same* tiered canonical/normalized/
+      reduced resolution (ADR-049 Phase 2, the identity model
+      `diff_filtering.py`'s cross-detector dedup key already uses) over a
+      report's serialized `changes[]` entry instead of a live `Change`. One
+      `FindingMatrixEntry` per distinct finding per `base_target`, with its
+      own `affected_profiles`/`unaffected_profiles` lists. Because the
+      identity model collapses the rich-vs-symbols-only detector pair, one
+      event two profiles report under different kinds (`func_removed` where
+      DWARF was available, `func_removed_elf_only` where it wasn't) is one
+      entry carrying both `kinds`, not two unrelated findings — the case a
+      real GCC/Clang/MSVC matrix actually produces.
+- [x] A third list, `undetermined_profiles`, was **added beyond the original
+      scope** and is the load-bearing one: a profile whose findings are not
+      fully known (a missing, unreadable, not-comparable, or `changes`-less
+      report among its checks) is neither affected nor unaffected. Without
+      it, this view would answer "profile X is clean of this finding" for a
+      profile that was never checked — the per-finding form of exactly the
+      "an expected target with no report is unknown, never compatible"
+      invariant the rest of `aggregate.py` is built on. `parse_report_findings`
+      keeps the two cases structurally apart (`None` = didn't enumerate,
+      `()` = enumerated and found nothing), and `FindingMatrixEntry.scope`
+      answers `undetermined` ahead of every other value whenever any profile
+      is in that state.
+- [x] A finding present on every profile and one present on only one are
+      distinguished by an explicit `scope` discriminator
+      (`all_profiles`/`profile_specific`/`partial`/`undetermined`) in both
+      the JSON (`finding_matrix`, aggregate schema `1.2`, published in
+      `abicheck/schemas/aggregate_report.schema.json`) and the text output's
+      `Cross-profile findings:` section. *Note on the acceptance criterion's
+      wording:* `aggregate` has `--format json|text` and no Markdown
+      renderer, so "JSON/Markdown" landed as JSON + text; adding a Markdown
+      format for `aggregate` is separate surface, not part of this phase.
+- [x] `tests/test_aggregate.py`'s `TestFindingMatrix`/
+      `TestReportFindingIdentity` cover the merged/split shapes (same
+      finding on all profiles, profile-specific, partial), the rich-vs-L0
+      kind collapse, all four undetermined sources, "affected outranks
+      undetermined across one profile's own checks", ordering stability,
+      the malformed-entry and unknown-future-kind degradations, that the
+      gate exit code is unmoved, and schema validation of the new block.
+
+**Not part of this phase, deliberately:** `finding_matrix` is a reporting
+view only — it never contributes to `exit_code()`. A cross-profile *gate*
+("fail when a finding is profile-specific") would be a new policy axis and
+needs its own design, not a drive-by addition to a reconciliation view.
 
 ## Design
 
