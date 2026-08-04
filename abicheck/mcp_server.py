@@ -54,7 +54,7 @@ from .checker_policy import (
     policy_for,
     policy_kind_sets,
 )
-from .contract_evaluation import stamp_scoped_result_findings
+from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .mcp_shared import (
     _audit_log,
@@ -1355,7 +1355,7 @@ def abi_compare(
                     # ADR-049 D1's full shape -- see the identical call in
                     # `cli_compare_fold`: this entry is often the only
                     # blocking finding the response carries.
-                    from .contract_evaluation import (
+                    from .contract_scoped_promotion import (
                         missing_contract_gate_contribution,
                         stamp_missing_contract_entry,
                     )
@@ -1451,7 +1451,7 @@ def abi_compare(
                 # independent dict copies, so stamping "changes" alone
                 # leaves the root-cause copy of this same finding unstamped
                 # (Codex review, fresh evidence).
-                from .contract_evaluation import (
+                from .contract_scoped_promotion import (
                     missing_contract_gate_contribution,
                     stamp_missing_contract_entry,
                 )

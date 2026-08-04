@@ -265,6 +265,22 @@ def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
     against the lightweight fakes the surrounding tests and sibling modules
     build, and requiring a real enum here would have broken it for exactly
     those callers (CodeRabbit review).
+
+    Includes ADR-049 D1's ``compatibility_evaluation_status`` /
+    ``compatibility_decision`` pair, and for the same reason as everything
+    else here: a `scan --against --contract-evaluation` row that carried
+    relevance but not the decision could not be compared field-by-field with
+    the `compare` finding for the same fact, which is exactly the
+    cross-command divergence this projection exists to prevent (Codex
+    review). ``compatibility_decision`` is JSON ``null`` for a
+    ``NOT_EVALUATED`` row and must stay that way -- ``null`` records that
+    policy never ran, which is not a verdict.
+
+    Not ``gate_contribution``, deliberately: ``scan --against`` computes its
+    own exit code from its own verdict and budget rules, so a per-finding
+    number copied from ``compare``'s severity gate would be a claim about a
+    gate this command does not run. The status/decision pair is a property of
+    the finding; the contribution is a property of the gate.
     """
     relevance = getattr(c, "contract_relevance", None)
     if relevance is None:
@@ -274,6 +290,13 @@ def _add_contract_fields(entry: dict[str, Any], c: Any) -> None:
     assurance = getattr(c, "contract_assurance", None)
     if assurance is not None:
         entry["contract_assurance"] = getattr(assurance, "value", str(assurance))
+    from .contract_gating import evaluation_status_of
+
+    status = evaluation_status_of(c)
+    if status is not None:
+        entry["compatibility_evaluation_status"] = status.value
+    decision = getattr(c, "compatibility_decision", None)
+    entry["compatibility_decision"] = getattr(decision, "value", None)
     refs = getattr(c, "contract_evidence_refs", None)
     if refs is not None:
         entry["contract_evidence_refs"] = list(refs)

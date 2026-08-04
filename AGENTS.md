@@ -315,6 +315,21 @@ Core pipeline (in order of data flow):
      below: since ADR-049 Phase 7 the decision runs *before* compatibility
      policy and determines whether policy scores the finding at all, so
      selecting a domain can change a verdict, a finding set, and an exit code
+   - `contract_scoped_promotion.py` — ADR-049 §4.3 item 1's evidence tier and
+     everything it implies. The evaluator above answers relevance from
+     *snapshot* evidence; this module answers the one question that evidence
+     cannot — a run given `--used-by` or `--required-symbol` has been *told*
+     what the contract is, and §4.3 ranks a caller's explicit consumer or
+     entrypoint above anything two snapshots can show. So it runs after
+     `compare()` returned, over the collections a scoping pass built, and
+     only ever promotes (to `IN_CONTRACT`, one reason code). Since Phase 7
+     that promotion is not cosmetic, which is why each function carries the
+     consequences with it: the finding's own `compatibility_decision`, the
+     verdict it may raise (`recompute_verdict_after_promotion`, monotonic —
+     it can raise a verdict, never lower one, since the set `compare()`
+     scored is not recoverable from the `DiffResult`), the gate contribution
+     a missing-contract label makes, and the receipt row recording all three.
+     Depends on `contract_evaluation` one way; nothing there imports back
    - `contract_pipeline.py` — ADR-049 D9's normative order, made executable:
      relevance is classified *before* compatibility policy, and policy then
      scores only the `EVALUATED` findings (`IN_CONTRACT`/`NOT_APPLICABLE`).

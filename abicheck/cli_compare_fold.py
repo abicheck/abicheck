@@ -302,7 +302,7 @@ def _fold_scoped_compat_into_text(
                     # finding in the response, so omitting its decision and
                     # contribution left the one row that explains the exit
                     # code as the least complete one (Codex review).
-                    from .contract_evaluation import (
+                    from .contract_scoped_promotion import (
                         missing_contract_gate_contribution,
                         stamp_missing_contract_entry,
                     )
@@ -520,7 +520,7 @@ def _fold_scoped_compat_into_text(
                     # (unlike JSON) silently dropped the contract decision
                     # for this exact finding shape.
                     if contract_evaluation:
-                        from .contract_evaluation import (
+                        from .contract_scoped_promotion import (
                             stamp_explicit_scope_contract_evaluation,
                         )
 

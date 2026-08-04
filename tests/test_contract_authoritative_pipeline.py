@@ -484,7 +484,7 @@ class TestPromotionNeverLowersAVerdict:
         Recomputing from `changes` alone therefore lowered BREAKING to
         COMPATIBLE on an unrelated promotion."""
         from abicheck.checker_types import DiffResult
-        from abicheck.contract_evaluation import recompute_verdict_after_promotion
+        from abicheck.contract_scoped_promotion import recompute_verdict_after_promotion
 
         result = DiffResult(
             old_version="1",
@@ -502,7 +502,7 @@ class TestPromotionNeverLowersAVerdict:
         frozen — the promotion's whole purpose is to make a proven-in-contract
         finding score."""
         from abicheck.checker_types import DiffResult
-        from abicheck.contract_evaluation import recompute_verdict_after_promotion
+        from abicheck.contract_scoped_promotion import recompute_verdict_after_promotion
 
         result = DiffResult(
             old_version="1",
@@ -552,6 +552,29 @@ class TestScanKeepsWhatItDoesNotScore:
         # actionable rather than merely present.
         assert entries[0]["contract_relevance"] == "UNKNOWN_UNRESOLVED"
         assert entries[0]["contract_reason_code"]
+
+    def test_a_scan_row_carries_the_canonical_decision_pair(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-049 section 6.4 is field-for-field parity, not just matching
+        exit codes: a scan row that stated the relevance but not the decision
+        could not be compared with `compare`'s finding for the same fact
+        (Codex review). `null` is the required value for an unscored row --
+        it records that policy never ran."""
+        report = self._scan(tmp_path, "--contract-evaluation", "--contract", "exports")
+        row = next(
+            f for f in report["diff"]["findings"] if f["bucket"] == "not_evaluated"
+        )
+        assert row["compatibility_evaluation_status"] == "NOT_EVALUATED"
+        assert row["compatibility_decision"] is None
+
+    def test_an_ordinary_scan_row_states_no_decision_pair(self, tmp_path: Path) -> None:
+        """The control: absent, not null. A run that never opted in has no
+        contract decision at all, so the whole group stays off the row."""
+        report = self._scan(tmp_path)
+        row = report["diff"]["findings"][0]
+        assert "compatibility_evaluation_status" not in row
+        assert "compatibility_decision" not in row
 
     def test_an_ordinary_scan_is_unchanged(self, tmp_path: Path) -> None:
         """No opt-in means no excluded findings, so the key is absent rather
@@ -780,6 +803,83 @@ class TestEveryRendererTellsTheSameStory:
         assert "Breaking Type Changes" in leaf
         assert "Not Evaluated (Contract)" not in leaf
 
+    @staticmethod
+    def _excluded():
+        return _compare(
+            _unreached_public_type_pair(),
+            contract_evaluation=True,
+            contract_mode="public",
+        )
+
+    @staticmethod
+    def _scored():
+        return _compare(
+            _unreached_public_type_pair(),
+            contract_evaluation=True,
+            contract_mode="all",
+        )
+
+    def test_sarif_annotates_it_as_a_note_not_an_error(self) -> None:
+        """SARIF classified every entry by its effective kind verdict, so a
+        finding policy never scored was annotated `level: error` on a run
+        that reported `NO_CHANGE` and exited clean (Codex review)."""
+        from abicheck.sarif import to_sarif
+
+        result = self._excluded()
+        assert result.verdict is Verdict.NO_CHANGE
+        entries = to_sarif(result)["runs"][0]["results"]
+        entry = next(e for e in entries if e["ruleId"] == "type_size_changed")
+        assert entry["level"] == "note"
+        # Downgraded, not dropped -- and it says why.
+        props = entry["properties"]
+        assert props["compatibilityEvaluationStatus"] == "NOT_EVALUATED"
+        assert props["contractRelevance"] == "PROVEN_OUT_OF_CONTRACT"
+
+    def test_sarif_keeps_error_for_a_scored_finding(self) -> None:
+        """The control: this is a filter on excluded findings, not a blanket
+        SARIF downgrade under `--contract-evaluation`."""
+        from abicheck.sarif import to_sarif
+
+        entries = to_sarif(self._scored())["runs"][0]["results"]
+        entry = next(e for e in entries if e["ruleId"] == "type_size_changed")
+        assert entry["level"] == "error"
+
+    def test_junit_does_not_report_it_as_a_failure(self) -> None:
+        """Same shape one renderer over: one `<failure>` beside a
+        `NO_CHANGE` verdict and a clean exit (Codex review)."""
+        from abicheck.junit_report import to_junit_xml
+
+        xml = to_junit_xml(self._excluded())
+        assert 'failures="0"' in xml
+        # The testcase itself is still there -- excluded from failing, not
+        # from the report (ADR-049 D9). JUnit names a testcase by symbol and
+        # only spells the kind inside a `<failure>`, so a passing one looks
+        # exactly like any other compatible finding's, which is the point.
+        assert '<testcase name="Internal"' in xml
+        assert 'tests="1"' in xml
+
+    def test_junit_still_fails_on_a_scored_finding(self) -> None:
+        from abicheck.junit_report import to_junit_xml
+
+        assert 'failures="1"' in to_junit_xml(self._scored())
+
+    def test_the_review_digest_does_not_list_it_as_impacted(self) -> None:
+        """The digest prints its merge advice from the verdict and its
+        impacted-symbol list from the raw change set, so it said "safe to
+        merge" directly above the symbol it called impacted (Codex review)."""
+        from abicheck.reporter_markdown import to_review_digest
+
+        digest = to_review_digest(self._excluded())
+        assert "safe to merge" in digest
+        assert "Top impacted symbols" not in digest
+
+    def test_the_review_digest_lists_a_scored_finding(self) -> None:
+        from abicheck.reporter_markdown import to_review_digest
+
+        digest = to_review_digest(self._scored())
+        assert "Top impacted symbols" in digest
+        assert "Internal" in digest
+
     @pytest.mark.parametrize("report_mode", ["full", "leaf"])
     def test_the_severity_table_does_not_claim_an_exit_it_will_not_produce(
         self, report_mode: str
@@ -978,8 +1078,8 @@ class TestExplicitConsumerEvidencePromotesAFinding:
         return change
 
     def test_promotion_carries_status_and_decision(self) -> None:
-        from abicheck.contract_evaluation import stamp_scoped_result_findings
         from abicheck.contract_gating import is_evaluated
+        from abicheck.contract_scoped_promotion import stamp_scoped_result_findings
         from abicheck.finding_identity import report_finding_id
 
         change = self._unresolved_removal()
@@ -1009,7 +1109,7 @@ class TestExplicitConsumerEvidencePromotesAFinding:
         so overriding it to IN_CONTRACT would be a false decision rather than
         a stronger one. It is already NOT_APPLICABLE, hence already
         evaluated."""
-        from abicheck.contract_evaluation import (
+        from abicheck.contract_scoped_promotion import (
             stamp_explicit_scope_contract_evaluation,
         )
 
@@ -1022,7 +1122,7 @@ class TestExplicitConsumerEvidencePromotesAFinding:
     def test_a_plain_dict_entry_gets_the_status_too(self) -> None:
         """A missing-symbol/entrypoint label is a plain dict the caller
         renders directly, not a `Change` — it takes the same fields."""
-        from abicheck.contract_evaluation import (
+        from abicheck.contract_scoped_promotion import (
             stamp_explicit_scope_contract_evaluation,
         )
 

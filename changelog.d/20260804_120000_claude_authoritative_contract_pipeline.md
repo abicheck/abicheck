@@ -29,3 +29,20 @@
   below it can no longer disagree. `scan --against` reports gain a matching
   `not_evaluated` count and findings bucket (scan schema 1.8), so an excluded
   fact stays itemized there too.
+
+### Fixed
+
+- **Every renderer now agrees with the verdict it prints.** Under
+  `compare --contract-evaluation`, SARIF annotated a `NOT_EVALUATED` finding
+  `level: error`, JUnit reported it as a `<failure>`, and the review digest
+  listed it under "Top impacted symbols" — all beside a `NO_CHANGE` verdict
+  and a clean exit. SARIF now emits `level: note` with the relevance and
+  reason that explain it, JUnit gives it a passing `<testcase>`, and the
+  digest's impacted list is over what actually gated. Conserved in all three:
+  downgraded, not dropped.
+- **`scan --against --contract-evaluation` findings carry ADR-049 D1's
+  canonical decision pair** (`compatibility_evaluation_status`,
+  `compatibility_decision`, `null` for an unscored row), so a scan row and
+  the `compare` finding for the same fact can be compared field by field
+  (§6.4). Not `gate_contribution` — that is a property of a severity gate
+  `scan --against` does not run.

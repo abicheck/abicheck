@@ -75,7 +75,7 @@ from .cli_resolve import (
     classify_compare_operand,
 )
 from .contract_coverage_exit import announce_coverage_floor, fold_coverage_exit
-from .contract_evaluation import stamp_scoped_result_findings
+from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
 
 if TYPE_CHECKING:

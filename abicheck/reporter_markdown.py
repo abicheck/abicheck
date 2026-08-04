@@ -41,6 +41,7 @@ from .checker_policy import (
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
+from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
 from .report_summary import build_summary, surface_breakdown
 from .semver import recommend_release
@@ -1009,7 +1010,7 @@ def _to_markdown_root_cause(
                 # genuinely needs the caller's own --contract-evaluation
                 # intent threaded through explicitly.
                 if contract_evaluation:
-                    from .contract_evaluation import (
+                    from .contract_scoped_promotion import (
                         stamp_explicit_scope_contract_evaluation,
                     )
 
@@ -1536,9 +1537,16 @@ def to_review_digest(
     # the same way it already is in the counts table and merge-effect phrase
     # above — otherwise this section could list a finding the rest of the
     # digest reports as compatible, or omit one it reports as breaking.
+    # ADR-049 D1: and over the findings compatibility policy actually scored,
+    # for the same reason -- the merge-effect phrase above is derived from the
+    # verdict, which a NOT_EVALUATED finding did not reach, so listing one
+    # here printed "safe to merge" directly above the symbol it says is
+    # impacted (Codex review). The excluded finding keeps its own disclosed
+    # section elsewhere in the report; this list is the digest of what gated.
     impacted = [
         c
         for c in result.changes
+        if is_evaluated(c)
         if result._effective_verdict_for_change(c)
         in (Verdict.BREAKING, Verdict.API_BREAK)
     ]

@@ -883,11 +883,11 @@ def _promote_scoped_contract(
     reason, and the later aggregate pass gives them their decision for the
     report.
     """
-    from .contract_evaluation import (
+    from .contract_gating import is_evaluated
+    from .contract_scoped_promotion import (
         recompute_verdict_after_promotion,
         stamp_scoped_changes,
     )
-    from .contract_gating import is_evaluated
 
     already_classified = [
         c for c in changes if getattr(c, "contract_relevance", None) is not None

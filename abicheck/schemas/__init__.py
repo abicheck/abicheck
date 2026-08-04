@@ -432,6 +432,15 @@ REPORT_SCHEMA_VERSION = "2.27"
 #:       carries the same relevance/reason fields 1.6 added, which is what
 #:       says why it did not gate. Both are absent when nothing was excluded,
 #:       so an ordinary scan is unchanged from 1.7.
+#:       Every ``findings`` row under ``--contract-evaluation`` also gains
+#:       ADR-049 D1's ``compatibility_evaluation_status`` and
+#:       ``compatibility_decision`` (``null`` for a ``NOT_EVALUATED`` row),
+#:       matching what the equivalent ``compare`` finding already carries --
+#:       section 6.4 requires the two commands to be comparable field by
+#:       field, and a row stating only the relevance was not (Codex review).
+#:       Not ``gate_contribution``: that is a property of a severity gate
+#:       ``scan --against`` does not run. Absent without the opt-in, so an
+#:       ordinary scan is still unchanged.
 SCAN_SCHEMA_VERSION = "1.8"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
