@@ -92,11 +92,12 @@ reads the same typed result for that classification step. `abi_compare` was
 the one confirmed violation (Phase 4/D4 below) and no longer is; the other
 phases closed gaps that made the invariant harder to reach even where it
 wasn't yet violated. One qualification the invariant needs, now that it
-holds: the CLI `compare` command builds the same *request* type and reads the
-same *result*, but still runs its own richer input resolution
-(`cli_resolve._resolve_compare_snapshots`) — a recorded decision, not an
-outstanding violation. See Phase 2's progress note for what that actually
-covers. This deliberately does **not** cover every
+holds: the CLI `compare` command builds the same *request* type, runs the
+same *resolution*, and reads the same *result*. It carried its own richer
+input resolution (`cli_resolve._resolve_compare_snapshots`) until Phase 2's
+structural half landed; that helper now builds a `CompareRequest` and
+delegates to the shared `resolve_compare_request`. See Phase 2's progress
+note. This deliberately does **not** cover every
 downstream presentation concern: `used_by`/`required_symbols` app-scoping
 and severity/exit-code computation are explicitly kept as thin,
 front-end-specific glue applied *after* a typed result exists (Phase 4
@@ -209,11 +210,14 @@ neither `service.py` comment quoted above still exists. Tests:
 `TestCompareRequestAdr055Evidence` (`tests/test_service_unit.py`) and the
 ADR-055 D1 blocks in `tests/test_api_types.py`.
 
-The two-resolution-path question this note raised is now **decided as (b)**,
-recorded in ADR-055's D1 section: `run_compare_request` was extended in
-parallel and the CLI `compare` command still resolves through
-`cli_resolve._resolve_compare_snapshots`, because option (a) would rewrite
-the CLI's most heavily-tested resolution path for no user-observable gain.
+The two-resolution-path question this note raised was first **decided as
+(b)** — `run_compare_request` extended in parallel, the CLI still resolving
+through `cli_resolve._resolve_compare_snapshots`, on the grounds that option
+(a) would rewrite the CLI's most heavily-tested resolution path for no
+user-observable gain. **That decision has since been reversed to (a)**; see
+"Structural half" at the end of this phase's note for what changed and why
+the earlier reasoning missed the real obstacle. The two paragraphs below
+describe the capability slice that landed while (b) still held.
 
 A follow-up slice then closed the *capability* half properly. A first attempt
 at naming what stayed CLI-only listed three things and was wrong on all

@@ -37,14 +37,17 @@ per-side ``CompileContext`` feature set at all, so a Python caller wanting
 that had to fall back to loose keyword arguments on lower-level functions.
 ``service.run_compare_request`` reads these new fields directly (see its own
 docstring for exactly how). A second D1 slice then closed the rest of the
-gap against the CLI's own, separately-maintained
+gap against the CLI's own, then separately-maintained
 ``cli_resolve._resolve_compare_snapshots`` — ``dwarf_only``,
-``debug_format``, ``include_labels``, and ``--follow-deps`` — so the two
-paths now differ in *structure*, not in what they can express. Keeping both,
-rather than migrating the CLI onto this one, is a recorded decision:
-ADR-055's "Two-resolution-path finding" answers it as option (b), since
-rewriting the CLI's most heavily-tested resolution path buys nothing a user
-can observe.
+``debug_format``, ``include_labels``, and ``--follow-deps``. A third slice
+then removed that second implementation outright: ``run_compare_request``
+was split into its two phases (``service_compare_pipeline``), which gave the
+CLI's Click-dependent ADR-049 ``resolve_and_apply`` step a seam to run in —
+the thing that had made a shared resolution look impossible — and
+``_resolve_compare_snapshots`` now builds one of these requests and
+delegates. So this really is the one resolution every front end uses.
+ADR-055's "Two-resolution-path finding", first answered as option (b), is
+recorded as settled the other way in D1's "Structural half" note.
 
 ADR-055 D2 adds :class:`CompareResult`, the result side of the same pair, and
 D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.

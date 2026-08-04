@@ -200,12 +200,20 @@ with the resolution wiring split out into
 `abicheck/service_compare_evidence.py`. Its stated acceptance test holds —
 neither `service.py` comment this ADR quoted still exists.
 
-The open choice is now answered: **option (b)** — `run_compare_request` was
-extended in parallel, and the CLI `compare` command still resolves through
-`cli_resolve._resolve_compare_snapshots`. This is a decision, not unfinished
-work: the *capability* gap D1 set out to close is closed, while option (a)
-would rewrite the CLI's single most heavily-tested resolution path to gain
-nothing a user can observe.
+The open choice was first answered as **option (b)** — `run_compare_request`
+extended in parallel, the CLI `compare` command still resolving through
+`cli_resolve._resolve_compare_snapshots` — as a decision rather than
+unfinished work: the *capability* gap D1 set out to close was closed, while
+option (a) would rewrite the CLI's single most heavily-tested resolution path
+to gain nothing a user can observe.
+
+> **Superseded — the answer is now (a).** See "Structural half" at the end of
+> this note. The reasoning above was not wrong about the cost; it was wrong
+> about the obstacle, which was never the CLI's test surface but
+> `run_compare_request` having no seam for ADR-049's Click-dependent step.
+> Once that was named, the change stopped being a rewrite of the CLI's
+> resolution and became a split of the service's. What follows is kept as the
+> record of what landed while (b) held.
 
 **Correction, and how the capability gap was actually closed.** A first pass
 of this note claimed three things stayed CLI-only — project-config
@@ -614,13 +622,17 @@ prose status. D1's and D4's both now do (the `service.py` comment-absence
 check by way of `TestCompareRequestAdr055Evidence`, and D4's source-level
 gate in `TestAbiCompareCliParity`).
 
-**Still open after this ADR, deliberately.** Two items, each needing its own
-scoped change rather than an extension of this one:
+**Still open after this ADR, deliberately.** One item, needing its own scoped
+change rather than an extension of this one:
 
-- The CLI's separate `_resolve_compare_snapshots` path (option (b) above).
-  Structural duplication only — the capability gap is closed; see D1's "As
-  implemented" note.
 - G33's Phase 5 (`abi_dump`/`abi_scan` reaching the same depth/sources/
   build-info/manifest parity `abi_compare` now has). That plan gates it on
   Phase 4, which this closes, so it is unblocked — but it is a change to two
   other tools' parameter surfaces, not part of this decision.
+
+This list said two items until the CLI's separate `_resolve_compare_snapshots`
+path was removed; that is now done, and D1's "Structural half" note above is
+the record. Which is worth naming, since it is the *third* instance in this
+one document of a status claim outliving the code it describes (D1's own
+"not started" line, the option-(b) decision, and now this list) — the reason
+each decision here carries an executable gate rather than only prose.
