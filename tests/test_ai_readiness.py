@@ -915,8 +915,34 @@ def test_adr_status_text_rejects_empty_heading_style_status(car):
     assert car._adr_status_text(text) is None
 
 
+@pytest.fixture(scope="module")
+def ass(car):
+    """The sibling gate module `scripts/adr_status_sync.py`.
+
+    Imported through `car` rather than by path: loading check_ai_readiness
+    puts `scripts/` on sys.path, which is exactly the wiring under test."""
+    import adr_status_sync
+
+    return adr_status_sync
+
+
+def test_first_party_roots_agree_with_the_readiness_script(car, ass):
+    """adr_status_sync keeps a local copy of the first-party root names to
+    stay a leaf module; this is the check that keeps the copy honest, so a
+    root added to FIRST_PARTY_PY_ROOTS can't silently go untracked here."""
+    from_script = {p.name for p in car.FIRST_PARTY_PY_ROOTS}
+    # CONTRIB_CLANG_PLUGIN is nested (contrib/abicheck-clang-plugin); the
+    # status-sync side keys on the *top* path segment, so it lists "contrib".
+    from_script = {
+        "contrib" if name.startswith("abicheck-") else name for name in from_script
+    }
+    assert from_script <= set(ass.FIRST_PARTY_ROOT_NAMES), (
+        f"first-party roots drifted: {from_script - set(ass.FIRST_PARTY_ROOT_NAMES)}"
+    )
+
+
 def _write_status_sync_fixture(
-    tmp_path, monkeypatch, car, *, adr_status: str, index_status: str
+    tmp_path, monkeypatch, ass, *, adr_status: str, index_status: str
 ):
     """Build a minimal one-ADR docs tree for check_adr_status_sync."""
     fake_docs = tmp_path / "docs"
@@ -930,8 +956,8 @@ def _write_status_sync_fixture(
     (adr_dir / "001-example.md").write_text(
         f"# ADR-001\n\n**Status:** {adr_status}\n", encoding="utf-8"
     )
-    monkeypatch.setattr(car, "ROOT", tmp_path)
-    monkeypatch.setattr(car, "DOCS", fake_docs)
+    monkeypatch.setattr(ass, "ROOT", tmp_path)
+    monkeypatch.setattr(ass, "DOCS", fake_docs)
     return adr_dir
 
 
@@ -944,14 +970,14 @@ def test_adr_status_sync_holds(car):
 
 
 def test_adr_status_sync_catches_implementation_contradiction(
-    car, tmp_path, monkeypatch
+    car, ass, tmp_path, monkeypatch
 ):
     """The regression this check exists for: ADR-056's own file said
     "partially implemented" while the index table said "not implemented"."""
     _write_status_sync_fixture(
         tmp_path,
         monkeypatch,
-        car,
+        ass,
         adr_status="Proposed — partially implemented (see the plan).",
         index_status="Proposed — not implemented; see the plan",
     )
@@ -962,11 +988,13 @@ def test_adr_status_sync_catches_implementation_contradiction(
     )
 
 
-def test_adr_status_sync_catches_decision_word_mismatch(car, tmp_path, monkeypatch):
+def test_adr_status_sync_catches_decision_word_mismatch(
+    car, ass, tmp_path, monkeypatch
+):
     _write_status_sync_fixture(
         tmp_path,
         monkeypatch,
-        car,
+        ass,
         adr_status="Accepted — implemented.",
         index_status="Proposed — implemented",
     )
@@ -977,14 +1005,16 @@ def test_adr_status_sync_catches_decision_word_mismatch(car, tmp_path, monkeypat
     )
 
 
-def test_adr_status_sync_rejects_unrecognized_decision_word(car, tmp_path, monkeypatch):
+def test_adr_status_sync_rejects_unrecognized_decision_word(
+    car, ass, tmp_path, monkeypatch
+):
     """A typo'd decision word must be reported, not treated as "nothing to
     compare" -- that would silently disable the decision check for exactly
     the ADR whose metadata is already broken (Codex review on PR #667)."""
     _write_status_sync_fixture(
         tmp_path,
         monkeypatch,
-        car,
+        ass,
         adr_status="Acceptd — implemented.",
         index_status="Proposed — implemented",
     )
@@ -995,13 +1025,13 @@ def test_adr_status_sync_rejects_unrecognized_decision_word(car, tmp_path, monke
     )
 
 
-def test_adr_named_modules_keeps_explicit_path_for_deleted_module(car):
+def test_adr_named_modules_keeps_explicit_path_for_deleted_module(ass):
     """A module named in full and since deleted or renamed is the case most
     likely to have invalidated the claim that names it, so the explicit path
     stays a tripwire even though it no longer resolves at HEAD. A *bare* name
     still has to resolve, since that's all that separates a real module
     reference from an unrelated `verify.py` mention (Codex review on #667)."""
-    named = car._adr_named_modules(
+    named = ass._adr_named_modules(
         "implemented in `abicheck/gone_module.py`; see also `also_gone.py` "
         "and `abicheck/checker.py`"
     )
@@ -1010,13 +1040,37 @@ def test_adr_named_modules_keeps_explicit_path_for_deleted_module(car):
     assert "abicheck/also_gone.py" not in named
 
 
-def test_adr_named_modules_expands_family_shorthand(car):
+def test_adr_named_modules_tracks_first_party_paths_outside_the_package(ass):
+    """A Status may name a first-party file outside `abicheck/` — ADR-037's
+    already names `tests/test_cli_contract.py`. Forcing every match under the
+    package dropped those silently, so the gate promised to track something it
+    didn't (Codex review on #667). A path under a non-first-party tree is
+    still ignored."""
+    named = ass._adr_named_modules(
+        "enforced by `tests/test_cli_contract.py` and `scripts/verify.py`, "
+        "unlike `docs/example.py`"
+    )
+    assert "tests/test_cli_contract.py" in named
+    assert "scripts/verify.py" in named
+    assert not any(path.startswith("docs/") for path in named)
+
+
+def test_adr_named_modules_does_not_anchor_shorthand_on_a_non_package_path(ass):
+    """Shorthand expands against the package, so a `tests/...` path must not
+    anchor it — that would build a candidate under the wrong tree."""
+    named = ass._adr_named_modules(
+        "`tests/test_compatibility_evaluation.py`, `_resolver.py`"
+    )
+    assert named == ["tests/test_compatibility_evaluation.py"]
+
+
+def test_adr_named_modules_expands_family_shorthand(ass):
     """Status prose names the first module of a family in full and the rest
     by suffix (`_resolver.py`). Without expansion, four of ADR-049's own
     modules were left untripwired (Codex review on PR #667). An expansion
     that doesn't resolve to a real file is dropped, so a wrong guess can
     never invent a tripwire on an unrelated module."""
-    named = car._adr_named_modules(
+    named = ass._adr_named_modules(
         "`abicheck/compatibility_evaluation_config.py`, `_resolver.py`, "
         "`_packs.py`, `_nonexistent.py`"
     )
@@ -1025,20 +1079,20 @@ def test_adr_named_modules_expands_family_shorthand(car):
     assert not any("nonexistent" in path for path in named)
 
 
-def test_adr_named_modules_ignores_shorthand_without_an_anchor(car):
+def test_adr_named_modules_ignores_shorthand_without_an_anchor(ass):
     """A leading-underscore token with no preceding full module name has
     nothing to expand against and must not be guessed at."""
-    assert car._adr_named_modules("see `_resolver.py` for details") == []
+    assert ass._adr_named_modules("see `_resolver.py` for details") == []
 
 
-def test_adr_status_sync_allows_index_row_to_abridge(car, tmp_path, monkeypatch):
+def test_adr_status_sync_allows_index_row_to_abridge(car, ass, tmp_path, monkeypatch):
     """An index cell is an abridgement, not a paraphrase-for-paraphrase copy.
     A status paragraph naming follow-up work the one-line row omits is normal
     editing, not drift -- a stricter prototype flagged 15 of 56 real ADRs."""
     _write_status_sync_fixture(
         tmp_path,
         monkeypatch,
-        car,
+        ass,
         adr_status=(
             "Accepted — implemented (phases 1-7); follow-ups #2 and #3 remain "
             "open and are deliberately deferred, see the plan."
@@ -1050,11 +1104,13 @@ def test_adr_status_sync_allows_index_row_to_abridge(car, tmp_path, monkeypatch)
     assert f.errors == [], f"abridged index row wrongly flagged: {f.errors}"
 
 
-def test_adr_status_sync_rejects_malformed_verified_line(car, tmp_path, monkeypatch):
+def test_adr_status_sync_rejects_malformed_verified_line(
+    car, ass, tmp_path, monkeypatch
+):
     adr_dir = _write_status_sync_fixture(
         tmp_path,
         monkeypatch,
-        car,
+        ass,
         adr_status="Accepted — implemented.",
         index_status="Accepted — implemented",
     )
@@ -1071,7 +1127,7 @@ def test_adr_status_sync_rejects_malformed_verified_line(car, tmp_path, monkeypa
 
 
 def test_adr_status_sync_warns_when_named_module_moved_since_verification(
-    car, tmp_path, monkeypatch
+    car, ass, tmp_path, monkeypatch
 ):
     """The document-vs-*code* tripwire: a commit touching a module the status
     paragraph names, after the recorded verification commit, means nobody has
@@ -1079,7 +1135,7 @@ def test_adr_status_sync_warns_when_named_module_moved_since_verification(
     adr_dir = _write_status_sync_fixture(
         tmp_path,
         monkeypatch,
-        car,
+        ass,
         adr_status="Accepted — implemented.",
         index_status="Accepted — implemented",
     )
@@ -1090,7 +1146,7 @@ def test_adr_status_sync_warns_when_named_module_moved_since_verification(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        car, "_git_output", lambda *a: "" if a[0] == "cat-file" else "deadbee\n"
+        ass, "_git_output", lambda *a: "" if a[0] == "cat-file" else "deadbee\n"
     )
     f = car.Findings()
     car.check_adr_status_sync(f)
@@ -1101,13 +1157,13 @@ def test_adr_status_sync_warns_when_named_module_moved_since_verification(
 
 
 def test_adr_status_sync_accepts_current_verification_receipt(
-    car, tmp_path, monkeypatch
+    car, ass, tmp_path, monkeypatch
 ):
     """No commits since the receipt -- nothing to warn about."""
     adr_dir = _write_status_sync_fixture(
         tmp_path,
         monkeypatch,
-        car,
+        ass,
         adr_status="Accepted — implemented.",
         index_status="Accepted — implemented",
     )
@@ -1117,7 +1173,7 @@ def test_adr_status_sync_accepts_current_verification_receipt(
         "**Verified:** main@abc1234 on 2026-01-01\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(car, "_git_output", lambda *a: "")
+    monkeypatch.setattr(ass, "_git_output", lambda *a: "")
     f = car.Findings()
     car.check_adr_status_sync(f)
     assert f.errors == []
@@ -1125,7 +1181,7 @@ def test_adr_status_sync_accepts_current_verification_receipt(
 
 
 def test_adr_status_sync_tolerates_unknown_sha_on_shallow_checkout(
-    car, tmp_path, monkeypatch
+    car, ass, tmp_path, monkeypatch
 ):
     """A receipt whose commit predates the fetch depth is not a typo. CI runs
     on shallow clones, so this must not be an error there -- while a complete
@@ -1133,7 +1189,7 @@ def test_adr_status_sync_tolerates_unknown_sha_on_shallow_checkout(
     adr_dir = _write_status_sync_fixture(
         tmp_path,
         monkeypatch,
-        car,
+        ass,
         adr_status="Accepted — implemented.",
         index_status="Accepted — implemented",
     )
@@ -1150,13 +1206,13 @@ def test_adr_status_sync_tolerates_unknown_sha_on_shallow_checkout(
             return "true\n"  # shallow
         return ""
 
-    monkeypatch.setattr(car, "_git_output", fake_git)
+    monkeypatch.setattr(ass, "_git_output", fake_git)
     f = car.Findings()
     car.check_adr_status_sync(f)
     assert f.errors == [], f"shallow checkout must not error: {f.errors}"
 
     monkeypatch.setattr(
-        car,
+        ass,
         "_git_output",
         lambda *a: (
             None if a[0] == "cat-file" else ("false\n" if a[0] == "rev-parse" else "")
