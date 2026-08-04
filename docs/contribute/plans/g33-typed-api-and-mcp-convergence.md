@@ -238,18 +238,21 @@ Introduce `CompareResult` (`diff`/`old_snapshot`/`new_snapshot`, a pure
 rename of the existing tuple shape) and a parallel typed entry point
 returning it, while `run_compare`/`run_compare_request`'s existing
 tuple-returning signatures stay exactly as they are for every current
-caller.
+caller. (The parallel-entry-point half was superseded before this phase
+closed — see the progress note.)
 
 **Gate:** a new field (resolved depth, an `EvaluationReceipt`, a coverage
 summary) has somewhere to land without a second tuple-shape break.
 
-**Progress:** done. `CompareResult` (`diff`/`old_snapshot`/`new_snapshot`)
-lives in `api_types.py` beside `CompareRequest`, and
-`service.run_compare_request_v2` returns it. `run_compare_request` keeps its
-exact tuple signature for every existing caller — it is now a one-line view
-(`CompareResult.as_tuple()`) over the same implementation, rather than a
-second copy of the resolution logic, which would have been this plan's own
-failure mode reproduced inside its fix.
+**Progress:** done, and then simplified past what the phase asked for.
+`CompareResult` (`diff`/`old_snapshot`/`new_snapshot`) lives in
+`api_types.py` beside `CompareRequest`. It first shipped behind a parallel
+`run_compare_request_v2` while `run_compare_request` kept its tuple; that
+seam is now gone. **`run_compare_request` returns `CompareResult` directly,
+`run_compare` does too, and no `_v2` function exists** — the only reason to
+carry two names was compatibility, which the project does not yet hold
+pre-1.0. `CompareResult.as_tuple()` is the one-line migration for a
+positional caller.
 
 One departure from the decision as written: the struct carries a fourth
 field, `suppression`, not just the tuple's three. Phase 4 is why — the
@@ -280,7 +283,7 @@ identical output to the CLI `compare` command for equivalent flags, both
 before and after the rewrite.
 
 **Progress:** done. `abi_compare` builds one `CompareRequest` and calls
-`run_compare_request_v2`; `mcp_server.py` no longer imports
+`run_compare_request`; `mcp_server.py` no longer imports
 `compare_snapshots` at all. Both halves of the gate are executable in
 `tests/test_mcp_server_unit.py`'s `TestAbiCompareCliParity`: the source-level
 absence check (comments stripped first — the function now *documents* what it

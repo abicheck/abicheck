@@ -128,6 +128,10 @@ its top-priority finding. See D4 below.
   convention, or breaking any current caller. Every change below is
   additive: a new optional field with a default, or a new wrapper type that
   existing tuple-returning functions keep returning unchanged.
+  **No longer holds (0.6).** This non-goal assumed compatibility had to be
+  kept; it does not, pre-1.0. `run_compare`/`run_compare_request` now return
+  `CompareResult` instead of a tuple — see D2's superseding note. The rest of
+  this ADR's changes remain additive.
 
 ## Decision
 
@@ -268,6 +272,16 @@ ADR-035 already applied to `ScanRequest`/`ScanResult`, generalized to
 `run_compare_request`'s tuple-returning callers are gone, a follow-up ADR can
 decide whether to rename `run_compare_request_v2` to something permanent —
 that rename is explicitly out of scope here.
+
+**Superseded by the 0.6 API break — read this first.** The parallel-function
+decision below was correct only while compatibility had to hold. It does not:
+the project is pre-1.0 and does not yet keep API compatibility, so
+`run_compare_request` itself now returns `CompareResult`, `run_compare` (the
+kwargs shim) does too, and `run_compare_request_v2` **does not exist**. Two
+names for one operation are worth carrying only when removing one would break
+callers; here it would not. `CompareResult.as_tuple()` is the one-line
+migration for a positional caller. The reasoning below is kept as the record
+of why the seam existed, not as a description of today's API.
 
 **As implemented — two deliberate departures.** `CompareResult` lives in
 `api_types.py` next to `CompareRequest`, not in `service.py` as the file
@@ -416,7 +430,7 @@ the CLI `compare` command's output for the equivalent flags) is the
 regression guard against silent behavior drift during the rewrite.
 
 **As implemented.** `abi_compare` builds one `CompareRequest` and calls
-`run_compare_request_v2`; the module no longer imports `compare_snapshots` at
+`run_compare_request`; the module no longer imports `compare_snapshots` at
 all. Both acceptance tests exist in `tests/test_mcp_server_unit.py`
 (`TestAbiCompareCliParity`): the source-level gate is asserted directly
 (comments stripped first, since the function now *documents* what it stopped
@@ -457,10 +471,10 @@ exists and has no CLI-comparable rendering path here. The sibling
 |---|---|
 | `abicheck/api_types.py` | `InputSpec.sources`/`build_info`/`dump_manifest`/`compile`/`public_header_dirs` + `CompareRequest.depth`/`frontend_context` (D1); `InputSpec.follow_linker_scripts` (D4); `CompareResult` (D2 — here, not `service.py`, see its "As implemented" note) |
 | `abicheck/service_compare_evidence.py` | D1's resolution wiring, split out of `service.py` |
-| `abicheck/service.py` | `run_compare_request_v2` owns the implementation and returns `CompareResult`; `run_compare_request` is its tuple view (D2); per-side `follow_linker_scripts` forwarding (D4) |
+| `abicheck/service.py` | `run_compare_request` returns `CompareResult`, and so does the `run_compare` kwargs shim (D2, after the 0.6 API break — no `_v2` function exists); per-side `follow_linker_scripts` forwarding (D4) |
 | `abicheck/schemas/__init__.py` | `current(name)` registry (D3) |
 | `scripts/check_ai_readiness.py` | `doc-count-sync` reads snapshot/compare versions from `schemas.current()` and pins the pages quoting them (D3's consumer half) |
-| `abicheck/mcp_server.py` | `abi_compare` builds a `CompareRequest` and calls `run_compare_request_v2`; no local resolve, no policy/suppression load, no `compare_snapshots` import (D4) |
+| `abicheck/mcp_server.py` | `abi_compare` builds a `CompareRequest` and calls `run_compare_request`; no local resolve, no policy/suppression load, no `compare_snapshots` import (D4) |
 | `docs/reference/python-api-reference.md`, `docs/reference/mcp-tools-reference.md` | Regenerated (generated files) |
 | `tests/test_api_types.py` | Field defaults for D1/D4; `TestCompareResult` (D2) |
 | `tests/test_service_unit.py` | `TestCompareRequestAdr055Evidence` (D1); `TestRunCompareRequestV2` (D2, incl. per-side `follow_linker_scripts`) |
@@ -495,7 +509,9 @@ exists and has no CLI-comparable rendering path here. The sibling
   right — same class of thing this repo's own review process tends to flag
   elsewhere.
 - **D2's `CompareResult` entry point: a bare `compare()` function.** Rejected
-  in favor of `run_compare_request_v2` after checking this ADR's own claimed
+  in favor of `run_compare_request_v2` (since collapsed into
+  `run_compare_request` itself, see D2's superseding note) after checking this
+  ADR's own claimed
   precedent (ADR-035's `ScanRequest`/`ScanResult`) against the actual code:
   the real function there is `run_scan(req: ScanRequest) -> ScanResult`, not
   a bare `scan()` — it followed the existing `run_<verb>` naming family from
