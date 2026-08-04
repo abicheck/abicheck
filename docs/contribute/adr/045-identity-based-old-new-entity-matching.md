@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19
 **Status:** Accepted — implemented for `RecordType` and `EnumType`.
-**Verified:** main@e73aea6 on 2026-08-04
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** Nikolay Petrov (@napetrov)
 
 ---

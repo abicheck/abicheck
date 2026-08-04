@@ -1143,6 +1143,76 @@ def test_adr_metadata_block_covers_heading_style_status(ass):
     assert "Body." not in block
 
 
+def _receipt_fixture(tmp_path, monkeypatch, ass):
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n",
+        encoding="utf-8",
+    )
+    return adr_dir
+
+
+def _fake_git(*, has_default_ref=True, is_ancestor=True):
+    def run(*args: str) -> str | None:
+        if args[0] == "rev-parse" and "--is-shallow-repository" in args:
+            return "false\n"
+        if args[0] == "rev-parse":
+            return "deadbee\n" if has_default_ref else None
+        if args[0] == "merge-base":
+            return "" if is_ancestor else None
+        return ""  # cat-file exists; git log finds nothing
+
+    return run
+
+
+def test_adr_status_sync_rejects_receipt_anchored_to_a_branch_only_commit(
+    car, ass, tmp_path, monkeypatch
+):
+    """A receipt naming a commit that exists only on the branch adding it is a
+    delayed-action failure: the commit vanishes on squash-merge, and because
+    the ai-readiness job checks out full history the unresolvable sha is an
+    error, not a tolerated skip — so a required job passes on the PR and then
+    fails on main forever (Codex review on #667)."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    monkeypatch.setattr(ass, "_git_output", _fake_git(is_ancestor=False))
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("not reachable from" in msg for _, msg in f.errors), (
+        f"expected a durable-anchor error, got: {f.errors}"
+    )
+
+
+def test_adr_status_sync_accepts_receipt_on_the_default_branch(
+    car, ass, tmp_path, monkeypatch
+):
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    monkeypatch.setattr(ass, "_git_output", _fake_git(is_ancestor=True))
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"a default-branch receipt was wrongly flagged: {f.errors}"
+
+
+def test_adr_status_sync_skips_anchor_check_without_a_default_branch_ref(
+    car, ass, tmp_path, monkeypatch
+):
+    """A clone with no `main`/`origin/main` can't answer the question, and
+    guessing would fail honest work."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    monkeypatch.setattr(
+        ass, "_git_output", _fake_git(has_default_ref=False, is_ancestor=False)
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f"unresolvable default branch must skip: {f.errors}"
+
+
 def test_adr_status_sync_rejects_malformed_verified_line(
     car, ass, tmp_path, monkeypatch
 ):

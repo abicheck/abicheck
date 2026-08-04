@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-25
 **Status:** Accepted — implemented (scope below), tracked as G30 P2's first slice.
-**Verified:** main@e73aea6 on 2026-08-04
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** pending
 
 ## Context

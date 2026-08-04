@@ -344,6 +344,49 @@ def _repo_is_shallow() -> bool:
     return shallow is None or shallow.strip() != "false"
 
 
+#: Refs to try, in order, when asking "is this receipt anchored to durable
+#: history". The remote ref is preferred: a PR checkout has `origin/main` but
+#: usually no local `main`.
+_DEFAULT_BRANCH_REFS: tuple[str, ...] = ("origin/main", "main")
+
+
+def _durable_history_ref() -> str | None:
+    """A ref for the default branch, or None if none is resolvable here."""
+    for ref in _DEFAULT_BRANCH_REFS:
+        if _git_output("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"):
+            return ref
+    return None
+
+
+def _check_receipt_is_durably_anchored(f: Findings, name: str, sha: str) -> None:
+    """A receipt must name a commit that will still exist after this branch is
+    gone -- i.e. one reachable from the default branch.
+
+    Anchoring to a PR-branch commit is a delayed-action failure, not a
+    cosmetic one: the branch commit is unreachable once the PR squash-merges,
+    and because the `ai-readiness` job checks out full history, the
+    unresolvable sha is reported as an *error* rather than tolerated the way a
+    shallow checkout's is. The result is a required job that passes on the PR
+    and then fails on main forever, for a documentation edit. Caught here, at
+    the moment the receipt is written, instead (Codex review on PR #667).
+
+    Skipped when no default-branch ref is resolvable -- a detached clone with
+    no `main` can't answer the question, and guessing would fail honest work.
+    """
+    ref = _durable_history_ref()
+    if ref is None:
+        return
+    if _git_output("merge-base", "--is-ancestor", sha, ref) is None:
+        f.err(
+            "adr-status-sync",
+            f"docs/contribute/adr/{name}: '**Verified:**' names commit {sha}, "
+            f"which is not reachable from {ref} — record the default-branch "
+            "commit whose tree you actually verified, not a commit on the "
+            "branch adding the receipt (that one disappears on merge and "
+            "turns this into a permanent failure on main)",
+        )
+
+
 def _check_adr_verification_receipt(
     f: Findings, name: str, text: str, status: str
 ) -> None:
@@ -380,6 +423,7 @@ def _check_adr_verification_receipt(
         # On a shallow checkout the commit may simply predate the fetch
         # depth, which says nothing about the receipt's validity.
         return
+    _check_receipt_is_durably_anchored(f, name, sha)
     modules = _adr_named_modules(status)
     if not modules:
         return

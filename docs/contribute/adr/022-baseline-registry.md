@@ -15,7 +15,7 @@ plain JSON snapshot compared via `scan --against OLD` (ADR-043 D4's
 replacement column), plus the CI-facing baseline lifecycle ADR-047/G30 owns —
 see the amendment below. Treat this ADR as a design record, not current
 behavior.
-**Verified:** main@e73aea6 on 2026-08-04
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** Nikolay Petrov
 
 **Amendment (2026-07-27):** the CI-facing half of "baseline lifecycle" this

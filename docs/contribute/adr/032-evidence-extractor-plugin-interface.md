@@ -24,7 +24,7 @@ parsing, no compiler invocation, no D5 action to permission) and is not an
 "extractor" in this ADR's sense — see ADR-038's "shared consumer" section
 (`abicheck_inputs/` and `merge`) for the executing/non-executing split
 spelled out explicitly.
-**Verified:** main@e73aea6 on 2026-08-04
+**Verified:** main@2e43d53 on 2026-08-04
 **Decision maker:** Nikolay Petrov
 
 ---

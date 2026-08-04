@@ -40,7 +40,16 @@ So a second, **optional** metadata line records when someone last did:
 ```
 
 placed directly after the Status paragraph. It means "a maintainer checked
-this ADR's Status claims against the tree at that commit" — nothing more. It
+this ADR's Status claims against the tree at that commit" — nothing more.
+
+**Name a commit on the default branch, not the branch you're writing the
+receipt on.** A branch commit stops existing once the PR squash-merges, and
+because the `ai-readiness` job checks out full history, an unresolvable sha
+is an error rather than a tolerated skip — so a receipt anchored to a PR
+commit passes on that PR and then fails on `main` permanently. Since a PR
+that adds a receipt normally doesn't change the code being attested, the
+right sha is the `main` commit the branch is based on. `adr-status-sync`
+enforces this. It
 is opt-in precisely so it stays truthful: an ADR without one has simply never
 been checked, which is the honest state of most of the files below and is not
 an error. Adding one you didn't actually perform is worse than having none.
