@@ -35,7 +35,7 @@ catch that; only re-reading the code can.
 
 So a second, **optional** metadata line records when someone last did:
 
-```
+```text
 **Verified:** <ref>@<sha> on <YYYY-MM-DD>
 ```
 
@@ -54,7 +54,8 @@ is opt-in precisely so it stays truthful: an ADR without one has simply never
 been checked, which is the honest state of most of the files below and is not
 an error. Adding one you didn't actually perform is worse than having none.
 
-What it buys is a tripwire rather than a promise. `adr-status-sync` (in
+What it buys is a tripwire rather than a promise. `adr-status-sync`
+(implemented in `scripts/adr_status_sync.py`, registered as a check by
 `scripts/check_ai_readiness.py`) reads the first-party module paths the Status
 paragraph *names* and warns when commits after the recorded sha have touched
 any of them — i.e. when the code a claim describes has moved out from under

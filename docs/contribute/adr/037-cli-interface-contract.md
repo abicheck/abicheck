@@ -337,6 +337,13 @@ choice applied at two pipeline stages. So:
 - `android` stays a source-ABI-only value (it has no header-AST path);
   selecting it for a header-only run is a validation error (D9).
 
+**Historical (2026-08-04):** `--source-abi-extractor` and its `android` value
+were `collect`'s, and ADR-043 D4 deleted that command along with the glue
+wiring its flags together — see the status note at the top of this ADR.
+`--ast-frontend {auto,castxml,clang}` is the whole of this decision that
+remains CLI surface; the two-pipeline-stages reasoning above is why the flag
+is named the way it is, not a description of a second flag you can pass.
+
 **Why not a generic `--backend`:** "backend of what?" is ambiguous — we have
 ELF/DWARF/PE/PDB/Mach-O *parser* backends too, which are auto-selected by
 artifact type and are not user choices. `--ast-frontend` names exactly the one

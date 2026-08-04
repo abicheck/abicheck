@@ -146,7 +146,10 @@ Manifests are trusted-by-operator, never auto-discovered. abicheck does
 not scan `PATH`, the working tree, or any plugin directory for manifests;
 an external extractor runs only when the operator registers it explicitly
 — via a config entry (e.g. `extractors:` in the project config) or a
-per-run `--extractor-manifest <path>` flag. A manifest's declared
+per-run `--extractor-manifest <path>` flag. **(Historical: that flag lived on
+`collect`, which ADR-043 D4 deleted; see the CLI surface note at the top of
+this ADR. The trusted-by-operator rule below is unchanged — only the
+command-line route to it is gone.)** A manifest's declared
 `allowed_actions` are a ceiling, not a grant: at run time they are
 intersected with the actions permitted for the run (D5), so a manifest
 cannot escalate beyond what the operator enabled.

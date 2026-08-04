@@ -47,12 +47,22 @@ FIRST_PARTY_ROOT_NAMES: tuple[str, ...] = (
 class Findings(Protocol):
     """The error/warning sink check_ai_readiness.py passes in."""
 
-    def err(self, check: str, msg: str) -> None: ...
+    def err(self, check: str, msg: str) -> None:
+        """Record a blocking finding under `check`."""
+        ...
 
-    def warn(self, check: str, msg: str) -> None: ...
+    def warn(self, check: str, msg: str) -> None:
+        """Record a non-blocking finding under `check`."""
+        ...
 
 
 def _read(p: Path) -> str:
+    """File contents, or `""` when unreadable.
+
+    A file this gate can't read is not a finding of its own: the ADR checks
+    below all degrade to "nothing to compare", which the surrounding checks
+    (`adr-index-nav-sync`'s missing-Status error) already report properly.
+    """
     try:
         return p.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
