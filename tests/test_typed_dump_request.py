@@ -1038,6 +1038,127 @@ class TestEvidenceFileSizeGuard:
         assert data["status"] == "ok"
 
 
+class TestManifestNamedFilesAreSizeChecked:
+    """A `dump_manifest`'s own named headers are held to the same limit.
+
+    Only the manifest YAML went through the size guard, but the document
+    names headers the dump pipeline then parses — so a tiny manifest could
+    point at a file `headers=` would have rejected outright (Codex review).
+    The asymmetry is exact: `dump_manifest.py` calls `roots` "the
+    manifest-mode equivalent of `--header`/`-H`", and `abi_dump` size-checks
+    every `headers=` entry.
+    """
+
+    @pytest.fixture()
+    def small_limit(self, monkeypatch):
+        """Shrink the limit for *both* paths this class compares.
+
+        `TestEvidenceFileSizeGuard`'s fixture patches
+        `mcp_server_inputs.mcp_shared`, which is enough for the manifest
+        path. It is not enough here: `mcp_server` imports `_check_file_size`
+        as a *function*, and that function reads `MCP_MAX_FILE_SIZE` from its
+        own module globals — so under a selection order that leaves two
+        distinct `abicheck.mcp_shared` objects (the hazard that fixture
+        documents), the `headers=` side silently kept the real 500 MB limit
+        and this class's whole point, that the two sides agree, passed
+        vacuously. Patching the globals dict each call path actually reads is
+        identity-proof.
+        """
+        from abicheck import mcp_server, mcp_server_inputs
+
+        for globals_dict in (
+            mcp_server._check_file_size.__globals__,
+            mcp_server_inputs.mcp_shared._check_file_size.__globals__,
+        ):
+            monkeypatch.setitem(globals_dict, "MCP_MAX_FILE_SIZE", 4096)
+
+    def _manifest(self, tmp_path: Path, body: str) -> Path:
+        path = tmp_path / "manifest.yaml"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    @pytest.fixture()
+    def oversized(self, tmp_path: Path) -> Path:
+        big = tmp_path / "huge.h"
+        big.write_text("//" + "x" * 8192 + "\n", encoding="utf-8")
+        return big
+
+    @pytest.mark.parametrize(
+        ("body", "expected"),
+        [
+            ("roots:\n  - {big}\ntranslation_units:\n  - name: tu\n", "root"),
+            (
+                "roots:\n  - {ok}\ntranslation_units:\n"
+                "  - name: tu\n    forced_includes:\n      - {big}\n",
+                "forced include (tu)",
+            ),
+            (
+                "roots:\n  - {ok}\npublic_header_paths:\n  - {big}\n"
+                "translation_units:\n  - name: tu\n",
+                "public header",
+            ),
+        ],
+        ids=["roots", "forced_includes", "public_header_paths"],
+    )
+    def test_an_oversized_manifest_header_is_rejected(
+        self,
+        snap_path: Path,
+        tmp_path: Path,
+        oversized: Path,
+        small_limit,
+        body: str,
+        expected: str,
+    ):
+        from abicheck.mcp_server import abi_dump
+
+        ok = tmp_path / "ok.h"
+        ok.write_text("// small\n", encoding="utf-8")
+        manifest = self._manifest(
+            tmp_path, body.format(big=oversized, ok=ok)
+        )
+        data = json.loads(abi_dump(str(snap_path), dump_manifest=str(manifest)))
+        assert data["status"] == "error"
+        assert f"dump_manifest {expected} is" in data["error"]
+        assert "exceeds limit" in data["error"]
+
+    def test_the_same_file_is_rejected_via_headers(
+        self, snap_path: Path, oversized: Path, small_limit
+    ):
+        # The point of the guard is that these two agree; pinning only the
+        # manifest side would not catch the two drifting apart again.
+        from abicheck.mcp_server import abi_dump
+
+        data = json.loads(abi_dump(str(snap_path), headers=[str(oversized)]))
+        assert data["status"] == "error"
+        assert "header is" in data["error"] and "exceeds limit" in data["error"]
+
+    def test_directory_valued_manifest_fields_are_not_size_checked(
+        self, snap_path: Path, tmp_path: Path, small_limit, monkeypatch
+    ):
+        """`public_header_dirs` and a TU's `includes` are -I search roots.
+
+        A size limit means nothing for a directory, so applying one there
+        would reject a legitimate manifest.
+        """
+        from abicheck import service
+        from abicheck.mcp_server import abi_dump
+
+        ok = tmp_path / "ok.h"
+        ok.write_text("// small\n", encoding="utf-8")
+        inc = tmp_path / "inc"
+        inc.mkdir()
+        manifest = self._manifest(
+            tmp_path,
+            f"roots:\n  - {ok}\npublic_header_dirs:\n  - {inc}\n"
+            f"translation_units:\n  - name: tu\n    includes:\n      - {inc}\n",
+        )
+        monkeypatch.setattr(
+            service, "run_dump_request", lambda request, **kw: _snapshot()
+        )
+        data = json.loads(abi_dump(str(snap_path), dump_manifest=str(manifest)))
+        assert data["status"] == "ok"
+
+
 class TestBuildDerivedIncludeSeeding:
     """A typed request seeds the build's include dirs, as the CLI does.
 

@@ -34,11 +34,15 @@ from __future__ import annotations
 
 import platform
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import mcp_shared
 from .compile_context import CompileContext
 from .mcp_shared import _safe_read_path
 from .model import AbiSnapshot
+
+if TYPE_CHECKING:
+    from .dump_manifest import DumpManifest
 
 #: Frontends that really drive header parsing, for the one MCP tool that has
 #: nowhere else to put a source-ABI-only value. Mirrors
@@ -50,6 +54,7 @@ __all__ = [
     "_ALLOWED_BINARY_SUFFIXES",
     "_ALLOWED_OUTPUT_SUFFIXES",
     "_PUBLIC_DEPTHS",
+    "_check_manifest_file_sizes",
     "_compile_context_from_args",
     "_contract_mode_error",
     "_detect_binary_format",
@@ -327,6 +332,38 @@ def _public_header_dir_paths(raw_dirs: list[str] | None) -> list[Path]:
             raise ValueError(f"public_header_dir must be an existing directory: {raw}")
         paths.append(p)
     return paths
+
+
+def _check_manifest_file_sizes(manifest: DumpManifest) -> None:
+    """Hold a ``dump_manifest``'s own *named files* to ``MCP_MAX_FILE_SIZE``.
+
+    Only the manifest YAML itself passes through ``_existing_path``, but the
+    document then names header files the dump pipeline goes on to parse — so
+    a tiny manifest could point at a header that would have been rejected
+    outright had the caller passed it as ``headers=`` (Codex review). The
+    asymmetry is exact rather than incidental: this module's own docs call
+    ``roots`` "the manifest-mode equivalent of ``--header``/``-H``" and a TU's
+    ``forced_includes`` "the manifest equivalent of a single named
+    ``--header``", and ``abi_dump`` size-checks every ``headers=`` entry.
+
+    Checks the three *file*-valued fields and deliberately not the two
+    directory-valued ones (``public_header_dirs``, a TU's ``includes``), which
+    are ``-I`` search roots with no content of their own to bound.
+    ``_check_file_size`` no-ops on a missing path, so a manifest naming a file
+    that isn't there still fails downstream where it already did, not here
+    with a size error.
+
+    Raises ValueError with the message the tool returns as its error payload.
+    """
+    for root in manifest.roots:
+        mcp_shared._check_file_size(root, label="dump_manifest root")
+    for header in manifest.public_header_paths:
+        mcp_shared._check_file_size(header, label="dump_manifest public header")
+    for tu in manifest.translation_units:
+        for forced in tu.forced_includes:
+            mcp_shared._check_file_size(
+                forced, label=f"dump_manifest forced include ({tu.name})"
+            )
 
 
 def _contract_mode_error(

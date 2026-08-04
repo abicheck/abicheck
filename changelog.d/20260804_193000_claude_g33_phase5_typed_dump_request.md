@@ -46,6 +46,15 @@
   build-source loader parses it, so an oversized build-info artifact bypassed
   the limit every other file-shaped MCP input is held to. The guard now lives
   in the one helper every evidence path goes through.
+- **A `dump_manifest`'s own named headers are held to
+  `ABICHECK_MCP_MAX_FILE_SIZE`** — only the manifest YAML itself passed the
+  size guard, but the document names headers the dump pipeline then parses,
+  so a tiny manifest could point at a file `headers=` would have rejected
+  outright. The asymmetry was exact rather than incidental: `roots` is the
+  manifest-mode equivalent of `--header`/`-H`, and every `headers=` entry is
+  size-checked. All three file-valued fields (`roots`, `public_header_paths`,
+  a TU's `forced_includes`) are now checked; the two directory-valued ones
+  are deliberately not, being `-I` search roots with no content to bound.
 - **`abi_scan`'s compile-context arguments are validated** — `ast_frontend` and
   `frontend_context` were copied into `ScanRequest` unvalidated (it has no
   `validate()` of its own), so a typo or an uppercased `"DEVICE"` survived into

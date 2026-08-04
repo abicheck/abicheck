@@ -57,6 +57,7 @@ from .mcp_server_inputs import (  # noqa: F401  (re-exported for API stability)
     _ALLOWED_BINARY_SUFFIXES,
     _ALLOWED_OUTPUT_SUFFIXES,
     _PUBLIC_DEPTHS,
+    _check_manifest_file_sizes,
     _compile_context_from_args,
     _contract_mode_error,
     _detect_binary_format,
@@ -322,6 +323,14 @@ def abi_dump(
             from .dump_manifest import load_manifest
 
             manifest = load_manifest(manifest_path)
+            # The manifest YAML passed the size guard, but the headers it
+            # *names* had not -- and the pipeline parses those, so a tiny
+            # manifest could smuggle in a file `headers=` would have rejected
+            # (Codex review).
+            try:
+                _check_manifest_file_sizes(manifest)
+            except ValueError as exc:
+                return json.dumps({"status": "error", "error": str(exc)})
 
         request = DumpRequest(
             input=InputSpec(
