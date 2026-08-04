@@ -242,6 +242,26 @@ yet projected into any forwarded flag (see `run-plan-schema.md`'s field
 table for why); every *other* analysis option above stays global-only,
 unaffected by this exception.
 
+**Exception: `dependency-source` also gets a per-cell override**, on the same
+precedence rule (G34 Phase C). A profile's own `dependency_source:`
+([`project-targets-schema.md`](project-targets-schema.md#os-and-dependency_source--how-a-profile-schedules-its-own-check-cell-g34-phase-c))
+wins over this workflow's `dependency-source` input for that profile's cells
+only, so a GCC-profile cell and a Clang-profile cell in one run can each
+provision a matching conda environment instead of sharing whatever the
+workflow-level value said. With both unset the legacy `install-deps` boolean
+still decides, exactly as before.
+
+**Each cell is scheduled on its profile's own runner** (G34 Phase C), rather
+than the `ubuntu-latest` every cell used to hardcode: the `plan` job derives
+`runs_on` from each profile's `os:`, so an `os: windows` profile's cell lands
+on `windows-latest`. A profile with no `os:` — every profile written before
+this phase — still resolves to `ubuntu-latest`, so no existing project's
+scheduling moves. Note this makes `os:` load-bearing: a value naming no
+schedulable platform now fails `project validate` instead of being ignored.
+An actual native `windows-latest` lane running a real MSVC profile end to end
+through this workflow is separate, still-open work — this phase lands the
+scheduling mechanism, not a validated MSVC fixture project.
+
 **Give each parallel call its own artifact names.** `actions/upload-artifact`
 requires unique names within one workflow *run* — two `check-project.yml`
 calls in the same run that both leave `run-plan-artifact-name` /

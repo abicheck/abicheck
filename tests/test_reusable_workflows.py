@@ -72,6 +72,28 @@ class TestBothFilesParseAsValidWorkflowYaml:
         assert set(data["jobs"]) == {"plan", "check", "no-checks", "aggregate"}
 
 
+class TestCheckSingleMirrorsCheckTargetInputs:
+    """`reusable-workflows.md` states check-single's inputs mirror
+    check-target's 1:1. A new check-target input that this workflow accepts
+    but never forwards — or never accepts at all — silently breaks that
+    claim, and leaves a single check unable to select a toolchain a matrix
+    cell can (G34 Phase C)."""
+
+    def test_dependency_source_is_accepted_and_forwarded(self) -> None:
+        data = _load(CHECK_SINGLE)
+        inputs = data[True]["workflow_call"]["inputs"]
+        assert inputs["dependency-source"]["type"] == "string"
+        assert inputs["dependency-source"]["default"] == ""
+        run_step = next(
+            s
+            for s in _steps(data["jobs"]["check"])
+            if s.get("name") == "Run check-target"
+        )
+        assert run_step["with"]["dependency-source"] == (
+            "${{ inputs.dependency-source }}"
+        )
+
+
 class TestCheckSingleSelfCheckout:
     """Mirrors check-target/action.yml's own "Capture this Action's
     identity" -> "Checkout abicheck" -> nested `uses:` pattern, but keyed
@@ -682,7 +704,7 @@ class TestPreCheckOperationalErrorReport:
         run = precheck["run"]
         assert "report_envelope.py" in run
         assert "--mode operational-error" in run
-        assert "--resolve-outcome \"ambiguous\"" in run
+        assert '--resolve-outcome "ambiguous"' in run
 
     def test_run_check_target_gated_on_candidate_success(self) -> None:
         data = _load(CHECK_PROJECT)
@@ -731,7 +753,9 @@ class TestPreCheckOperationalErrorReport:
         repo_root = Path(__file__).resolve().parents[1]
         src_dir = tmp_path / ".check-project-src"
         src_dir.mkdir()
-        (src_dir / "actions").symlink_to(repo_root / "actions", target_is_directory=True)
+        (src_dir / "actions").symlink_to(
+            repo_root / "actions", target_is_directory=True
+        )
 
         github_output = tmp_path / "github_output"
         github_output.write_text("")
@@ -750,7 +774,11 @@ class TestPreCheckOperationalErrorReport:
             "GITHUB_OUTPUT": str(github_output),
         }
         result = subprocess.run(
-            ["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True
+            ["bash", "-c", script],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 1, result.stderr  # operational errors fail the step
 
@@ -759,16 +787,19 @@ class TestPreCheckOperationalErrorReport:
             for line in github_output.read_text().splitlines()
             if "=" in line
         )
-        assert output_lines["check-id"] == (
-            "libfoo@linux-x86_64#accepted-main@headers"
-        )
+        assert output_lines["check-id"] == ("libfoo@linux-x86_64#accepted-main@headers")
         assert output_lines["report-path"] == "precheck-report.json"
-        assert "exit-code" not in output_lines  # grep -v'd out, like run.sh's own pattern
+        assert (
+            "exit-code" not in output_lines
+        )  # grep -v'd out, like run.sh's own pattern
 
         report = json.loads((tmp_path / "precheck-report.json").read_text())
         assert report["verdict"] == "ERROR"
         assert report["operational_errors"][0]["kind"] == "ambiguous"
-        assert "resolution failed for 'libfoo'" in report["operational_errors"][0]["message"]
+        assert (
+            "resolution failed for 'libfoo'"
+            in report["operational_errors"][0]["message"]
+        )
 
 
 class TestBaselineRequiredAndCandidateBuildOutputForwarded:
@@ -815,6 +846,40 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         )
         # gcc-prefix has no RunPlanCheck counterpart -- stays global-only.
         assert run_step["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
+
+    def test_check_job_is_scheduled_on_the_cells_own_runner(self) -> None:
+        """G34 Phase C: `runs-on` comes from the cell, not a hardcoded
+        `ubuntu-latest`, so an `os: windows` profile's cell runs natively.
+
+        The `|| 'ubuntu-latest'` fallback is for one case only: a
+        run-plan.json produced by an older abicheck, carrying no `runs_on`.
+        Without it that cell resolves `runs-on:` to the empty string and is
+        never scheduled — a silently missing check.
+        """
+        data = _load(CHECK_PROJECT)
+        assert data["jobs"]["check"]["runs-on"] == (
+            "${{ matrix.runs_on || 'ubuntu-latest' }}"
+        )
+
+    def test_run_check_target_prefers_per_cell_dependency_source(self) -> None:
+        """G34 Phase C: same precedence as the compile overlay above — the
+        profile's own `dependency_source:` wins for its cells, the
+        workflow-level input covers the rest, and both empty leaves the
+        legacy `install-deps` boolean deciding (the root action.yml owns
+        that fallback, so it is not re-implemented here)."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["dependency-source"] == (
+            "${{ matrix.dependency_source || inputs.dependency-source }}"
+        )
+        assert run_step["with"]["install-deps"] == "${{ inputs.install-deps }}"
+
+    def test_dependency_source_input_defaults_to_empty(self) -> None:
+        data = _load(CHECK_PROJECT)
+        inputs = data[True]["workflow_call"]["inputs"]
+        assert inputs["dependency-source"]["type"] == "string"
+        assert inputs["dependency-source"]["default"] == ""
 
     def test_toolchain_bindings_path_input_defaults_to_empty(self) -> None:
         data = _load(CHECK_PROJECT)
@@ -1208,7 +1273,9 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
             "isn't a bug in the workflow script itself."
         ),
     )
-    def test_absolute_pattern_is_rejected_without_globbing(self, tmp_path: Path) -> None:
+    def test_absolute_pattern_is_rejected_without_globbing(
+        self, tmp_path: Path
+    ) -> None:
         # An absolute recursive pattern like '/**/*' would otherwise expand
         # glob.glob against the whole runner filesystem BEFORE the
         # commonpath confinement check ever ran -- a needlessly slow/heavy

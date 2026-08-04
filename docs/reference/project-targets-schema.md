@@ -167,7 +167,8 @@ time.
 
 ## `profiles:`
 
-A mapping of profile id → `{contract, os, arch, compile, consumer_compile}`. `contract`
+A mapping of profile id → `{contract, os, arch, dependency_source, compile,
+consumer_compile}`. `contract`
 (default `true`) decides whether this build lane is an ABI contract (gets a
 baseline, gates CI) or a test-only CI lane that never gets one — "not every
 CI lane gets a baseline" is the whole point of this field (S17). The map
@@ -273,6 +274,50 @@ on an overlay leaves that field empty, deferring to a caller's own global
 projection only — no run-plan consumer resolves a per-cell `RunPlanCell`
 that actually threads this field into a real `dump`/`compare` invocation
 yet; see the G34 plan doc's Phase B for what remains.
+
+### `os:` and `dependency_source:` — how a profile schedules its own check cell (G34 Phase C)
+
+These two decide *where* a profile's `check-project.yml` check cell runs and
+*how* it provisions its own system dependencies. Before this phase both were
+fixed for the whole run: every cell ran on a hardcoded `ubuntu-latest`, and
+dependency installation came from one workflow-level `install-deps` boolean —
+so an `os: windows` profile could not be checked natively, and a GCC-profile
+cell and a Clang-profile cell in the same run could not each get a matching
+toolchain.
+
+```yaml
+profiles:
+  linux-gcc14:
+    contract: true
+    os: linux                            # → runs-on: ubuntu-latest
+    dependency_source: conda-forge-gcc14
+  windows-msvc:
+    contract: true
+    os: windows                          # → runs-on: windows-latest
+  linux-clang20:
+    contract: true
+    os: linux
+    dependency_source: conda-forge-clang20
+```
+
+`os:` accepts `linux`, `windows`, `macos` (or `darwin`), case-insensitively,
+and additionally passes a GitHub-hosted runner label through verbatim
+(`ubuntu-24.04`, `windows-2022`, `macos-14`) so a project that already wrote
+an image there keeps working. It reaches `abicheck project plan` as each
+cell's [`runs_on`](run-plan-schema.md#runplancheck-fields). **A profile with
+no `os:` resolves to `ubuntu-latest`** — that is every profile written before
+this phase, so their scheduling is unchanged. A value naming no schedulable
+platform (`os: freebsd`) is a *validation error* rather than a silent
+fallback to Linux: a cell scheduled on the wrong platform reports success
+having gated the wrong thing.
+
+`dependency_source:` accepts the same five values as the Action's own
+[`dependency-source` input](github-action-inputs.md) — `conda-forge`,
+`conda-forge-gcc14`, `conda-forge-clang20`, `system`, `none` — and reaches
+the cell as [`dependency_source`](run-plan-schema.md#runplancheck-fields),
+forwarded to `check-target`. It is optional: an undeclared value leaves the
+caller's workflow-level `dependency-source` input standing, and with both
+unset the legacy `install-deps` boolean still decides, exactly as before.
 
 ### `compile.binding` — resolving a logical toolchain id
 

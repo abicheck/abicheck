@@ -220,6 +220,18 @@ on:
       install-deps:
         type: boolean
         default: true
+      dependency-source:
+        description: >
+          How each check cell installs its system dependencies —
+          'conda-forge', 'conda-forge-gcc14', 'conda-forge-clang20',
+          'system', or 'none' (see the root action.yml's own input of the
+          same name). Workflow-level default; a profile that declares its
+          own `dependency_source:` overrides it for that profile's cells
+          only (G34 Phase C), the same precedence `compile:`'s
+          gcc-path/gcc-options overlay already uses. Leave empty to keep the
+          legacy `install-deps` boolean deciding.
+        type: string
+        default: ''
 
     outputs:
       gate-exit-code:
@@ -399,11 +411,23 @@ jobs:
           exit 1
 
   # ── Job 2: one check-target invocation per run-plan.json cell ──────────
+  # `runs-on` comes from the cell itself (G34 Phase C): `abicheck project
+  # plan` derives `runs_on` from each profile's own `os:`, so an `os:
+  # windows` profile's cell is scheduled natively instead of on the Linux
+  # runner every cell used to hardcode. `project plan` always emits the key
+  # and defaults it to `ubuntu-latest` for a profile with no `os:` -- which
+  # is every profile in every project written before this phase, so their
+  # scheduling is unchanged. The `|| 'ubuntu-latest'` is for one real case
+  # only: a run-plan.json produced by an older abicheck than this workflow,
+  # which carries no `runs_on` at all. Without it that cell would resolve
+  # `runs-on:` to the empty string and never be scheduled -- a silently
+  # missing check, which is exactly what this file's other guards exist to
+  # prevent.
   check:
     name: ${{ matrix.check_id }}
     needs: plan
     if: needs.plan.outputs.has-checks == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runs_on || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -837,6 +861,11 @@ jobs:
           extra-args: ${{ inputs.extra-args }}
           python-version: ${{ inputs.python-version }}
           install-deps: ${{ inputs.install-deps }}
+          # Per-cell first, workflow-level second (G34 Phase C). Both empty
+          # leaves the legacy `install-deps` boolean deciding, exactly as
+          # before -- the root action.yml resolves that fallback itself, so
+          # this stays one expression rather than a second copy of its rule.
+          dependency-source: ${{ matrix.dependency_source || inputs.dependency-source }}
           action-version: ${{ format('{0}@{1}', steps.identity.outputs.repository, steps.identity.outputs.ref) }}
           # This job's own already-resolved identity (captured in "Capture
           # this reusable workflow's identity" above) -- check-target's own

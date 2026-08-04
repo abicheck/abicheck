@@ -223,31 +223,56 @@ confirmed by reading the workflow, not asserted from a design doc):
       independent resolution, no-override case) cover the schema/projection
       slice landed here.
 
-### Phase C — Actions-matrix native-OS scheduling + per-cell dependency source (L)
+### Phase C — Actions-matrix native-OS scheduling + per-cell dependency source (L) — **done**
 
-- [ ] `check-project.yml`'s check-matrix job's `runs-on:` is derived from
+- [x] `check-project.yml`'s check-matrix job's `runs-on:` is derived from
       the resolved profile's `os:` field (`ubuntu-latest`/`windows-latest`/
-      `macos-latest`) instead of the current hardcoded `ubuntu-latest` —
-      this is the change with the widest blast radius in this plan (a
-      reusable workflow every project consuming `check-project.yml`
-      depends on), so it ships behind the existing `matrix.profile_id`
-      indirection with a compatibility test asserting an `os`-less profile
-      (today's default) still resolves to `ubuntu-latest` unchanged.
-- [ ] `check-project.yml`/`actions/check-target/action.yml` gain a
+      `macos-latest`) instead of the current hardcoded `ubuntu-latest`.
+      Derived once, at plan time: `runner_label_for_os` (`project_targets.py`)
+      is the mapping, `RunPlanCheck.runs_on` carries it, and the workflow
+      reads `matrix.runs_on` — so the widest-blast-radius half of this plan
+      is a one-expression change in the reusable workflow rather than
+      scheduling logic embedded in YAML. A profile with **no** `os:` (every
+      profile written before this phase) resolves to `ubuntu-latest`
+      unchanged, which `test_a_profile_without_os_keeps_todays_runner` pins.
+      Two decisions worth not re-litigating: `runs_on` is serialized even at
+      its default, unlike every other optional field, because a matrix entry
+      missing the key resolves `runs-on:` to the empty string and schedules
+      *nothing*; and an `os:` naming no schedulable platform is a hard error
+      at both `project validate` and `project plan` time rather than a
+      fallback to Linux, since a cell scheduled on the wrong platform
+      reports success having gated the wrong thing. A GitHub-hosted runner
+      label (`ubuntu-24.04`) passes through verbatim — `os:` was a
+      free-form, never-consulted string before this phase, so narrowing it
+      to platform names only would be a breaking config change dressed up
+      as a feature.
+- [x] `check-project.yml`/`actions/check-target/action.yml` gain a
       per-cell `dependency-source` input, resolved from the profile the
-      same way `compile_gcc_path`/`compile_gcc_options` already are,
-      forwarded to the root `action.yml`'s existing `dependency-source`
-      input instead of only the legacy `install-deps` boolean.
-- [ ] `docs/reference/check-target.md` and the GitHub Actions integration
-      docs (G30) document the new inputs; `tests/test_build_source_cli.py`
-      (or a dedicated new test module) covers the `os:`-to-`runs-on:`
-      resolution logic in isolation (this is plain Python string mapping,
-      testable without actually running the workflow).
-- [ ] Out of scope for this phase: an actual native `windows-latest` CI
-      lane exercising a real MSVC profile end-to-end through
-      `check-project.yml` — that needs a real fixture project and belongs
-      in G17 (real-world validation corpus) once the scheduling mechanism
-      itself lands here.
+      same way `compile_gcc_path`/`compile_gcc_options` already are
+      (`profiles.<id>.dependency_source` → `RunPlanCheck.dependency_source`
+      → `matrix.dependency_source || inputs.dependency-source`), forwarded
+      to the root `action.yml`'s existing `dependency-source` input instead
+      of only the legacy `install-deps` boolean. Both unset leaves that
+      boolean deciding exactly as before — the root Action already owns that
+      fallback, so the workflow forwards one expression rather than keeping
+      a second copy of the rule. The accepted-value list is mirrored from
+      `action.yml` (its own validation case is the fact owner) and
+      `TestActionYmlAgreesOnDependencySources` asserts the two agree, plus
+      that `check-target` actually forwards the input — a per-cell value
+      accepted but never forwarded would be silently inert, which is the
+      exact failure this phase is about.
+- [x] `docs/reference/check-target.md`, `run-plan-schema.md`,
+      `project-targets-schema.md`, and `reusable-workflows.md` document the
+      new fields/inputs; `tests/test_project_targets_scheduling.py` covers
+      the `os:`-to-`runs-on:` resolution and the `dependency_source` schema
+      in isolation (plain Python, no workflow run), and
+      `test_run_plan.py`'s `TestSchedulingProjection` covers the projection
+      into target and bundle cells.
+- [ ] Out of scope for this phase, still open: an actual native
+      `windows-latest` CI lane exercising a real MSVC profile end-to-end
+      through `check-project.yml` — that needs a real fixture project and
+      belongs in G17 (real-world validation corpus) now that the scheduling
+      mechanism itself has landed here.
 
 ### Phase D — per-finding cross-profile reconciliation (M, depends on G32) — **done**
 
