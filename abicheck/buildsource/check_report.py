@@ -239,6 +239,34 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         }
     elif "scan_schema_version" in report and "exit_code" in report:
         report["exit_code"] = 0
+    # ADR-049 Phase 7's contract-coverage axis is a *second* way this report
+    # can raise an exit code, orthogonal to the compatibility gate above and
+    # folded separately by `aggregate` -- so zeroing only the gate left an
+    # advisory report still driving the trailing aggregate to exit 1 (Codex
+    # review, reproduced end to end). "Advisory" means this check gates
+    # nothing; that has to hold on every axis it can contribute to, not just
+    # the one that existed when this function was written.
+    #
+    # Only the *contribution* is zeroed. `contract_coverage_failures` stays
+    # exactly as the run recorded it: the ledger is deliberately
+    # unsuppressible, and advisory mode is about not gating, not about
+    # hiding what was found -- the same split `contract.unresolved=warn`
+    # already makes.
+    if _is_valid_coverage_contribution(report.get("contract_coverage_exit_contribution")):
+        report["contract_coverage_exit_contribution"] = 0
+
+
+def _is_valid_coverage_contribution(raw: object) -> bool:
+    """Whether *raw* is a contribution this function should rewrite.
+
+    Mirrors ``aggregate._is_valid_contribution``: a ``bool`` is excluded
+    before the ``int`` check, since ``True`` is an ``int`` in Python. An
+    absent or unusable value is left untouched rather than replaced with a
+    ``0`` the run never stated -- the aggregate already reads it as "says
+    nothing", and inventing a value here would make it look like an
+    advisory run had answered the question.
+    """
+    return not isinstance(raw, bool) and isinstance(raw, int) and raw in (0, 1)
 
 
 def augment_report(

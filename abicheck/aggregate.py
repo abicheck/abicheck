@@ -956,9 +956,16 @@ class AggregateResult:
                 and t.contract_coverage_declared
             )
             if accepted:
+                # States what is observable, not the policy behind it. A
+                # target listing failures while contributing 0 can have got
+                # there by `contract.unresolved=warn` *or* by `gate-mode:
+                # advisory` neutralization (`buildsource.check_report.
+                # _neutralize_gate`), and this side cannot tell them apart --
+                # both look like "declared 0 with failures listed". Naming
+                # one of them was wrong for the other (Codex review).
                 lines.append(
-                    f"  accepted via contract.unresolved=warn on "
-                    f"{', '.join(sorted(accepted))} (listed, not gated)"
+                    f"  not gated on {', '.join(sorted(accepted))} "
+                    "(that run contributed 0; listed, not gated)"
                 )
             lines.append(
                 f"  contributes {self.contract_coverage_exit} to the exit code "

@@ -1258,14 +1258,18 @@ class TestJsonSchema:
 
 
 class TestWarnAcceptanceProvenance:
-    """`contract.unresolved=warn` is a policy the *target run* set. The
-    aggregate may only say so when the report actually stated a usable
-    contribution — a coverage exit of 0 also covers "said nothing" and
-    "said something unusable", and attributing a policy to either is a
-    claim the report never made (CodeRabbit review)."""
+    """Whether a listed-but-not-gated target is reported as such.
+
+    Two separate claims are at stake. The aggregate may only say a target
+    contributed 0 when the report actually *stated* a usable contribution —
+    a coverage exit of 0 also covers "said nothing" and "said something
+    unusable" (CodeRabbit review). And it must not name the *policy*
+    behind that 0: `contract.unresolved=warn` and `gate-mode: advisory`
+    neutralization both produce declared-0-with-failures, and this side
+    cannot tell them apart (Codex review)."""
 
     TARGET = "libfoo"
-    LINE = "accepted via contract.unresolved=warn"
+    LINE = "not gated on"
 
     def _text(self, tmp_path: Path, **extra) -> str:
         _write_report(
@@ -1279,7 +1283,11 @@ class TestWarnAcceptanceProvenance:
             tmp_path, expected=_expect(self.TARGET)
         ).render_text()
 
-    def test_a_declared_zero_is_reported_as_accepted(self, tmp_path: Path):
+    def test_it_does_not_name_a_policy_it_cannot_verify(self, tmp_path: Path):
+        text = self._text(tmp_path, contract_coverage_exit_contribution=0)
+        assert "contract.unresolved=warn" not in text
+
+    def test_a_declared_zero_is_reported_as_not_gated(self, tmp_path: Path):
         assert self.LINE in self._text(tmp_path, contract_coverage_exit_contribution=0)
 
     def test_a_malformed_contribution_is_not(self, tmp_path: Path):
@@ -1507,7 +1515,10 @@ class TestContractCoverageAxis:
         assert result.to_dict()["contract_coverage"]["incomplete_targets"] == [LINUX]
         text = result.render_text()
         assert "Contract coverage:" in text
-        assert "contract.unresolved=warn" in text
+        # Reported as listed-but-not-gated, without naming the policy: the
+        # same shape is produced by `gate-mode: advisory` neutralization,
+        # which this side cannot distinguish (Codex review).
+        assert f"not gated on {LINUX}" in text
 
     def test_a_target_with_no_failures_is_not_listed_as_incomplete(
         self, tmp_path: Path

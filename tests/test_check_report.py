@@ -543,6 +543,69 @@ class TestAugmentReport:
             {"kind": "analysis_error", "message": "bad flag combination"}
         ]
 
+    def test_advisory_also_neutralizes_the_contract_coverage_axis(self):
+        """ADR-049 Phase 7 added a *second* way a report raises an exit code.
+
+        Zeroing only the compatibility gate left an advisory cell still
+        driving the trailing ``aggregate`` job to exit 1 through the
+        orthogonal contract-coverage axis (Codex review, reproduced end to
+        end). "Advisory" has to mean "gates nothing" on every axis this
+        report can contribute to, not just the one that existed when
+        ``_neutralize_gate`` was written.
+        """
+        out = augment_report(
+            {
+                "verdict": "BREAKING",
+                "severity": {"exit_code": 4, "blocking": True},
+                "contract_coverage_exit_contribution": 1,
+                "contract_coverage_failures": [{"provider": "public_header"}],
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["contract_coverage_exit_contribution"] == 0
+        # Not gating is not the same as hiding: the ledger is deliberately
+        # unsuppressible, so the failures stay exactly as recorded.
+        assert out["contract_coverage_failures"] == [{"provider": "public_header"}]
+
+    def test_deferred_keeps_its_contract_coverage_contribution(self):
+        # `deferred` exists so the trailing aggregate computes the gate from
+        # the real values -- neutralizing it there would blind that
+        # computation, on this axis exactly as on the severity one.
+        out = augment_report(
+            {
+                "verdict": "COMPATIBLE",
+                "severity": {"exit_code": 0, "blocking": False},
+                "contract_coverage_exit_contribution": 1,
+            },
+            name="libfoo",
+            profile_id="linux-gcc14",
+            baseline_channel="release",
+            requested_depth="headers",
+            gate_mode="deferred",
+        )
+        assert out["contract_coverage_exit_contribution"] == 1
+
+    def test_advisory_does_not_invent_a_contribution_that_was_never_stated(self):
+        # An absent or unusable value stays absent/unusable rather than
+        # becoming a 0 the run never declared -- otherwise an advisory run
+        # would look like it had answered the coverage question.
+        for payload in ({}, {"contract_coverage_exit_contribution": "nope"}):
+            out = augment_report(
+                {"verdict": "COMPATIBLE", "severity": {"exit_code": 0}, **payload},
+                name="libfoo",
+                profile_id="linux-gcc14",
+                baseline_channel="release",
+                requested_depth="headers",
+                gate_mode="advisory",
+            )
+            assert out.get("contract_coverage_exit_contribution") == payload.get(
+                "contract_coverage_exit_contribution"
+            )
+
     def test_advisory_neutralize_is_a_no_op_when_report_has_no_gate_block(self):
         out = augment_report(
             {"verdict": OPERATIONAL_ERROR_VERDICT, "error": "usage error"},
