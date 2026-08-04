@@ -43,6 +43,7 @@ from abicheck.aggregate_findings import (
     ReportFinding,
     ReportFindings,
     build_finding_matrix,
+    cross_abi_declaration,
     parse_report_findings,
     render_finding_matrix_lines,
     resolve_cross_abi_identity,
@@ -606,6 +607,12 @@ _REMOVED_ITANIUM_OVERLOAD = {
     "symbol": "_ZN3lib3addEd",
     "description": "Function removed",
 }
+#: The MSVC spelling of yet another overload of the same declaration.
+_REMOVED_MSVC_OTHER_OVERLOAD = {
+    "kind": "func_removed",
+    "symbol": "?add@lib@@YAHN@Z",
+    "description": "Function removed",
+}
 
 MSVC_CHECK = "libfoo@windows-msvc#release@headers"
 
@@ -613,26 +620,54 @@ MSVC_CHECK = "libfoo@windows-msvc#release@headers"
 class TestCrossAbiReconciliation:
     """Findings spelled under different C++ mangling schemes (Codex review).
 
-    Without this, a Linux profile and a Windows profile reporting one logical
-    removal produced two profile-specific entries, each claiming the *other*
-    profile was clean of it — the false clean claim this module exists to
-    prevent, in the one place the identity model could not see it.
+    Two rules, and the second is what keeps the first honest. A profile
+    holding a finding on the same declaration under another mangling is never
+    reported *clean* of this one — that was the original bug. But the two
+    findings are never *merged* either: neither mangling parser recovers
+    parameter types, so nothing in a report distinguishes "both profiles lost
+    the same overload" from "each lost a different one", and asserting the
+    former would invent a fact no producer supplied.
     """
 
-    def test_itanium_and_msvc_spellings_reconcile_to_one_finding(
+    def test_same_declaration_under_two_schemes_is_never_called_clean(
         self, tmp_path: Path
     ) -> None:
         _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
         _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [_REMOVED_MSVC])
         r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
-        (entry,) = r.finding_matrix
-        assert entry.scope == "all_profiles"
-        assert entry.affected_profiles == ("linux-gcc14", "windows-msvc")
-        assert entry.identity_tier == "normalized"
+        assert len(r.finding_matrix) == 2
+        assert {e.scope for e in r.finding_matrix} == {"undetermined"}
+        assert all(e.unaffected_profiles == () for e in r.finding_matrix)
 
-    def test_unrelated_declarations_do_not_merge(self, tmp_path: Path) -> None:
-        """The merge must not over-fire: two genuinely different declarations
-        stay two findings, and the clean profile really is clean."""
+    def test_the_shared_declaration_is_exposed_so_a_consumer_can_link_them(
+        self, tmp_path: Path
+    ) -> None:
+        """Not merging must not mean hiding the relationship."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [_REMOVED_MSVC])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
+        assert {e.cross_abi_declaration for e in r.finding_matrix} == {"lib::add"}
+
+    def test_differing_overloads_are_not_asserted_to_be_one_finding(
+        self, tmp_path: Path
+    ) -> None:
+        """The case an earlier revision got wrong: one finding per profile,
+        same qualified name, *different* overloads. Cardinality alone looks
+        like a clean pairing, but nothing proves it — so these must not
+        collapse into a single all-profiles entry."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(
+            tmp_path, MSVC_CHECK, "BREAKING", [_REMOVED_MSVC_OTHER_OVERLOAD]
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
+        assert len(r.finding_matrix) == 2
+        assert all(e.scope == "undetermined" for e in r.finding_matrix)
+
+    def test_unrelated_declarations_stay_genuinely_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """The withholding must not over-fire: two different declarations
+        leave the clean profile provably clean."""
         other = {
             "kind": "func_removed",
             "symbol": "?other@lib@@YAHXZ",
@@ -647,33 +682,29 @@ class TestCrossAbiReconciliation:
         ]
         assert all(e.unaffected_profiles for e in r.finding_matrix)
 
-    def test_ambiguous_overloads_stay_split_but_nobody_is_called_clean(
-        self, tmp_path: Path
-    ) -> None:
-        """Neither mangling parser recovers parameter types, so two overloads
-        share a cross-ABI key. A profile carrying both makes the pairing
-        unguessable — the entries stay separate, and every profile holding a
-        sibling finding on the same declaration is undetermined, never
-        unaffected."""
-        _write_findings_report(
-            tmp_path,
-            GCC,
-            "BREAKING",
-            [_REMOVED_ITANIUM, _REMOVED_ITANIUM_OVERLOAD],
-        )
-        _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [_REMOVED_MSVC])
+    def test_a_removal_and_an_addition_are_not_siblings(self, tmp_path: Path) -> None:
+        """The discriminator rides along, so sharing a declaration is not
+        enough — the two profiles must be reporting the same *event* before
+        either is withheld from a clean verdict."""
+        added = {
+            "kind": "func_added",
+            "symbol": "?add@lib@@YAHHH@Z",
+            "description": "Function added",
+        }
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_REMOVED_ITANIUM])
+        _write_findings_report(tmp_path, MSVC_CHECK, "BREAKING", [added])
         r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, MSVC_CHECK))
-        assert len(r.finding_matrix) == 3
-        assert {e.scope for e in r.finding_matrix} == {"undetermined"}
-        assert all(e.unaffected_profiles == () for e in r.finding_matrix)
+        assert all(e.unaffected_profiles for e in r.finding_matrix)
 
     def test_type_level_finding_has_no_cross_abi_key(self) -> None:
         """`symbol` is a type name, not a mangling — nothing to normalize, and
         the helper must not guess one."""
         assert resolve_cross_abi_identity(_SIZE_CHANGED) is None
+        assert cross_abi_declaration("Foo") is None
 
     def test_finding_with_no_symbol_has_no_cross_abi_key(self) -> None:
         assert resolve_cross_abi_identity({"kind": "func_removed"}) is None
+        assert cross_abi_declaration("") is None
 
     def test_extern_c_symbol_has_no_cross_abi_key(self) -> None:
         """An unmangled C symbol is already scheme-independent."""
@@ -684,9 +715,11 @@ class TestCrossAbiReconciliation:
             is None
         )
 
+    def test_both_schemes_reduce_to_the_same_declaration(self) -> None:
+        assert cross_abi_declaration("_ZN3lib3addEii") == "lib::add"
+        assert cross_abi_declaration("?add@lib@@YAHHH@Z") == "lib::add"
+
     def test_cross_abi_key_keeps_a_removal_and_an_addition_apart(self) -> None:
-        """The discriminator rides along, so normalizing the *name* never
-        merges two different events on one declaration."""
         removed = resolve_cross_abi_identity(_REMOVED_ITANIUM)
         added = resolve_cross_abi_identity(
             {**_REMOVED_ITANIUM, "kind": "func_added", "description": "Function added"}
@@ -722,3 +755,53 @@ class TestKindsAcrossOneProfilesChecks:
         (entry,) = r.finding_matrix
         assert entry.kinds == ("func_removed", "func_removed_elf_only")
         assert entry.affected_profiles == ("linux-gcc14",)
+
+
+class TestFindingEntryValidation:
+    """A mapping is not automatically a usable finding (Codex review)."""
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            pytest.param({"foo": 1}, id="no-kind"),
+            pytest.param({"kind": 42}, id="non-string-kind"),
+            pytest.param({"kind": ""}, id="empty-kind"),
+            pytest.param({"kind": "func_removed", "symbol": ["x"]}, id="list-symbol"),
+            pytest.param(
+                {"kind": "func_removed", "old_value": {"a": 1}}, id="mapping-old-value"
+            ),
+            pytest.param(
+                {"kind": "func_removed", "description": 7}, id="non-string-description"
+            ),
+        ],
+    )
+    def test_unusable_entry_marks_the_report_incomplete(self, entry: dict) -> None:
+        result = parse_report_findings({"changes": [entry]})
+        assert result.findings == ()
+        assert result.complete is False
+
+    def test_valid_siblings_survive_an_unusable_entry(self) -> None:
+        result = parse_report_findings({"changes": [_SIZE_CHANGED, {"foo": 1}]})
+        assert len(result.findings) == 1
+        assert result.complete is False
+
+    def test_absent_optional_fields_are_fine(self) -> None:
+        result = parse_report_findings({"changes": [{"kind": "func_removed"}]})
+        assert len(result.findings) == 1
+        assert result.complete is True
+
+    def test_unusable_entry_cannot_clear_another_profile(self, tmp_path: Path) -> None:
+        """The end-to-end consequence: a profile whose findings array holds
+        only an unidentifiable object has not enumerated anything, so it must
+        not be reported clean of another profile's finding."""
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED])
+        _write_report(tmp_path, CLANG, "COMPATIBLE", changes=[{"foo": 1}])
+        r = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG))
+        (entry,) = r.finding_matrix
+        assert entry.unaffected_profiles == ()
+        assert entry.undetermined_profiles == ("linux-clang20",)
+
+    def test_unusable_release_entry_marks_incomplete(self) -> None:
+        result = parse_report_findings({"bundle_findings": [{"symbol": "x"}]})
+        assert result.findings == ()
+        assert result.complete is False

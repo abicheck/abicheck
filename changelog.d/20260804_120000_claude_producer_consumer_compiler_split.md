@@ -20,13 +20,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   they had different evidence available (`func_removed` with DWARF,
   `func_removed_elf_only` without) reconciles to a single entry carrying both
   kinds, rather than looking like two unrelated problems. Profiles on
-  different C++ ABIs reconcile too: a declaration spelled `_ZN3lib3addEii` by
-  an Itanium toolchain and `?add@lib@@YAHHH@Z` by MSVC is matched through a
-  scheme-independent key derived from either mangling — but only when the
-  pairing is unambiguous, since that key cannot tell two overloads apart.
-  Where it is ambiguous the entries stay separate and every profile holding a
-  sibling finding on the same declaration is reported `undetermined`, never
-  clean. Both report shapes
+  different C++ ABIs are handled too, conservatively: a declaration spelled
+  `_ZN3lib3addEii` by an Itanium toolchain and `?add@lib@@YAHHH@Z` by MSVC is
+  recognized as one declaration (reported as `cross_abi_declaration`), so
+  neither profile is reported clean of the other's finding — but the two are
+  never merged into a single entry, since no mangling parser recovers
+  parameter types and nothing in a report distinguishes "both profiles lost
+  the same overload" from "each lost a different one". Both report shapes
   are read: a `compare`/`scan` report's `changes`, and a `compare-release`
   report's `bundle_findings`/`matrix_findings` (what a `kind: bundle` check
   produces). A profile only counts as *unaffected* by a finding when it

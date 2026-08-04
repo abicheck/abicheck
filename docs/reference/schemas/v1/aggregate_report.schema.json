@@ -168,12 +168,12 @@
     "finding_matrix_entry": {
       "type": "object",
       "description": "Added in schema 1.2. One logical finding, reconciled across every profile that checked its target. The three profile lists partition that target's profiles and never overlap.",
-      "required": ["base_target", "finding_identity", "identity_tier", "kinds", "symbol", "description", "scope", "affected_profiles", "unaffected_profiles", "undetermined_profiles"],
+      "required": ["base_target", "finding_identity", "identity_tier", "kinds", "symbol", "description", "scope", "affected_profiles", "unaffected_profiles", "undetermined_profiles", "cross_abi_declaration"],
       "properties": {
         "base_target": {"type": "string"},
         "finding_identity": {
           "type": "string",
-          "description": "The reconciliation key: aggregate_findings.resolve_report_change_identity's primary_id, or -- when profiles using different C++ mangling schemes reported the same declaration and the pairing was unambiguous -- the scheme-independent key resolve_cross_abi_identity derived from it. Deliberately NOT the per-report finding_id, which also hashes description and source_location unconditionally -- right for correlating two runs of the same comparison, too strict across profiles, where a header path or a rendered size can legitimately differ for one logical event. Opaque: compare it for equality, don't parse it."
+          "description": "The reconciliation key: aggregate_findings.resolve_report_change_identity's primary_id. Deliberately NOT the per-report finding_id, which also hashes description and source_location unconditionally -- right for correlating two runs of the same comparison, too strict across profiles, where a header path or a rendered size can legitimately differ for one logical event. Opaque: compare it for equality, don't parse it."
         },
         "identity_tier": {
           "type": "string",
@@ -205,7 +205,11 @@
         "undetermined_profiles": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Profiles that can be placed in neither list above: at least one of their reports fell short of a complete finding set -- missing, unreadable, not-comparable, carrying no finding array at all, carrying an unparseable entry, or being a compare-release report (which lists bundle/matrix findings but only per-library counts). Never read as unaffected -- that would claim a profile was checked and found clean when it was never checked at all. An incomplete report can still place a profile in affected_profiles: seeing a finding proves it is there, while not seeing one proves nothing unless the list was exhaustive. Also lands here when the profile reported a *sibling* finding sharing this one's cross-ABI declaration key but the pairing was ambiguous (two overloads, which the mangling parsers cannot tell apart): it demonstrably has a finding on the same declaration, so it is precisely the profile that must not be called clean."
+          "description": "Profiles that can be placed in neither list above: at least one of their reports fell short of a complete finding set -- missing, unreadable, not-comparable, carrying no finding array at all, carrying an unparseable entry, or being a compare-release report (which lists bundle/matrix findings but only per-library counts). Never read as unaffected -- that would claim a profile was checked and found clean when it was never checked at all. An incomplete report can still place a profile in affected_profiles: seeing a finding proves it is there, while not seeing one proves nothing unless the list was exhaustive. Also lands here when the profile reported a finding on the same declaration under a different C++ mangling scheme (see cross_abi_declaration): it demonstrably has a finding there, so it is precisely the profile that must not be called clean, even though nothing proves the two are the same overload."
+        },
+        "cross_abi_declaration": {
+          "type": ["string", "null"],
+          "description": "The declaration this finding is about, spelled independently of its C++ mangling scheme (e.g. lib::add, recovered from either _ZN3lib3addEii or ?add@lib@@YAHHH@Z), or null when none could be recovered (a type-level finding, an extern \"C\" symbol, or a mangling the deliberately conservative parsers decline to model). Two entries sharing it concern the same declaration under different manglings. They are deliberately NOT merged into one entry: neither parser recovers parameter types, so nothing in a report distinguishes \"both profiles lost the same overload\" from \"each lost a different one\". The link is exposed here so a consumer can present them together without the report asserting a pairing it cannot prove."
         }
       }
     },

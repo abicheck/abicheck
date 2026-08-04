@@ -267,26 +267,44 @@ confirmed by reading the workflow, not asserted from a design doc):
       *every* check a profile ran, not just its first, since one profile can
       run a `binary`-depth and a `headers`-depth check that report the same
       event under the two equivalent kinds.
-- [x] Profiles on **different C++ ABIs** reconcile as well, which the
-      mangled-name identity alone could not do: one declaration is spelled
-      `_ZN3lib3addEii` by an Itanium toolchain and `?add@lib@@YAHHH@Z` by
-      MSVC, so a Linux and a Windows profile reporting one logical removal
-      produced two profile-specific entries, each asserting the *other*
-      profile was clean of it. `resolve_cross_abi_identity` recovers the
-      declaration's qualified name from either scheme
-      (`diff_cxx_rules.itanium_qualified_name`/`msvc_qualified_name` — pure
-      structural parsers, no demangler subprocess, so this works identically
-      on every host) and re-resolves the identity from that, keeping the
-      discriminator so a removal and an addition on one declaration still
-      stay apart. **Merged only when unambiguous:** neither parser recovers
-      parameter types, so `add(int, int)` and `add(double)` share the key — a
-      profile carrying both means the pairing is unguessable, and those
-      entries stay split with every sibling-holding profile marked
-      `undetermined` rather than `unaffected`. That is the same "zero or many
-      candidates are equally unsafe to guess at" rule
-      `SymbolIdentityIndex.unique_alias_match` applies to alias joins.
-      (Both this and the `kinds` union above came from the PR's second Codex
-      review round.)
+- [x] Profiles on **different C++ ABIs** no longer falsely clear each other,
+      which the mangled-name identity alone could not prevent: one
+      declaration is spelled `_ZN3lib3addEii` by an Itanium toolchain and
+      `?add@lib@@YAHHH@Z` by MSVC, so a Linux and a Windows profile
+      reporting one logical removal produced two profile-specific entries,
+      each asserting the *other* profile was clean of it.
+      `cross_abi_declaration` recovers the declaration's qualified name from
+      either scheme (`diff_cxx_rules.itanium_qualified_name`/
+      `msvc_qualified_name` — pure structural parsers, no demangler
+      subprocess, so this works identically on every host), and
+      `resolve_cross_abi_identity` re-resolves the identity from it, keeping
+      the discriminator so a removal and an addition on one declaration are
+      not treated as related.
+- [x] **That key withholds a clean verdict; it never merges two findings.**
+      Neither parser recovers parameter types, so `add(int, int)` and
+      `add(double)` reduce to the same key — meaning two profiles matching on
+      it may be reporting one shared removal or two unrelated overload
+      removals, and *nothing in a report distinguishes those*. Withholding
+      needs no proof and is therefore safe; merging asserts a pairing the
+      evidence does not establish, so it is not done. A profile holding a
+      finding on the same declaration under another mangling is reported
+      `undetermined`, and the shared declaration is exposed on the entry so a
+      consumer can present the two together without the report claiming they
+      are one finding. (An intermediate revision *did* merge when each
+      profile contributed exactly one identity; the third Codex review round
+      pointed out that cardinality is not evidence — Linux losing
+      `add(int, int)` while Windows loses `add(double)` passes that check and
+      would have been published as a single all-profiles finding. Reverted to
+      withholding only.)
+- [x] A finding entry is validated before it counts as *enumerated*: being a
+      JSON object is not enough, since one with no `kind` still parses into a
+      contentless REDUCED-tier identity and would let a garbage array read as
+      an exhaustive finding set. `kind` must be a non-empty string and every
+      other identity-essential field must be a string when present — a
+      wrong-typed value is rejected rather than coerced, since coercion would
+      mint an identity from a spelling no producer emitted. Valid siblings in
+      the same array stay usable. (Third Codex review round; the same false
+      clean claim as the non-object case, one level down.)
 - [x] A third list, `undetermined_profiles`, was **added beyond the original
       scope** and is the load-bearing one: a profile whose findings are not
       fully known is neither affected nor unaffected. Without it, this view
