@@ -1022,3 +1022,126 @@ class TestEvidenceFileSizeGuard:
         )
         data = json.loads(abi_dump(str(snap_path), build_info=str(build_dir)))
         assert data["status"] == "ok"
+
+
+class TestBuildDerivedIncludeSeeding:
+    """A typed request seeds the build's include dirs, as the CLI does.
+
+    With headers plus ``sources``/``build_info`` but no explicit ``includes``,
+    the L2 public-header parse cannot see the include dirs the build already
+    knows (public headers reaching into a dependency SDK). The CLI has seeded
+    these from the build since ADR-033; the typed path did not, so an identical
+    request parsed less than the equivalent CLI invocation (Codex review).
+    """
+
+    def test_seeds_when_evidence_is_present_and_includes_are_empty(
+        self, snap_path: Path, tmp_path: Path, monkeypatch
+    ):
+        from abicheck import service
+
+        seen: dict[str, object] = {}
+        seeded = tmp_path / "generated-include"
+        seeded.mkdir()
+
+        def _fake_seed(**kwargs):
+            seen["headers"] = list(kwargs["headers"])
+            seen["allow_inferred_build_query"] = kwargs["allow_inferred_build_query"]
+            return [seeded], []
+
+        monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", _fake_seed)
+        captured: dict[str, object] = {}
+        original = service.resolve_input
+
+        def _spy(path, headers=None, includes=None, version="", lang="c++", **kwargs):
+            captured["includes"] = list(includes or [])
+            return original(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service, "resolve_input", _spy)
+        service.run_dump_request(
+            DumpRequest(input=InputSpec(path=snap_path, build_info=tmp_path))
+        )
+        assert captured["includes"] == [seeded]
+        # A Tier-2 call must never *execute* a build system as a side effect of
+        # resolving an input — passive discovery only.
+        assert seen["allow_inferred_build_query"] is False
+
+    def test_no_evidence_means_no_seeding_call(self, snap_path: Path, monkeypatch):
+        """Without sources/build_info the seed is skipped entirely."""
+        from abicheck import service
+
+        def _boom(**kwargs):  # pragma: no cover - must never run
+            raise AssertionError("seed_l2_includes reached without build evidence")
+
+        monkeypatch.setattr("abicheck.buildsource.l2_seed.seed_l2_includes", _boom)
+        snap = service.run_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
+        assert snap.library == "libfoo.so.1"
+
+    def test_cleanups_run_after_resolution(
+        self, snap_path: Path, tmp_path: Path, monkeypatch
+    ):
+        """Seeded temp dirs are drained only after the parse consumed them."""
+        from abicheck import service
+
+        order: list[str] = []
+        monkeypatch.setattr(
+            "abicheck.buildsource.l2_seed.seed_l2_includes",
+            lambda **kw: ([], [lambda: order.append("cleanup")]),
+        )
+        original = service.resolve_input
+
+        def _spy(path, headers=None, includes=None, version="", lang="c++", **kwargs):
+            order.append("resolve")
+            return original(path, headers, includes, version, lang, **kwargs)
+
+        monkeypatch.setattr(service, "resolve_input", _spy)
+        service.run_dump_request(
+            DumpRequest(input=InputSpec(path=snap_path, build_info=tmp_path))
+        )
+        assert order == ["resolve", "cleanup"]
+
+
+class TestContractModeReachesTheReceipt:
+    """ADR-049 Phase 6/7: the receipt must name the domain that scored the run.
+
+    `abi_compare` gained `contract_mode`, so a receipt still recording the
+    built-in default would misreport the domain that produced the verdict and
+    the coverage gate — which is exactly what a replay/audit consumer reads it
+    for (Codex review).
+    """
+
+    def test_selected_mode_is_recorded(self, snap_path: Path, monkeypatch):
+        from abicheck import mcp_compare_receipt
+
+        seen: dict[str, object] = {}
+        original = mcp_compare_receipt.resolve_tool_config
+
+        def _spy(**kwargs):
+            seen["contract_mode"] = kwargs.get("contract_mode")
+            return original(**kwargs)
+
+        monkeypatch.setattr(mcp_compare_receipt, "resolve_tool_config", _spy)
+        from abicheck.mcp_server import abi_compare
+
+        abi_compare(
+            str(snap_path),
+            str(snap_path),
+            contract_evaluation=True,
+            contract_mode="exports",
+        )
+        assert seen["contract_mode"] == "exports"
+
+    def test_absent_mode_stays_absent(self, snap_path: Path, monkeypatch):
+        from abicheck import mcp_compare_receipt
+
+        seen: dict[str, object] = {}
+        original = mcp_compare_receipt.resolve_tool_config
+
+        def _spy(**kwargs):
+            seen["contract_mode"] = kwargs.get("contract_mode")
+            return original(**kwargs)
+
+        monkeypatch.setattr(mcp_compare_receipt, "resolve_tool_config", _spy)
+        from abicheck.mcp_server import abi_compare
+
+        abi_compare(str(snap_path), str(snap_path), contract_evaluation=True)
+        assert seen["contract_mode"] is None

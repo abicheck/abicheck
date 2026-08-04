@@ -48,6 +48,16 @@
   `validate()` of its own), so a typo or an uppercased `"DEVICE"` survived into
   the spawned scan worker to be ignored or resurface as a generic failure. Both
   tools now reject the same mistake with the same text `abi_dump` produces.
+- **The typed path seeds the build's L2 include dirs, as the CLI does** — with
+  headers plus `sources`/`build_info` but no explicit include dirs, the public-
+  header parse could not see the include dirs the build already knows, so a
+  `DumpRequest`/`CompareRequest` parsed less than the equivalent CLI
+  invocation. A Tier-2 call never *executes* a build system to discover them,
+  unlike the CLI: passive discovery of an existing compile database only.
+- **The MCP `abi_compare` receipt records the selected `contract_mode`** — the
+  persisted `contract_context` named the built-in default domain even when the
+  caller selected `exports`/`all`, which since ADR-049 Phase 7 is the domain
+  that decides the verdict and the coverage gate a replay consumer reads it for.
 - **A nonexistent `sources`/`build_info`/`compile_db` path is now a usage
   error on the MCP tools** — these infer an evidence-collection depth from
   being set at all, and only an *explicit* depth arms the depth floor, so a

@@ -246,16 +246,32 @@ def _depth_errors(depth: str | None) -> list[str]:
     return [f"unsupported depth {depth!r}: choose from {allowed}"]
 
 
+#: The two ``--frontend-context`` values (ADR-050 D3/D5). One tuple, so the
+#: request-level check and the per-side one below cannot drift -- and so a
+#: third caller inherits both the vocabulary and the message wording rather
+#: than restating them (CodeRabbit).
+FRONTEND_CONTEXTS = ("host", "device")
+
+
+def _frontend_context_message(value: str, label: str = "") -> str:
+    """The one wording for an out-of-vocabulary frontend context.
+
+    *label* names the side when the value came from an ``InputSpec.compile``
+    rather than the request itself.
+    """
+    scope = f"{label} " if label else ""
+    allowed = ", ".join(sorted(FRONTEND_CONTEXTS))
+    return f"unsupported {scope}frontend context {value!r}: choose from {allowed}"
+
+
 def _frontend_context_errors(frontend_context: str) -> list[str]:
     # Validated case-insensitively like the other enums -- an unvalidated value
     # (e.g. "DEVICE") would pass but then compare unequal to the lowercase
     # "host"/"device" literals every actual consumer checks against, silently
     # behaving as neither.
-    if frontend_context.lower() in ("host", "device"):
+    if frontend_context.lower() in FRONTEND_CONTEXTS:
         return []
-    return [
-        f"unsupported frontend context {frontend_context!r}: choose from device, host"
-    ]
+    return [_frontend_context_message(frontend_context)]
 
 
 def _side_errors(label: str, side: InputSpec) -> list[str]:
@@ -270,13 +286,12 @@ def _side_errors(label: str, side: InputSpec) -> list[str]:
       ``validation_errors()``/``validate()`` alone also catches it.
     """
     errors: list[str] = []
-    if side.compile is not None and side.compile.frontend_context.lower() not in (
-        "host",
-        "device",
+    if (
+        side.compile is not None
+        and side.compile.frontend_context.lower() not in FRONTEND_CONTEXTS
     ):
         errors.append(
-            f"unsupported {label} frontend context "
-            f"{side.compile.frontend_context!r}: choose from device, host"
+            _frontend_context_message(side.compile.frontend_context, label)
         )
     if side.dump_manifest is not None and side.headers:
         errors.append(
@@ -658,6 +673,7 @@ class CompareResult:
 
 
 __all__ = [
+    "FRONTEND_CONTEXTS",
     "HEADER_AST_FRONTENDS",
     "SUPPORTED_DEBUG_FORMATS",
     "SUPPORTED_FRONTENDS",

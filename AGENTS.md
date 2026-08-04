@@ -263,17 +263,24 @@ Core pipeline (in order of data flow):
    - `mcp_compare_receipt.py` — the same thing for the MCP `abi_compare`
      tool (ADR-049 Phase 5), which previously patched its own gate rather
      than resolving a config. `resolve_tool_config` hands the tool's real
-     arguments (`policy`/`policy_file`/`suppression_file` + the four
-     severity levels) to the canonical resolver at `FrontEnd.API`;
+     arguments (`policy`/`policy_file`/`suppression_file`, the four
+     severity levels, and — since G33 Phase 5 gave the tool the argument —
+     `contract_mode`) to the canonical resolver at `FrontEnd.API`;
      `record_resolved_config` installs the result through
      `with_resolved_config` before the report renders, keeping the CLI's
      "values from the run, provenance from the resolver" gate split. The
-     receipt states only what this tool *has*: `abi_compare` takes no
-     scope/contract/public-symbol/exit-code-scheme parameter, so those
+     receipt states only what this tool *has*, and `contract_mode` is the
+     one entry that moved: while `abi_compare` had no `--contract`
+     equivalent, `contract.mode` honestly resolved as a built-in default,
+     but once a caller can select `exports`/`all` a receipt still naming the
+     default misreports the domain that produced the verdict and the
+     coverage gate (ADR-049 Phase 7 makes the domain authoritative) — which
+     is exactly what a replay/audit consumer reads it for. `abi_compare`
+     still takes no public-symbol or exit-code-scheme parameter, so those
      resolve as built-in defaults — honest, since `compare_snapshots`'
      own `scope_to_public_surface` default agrees with
-     `BUILT_IN_DEFAULT_CONTRACT_MODE` by construction. A leaf; nothing
-     imports back into the server
+     `BUILT_IN_DEFAULT_CONTRACT_MODE` by construction when no mode is
+     stated. A leaf; nothing imports back into the server
    - `pack_application.py` — ADR-049 D8's *application* layer: what turns a
      selected `--pack` manifest into something the engine runs, rather than
      a line in the receipt (a first `--pack` was reverted before merge for

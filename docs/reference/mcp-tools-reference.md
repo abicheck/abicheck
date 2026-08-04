@@ -93,7 +93,7 @@ Dump ABI snapshot of a C/C++ shared library to JSON.
 | `include_dependencies` | `bool` | no | `True` | Keep declarations whose defining header is a toolchain/system header (default True, matching the Python API's own default — ``dump --include-dependencies``'s opt-out is the CLI spelling of the same switch, whose default is the opposite way round). Set False for a dependency-scoped snapshot. |
 | `dwarf_only` | `bool` | no | `False` | Use DWARF debug info as the primary data source even when headers are available. |
 | `debug_format` | `str \| None` | no | `None` | Force the ELF debug format — "auto", "dwarf", "btf", or "ctf". ELF only: a forced format against a PE/Mach-O input is a validation error rather than a silently ignored request. |
-| `ast_frontend` | `str` | no | `auto` | L2 header-AST frontend — "auto" (default), "castxml", "clang", "hybrid", or "android". |
+| `ast_frontend` | `str` | no | `auto` | AST frontend — "auto" (default), "castxml", "clang" or "hybrid" drive L2 header parsing. "android" is source-ABI-replay only: it has no header-AST path, so header parsing falls back to "auto" rather than failing, and it is meaningful only alongside source inputs. |
 | `gcc_path` | `str \| None` | no | `None` | Explicit compiler binary for the header frontend. |
 | `gcc_prefix` | `str \| None` | no | `None` | Cross-toolchain prefix for the header frontend. |
 | `gcc_options` | `str \| None` | no | `None` | Extra compiler flags for the header frontend, as one shell-quoted string. |
@@ -176,7 +176,7 @@ Run a deterministic source-intelligence scan (ADR-035 D3/D10 / ADR-043).
 | `suppression_file` | `str \| None` | no | `None` | With ``against``: YAML suppression file filtering known changes out of the comparison. |
 | `contract_evaluation` | `bool` | no | `False` | With ``against``: stamp each comparison finding with its ADR-049 contract decision, exactly as ``abi_compare``'s own argument does. Authoritative since ADR-049 Phase 7 — it changes the verdict and the exit code, and an incomplete contract domain contributes the orthogonal coverage exit. |
 | `contract_mode` | `str \| None` | no | `None` | With ``contract_evaluation``: which evidence domain the decision is judged against — "public", "exports", or "all". Omitted, the domain follows the scan's public-surface scoping. |
-| `ast_frontend` | `str` | no | `auto` | L2 header-AST frontend — "auto" (default), "castxml", "clang", "hybrid", or "android". |
+| `ast_frontend` | `str` | no | `auto` | AST frontend — "auto" (default), "castxml", "clang" or "hybrid" drive L2 header parsing. "android" is source-ABI-replay only: it has no header-AST path, so header parsing falls back to "auto" rather than failing, and it is meaningful only alongside source inputs. |
 | `gcc_path` | `str \| None` | no | `None` | Explicit compiler binary for the header frontend. |
 | `gcc_prefix` | `str \| None` | no | `None` | Cross-toolchain prefix for the header frontend. |
 | `gcc_options` | `str \| None` | no | `None` | Extra compiler flags for the header frontend, as one shell-quoted string. |

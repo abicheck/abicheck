@@ -27,14 +27,23 @@ declares legitimate.
 
 **What this tool can and cannot state**, since a receipt may only name inputs
 that exist. ``abi_compare`` takes ``policy``/``policy_file``/
-``suppression_file`` and the four severity levels, so those resolve from real
-arguments. It takes no contract-mode, public-symbol, or exit-code-scheme
-parameter at all -- so unlike ``CompareRequest.scope_public``, whose dataclass
+``suppression_file``, the four severity levels, and -- since G33 Phase 5 gave
+it the argument -- ``contract_mode``, so those resolve from real arguments.
+**That last one is why this paragraph had to change**: while the tool took no
+``--contract`` equivalent, ``contract.mode`` honestly resolved as a built-in
+default. Now a caller can select ``exports``/``all``, and since ADR-049 Phase 7
+the selected domain decides which findings compatibility policy scores, so a
+receipt still naming the default would misreport the domain that produced the
+verdict and the coverage gate -- exactly what a replay/audit consumer reads it
+for (Codex review).
+
+It still takes no public-symbol or exit-code-scheme parameter -- so unlike
+``CompareRequest.scope_public``, whose dataclass
 default is still a caller's choice, there is nothing for a caller to have
 chosen there and those fields resolve as built-in defaults. That is not an
 under-claim: ``service.compare_snapshots``' own ``scope_to_public_surface``
 default is what runs, and it agrees with
-``BUILT_IN_DEFAULT_CONTRACT_MODE`` by construction.
+``BUILT_IN_DEFAULT_CONTRACT_MODE`` by construction when no mode is stated.
 
 It *does* take two consumer-scope arguments, ``used_by`` and
 ``required_symbols``, and those are a genuine under-claim rather than an
@@ -72,6 +81,7 @@ def resolve_tool_config(
     severity_potential_breaking: str | None = None,
     severity_quality_issues: str | None = None,
     severity_addition: str | None = None,
+    contract_mode: str | None = None,
 ) -> Any:
     """Resolve one :class:`CompatibilityEvaluationConfig` for this call.
 
@@ -124,6 +134,7 @@ def resolve_tool_config(
             severity_potential_breaking=severity_potential_breaking,
             severity_quality_issues=severity_quality_issues,
             severity_addition=severity_addition,
+            contract_mode=contract_mode,
         ),
     )
 
@@ -139,6 +150,7 @@ def record_resolved_config(
     suppression: Any = None,
     suppression_path: Any = None,
     severity: Mapping[str, str | None] | None = None,
+    contract_mode: str | None = None,
 ) -> None:
     """Install this tool's resolved configuration onto the persisted context.
 
@@ -177,6 +189,7 @@ def record_resolved_config(
         severity_potential_breaking=levels.get("potential_breaking"),
         severity_quality_issues=levels.get("quality_issues"),
         severity_addition=levels.get("addition"),
+        contract_mode=contract_mode,
     )
     scheme = exit_code_scheme
     if scheme == "scoped":

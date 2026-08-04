@@ -253,8 +253,11 @@ def abi_dump(
         debug_format: Force the ELF debug format — "auto", "dwarf", "btf", or
             "ctf". ELF only: a forced format against a PE/Mach-O input is a
             validation error rather than a silently ignored request.
-        ast_frontend: L2 header-AST frontend — "auto" (default), "castxml",
-            "clang", "hybrid", or "android".
+        ast_frontend: AST frontend — "auto" (default), "castxml", "clang" or
+            "hybrid" drive L2 header parsing. "android" is source-ABI-replay
+            only: it has no header-AST path, so header parsing falls back to
+            "auto" rather than failing, and it is meaningful only alongside
+            source inputs.
         gcc_path: Explicit compiler binary for the header frontend.
         gcc_prefix: Cross-toolchain prefix for the header frontend.
         gcc_options: Extra compiler flags for the header frontend, as one
@@ -1009,6 +1012,10 @@ def abi_compare(
                 policy_file_path=policy_file,
                 suppression=suppression,
                 suppression_path=suppression_file,
+                # ADR-049 Phase 6/7: the selected domain decides which findings
+                # policy scores, so the receipt must name the one that produced
+                # this verdict rather than the built-in default (Codex review).
+                contract_mode=contract_mode,
                 severity={
                     "preset": severity_preset,
                     "abi_breaking": severity_abi_breaking,
@@ -1662,8 +1669,11 @@ def abi_scan(
         contract_mode: With ``contract_evaluation``: which evidence domain the
             decision is judged against — "public", "exports", or "all". Omitted,
             the domain follows the scan's public-surface scoping.
-        ast_frontend: L2 header-AST frontend — "auto" (default), "castxml",
-            "clang", "hybrid", or "android".
+        ast_frontend: AST frontend — "auto" (default), "castxml", "clang" or
+            "hybrid" drive L2 header parsing. "android" is source-ABI-replay
+            only: it has no header-AST path, so header parsing falls back to
+            "auto" rather than failing, and it is meaningful only alongside
+            source inputs.
         gcc_path: Explicit compiler binary for the header frontend.
         gcc_prefix: Cross-toolchain prefix for the header frontend.
         gcc_options: Extra compiler flags for the header frontend, as one

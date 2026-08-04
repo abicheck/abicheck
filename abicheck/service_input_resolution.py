@@ -101,6 +101,47 @@ def reject_hybrid_source_frontend(
             )
 
 
+def _seeded_includes(
+    side: InputSpec, evidence: SideEvidence
+) -> tuple[list[Path], list[Callable[[], None]]]:
+    """This input's include dirs, plus any the build already knows about.
+
+    When headers are given with ``sources``/``build_info`` but no explicit
+    ``includes``, the L2 public-header parse cannot see the include dirs the
+    build knows (the pvxs/EPICS case: public headers that reach into a
+    dependency SDK). The CLI has seeded them from the build since ADR-033
+    (``cli_dump_helpers``' two ``seed_l2_includes`` calls); the typed path did
+    not, so an identical ``DumpRequest``/``CompareRequest`` parsed less than
+    the equivalent CLI invocation and degraded or failed (Codex review).
+
+    ``allow_inferred_build_query=False``, unlike the CLI's
+    ``collect_mode != "off"``: passive discovery of an existing compile
+    database still applies, but a Tier-2 API call must never *execute* a
+    build system (cmake/make/bazel) as a side effect of resolving an input.
+    That is a surprise a library caller cannot see coming, and the CLI only
+    permits it because the user typed a command that says so.
+
+    Returns the cleanups the caller must run **after** the parse consumes the
+    dirs — an inferred build dir may hold the generated headers they point at.
+    """
+    if not (side.sources or side.build_info):
+        return list(side.includes), []
+    from .buildsource.l2_seed import seed_l2_includes
+
+    compile = evidence.compile
+    return seed_l2_includes(
+        headers=evidence.headers,
+        includes=side.includes,
+        sources=side.sources,
+        build_info=side.build_info,
+        build_config=None,
+        defer_cleanup=None,
+        gcc_options=compile.gcc_options if compile is not None else None,
+        gcc_option_tokens=compile.gcc_option_tokens if compile is not None else (),
+        allow_inferred_build_query=False,
+    )
+
+
 def resolve_side_snapshot(
     side: InputSpec,
     evidence: SideEvidence,
@@ -126,38 +167,48 @@ def resolve_side_snapshot(
     """
     from . import service
 
-    snap = service.resolve_input(
-        side.path,
-        evidence.headers,
-        list(side.includes),
-        side.version,
-        lang,
-        is_elf=True if fmt == "elf" else None,
-        pdb_path=side.pdb,
-        debug_roots=list(side.debug_roots) or None,
-        enable_debuginfod=enable_debuginfod,
-        debuginfod_url=debuginfod_url,
-        header_backend=header_backend,
-        compile=evidence.compile,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
-        include_dependencies=side.include_dependencies,
-        dump_manifest=evidence.dump_manifest,
-        follow_linker_scripts=side.follow_linker_scripts,
-        dwarf_only=dwarf_only,
-        debug_format=debug_format,
-        include_labels=include_labels,
-        notify=notify,
-    )
-    if side.sources or side.build_info:
-        embed_side_build_source(
-            snap,
-            side,
-            evidence,
-            header_backend,
-            public_headers,
-            public_header_dirs,
+    includes, cleanups = _seeded_includes(side, evidence)
+    try:
+        snap = service.resolve_input(
+            side.path,
+            evidence.headers,
+            includes,
+            side.version,
+            lang,
+            is_elf=True if fmt == "elf" else None,
+            pdb_path=side.pdb,
+            debug_roots=list(side.debug_roots) or None,
+            enable_debuginfod=enable_debuginfod,
+            debuginfod_url=debuginfod_url,
+            header_backend=header_backend,
+            compile=evidence.compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            include_dependencies=side.include_dependencies,
+            dump_manifest=evidence.dump_manifest,
+            follow_linker_scripts=side.follow_linker_scripts,
+            dwarf_only=dwarf_only,
+            debug_format=debug_format,
+            include_labels=include_labels,
+            notify=notify,
         )
+        if side.sources or side.build_info:
+            embed_side_build_source(
+                snap,
+                side,
+                evidence,
+                header_backend,
+                public_headers,
+                public_header_dirs,
+            )
+    finally:
+        # Only after the L2 parse (and any embed) has consumed the seeded dirs:
+        # an inferred CMake build dir can hold the generated headers they point
+        # into, so draining earlier would delete them mid-parse.
+        if cleanups:
+            from .buildsource.inline import _run_cleanups
+
+            _run_cleanups(cleanups)
     return snap
 
 
