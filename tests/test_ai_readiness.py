@@ -1114,6 +1114,33 @@ def test_adr_status_sync_allows_index_row_to_abridge(car, ass, tmp_path, monkeyp
     assert f.errors == [], f"abridged index row wrongly flagged: {f.errors}"
 
 
+def test_adr_status_sync_rejects_duplicate_verified_lines(
+    car, ass, tmp_path, monkeypatch
+):
+    """Two receipts — what a merge resolution or careless edit produces —
+    make "which commit was this verified at?" ambiguous. Validating only the
+    first would leave a malformed or conflicting second one in the file with
+    the gate still green (Codex review on #667)."""
+    adr_dir = _write_status_sync_fixture(
+        tmp_path,
+        monkeypatch,
+        ass,
+        adr_status="Accepted — implemented.",
+        index_status="Accepted — implemented",
+    )
+    (adr_dir / "001-example.md").write_text(
+        "# ADR-001\n\n**Status:** Accepted — implemented.\n"
+        "**Verified:** main@abc1234 on 2026-01-01\n"
+        "**Verified:** main@def5678 on 2026-02-02\n",
+        encoding="utf-8",
+    )
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert any("exactly one is allowed" in msg for _, msg in f.errors), (
+        f"expected a duplicate-receipt error, got: {f.errors}"
+    )
+
+
 def test_adr_status_sync_ignores_a_verified_example_in_the_body(
     car, ass, tmp_path, monkeypatch
 ):

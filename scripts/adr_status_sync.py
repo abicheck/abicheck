@@ -407,16 +407,33 @@ def _check_adr_verification_receipt(
     that point means the prose describing it may no longer hold. That is a
     WARN, not an ERROR -- a change to a named module doesn't prove the claim
     went stale, it proves nobody has re-read it since the code moved.
+
+    Exactly one receipt is allowed. Two of them -- what a merge resolution or
+    a careless edit produces -- leave "which commit was this verified at?"
+    ambiguous, and validating only the first would let a malformed or
+    conflicting second one sit in the file with the gate still green (Codex
+    review on PR #667). That is the same silent no-op this whole check exists
+    to prevent, so it is reported rather than resolved by picking one.
     """
-    m = _ADR_VERIFIED_START_RE.search(_adr_metadata_block(text))
-    if m is None:
+    receipts = _ADR_VERIFIED_START_RE.findall(_adr_metadata_block(text))
+    if not receipts:
         return
-    value = _ADR_VERIFIED_VALUE_RE.match(m.group(1).strip())
+    if len(receipts) > 1:
+        f.err(
+            "adr-status-sync",
+            f"docs/contribute/adr/{name}: carries {len(receipts)} "
+            "'**Verified:**' lines; exactly one is allowed, since which "
+            "commit the Status was checked at would otherwise be ambiguous "
+            f"({', '.join(repr(r.strip()) for r in receipts)})",
+        )
+        return
+    raw = receipts[0].strip()
+    value = _ADR_VERIFIED_VALUE_RE.match(raw)
     if value is None:
         f.err(
             "adr-status-sync",
             f"docs/contribute/adr/{name}: malformed '**Verified:**' line "
-            f"({m.group(1).strip()!r}); expected '<ref>@<sha> on YYYY-MM-DD', "
+            f"({raw!r}); expected '<ref>@<sha> on YYYY-MM-DD', "
             "e.g. 'main@2e43d53 on 2026-08-04'",
         )
         return
