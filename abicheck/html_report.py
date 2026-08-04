@@ -730,9 +730,20 @@ def generate_html_report(
     # lightweight stub result without a real DiffResult's policy machinery
     # still renders — compatibility_metrics falls back to raw-kind counting
     # when kind_sets is None.
+    # ADR-049 D1, same reasoning one level up in `report_summary.
+    # build_summary`: a finding contract evaluation left NOT_EVALUATED is not
+    # on the compatibility axis, so counting it here would put "0.0% binary
+    # compatibility" on a page whose verdict banner reads NO_CHANGE -- the
+    # exact disagreement the policy/kind_sets note above already guards
+    # against for the demotion case. Filtered via the shared predicate rather
+    # than `result._evaluated_changes()`: `all_changes` here is the render
+    # set, which a stub result need not expose, and this function is
+    # duck-typed throughout.
+    from .contract_gating import is_evaluated
+
     _eff_kind_sets_fn = getattr(result, "_effective_kind_sets", None)
     metrics = compatibility_metrics(
-        cast(list[HasKind], all_changes),
+        [c for c in cast(list[HasKind], all_changes) if is_evaluated(c)],
         old_symbol_count,
         policy=getattr(result, "policy", None),
         kind_sets=_eff_kind_sets_fn() if callable(_eff_kind_sets_fn) else None,

@@ -48,7 +48,14 @@ from abicheck.contract_relevance_types import (
     CompatibilityEvaluationStatus,
     ContractRelevance,
 )
-from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    RecordType,
+    ScopeOrigin,
+    TypeField,
+    Visibility,
+)
 from abicheck.serialization import snapshot_to_json
 
 
@@ -297,6 +304,238 @@ class TestTheGateFollowsTheDecision:
             for c in result.changes
         ]
         assert max(contributions) == legacy_exit_code(result.verdict)
+
+
+class TestAnExcludedFindingCannotLaunderItselfBack:
+    """A finding that does not score must not reach the gate *indirectly*.
+
+    Three ways it nearly did (Codex review of this PR), all the same shape:
+    something downstream still read the unfiltered change list. Excluding a
+    finding from policy is only meaningful if everything that *derives* from
+    the finding set is excluded with it.
+    """
+
+    @staticmethod
+    def _pair_with_soname(soname: str = "libfoo.so.1"):
+        """The unreached-public-type pair, plus an unchanged ELF SONAME."""
+        from abicheck.elf_metadata import ElfMetadata
+
+        old, new = _unreached_public_type_pair()
+        old.elf = ElfMetadata(soname=soname)
+        new.elf = ElfMetadata(soname=soname)
+        return old, new
+
+    def test_it_does_not_derive_a_soname_advisory(self) -> None:
+        """The SONAME policy *creates a finding* from the presence of
+        breaking ones, and the advisory it creates is `NOT_APPLICABLE` --
+        therefore evaluated. Running it over unclassified findings let an
+        excluded layout change manufacture an evaluated
+        `soname_bump_recommended`, moving `NO_CHANGE` to `COMPATIBLE` (and,
+        under a policy that escalates the advisory, into the gate).
+        """
+        result = _compare(
+            self._pair_with_soname(),
+            contract_evaluation=True,
+            contract_mode="public",
+        )
+        kinds = [c.kind for c in result.changes]
+        assert ChangeKind.SONAME_BUMP_RECOMMENDED not in kinds
+        assert result.verdict is Verdict.NO_CHANGE
+
+    def test_the_advisory_is_still_derived_when_the_finding_scores(self) -> None:
+        """The control: this is a filter on excluded findings, not a
+        disabling of the SONAME policy under `--contract-evaluation`."""
+        result = _compare(
+            self._pair_with_soname(),
+            contract_evaluation=True,
+            contract_mode="all",
+        )
+        kinds = [c.kind for c in result.changes]
+        assert ChangeKind.SONAME_BUMP_RECOMMENDED in kinds
+        assert result.verdict is Verdict.BREAKING
+
+    def test_the_compatibility_percentages_exclude_it_too(self) -> None:
+        """`build_summary`'s percentages are the compatibility axis. Counting
+        an excluded finding there reported `verdict: NO_CHANGE` and
+        `breaking: 0` beside `binary_compatibility_pct: 0.0` and
+        `affected_pct: 100.0` in the same JSON document.
+        """
+        from abicheck.report_summary import build_summary
+
+        result = _compare(
+            _unreached_public_type_pair(),
+            contract_evaluation=True,
+            contract_mode="public",
+        )
+        summary = build_summary(result)
+        assert result.verdict is Verdict.NO_CHANGE
+        assert summary.breaking == 0
+        assert summary.binary_compatibility_pct == 100.0
+        assert summary.affected_pct == 0.0
+        # `total_changes` is a count of what the report shows, not of what
+        # scored -- the excluded finding is still displayed.
+        assert summary.total_changes == 1
+
+    def test_the_html_percentages_exclude_it_too(self) -> None:
+        """The HTML renderer computes its own metrics rather than reading
+        `build_summary`, so it needs the same filter or the two disagree."""
+        from abicheck.html_report import generate_html_report
+
+        result = _compare(
+            _unreached_public_type_pair(),
+            contract_evaluation=True,
+            contract_mode="public",
+        )
+        html = generate_html_report(result)
+        # The page's verdict banner and its compatibility percentage have to
+        # tell the same story: a NO_CHANGE banner beside "0.0% binary
+        # compatibility (1 breaking change)" was the bug.
+        assert "NO_CHANGE" in html
+        assert "100.0%" in html
+        assert "(0 breaking change(s))" in html
+
+
+class TestEveryReportModeStatesTheSameGateContribution:
+    """`--report-mode leaf` builds its own entry dicts rather than routing
+    through `_change_to_dict`, so it can silently miss a field the other
+    modes carry -- which is exactly what happened to `gate_contribution`."""
+
+    @staticmethod
+    def _reachable_type_pair():
+        def snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libfoo.so",
+                version="1",
+                functions=[
+                    Function(
+                        name="api",
+                        mangled="api",
+                        return_type="Cfg *",
+                        visibility=Visibility.PUBLIC,
+                    )
+                ],
+                types=[
+                    RecordType(
+                        name="Cfg",
+                        kind="struct",
+                        size_bits=size,
+                        fields=[TypeField(name="x", type="int", offset_bits=0)],
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    )
+                ],
+            )
+
+        return snap(64), snap(128)
+
+    @pytest.mark.parametrize("report_mode", ["full", "leaf"])
+    def test_a_gating_finding_states_its_real_contribution(
+        self, report_mode: str
+    ) -> None:
+        from abicheck import reporter
+        from abicheck.severity import SeverityConfig
+
+        result = _compare(
+            self._reachable_type_pair(),
+            contract_evaluation=True,
+            contract_mode="all",
+        )
+        assert result.verdict is Verdict.BREAKING
+        kwargs = {"severity_config": SeverityConfig()}
+        if report_mode == "leaf":
+            kwargs["report_mode"] = "leaf"
+        payload = json.loads(reporter.to_json(result, **kwargs))
+        entries = payload.get("leaf_changes") or payload["changes"]
+        type_entries = [e for e in entries if e["kind"].startswith("type_")]
+        assert type_entries, entries
+        for entry in type_entries:
+            assert entry["compatibility_decision"] == "BREAKING"
+            assert entry["gate_contribution"] == 4
+
+
+class TestExplicitConsumerEvidencePromotesAFinding:
+    """`--used-by`/`--required-symbol` stamping runs *after* `compare()`
+    returned, so it has to carry the whole decision with it.
+
+    ADR-049 §4.3 ranks explicit consumer/required-symbol evidence as the
+    strongest public-contract proof, above header-derived membership — so it
+    overrides a weaker `UNKNOWN_UNRESOLVED` the header path reached. Once
+    relevance is authoritative, promoting the relevance alone is not enough:
+    a stale `NOT_EVALUATED` status would keep the gate excluding a finding a
+    real consumer was just proven to depend on, and a stale `None` decision
+    would read as "policy declined to score a finding it did score".
+    """
+
+    @staticmethod
+    def _unresolved_removal():
+        from abicheck.contract_pipeline import build_contract_stage
+        from abicheck.post_processing import PipelineContext
+
+        old, new = _removal_pair()
+        stage = build_contract_stage(
+            old,
+            new,
+            scope_to_public_surface=True,
+            force_public_symbols=None,
+            pp_ctx=PipelineContext(old=old, new=new),
+            contract_mode="exports",
+        )
+        change = Change(ChangeKind.FUNC_REMOVED, "pub_b", "Public function removed")
+        stage.classify([change])
+        return change
+
+    def test_promotion_carries_status_and_decision(self) -> None:
+        from abicheck.contract_evaluation import stamp_scoped_result_findings
+        from abicheck.contract_gating import is_evaluated
+        from abicheck.finding_identity import report_finding_id
+
+        change = self._unresolved_removal()
+        assert change.contract_relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert not is_evaluated(change)
+
+        class _Result:
+            changes = [change]
+            scoped_relevant_finding_ids = frozenset({report_finding_id(change)})
+            scoped_only_changes = ()
+            policy = "strict_abi"
+            policy_file = None
+
+        stamp_scoped_result_findings(_Result(), finding_id=report_finding_id)
+
+        assert change.contract_relevance is ContractRelevance.IN_CONTRACT
+        assert change.compatibility_evaluation_status is (
+            CompatibilityEvaluationStatus.EVALUATED
+        )
+        assert is_evaluated(change)
+        # And the decision policy would reach for it, not a stale null.
+        assert change.compatibility_decision is Verdict.BREAKING
+
+    def test_a_non_entity_finding_is_left_alone(self) -> None:
+        """The documented exception: a SONAME/loader finding is in the scoped
+        relevant set for reasons unrelated to a consumer referencing a symbol,
+        so overriding it to IN_CONTRACT would be a false decision rather than
+        a stronger one. It is already NOT_APPLICABLE, hence already
+        evaluated."""
+        from abicheck.contract_evaluation import (
+            stamp_explicit_scope_contract_evaluation,
+        )
+
+        change = Change(ChangeKind.SONAME_CHANGED, "DT_SONAME", "soname changed")
+        change.contract_relevance = ContractRelevance.NOT_APPLICABLE
+        change.compatibility_evaluation_status = CompatibilityEvaluationStatus.EVALUATED
+        stamp_explicit_scope_contract_evaluation(change)
+        assert change.contract_relevance is ContractRelevance.NOT_APPLICABLE
+
+    def test_a_plain_dict_entry_gets_the_status_too(self) -> None:
+        """A missing-symbol/entrypoint label is a plain dict the caller
+        renders directly, not a `Change` — it takes the same fields."""
+        from abicheck.contract_evaluation import (
+            stamp_explicit_scope_contract_evaluation,
+        )
+
+        entry: dict = {"kind": "consumer_required_symbol_missing", "symbol": "pub_b"}
+        stamp_explicit_scope_contract_evaluation(entry)
+        assert entry["contract_relevance"] == "IN_CONTRACT"
+        assert entry["compatibility_evaluation_status"] == "EVALUATED"
 
 
 class TestNothingIsLost:

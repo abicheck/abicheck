@@ -514,6 +514,7 @@ def _apply_soname_policy(
     new: AbiSnapshot,
     *,
     versioned_scheme_soname_relink_required: bool = False,
+    stage: ContractEvaluationStage | None = None,
 ) -> list[Change]:
     """Apply ELF version-node demotion and SONAME bump-policy check.
 
@@ -523,6 +524,17 @@ def _apply_soname_policy(
 
     Runs after post-processing so downstream dedup/rename collapsing is
     already settled before the policy reads ``kept + verdict_redundant``.
+
+    *stage* (ADR-049 D9) makes this policy read the same finding set
+    compatibility policy will. The SONAME check *derives a new finding* from
+    the presence of breaking ones, so an excluded finding reaching it does
+    not merely fail to be ignored — it manufactures a
+    ``soname_bump_recommended`` advisory that is itself ``NOT_APPLICABLE``,
+    hence evaluated, hence able to move a ``NO_CHANGE`` verdict to
+    ``COMPATIBLE`` and, under a policy that escalates the advisory, to gate.
+    A change proven outside the contract must not be able to launder itself
+    into the gate through a derived finding (Codex review, confirmed with a
+    proven-out-of-contract layout change against an unchanged SONAME).
     """
     from .diff_versioning import demote_internal_version_node_findings
     from .elf_metadata import ElfMetadata as _ElfMetadata
@@ -535,9 +547,16 @@ def _apply_soname_policy(
     # spurious bump recommendation (validation parity class A — nettle 3.6→3.7).
     demote_internal_version_node_findings(kept + verdict_redundant, _old_elf, _new_elf)
 
-    soname_changes = check_soname_bump_policy(
-        kept + verdict_redundant, _old_elf, _new_elf
-    )
+    # Classify before deriving, not after: everything appended to `kept` up to
+    # this point (the declared-floor, wheel and numpy checks above included) is
+    # covered, and `classify` is idempotent, so the later verdict computation
+    # re-runs over the same findings for free.
+    policy_input = kept + verdict_redundant
+    if stage is not None:
+        stage.classify(policy_input)
+        policy_input = evaluated_for_policy(policy_input)
+
+    soname_changes = check_soname_bump_policy(policy_input, _old_elf, _new_elf)
     if versioned_scheme_soname_relink_required:
         soname_changes = [
             c
@@ -990,6 +1009,7 @@ def compare(
         versioned_scheme_soname_relink_required=(
             pp_ctx.versioned_scheme_soname_relink_required
         ),
+        stage=stage,
     )
 
     all_unsuppressed = kept + verdict_redundant

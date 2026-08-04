@@ -458,7 +458,27 @@ def _to_json_leaf(
         # contract_relevance/contract_reason_code/contract_assurance even
         # though the identical finding kept them under --report-mode full
         # (Codex review, fresh evidence).
-        _add_contract_evaluation_fields(entry, c)
+        #
+        # The gate contribution is computed, not left at the helper's default
+        # `0`: that default is right for the audit ledgers (an out-of-surface
+        # or suppressed finding reaches no gate), but a leaf entry is an
+        # ordinary `result.changes` finding that does. Without this, an
+        # evaluated `type_size_changed` driving a real exit 4 serialized as
+        # `compatibility_decision: BREAKING` beside `gate_contribution: 0`
+        # under --report-mode leaf alone (Codex review, fresh evidence).
+        from .severity import gate_contribution_for_change
+
+        _add_contract_evaluation_fields(
+            entry,
+            c,
+            gate_contribution=gate_contribution_for_change(
+                cast(HasKind, c),
+                severity_config,
+                policy=effective_policy,
+                kind_sets=eff_sets,
+                policy_file=result.policy_file,
+            ),
+        )
         return entry
 
     leaf_changes_list = [_leaf_entry(c) for c in type_changes]
