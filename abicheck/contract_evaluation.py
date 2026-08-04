@@ -58,7 +58,6 @@ its :doc:`implementation plan </contribute/plans/public-contract-default>`.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -800,11 +799,7 @@ def _in_surface_result_is_confirmed(
         return True
     return bool(
         _confirmed_type_matches(
-            _type_candidates(change),
-            auth.public_types,
-            auth.ambiguous_type_names,
-            auth.ambiguous_type_name_arity,
-            auth.origin_by_qualified_key,
+            _type_candidates(change), auth.public_types, auth.ambiguous_type_names
         )
     )
 
@@ -966,11 +961,7 @@ def _type_candidates(change: Change) -> set[str]:
 
 
 def _confirmed_type_matches(
-    candidates: set[str],
-    types: set[str],
-    ambiguous: set[str],
-    arity: Mapping[str, int] | None = None,
-    qualified_origins: Mapping[str, ScopeOrigin] | None = None,
+    candidates: set[str], types: set[str], ambiguous: set[str]
 ) -> set[str]:
     """*candidates* present in *types* whose identity is not ambiguous.
 
@@ -987,71 +978,37 @@ def _confirmed_type_matches(
     candidate, rather than its ambiguous sibling, is what the signature
     actually reaches. Neither case establishes which record -- or whether
     either -- this finding's root actually resolves to.
+
+    **An "indecisive ambiguity" shortcut was tried here and reverted; do not
+    re-derive it.** The idea was that when every colliding entry is
+    public-header origin, both readings put the finding in the contract, so
+    the ambiguity has nothing to decide and the finding can be confirmed --
+    which would recover the real gate coverage this rejection costs
+    (``measure_contract_shadow.py``'s ``unresolved_losses`` counts it). The
+    premise is false: ``ScopeOrigin.PUBLIC_HEADER`` records *where a
+    declaration was written*, not whether it is reachable from a public
+    root, and this module's whole notion of membership is reachability --
+    that is what ``compute_public_surface`` computes and what ``types``
+    (``public_surface.public_types``) means here. A type declared in a
+    public header that no public API reaches is not in the contract.
+
+    Confirmed empirically before reverting (Codex review): with
+    ``one::api(Point *)`` reaching ``one::Point`` and an unrelated,
+    unreachable ``two::Point`` also declared in a public header, the origin
+    count equals the arity, so a layout finding on ``two::Point`` was
+    confirmed ``IN_CONTRACT`` and gated the run -- turning a withheld
+    finding into a false positive. Counting reachable siblings instead is
+    not available either: the closure adds *both* under the shared bare key
+    (that is the anti-hiding rule above), so ``public_types`` cannot say
+    which qualified identity was independently reached. Proving
+    indecisiveness needs per-identity reachability that ``surface.py`` does
+    not record today.
     """
-    arity = arity or {}
-    qualified_origins = qualified_origins or {}
     return {
         m
         for m in candidates & types
-        if _ambiguity_is_decisive_for(m, ambiguous, arity, qualified_origins) is not True
+        if m not in ambiguous and not ("::" in m and m.rsplit("::", 1)[1] in ambiguous)
     }
-
-
-def _ambiguity_is_decisive_for(
-    candidate: str,
-    ambiguous: set[str],
-    arity: Mapping[str, int],
-    qualified_origins: Mapping[str, ScopeOrigin],
-) -> bool | None:
-    """Whether *candidate*'s ambiguity can change the contract answer.
-
-    ``None`` when there is no ambiguity to speak of. ``False`` when there is
-    one but it is *indecisive*: every entry the name collides across is
-    itself public, so both readings put the finding in the contract and the
-    unknowable part is unknowable about something that does not matter.
-    ``True`` when a colliding entry is not accounted for and the answer
-    genuinely turns on which record the finding is about.
-
-    The indecisive case is what this exists for. Rejecting it cost real gate
-    coverage: measured against the corpus (``measure_contract_shadow.py``'s
-    ``unresolved_losses``), a genuine ``type_size_changed`` break on a public
-    type whose bare tail happened to collide with another *public* type
-    stopped gating -- the decision was withheld over an ambiguity that had
-    the same answer either way.
-
-    Proof is by counting, and it fails closed. ``arity`` is the number of
-    record/enum entries sharing the bare tail; the siblings counted here are
-    the *public-header-origin* entries of ``origin_by_qualified_key`` whose
-    own tail is that name. Unless those numbers agree, some colliding entry
-    is either not public or carries no qualified name to read an origin
-    from, and the ambiguity stays decisive.
-
-    Two details are load-bearing. Counting rather than set-membership:
-    ``PublicSurface.origin_by_key`` merges a collision with public winning,
-    so a private sibling is invisible by the time anything downstream looks
-    -- an existence check there would confirm exactly the case that must not
-    be confirmed. And counting *qualified* entries rather than
-    ``public_types``: that set is keyed by the bare name the producer
-    records, so every colliding entry collapses to one member and the count
-    could never reach an arity above one -- the proof would be dead code.
-    """
-    bare = candidate.rsplit("::", 1)[1] if "::" in candidate else candidate
-    name = candidate if candidate in ambiguous else (bare if bare in ambiguous else None)
-    if name is None:
-        return None
-    expected = arity.get(name)
-    if not expected:
-        # Ambiguous, but with no recorded arity to reason from -- an older
-        # surface, or a name flagged by a path that did not count. No proof
-        # is available, so the ambiguity stands.
-        return True
-    siblings = sum(
-        1
-        for qualified, origin in qualified_origins.items()
-        if origin is ScopeOrigin.PUBLIC_HEADER
-        and (qualified.rsplit("::", 1)[1] if "::" in qualified else qualified) == name
-    )
-    return siblings != expected
 
 
 def _authoritative_export_surface(

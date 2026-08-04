@@ -370,10 +370,6 @@ class PublicSurface:
     # within their own kind, but still collide in the single ``origin_by_key``
     # both kinds share (Codex review, thirteenth round).
     ambiguous_type_names: set[str] = field(default_factory=set)
-    # ``{ambiguous name: how many record/enum entries share it}``. Same keys
-    # as ``ambiguous_type_names``; see where it is populated for why the count
-    # cannot be recovered later from ``origin_by_key``.
-    ambiguous_type_name_arity: dict[str, int] = field(default_factory=dict)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
     # Lets the classifier distinguish a confident reachability demotion from one
@@ -477,17 +473,6 @@ def _index_surface_types(
             combined_counts[name] = combined_counts.get(name, 0) + len(entries)
     surface.ambiguous_type_names.update(
         name for name, count in combined_counts.items() if count > 1
-    )
-    # How many entries each ambiguous name actually collides across. The
-    # membership set alone says an answer is unknowable; the arity is what
-    # lets a consumer ask whether it *matters* -- when every colliding entry
-    # is public, both readings place a finding in the contract and the
-    # ambiguity cannot change the answer. Recorded here rather than
-    # recomputed downstream because `origin_by_key` merges collisions with
-    # public winning, so after the fact there is no way to count the private
-    # sibling that makes an ambiguity decisive.
-    surface.ambiguous_type_name_arity.update(
-        (name, count) for name, count in combined_counts.items() if count > 1
     )
     return record_by_name, enum_by_name
 
