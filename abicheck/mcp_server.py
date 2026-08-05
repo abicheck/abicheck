@@ -284,20 +284,22 @@ def abi_dump(
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
+        # Every validator below raises ValueError (ManifestValidationError
+        # included -- it subclasses ValueError) on a bad argument, and every
+        # one converts to the identical JSON error payload, so one try/except
+        # covers the whole phase instead of one per argument family (a fresh
+        # review's own suggestion: this was four separate try/except blocks
+        # doing the same conversion). Order matches the original blocks
+        # exactly, so which error a multi-invalid-argument call reports first
+        # is unchanged.
         try:
             phd_paths = _public_header_dir_paths(public_header_dirs)
-        except ValueError as exc:
-            return json.dumps({"status": "error", "error": str(exc)})
-        try:
             depth = _validate_public_depth(depth)
-        except ValueError as exc:
-            return json.dumps({"status": "error", "error": str(exc)})
-        # Existence is checked, not just containment: `sources`/`build_info`
-        # infer a collect mode from being set at all, and only an *explicit*
-        # depth arms the floor -- so a typo would otherwise collect nothing
-        # and still answer "ok" (Codex review, P1). The CLI's own
-        # `click.Path(exists=True)` rejects the same input.
-        try:
+            # Existence is checked, not just containment: `sources`/`build_info`
+            # infer a collect mode from being set at all, and only an *explicit*
+            # depth arms the floor -- so a typo would otherwise collect nothing
+            # and still answer "ok" (Codex review, P1). The CLI's own
+            # `click.Path(exists=True)` rejects the same input.
             src_path = _existing_path(sources, label="sources") if sources else None
             bi_path = (
                 _existing_path(build_info, label="build_info") if build_info else None
@@ -316,21 +318,18 @@ def abi_dump(
                 nostdinc=nostdinc,
                 frontend_context=frontend_context,
             )
+            manifest = None
+            if manifest_path is not None:
+                from .dump_manifest import load_manifest
+
+                manifest = load_manifest(manifest_path)
+                # The manifest YAML passed the size guard, but the headers it
+                # *names* had not -- and the pipeline parses those, so a tiny
+                # manifest could smuggle in a file `headers=` would have
+                # rejected (Codex review).
+                _check_manifest_file_sizes(manifest)
         except ValueError as exc:
             return json.dumps({"status": "error", "error": str(exc)})
-        manifest = None
-        if manifest_path is not None:
-            from .dump_manifest import load_manifest
-
-            manifest = load_manifest(manifest_path)
-            # The manifest YAML passed the size guard, but the headers it
-            # *names* had not -- and the pipeline parses those, so a tiny
-            # manifest could smuggle in a file `headers=` would have rejected
-            # (Codex review).
-            try:
-                _check_manifest_file_sizes(manifest)
-            except ValueError as exc:
-                return json.dumps({"status": "error", "error": str(exc)})
 
         request = DumpRequest(
             input=InputSpec(
@@ -1711,16 +1710,20 @@ def abi_scan(
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
+        # One try/except for both argument families this PR added (a fresh
+        # review's own suggestion — these were two separate try/except blocks
+        # doing the identical ValueError-to-JSON conversion). `depth` above
+        # stays in its own, separate try: it predates this PR and sits before
+        # the unrelated hdr_paths/inc_paths construction, so folding it in
+        # here would reorder pre-existing statements for no benefit.
         try:
             phd_paths = _public_header_dir_paths(public_header_dirs)
-        except ValueError as exc:
-            return json.dumps({"status": "error", "error": str(exc)})
-        # Same existence rule as `abi_dump` (Codex review, P1): every one of
-        # these infers evidence collection from being set, and the `scan` CLI
-        # declares all four `click.Path(exists=True)`. `sources`/`compile_db`
-        # predate this PR and carried the identical hole -- fixed alongside
-        # `build_info` rather than left as a knowingly-broken twin.
-        try:
+            # Same existence rule as `abi_dump` (Codex review, P1): every one
+            # of these infers evidence collection from being set, and the
+            # `scan` CLI declares all four `click.Path(exists=True)`.
+            # `sources`/`compile_db` predate this PR and carried the identical
+            # hole -- fixed alongside `build_info` rather than left as a
+            # knowingly-broken twin.
             src_path = _existing_path(sources, label="sources") if sources else None
             cdb_path = (
                 _existing_path(compile_db, label="compile_db") if compile_db else None

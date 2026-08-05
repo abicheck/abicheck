@@ -467,11 +467,11 @@ def _compile_context_from_args(
     """
     from .api_types import (
         HEADER_AST_FRONTENDS,
-        _frontend_context_errors,
-        _frontend_value_errors,
+        frontend_context_errors,
+        frontend_value_errors,
     )
 
-    errors = _frontend_value_errors(ast_frontend) + _frontend_context_errors(
+    errors = frontend_value_errors(ast_frontend) + frontend_context_errors(
         frontend_context
     )
     if errors:

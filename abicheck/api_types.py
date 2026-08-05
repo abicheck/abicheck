@@ -1,5 +1,4 @@
 # Copyright 2026 Nikolay Petrov
-# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -209,12 +208,20 @@ def _lang_errors(lang: str) -> list[str]:
     return [f"unsupported language {lang!r}: choose from {allowed}"]
 
 
-def _frontend_value_errors(frontend: str) -> list[str]:
+def frontend_value_errors(frontend: str) -> list[str]:
     """``frontend`` must name a known AST frontend (value check only).
 
     The cross-flag ``android``-needs-source-inputs rule is left to each request
     type: what counts as "has source inputs" differs between a two-sided
     comparison and a single dump.
+
+    Public (no leading underscore): unlike this module's other per-field
+    validators, ``mcp_server_inputs._compile_context_from_args`` imports this
+    one across the module boundary, so its own MCP-argument validation
+    matches ``DumpRequest.validate()``'s wording exactly instead of
+    restating the rule (a fresh review's own suggestion — a shared-vocabulary
+    function reads clearer as a declared public name than a private one used
+    from outside its module).
     """
     if frontend.lower() in SUPPORTED_FRONTENDS:
         return []
@@ -264,7 +271,13 @@ def _frontend_context_message(value: str, label: str = "") -> str:
     return f"unsupported {scope}frontend context {value!r}: choose from {allowed}"
 
 
-def _frontend_context_errors(frontend_context: str) -> list[str]:
+def frontend_context_errors(frontend_context: str) -> list[str]:
+    """``frontend_context`` must be one of :data:`FRONTEND_CONTEXTS`.
+
+    Public for the same reason as :func:`frontend_value_errors`:
+    ``mcp_server_inputs._compile_context_from_args`` imports it across the
+    module boundary.
+    """
     # Validated case-insensitively like the other enums -- an unvalidated value
     # (e.g. "DEVICE") would pass but then compare unequal to the lowercase
     # "host"/"device" literals every actual consumer checks against, silently
@@ -453,7 +466,7 @@ class CompareRequest:
         errors: list[str] = []
         errors += _lang_errors(self.lang)
         frontend = self.frontend.lower()
-        frontend_errors = _frontend_value_errors(self.frontend)
+        frontend_errors = frontend_value_errors(self.frontend)
         errors += frontend_errors
         if not frontend_errors and frontend == "android" and not (
             self.has_sources
@@ -518,7 +531,7 @@ class CompareRequest:
                     "decision is computed at all"
                 )
         errors += _depth_errors(self.depth)
-        errors += _frontend_context_errors(self.frontend_context)
+        errors += frontend_context_errors(self.frontend_context)
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _side_errors(label, side)
         return errors
@@ -534,7 +547,17 @@ class CompareRequest:
         return self
 
     def replace(self, **changes: Any) -> CompareRequest:
-        """Return a copy with *changes* applied (frozen-dataclass ``replace``)."""
+        """Return a copy with *changes* applied (frozen-dataclass ``replace``).
+
+        ``**changes: Any`` is deliberate, not an oversight (a fresh review's
+        own question): a per-field ``TypedDict``/overload set would need to be
+        kept in sync with every field this dataclass gains, which is exactly
+        the maintenance burden this module's own docstring says a request
+        dataclass exists to avoid ("a new feature becomes a new field with a
+        default, never a signature break"). A typo'd kwarg still surfaces —
+        as ``dataclasses.replace``'s own ``TypeError`` at the call site,
+        rather than a mypy error.
+        """
         return replace(self, **changes)
 
 
@@ -606,7 +629,7 @@ class DumpRequest:
         """
         errors: list[str] = []
         errors += _lang_errors(self.lang)
-        frontend_errors = _frontend_value_errors(self.frontend)
+        frontend_errors = frontend_value_errors(self.frontend)
         errors += frontend_errors
         if (
             not frontend_errors
@@ -616,7 +639,7 @@ class DumpRequest:
             errors.append(_ANDROID_NEEDS_SOURCES)
         errors += _debug_format_errors(self.debug_format)
         errors += _depth_errors(self.depth)
-        errors += _frontend_context_errors(self.frontend_context)
+        errors += frontend_context_errors(self.frontend_context)
         errors += _side_errors("input", self.input)
         return errors
 
@@ -631,7 +654,11 @@ class DumpRequest:
         return self
 
     def replace(self, **changes: Any) -> DumpRequest:
-        """Return a copy with *changes* applied (frozen-dataclass ``replace``)."""
+        """Return a copy with *changes* applied (frozen-dataclass ``replace``).
+
+        See :meth:`CompareRequest.replace` for why ``**changes: Any`` is
+        deliberate rather than an oversight.
+        """
         return replace(self, **changes)
 
 
@@ -698,4 +725,6 @@ __all__ = [
     "DumpRequest",
     "InputSpec",
     "OutputSpec",
+    "frontend_context_errors",
+    "frontend_value_errors",
 ]
