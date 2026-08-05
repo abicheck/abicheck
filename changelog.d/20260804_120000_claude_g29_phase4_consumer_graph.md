@@ -9,7 +9,12 @@
   `consumer_required_symbol_removed` finding names the public entry point
   behind the dependency — "`training-service` requires
   `detail::train_ops_dispatcher` via public entry `train`" — in its existing
-  `impact_assessment.proof_path`/`affected_public_roots` fields. Works for a
+  `impact_assessment.proof_path`/`affected_public_roots` fields. This applies
+  both to the existing `func_removed`/`symbol_removed` finding for the symbol
+  (in library-owned wording — "X is reachable from public entry `train`",
+  since that finding is shared with the unscoped report) and, when the diff
+  carried no finding for it at all, to the `consumer_required_symbol_removed`
+  overlay. Works for a
   real-binary OLD as well as a saved-snapshot one — `scope_diff_to_app` takes
   the resolved old snapshot separately, for graph lookup only, so the path
   operand keeps owning every export/version read. No new

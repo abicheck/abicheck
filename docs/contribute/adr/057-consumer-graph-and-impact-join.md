@@ -231,6 +231,46 @@ This is worth stating plainly rather than burying in a changelog line,
 because the failure mode was invisible: nothing errored, no test failed, and
 the finding simply came out exactly as it did before the feature existed.
 
+### D8 — Enrichment reaches the covered case too, in library-owned wording
+
+Second post-review addition (Codex on PR #672). D5 attached the explanation
+to the `CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay — but that overlay only
+exists for a symbol `uncovered_missing_symbols()` finds *no* library-diff
+`Change` for. An ordinary removed export produces its own `FUNC_REMOVED`,
+which covers the symbol, so no overlay is created and nothing was enriched.
+The join reached only the case where the diff had already failed to represent
+the removal, and missed the ordinary flow — including the
+internal-dispatcher case in this ADR's own Context.
+
+So the walk now runs over every missing symbol, and `_enrich_covered_changes`
+attaches the explanation to the library-diff finding that already covers it.
+Two constraints shape how:
+
+- **The prose is consumer-neutral on a shared finding.** `_partition_app_changes`
+  appends the *same* `Change` objects that are in `DiffResult.changes`, which
+  the unscoped report also renders. "`training-service` requires X" is a fact
+  about one consumer and would be wrong there (and last-writer-wins across
+  several `--used-by` apps); "X is reachable from public entry `train`" is a
+  fact about the library, true regardless of who consumes it. The overlay —
+  which exists per app — keeps the consumer-named wording. Only the sentence
+  differs; `affected_public_roots`/`impact_proof_path` are library facts
+  either way, and are what `internal_leak` already writes onto shared changes.
+- **A finding that already carries evidence is never touched**
+  (`_has_impact_evidence`). `attach_impact_metadata` assigns its whole field
+  set unconditionally, `None` included, so enriching a finding a producer had
+  already populated would erase that producer's work — on an object the
+  library-wide report shares. It also makes the multi-`--used-by` case
+  first-writer-wins, and therefore deterministic in app order, rather than
+  silently last-writer-wins.
+
+The residual asymmetry is accepted and worth naming: a `FUNC_REMOVED` gains a
+proof path only on a run that passed `--used-by`, so the same comparison with
+and without it renders that finding differently. The alternative — minting
+scoped copies so the library-wide report never sees consumer-derived work at
+all — collides with `_apply_used_by_scoping`'s `_finding_id`-based
+`scoped_only_changes` dedup (an enriched copy shares its original's id and
+would be dropped) and needs its own design across all three front ends.
+
 ## Consequences
 
 - The top of ADR-046 D6's preference order is reachable for the first time.
@@ -280,6 +320,12 @@ the finding simply came out exactly as it did before the feature existed.
   residual case would mean `appcompat` dumping a snapshot of its own, a
   different and much more expensive contract than "scope an already-computed
   diff".
+- **Scoped copies of enriched library-diff findings.** D8 enriches the shared
+  `Change` in place, in library-owned wording. Keeping consumer-derived
+  evidence entirely out of the unscoped report instead would need a
+  scoped-copy path plus a `_finding_id` dedup rule that lets an enriched copy
+  survive alongside its original, in `cli_compare_helpers`, `mcp_server`, and
+  the reporters. Its own slice.
 - **`case194`** (G29 Phase 6's `consumer → symbol ← public entry` example
   fixture). This slice's end-to-end coverage is at the `scope_diff_to_app`
   level with synthetic snapshots; a real compiled fixture pair belongs with the

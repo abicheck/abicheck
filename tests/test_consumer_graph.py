@@ -712,3 +712,91 @@ class TestScopeDiffToAppConsumerImpact:
         assert via_path.missing_symbols == via_snapshot.missing_symbols
         assert via_path.verdict == via_snapshot.verdict
         assert via_path.required_symbols == via_snapshot.required_symbols
+
+
+class TestCoveredChangeEnrichment:
+    """ADR-057 D8: the ordinary flow, where the diff already has its own
+    `FUNC_REMOVED` for the missing symbol so no overlay is created."""
+
+    def _run(self, tmp_path: Path, *, prior_evidence: bool = False):
+        old = AbiSnapshot(
+            library="libtrain.so.1",
+            version="1.0",
+            elf=ElfMetadata(
+                soname="libtrain.so.1",
+                symbols=[ElfSymbol(name="_Z5trainv"), ElfSymbol(name=_DISPATCHER)],
+            ),
+        )
+        old.build_source = BuildSourcePack(root=Path(""), source_graph=_library_graph())
+        new = AbiSnapshot(
+            library="libtrain.so.1",
+            version="2.0",
+            elf=ElfMetadata(
+                soname="libtrain.so.1", symbols=[ElfSymbol(name="_Z5trainv")]
+            ),
+        )
+        removed = Change(ChangeKind.FUNC_REMOVED, _DISPATCHER, "removed")
+        if prior_evidence:
+            removed.reachability_proof_path = "already computed by another producer"
+        diff = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtrain.so.1",
+            changes=[removed],
+            verdict=Verdict.BREAKING,
+        )
+        reqs = AppRequirements(undefined_symbols={"_Z5trainv", _DISPATCHER})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            result = scope_diff_to_app(
+                diff, tmp_path / "training-service", old, new
+            )
+        return result, removed
+
+    def test_the_existing_removal_finding_gets_the_proof_path(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex's finding: `uncovered_missing_symbols` drops a symbol the
+        diff already covers, so before this the common case got nothing."""
+        result, removed = self._run(tmp_path)
+        # No overlay — the FUNC_REMOVED already covers the symbol.
+        assert not [
+            c
+            for c in result.breaking_for_app
+            if c.kind == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
+        ]
+        assert removed.affected_public_roots == ["train"]
+        assert removed.impact_proof_path is not None
+        assert removed.impact_proof_path[-1]["id"] == symbol_node_id(_DISPATCHER)
+
+    def test_the_wording_on_a_shared_finding_names_no_consumer(
+        self, tmp_path: Path
+    ) -> None:
+        """The `Change` is shared with `DiffResult.changes`, which the
+        *unscoped* report also renders — "X is reachable from public entry
+        train" is a library fact; "training-service requires X" is not."""
+        _result, removed = self._run(tmp_path)
+        assert removed.reachability_proof_path is not None
+        assert "training-service" not in removed.reachability_proof_path
+        assert "is reachable from public entry train" in removed.reachability_proof_path
+
+    def test_a_finding_with_its_own_evidence_is_left_alone(
+        self, tmp_path: Path
+    ) -> None:
+        """`attach_impact_metadata` assigns its whole field set including
+        `None`, so enriching a producer-populated finding would erase what
+        that producer computed — and this is a shared object."""
+        _result, removed = self._run(tmp_path, prior_evidence=True)
+        assert removed.reachability_proof_path == "already computed by another producer"
+        assert removed.impact_proof_path is None
+        assert removed.affected_public_roots is None
+
+    def test_enrichment_changes_no_verdict_or_finding_set(
+        self, tmp_path: Path
+    ) -> None:
+        result, removed = self._run(tmp_path)
+        assert result.verdict == Verdict.BREAKING
+        assert [c.kind for c in result.breaking_for_app] == [ChangeKind.FUNC_REMOVED]
+        assert removed.kind == ChangeKind.FUNC_REMOVED
+        assert removed.effective_verdict is None

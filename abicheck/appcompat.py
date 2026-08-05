@@ -979,7 +979,10 @@ def _consumer_impact_explanations(
 
 
 def _format_consumer_impact(
-    explained: ConsumerImpactPath, graph: SourceGraphSummary
+    explained: ConsumerImpactPath,
+    graph: SourceGraphSummary,
+    *,
+    name_consumer: bool = True,
 ) -> str:
     """The human-readable half of a consumer impact explanation — the string
     that replaces "requires missing symbol X" with why it was required.
@@ -987,18 +990,93 @@ def _format_consumer_impact(
     Reuses ``source_graph_findings._format_dependency_path`` for the chain
     itself rather than formatting edges here, so a consumer proof path reads
     identically to an internal-leak one for the same edges.
+
+    *name_consumer* picks which of the two facts the sentence leads with, and
+    the distinction is not cosmetic (ADR-057 D8). "``training-service``
+    requires X" is a fact about *one* consumer; "X is reachable from public
+    entry ``train``" is a fact about the *library*, true of every consumer and
+    of no consumer. The first belongs on the
+    ``CONSUMER_REQUIRED_SYMBOL_REMOVED`` overlay, which exists per app; the
+    second is what may be written onto a shared library-diff finding that the
+    unscoped report also renders.
     """
     entry = explained.public_entries[0] if explained.public_entries else "?"
     if explained.is_direct():
-        return f"{explained.consumer} requires public entry {entry} directly"
+        if name_consumer:
+            return f"{explained.consumer} requires public entry {entry} directly"
+        return f"{explained.symbol} is declared by public entry {entry}"
     from .buildsource.source_graph_findings import _format_dependency_path
 
     chain = _format_dependency_path(graph, explained.entry_path)
-    return f"{explained.consumer} requires {explained.symbol} via public entry {entry}: {chain}"
+    if name_consumer:
+        return (
+            f"{explained.consumer} requires {explained.symbol} "
+            f"via public entry {entry}: {chain}"
+        )
+    return f"{explained.symbol} is reachable from public entry {entry}: {chain}"
+
+
+def _has_impact_evidence(change: Change) -> bool:
+    """Whether *change* already carries reachability/impact evidence from one
+    of its own producers (``internal_leak``, ``source_graph_findings``,
+    ``post_processing``).
+
+    The guard on enriching a *shared* library-diff finding: those `Change`
+    objects are the same ones in ``DiffResult.changes``, so overwriting
+    evidence a producer already computed would corrupt the unscoped report,
+    and ``attach_impact_metadata`` assigns its whole field set
+    unconditionally (``None`` included). It also makes the multi-``--used-by``
+    case first-writer-wins and therefore deterministic in app order, rather
+    than silently last-writer-wins.
+    """
+    return (
+        getattr(change, "impact_assessment", None) is not None
+        or getattr(change, "impact_proof_path", None) is not None
+        or getattr(change, "reachability_proof_path", None) is not None
+    )
+
+
+def _enrich_covered_changes(
+    changes: list[Change],
+    explanations: dict[str, ConsumerImpactPath],
+    graph: SourceGraphSummary,
+) -> None:
+    """Attach the graph explanation to library-diff findings that already
+    cover a missing symbol (ADR-057 D8, Codex review).
+
+    Without this the join reached only *uncovered* symbols: an ordinary
+    removed export produces its own ``FUNC_REMOVED``, which
+    :func:`uncovered_missing_symbols` then excludes from the overlay — so the
+    common case, including the internal-dispatcher one this join was built
+    for, got no proof path at all.
+
+    These `Change` objects are shared with ``DiffResult.changes``, so the
+    prose written here is deliberately consumer-neutral (see
+    :func:`_format_consumer_impact`) and only findings with no evidence of
+    their own are touched.
+    """
+    for change in changes:
+        if _has_impact_evidence(change):
+            continue
+        explained = next(
+            (
+                e
+                for sym, e in explanations.items()
+                if _change_covers_symbol(change, sym)
+            ),
+            None,
+        )
+        if explained is None:
+            continue
+        _attach_consumer_impact(change, explained, graph, name_consumer=False)
 
 
 def _attach_consumer_impact(
-    change: Change, explained: ConsumerImpactPath, graph: SourceGraphSummary
+    change: Change,
+    explained: ConsumerImpactPath,
+    graph: SourceGraphSummary,
+    *,
+    name_consumer: bool = True,
 ) -> None:
     """Attach one :class:`ConsumerImpactPath` to *change* in place.
 
@@ -1015,7 +1093,9 @@ def _attach_consumer_impact(
         graph=graph,
         alternative_paths=explained.alternative_entry_paths,
     )
-    change.reachability_proof_path = _format_consumer_impact(explained, graph)
+    change.reachability_proof_path = _format_consumer_impact(
+        explained, graph, name_consumer=name_consumer
+    )
 
 
 def scope_diff_to_app(
@@ -1120,8 +1200,13 @@ def scope_diff_to_app(
     # once per comparison rather than once per missing symbol. Both values are
     # empty when no L5 graph is available on the old side, which is the
     # unchanged pre-ADR-057 behavior.
+    # Every missing symbol, not just the uncovered ones: a removed export
+    # normally produces its own FUNC_REMOVED, which uncovered_missing_symbols
+    # then excludes from the overlay below -- so scoping the walk to
+    # `uncovered` left the common case (the internal-dispatcher one this join
+    # was built for) with no explanation at all (ADR-057 D8, Codex review).
     joined_graph, consumer_impact = _consumer_impact_explanations(
-        app_path, app_reqs, old_lib, uncovered, old_snapshot
+        app_path, app_reqs, old_lib, missing_symbols, old_snapshot
     )
     for sym in uncovered:
         # public_reachable=True (Codex review, fresh evidence): this overlay
@@ -1190,6 +1275,12 @@ def scope_diff_to_app(
             breaking_for_app.append(
                 _build_suppression_overreach_change(overlay_change, outcome.withheld_rule)
             )
+    # After the overlay loop: an overlay already carries its own (consumer-
+    # named) explanation and a cached ImpactAssessment, so _has_impact_evidence
+    # skips it here and only the shared library-diff findings are considered.
+    if joined_graph is not None and consumer_impact:
+        _enrich_covered_changes(breaking_for_app, consumer_impact, joined_graph)
+
     if suppressed_missing:
         missing_symbols = [s for s in missing_symbols if s not in suppressed_missing]
 
