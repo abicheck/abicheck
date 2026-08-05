@@ -30,6 +30,7 @@ boundary was chosen specifically to avoid needing one).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from .contract_gating import zero_scoped_out_gate_contributions
@@ -102,10 +103,65 @@ def _fold_scoped_compat_into_text(
     required_symbols = getattr(result, "required_symbols", None)
     if used_by is None and required_symbols is None:
         return text
-    scoped_verdict = getattr(result, "scoped_verdict", None)
-    scoped_verdict_value = getattr(scoped_verdict, "value", scoped_verdict)
-
+    fold = _ScopedFold(
+        result=result,
+        severity_config=severity_config,
+        show_only=show_only,
+        report_mode=report_mode,
+        contract_evaluation=contract_evaluation,
+        used_by=used_by,
+        required_symbols=required_symbols,
+    )
     if fmt == "json":
+        return fold.into_json(text)
+    if fmt in ("markdown", "text", "review"):
+        return fold.into_text(text, fmt)
+    return text
+
+
+@dataclass(frozen=True)
+class _ScopedFold:
+    """One scoped-gate fold-in: the inputs, and the per-format renderings.
+
+    A class rather than one branching function (CodeFactor: complex method) so
+    the JSON payload rewrite, the ``--stat`` summary-only variant, and the
+    markdown/text/review append are separate, individually readable steps that
+    share these inputs instead of threading eight parameters through each other.
+    Every method is a pure function of these fields plus the text handed in.
+    """
+
+    result: Any
+    severity_config: Any
+    show_only: str | None
+    report_mode: str
+    contract_evaluation: bool
+    used_by: Any
+    required_symbols: Any
+
+    @property
+    def scoped_verdict_value(self) -> Any:
+        """The scoped verdict as its plain value (an enum's ``.value`)."""
+        scoped_verdict = getattr(self.result, "scoped_verdict", None)
+        return getattr(scoped_verdict, "value", scoped_verdict)
+
+    def _scoped_gate_findings(self) -> tuple[Any, Any, bool, Any]:
+        """The scoped-only changes, missing-contract labels, and gate blocking
+        decision this run's scoped gate actually rests on."""
+        from .reporter import _resolve_scoped_gate_findings
+
+        return _resolve_scoped_gate_findings(
+            self.result, self.severity_config, self.show_only
+        )
+
+    # ── JSON ────────────────────────────────────────────────────────────────
+
+    def into_json(self, text: str) -> str:
+        """Rewrite the rendered JSON payload so it describes the scoped gate.
+
+        The full-library verdict/severity/summary move to their ``full_*``
+        siblings and the scoped ones take their place, so the body agrees with
+        the exit code the process is about to use.
+        """
         import json
 
         try:
@@ -113,57 +169,13 @@ def _fold_scoped_compat_into_text(
         except ValueError:
             return text
         payload["full_verdict"] = payload.get("verdict")
-        if scoped_verdict_value is not None:
-            payload["verdict"] = scoped_verdict_value
-        if used_by is not None:
-            payload["used_by"] = used_by
-        if required_symbols is not None:
-            payload["required_symbol_contract"] = required_symbols
-        # Under a severity scheme, `severity.exit_code`/`blocking` describe
-        # the *full-library* gate decision -- but the process actually exits
-        # with the scoped exit code computed above (Codex review): without
-        # this, a scoped-compatible run that exits 0 could still carry
-        # `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
-        # opposite of what the command that produced it just did. Mirrors the
-        # verdict/full_verdict swap above -- the full-library breakdown moves
-        # to `full_severity`, `severity` becomes the scoped gate.
-        scoped_exit_code = getattr(result, "scoped_exit_code", None)
-        scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
-        severity_block = payload.get("severity")
-        if (
-            scoped_exit_code is not None
-            and scoped_exit_code_scheme == "severity"
-            and isinstance(severity_block, dict)
-        ):
-            payload["full_severity"] = severity_block
-            # `categories.*.count` must also move to the scoped tally --
-            # otherwise a scoped-compatible `exit_code: 0` could still show
-            # an error-level `categories.abi_breaking.count > 0` left over
-            # from the full-library breakdown, contradicting the now-scoped
-            # `blocking`/`blocking_categories` fields above (Codex review).
-            scoped_counts = getattr(result, "scoped_severity_counts", None) or {}
-            full_categories = severity_block.get("categories")
-            scoped_categories = (
-                {
-                    cat: (
-                        {**info, "count": scoped_counts.get(cat, 0)}
-                        if isinstance(info, dict)
-                        else info
-                    )
-                    for cat, info in full_categories.items()
-                }
-                if isinstance(full_categories, dict)
-                else full_categories
-            )
-            payload["severity"] = {
-                **severity_block,
-                "categories": scoped_categories,
-                "exit_code": scoped_exit_code,
-                "blocking": scoped_exit_code != 0,
-                "blocking_categories": list(
-                    getattr(result, "scoped_blocking_categories", ()) or ()
-                ),
-            }
+        if self.scoped_verdict_value is not None:
+            payload["verdict"] = self.scoped_verdict_value
+        if self.used_by is not None:
+            payload["used_by"] = self.used_by
+        if self.required_symbols is not None:
+            payload["required_symbol_contract"] = self.required_symbols
+        self._swap_in_scoped_severity(payload)
         # Scoped-only changes (e.g. PE_ORDINAL_RETARGETED, synthesized fresh
         # per app/host by scope_diff_to_app/scope_diff_to_required_symbols)
         # and uncovered missing-contract labels are relevant to the scoped
@@ -178,258 +190,341 @@ def _fold_scoped_compat_into_text(
         changes_list = payload.get("changes")
         full_summary = payload.get("summary")
         if isinstance(changes_list, list):
-            from .checker_policy import EvidenceStatus, ReachabilityState
-            from .reporter import (
-                _add_entries_to_root_causes,
-                _change_to_dict,
-                _finding_id,
-                _resolve_scoped_gate_findings,
-                _root_cause_key_and_display,
-                root_cause_for_change,
+            self._fold_findings_into_changes(payload, changes_list, full_summary)
+        elif isinstance(full_summary, dict):
+            self._fold_findings_into_stat_summary(payload, full_summary)
+        return json.dumps(payload, indent=2)
+
+    def _swap_in_scoped_severity(self, payload: dict[str, Any]) -> None:
+        """Move the full-library severity block aside for the scoped one.
+
+        Under a severity scheme, `severity.exit_code`/`blocking` describe
+        the *full-library* gate decision -- but the process actually exits
+        with the scoped exit code computed above (Codex review): without
+        this, a scoped-compatible run that exits 0 could still carry
+        `severity.exit_code: 4`/`blocking: true` in its own JSON body, the
+        opposite of what the command that produced it just did. Mirrors the
+        verdict/full_verdict swap above -- the full-library breakdown moves
+        to `full_severity`, `severity` becomes the scoped gate.
+        """
+        scoped_exit_code = getattr(self.result, "scoped_exit_code", None)
+        scoped_exit_code_scheme = getattr(self.result, "scoped_exit_code_scheme", None)
+        severity_block = payload.get("severity")
+        if (
+            scoped_exit_code is None
+            or scoped_exit_code_scheme != "severity"
+            or not isinstance(severity_block, dict)
+        ):
+            return
+        payload["full_severity"] = severity_block
+        # `categories.*.count` must also move to the scoped tally --
+        # otherwise a scoped-compatible `exit_code: 0` could still show
+        # an error-level `categories.abi_breaking.count > 0` left over
+        # from the full-library breakdown, contradicting the now-scoped
+        # `blocking`/`blocking_categories` fields above (Codex review).
+        scoped_counts = getattr(self.result, "scoped_severity_counts", None) or {}
+        full_categories = severity_block.get("categories")
+        scoped_categories = (
+            {
+                cat: (
+                    {**info, "count": scoped_counts.get(cat, 0)}
+                    if isinstance(info, dict)
+                    else info
+                )
+                for cat, info in full_categories.items()
+            }
+            if isinstance(full_categories, dict)
+            else full_categories
+        )
+        payload["severity"] = {
+            **severity_block,
+            "categories": scoped_categories,
+            "exit_code": scoped_exit_code,
+            "blocking": scoped_exit_code != 0,
+            "blocking_categories": list(
+                getattr(self.result, "scoped_blocking_categories", ()) or ()
+            ),
+        }
+
+    def _fold_findings_into_changes(
+        self,
+        payload: dict[str, Any],
+        changes_list: list[Any],
+        full_summary: Any,
+    ) -> None:
+        """Append the scoped gate's own findings to the ``changes`` array.
+
+        Each appended entry also registers its root-cause grouping key, and the
+        summary counts are recomputed afterwards from the now-complete array.
+        """
+        from .checker_policy import EvidenceStatus, ReachabilityState
+        from .reporter import (
+            _add_entries_to_root_causes,
+            _change_to_dict,
+            _finding_id,
+            _root_cause_key_and_display,
+            root_cause_for_change,
+        )
+
+        result = self.result
+        severity_config = self.severity_config
+        contract_evaluation = self.contract_evaluation
+        eff_sets = result._effective_kind_sets()
+        scoped_only, missing_labels, blocks, missing_kind = self._scoped_gate_findings()
+        # ADR-049 D1: `gate_contribution` is defined as the number that
+        # *actually* gated, and under --used-by/--required-symbol the
+        # scoped gate is what the run exits on -- this fold is where it
+        # replaces the primary verdict and severity block. A full-diff
+        # finding the selected consumer does not use contributes nothing
+        # to that gate, so leaving its full-library number in place
+        # published `gate_contribution: 4` on a run that exited 0 (Codex
+        # review, reproduced with a removal outside the required-symbol
+        # contract). Only entries that already carry the field are
+        # touched, so a run without --contract-evaluation is unaffected.
+        # Called here, *before* the scoped-only/missing-contract fold-in
+        # below: those are the scoped gate's own findings and only the
+        # ones tracked in `scoped_relevant_finding_ids` would survive it.
+        zero_scoped_out_gate_contributions(payload, result)
+        # G29 Phase 3 slice 3 (ADR-052, Codex review): these synthetic
+        # entries are appended to `changes` after `_to_json_root_cause`
+        # already grouped `result.changes` into `root_causes` -- without
+        # tracking their own grouping key/root here too, a scoped run
+        # whose only gated issue is one of these would report a nonempty
+        # `changes` array next to `root_cause_count: 0`, losing the only
+        # gate failure for a root-cause consumer.
+        # Mirrors _to_json_root_cause's own referenced_causes computation
+        # (Codex review): a symbol only groups when some caused_by_type
+        # actually names it, not merely because it's shared.
+        referenced_causes: frozenset[str] = frozenset(
+            str(entry.get("caused_by_type"))
+            for entry in changes_list
+            if isinstance(entry, dict) and entry.get("caused_by_type")
+        ) | frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
+        root_cause_entries: list[tuple[str, str, dict[str, object]]] = []
+        for c in scoped_only:
+            entry = _change_to_dict(
+                c,
+                policy=result.policy or "strict_abi",
+                kind_sets=eff_sets,
+                policy_file=result.policy_file,
+                # ADR-049 D1's per-finding `gate_contribution` is only
+                # truthful if it is computed under the scheme the run
+                # exits on -- a scoped-only finding does reach the scoped
+                # gate, so this is not one of the always-0 ledger cases.
+                severity_config=severity_config,
+                # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
+                # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
+                # is proven by the real consumer's own import table/execution,
+                # not by an artifact-level library diff -- evidence_status_for_change
+                # would otherwise report "artifact_proven" purely from the kind's
+                # BREAKING/RISK category, same as appcompat_to_json's own
+                # CONSUMER_PROVEN override for this exact finding shape.
+                evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+                # G29 Phase 3 follow-up (ADR-052): feeds
+                # impact_assessment.root_cause_id -- None (the singleton
+                # case) for a scoped-only change with no real correlation
+                # signal, same rule root_cause_lookup_for_changes applies
+                # elsewhere; the *entries* below never skip a singleton,
+                # since --report-mode root-cause's own grouping is
+                # deliberately complete, unlike this per-finding field.
+                root_cause=root_cause_for_change(
+                    c, referenced_causes=referenced_causes
+                ),
+            )
+            changes_list.append(entry)
+            key, root_display = _root_cause_key_and_display(
+                c.caused_by_type,
+                c.symbol,
+                c.kind.value,
+                _finding_id(c),
+                referenced_causes=referenced_causes,
+            )
+            root_cause_entries.append((key, root_display, entry))
+        for label in missing_labels:
+            from .finding_identity import (
+                missing_contract_finding,
+                report_finding_id,
             )
 
-            eff_sets = result._effective_kind_sets()
-            scoped_only, missing_labels, blocks, missing_kind = (
-                _resolve_scoped_gate_findings(result, severity_config, show_only)
+            identity = missing_contract_finding(missing_kind, label)
+            entry = {
+                "kind": missing_kind,
+                "symbol": label,
+                "description": identity.description,
+                # A missing-contract label has no backing Change, so this
+                # entry never routed through `_change_to_dict` and carried
+                # no id at all -- leaving the decision this same loop
+                # stamps below unjoinable to ADR-049's own
+                # `decision_receipt`, which is keyed by exactly this id
+                # (Codex review, fresh evidence).
+                "finding_id": report_finding_id(identity),
+                "old_value": None,
+                "new_value": None,
+                "severity": "breaking" if blocks else "compatible",
+                "relevant_to_gate": True,
+                "blocks_gate": blocks,
+                # G29 Phase 3 slice 1 (ADR-052, Codex review): a
+                # missing-contract label has no backing Change for
+                # _change_to_dict/assess_change to read (unlike the
+                # scoped_only loop above, which already routes
+                # through _change_to_dict and picks up
+                # reachability_state for free). reachability_state is
+                # "always present" for every changes[] entry per D3
+                # -- a missing symbol/version is a hard absence, not
+                # a reachability question, so UNKNOWN (not proven
+                # either way) is the honest, consistent value here.
+                "reachability_state": ReachabilityState.UNKNOWN.value,
+            }
+            if contract_evaluation:
+                # ADR-049 D1's full per-finding shape, not just the
+                # relevance: this entry is frequently the *only* blocking
+                # finding in the response, so omitting its decision and
+                # contribution left the one row that explains the exit
+                # code as the least complete one (Codex review).
+                from .contract_scoped_promotion import (
+                    missing_contract_gate_contribution,
+                    stamp_missing_contract_entry,
+                )
+
+                stamp_missing_contract_entry(
+                    entry,
+                    gate_contribution=missing_contract_gate_contribution(
+                        severity_config, blocks
+                    ),
+                )
+            changes_list.append(entry)
+            # A missing-contract label has no caused_by_type; its
+            # `symbol` (the label) only becomes a *grouping* key if some
+            # other finding's caused_by_type names it, same as any other
+            # symbol-only fallback (see referenced_causes above). There is
+            # no real Change/finding_id to disambiguate an unreferenced
+            # label by, so the label itself (always unique per label)
+            # fills that role instead.
+            key, root_display = _root_cause_key_and_display(
+                None,
+                label,
+                missing_kind,
+                label,
+                referenced_causes=referenced_causes,
             )
-            # ADR-049 D1: `gate_contribution` is defined as the number that
-            # *actually* gated, and under --used-by/--required-symbol the
-            # scoped gate is what the run exits on -- this fold is where it
-            # replaces the primary verdict and severity block. A full-diff
-            # finding the selected consumer does not use contributes nothing
-            # to that gate, so leaving its full-library number in place
-            # published `gate_contribution: 4` on a run that exited 0 (Codex
-            # review, reproduced with a removal outside the required-symbol
-            # contract). Only entries that already carry the field are
-            # touched, so a run without --contract-evaluation is unaffected.
-            # Called here, *before* the scoped-only/missing-contract fold-in
-            # below: those are the scoped gate's own findings and only the
-            # ones tracked in `scoped_relevant_finding_ids` would survive it.
-            zero_scoped_out_gate_contributions(payload, result)
-            # G29 Phase 3 slice 3 (ADR-052, Codex review): these synthetic
-            # entries are appended to `changes` after `_to_json_root_cause`
-            # already grouped `result.changes` into `root_causes` -- without
-            # tracking their own grouping key/root here too, a scoped run
-            # whose only gated issue is one of these would report a nonempty
-            # `changes` array next to `root_cause_count: 0`, losing the only
-            # gate failure for a root-cause consumer.
-            # Mirrors _to_json_root_cause's own referenced_causes computation
-            # (Codex review): a symbol only groups when some caused_by_type
-            # actually names it, not merely because it's shared.
-            referenced_causes: frozenset[str] = frozenset(
-                str(entry.get("caused_by_type"))
-                for entry in changes_list
-                if isinstance(entry, dict) and entry.get("caused_by_type")
-            ) | frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
-            root_cause_entries: list[tuple[str, str, dict[str, object]]] = []
+            root_cause_entries.append((key, root_display, entry))
+        _add_entries_to_root_causes(payload, root_cause_entries)
+        # `summary` above was computed from result.changes *before*
+        # scoped_only/missing_labels were appended to `changes` here --
+        # so a scoped run whose only gating issue is one of these
+        # synthetic entries could report e.g. verdict "BREAKING" next to
+        # summary.total_changes: 0, an internally contradictory JSON
+        # body (audit finding: scoped CLI JSON summary can be stale).
+        # Move the pre-scoped summary to `full_summary` (mirrors the
+        # verdict/full_verdict and severity/full_severity swap above)
+        # and recompute the count buckets `summary` reports from the
+        # now-complete `changes` array. `binary_compatibility_pct`/
+        # `affected_pct` describe the full library surface and are left
+        # as-is -- recomputing them for the scoped subset would need
+        # old_symbol_count context this fold-in doesn't have.
+        if isinstance(full_summary, dict):
+            payload["full_summary"] = full_summary
+            bucket_counts = {
+                "breaking": 0,
+                "source_breaks": 0,
+                "risk_changes": 0,
+                "compatible_additions": 0,
+            }
+            for entry in changes_list:
+                severity = entry.get("severity") if isinstance(entry, dict) else None
+                bucket = (
+                    _SEVERITY_TO_SUMMARY_BUCKET.get(severity, "")
+                    if isinstance(severity, str)
+                    else None
+                )
+                if bucket:
+                    bucket_counts[bucket] += 1
+            payload["summary"] = {
+                **full_summary,
+                **bucket_counts,
+                "total_changes": len(changes_list),
+            }
+
+    def _fold_findings_into_stat_summary(
+        self, payload: dict[str, Any], full_summary: dict[str, Any]
+    ) -> None:
+        """Adjust a ``--stat`` payload's summary-only counts for the scoped gate.
+
+        Codex review: `--format json --stat` (to_stat_json) emits a
+        summary-only payload with no `changes` array at all, so the
+        branch above -- gated on `isinstance(changes_list, list)` --
+        never runs for it. Without this, a `--stat --used-by`/
+        `--required-symbol` run still swaps `verdict` to the scoped
+        gate result (above) but leaves `summary` as the stale
+        full-library counts and never adds `full_summary`: a scoped
+        BREAKING verdict sitting next to unrelated full-library
+        summary numbers, the exact contradiction this fold-in exists
+        to remove. There's no per-change list to recompute bucket
+        counts from here, so instead add each scoped-only/missing-
+        contract synthetic finding's own contribution on top of the
+        already-correct full-library counts.
+        """
+        from .checker_policy import EvidenceStatus
+        from .reporter import _change_to_dict
+
+        result = self.result
+        scoped_only, missing_labels, blocks, _missing_kind = (
+            self._scoped_gate_findings()
+        )
+        if scoped_only or missing_labels:
+            payload["full_summary"] = full_summary
+            eff_sets = result._effective_kind_sets()
+            added_counts = {
+                "breaking": 0,
+                "source_breaks": 0,
+                "risk_changes": 0,
+                "compatible_additions": 0,
+            }
             for c in scoped_only:
                 entry = _change_to_dict(
                     c,
                     policy=result.policy or "strict_abi",
                     kind_sets=eff_sets,
                     policy_file=result.policy_file,
-                    # ADR-049 D1's per-finding `gate_contribution` is only
-                    # truthful if it is computed under the scheme the run
-                    # exits on -- a scoped-only finding does reach the scoped
-                    # gate, so this is not one of the always-0 ledger cases.
-                    severity_config=severity_config,
-                    # Codex review: a scoped-only change (PE_ORDINAL_RETARGETED,
-                    # CONSUMER_REQUIRED_SYMBOL_REMOVED, CONSUMER_RUNTIME_LOAD_FAILED)
-                    # is proven by the real consumer's own import table/execution,
-                    # not by an artifact-level library diff -- evidence_status_for_change
-                    # would otherwise report "artifact_proven" purely from the kind's
-                    # BREAKING/RISK category, same as appcompat_to_json's own
-                    # CONSUMER_PROVEN override for this exact finding shape.
+                    severity_config=self.severity_config,
                     evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
-                    # G29 Phase 3 follow-up (ADR-052): feeds
-                    # impact_assessment.root_cause_id -- None (the singleton
-                    # case) for a scoped-only change with no real correlation
-                    # signal, same rule root_cause_lookup_for_changes applies
-                    # elsewhere; the *entries* below never skip a singleton,
-                    # since --report-mode root-cause's own grouping is
-                    # deliberately complete, unlike this per-finding field.
-                    root_cause=root_cause_for_change(
-                        c, referenced_causes=referenced_causes
-                    ),
                 )
-                changes_list.append(entry)
-                key, root_display = _root_cause_key_and_display(
-                    c.caused_by_type,
-                    c.symbol,
-                    c.kind.value,
-                    _finding_id(c),
-                    referenced_causes=referenced_causes,
+                severity = entry.get("severity")
+                bucket = (
+                    _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
+                    if isinstance(severity, str)
+                    else None
                 )
-                root_cause_entries.append((key, root_display, entry))
-            for label in missing_labels:
-                from .finding_identity import (
-                    missing_contract_finding,
-                    report_finding_id,
-                )
-
-                identity = missing_contract_finding(missing_kind, label)
-                entry = {
-                    "kind": missing_kind,
-                    "symbol": label,
-                    "description": identity.description,
-                    # A missing-contract label has no backing Change, so this
-                    # entry never routed through `_change_to_dict` and carried
-                    # no id at all -- leaving the decision this same loop
-                    # stamps below unjoinable to ADR-049's own
-                    # `decision_receipt`, which is keyed by exactly this id
-                    # (Codex review, fresh evidence).
-                    "finding_id": report_finding_id(identity),
-                    "old_value": None,
-                    "new_value": None,
-                    "severity": "breaking" if blocks else "compatible",
-                    "relevant_to_gate": True,
-                    "blocks_gate": blocks,
-                    # G29 Phase 3 slice 1 (ADR-052, Codex review): a
-                    # missing-contract label has no backing Change for
-                    # _change_to_dict/assess_change to read (unlike the
-                    # scoped_only loop above, which already routes
-                    # through _change_to_dict and picks up
-                    # reachability_state for free). reachability_state is
-                    # "always present" for every changes[] entry per D3
-                    # -- a missing symbol/version is a hard absence, not
-                    # a reachability question, so UNKNOWN (not proven
-                    # either way) is the honest, consistent value here.
-                    "reachability_state": ReachabilityState.UNKNOWN.value,
-                }
-                if contract_evaluation:
-                    # ADR-049 D1's full per-finding shape, not just the
-                    # relevance: this entry is frequently the *only* blocking
-                    # finding in the response, so omitting its decision and
-                    # contribution left the one row that explains the exit
-                    # code as the least complete one (Codex review).
-                    from .contract_scoped_promotion import (
-                        missing_contract_gate_contribution,
-                        stamp_missing_contract_entry,
-                    )
-
-                    stamp_missing_contract_entry(
-                        entry,
-                        gate_contribution=missing_contract_gate_contribution(
-                            severity_config, blocks
-                        ),
-                    )
-                changes_list.append(entry)
-                # A missing-contract label has no caused_by_type; its
-                # `symbol` (the label) only becomes a *grouping* key if some
-                # other finding's caused_by_type names it, same as any other
-                # symbol-only fallback (see referenced_causes above). There is
-                # no real Change/finding_id to disambiguate an unreferenced
-                # label by, so the label itself (always unique per label)
-                # fills that role instead.
-                key, root_display = _root_cause_key_and_display(
-                    None,
-                    label,
-                    missing_kind,
-                    label,
-                    referenced_causes=referenced_causes,
-                )
-                root_cause_entries.append((key, root_display, entry))
-            _add_entries_to_root_causes(payload, root_cause_entries)
-            # `summary` above was computed from result.changes *before*
-            # scoped_only/missing_labels were appended to `changes` here --
-            # so a scoped run whose only gating issue is one of these
-            # synthetic entries could report e.g. verdict "BREAKING" next to
-            # summary.total_changes: 0, an internally contradictory JSON
-            # body (audit finding: scoped CLI JSON summary can be stale).
-            # Move the pre-scoped summary to `full_summary` (mirrors the
-            # verdict/full_verdict and severity/full_severity swap above)
-            # and recompute the count buckets `summary` reports from the
-            # now-complete `changes` array. `binary_compatibility_pct`/
-            # `affected_pct` describe the full library surface and are left
-            # as-is -- recomputing them for the scoped subset would need
-            # old_symbol_count context this fold-in doesn't have.
-            if isinstance(full_summary, dict):
-                payload["full_summary"] = full_summary
-                bucket_counts = {
-                    "breaking": 0,
-                    "source_breaks": 0,
-                    "risk_changes": 0,
-                    "compatible_additions": 0,
-                }
-                for entry in changes_list:
-                    severity = (
-                        entry.get("severity") if isinstance(entry, dict) else None
-                    )
-                    bucket = (
-                        _SEVERITY_TO_SUMMARY_BUCKET.get(severity, "")
-                        if isinstance(severity, str)
-                        else None
-                    )
-                    if bucket:
-                        bucket_counts[bucket] += 1
-                payload["summary"] = {
-                    **full_summary,
-                    **bucket_counts,
-                    "total_changes": len(changes_list),
-                }
-        elif isinstance(full_summary, dict):
-            # Codex review: `--format json --stat` (to_stat_json) emits a
-            # summary-only payload with no `changes` array at all, so the
-            # branch above -- gated on `isinstance(changes_list, list)` --
-            # never runs for it. Without this, a `--stat --used-by`/
-            # `--required-symbol` run still swaps `verdict` to the scoped
-            # gate result (above) but leaves `summary` as the stale
-            # full-library counts and never adds `full_summary`: a scoped
-            # BREAKING verdict sitting next to unrelated full-library
-            # summary numbers, the exact contradiction this fold-in exists
-            # to remove. There's no per-change list to recompute bucket
-            # counts from here, so instead add each scoped-only/missing-
-            # contract synthetic finding's own contribution on top of the
-            # already-correct full-library counts.
-            from .checker_policy import EvidenceStatus
-            from .reporter import _change_to_dict, _resolve_scoped_gate_findings
-
-            scoped_only, missing_labels, blocks, _missing_kind = (
-                _resolve_scoped_gate_findings(result, severity_config, show_only)
-            )
-            if scoped_only or missing_labels:
-                payload["full_summary"] = full_summary
-                eff_sets = result._effective_kind_sets()
-                added_counts = {
-                    "breaking": 0,
-                    "source_breaks": 0,
-                    "risk_changes": 0,
-                    "compatible_additions": 0,
-                }
-                for c in scoped_only:
-                    entry = _change_to_dict(
-                        c,
-                        policy=result.policy or "strict_abi",
-                        kind_sets=eff_sets,
-                        policy_file=result.policy_file,
-                        severity_config=severity_config,
-                        evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
-                    )
-                    severity = entry.get("severity")
-                    bucket = (
-                        _SEVERITY_TO_SUMMARY_BUCKET.get(severity)
-                        if isinstance(severity, str)
-                        else None
-                    )
-                    if bucket:
-                        added_counts[bucket] += 1
-                for _label in missing_labels:
-                    bucket = _SEVERITY_TO_SUMMARY_BUCKET[
-                        "breaking" if blocks else "compatible"
-                    ]
+                if bucket:
                     added_counts[bucket] += 1
-                payload["summary"] = {
-                    **full_summary,
-                    **{k: full_summary.get(k, 0) + v for k, v in added_counts.items()},
-                    "total_changes": (
-                        full_summary.get("total_changes", 0)
-                        + len(scoped_only)
-                        + len(missing_labels)
-                    ),
-                }
-        return json.dumps(payload, indent=2)
+            for _label in missing_labels:
+                bucket = _SEVERITY_TO_SUMMARY_BUCKET[
+                    "breaking" if blocks else "compatible"
+                ]
+                added_counts[bucket] += 1
+            payload["summary"] = {
+                **full_summary,
+                **{k: full_summary.get(k, 0) + v for k, v in added_counts.items()},
+                "total_changes": (
+                    full_summary.get("total_changes", 0)
+                    + len(scoped_only)
+                    + len(missing_labels)
+                ),
+            }
 
-    if fmt in ("markdown", "text", "review"):
+    # ── markdown / text / review ───────────────────────────
+
+    def into_text(self, text: str, fmt: str) -> str:
+        """Append the scoped-gate sections to a markdown/text/review report.
+
+        The report itself is left exactly as rendered; what follows it is a
+        scoped-verdict header (only when the two verdicts disagree), the
+        per-consumer summaries, and the scoped gate's own findings.
+        """
+        result = self.result
+        used_by = self.used_by
+        required_symbols = self.required_symbols
+        scoped_verdict_value = self.scoped_verdict_value
         full_verdict_value = getattr(getattr(result, "verdict", None), "value", None)
         header: list[str] = []
         if (
@@ -499,11 +594,9 @@ def _fold_scoped_compat_into_text(
         # already merged these into its own root-cause groups, so appending
         # them again here would duplicate every scoped finding that
         # correlates with an existing group (Codex review follow-up).
-        if not (report_mode == "root-cause" and fmt in ("markdown", "text")):
-            from .reporter import _resolve_scoped_gate_findings
-
+        if not (self.report_mode == "root-cause" and fmt in ("markdown", "text")):
             scoped_only, missing_labels, blocks, _missing_kind = (
-                _resolve_scoped_gate_findings(result, severity_config, show_only)
+                self._scoped_gate_findings()
             )
             if scoped_only or missing_labels:
                 lines.append("## Additional scoped-gate findings")
@@ -519,7 +612,7 @@ def _fold_scoped_compat_into_text(
                     # without this, the default markdown/text/review report
                     # (unlike JSON) silently dropped the contract decision
                     # for this exact finding shape.
-                    if contract_evaluation:
+                    if self.contract_evaluation:
                         from .contract_scoped_promotion import (
                             stamp_explicit_scope_contract_evaluation,
                         )
@@ -550,8 +643,6 @@ def _fold_scoped_compat_into_text(
                         line += "]"
                     lines.append(line)
         return "\n".join(lines)
-
-    return text
 
 
 def _suppression_rule_label(rule: Any, index: int) -> str:
