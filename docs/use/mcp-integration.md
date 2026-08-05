@@ -197,6 +197,13 @@ See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_dump) for
 the exhaustive, generated parameter list. `output_path` is subject to the
 [path restrictions](#path-restrictions-for-output_path) below.
 
+This tool takes the same evidence inputs `abicheck dump` does — `depth`,
+`sources`, `build_info`, `dump_manifest`, and the compile-context family — and
+applies the same rule to `depth`: an explicit value is a *floor*, so a request
+whose resolved snapshot did not reach it returns an error rather than a weaker
+snapshot. See the [`--depth` dial](../learn/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect)
+for the model.
+
 **Response — inline snapshot** (no `output_path`):
 
 ```json
@@ -339,7 +346,10 @@ for the `depth` model — `mode`/`source_method` are no longer accepted; depth
 is inferred automatically, or pinned explicitly via `depth`.
 
 See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_scan) for
-the exhaustive, generated parameter list.
+the exhaustive, generated parameter list. When `against` is given, the
+comparison is configurable exactly as `abi_compare` is —
+`policy`/`policy_file`/`suppression_file`/`contract_evaluation`/`contract_mode`
+mean the same thing on both tools.
 
 **Response fields:** `verdict`, `exit_code`, `findings` (count), `layers`
 (the per-layer evidence-coverage rows — always read these before trusting the
@@ -541,7 +551,7 @@ variables override defaults.
 | CLI flag | Environment variable | Default | Purpose |
 |---|---|---|---|
 | `--timeout <s>` | `ABICHECK_MCP_TIMEOUT` | `120` | Per-call timeout (seconds) for `abi_dump`, `abi_compare`, `abi_audit`, `abi_scan`, `abi_deps`, `abi_aggregate`, `abi_project_validate`, and `abi_project_plan`. On timeout the tool returns a structured error; the server stays up |
-| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path`/`headers` (`abi_dump`/`abi_audit`), `old_input`/`new_input`/`headers`/`old_headers`/`new_headers`/`suppression_file`/`policy_file` (`abi_compare`), `binary_path`/`headers`/`compile_db`/`against` (`abi_scan`), and the binary/report/config/bindings paths `abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read. Does *not* cover `include_dirs`/`public_header_dirs` (directories, not single files this check meaningfully bounds) or `abi_estimate`'s inputs (that tool never runs bounded work at all — see below) |
+| `--max-file-size <bytes>` | `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` (500 MB) | Maximum size of any input artifact — `library_path`/`headers`/`dump_manifest` (`abi_dump`; `abi_audit` for the first two), `old_input`/`new_input`/`headers`/`old_headers`/`new_headers`/`suppression_file`/`policy_file` (`abi_compare`), `binary_path`/`headers`/`compile_db`/`against`/`suppression_file`/`policy_file` (`abi_scan`), and the binary/report/config/bindings paths `abi_deps`/`abi_aggregate`/`abi_project_validate`/`abi_project_plan` read. A *file-shaped* `build_info` (a `compile_commands.json`, a Bazel jsonproto, or an evidence-pack file) is covered too, since the build-source loader parses it. Does *not* cover `include_dirs`/`public_header_dirs`/`sources`, or a `build_info` given as a **directory** (a size limit means nothing for one), or `abi_estimate`'s inputs (that tool never runs bounded work at all — see below) |
 | `--log-format text\|json` | — | `text` | Audit log format on stderr |
 
 The eight tools above share one configuration source: `--timeout`/

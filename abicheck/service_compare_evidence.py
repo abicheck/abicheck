@@ -17,6 +17,14 @@ build/source-evidence fields into the primitives :func:`service.run_compare_requ
 already knows how to drive (a collect mode, a per-side header list, a per-side
 :class:`CompileContext`).
 
+G33 Phase 5 gave :class:`~abicheck.api_types.DumpRequest` the same fields, so
+the per-input half of that resolution is shared:
+:func:`resolve_side_evidence` answers for one :class:`InputSpec`, and
+:func:`resolve_compare_request_evidence` / :func:`resolve_dump_request_evidence`
+are the two-input and one-input callers of it. (The module keeps its
+``compare``-shaped name: that is where all of this started, and renaming it
+would churn every import for no reader benefit.)
+
 Split out of ``service.py`` rather than inlined there: that module sits at the
 2000-line AI-readiness hard cap. Deliberately kept a *leaf* module (only
 ``compile_context``/``buildsource.scan_levels``, both stdlib-deps-only) rather
@@ -44,15 +52,21 @@ from .buildsource.scan_levels import (
 from .compile_context import CompileContext
 
 if TYPE_CHECKING:
-    from .api_types import CompareRequest, InputSpec
+    from collections.abc import Iterable
+
+    from .api_types import CompareRequest, DumpRequest, InputSpec
     from .dump_manifest import DumpManifest
 
 __all__ = [
     "SideEvidence",
+    "collect_mode_for",
     "effective_frontend",
     "normalized_debug_format",
+    "reject_debug_format_for_binaries",
     "reject_debug_format_for_non_elf",
     "resolve_compare_request_evidence",
+    "resolve_dump_request_evidence",
+    "resolve_side_evidence",
 ]
 
 
@@ -99,16 +113,21 @@ def _resolve_depth_collect_mode(depth: str | None, default_mode: str) -> str:
     )
 
 
-def _collect_mode(request: CompareRequest) -> str:
-    # Mirrors the CLI's own --depth-omitted inference
-    # (cli_compare_helpers._resolve_compare_collect_mode): explicit depth
-    # always wins; else sources infers "source", build_info infers "build",
-    # nothing at all stays "off".
-    if request.depth is not None:
-        return _resolve_depth_collect_mode(request.depth, "off")
-    if request.old.sources or request.new.sources:
+def collect_mode_for(depth: str | None, *sides: InputSpec) -> str:
+    """The build-source collect mode *depth* (or the inputs) implies.
+
+    Mirrors the CLI's own --depth-omitted inference
+    (cli_compare_helpers._resolve_compare_collect_mode): explicit depth
+    always wins; else sources infers "source", build_info infers "build",
+    nothing at all stays "off". Variadic in *sides* so ``compare`` asks over
+    both of its inputs and ``dump`` over its single one — the rule is the
+    same, only the number of inputs that can carry the evidence differs.
+    """
+    if depth is not None:
+        return _resolve_depth_collect_mode(depth, "off")
+    if any(side.sources for side in sides):
         return _resolve_depth_collect_mode("source", "off")
-    if request.old.build_info or request.new.build_info:
+    if any(side.build_info for side in sides):
         return _resolve_depth_collect_mode("build", "off")
     return "off"
 
@@ -188,8 +207,88 @@ def _compile_context(
             else None
         )
     if frontend_context != "host" and base.frontend_context == "host":
-        return dataclasses.replace(base, frontend_context=frontend_context)
-    return base
+        base = dataclasses.replace(base, frontend_context=frontend_context)
+    return _header_ast_frontend_only(base)
+
+
+def _header_ast_frontend_only(base: CompileContext) -> CompileContext:
+    """Strip a non-header-AST ``frontend`` from a resolved compile context.
+
+    ``android`` is a member of ``SUPPORTED_FRONTENDS`` but not of
+    ``HEADER_AST_FRONTENDS``: it is source-ABI only, with no header-AST path.
+    Both pipelines already honour that when computing the bare
+    ``header_backend`` (anything outside ``HEADER_AST_FRONTENDS`` falls back to
+    ``"auto"``) — but ``service._run_dump_uncached`` gives an explicit
+    ``compile.frontend`` *precedence* over that argument, and
+    ``dumper._resolve_header_backend`` raises ``ValidationError`` for anything
+    outside ``castxml``/``clang``/``hybrid``/``auto``. So a resolved context
+    still carrying ``"android"`` made the whole extraction fail with "Unknown
+    AST frontend 'android'" before any build/source evidence was embedded —
+    for a value both front ends document as accepted (Codex review, P2).
+
+    Fixed here rather than at either caller because the invariant is about
+    what may reach ``resolve_input``, and it holds for both: a
+    ``CompareRequest`` whose ``InputSpec.compile.frontend`` is ``"android"``
+    failed identically (verified), so nothing can be relying on the old
+    behaviour. The request-level ``frontend`` field still carries the value
+    for L4 source-ABI replay, which is the only layer that can act on it.
+    """
+    from .api_types import HEADER_AST_FRONTENDS, SUPPORTED_FRONTENDS
+
+    frontend = base.frontend.lower()
+    if frontend in HEADER_AST_FRONTENDS:
+        return base
+    # Only a *known* frontend with no header path is downgraded. An unknown
+    # value falls through untouched so `dumper._resolve_header_backend` still
+    # raises `Unknown AST frontend` for it: rewriting a typo like "clnag" to
+    # "auto" would turn it into a successful default-backend run, trading the
+    # bug this function fixes for a worse one (Codex review). Both request
+    # types now also reject such a value in `validate()`, so this is the
+    # second line of defence rather than the only one.
+    if frontend not in SUPPORTED_FRONTENDS:
+        return base
+    return dataclasses.replace(base, frontend="auto")
+
+
+def resolve_side_evidence(
+    side: InputSpec,
+    *,
+    depth: str | None,
+    collect_mode: str,
+    pair_compile: CompileContext | None,
+    frontend_context: str,
+) -> SideEvidence:
+    """One input's resolved evidence, ready for ``resolve_input``/``embed_build_source``.
+
+    *frontend_context* must already be lowercased by the caller (both request
+    types validate it case-insensitively; every real consumer compares against
+    the lowercase literals).
+    """
+    return SideEvidence(
+        headers=_headers(side, depth),
+        compile=_compile_context(side.compile, pair_compile, frontend_context),
+        collect_mode=collect_mode,
+        dump_manifest=_dump_manifest(side, depth),
+    )
+
+
+def resolve_dump_request_evidence(request: DumpRequest) -> SideEvidence:
+    """Resolve a :class:`~abicheck.api_types.DumpRequest`'s single input.
+
+    No pair-wide compile context: the C++20 dialect override
+    (``service_scan.pair_wide_cxx20_std_override``) exists so two *sides* of a
+    comparison cannot silently disagree on a language standard. A lone dump has
+    nothing to disagree with, and ``dumper.py``'s own per-input C++20 heuristic
+    already runs — so forcing a pair-wide decision here would change what a
+    single ``dump`` produces relative to today for no benefit.
+    """
+    return resolve_side_evidence(
+        request.input,
+        depth=request.depth,
+        collect_mode=collect_mode_for(request.depth, request.input),
+        pair_compile=None,
+        frontend_context=request.frontend_context.lower(),
+    )
 
 
 def resolve_compare_request_evidence(
@@ -204,30 +303,27 @@ def resolve_compare_request_evidence(
     (``service_scan.pair_wide_cxx20_std_override``); each side's own
     ``InputSpec.compile`` takes precedence over it.
     """
-    collect_mode = _collect_mode(request)
+    collect_mode = collect_mode_for(request.depth, request.old, request.new)
     # Codex review: validate() accepts frontend_context case-insensitively,
     # but every real consumer compares against the lowercase "host"/"device"
     # literals -- normalize once here so an accepted "DEVICE" doesn't
     # silently behave as neither.
     frontend_context = request.frontend_context.lower()
-    return (
-        SideEvidence(
-            headers=_headers(request.old, request.depth),
-            compile=_compile_context(request.old.compile, pair_compile, frontend_context),
+
+    def _side(side: InputSpec) -> SideEvidence:
+        return resolve_side_evidence(
+            side,
+            depth=request.depth,
             collect_mode=collect_mode,
-            dump_manifest=_dump_manifest(request.old, request.depth),
-        ),
-        SideEvidence(
-            headers=_headers(request.new, request.depth),
-            compile=_compile_context(request.new.compile, pair_compile, frontend_context),
-            collect_mode=collect_mode,
-            dump_manifest=_dump_manifest(request.new, request.depth),
-        ),
-    )
+            pair_compile=pair_compile,
+            frontend_context=frontend_context,
+        )
+
+    return _side(request.old), _side(request.new)
 
 
-def normalized_debug_format(request: CompareRequest) -> str | None:
-    """``CompareRequest.debug_format`` in the form the extraction layer takes.
+def normalized_debug_format(request: CompareRequest | DumpRequest) -> str | None:
+    """A request's ``debug_format`` in the form the extraction layer takes.
 
     Two normalizations, both mirroring what the CLI already does to the same
     flag (``cli_compare_helpers``/``cli_dump_helpers``), so the typed path
@@ -250,6 +346,29 @@ def normalized_debug_format(request: CompareRequest) -> str | None:
     return None if normalized == "auto" else normalized
 
 
+def reject_debug_format_for_binaries(
+    debug_format: str | None, sides: Iterable[tuple[str, str | None]]
+) -> None:
+    """Raise if a forced ELF debug format meets a PE/Mach-O input.
+
+    *sides* is ``(label, detected format)`` pairs, so the message names the
+    input that cannot honour the request — ``compare`` passes ``old``/``new``,
+    ``dump`` its single ``input``. See
+    :func:`reject_debug_format_for_non_elf` for why this is rejected up front
+    rather than silently dropped.
+    """
+    from .errors import ValidationError
+
+    if debug_format is None:
+        return
+    for side, binary_fmt in sides:
+        if binary_fmt in ("pe", "macho"):
+            raise ValidationError(
+                f"debug_format={debug_format!r} is only supported for ELF "
+                f"binaries, but the {side} input is {binary_fmt.upper()}."
+            )
+
+
 def reject_debug_format_for_non_elf(
     debug_format: str | None, old_fmt: str | None, new_fmt: str | None
 ) -> None:
@@ -265,13 +384,6 @@ def reject_debug_format_for_non_elf(
     A JSON-snapshot or dump input has ``fmt is None`` and is unaffected, same
     as on the CLI side.
     """
-    from .errors import ValidationError
-
-    if debug_format is None:
-        return
-    for side, binary_fmt in (("old", old_fmt), ("new", new_fmt)):
-        if binary_fmt in ("pe", "macho"):
-            raise ValidationError(
-                f"debug_format={debug_format!r} is only supported for ELF "
-                f"binaries, but the {side} input is {binary_fmt.upper()}."
-            )
+    reject_debug_format_for_binaries(
+        debug_format, (("old", old_fmt), ("new", new_fmt))
+    )

@@ -98,6 +98,37 @@ def populate_dependency_info(
     )
 
 
+def populate_side_dependency_info(
+    snap: AbiSnapshot,
+    side: InputSpec,
+    fmt: str | None,
+    search_paths: list[Path],
+    ld_library_path: str,
+) -> None:
+    """Populate one resolved input's transitive ``DependencyInfo``.
+
+    ELF-only, matching the CLI's own ``--follow-deps`` guard:
+    ``resolver.resolve_dependencies`` reads ELF ``DT_NEEDED`` entries, so there
+    is nothing for it to do on a PE or Mach-O input (it would not merely be
+    redundant, it would not work). A non-ELF input is a silent no-op here, the
+    same as it is on the CLI.
+
+    Whether to call this at all is the caller's opt-in
+    (``CompareRequest``/``DumpRequest``'s ``follow_dependencies``): populating
+    it costs a full dependency-graph resolution.
+
+    The sysroot comes from this input's own ``compile`` context. It is the only
+    one a typed request can carry, and without it a cross/sysrooted extraction
+    searched the *host* default directories and reported the target's
+    dependencies unresolved -- while the CLI, which forwards ``--sysroot`` here,
+    resolved them for the same input (Codex review).
+    """
+    elf_path = _dependency_source(side, fmt)
+    if elf_path is not None:
+        sysroot = side.compile.sysroot if side.compile is not None else None
+        populate_dependency_info(snap, elf_path, search_paths, sysroot, ld_library_path)
+
+
 def populate_pair_dependency_info(
     request: CompareRequest,
     old: AbiSnapshot,
@@ -111,20 +142,14 @@ def populate_pair_dependency_info(
     A no-op unless the request opts in — populating this costs a full
     dependency-graph resolution per side, so it stays opt-in for a typed
     caller exactly as ``--follow-deps`` is for the CLI.
-
-    ELF-only, matching the CLI's own guard: ``resolver.resolve_dependencies``
-    reads ELF ``DT_NEEDED`` entries, so there is nothing for it to do on a
-    PE or Mach-O side (it would not merely be redundant, it would not work).
     """
     if not request.follow_dependencies:
         return
     search_paths = list(request.dependency_search_paths)
     for snap, side, fmt in ((old, request.old, old_fmt), (new, request.new, new_fmt)):
-        elf_path = _dependency_source(side, fmt)
-        if elf_path is not None:
-            populate_dependency_info(
-                snap, elf_path, search_paths, None, request.ld_library_path
-            )
+        populate_side_dependency_info(
+            snap, side, fmt, search_paths, request.ld_library_path
+        )
 
 
 def _dependency_source(side: InputSpec, fmt: str | None) -> Path | None:

@@ -622,17 +622,33 @@ prose status. D1's and D4's both now do (the `service.py` comment-absence
 check by way of `TestCompareRequestAdr055Evidence`, and D4's source-level
 gate in `TestAbiCompareCliParity`).
 
-**Still open after this ADR, deliberately.** One item, needing its own scoped
-change rather than an extension of this one:
+**Still open after this ADR, deliberately.** Nothing, now. This list said two
+items, then one, and is now empty:
 
+- The CLI's separate `_resolve_compare_snapshots` path was removed; D1's
+  "Structural half" note above is the record.
 - G33's Phase 5 (`abi_dump`/`abi_scan` reaching the same depth/sources/
-  build-info/manifest parity `abi_compare` now has). That plan gates it on
-  Phase 4, which this closes, so it is unblocked — but it is a change to two
-  other tools' parameter surfaces, not part of this decision.
+  build-info/manifest parity) is **done**, in the shape that plan's Phase 5
+  note records. It is worth stating here what it found, because it corrects a
+  premise this section carried: the parity `abi_compare` "now has" from D4 is
+  a *typed request* carrying those fields, not tool arguments exposing them —
+  so `abi_dump` had nothing to copy and instead got the thing this ADR gave
+  `compare`: a typed request (`DumpRequest`) plus one resolution
+  (`service_dump_pipeline.run_dump_request`) built on the per-input primitives
+  lifted out of `service_compare_pipeline`. Which makes it less "a change to
+  two other tools' parameter surfaces" than this line assumed, and more D1
+  applied to the other command.
 
-This list said two items until the CLI's separate `_resolve_compare_snapshots`
-path was removed; that is now done, and D1's "Structural half" note above is
-the record. Which is worth naming, since it is the *third* instance in this
-one document of a status claim outliving the code it describes (D1's own
-"not started" line, the option-(b) decision, and now this list) — the reason
-each decision here carries an executable gate rather than only prose.
+That the list emptied by a route its own entry mis-described is the *fourth*
+instance in this one document of a status claim outliving the code it
+describes (D1's "not started" line, the option-(b) decision, this list's
+length, and now its remaining entry's premise) — the reason each decision here
+carries an executable gate rather than only prose. Phase 5 follows the same
+rule: its gate is a signature check over the three MCP tools
+(`tests/test_typed_dump_request.py`), not this paragraph.
+
+One genuinely open follow-up, named in G33's Phase 5 note rather than
+implied here: the native `dump` CLI does not yet build a `DumpRequest`, so
+`dump` has this ADR's *shape* without the CLI having adopted it — the
+`dump`-side analogue of D1's structural half, which needs its own seam found
+in `dump_cmd` first.

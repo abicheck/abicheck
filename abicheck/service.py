@@ -31,7 +31,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .api_types import CompareRequest, CompareResult, InputSpec, OutputSpec
+from .api_types import (
+    CompareRequest,
+    CompareResult,
+    DumpRequest,
+    InputSpec,
+    OutputSpec,
+)
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .clang_layout_tool import attach_clang_layout
@@ -1780,6 +1786,12 @@ from .service_compare_pipeline import (  # noqa: E402,F401
     resolve_sides_sequentially,
 )
 
+# ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the
+# leaf module ``service_dump_pipeline``. Re-exported for the same reason:
+# ``from abicheck.service import run_dump_request`` is the typed entry point
+# every front end (CLI, Python, MCP ``abi_dump``) builds a request for. ───────
+from .service_dump_pipeline import run_dump_request  # noqa: E402,F401
+
 # ── Output rendering (extracted to leaf module service_render, a non-
 # importing-us leaf) to stay under the AI-readiness size cap; re-exported
 # verbatim so ``from abicheck.service import render_output`` is unchanged. ──
@@ -1831,6 +1843,7 @@ __all__ = [
     "CompareResult",
     "CompileContext",
     "CostEstimate",
+    "DumpRequest",
     "InputSpec",
     "LayerResult",
     "OutputSpec",
@@ -1853,6 +1866,7 @@ __all__ = [
     "run_compare",
     "run_compare_request",
     "run_dump",
+    "run_dump_request",
     "run_scan",
     "run_scan_set",
     "run_scan_set_subprocess",

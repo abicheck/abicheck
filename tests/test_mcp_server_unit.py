@@ -858,8 +858,14 @@ class TestAbiDump:
     def test_headers_are_passed_as_public_headers(self, tmp_path: Path, monkeypatch):
         """abi_dump documents ``headers`` as "Public header file paths" — it
         must actually classify provenance with them, mirroring the CLI
-        ``compare --header`` fix."""
-        from abicheck import mcp_server
+        ``compare --header`` fix.
+
+        G33 Phase 5 moved this tool onto ``service.run_dump_request``, so the
+        spy goes on ``service.resolve_input`` — the function that now actually
+        runs — rather than the MCP-local ``_resolve_input`` wrapper it no
+        longer calls (the same relocation ADR-055 D4 made for ``abi_compare``).
+        """
+        from abicheck import service
 
         snap = _make_snapshot("1.0")
         snap_path = tmp_path / "input.json"
@@ -868,18 +874,22 @@ class TestAbiDump:
         hdr.write_text("int foo(void);\n", encoding="utf-8")
 
         captured: dict[str, object] = {}
-        original_resolve = mcp_server._resolve_input
+        original_resolve = service.resolve_input
 
-        def _spy(path, headers, includes, version, lang, **kwargs):
+        def _spy(path, headers=None, includes=None, version="", lang="c++", **kwargs):
             captured["public_headers"] = kwargs.get("public_headers")
+            captured["follow_linker_scripts"] = kwargs.get("follow_linker_scripts")
             return original_resolve(path, headers, includes, version, lang, **kwargs)
 
-        monkeypatch.setattr(mcp_server, "_resolve_input", _spy)
+        monkeypatch.setattr(service, "resolve_input", _spy)
 
         raw = abi_dump(str(snap_path), headers=[str(hdr)])
         data = json.loads(raw)
         assert data["status"] == "ok"
         assert captured["public_headers"] == [hdr]
+        # The size-guard pin `abi_compare` carries as `InputSpec.follow_linker_scripts`
+        # applies identically here: this tool size-checks only the caller-supplied path.
+        assert captured["follow_linker_scripts"] is False
 
 
 # ===================================================================

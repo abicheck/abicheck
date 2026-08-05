@@ -1985,6 +1985,9 @@ MCP_CLI_NAME_MAP: dict[str, str | None] = {
     "diagnostic_comparison": "--diagnostic-comparison",
     # ADR-049 Phase 3: the shadow contract evaluator.
     "contract_evaluation": "--contract-evaluation",
+    # ADR-049 Phase 6: which evidence domain that evaluator judges against
+    # (G33 Phase 5 gave the MCP tool the argument `compare` already had).
+    "contract_mode": "--contract",
 }
 
 

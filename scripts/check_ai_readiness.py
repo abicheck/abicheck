@@ -1163,6 +1163,26 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # effect on the graph is a *reduction*, since `cli_resolve` no longer
         # carries its own copy of the resolution this module now owns.
         #
+        # `service_dump_pipeline` and `service_input_resolution` join the same
+        # SCC (G33 Phase 5), on exactly the terms `service_compare_pipeline`
+        # above was signed off under — a *split* of an existing member, not a
+        # new dependency direction:
+        #   * `service_input_resolution` holds the per-input primitives that
+        #     were `service_compare_pipeline`'s private helpers (`_resolve_side`,
+        #     `_embed_side_build_source`, `_enforce_requested_depth`). Every
+        #     edge it has — `service`, `cli_buildsource`, `cli_dump_helpers`,
+        #     `cli_buildsource_helpers` — is an edge that code already had one
+        #     module over, moved rather than added.
+        #   * `service_dump_pipeline` is `run_dump_request`: `dump`'s
+        #     counterpart to `resolve_compare_request`, so the MCP `abi_dump`
+        #     tool (and any Python caller) reaches the same evidence resolution
+        #     instead of a five-argument subset of `resolve_input`. It reaches
+        #     `service` function-locally and `service` imports it back at its
+        #     module-load tail — the identical shape as its compare sibling.
+        # Both import only leaf modules (`api_types`/`errors`/
+        # `service_input_resolution`) at module load, so the package still
+        # imports cleanly: no init deadlock.
+        #
         # `cli_config`, `cli_doctor`, and `cli_graph` also join this same SCC —
         # each already had its own standalone `{"cli", "cli_X"}` entry above,
         # which covers the trivial two-node cycle from `cli`'s tail-of-module
@@ -1228,6 +1248,8 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "scan_engine",
                 "service",
                 "service_compare_pipeline",
+                "service_dump_pipeline",
+                "service_input_resolution",
                 "service_scan",
             }
         ),

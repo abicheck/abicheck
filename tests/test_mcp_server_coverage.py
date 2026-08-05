@@ -71,7 +71,7 @@ class TestSafeWritePathWindows:
         monkeypatch.setattr("platform.system", lambda: "Windows")
         # Simulate a resolved path under C:\Windows
         fake_path = r"C:\Windows\System32\evil.json"
-        with patch("abicheck.mcp_server.Path") as MockPath:
+        with patch("abicheck.mcp_server_inputs.Path") as MockPath:
             mock_resolved = MagicMock()
             mock_resolved.suffix = ".json"
             mock_resolved.__str__ = lambda self: fake_path
@@ -90,7 +90,7 @@ class TestSafeWritePathWindows:
         """Lines 145-148: NT extended path prefix stripping."""
         monkeypatch.setattr("platform.system", lambda: "Windows")
         fake_path = r"\\?\C:\Windows\System32\evil.json"
-        with patch("abicheck.mcp_server.Path") as MockPath:
+        with patch("abicheck.mcp_server_inputs.Path") as MockPath:
             mock_resolved = MagicMock()
             mock_resolved.suffix = ".json"
             mock_resolved.__str__ = lambda self: fake_path
@@ -107,7 +107,7 @@ class TestSafeWritePathWindows:
         """Lines 147-148: UNC prefix handling after NT extended strip."""
         monkeypatch.setattr("platform.system", lambda: "Windows")
         fake_path = r"\\?\UNC\localhost\c$\Windows\evil.json"
-        with patch("abicheck.mcp_server.Path") as MockPath:
+        with patch("abicheck.mcp_server_inputs.Path") as MockPath:
             mock_resolved = MagicMock()
             mock_resolved.suffix = ".json"
             mock_resolved.__str__ = lambda self: fake_path
@@ -129,7 +129,7 @@ class TestSafeWritePathWindows:
 class TestSafeWritePathResolveError:
     def test_invalid_path_raises(self):
         """Lines 112-113: TypeError/ValueError from Path().resolve()."""
-        with patch("abicheck.mcp_server.Path") as MockPath:
+        with patch("abicheck.mcp_server_inputs.Path") as MockPath:
             MockPath.return_value.resolve.side_effect = ValueError("bad path")
             with pytest.raises(ValueError, match="Invalid output_path"):
                 _safe_write_path("some\x00path.json")
@@ -496,8 +496,12 @@ class TestAbiDumpTool:
         out = tmp_path / "snap.json"
 
         fake_snap = _empty_snapshot()
+        # G33 Phase 5 routed `abi_dump` through `service.run_dump_request`,
+        # the same relocation ADR-055 D4 made for `abi_compare` below -- so
+        # the stub goes on the service-layer name this tool now reaches, not
+        # the `mcp_server._resolve_input` wrapper it no longer calls.
         monkeypatch.setattr(
-            "abicheck.mcp_server._resolve_input",
+            "abicheck.service.run_dump_request",
             lambda *a, **kw: fake_snap,
         )
         monkeypatch.setattr(
@@ -517,8 +521,9 @@ class TestAbiDumpTool:
 
 class TestAbiCompareTool:
     """These patch ``abicheck.service.resolve_input``/``compare_snapshots``,
-    not the ``abicheck.mcp_server`` names the sibling ``abi_dump`` tests still
-    patch. ADR-055 D4 routed ``abi_compare`` through the Tier-2 chokepoint
+    the ``abicheck.mcp_server`` names these tests originally patched (the
+    sibling ``abi_dump`` tests moved the same way in G33 Phase 5).
+    ADR-055 D4 routed ``abi_compare`` through the Tier-2 chokepoint
     (``run_compare_request``), so the service-layer names are the ones this
     tool now actually reaches; patching the MCP module's own would stub a
     function ``abi_compare`` no longer calls.

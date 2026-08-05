@@ -63,7 +63,8 @@ from typing import TYPE_CHECKING
 
 from .api_types import CompareResult
 from .dependency_info import populate_pair_dependency_info
-from .errors import SnapshotError, ValidationError
+from .errors import ValidationError
+from .service_input_resolution import enforce_requested_depth, resolve_side_snapshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -198,14 +199,6 @@ def _public_header_sets(
     )
 
 
-def _is_raw_source_tree(path: Path | None) -> bool:
-    """True for a source tree needing real extraction — not a prebuilt pack."""
-    from .buildsource.inline import is_pack_dir
-    from .cli_buildsource_helpers import _is_inputs_pack_dir
-
-    return path is not None and not (is_pack_dir(path) or _is_inputs_pack_dir(path))
-
-
 def _reject_unsupported_frontends(
     request: CompareRequest,
     frontend_lower: str,
@@ -220,11 +213,18 @@ def _reject_unsupported_frontends(
     error rather than a silently weaker result. A prebuilt pack or a bare
     ``build_info`` never feeds L4, so neither is rejected. Mirrors ``cli.py``'s
     own ``--depth source`` + ``--ast-frontend hybrid`` ``UsageError``.
+
+    The ``hybrid`` half is :func:`~abicheck.service_input_resolution.reject_hybrid_source_frontend`,
+    shared with ``dump``'s own typed path; the ``android`` half names
+    ``run_compare_request`` in its message and stays here.
     """
-    from . import service_compare_evidence as _sce
+    from .service_input_resolution import (
+        is_raw_source_tree,
+        reject_hybrid_source_frontend,
+    )
 
     if frontend_lower == "android" and any(
-        _is_raw_source_tree(side.sources) for side in (request.old, request.new)
+        is_raw_source_tree(side.sources) for side in (request.old, request.new)
     ):
         raise ValidationError(
             "the 'android' AST frontend's source-ABI replay is not yet wired "
@@ -232,56 +232,11 @@ def _reject_unsupported_frontends(
             "source tree -- pass a prebuilt evidence pack directory instead, "
             "or use has_sources=True with no inline sources/build_info."
         )
-    if request.depth is not None and request.depth.lower() == "source":
-        for side, evidence in ((request.old, old_evidence), (request.new, new_evidence)):
-            if (
-                _is_raw_source_tree(side.sources)
-                and _sce.effective_frontend(evidence.compile, header_backend) == "hybrid"
-            ):
-                raise ValidationError(
-                    "depth='source' is incompatible with the 'hybrid' AST "
-                    "frontend: L4 source-ABI replay has no dual-backend hybrid "
-                    "extractor. Use 'castxml' or 'clang' for a depth='source' "
-                    "request."
-                )
-
-
-def _enforce_requested_depth(
-    request: CompareRequest, old: AbiSnapshot, new: AbiSnapshot
-) -> None:
-    """Fail when an explicit ``depth`` was requested but not actually reached.
-
-    Mirrors ``dump``'s own ``check_requested_depth_satisfied`` hard-fail, but
-    raises ``ValidationError`` (a Tier-2 API has no ``ClickException``
-    concept). Without it, a raw input that could not reach the requested rung
-    — no usable compile database, extractor, or linkable declarations —
-    silently diffed whatever weaker evidence ``embed_build_source`` produced.
-
-    Known, accepted limitation (Codex review, not fixed here): this is a
-    floor, not a ceiling. A side whose input is an already-serialized JSON
-    snapshot with richer embedded evidence than ``depth`` requested still
-    diffs with all of it — ``resolve_input``'s ``fmt == "json"`` branch
-    returns ``load_snapshot(path)`` verbatim, matching the CLI's own
-    long-documented default, which ``--depth`` has never projected down for a
-    pre-built snapshot either.
-    """
-    if request.depth is None:
-        return
-    from .cli_dump_helpers import _DEPTH_RANK, _gated_source_label
-
-    # validate() already restricts depth to USER_DEPTHS.
-    requested_rank = _DEPTH_RANK.get(request.depth.lower(), 0)
-    for side_label, snap in (("old", old), ("new", new)):
-        effective = _gated_source_label(snap.build_source, snap)
-        if _DEPTH_RANK.get(effective, 0) < requested_rank:
-            raise ValidationError(
-                f"depth={request.depth!r} was requested for the {side_label} "
-                f"side but the resolved snapshot only reached {effective!r} "
-                "evidence depth. Supply the evidence this rung needs (headers, "
-                "a build/compile database, or --sources with linkable "
-                "declarations) or lower depth to match what is actually "
-                "available."
-            )
+    reject_hybrid_source_frontend(
+        request.depth,
+        ((request.old, old_evidence), (request.new, new_evidence)),
+        header_backend,
+    )
 
 
 def resolve_compare_request(
@@ -358,39 +313,21 @@ def resolve_compare_request(
         public_headers: list[Path],
         public_header_dirs: list[Path],
     ) -> AbiSnapshot:
-        snap = service.resolve_input(
-            side.path,
-            evidence.headers,
-            list(side.includes),
-            side.version,
-            lang,
-            is_elf=True if fmt == "elf" else None,
-            pdb_path=side.pdb,
-            debug_roots=list(side.debug_roots) or None,
-            enable_debuginfod=request.enable_debuginfod,
-            debuginfod_url=request.debuginfod_url,
+        return resolve_side_snapshot(
+            side,
+            evidence,
+            lang=lang,
             header_backend=header_backend,
-            compile=evidence.compile,
+            fmt=fmt,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
-            include_dependencies=side.include_dependencies,
-            dump_manifest=evidence.dump_manifest,
-            follow_linker_scripts=side.follow_linker_scripts,
+            enable_debuginfod=request.enable_debuginfod,
+            debuginfod_url=request.debuginfod_url,
             dwarf_only=request.dwarf_only,
             debug_format=debug_format,
             include_labels=dict(request.include_labels) or None,
             notify=notify,
         )
-        if side.sources or side.build_info:
-            _embed_side_build_source(
-                snap,
-                side,
-                evidence,
-                header_backend,
-                public_headers,
-                public_header_dirs,
-            )
-        return snap
 
     def _resolve_old_side() -> AbiSnapshot:
         return _resolve_side(
@@ -426,7 +363,7 @@ def resolve_compare_request(
     populate_pair_dependency_info(
         request, old, new, old_fmt=old_fmt, new_fmt=new_fmt
     )
-    _enforce_requested_depth(request, old, new)
+    enforce_requested_depth(request.depth, (("old", old), ("new", new)))
     return ResolvedComparePair(
         old=old,
         new=new,
@@ -435,48 +372,6 @@ def resolve_compare_request(
         old_evidence=old_evidence,
         new_evidence=new_evidence,
     )
-
-
-def _embed_side_build_source(
-    snap: AbiSnapshot,
-    side: InputSpec,
-    evidence: SideEvidence,
-    header_backend: str,
-    public_headers: list[Path],
-    public_header_dirs: list[Path],
-) -> None:
-    """Embed one side's inline L3-L5 build/source evidence into *snap*.
-
-    Same public roots as ``resolve_input``, plus a ``dump_manifest``'s
-    *declared-public* roots only (a manifest's project-owned TU includes are
-    private, hence ``dump_manifest_public_roots`` rather than
-    ``dump_manifest_header_roots``).
-
-    A malformed pack raises ``click.ClickException`` deep inside
-    ``embed_build_source`` — no place in this Tier-2 API's
-    ``ValidationError``/``SnapshotError`` contract, so it is translated here
-    (Codex review).
-    """
-    import click
-
-    from . import service_compare_evidence as _sce
-    from .cli_buildsource import embed_build_source
-    from .dumper_scoping import dump_manifest_public_roots
-
-    try:
-        embed_build_source(
-            snap,
-            build_info=side.build_info,
-            sources=side.sources,
-            collect_mode=evidence.collect_mode,
-            extractor=_sce.effective_frontend(evidence.compile, header_backend),
-            public_headers=tuple(str(p) for p in public_headers),
-            public_header_dirs=tuple(str(p) for p in public_header_dirs)
-            + tuple(str(p) for p in dump_manifest_public_roots(evidence.dump_manifest)),
-            quiet=True,
-        )
-    except click.ClickException as exc:
-        raise SnapshotError(str(exc)) from exc
 
 
 def classify_compare_pair(
