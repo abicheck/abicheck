@@ -381,6 +381,270 @@ def _classify_outcome(
     return OUTCOME_RECONCILED
 
 
+#: One node kind's structural-context index: context -> the new-side node ids
+#: sharing it. Tier 3 builds it; the per-kind finalize step reads it back to
+#: tell an ambiguous new node from a genuine addition.
+_ContextIndex = dict[frozenset[tuple[str, str, str]], list[str]]
+
+
+@dataclass(frozen=True)
+class _KindPass:
+    """One node kind's candidate lists plus their pre-resolved identities.
+
+    The three matching tiers all work over exactly this: the removed nodes of
+    one kind, the added nodes of the same kind, and each side's
+    :func:`resolve_identity_for_node` result keyed by node id (resolved once
+    per pass, since every tier consults them).
+    """
+
+    old_list: list[GraphNode]
+    new_list: list[GraphNode]
+    old_ident: dict[str, CanonicalIdentity]
+    new_ident: dict[str, CanonicalIdentity]
+
+
+class _Reconciler:
+    """The cross-kind state of one :func:`reconcile_added_removed` run.
+
+    Holds what every kind's pass shares — the accumulating result, the two
+    matched-id sets, and the whole-graph structural-context / declaring-file
+    indices — so the three tiers can be separate methods instead of one
+    240-line function (CodeFactor: complex method). Each tier keeps its own
+    ambiguity rules; what they have in common (recording a pair, marking both
+    sides matched) is :meth:`_record_pair`.
+    """
+
+    def __init__(
+        self, old_graph: SourceGraphSummary, new_graph: SourceGraphSummary
+    ) -> None:
+        self.result = GraphReconciliation()
+        self.matched_old: set[str] = set()
+        self.matched_new: set[str] = set()
+        # Computed once per side, for the whole graph -- not per kind, and not
+        # per node-probed-in-Tier-3 (see _all_structural_contexts' own
+        # docstring for why the latter mattered on a large graph).
+        self.old_contexts = _all_structural_contexts(old_graph)
+        self.new_contexts = _all_structural_contexts(new_graph)
+        self.old_declaring_files = _declaring_files(old_graph)
+        self.new_declaring_files = _declaring_files(new_graph)
+
+    def _record_pair(
+        self,
+        kind_pass: _KindPass,
+        old_node: GraphNode,
+        new_id: str,
+        match_kind: str,
+    ) -> None:
+        """Record one reconciled pair and mark both sides matched.
+
+        Shared by all three tiers — they differ in *how* they choose the
+        candidate, never in how the pair is classified or booked.
+        """
+        oid = old_node.id
+        new_node = next(n for n in kind_pass.new_list if n.id == new_id)
+        outcome = _classify_outcome(
+            kind_pass.old_ident[oid],
+            kind_pass.new_ident[new_id],
+            old_declaring_file=self.old_declaring_files.get(oid, ""),
+            new_declaring_file=self.new_declaring_files.get(new_id, ""),
+        )
+        self.result.reconciled.append(
+            ReconciledPair(
+                old_node,
+                new_node,
+                match_kind,
+                outcome,
+                kind_pass.old_ident[oid],
+                kind_pass.new_ident[new_id],
+            )
+        )
+        self.matched_old.add(oid)
+        self.matched_new.add(new_id)
+
+    def match_canonical_ids(self, kind_pass: _KindPass) -> None:
+        """Tier 1: canonical-id match (USR/mangled only).
+
+        A shared normalized-signature ``primary_id`` is intentionally left to
+        the alias tier instead: "same qualified name + kind" is exactly the
+        alias-match evidence the module docstring describes, not a
+        canonical-identity match.
+        """
+        new_primary_index: dict[str, list[str]] = {}
+        for nid, ident in kind_pass.new_ident.items():
+            if ident.tier == IDENTITY_TIER_CANONICAL:
+                new_primary_index.setdefault(ident.primary_id, []).append(nid)
+        for old_node in kind_pass.old_list:
+            oid = old_node.id
+            if oid in self.matched_old:
+                continue
+            if kind_pass.old_ident[oid].tier != IDENTITY_TIER_CANONICAL:
+                continue
+            primary = kind_pass.old_ident[oid].primary_id
+            candidates = [
+                c
+                for c in new_primary_index.get(primary, [])
+                if c not in self.matched_new
+            ]
+            if len(candidates) == 1:
+                self._record_pair(
+                    kind_pass, old_node, candidates[0], _MATCH_KIND_CANONICAL_ID
+                )
+
+    def match_aliases(self, kind_pass: _KindPass) -> None:
+        """Tier 2: alias match, required unambiguous in *both* directions.
+
+        A bare "name:<short>" alias (resolve_canonical_identity() adds one
+        for every entity that has a name at all) must never be sufficient
+        evidence on its own -- that is exactly the "ambiguous fallback key
+        must resolve to no match" principle this module's own docstring
+        cites (ADR-045), generalized to aliases: two unrelated
+        declarations that merely share a short name (e.g. old `a::foo`
+        removed, unrelated new `b::foo` added) must not reconcile just
+        because "foo" is their only common alias (Codex review).
+
+        That principle is silently defeated when the entity has no real
+        qualified_name fact at all: resolve_identity_for_node() falls
+        back to node.label for `qualified_name`, so a header-only-graph
+        source_decl node seeded with only a bare label (the common
+        production shape -- no explicit qualified_name attr) launders
+        that same bare name into "qualified:<label>" and the plain
+        signature alias, both exempt from the name: filter above. Two
+        unrelated such nodes sharing a label then reconcile on evidence
+        no stronger than a bare name (Codex review, fresh evidence).
+        _strong_aliases() treats those two aliases as equally weak
+        whenever the identity carries no scope-qualification ("::") and
+        no arity-distinguishing param types.
+        """
+        strong_new_by_alias: dict[str, list[str]] = {}
+        for nid, ident in kind_pass.new_ident.items():
+            if nid in self.matched_new:
+                continue
+            for alias in _strong_aliases(ident):
+                strong_new_by_alias.setdefault(alias, []).append(nid)
+        for old_node in kind_pass.old_list:
+            oid = old_node.id
+            if oid in self.matched_old:
+                continue
+            candidate_ids: set[str] = set()
+            for alias in _strong_aliases(kind_pass.old_ident[oid]):
+                for nid in strong_new_by_alias.get(alias, []):
+                    if nid not in self.matched_new:
+                        candidate_ids.add(nid)
+            if len(candidate_ids) > 1:
+                self.result.ambiguous_old.append(old_node)
+            elif len(candidate_ids) == 1:
+                cand = next(iter(candidate_ids))
+                # Ambiguity-safe both ways (ADR-045 principle): the candidate
+                # must also see exactly one unmatched old-side alias partner.
+                cand_ident = kind_pass.new_ident[cand]
+                reverse_candidates = {
+                    n.id
+                    for n in kind_pass.old_list
+                    if n.id not in self.matched_old
+                    and _strong_aliases(kind_pass.old_ident[n.id])
+                    & _strong_aliases(cand_ident)
+                }
+                if len(reverse_candidates) == 1:
+                    self._record_pair(kind_pass, old_node, cand, _MATCH_KIND_ALIAS)
+                else:
+                    self.result.ambiguous_old.append(old_node)
+
+    def match_structural_contexts(self, kind_pass: _KindPass) -> _ContextIndex:
+        """Tier 3: structural-context match (weakest — unique position only).
+
+        Returns the new-side context index it built, which the per-kind
+        finalize step reads back to separate an ambiguous new node (its
+        position is shared) from a genuine addition.
+        """
+        remaining_old = [
+            n
+            for n in kind_pass.old_list
+            if n.id not in self.matched_old and n not in self.result.ambiguous_old
+        ]
+        ctx_new: _ContextIndex = {}
+        for n in kind_pass.new_list:
+            if n.id in self.matched_new:
+                continue
+            ctx = self.new_contexts.get(n.id, frozenset())
+            if ctx:
+                ctx_new.setdefault(ctx, []).append(n.id)
+        for old_node in remaining_old:
+            oid = old_node.id
+            if oid in self.matched_old:
+                continue
+            ctx = self.old_contexts.get(oid, frozenset())
+            if not ctx:
+                continue
+            candidates = [c for c in ctx_new.get(ctx, []) if c not in self.matched_new]
+            if len(candidates) > 1:
+                self.result.ambiguous_old.append(old_node)
+            elif len(candidates) == 1:
+                # Uniqueness must also hold from the *old* side: no other
+                # unmatched old node of this kind may share the identical
+                # context (else the position itself is ambiguous).
+                sibling_old_matches = [
+                    n
+                    for n in remaining_old
+                    if n.id != oid
+                    and n.id not in self.matched_old
+                    and self.old_contexts.get(n.id, frozenset()) == ctx
+                ]
+                if not sibling_old_matches:
+                    self._record_pair(
+                        kind_pass,
+                        old_node,
+                        candidates[0],
+                        _MATCH_KIND_STRUCTURAL_CONTEXT,
+                    )
+                else:
+                    self.result.ambiguous_old.append(old_node)
+                    for sib in sibling_old_matches:
+                        if sib not in self.result.ambiguous_old:
+                            self.result.ambiguous_old.append(sib)
+        return ctx_new
+
+    def finalize_kind(self, kind_pass: _KindPass, ctx_new: _ContextIndex) -> None:
+        """Bucket whatever the three tiers left over as true removes/adds.
+
+        An unmatched *new* node whose structural position is shared with
+        another unmatched new node is ambiguous rather than added: nothing
+        proves which of them (if either) is the counterpart.
+        """
+        for old_node in kind_pass.old_list:
+            if old_node.id in self.matched_old:
+                continue
+            if old_node in self.result.ambiguous_old:
+                continue
+            self.result.true_removed.append(old_node)
+        for new_node in kind_pass.new_list:
+            if new_node.id in self.matched_new:
+                continue
+            ctx = self.new_contexts.get(new_node.id, frozenset())
+            is_ambiguous_new = ctx in ctx_new and len(ctx_new.get(ctx, [])) > 1
+            if is_ambiguous_new and new_node not in self.result.ambiguous_new:
+                self.result.ambiguous_new.append(new_node)
+            elif not is_ambiguous_new:
+                self.result.true_added.append(new_node)
+
+
+def _group_reconcilable_by_kind(
+    nodes: list[GraphNode], unreconcilable: list[GraphNode]
+) -> dict[str, list[GraphNode]]:
+    """Bucket *nodes* by kind, diverting kinds that are never reconciled.
+
+    A node of an unreconcilable kind goes straight into *unreconcilable* (the
+    result's own true-added/true-removed list) — it is not a rename candidate
+    at all, so no tier ever sees it.
+    """
+    by_kind: dict[str, list[GraphNode]] = {}
+    for n in nodes:
+        if n.kind in _RECONCILABLE_KINDS:
+            by_kind.setdefault(n.kind, []).append(n)
+        else:
+            unreconcilable.append(n)
+    return by_kind
+
+
 def reconcile_added_removed(
     removed_nodes: list[GraphNode],
     added_nodes: list[GraphNode],
@@ -394,235 +658,33 @@ def reconcile_added_removed(
     diff lists — callers typically pass
     ``diff.removed_nodes``/``diff.added_nodes`` straight from
     :func:`~.source_graph.diff_source_graph`.
+
+    Each node kind is matched independently, strongest evidence first:
+    canonical id, then alias, then structural context — every tier
+    ambiguity-safe, and each only ever considering what the previous ones left
+    unmatched. See :class:`_Reconciler` for the tiers themselves.
     """
-    result = GraphReconciliation()
-
-    removed_by_kind: dict[str, list[GraphNode]] = {}
-    for n in removed_nodes:
-        if n.kind in _RECONCILABLE_KINDS:
-            removed_by_kind.setdefault(n.kind, []).append(n)
-        else:
-            result.true_removed.append(n)
-    added_by_kind: dict[str, list[GraphNode]] = {}
-    for n in added_nodes:
-        if n.kind in _RECONCILABLE_KINDS:
-            added_by_kind.setdefault(n.kind, []).append(n)
-        else:
-            result.true_added.append(n)
-
-    matched_old: set[str] = set()
-    matched_new: set[str] = set()
-
-    # Computed once per side, for the whole graph -- not per kind, and not
-    # per node-probed-in-Tier-3 (see _all_structural_contexts' own
-    # docstring for why the latter mattered on a large graph).
-    old_contexts = _all_structural_contexts(old_graph)
-    new_contexts = _all_structural_contexts(new_graph)
-    old_declaring_files = _declaring_files(old_graph)
-    new_declaring_files = _declaring_files(new_graph)
+    run = _Reconciler(old_graph, new_graph)
+    removed_by_kind = _group_reconcilable_by_kind(
+        removed_nodes, run.result.true_removed
+    )
+    added_by_kind = _group_reconcilable_by_kind(added_nodes, run.result.true_added)
 
     for kind in sorted(set(removed_by_kind) | set(added_by_kind)):
         old_list = removed_by_kind.get(kind, [])
         new_list = added_by_kind.get(kind, [])
-        old_ident = {n.id: resolve_identity_for_node(n) for n in old_list}
-        new_ident = {n.id: resolve_identity_for_node(n) for n in new_list}
+        kind_pass = _KindPass(
+            old_list,
+            new_list,
+            {n.id: resolve_identity_for_node(n) for n in old_list},
+            {n.id: resolve_identity_for_node(n) for n in new_list},
+        )
+        run.match_canonical_ids(kind_pass)
+        run.match_aliases(kind_pass)
+        ctx_new = run.match_structural_contexts(kind_pass)
+        run.finalize_kind(kind_pass, ctx_new)
 
-        # -- Tier 1: canonical-id match (USR/mangled only — a shared
-        # normalized-signature primary_id is intentionally handled by the
-        # alias tier below, since "same qualified name + kind" is exactly
-        # the alias-match evidence the module docstring describes, not a
-        # canonical-identity match). ---------------------------------
-        new_by_primary: dict[str, str] = {
-            nid: ident.primary_id
-            for nid, ident in new_ident.items()
-            if ident.tier == IDENTITY_TIER_CANONICAL
-        }
-        new_primary_index: dict[str, list[str]] = {}
-        for nid, primary in new_by_primary.items():
-            new_primary_index.setdefault(primary, []).append(nid)
-        for old_node in old_list:
-            oid = old_node.id
-            if oid in matched_old:
-                continue
-            if old_ident[oid].tier != IDENTITY_TIER_CANONICAL:
-                continue
-            primary = old_ident[oid].primary_id
-            candidates = [
-                c for c in new_primary_index.get(primary, []) if c not in matched_new
-            ]
-            if len(candidates) == 1:
-                new_node = next(n for n in new_list if n.id == candidates[0])
-                outcome = _classify_outcome(
-                    old_ident[oid],
-                    new_ident[candidates[0]],
-                    old_declaring_file=old_declaring_files.get(oid, ""),
-                    new_declaring_file=new_declaring_files.get(candidates[0], ""),
-                )
-                result.reconciled.append(
-                    ReconciledPair(
-                        old_node,
-                        new_node,
-                        _MATCH_KIND_CANONICAL_ID,
-                        outcome,
-                        old_ident[oid],
-                        new_ident[candidates[0]],
-                    )
-                )
-                matched_old.add(oid)
-                matched_new.add(candidates[0])
-
-        # -- Tier 2: alias match (unambiguous both directions) ----------
-        # A bare "name:<short>" alias (resolve_canonical_identity() adds one
-        # for every entity that has a name at all) must never be sufficient
-        # evidence on its own -- that is exactly the "ambiguous fallback key
-        # must resolve to no match" principle this module's own docstring
-        # cites (ADR-045), generalized to aliases: two unrelated
-        # declarations that merely share a short name (e.g. old `a::foo`
-        # removed, unrelated new `b::foo` added) must not reconcile just
-        # because "foo" is their only common alias (Codex review).
-        #
-        # That principle is silently defeated when the entity has no real
-        # qualified_name fact at all: resolve_identity_for_node() falls
-        # back to node.label for `qualified_name`, so a header-only-graph
-        # source_decl node seeded with only a bare label (the common
-        # production shape -- no explicit qualified_name attr) launders
-        # that same bare name into "qualified:<label>" and the plain
-        # signature alias, both exempt from the name: filter above. Two
-        # unrelated such nodes sharing a label then reconcile on evidence
-        # no stronger than a bare name (Codex review, fresh evidence).
-        # _strong_aliases() treats those two aliases as equally weak
-        # whenever the identity carries no scope-qualification ("::") and
-        # no arity-distinguishing param types.
-        strong_new_by_alias: dict[str, list[str]] = {}
-        for nid, ident in new_ident.items():
-            if nid in matched_new:
-                continue
-            for alias in _strong_aliases(ident):
-                strong_new_by_alias.setdefault(alias, []).append(nid)
-        for old_node in old_list:
-            oid = old_node.id
-            if oid in matched_old:
-                continue
-            candidate_ids: set[str] = set()
-            for alias in _strong_aliases(old_ident[oid]):
-                for nid in strong_new_by_alias.get(alias, []):
-                    if nid not in matched_new:
-                        candidate_ids.add(nid)
-            if len(candidate_ids) == 1:
-                cand = next(iter(candidate_ids))
-                # Ambiguity-safe both ways (ADR-045 principle): the candidate
-                # must also see exactly one unmatched old-side alias partner.
-                cand_ident = new_ident[cand]
-                reverse_candidates = {
-                    n.id
-                    for n in old_list
-                    if n.id not in matched_old
-                    and _strong_aliases(old_ident[n.id]) & _strong_aliases(cand_ident)
-                }
-                if len(reverse_candidates) == 1:
-                    new_node = next(n for n in new_list if n.id == cand)
-                    outcome = _classify_outcome(
-                        old_ident[oid],
-                        cand_ident,
-                        old_declaring_file=old_declaring_files.get(oid, ""),
-                        new_declaring_file=new_declaring_files.get(cand, ""),
-                    )
-                    result.reconciled.append(
-                        ReconciledPair(
-                            old_node,
-                            new_node,
-                            _MATCH_KIND_ALIAS,
-                            outcome,
-                            old_ident[oid],
-                            cand_ident,
-                        )
-                    )
-                    matched_old.add(oid)
-                    matched_new.add(cand)
-                else:
-                    result.ambiguous_old.append(old_node)
-            elif len(candidate_ids) > 1:
-                result.ambiguous_old.append(old_node)
-
-        # -- Tier 3: structural-context match (weakest, unique-position) -
-        remaining_old = [
-            n
-            for n in old_list
-            if n.id not in matched_old and n not in result.ambiguous_old
-        ]
-        remaining_new = [n for n in new_list if n.id not in matched_new]
-        ctx_new: dict[frozenset[tuple[str, str, str]], list[str]] = {}
-        for n in remaining_new:
-            if n.id in matched_new:
-                continue
-            ctx = new_contexts.get(n.id, frozenset())
-            if ctx:
-                ctx_new.setdefault(ctx, []).append(n.id)
-        for old_node in remaining_old:
-            oid = old_node.id
-            if oid in matched_old:
-                continue
-            ctx = old_contexts.get(oid, frozenset())
-            if not ctx:
-                continue
-            candidates = [c for c in ctx_new.get(ctx, []) if c not in matched_new]
-            if len(candidates) == 1:
-                cand = candidates[0]
-                # Uniqueness must also hold from the *old* side: no other
-                # unmatched old node of this kind may share the identical
-                # context (else the position itself is ambiguous).
-                sibling_old_matches = [
-                    n
-                    for n in remaining_old
-                    if n.id != oid
-                    and n.id not in matched_old
-                    and old_contexts.get(n.id, frozenset()) == ctx
-                ]
-                if not sibling_old_matches:
-                    new_node = next(n for n in new_list if n.id == cand)
-                    outcome = _classify_outcome(
-                        old_ident[oid],
-                        new_ident[cand],
-                        old_declaring_file=old_declaring_files.get(oid, ""),
-                        new_declaring_file=new_declaring_files.get(cand, ""),
-                    )
-                    result.reconciled.append(
-                        ReconciledPair(
-                            old_node,
-                            new_node,
-                            _MATCH_KIND_STRUCTURAL_CONTEXT,
-                            outcome,
-                            old_ident[oid],
-                            new_ident[cand],
-                        )
-                    )
-                    matched_old.add(oid)
-                    matched_new.add(cand)
-                else:
-                    result.ambiguous_old.append(old_node)
-                    for sib in sibling_old_matches:
-                        if sib not in result.ambiguous_old:
-                            result.ambiguous_old.append(sib)
-            elif len(candidates) > 1:
-                result.ambiguous_old.append(old_node)
-
-        for old_node in old_list:
-            if old_node.id in matched_old:
-                continue
-            if old_node in result.ambiguous_old:
-                continue
-            result.true_removed.append(old_node)
-        for new_node in new_list:
-            if new_node.id in matched_new:
-                continue
-            ctx = new_contexts.get(new_node.id, frozenset())
-            is_ambiguous_new = ctx in ctx_new and len(ctx_new.get(ctx, [])) > 1
-            if is_ambiguous_new and new_node not in result.ambiguous_new:
-                result.ambiguous_new.append(new_node)
-            elif not is_ambiguous_new:
-                result.true_added.append(new_node)
-
-    return result
+    return run.result
 
 
 def reconcile_graph_diff(

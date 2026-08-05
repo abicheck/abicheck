@@ -32,7 +32,6 @@ committed fixtures; ``--check`` fails if they drift.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -42,6 +41,10 @@ EXAMPLES = ROOT / "examples"
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from fixture_sync import sync_fixtures  # noqa: E402
 
 from abicheck.buildsource.pack import BuildSourcePack  # noqa: E402
 from abicheck.buildsource.source_graph import (  # noqa: E402
@@ -272,13 +275,6 @@ FIXTURES: dict[str, dict[str, object]] = {
 }
 
 
-def _render(builder: object) -> str:
-    if isinstance(builder, str):
-        return builder
-    snap = builder()  # type: ignore[operator]
-    return json.dumps(snapshot_to_dict(snap), indent=2, sort_keys=True) + "\n"
-
-
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -287,36 +283,17 @@ def main(argv: Iterable[str] | None = None) -> int:
         help="Fail if a committed fixture differs from what would be generated.",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
-
-    drift = False
-    written = 0
-    for case_name, files in FIXTURES.items():
-        case_dir = EXAMPLES / case_name
-        for filename, builder in files.items():
-            content = _render(builder)
-            path = case_dir / filename
-            if args.check:
-                current = path.read_text(encoding="utf-8") if path.is_file() else ""
-                if current != content:
-                    print(f"drift: {path.relative_to(ROOT)}", file=sys.stderr)
-                    drift = True
-            else:
-                case_dir.mkdir(parents=True, exist_ok=True)
-                path.write_text(content, encoding="utf-8")
-                written += 1
-
-    if args.check:
-        if drift:
-            print(
-                "Reachability example fixtures out of date. Run: "
-                "python scripts/gen_reachability_examples.py",
-                file=sys.stderr,
-            )
-            return 1
-        print("Reachability example fixtures up to date.")
-        return 0
-    print(f"Wrote {written} reachability example fixture file(s).")
-    return 0
+    # The write/--check walk itself is shared with the other committed-fixture
+    # generators (see fixture_sync.py); this script owns only the fixtures.
+    return sync_fixtures(
+        FIXTURES,
+        examples_dir=EXAMPLES,
+        root=ROOT,
+        to_dict=snapshot_to_dict,
+        check=args.check,
+        label="Reachability example fixtures",
+        regen_command="python scripts/gen_reachability_examples.py",
+    )
 
 
 if __name__ == "__main__":

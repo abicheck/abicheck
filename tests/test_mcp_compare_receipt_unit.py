@@ -78,11 +78,11 @@ class TestResolveToolConfig:
             rule_identities=lambda: ("symbol:api_b",),
         )
         config = resolve_tool_config(
-            policy="strict_abi", suppression=rules, suppression_path="/tmp/s.yaml"
+            policy="strict_abi", suppression=rules, suppression_path="/work/s.yaml"
         )
         assert config.suppressions is not None
         assert config.suppressions.sha256 == "deadbeef"
-        assert config.provenance["suppressions"].path == "/tmp/s.yaml"
+        assert config.provenance["suppressions"].path == "/work/s.yaml"
 
     def test_a_suppression_list_with_no_path_is_still_accepted(self):
         """An API caller can hand over rules it built in memory; there is no

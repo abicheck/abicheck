@@ -63,7 +63,7 @@ from .model import ScopeOrigin, Visibility
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot, RecordType
+    from .model import AbiSnapshot, Function, RecordType, Variable
 
 __all__ = [
     "directly_referenced_stdlib_types",
@@ -551,6 +551,221 @@ def _finditer_allow_nested(
     return matches
 
 
+def _partition_snapshot_types(
+    snapshot: AbiSnapshot,
+) -> tuple[list[str], frozenset[str], dict[str, list[RecordType]]]:
+    """Split ``snapshot.types`` into the stdlib candidates and everything else.
+
+    Returns the stdlib identities (what the scan is looking *for*), the
+    non-stdlib identities (what a signature may legitimately name on the way
+    there), and the non-stdlib records keyed by identity.
+
+    That last one is a ``list`` per identity, not a single record, deliberately
+    (Codex review, fresh evidence): ``snapshot.types`` can carry several entries
+    sharing one identity (a complete definition alongside an ODR-duplicate or an
+    incomplete declaration), and a plain dict would silently drop all but the
+    last — so a public signature reaching that identity would walk only the
+    survivor, missing a ``std::`` field the other entry carries. ``surface.py``'s
+    own ``record_by_name`` index is a list per identity for exactly this reason.
+    """
+    stdlib_identities: list[str] = []
+    non_stdlib_identities: set[str] = set()
+    non_stdlib_records: dict[str, list[RecordType]] = {}
+    for t in snapshot.types:
+        identity = _record_identity(t.name, t.qualified_name)
+        if identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+            stdlib_identities.append(identity)
+        else:
+            non_stdlib_identities.add(identity)
+            non_stdlib_records.setdefault(identity, []).append(t)
+    return stdlib_identities, frozenset(non_stdlib_identities), non_stdlib_records
+
+
+def _is_public_non_stdlib_declaration(decl: Function | Variable) -> bool:
+    """True when *decl* may seed the scan as a public reachability root.
+
+    Four independent reasons a retained declaration must not be treated as a
+    public reachability root, applied identically to both kinds — see
+    :func:`directly_referenced_stdlib_types`'s own docstring for why each one
+    matters:
+
+    * its display name is stdlib-namespaced;
+    * its ``visibility`` is not ``PUBLIC`` (``HIDDEN``/``ELF_ONLY``);
+    * its ``origin`` is a confidently-non-public header
+      (``PRIVATE_HEADER``/``SYSTEM_HEADER``/``GENERATED``) — linkage and origin
+      are independent axes (ADR-024 D1);
+    * its *recovered* qualified name (from ``mangled``, Itanium or MSVC) is
+      stdlib-namespaced, which is the only check that catches a stdlib-internal
+      declaration whose backend recorded the display name bare.
+    """
+    if decl.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+        return False
+    if decl.visibility != Visibility.PUBLIC:
+        return False
+    if decl.origin in _NON_PUBLIC_ORIGINS:
+        return False
+    qualified = itanium_qualified_name(decl.mangled) or msvc_qualified_name(
+        decl.mangled
+    )
+    return not (
+        qualified is not None and qualified.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)
+    )
+
+
+class _StdlibReferenceScan:
+    """Mutable state of one :func:`directly_referenced_stdlib_types` walk.
+
+    Owns the three compiled spelling patterns and the sets they feed: which
+    stdlib identities are still unaccounted for, which have been referenced,
+    which non-stdlib records have been reached, and which typedef aliases have
+    already been followed. A class rather than a closure so the seeding pass and
+    the record walk can share it as one explicit object.
+    """
+
+    def __init__(
+        self,
+        stdlib_identities: list[str],
+        non_stdlib_identities: frozenset[str],
+        typedefs: dict[str, str],
+    ) -> None:
+        self._stdlib_index, self._record_index = _spelling_index(
+            stdlib_identities, non_stdlib_identities
+        )
+        stdlib_pattern = _compile_spelling_pattern(self._stdlib_index)
+        # stdlib_index always has at least one entry here (every stdlib
+        # identity maps at least itself), so _compile_spelling_pattern's
+        # empty-input case never applies to this caller.
+        assert stdlib_pattern is not None
+        self._stdlib_pattern = stdlib_pattern
+        self._record_pattern = _compile_spelling_pattern(self._record_index)
+        self._typedef_targets = _typedef_spelling_targets(
+            typedefs, non_stdlib_identities
+        )
+        self._typedef_pattern = (
+            _compile_spelling_pattern(self._typedef_targets)
+            if self._typedef_targets
+            else None
+        )
+        self._referenced: set[str] = set()
+        self._remaining = set(stdlib_identities)
+        self._reached_records: set[str] = set()
+        self._worklist: list[str] = []
+        self._resolved_typedefs: set[str] = set()
+
+    @property
+    def exhausted(self) -> bool:
+        """True once every stdlib candidate has been accounted for.
+
+        Both seeding loops stop early on this: there is nothing left to find.
+        """
+        return not self._remaining
+
+    def scan(self, type_string: str) -> None:
+        """Record every stdlib/non-stdlib identity *type_string* names;
+        newly-reached non-stdlib records are queued for their own fields to
+        be walked in turn. Also follows a typedef alias to its own target
+        (Codex review, fresh evidence: ``surface.py``'s own reachability
+        closure does the same), so a public signature spelled with a
+        user-defined alias name still reaches the record it actually
+        names."""
+        if not type_string:
+            return
+        for match in _finditer_allow_nested(self._stdlib_pattern, type_string):
+            for identity in self._stdlib_index.get(match.group(0), ()):
+                if identity in self._remaining:
+                    self._referenced.add(identity)
+                    self._remaining.discard(identity)
+        if self._record_pattern is not None:
+            for match in _finditer_allow_nested(self._record_pattern, type_string):
+                for identity in self._record_index.get(match.group(0), ()):
+                    self.reach_record(identity)
+        if self._typedef_pattern is not None:
+            for match in _finditer_allow_nested(self._typedef_pattern, type_string):
+                alias = match.group(0)
+                if alias not in self._resolved_typedefs:
+                    self._resolved_typedefs.add(alias)
+                    self.scan(self._typedef_targets[alias])
+
+    def reach_record(self, identity: str) -> None:
+        """Queue a non-stdlib record's own fields/bases to be walked, once."""
+        if identity not in self._reached_records:
+            self._reached_records.add(identity)
+            self._worklist.append(identity)
+
+    def next_reached_record(self) -> str | None:
+        """Pop the next queued record identity, or ``None`` when the queue
+        is empty."""
+        return self._worklist.pop() if self._worklist else None
+
+    def referenced(self) -> frozenset[str]:
+        """The stdlib identities this walk proved directly referenced."""
+        return frozenset(self._referenced)
+
+
+def _seed_scan_from_public_declarations(
+    snapshot: AbiSnapshot,
+    scan: _StdlibReferenceScan,
+    non_stdlib_identities: frozenset[str],
+) -> None:
+    """Scan every public, non-stdlib function signature and variable type.
+
+    A member function additionally seeds its *owner* class — a public method
+    never repeats its own class in its return/parameter types, so without this
+    the owner's fields would never be walked. The owner is queued only on an
+    *exact* identity match, never through ``record_index``'s suffix matching:
+    ``owner_class_of`` cannot tell an enclosing class from an enclosing
+    namespace, so a bare namespace fragment could otherwise collide with an
+    unrelated internal record's bare suffix (see the public function's
+    docstring).
+    """
+    for fn in snapshot.functions:
+        if scan.exhausted:
+            break
+        if not _is_public_non_stdlib_declaration(fn):
+            continue
+        scan.scan(fn.return_type)
+        for param in fn.params:
+            scan.scan(param.type)
+        owner = owner_class_of(fn)
+        if owner is not None and owner in non_stdlib_identities:
+            scan.reach_record(owner)
+
+    for var in snapshot.variables:
+        if scan.exhausted:
+            break
+        if not _is_public_non_stdlib_declaration(var):
+            continue
+        scan.scan(var.type)
+
+
+def _walk_reached_records(
+    scan: _StdlibReferenceScan, non_stdlib_records: dict[str, list[RecordType]]
+) -> None:
+    """Walk each reached non-stdlib record's own fields and bases, transitively.
+
+    Every entry sharing the reached identity is walked, each checking its own
+    ``origin`` independently: a private-origin duplicate excludes only itself,
+    not a public-origin sibling of the same identity.
+    """
+    while not scan.exhausted:
+        identity = scan.next_reached_record()
+        if identity is None:
+            return
+        for rec in non_stdlib_records[identity]:
+            if rec.origin in _NON_PUBLIC_ORIGINS:
+                continue
+            for f in rec.fields:
+                scan.scan(f.type)
+            # Both direct and virtual bases are ABI-reachable through the
+            # derived type (virtual inheritance still embeds the base
+            # subobject + vtable path), same as surface.py's own closure
+            # (Codex review, fresh evidence): a public Derived inheriting a
+            # non-stdlib Base whose own field is a stdlib record was
+            # otherwise never reached, since only rec.fields was followed.
+            for base in (*rec.bases, *rec.virtual_bases):
+                scan.scan(base)
+
+
 def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     """Stdlib/runtime-namespaced :class:`RecordType` names in *snapshot* that
     are directly referenced by a **public**, non-stdlib function's
@@ -693,129 +908,15 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     (``diff_filtering._filter_opaque_size_changes``, gated on
     ``RecordType.is_opaque``), not by this reachability computation.
     """
-    stdlib_identities: list[str] = []
-    non_stdlib_identities: set[str] = set()
-    non_stdlib_records: dict[str, list[RecordType]] = {}
-    for t in snapshot.types:
-        identity = _record_identity(t.name, t.qualified_name)
-        if identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
-            stdlib_identities.append(identity)
-        else:
-            non_stdlib_identities.add(identity)
-            non_stdlib_records.setdefault(identity, []).append(t)
+    stdlib_identities, non_stdlib_identities, non_stdlib_records = (
+        _partition_snapshot_types(snapshot)
+    )
     if not stdlib_identities:
         return frozenset()
 
-    stdlib_index, record_index = _spelling_index(
-        stdlib_identities, frozenset(non_stdlib_identities)
+    scan = _StdlibReferenceScan(
+        stdlib_identities, non_stdlib_identities, dict(snapshot.typedefs)
     )
-    stdlib_pattern = _compile_spelling_pattern(stdlib_index)
-    record_pattern = _compile_spelling_pattern(record_index)
-    # stdlib_index always has at least one entry here (every stdlib
-    # identity maps at least itself), so _compile_spelling_pattern's
-    # empty-input case never applies to this caller.
-    assert stdlib_pattern is not None
-
-    referenced: set[str] = set()
-    remaining = set(stdlib_identities)
-    reached_records: set[str] = set()
-    worklist: list[str] = []
-
-    typedef_targets = _typedef_spelling_targets(
-        dict(snapshot.typedefs), frozenset(non_stdlib_identities)
-    )
-    typedef_pattern = (
-        _compile_spelling_pattern(typedef_targets) if typedef_targets else None
-    )
-    resolved_typedefs: set[str] = set()
-
-    def _scan(type_string: str) -> None:
-        """Record every stdlib/non-stdlib identity *type_string* names;
-        newly-reached non-stdlib records are queued for their own fields to
-        be walked in turn. Also follows a typedef alias to its own target
-        (Codex review, fresh evidence: ``surface.py``'s own reachability
-        closure does the same), so a public signature spelled with a
-        user-defined alias name still reaches the record it actually
-        names."""
-        if not type_string:
-            return
-        for match in _finditer_allow_nested(stdlib_pattern, type_string):
-            for identity in stdlib_index.get(match.group(0), ()):
-                if identity in remaining:
-                    referenced.add(identity)
-                    remaining.discard(identity)
-        if record_pattern is not None:
-            for match in _finditer_allow_nested(record_pattern, type_string):
-                for identity in record_index.get(match.group(0), ()):
-                    if identity not in reached_records:
-                        reached_records.add(identity)
-                        worklist.append(identity)
-        if typedef_pattern is not None:
-            for match in _finditer_allow_nested(typedef_pattern, type_string):
-                alias = match.group(0)
-                if alias not in resolved_typedefs:
-                    resolved_typedefs.add(alias)
-                    _scan(typedef_targets[alias])
-
-    for fn in snapshot.functions:
-        if not remaining:
-            break
-        if fn.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
-            continue
-        if fn.visibility != Visibility.PUBLIC:
-            continue
-        if fn.origin in _NON_PUBLIC_ORIGINS:
-            continue
-        qualified_fn = itanium_qualified_name(fn.mangled) or msvc_qualified_name(
-            fn.mangled
-        )
-        if qualified_fn is not None and qualified_fn.startswith(
-            STDLIB_TYPE_NAMESPACE_PREFIXES
-        ):
-            continue
-        _scan(fn.return_type)
-        for param in fn.params:
-            _scan(param.type)
-        owner = owner_class_of(fn)
-        if (
-            owner is not None
-            and owner in non_stdlib_identities
-            and owner not in reached_records
-        ):
-            reached_records.add(owner)
-            worklist.append(owner)
-
-    for var in snapshot.variables:
-        if not remaining:
-            break
-        if var.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
-            continue
-        if var.visibility != Visibility.PUBLIC:
-            continue
-        if var.origin in _NON_PUBLIC_ORIGINS:
-            continue
-        qualified_var = itanium_qualified_name(var.mangled) or msvc_qualified_name(
-            var.mangled
-        )
-        if qualified_var is not None and qualified_var.startswith(
-            STDLIB_TYPE_NAMESPACE_PREFIXES
-        ):
-            continue
-        _scan(var.type)
-
-    while worklist and remaining:
-        for rec in non_stdlib_records[worklist.pop()]:
-            if rec.origin in _NON_PUBLIC_ORIGINS:
-                continue
-            for f in rec.fields:
-                _scan(f.type)
-            # Both direct and virtual bases are ABI-reachable through the
-            # derived type (virtual inheritance still embeds the base
-            # subobject + vtable path), same as surface.py's own closure
-            # (Codex review, fresh evidence): a public Derived inheriting a
-            # non-stdlib Base whose own field is a stdlib record was
-            # otherwise never reached, since only rec.fields was followed.
-            for base in (*rec.bases, *rec.virtual_bases):
-                _scan(base)
-
-    return frozenset(referenced)
+    _seed_scan_from_public_declarations(snapshot, scan, non_stdlib_identities)
+    _walk_reached_records(scan, non_stdlib_records)
+    return scan.referenced()

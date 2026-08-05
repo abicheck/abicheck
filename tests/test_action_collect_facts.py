@@ -292,7 +292,7 @@ class TestIsAbsolutePath:
     @pytest.mark.parametrize(
         "path",
         [
-            "/tmp/abicheck_inputs",
+            "/work/abicheck_inputs",
             r"C:\Users\foo\abicheck_inputs",
             "D:/a/repo/abicheck_inputs",
             r"\\server\share\abicheck_inputs",

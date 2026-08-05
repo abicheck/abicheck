@@ -140,12 +140,12 @@ def test_structural_context_uses_neighbor_kind_not_raw_id() -> None:
     docstring says it should -- would make an otherwise-unique rename
     compare as a different context and silently fail to reconcile."""
     old_parent = GraphNode(
-        id="header:///tmp/checkout_old/include/api.h",
+        id="header:///work/checkout_old/include/api.h",
         kind="header",
         label="api.h",
     )
     new_parent = GraphNode(
-        id="header:///tmp/checkout_new/include/api.h",
+        id="header:///work/checkout_new/include/api.h",
         kind="header",
         label="api.h",
     )
@@ -192,14 +192,14 @@ def test_structural_context_normalizes_real_header_node_labels() -> None:
     unique rename under the same public header (different checkout roots on
     each side) must still reconcile via the structural-context tier."""
     old_parent = GraphNode(
-        id="header:///tmp/checkout_old/include/api.h",
+        id="header:///work/checkout_old/include/api.h",
         kind="header",
-        label="/tmp/checkout_old/include/api.h",
+        label="/work/checkout_old/include/api.h",
     )
     new_parent = GraphNode(
-        id="header:///tmp/checkout_new/include/api.h",
+        id="header:///work/checkout_new/include/api.h",
         kind="header",
-        label="/tmp/checkout_new/include/api.h",
+        label="/work/checkout_new/include/api.h",
     )
     old_internal = GraphNode(
         id="type://demo::detail::RawConfig",
@@ -244,14 +244,14 @@ def test_structural_context_normalizes_source_and_generated_file_labels(
     generated_file parent's raw label would leak into the structural-context
     tuple, exactly like the header case above."""
     old_parent = GraphNode(
-        id=f"{parent_kind}:///tmp/checkout_old/src/impl.cpp",
+        id=f"{parent_kind}:///work/checkout_old/src/impl.cpp",
         kind=parent_kind,
-        label="/tmp/checkout_old/src/impl.cpp",
+        label="/work/checkout_old/src/impl.cpp",
     )
     new_parent = GraphNode(
-        id=f"{parent_kind}:///tmp/checkout_new/src/impl.cpp",
+        id=f"{parent_kind}:///work/checkout_new/src/impl.cpp",
         kind=parent_kind,
-        label="/tmp/checkout_new/src/impl.cpp",
+        label="/work/checkout_new/src/impl.cpp",
     )
     old_internal = GraphNode(
         id="type://demo::detail::RawConfig",
@@ -370,7 +370,7 @@ def test_different_checkout_roots_not_misclassified_as_moved() -> None:
         label="ns::Widget",
         attrs={
             "qualified_name": "ns::Widget",
-            "def_file": "/tmp/checkout_old/include/api.h",
+            "def_file": "/work/checkout_old/include/api.h",
         },
     )
     new_node = GraphNode(
@@ -379,7 +379,7 @@ def test_different_checkout_roots_not_misclassified_as_moved() -> None:
         label="ns::Widget",
         attrs={
             "qualified_name": "ns::Widget",
-            "def_file": "/tmp/checkout_new/include/api.h",
+            "def_file": "/work/checkout_new/include/api.h",
         },
     )
     old_g = _graph([old_node], [])
@@ -400,7 +400,7 @@ def test_real_move_still_detected_across_different_checkout_roots() -> None:
         label="ns::Widget",
         attrs={
             "qualified_name": "ns::Widget",
-            "def_file": "/tmp/checkout_old/include/a.h",
+            "def_file": "/work/checkout_old/include/a.h",
         },
     )
     new_node = GraphNode(
@@ -409,7 +409,7 @@ def test_real_move_still_detected_across_different_checkout_roots() -> None:
         label="ns::Widget",
         attrs={
             "qualified_name": "ns::Widget",
-            "def_file": "/tmp/checkout_new/include/b.h",
+            "def_file": "/work/checkout_new/include/b.h",
         },
     )
     old_g = _graph([old_node], [])
@@ -433,7 +433,7 @@ def test_single_sample_cross_directory_move_same_basename_detected() -> None:
         label="ns::Widget",
         attrs={
             "qualified_name": "ns::Widget",
-            "def_file": "/tmp/old/src/foo.h",
+            "def_file": "/work/old/src/foo.h",
         },
     )
     new_node = GraphNode(
@@ -442,7 +442,7 @@ def test_single_sample_cross_directory_move_same_basename_detected() -> None:
         label="ns::Widget",
         attrs={
             "qualified_name": "ns::Widget",
-            "def_file": "/tmp/new/include/foo.h",
+            "def_file": "/work/new/include/foo.h",
         },
     )
     old_g = _graph([old_node], [])
@@ -575,7 +575,7 @@ def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> N
         label="ns::Stable",
         attrs={
             "qualified_name": "ns::Stable",
-            "def_file": "/tmp/checkout_old/project/include/stable.h",
+            "def_file": "/work/checkout_old/project/include/stable.h",
         },
     )
     old_moved = GraphNode(
@@ -584,7 +584,7 @@ def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> N
         label="ns::Moved",
         attrs={
             "qualified_name": "ns::Moved",
-            "def_file": "/tmp/checkout_old/project/include/detail/moved.h",
+            "def_file": "/work/checkout_old/project/include/detail/moved.h",
         },
     )
     new_stable = GraphNode(
@@ -593,7 +593,7 @@ def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> N
         label="ns::Stable",
         attrs={
             "qualified_name": "ns::Stable",
-            "def_file": "/tmp/checkout_new/project/include/stable.h",
+            "def_file": "/work/checkout_new/project/include/stable.h",
         },
     )
     new_moved = GraphNode(
@@ -602,7 +602,7 @@ def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> N
         label="ns::Moved",
         attrs={
             "qualified_name": "ns::Moved",
-            "def_file": "/tmp/checkout_new/project/include/public/moved.h",
+            "def_file": "/work/checkout_new/project/include/public/moved.h",
         },
     )
     old_g = _graph([old_stable, old_moved], [])

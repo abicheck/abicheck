@@ -60,10 +60,8 @@ is future work; see ADR-041 P0/P1.
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
-import subprocess  # noqa: S404 - type-graph extraction shells out to clang (never shell=True)
 import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -72,6 +70,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from .. import deadline
+from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import register_fact
 from .source_graph import (
     CONF_HIGH,
@@ -1510,72 +1509,19 @@ class ClangTypeGraphExtractor:
     def _extract_from_safe_args(
         self, argv: list[str], cwd: str | None = None
     ) -> list[TypeEdge]:
+        """Run ``clang -Xclang -ast-dump=json -fsyntax-only`` with pre-sanitized args.
+
+        The bounded run itself lives in :func:`clang_ast_run.run_clang_ast_dump`,
+        shared verbatim with the call-graph pass; only the parser applied to the
+        resulting AST differs between the two.
+        """
         if not self.available():
             self.diagnostics.append(f"{self.clang_bin} not found in PATH")
             return []
-        cmd = [self.clang_bin, "-Xclang", "-ast-dump=json", "-fsyntax-only", *argv]
-        local_cap = 120.0
-        scan_remaining = deadline.remaining()
-        effective_timeout = (
-            local_cap if scan_remaining is None else min(local_cap, scan_remaining)
+        ast = run_clang_ast_dump(
+            self.clang_bin, argv, cwd=cwd, diagnostics=self.diagnostics
         )
-        try:
-            # Bound by min(local_cap, active --budget deadline), process-group-
-            # safe on timeout, degrades to the same diagnostic+[] contract on
-            # overflow — mirrors
-            # call_graph.ClangCallGraphExtractor._extract_from_safe_args
-            # (Codex review, PR #591, round 8).
-            with deadline.deadline_scope(effective_timeout):
-                proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
-                    cmd,
-                    cwd=cwd,
-                    capture_output=True,
-                    text=True,
-                    timeout=local_cap,
-                )
-        except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded) as exc:
-            self.diagnostics.append(f"clang invocation failed: {exc}")
-            return []
-        if not proc.stdout.strip():
-            self.diagnostics.append(
-                f"clang produced no AST (stderr: {proc.stderr[:200]})"
-            )
-            return []
-        # A non-zero exit (real compile errors in the replayed, necessarily
-        # approximate flag subset) does not stop clang's AST dump from still
-        # printing a partial, error-recovered tree. Still salvage any edges
-        # from that best-effort AST, but record a diagnostic regardless so
-        # extractor_pass_fully_covered (ADR-041 P0 slice 3, ninth Codex
-        # review) never treats this TU as cleanly, fully parsed — mirrors
-        # call_graph.ClangCallGraphExtractor._extract_from_safe_args.
-        if proc.returncode != 0:
-            self.diagnostics.append(
-                f"clang exited {proc.returncode} (stderr: {proc.stderr[:200]})"
-            )
-        try:
-            # clang can exit successfully right as the budget expires; recheck
-            # before the CPU/RSS-heavy parse+walk, same as the L2/L4 post-run
-            # checks and call_graph's identical fix (Codex review, PR #591).
-            deadline.check()
-        except deadline.DeadlineExceeded as exc:
-            self.diagnostics.append(
-                f"scan deadline exceeded before parsing clang AST: {exc}"
-            )
-            return []
-        try:
-            ast = json.loads(proc.stdout)
-        except (ValueError, RecursionError) as exc:
-            self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
-            return []
-        try:
-            # The JSON load itself can consume the rest of the budget on a
-            # huge AST; re-check before the recursive walk (Codex review,
-            # PR #591, round 4).
-            deadline.check()
-        except deadline.DeadlineExceeded as exc:
-            self.diagnostics.append(
-                f"scan deadline exceeded before walking clang AST: {exc}"
-            )
+        if ast is None:
             return []
         try:
             return parse_clang_ast_types(ast)

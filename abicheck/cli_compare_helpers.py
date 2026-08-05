@@ -925,6 +925,122 @@ def _report_not_comparable(
 #: :class:`~abicheck.severity.SeverityConfig`, so any one of them being typed
 #: makes the resolved severity explicitly CLI-selected.
 
+def _reject_incoherent_compare_flags(
+    *,
+    dry_run: bool,
+    output: Path | None,
+    secondary_output: Path | None,
+    secondary_fmt: str | None,
+    contract_mode: str | None,
+    contract_evaluation: bool,
+) -> None:
+    """Reject flag combinations that cannot mean anything, before any work.
+
+    Every one of these would otherwise either do nothing silently or
+    destroy its own output: a ``--secondary-*`` half-pair, two reports
+    aimed at one file, a ``--contract`` domain with no evaluator to select
+    for, a dry run asked to write a report. Raised as ``UsageError`` (exit
+    64) up front, so none of them is discovered after an expensive compare.
+    """
+    if dry_run and secondary_output is not None:
+        raise click.UsageError(
+            "--dry-run cannot be combined with --secondary-output: a dry run "
+            "performs no analysis and writes nothing, so there is no "
+            "secondary report to produce."
+        )
+    if contract_mode is not None and not contract_evaluation:
+        # `--contract` selects the domain the shadow evaluator judges
+        # against, so on its own it would silently do nothing: no finding
+        # carries a contract decision unless `--contract-evaluation` asked
+        # for one. Rejecting is better than accepting a flag with no effect.
+        raise click.UsageError(
+            "--contract requires --contract-evaluation: it selects which "
+            "evidence domain the shadow contract evaluator judges against, "
+            "and without that flag no contract decision is computed at all."
+        )
+
+    if secondary_fmt is not None and secondary_output is None:
+        raise click.UsageError(
+            "--secondary-format requires --secondary-output: writing two "
+            "output formats to the same stream would be ambiguous."
+        )
+    if secondary_output is not None and secondary_fmt is None:
+        raise click.UsageError(
+            "--secondary-output requires --secondary-format: with no format "
+            "given there is nothing to render, and the path would be silently "
+            "ignored."
+        )
+    if (
+        secondary_output is not None
+        and output is not None
+        and secondary_output.resolve() == output.resolve()
+    ):
+        raise click.UsageError(
+            "--secondary-output must differ from --output/-o: writing both "
+            "formats to the same file would silently overwrite the primary "
+            "report with the secondary one."
+        )
+
+
+
+def _preflight_manifests_and_audit(
+    *,
+    old_dump_manifest: Path | None,
+    new_dump_manifest: Path | None,
+    audit_suppressions: bool,
+    suppress: Path | None,
+    pack_paths: Any,
+    policy_file_path: Path | None,
+    contract_evaluation: bool,
+) -> tuple[DumpManifest | None, DumpManifest | None]:
+    """Load the dump manifests and reject what a dry run must not report "ok".
+
+    Everything here runs *ahead* of the ``--dry-run`` emit deliberately: a
+    dry run reporting success for an invocation the real run rejects would be
+    worse than useless. Returns the two loaded manifest objects (``None`` for
+    a side given none).
+
+    ADR-049 D8 pack-vs-pack conflict detection is deliberately *not* part of
+    this — see ``validate_pack_manifests`` for which layers it needs that are
+    not resolved this early.
+    """
+    old_manifest_obj: DumpManifest | None = None
+    new_manifest_obj: DumpManifest | None = None
+    if old_dump_manifest is not None or new_dump_manifest is not None:
+        from .dump_manifest import load_manifest
+        from .errors import ManifestValidationError
+
+        try:
+            if old_dump_manifest is not None:
+                old_manifest_obj = load_manifest(old_dump_manifest)
+            if new_dump_manifest is not None:
+                new_manifest_obj = load_manifest(new_dump_manifest)
+        except ManifestValidationError as exc:
+            raise click.UsageError(str(exc)) from exc
+
+    if audit_suppressions and suppress is None:
+        # Validated ahead of the --dry-run emit below, same reasoning as the
+        # directory/package rejection above (Codex review, fresh evidence):
+        # a dry run must not report "ok" for `--audit-suppressions` without
+        # `--suppress` when the identical non-dry-run invocation is rejected
+        # by the later (post-suppression-loading) guard in this function.
+        raise click.UsageError(
+            "--audit-suppressions requires --suppress (nothing to audit)."
+        )
+
+    # Manifest validity, ahead of the --dry-run emit for the same reason as
+    # the two guards above -- see the helper for what deliberately does *not*
+    # move here.
+    from .cli_compare_receipt import validate_pack_manifests
+    from .errors import PackManifestError as _PackManifestError
+
+    try:
+        validate_pack_manifests(pack_paths, policy_file_path=policy_file_path, contract_evaluation=contract_evaluation)
+    except _PackManifestError as exc:
+        raise click.UsageError(str(exc)) from exc
+    return old_manifest_obj, new_manifest_obj
+
+
 def run_compare(
     ctx: click.Context,
     *,
@@ -1005,46 +1121,15 @@ def run_compare(
     from .dry_run import reject_dry_run_with_output
 
     reject_dry_run_with_output(dry_run, output)
-    if dry_run and secondary_output is not None:
-        raise click.UsageError(
-            "--dry-run cannot be combined with --secondary-output: a dry run "
-            "performs no analysis and writes nothing, so there is no "
-            "secondary report to produce."
-        )
+    _reject_incoherent_compare_flags(
+        dry_run=dry_run,
+        output=output,
+        secondary_output=secondary_output,
+        secondary_fmt=secondary_fmt,
+        contract_mode=contract_mode,
+        contract_evaluation=contract_evaluation,
+    )
     _setup_verbosity(verbose)
-
-    if contract_mode is not None and not contract_evaluation:
-        # `--contract` selects the domain the shadow evaluator judges
-        # against, so on its own it would silently do nothing: no finding
-        # carries a contract decision unless `--contract-evaluation` asked
-        # for one. Rejecting is better than accepting a flag with no effect.
-        raise click.UsageError(
-            "--contract requires --contract-evaluation: it selects which "
-            "evidence domain the shadow contract evaluator judges against, "
-            "and without that flag no contract decision is computed at all."
-        )
-
-    if secondary_fmt is not None and secondary_output is None:
-        raise click.UsageError(
-            "--secondary-format requires --secondary-output: writing two "
-            "output formats to the same stream would be ambiguous."
-        )
-    if secondary_output is not None and secondary_fmt is None:
-        raise click.UsageError(
-            "--secondary-output requires --secondary-format: with no format "
-            "given there is nothing to render, and the path would be silently "
-            "ignored."
-        )
-    if (
-        secondary_output is not None
-        and output is not None
-        and secondary_output.resolve() == output.resolve()
-    ):
-        raise click.UsageError(
-            "--secondary-output must differ from --output/-o: writing both "
-            "formats to the same file would silently overwrite the primary "
-            "report with the secondary one."
-        )
 
     required_symbols, required_symbols_from_file, required_symbols_sha = (
         load_required_symbols(required_symbols_opt, required_symbols_file)
@@ -1159,40 +1244,16 @@ def run_compare(
     # supported for directory/package" message, not a confusing "invalid
     # YAML" one for a flag combination that was never going to work anyway
     # (Codex review).
-    old_manifest_obj: DumpManifest | None = None
-    new_manifest_obj: DumpManifest | None = None
-    if old_dump_manifest is not None or new_dump_manifest is not None:
-        from .dump_manifest import load_manifest
-        from .errors import ManifestValidationError
-
-        try:
-            if old_dump_manifest is not None:
-                old_manifest_obj = load_manifest(old_dump_manifest)
-            if new_dump_manifest is not None:
-                new_manifest_obj = load_manifest(new_dump_manifest)
-        except ManifestValidationError as exc:
-            raise click.UsageError(str(exc)) from exc
-
-    if audit_suppressions and suppress is None:
-        # Validated ahead of the --dry-run emit below, same reasoning as the
-        # directory/package rejection above (Codex review, fresh evidence):
-        # a dry run must not report "ok" for `--audit-suppressions` without
-        # `--suppress` when the identical non-dry-run invocation is rejected
-        # by the later (post-suppression-loading) guard in this function.
-        raise click.UsageError(
-            "--audit-suppressions requires --suppress (nothing to audit)."
-        )
-
-    # Manifest validity, ahead of the --dry-run emit for the same reason as
-    # the two guards above -- see the helper for what deliberately does *not*
-    # move here.
-    from .cli_compare_receipt import dry_run_scheme_label, validate_pack_manifests
-    from .errors import PackManifestError as _PackManifestError
-
-    try:
-        validate_pack_manifests(pack_paths, policy_file_path=policy_file_path, contract_evaluation=contract_evaluation)
-    except _PackManifestError as exc:
-        raise click.UsageError(str(exc)) from exc
+    old_manifest_obj, new_manifest_obj = _preflight_manifests_and_audit(
+        old_dump_manifest=old_dump_manifest,
+        new_dump_manifest=new_dump_manifest,
+        audit_suppressions=audit_suppressions,
+        suppress=suppress,
+        pack_paths=pack_paths,
+        policy_file_path=policy_file_path,
+        contract_evaluation=contract_evaluation,
+    )
+    from .cli_compare_receipt import dry_run_scheme_label
 
     if dry_run:
         from .dry_run import emit_dry_run
