@@ -1,0 +1,197 @@
+name: Agent focused oneAPI mismatch scan 2026-08-05
+
+on:
+  push:
+    branches:
+      - ops/oneapi-mismatch-scan-2026-08-05-5465a861
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      OUT: scan-results-oneapi-focus
+      BASE_SHA: 5465a8610e2a01f07abcd9f18ff93ecf2256114f
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install scanner and binary tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y binutils zstd bzip2 xz-utils curl ca-certificates time
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" zstandard
+
+      - name: Run only the two unexpected-breaking product pairs
+        run: |
+          mkdir -p "$OUT/reports"
+          cat > /tmp/run_focus.py <<'PY'
+          from __future__ import annotations
+
+          import collections
+          import json
+          import shutil
+          import sys
+          import time
+          import traceback
+          from pathlib import Path
+          from typing import Any
+
+          root = Path.cwd()
+          out = root / "scan-results-oneapi-focus"
+          reports = out / "reports"
+          reports.mkdir(parents=True, exist_ok=True)
+          sys.path.insert(0, str(root / "validation" / "scripts"))
+          import run_oneapi_scan as lane  # noqa: E402
+
+          targets = {
+              ("oneDNN", "3.11", "3.12"),
+              ("oneDAL", "2025.0.0", "2025.1.0"),
+          }
+          lane.PAIRS = [
+              spec for spec in lane.PAIRS
+              if (spec["lib"], spec["old"], spec["new"]) in targets
+          ]
+
+          started = time.perf_counter()
+          failure = None
+          rows: list[dict[str, Any]] = []
+          try:
+              rows = lane.run()
+          except BaseException:
+              failure = traceback.format_exc()
+          wall = round(time.perf_counter() - started, 3)
+
+          # Preserve only final scan JSON reports, never downloaded packages or ABI baselines.
+          report_files = []
+          if lane.WORK.exists():
+              for path in sorted(lane.WORK.glob("*_s0.json")):
+                  target = reports / path.name
+                  shutil.copy2(path, target)
+                  report_files.append(target.name)
+
+          def leaf_inventory(value: Any, path: str = "") -> list[dict[str, Any]]:
+              inventory: list[dict[str, Any]] = []
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      next_path = f"{path}.{key}" if path else str(key)
+                      inventory.extend(leaf_inventory(child, next_path))
+              elif isinstance(value, list):
+                  sample = []
+                  for item in value[:10]:
+                      if isinstance(item, (str, int, float, bool)) or item is None:
+                          sample.append(item)
+                      elif isinstance(item, dict):
+                          sample.append({k: item.get(k) for k in list(item)[:8]})
+                      else:
+                          sample.append(str(item)[:300])
+                  inventory.append(
+                      {
+                          "path": path,
+                          "kind": "list",
+                          "count": len(value),
+                          "sample": sample,
+                      }
+                  )
+              else:
+                  inventory.append(
+                      {
+                          "path": path,
+                          "kind": type(value).__name__,
+                          "value": value,
+                      }
+                  )
+              return inventory
+
+          for row in rows:
+              diff = row.get("diff") or {}
+              row["diff_inventory"] = leaf_inventory(diff)
+              row["report_file"] = next(
+                  (
+                      name for name in report_files
+                      if name.startswith(f"{row.get('lib')}_{row.get('old')}_{row.get('new')}_")
+                  ),
+                  None,
+              )
+
+          result = {
+              "schema": "agent-oneapi-mismatch-focus.v1",
+              "base_sha": "5465a8610e2a01f07abcd9f18ff93ecf2256114f",
+              "wall_seconds": wall,
+              "failure": failure,
+              "rows": rows,
+              "reports": report_files,
+          }
+          (out / "focus-results.json").write_text(json.dumps(result, indent=2) + "\n")
+
+          lines = [
+              "# Focused oneAPI mismatch scan",
+              "",
+              f"- Base SHA: `{result['base_sha']}`",
+              f"- Wall: `{wall}` seconds",
+              f"- Reports: `{len(report_files)}`",
+              "",
+          ]
+          for row in rows:
+              lines.extend(
+                  [
+                      f"## {row.get('lib')} {row.get('old')} → {row.get('new')}",
+                      "",
+                      f"- Status: `{row.get('status')}`",
+                      f"- Verdict: `{row.get('verdict')}`",
+                      f"- Exit: `{row.get('exit')}`",
+                      f"- L0: `{row.get('L0')}`; L1: `{row.get('L1')}`",
+                      f"- SONAME: `{row.get('soname_old')}` → `{row.get('soname_new')}`",
+                      f"- Scan time: `{row.get('wall_s')}` seconds",
+                      "",
+                      "### Diff inventory",
+                      "",
+                      "| Path | Kind | Count/value |",
+                      "|---|---|---:|",
+                  ]
+              )
+              for item in row.get("diff_inventory", []):
+                  count_or_value = item.get("count", item.get("value"))
+                  lines.append(f"| {item.get('path')} | {item.get('kind')} | {count_or_value} |")
+              lines.append("")
+          if failure:
+              lines.extend(["## Failure", "", "```", failure, "```"])
+          (out / "summary.md").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          if failure:
+              raise SystemExit(1)
+          PY
+          set +e
+          /usr/bin/time -f '%e' -o "$OUT/command-seconds.txt" \
+            python -u /tmp/run_focus.py 2>&1 | tee "$OUT/run.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "$rc" > "$OUT/exit-code.txt"
+          exit "$rc"
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f "$OUT/summary.md" ]; then cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload focused evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: oneapi-mismatch-focus-main-5465a861
+          path: scan-results-oneapi-focus/
+          if-no-files-found: error
+          retention-days: 30
