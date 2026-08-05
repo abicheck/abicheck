@@ -706,7 +706,7 @@ def test_strip_volatile_snapshot_fields_strips_nested_build_source_coverage(
     raw = {
         "library": "libpvxs",
         "created_at": "2026-01-01T00:00:00Z",
-        "build_source_pack": {"path_hint": "/tmp/run1", "kind": "embedded"},
+        "build_source_pack": {"path_hint": "/work/run1", "kind": "embedded"},
         "build_source": {
             "manifest": {
                 "created_at": "2026-01-01T00:00:00Z",
@@ -738,7 +738,7 @@ def test_strip_volatile_snapshot_fields_strips_nested_build_source_coverage(
     redumped = {
         "library": "libpvxs",
         "created_at": "2026-07-22T12:00:00Z",
-        "build_source_pack": {"path_hint": "/tmp/run2", "kind": "embedded"},
+        "build_source_pack": {"path_hint": "/work/run2", "kind": "embedded"},
         "build_source": {
             "manifest": {
                 "created_at": "2026-07-22T12:00:00Z",

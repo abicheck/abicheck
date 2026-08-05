@@ -302,7 +302,7 @@ def test_display_path_is_relative_inside_repo() -> None:
 
 
 def test_display_path_falls_back_outside_repo() -> None:
-    outside = Path("/tmp/somewhere/else/report.md")
+    outside = Path("/work/somewhere/else/report.md")
     assert gbr._display_path(outside) == str(outside)
 
 

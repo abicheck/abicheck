@@ -56,6 +56,15 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
+# This script's own directory, so the sibling `findings_report` module below
+# imports whether this file is run directly (Python adds it automatically) or
+# loaded from its path by `tests/test_docs_contract.py` (Python doesn't) — same
+# bootstrap `check_ai_readiness.py` uses for its own siblings.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from findings_report import Findings as _SharedFindings  # noqa: E402
+
 DOCS = ROOT / "docs"
 TOPICS_FILE = DOCS / "_meta" / "topics.yaml"
 TERMINOLOGY_FILE = DOCS / "_meta" / "terminology.yaml"
@@ -182,39 +191,15 @@ def _blank_front_matter(text: str) -> str:
     return "\n" * consumed.count("\n") + text[m.end() :]
 
 
-class Findings:
-    """Collects errors and warnings, grouped by check name (mirrors
-    scripts/check_ai_readiness.py's Findings class for consistent output)."""
+class Findings(_SharedFindings):
+    """This gate's error/warning collector — the shared one, labelled for it.
 
-    def __init__(self) -> None:
-        self.errors: list[tuple[str, str]] = []
-        self.warnings: list[tuple[str, str]] = []
+    The collection/grouping/printing itself lives in ``findings_report.py``,
+    shared with ``check_ai_readiness.py`` so both gates report identically
+    without a second copy.
+    """
 
-    def err(self, check: str, msg: str) -> None:
-        self.errors.append((check, msg))
-
-    def warn(self, check: str, msg: str) -> None:
-        self.warnings.append((check, msg))
-
-    def report(self) -> int:
-        by_check: dict[str, dict[str, list[str]]] = defaultdict(
-            lambda: {"errors": [], "warnings": []}
-        )
-        for check, msg in self.errors:
-            by_check[check]["errors"].append(msg)
-        for check, msg in self.warnings:
-            by_check[check]["warnings"].append(msg)
-
-        for check, buckets in sorted(by_check.items()):
-            print(f"\n=== {check} ===")
-            for m in buckets["errors"]:
-                print(f"  ERROR: {m}")
-            for m in buckets["warnings"]:
-                print(f"  WARN:  {m}")
-
-        n_err, n_warn = len(self.errors), len(self.warnings)
-        print(f"\ndocs-contract: {n_err} error(s), {n_warn} warning(s)")
-        return 1 if n_err else 0
+    SUMMARY_LABEL = "docs-contract"
 
 
 def _rel(p: Path) -> str:

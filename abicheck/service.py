@@ -755,27 +755,17 @@ def _run_dump_uncached(
                 public_header_dirs=public_header_dirs,
                 include_labels=include_labels,
             )
-        snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
-        _try_attach_python_ext_metadata(snap)
-        _try_attach_python_api_surface(snap)
-        _try_attach_numpy_capi_surface(snap, path)
-        snap = _attach_header_graph(
+        return _finish_native_snapshot(
             snap,
-            _HEADER_GRAPH_ENABLED
-            and not _skip_header_graph_attach
-            and not symbols_only,
-            _HEADER_GRAPH_INCLUDES_ENABLED
-            and not _skip_header_graph_attach
-            and not symbols_only,
-            _headers,
-            _includes,
-            _header_graph_lang,
-            compile,
-            public_headers,
-            public_header_dirs,
-        )
-        return attach_clang_layout(
-            snap, _headers, _includes, lang=lang, compile=compile
+            path=path,
+            headers=_headers,
+            includes=_includes,
+            lang=lang,
+            header_graph_lang=_header_graph_lang,
+            compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            skip_header_graph=_skip_header_graph_attach or symbols_only,
         )
     if binary_fmt == "macho":
         with dumper_cache.ast_memoize_scope():
@@ -791,29 +781,65 @@ def _run_dump_uncached(
                 public_header_dirs=public_header_dirs,
                 include_labels=include_labels,
             )
-        snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
-        _try_attach_python_ext_metadata(snap)
-        _try_attach_python_api_surface(snap)
-        _try_attach_numpy_capi_surface(snap, path)
-        snap = _attach_header_graph(
+        return _finish_native_snapshot(
             snap,
-            _HEADER_GRAPH_ENABLED
-            and not _skip_header_graph_attach
-            and not symbols_only,
-            _HEADER_GRAPH_INCLUDES_ENABLED
-            and not _skip_header_graph_attach
-            and not symbols_only,
-            _headers,
-            _includes,
-            _header_graph_lang,
-            compile,
-            public_headers,
-            public_header_dirs,
-        )
-        return attach_clang_layout(
-            snap, _headers, _includes, lang=lang, compile=compile
+            path=path,
+            headers=_headers,
+            includes=_includes,
+            lang=lang,
+            header_graph_lang=_header_graph_lang,
+            compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            skip_header_graph=_skip_header_graph_attach or symbols_only,
         )
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
+
+
+def _finish_native_snapshot(
+    snap: AbiSnapshot,
+    *,
+    path: Path,
+    headers: list[Path],
+    includes: list[Path],
+    lang: str,
+    header_graph_lang: str | None,
+    compile: CompileContext | None,
+    public_headers: list[Path] | None,
+    public_header_dirs: list[Path] | None,
+    skip_header_graph: bool,
+) -> AbiSnapshot:
+    """Shared post-dump tail for the PE and Mach-O branches of ``run_dump``.
+
+    Both formats finish a dump identically — native provenance, the optional
+    Python/NumPy surface attachments, the header-only (L2) graph, then the
+    clang layout backfill — and the two branches only differ in which
+    ``_dump_*`` produced *snap*. Kept as one function so a new post-processing
+    step cannot be added to one format and silently forgotten on the other
+    (CodeFactor: duplicate code). The ELF branch deliberately stays separate:
+    it also attaches SYCL metadata and honors ``dwarf_only``, neither of which
+    applies here.
+
+    ``skip_header_graph`` folds the caller's own reasons to suppress the graph
+    (the ``hybrid`` recursion's ``_skip_header_graph_attach``, ``symbols_only``)
+    into one flag; the global enablement switches stay this function's business.
+    """
+    snap = _apply_native_provenance(snap, public_headers, public_header_dirs)
+    _try_attach_python_ext_metadata(snap)
+    _try_attach_python_api_surface(snap)
+    _try_attach_numpy_capi_surface(snap, path)
+    snap = _attach_header_graph(
+        snap,
+        _HEADER_GRAPH_ENABLED and not skip_header_graph,
+        _HEADER_GRAPH_INCLUDES_ENABLED and not skip_header_graph,
+        headers,
+        includes,
+        header_graph_lang,
+        compile,
+        public_headers,
+        public_header_dirs,
+    )
+    return attach_clang_layout(snap, headers, includes, lang=lang, compile=compile)
 
 
 @functools.wraps(_run_dump_uncached)  # name lookup below so patching sticks

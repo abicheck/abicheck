@@ -475,6 +475,243 @@ def abi_dump(
         )
 
 
+def _apply_used_by_scope(
+    result: Any,
+    *,
+    used_by: list[str],
+    old_path: Path,
+    new_path: Path,
+    old_snap: Any,
+    new_snap: Any,
+    suppression: Any,
+    severity_config: Any,
+    active_policy: str,
+    pf: Any,
+) -> str | tuple[str, Any, str | None, int, str]:
+    """Scope the comparison to the ``used_by`` consumer applications (ADR-043).
+
+    Mirrors the CLI's ``cli_compare_helpers._apply_used_by_scoping``: every
+    app is scoped independently and the *worst* result gates, with exit code
+    and verdict maxed/ranked independently of each other.
+
+    Stamps the ADR-043 scoped attributes on *result* in place (what the
+    report fold-in and the SARIF/JUnit renderers read), and returns
+    ``(scoped_key, scoped_payload, scoped_verdict_value, exit_code,
+    "scoped")``. Returns an error-JSON *string* instead when an operand or
+    an app path cannot serve as a used-by input — the caller returns it
+    verbatim.
+    """
+    from .appcompat import scope_diff_to_app, uncovered_missing_symbols
+    from .service import detect_binary_format
+
+    old_lib: Any = old_path if detect_binary_format(old_path) is not None else old_snap
+    new_lib: Any = new_path if detect_binary_format(new_path) is not None else new_snap
+    for lib, p, label in (
+        (old_lib, old_path, "old_input"), (new_lib, new_path, "new_input"),
+    ):
+        has_binary_evidence = isinstance(lib, Path) or any(
+            getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
+        )
+        if not has_binary_evidence:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"used_by requires old_input/new_input to be "
+                    f"real library binaries, or JSON snapshots carrying "
+                    f"binary evidence (a dump of a real library, not "
+                    f"headers-only); {label} ({p}) is neither.",
+                }
+            )
+    summaries = []
+    worst_exit = 0
+    worst_verdict = None
+    worst_verdict_rank = -1
+    # Keyed by the change's semantic identity (kind/symbol/old/new/
+    # location/description, via `_finding_id`) -- not id(change) --
+    # so a Change or missing symbol shared by two tied apps (e.g.
+    # both import the same removed symbol) collapses to one entry
+    # instead of being tallied once per app (Codex review) --
+    # `_scoped_severity_summary` runs once at the end over this
+    # deduplicated union, not per app summed together. `id()` alone
+    # under-deduplicates PE_ORDINAL_RETARGETED findings: each app's
+    # `scope_diff_to_app` call synthesizes a fresh `Change` object
+    # for the same underlying ordinal retarget (see
+    # `cli_compare_helpers._apply_used_by_scoping`).
+    worst_changes: dict[str, Any] = {}
+    worst_missing: set[str] = set()
+    # Union across ALL apps of which findings this --used-by gate
+    # cares about -- SARIF/JUnit consult this to make their own
+    # result levels/failure counts follow the scoped gate (CLI-audit
+    # P1), mirroring cli_compare_helpers._apply_used_by_scoping.
+    relevant_finding_ids: set[str] = set()
+    # Union across ALL apps of relevant Change objects (not just
+    # ids) so scoped-only changes (e.g. PE_ORDINAL_RETARGETED,
+    # synthesized fresh per app and never added to result.changes)
+    # can still be rendered by SARIF/JUnit (Codex review, mirrors
+    # cli_compare_helpers._apply_used_by_scoping).
+    relevant_changes_by_id: dict[str, Any] = {}
+    missing_labels: set[str] = set()
+    for app in used_by:
+        app_path = _safe_read_path(app, label="used_by")
+        if not app_path.exists():
+            return json.dumps(
+                {"status": "error", "error": f"used_by app not found: {app}"}
+            )
+        _check_file_size(app_path, label="used_by")
+        scoped = scope_diff_to_app(
+            result, app_path, old_lib, new_lib,
+            policy=active_policy, policy_file=pf, suppression=suppression,
+        )
+        relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
+        relevant_changes_by_id.update(
+            {_finding_id(c): c for c in scoped.breaking_for_app}
+        )
+        # A missing symbol/version already covered by a relevant
+        # Change (e.g. FUNC_REMOVED) must not also become a
+        # synthetic missing-contract finding (Codex review, mirrors
+        # cli_compare_helpers._apply_used_by_scoping's dedup).
+        missing_labels.update(
+            uncovered_missing_symbols(
+                list(scoped.missing_symbols) + list(scoped.missing_versions),
+                scoped.breaking_for_app,
+            )
+        )
+        summaries.append(
+            {
+                "app": scoped.app_path,
+                "verdict": scoped.verdict.value,
+                "required_symbol_count": scoped.required_symbol_count,
+                "missing_symbols": scoped.missing_symbols,
+                "missing_versions": scoped.missing_versions,
+                "relevant_change_count": len(scoped.breaking_for_app),
+                "symbol_coverage": round(scoped.symbol_coverage, 1),
+            }
+        )
+        app_exit = _scoped_exit_code(
+            scoped.verdict, scoped.breaking_for_app, result,
+            severity_config, active_policy, pf,
+            has_missing_contract=bool(
+                scoped.missing_symbols or scoped.missing_versions
+            ),
+        )
+        # exit code (gating) and verdict (reporting) are maxed/ranked
+        # independently -- see _verdict_severity_rank.
+        if severity_config is not None:
+            if app_exit > worst_exit:
+                worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
+                worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
+            elif app_exit == worst_exit:
+                worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
+                worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
+        worst_exit = max(worst_exit, app_exit)
+        rank = _verdict_severity_rank(scoped.verdict)
+        if worst_verdict is None or rank >= worst_verdict_rank:
+            worst_verdict_rank = rank
+            worst_verdict = scoped.verdict
+    scoped_key = "used_by"
+    scoped_payload = summaries
+    exit_code = worst_exit
+    exit_code_scheme = "scoped"
+    scoped_verdict_value = worst_verdict.value if worst_verdict is not None else None
+    # Mirror the CLI's result attributes (cli_compare_helpers._apply_used_by_scoping)
+    # so _fold_scoped_compat_into_text below can fold the same scoping into the
+    # rendered report, not just this response's top-level fields.
+    result.used_by = summaries  # type: ignore[attr-defined]
+    result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
+    result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
+    scoped_scheme = "severity" if severity_config is not None else "legacy"
+    result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+    result.gate_scope = "used_by"  # type: ignore[attr-defined]
+    result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
+    result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
+    _existing_ids = {_finding_id(c) for c in result.changes}
+    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+        c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
+    )
+    if severity_config is not None:
+        categories, counts = _scoped_severity_summary(
+            list(worst_changes.values()), worst_missing,
+            result, severity_config, active_policy, pf,
+        )
+        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+    return (scoped_key, scoped_payload, scoped_verdict_value, exit_code, exit_code_scheme)
+
+
+def _apply_required_symbols_scope(
+    result: Any,
+    *,
+    required_symbols: list[str],
+    old_snap: Any,
+    new_snap: Any,
+    severity_config: Any,
+    active_policy: str,
+    pf: Any,
+) -> tuple[str, Any, str | None, int, str]:
+    """Scope the comparison to a ``required_symbols`` entrypoint contract.
+
+    The ``used_by`` sibling of this function, for the other ADR-043 scope:
+    one contract rather than a set of apps, so there is no worst-of fold —
+    but the same scoped attributes are stamped on *result*, and the same
+    five-tuple is returned.
+    """
+    from .appcompat import (
+        scope_diff_to_required_symbols,
+        uncovered_missing_symbols,
+    )
+
+    scoped_host = scope_diff_to_required_symbols(
+        result, old_snap, new_snap, required_symbols,
+        policy=active_policy, policy_file=pf,
+    )
+    scoped_key = "required_symbol_contract"
+    scoped_payload = {
+        "verdict": scoped_host.verdict.value,
+        "required_entrypoints": sorted(scoped_host.required_entrypoints),
+        "missing_entrypoints": scoped_host.missing_entrypoints,
+        "relevant_change_count": len(scoped_host.breaking_for_host),
+        "coverage": round(scoped_host.coverage, 1),
+    }
+    exit_code = _scoped_exit_code(
+        scoped_host.verdict, scoped_host.breaking_for_host, result,
+        severity_config, active_policy, pf,
+        has_missing_contract=bool(scoped_host.missing_entrypoints),
+    )
+    exit_code_scheme = "scoped"
+    scoped_verdict_value = scoped_host.verdict.value
+    result.required_symbols = scoped_payload  # type: ignore[attr-defined]
+    result.scoped_verdict = scoped_host.verdict  # type: ignore[attr-defined]
+    result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
+    scoped_scheme = "severity" if severity_config is not None else "legacy"
+    result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
+    result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
+    result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
+        _finding_id(c) for c in scoped_host.breaking_for_host
+    )
+    # An entrypoint already covered by a relevant Change must not
+    # also become a synthetic missing-contract finding (Codex
+    # review).
+    result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
+        uncovered_missing_symbols(
+            scoped_host.missing_entrypoints, scoped_host.breaking_for_host
+        )
+    ))
+    # Scoped-only changes: relevant to the host contract but never
+    # added to result.changes (mirrors the used_by branch above).
+    _existing_ids = {_finding_id(c) for c in result.changes}
+    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+        c for c in scoped_host.breaking_for_host if _finding_id(c) not in _existing_ids
+    )
+    if severity_config is not None:
+        categories, counts = _scoped_severity_summary(
+            scoped_host.breaking_for_host, scoped_host.missing_entrypoints,
+            result, severity_config, active_policy, pf,
+        )
+        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
+        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+    return (scoped_key, scoped_payload, scoped_verdict_value, exit_code, exit_code_scheme)
+
+
 @mcp.tool()
 def abi_compare(
     old_input: str,
@@ -836,195 +1073,43 @@ def abi_compare(
         scoped_payload: Any = None
         scoped_verdict_value: str | None = None
         if used_by:
-            from .appcompat import scope_diff_to_app, uncovered_missing_symbols
-            from .service import detect_binary_format
-
-            old_lib: Any = old_path if detect_binary_format(old_path) is not None else old_snap
-            new_lib: Any = new_path if detect_binary_format(new_path) is not None else new_snap
-            for lib, p, label in (
-                (old_lib, old_path, "old_input"), (new_lib, new_path, "new_input"),
-            ):
-                has_binary_evidence = isinstance(lib, Path) or any(
-                    getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
-                )
-                if not has_binary_evidence:
-                    return json.dumps(
-                        {
-                            "status": "error",
-                            "error": f"used_by requires old_input/new_input to be "
-                            f"real library binaries, or JSON snapshots carrying "
-                            f"binary evidence (a dump of a real library, not "
-                            f"headers-only); {label} ({p}) is neither.",
-                        }
-                    )
-            summaries = []
-            worst_exit = 0
-            worst_verdict = None
-            worst_verdict_rank = -1
-            # Keyed by the change's semantic identity (kind/symbol/old/new/
-            # location/description, via `_finding_id`) -- not id(change) --
-            # so a Change or missing symbol shared by two tied apps (e.g.
-            # both import the same removed symbol) collapses to one entry
-            # instead of being tallied once per app (Codex review) --
-            # `_scoped_severity_summary` runs once at the end over this
-            # deduplicated union, not per app summed together. `id()` alone
-            # under-deduplicates PE_ORDINAL_RETARGETED findings: each app's
-            # `scope_diff_to_app` call synthesizes a fresh `Change` object
-            # for the same underlying ordinal retarget (see
-            # `cli_compare_helpers._apply_used_by_scoping`).
-            worst_changes: dict[str, Any] = {}
-            worst_missing: set[str] = set()
-            # Union across ALL apps of which findings this --used-by gate
-            # cares about -- SARIF/JUnit consult this to make their own
-            # result levels/failure counts follow the scoped gate (CLI-audit
-            # P1), mirroring cli_compare_helpers._apply_used_by_scoping.
-            relevant_finding_ids: set[str] = set()
-            # Union across ALL apps of relevant Change objects (not just
-            # ids) so scoped-only changes (e.g. PE_ORDINAL_RETARGETED,
-            # synthesized fresh per app and never added to result.changes)
-            # can still be rendered by SARIF/JUnit (Codex review, mirrors
-            # cli_compare_helpers._apply_used_by_scoping).
-            relevant_changes_by_id: dict[str, Any] = {}
-            missing_labels: set[str] = set()
-            for app in used_by:
-                app_path = _safe_read_path(app, label="used_by")
-                if not app_path.exists():
-                    return json.dumps(
-                        {"status": "error", "error": f"used_by app not found: {app}"}
-                    )
-                _check_file_size(app_path, label="used_by")
-                scoped = scope_diff_to_app(
-                    result, app_path, old_lib, new_lib,
-                    policy=active_policy, policy_file=pf, suppression=suppression,
-                )
-                relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
-                relevant_changes_by_id.update(
-                    {_finding_id(c): c for c in scoped.breaking_for_app}
-                )
-                # A missing symbol/version already covered by a relevant
-                # Change (e.g. FUNC_REMOVED) must not also become a
-                # synthetic missing-contract finding (Codex review, mirrors
-                # cli_compare_helpers._apply_used_by_scoping's dedup).
-                missing_labels.update(
-                    uncovered_missing_symbols(
-                        list(scoped.missing_symbols) + list(scoped.missing_versions),
-                        scoped.breaking_for_app,
-                    )
-                )
-                summaries.append(
-                    {
-                        "app": scoped.app_path,
-                        "verdict": scoped.verdict.value,
-                        "required_symbol_count": scoped.required_symbol_count,
-                        "missing_symbols": scoped.missing_symbols,
-                        "missing_versions": scoped.missing_versions,
-                        "relevant_change_count": len(scoped.breaking_for_app),
-                        "symbol_coverage": round(scoped.symbol_coverage, 1),
-                    }
-                )
-                app_exit = _scoped_exit_code(
-                    scoped.verdict, scoped.breaking_for_app, result,
-                    severity_config, active_policy, pf,
-                    has_missing_contract=bool(
-                        scoped.missing_symbols or scoped.missing_versions
-                    ),
-                )
-                # exit code (gating) and verdict (reporting) are maxed/ranked
-                # independently -- see _verdict_severity_rank.
-                if severity_config is not None:
-                    if app_exit > worst_exit:
-                        worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
-                        worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
-                    elif app_exit == worst_exit:
-                        worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
-                        worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
-                worst_exit = max(worst_exit, app_exit)
-                rank = _verdict_severity_rank(scoped.verdict)
-                if worst_verdict is None or rank >= worst_verdict_rank:
-                    worst_verdict_rank = rank
-                    worst_verdict = scoped.verdict
-            scoped_key = "used_by"
-            scoped_payload = summaries
-            exit_code = worst_exit
-            exit_code_scheme = "scoped"
-            scoped_verdict_value = worst_verdict.value if worst_verdict is not None else None
-            # Mirror the CLI's result attributes (cli_compare_helpers._apply_used_by_scoping)
-            # so _fold_scoped_compat_into_text below can fold the same scoping into the
-            # rendered report, not just this response's top-level fields.
-            result.used_by = summaries  # type: ignore[attr-defined]
-            result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
-            result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
-            scoped_scheme = "severity" if severity_config is not None else "legacy"
-            result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
-            result.gate_scope = "used_by"  # type: ignore[attr-defined]
-            result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
-            result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
-            _existing_ids = {_finding_id(c) for c in result.changes}
-            result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
-                c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
+            scoped = _apply_used_by_scope(
+                result,
+                used_by=used_by,
+                old_path=old_path,
+                new_path=new_path,
+                old_snap=old_snap,
+                new_snap=new_snap,
+                suppression=suppression,
+                severity_config=severity_config,
+                active_policy=active_policy,
+                pf=pf,
             )
-            if severity_config is not None:
-                categories, counts = _scoped_severity_summary(
-                    list(worst_changes.values()), worst_missing,
-                    result, severity_config, active_policy, pf,
-                )
-                result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
-                result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+            if isinstance(scoped, str):
+                return scoped
+            (
+                scoped_key,
+                scoped_payload,
+                scoped_verdict_value,
+                exit_code,
+                exit_code_scheme,
+            ) = scoped
         elif required_symbols:
-            from .appcompat import (
-                scope_diff_to_required_symbols,
-                uncovered_missing_symbols,
+            (
+                scoped_key,
+                scoped_payload,
+                scoped_verdict_value,
+                exit_code,
+                exit_code_scheme,
+            ) = _apply_required_symbols_scope(
+                result,
+                required_symbols=required_symbols,
+                old_snap=old_snap,
+                new_snap=new_snap,
+                severity_config=severity_config,
+                active_policy=active_policy,
+                pf=pf,
             )
-
-            scoped_host = scope_diff_to_required_symbols(
-                result, old_snap, new_snap, required_symbols,
-                policy=active_policy, policy_file=pf,
-            )
-            scoped_key = "required_symbol_contract"
-            scoped_payload = {
-                "verdict": scoped_host.verdict.value,
-                "required_entrypoints": sorted(scoped_host.required_entrypoints),
-                "missing_entrypoints": scoped_host.missing_entrypoints,
-                "relevant_change_count": len(scoped_host.breaking_for_host),
-                "coverage": round(scoped_host.coverage, 1),
-            }
-            exit_code = _scoped_exit_code(
-                scoped_host.verdict, scoped_host.breaking_for_host, result,
-                severity_config, active_policy, pf,
-                has_missing_contract=bool(scoped_host.missing_entrypoints),
-            )
-            exit_code_scheme = "scoped"
-            scoped_verdict_value = scoped_host.verdict.value
-            result.required_symbols = scoped_payload  # type: ignore[attr-defined]
-            result.scoped_verdict = scoped_host.verdict  # type: ignore[attr-defined]
-            result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
-            scoped_scheme = "severity" if severity_config is not None else "legacy"
-            result.scoped_exit_code_scheme = scoped_scheme  # type: ignore[attr-defined]
-            result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
-            result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
-                _finding_id(c) for c in scoped_host.breaking_for_host
-            )
-            # An entrypoint already covered by a relevant Change must not
-            # also become a synthetic missing-contract finding (Codex
-            # review).
-            result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
-                uncovered_missing_symbols(
-                    scoped_host.missing_entrypoints, scoped_host.breaking_for_host
-                )
-            ))
-            # Scoped-only changes: relevant to the host contract but never
-            # added to result.changes (mirrors the used_by branch above).
-            _existing_ids = {_finding_id(c) for c in result.changes}
-            result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
-                c for c in scoped_host.breaking_for_host if _finding_id(c) not in _existing_ids
-            )
-            if severity_config is not None:
-                categories, counts = _scoped_severity_summary(
-                    scoped_host.breaking_for_host, scoped_host.missing_entrypoints,
-                    result, severity_config, active_policy, pf,
-                )
-                result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
-                result.scoped_severity_counts = counts  # type: ignore[attr-defined]
 
         # A finding relevant to used_by/required_symbols scoping that is
         # ALSO already in result.changes (the ordinary case, e.g. a plain

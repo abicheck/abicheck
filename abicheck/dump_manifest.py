@@ -160,7 +160,11 @@ def _load_yaml_strict(text: str, *, source: str) -> Any:
     )
 
     try:
-        return yaml.load(text, Loader=_StrictLoader)
+        # `_StrictLoader` subclasses `yaml.SafeLoader` and only replaces its
+        # mapping constructor with the duplicate-key check above; bandit's B506
+        # flags every `Loader=` it cannot name-match against
+        # `SafeLoader`/`CSafeLoader`, subclasses included.
+        return yaml.load(text, Loader=_StrictLoader)  # nosec B506
     except ManifestValidationError:
         raise
     except yaml.YAMLError as exc:

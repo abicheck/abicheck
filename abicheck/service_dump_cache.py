@@ -481,7 +481,14 @@ def cached_run_dump(
         include_labels=include_labels,
         dump_manifest=dump_manifest,
     )
-    if not cacheable:
+    def _dump_uncached() -> AbiSnapshot:
+        """Run the real dump with this call's arguments, cache aside.
+
+        Both the not-cacheable early return and the cache-miss path below hand
+        `run_dump` the exact same 22 arguments; stated once so a newly threaded
+        parameter cannot reach one of them and silently skip the other
+        (CodeFactor: duplicate code).
+        """
         return run_dump(
             path,
             binary_fmt,
@@ -506,6 +513,9 @@ def cached_run_dump(
             dump_manifest=dump_manifest,
             include_dependencies=include_dependencies,
         )
+
+    if not cacheable:
+        return _dump_uncached()
 
     from . import snapshot_cache
 
@@ -591,30 +601,7 @@ def cached_run_dump(
     cached = snapshot_cache.lookup_key(initial_key, path)
     if cached is not None:
         return cached
-    snap = run_dump(
-        path,
-        binary_fmt,
-        headers,
-        includes,
-        version,
-        lang,
-        pdb_path=pdb_path,
-        dwarf_only=dwarf_only,
-        debug_roots=debug_roots,
-        enable_debuginfod=enable_debuginfod,
-        debuginfod_url=debuginfod_url,
-        debug_format=debug_format,
-        symbols_only=symbols_only,
-        debug_presence_only=debug_presence_only,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
-        header_backend=header_backend,
-        compile=compile,
-        notify=notify,
-        include_labels=include_labels,
-        dump_manifest=dump_manifest,
-        include_dependencies=include_dependencies,
-    )
+    snap = _dump_uncached()
     final_extra = _build_extra()
     final_key = snapshot_cache._cache_key(
         path, _cache_headers, _cache_includes, version, lang, extra=final_extra

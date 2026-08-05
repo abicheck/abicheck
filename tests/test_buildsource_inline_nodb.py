@@ -806,3 +806,26 @@ def test_compile_db_at_dir_uses_subdir_fallback(tmp_path):
     db = bd / "compile_commands.json"
     db.write_text("[]")
     assert _compile_db_at(tmp_path) == db
+
+
+def test_run_cleanups_keeps_going_and_logs_after_one_fails(caplog):
+    """A failing cleanup must not skip the remaining ones, and must not vanish.
+
+    The handler is deliberately broad (a temp tree already gone, a read-only
+    mount — none of it should abort collection), so it logs at debug instead of
+    swallowing silently (bandit B110).
+    """
+    import logging
+
+    from abicheck.buildsource.inline import _run_cleanups
+
+    ran: list[str] = []
+
+    def _boom() -> None:
+        raise OSError("scratch dir already gone")
+
+    with caplog.at_level(logging.DEBUG, logger="abicheck.buildsource.inline"):
+        _run_cleanups([lambda: ran.append("first"), _boom, lambda: ran.append("last")])
+
+    assert ran == ["first", "last"], "a failing cleanup skipped the ones after it"
+    assert any("cleanup failed" in r.message for r in caplog.records)

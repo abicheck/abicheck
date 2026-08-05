@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.checker import compare
 from abicheck.cli import main
@@ -437,11 +438,9 @@ class TestDownstreamConsumers:
         assert doc["runs"][0]["invocations"][0]["toolExecutionNotifications"] == []
 
     def test_junit_reports_coverage_as_errors_never_as_passes(self) -> None:
-        import xml.etree.ElementTree as ET
-
         from abicheck.junit_report import to_junit_xml
 
-        root = ET.fromstring(to_junit_xml(self._result()))
+        root = xml_fromstring(to_junit_xml(self._result()))
         (suite,) = [
             s
             for s in root.findall("testsuite")
@@ -459,18 +458,14 @@ class TestDownstreamConsumers:
 
     def test_junit_rolls_the_errors_into_the_document_totals(self) -> None:
         """A dashboard reading only the root counts must still see them."""
-        import xml.etree.ElementTree as ET
-
-        root = ET.fromstring(to_junit_xml_of(self._result()))
+        root = xml_fromstring(to_junit_xml_of(self._result()))
         assert root.get("errors") == "2"
 
     def test_junit_has_no_coverage_suite_without_contract_evaluation(self) -> None:
-        import xml.etree.ElementTree as ET
-
         from abicheck.junit_report import to_junit_xml
 
         old, new = _pair_without_export_table()
-        root = ET.fromstring(to_junit_xml(compare(old, new)))
+        root = xml_fromstring(to_junit_xml(compare(old, new)))
         assert not [
             s
             for s in root.findall("testsuite")
@@ -576,8 +571,6 @@ def test_junit_multi_result_documents_carry_the_coverage_suite() -> None:
     suite, letting a consumer read an uncheckable comparison as clean (Codex
     review).
     """
-    import xml.etree.ElementTree as ET
-
     from abicheck.junit_report import to_junit_xml_multi
 
     old, new = _pair_without_export_table()
@@ -588,7 +581,7 @@ def test_junit_multi_result_documents_carry_the_coverage_suite() -> None:
         contract_evaluation=True,
         contract_mode="exports",
     )
-    root = ET.fromstring(to_junit_xml_multi([(result, old)]))
+    root = xml_fromstring(to_junit_xml_multi([(result, old)]))
     suites = [
         s
         for s in root.findall("testsuite")
@@ -607,8 +600,6 @@ def test_junit_coverage_suites_stay_attributable_per_library() -> None:
     (CodeRabbit review). The library qualifies both the suite name and the
     testcase classname.
     """
-    import xml.etree.ElementTree as ET
-
     from abicheck.junit_report import to_junit_xml_multi
 
     old, new = _pair_without_export_table()
@@ -623,7 +614,7 @@ def test_junit_coverage_suites_stay_attributable_per_library() -> None:
         )
         result.library = name
         results.append((result, old))
-    root = ET.fromstring(to_junit_xml_multi(results))
+    root = xml_fromstring(to_junit_xml_multi(results))
     suites = [
         s
         for s in root.findall("testsuite")
