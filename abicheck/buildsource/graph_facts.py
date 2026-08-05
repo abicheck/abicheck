@@ -51,6 +51,39 @@ CONF_UNKNOWN = "unknown"
 #: ``CONF_UNKNOWN`` rather than erroring.
 _CONFIDENCE_RANK: dict[str, int] = {CONF_HIGH: 2, CONF_REDUCED: 1, CONF_UNKNOWN: 0}
 
+#: The consumer half of the graph vocabulary (G29 Phase 4, ADR-057) —
+#: ``source_graph.NODE_KINDS``/``EDGE_KINDS`` union these in, and
+#: ``abicheck.impact.consumer_graph`` (which populates them) re-exports them.
+#:
+#: They live in this leaf module rather than beside the rest of the vocabulary
+#: for two reasons: ``source_graph.py`` sits at its 2000-line hard cap, and
+#: the producer imports ``source_graph`` (via a function-local import) so
+#: ``source_graph`` cannot import the producer back without forming a cycle.
+#:
+#: Only ``consumer_binary``, ``CONSUMER_REQUIRES_SYMBOL`` and
+#: ``CONSUMER_REQUIRES_VERSION`` are populated today. The rest are **reserved**
+#: — same "registered so a hand-built or newer graph naming one is never
+#: rejected, but no normalized data source yet" pattern as the archive/linker
+#: kinds in ``source_graph.py``: a consumer's *compiled* header/instantiation
+#: dependencies need consumer-side build evidence, and a runtime resolution
+#: failure needs trace ingestion, both later slices of the same phase.
+#:
+#: Deliberately no ``consumer_required_symbol`` node kind: a requirement is an
+#: edge onto the existing ``binary_symbol`` node, which is what makes the
+#: consumer and library graphs join on one shared node id at all.
+CONSUMER_NODE_KINDS: frozenset[str] = frozenset(
+    {"consumer_binary", "consumer_object", "runtime_probe"}
+)
+CONSUMER_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "CONSUMER_REQUIRES_SYMBOL",
+        "CONSUMER_REQUIRES_VERSION",
+        "CONSUMER_INSTANTIATES_DECL",
+        "CONSUMER_COMPILED_FROM_HEADER",
+        "RUNTIME_FAILED_TO_RESOLVE_SYMBOL",
+    }
+)
+
 
 def _precedence_key(fact: GraphFact) -> tuple[int, str, str]:
     """Deterministic total order over facts: highest confidence first, tie

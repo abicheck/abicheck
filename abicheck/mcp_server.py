@@ -505,6 +505,10 @@ def _apply_used_by_scope(
         scoped = scope_diff_to_app(
             result, app_path, old_lib, new_lib,
             policy=active_policy, policy_file=pf, suppression=suppression,
+            # ADR-057: old_lib is the path when OLD is a real binary, and
+            # only the snapshot carries the L5 graph the consumer-impact
+            # join needs.
+            old_snapshot=old_snap,
         )
         relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
         relevant_changes_by_id.update(

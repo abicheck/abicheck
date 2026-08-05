@@ -7,6 +7,7 @@ level: intermediate
 canonical_for:
   - impact-analysis
 depends_on:
+  - abicheck/impact/consumer_graph.py
   - abicheck/impact/model.py
   - abicheck/impact/engine.py
   - abicheck/buildsource/graph_impact.py
@@ -164,11 +165,49 @@ no "what if this testcase's findings disagree on root cause" question: two
 sibling `<failure>` elements can legitimately show two different root
 causes.
 
+## Why a consumer required a symbol
+
+`compare --used-by <app>` reports the symbols an application binary needs
+that the new library no longer exports, as
+`consumer_required_symbol_removed` findings. On its own that answers *what*
+broke — `training-service` requires `_ZN6detail21train_ops_dispatcherEv` —
+but not why the application ever depended on an internal dispatcher it never
+called.
+
+When the **old** library's snapshot carries an L5 source graph (`dump
+--sources`/`--build-info`, or the always-on header-only graph), abicheck
+folds the consumer's own requirements into a copy of that graph and walks
+back through it: symbol → declaration (`source_decl_maps_to_symbol`) →
+whichever public entry point reaches that declaration in the call graph. The
+finding then carries the answer in the fields this page already documents —
+`impact_assessment.proof_path.root` names the public entry, `steps` is the
+chain, and the prose reads
+
+> `training-service` requires `_ZN6detail21train_ops_dispatcherEv` via public
+> entry `train`: train → detail::train_ops_dispatcher → …
+
+The walk uses the same restricted traversal as internal-leak findings, so it
+stops at any declaration whose body a consumer does not compile — an
+ordinary out-of-line exported function's internal calls are never attributed
+to code that cannot see them. That also means a public entry whose body is
+*not* consumer-compiled yields no answer rather than a speculative one, as
+does a missing graph, a symbol with no captured declaration, or no path from
+any entry. In every one of those cases the finding is exactly what it was
+before: absence of an explanation is never evidence that a dependency is
+absent.
+
+This is [ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md)
+(G29 Phase 4, slice 1). It adds no `ChangeKind`, changes no verdict, and adds
+no report field — it fills in fields the schema already had.
+
 ## What this does not cover yet
 
-`impact_assessment` does not (yet) include which consumers or use cases are
-affected, or a coverage summary — those need the consumer/use-case graph
-(G29 Phase 4) and the per-role coverage matrix wired through the impact
+`impact_assessment` does not (yet) include a list of affected consumers or
+use cases, or a coverage summary. The consumer *graph* exists (above), but as
+evidence a finding is enriched from — not as its own
+`affected_consumers`/`affected_use_cases` fields; declared use cases
+(`impact-use-cases.yaml`) and runtime-trace ingestion are the remainder of
+G29 Phase 4, and the per-role coverage matrix is not wired through the impact
 layer. `root_cause_id`/`impact_group_id` (documented above) are implemented,
 but `impact_group_id` is currently only ever an alias of `root_cause_id` —
 distinguishing them (e.g. bucketing several distinct root causes that share

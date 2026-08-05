@@ -483,3 +483,11 @@ class TestPathOccurrenceId:
         assert assessment.proof_path is not None
         assert assessment.proof_path.occurrence_id == change.impact_occurrence_id
         assert assessment.proof_path.occurrence_id is not None
+
+
+def test_path_node_ids_is_empty_for_an_empty_path() -> None:
+    """An empty path (entry == target) has no hops to enumerate — the tier
+    computation must not index into it."""
+    from abicheck.buildsource.graph_impact import _path_node_ids
+
+    assert _path_node_ids([]) == []

@@ -6,6 +6,7 @@ summarizes:
   - impact-analysis
 depends_on:
   - abicheck/buildsource/graph_facts.py
+  - abicheck/impact/consumer_graph.py
   - abicheck/buildsource/source_graph.py
   - abicheck/internal_leak.py
   - abicheck/buildsource/graph_impact.py
@@ -135,7 +136,7 @@ When more than one candidate path reaches the same target, plain
 shortest-wins can pick a weaker proof over a stronger one just because it's
 fewer hops. The ADR's target six-tier order — best to worst — is:
 
-1. **Consumer-proven** — a real `--used-by` consumer binary proves the path (Phase 4, not implemented — needs the consumer graph).
+1. **Consumer-proven** — a real `--used-by` consumer binary requires a node on the path ([ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md)).
 2. **Exact / high-confidence** — every edge is `CONF_HIGH`.
 3. **Public-header structural** — every node on the path has a `public_header`/`generated` (`PUBLIC_VISIBILITIES`) visibility, not a private-header/source one.
 4. **Multi-producer-confirmed** — some edge has more than one distinct fact producer (ADR-046 D2).
@@ -153,10 +154,45 @@ structured per-hop data their walk's path representation carries:
   `list[GraphEdge]` path, e.g. `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`'s
   proof) implements tiers 2-5 — real `GraphEdge` objects carry confidence,
   fact-producer count, and (via each endpoint node's `visibility` attr)
-  public/private surface information. Tier 1 stays out of scope for both
-  (Phase 4).
+  public/private surface information. It also implements **tier 1**, read
+  straight off the graph it is given: whenever a consumer graph has been
+  folded in (`impact.consumer_graph.join_consumer_graph`, ADR-057), a path
+  touching a `CONSUMER_REQUIRES_SYMBOL` target is consumer-proven. With no
+  consumer facts in the graph — every run without `--used-by` — that set is
+  empty and the tier is inert. Tier 1 stays out of scope for
+  `internal_leak.select_preferred_path`.
+
+Tier 1 matches on the path's **endpoint**, and the tier-6 overapprox check
+still runs first and wins — so in practice tier 1 means "consumer-proven
+*and* exactly resolved". See
+[ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md) D4 for why
+it is scoped that way.
 
 Both break ties within a tier by shortest path (fewest hops).
+
+## The consumer half of the graph (ADR-057)
+
+`compare --used-by <app>` can fold the consumer's own requirements into the
+library's graph, so a `consumer_required_symbol_removed` finding can name the
+public entry point behind the dependency instead of only the missing symbol.
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `consumer_binary` *(node)* | populated | The `--used-by` application binary. |
+| `consumer_object` / `runtime_probe` *(nodes)* | reserved | Need consumer-side build evidence / trace ingestion. |
+| `CONSUMER_REQUIRES_SYMBOL` *(edge)* | populated | The consumer's undefined-symbol requirement, scoped to the target library's exports. |
+| `CONSUMER_REQUIRES_VERSION` *(edge)* | populated | An ELF version tag the consumer needs, targeting the `DT_NEEDED` soname's `external_dependency` node. |
+| `CONSUMER_INSTANTIATES_DECL` / `CONSUMER_COMPILED_FROM_HEADER` / `RUNTIME_FAILED_TO_RESOLVE_SYMBOL` *(edges)* | reserved | Same "registered, no data source yet" pattern as the archive/linker kinds. |
+
+There is deliberately **no** `consumer_required_symbol` node kind: a
+requirement is an edge onto the *existing* `binary_symbol://<symbol>` node the
+library graph already uses for that export, and that one shared node id is the
+entire join — see
+[ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md) D1.
+
+The vocabulary constants live in `abicheck/buildsource/graph_facts.py` and are
+unioned into `source_graph.NODE_KINDS`/`EDGE_KINDS`; the producer is
+`abicheck/impact/consumer_graph.py`.
 
 ## `primary_path` / `alternative_paths` / `discarded_path_count`
 
