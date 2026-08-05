@@ -292,11 +292,21 @@ def _side_errors(label: str, side: InputSpec) -> list[str]:
 
     * a per-side ``compile.frontend_context`` bypassed the request-level enum
       check entirely, so it is validated here too, same message shape;
-    * ``dump_manifest`` replaces ``headers`` for the primary AST, so forwarding
-      both mixes two declared surfaces into one snapshot's provenance/dialect
-      detection (mirrors the CLI's ``--dump-manifest``/``-H`` ``UsageError``).
-      Checked in this Tier-2 pre-flight, not only at runtime, so a caller using
-      ``validation_errors()``/``validate()`` alone also catches it.
+    * ``dump_manifest`` replaces ``headers``/``includes``/``public_header_dirs``
+      for the primary AST, so forwarding any of them alongside it mixes two
+      declared surfaces into one snapshot's provenance/dialect detection
+      (mirrors the CLI's ``--dump-manifest``/``-H``/``--public-header-dir``
+      ``UsageError``, and ``dumper.dump()``'s own runtime check of the
+      identical field set — ``extra_includes``/``public_header_dirs`` there
+      are this dataclass's ``includes``/``public_header_dirs``). Checked in
+      this Tier-2 pre-flight, not only at runtime, so a caller using
+      ``validation_errors()``/``validate()`` alone also catches it — without
+      this, a ``dump_manifest`` set alongside ``public_header_dirs`` or
+      ``includes`` passed ``validate()`` and failed late, deep inside
+      extraction, as a generic ``SnapshotError`` rather than a usage error
+      (Codex review named ``public_header_dirs``; ``includes`` has the
+      identical gap, confirmed against ``dumper.dump()``'s own check, which
+      this pre-flight is front-running).
     """
     errors: list[str] = []
     # The per-side `compile.frontend` was unvalidated: the request-level
@@ -321,12 +331,24 @@ def _side_errors(label: str, side: InputSpec) -> list[str]:
         errors.append(
             _frontend_context_message(side.compile.frontend_context, label)
         )
-    if side.dump_manifest is not None and side.headers:
-        errors.append(
-            f"dump_manifest and a header for the {label} side (InputSpec.headers) "
-            f"are mutually exclusive -- declare the {label} side's public surface "
-            "in the manifest's own base profile instead."
-        )
+    if side.dump_manifest is not None:
+        # Same field set `dumper.dump()` itself rejects (its `extra_includes`/
+        # `public_header_dirs` params are this dataclass's `includes`/
+        # `public_header_dirs`) -- excludes `scope_header_dirs`, which no
+        # typed-request field ever populates, so there is nothing live to
+        # conflict there.
+        _manifest_conflicts = {
+            "headers": side.headers,
+            "includes": side.includes,
+            "public_header_dirs": side.public_header_dirs,
+        }
+        given = sorted(name for name, value in _manifest_conflicts.items() if value)
+        if given:
+            errors.append(
+                f"dump_manifest and the {label} side's {', '.join(given)} "
+                "are mutually exclusive -- declare the equivalent in the "
+                "manifest's own base profile instead."
+            )
     return errors
 
 

@@ -120,6 +120,43 @@ class TestDumpRequestValidation:
         errors = DumpRequest(input=spec).validation_errors()
         assert any("mutually exclusive" in e and "input side" in e for e in errors)
 
+    @pytest.mark.parametrize(
+        ("field", "value_factory"),
+        [
+            ("public_header_dirs", lambda tmp: {"public_header_dirs": (tmp,)}),
+            ("includes", lambda tmp: {"includes": (tmp,)}),
+        ],
+    )
+    def test_dump_manifest_and_other_conflicting_fields_are_caught_pre_flight(
+        self, snap_path: Path, tmp_path: Path, field: str, value_factory
+    ):
+        """`dumper.dump()` itself rejects `dump_manifest` alongside
+        `extra_includes`/`public_header_dirs` (its names for this dataclass's
+        `includes`/`public_header_dirs`) -- but only at extraction time. Before
+        this fix, `validate()` missed both, so a caller relying on
+        `validation_errors()`/`validate()` alone got a late, generic
+        `SnapshotError` instead of the fast usage error `headers` already gets
+        (Codex review named `public_header_dirs`; `includes` has the identical
+        gap, confirmed independently against `dumper.dump()`'s own check).
+        """
+        spec = InputSpec(
+            path=snap_path,
+            dump_manifest=object(),  # type: ignore[arg-type]
+            **value_factory(tmp_path),
+        )
+        errors = DumpRequest(input=spec).validation_errors()
+        assert any(
+            "mutually exclusive" in e and "input side" in e and field in e
+            for e in errors
+        ), errors
+
+    def test_a_clean_manifest_only_request_is_unaffected(
+        self, snap_path: Path, tmp_path: Path
+    ):
+        # The combined check must not fire when nothing actually conflicts.
+        spec = InputSpec(path=snap_path, dump_manifest=object())  # type: ignore[arg-type]
+        assert DumpRequest(input=spec).validation_errors() == []
+
     def test_per_input_compile_frontend_context_is_validated(self, snap_path: Path):
         spec = InputSpec(path=snap_path, compile=CompileContext(frontend_context="gpu"))
         errors = DumpRequest(input=spec).validation_errors()
@@ -153,6 +190,65 @@ class TestDumpRequestValidation:
             frontend_context="DEVICE",
         )
         assert request.validation_errors() == []
+
+
+class TestManifestConflictsFailFastEndToEnd:
+    """The `abi_dump` tool call surfaces the pre-flight usage error, not the
+    late, generic `SnapshotError` that reached the caller before this fix.
+
+    Reproduces the exact gap: before the fix, `req.validate()` inside
+    `run_dump_request` silently passed for `dump_manifest` +
+    `public_header_dirs`/`includes`, and the mismatch was only caught deep
+    inside `dumper.dump()`'s own runtime check, translated into a
+    `SnapshotError` the tool reports as a generic failure rather than the
+    same-shaped usage error `dump_manifest` + `headers` already got.
+    """
+
+    def _manifest(self, tmp_path: Path) -> Path:
+        hdr = tmp_path / "root.h"
+        hdr.write_text("int foo(void);\n", encoding="utf-8")
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text(
+            f"roots:\n  - {hdr}\ntranslation_units:\n  - name: tu\n",
+            encoding="utf-8",
+        )
+        return manifest
+
+    def test_public_header_dirs_alongside_a_manifest_is_a_usage_error(
+        self, snap_path: Path, tmp_path: Path
+    ):
+        from abicheck.mcp_server import abi_dump
+
+        phd = tmp_path / "pub"
+        phd.mkdir()
+        data = json.loads(
+            abi_dump(
+                str(snap_path),
+                dump_manifest=str(self._manifest(tmp_path)),
+                public_header_dirs=[str(phd)],
+            )
+        )
+        assert data["status"] == "error"
+        assert "mutually exclusive" in data["error"]
+        assert "public_header_dirs" in data["error"]
+
+    def test_includes_alongside_a_manifest_is_a_usage_error(
+        self, snap_path: Path, tmp_path: Path
+    ):
+        from abicheck.mcp_server import abi_dump
+
+        inc = tmp_path / "inc"
+        inc.mkdir()
+        data = json.loads(
+            abi_dump(
+                str(snap_path),
+                dump_manifest=str(self._manifest(tmp_path)),
+                include_dirs=[str(inc)],
+            )
+        )
+        assert data["status"] == "error"
+        assert "mutually exclusive" in data["error"]
+        assert "includes" in data["error"]
 
 
 # ===================================================================

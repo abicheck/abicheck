@@ -96,6 +96,15 @@
   being set at all, and only an *explicit* depth arms the depth floor, so a
   typo silently collected nothing and still reported success. The `dump`/`scan`
   CLIs reject the same input via `click.Path(exists=True)`.
+- **`dump_manifest` alongside `public_header_dirs` or `includes` now fails
+  fast, as it already did for `headers`** — `dumper.dump()` itself rejects
+  `dump_manifest` alongside any of `headers`/`extra_includes`/
+  `public_header_dirs` (its names for `InputSpec.headers`/`includes`/
+  `public_header_dirs`), but the Tier-2 pre-flight `validate()` only checked
+  `headers`. A `DumpRequest`/`CompareRequest` combining a manifest with the
+  other two passed `validate()` and failed late, deep inside extraction, as a
+  generic `SnapshotError` instead of the same usage error `headers` already
+  gets.
 
 ### Changed
 
