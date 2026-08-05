@@ -1,0 +1,265 @@
+name: Agent Level Zero package scan 2026-08-05
+
+on:
+  push:
+    branches:
+      - ops/level-zero-scan-2026-08-05-5465a861
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      BASE_SHA: 5465a8610e2a01f07abcd9f18ff93ecf2256114f
+      OUT: scan-results-level-zero
+      OLD_RUNTIME_URL: https://github.com/oneapi-src/level-zero/releases/download/v1.31.0/libze1_1.31.0%2Bu24.04_amd64.deb
+      OLD_DEV_URL: https://github.com/oneapi-src/level-zero/releases/download/v1.31.0/libze-dev_1.31.0%2Bu24.04_amd64.deb
+      NEW_RUNTIME_URL: https://github.com/oneapi-src/level-zero/releases/download/v1.32.0/libze1_1.32.0%2Bu24.04_amd64.deb
+      NEW_DEV_URL: https://github.com/oneapi-src/level-zero/releases/download/v1.32.0/libze-dev_1.32.0%2Bu24.04_amd64.deb
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install scanner and comparison tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            binutils curl ca-certificates time abigail-tools zstd bzip2 xz-utils
+          bash action/install-castxml.sh
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" zstandard
+
+      - name: Record provenance and download official packages
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT/packages" "$OUT/extracted/old" "$OUT/extracted/new" "$OUT/abidiff"
+          {
+            echo "base_main_sha=$BASE_SHA"
+            echo "workflow_head_sha=$(git rev-parse HEAD)"
+            echo "workflow_parent_sha=$(git rev-parse HEAD^)"
+            echo "generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            python --version
+            abicheck --version
+            castxml --version
+            abidiff --version
+          } > "$OUT/provenance.txt" 2>&1
+          cat "$OUT/provenance.txt"
+          git diff --stat "$BASE_SHA"..HEAD > "$OUT/branch-diff-stat.txt"
+
+          curl --fail --location --retry 4 --retry-all-errors \
+            "$OLD_RUNTIME_URL" -o "$OUT/packages/libze1_1.31.0+u24.04_amd64.deb"
+          curl --fail --location --retry 4 --retry-all-errors \
+            "$OLD_DEV_URL" -o "$OUT/packages/libze-dev_1.31.0+u24.04_amd64.deb"
+          curl --fail --location --retry 4 --retry-all-errors \
+            "$NEW_RUNTIME_URL" -o "$OUT/packages/libze1_1.32.0+u24.04_amd64.deb"
+          curl --fail --location --retry 4 --retry-all-errors \
+            "$NEW_DEV_URL" -o "$OUT/packages/libze-dev_1.32.0+u24.04_amd64.deb"
+          sha256sum "$OUT"/packages/*.deb | tee "$OUT/package-sha256.txt"
+          for package in "$OUT"/packages/*.deb; do
+            dpkg-deb --info "$package" > "$package.info.txt"
+            dpkg-deb --contents "$package" > "$package.contents.txt"
+          done
+
+      - name: Compare official Level Zero runtime and development packages
+        run: |
+          set -uo pipefail
+          old_runtime="$OUT/packages/libze1_1.31.0+u24.04_amd64.deb"
+          old_dev="$OUT/packages/libze-dev_1.31.0+u24.04_amd64.deb"
+          new_runtime="$OUT/packages/libze1_1.32.0+u24.04_amd64.deb"
+          new_dev="$OUT/packages/libze-dev_1.32.0+u24.04_amd64.deb"
+
+          set +e
+          /usr/bin/time -f '%e' -o "$OUT/abicheck-seconds.txt" \
+            abicheck compare \
+              "$old_runtime" "$new_runtime" \
+              --devel-pkg "old=$old_dev" \
+              --devel-pkg "new=$new_dev" \
+              --version old=1.31.0 \
+              --version new=1.32.0 \
+              --format json \
+              --recommend \
+              -o "$OUT/level-zero-1.31.0-to-1.32.0.json" \
+              > "$OUT/abicheck.stdout.txt" \
+              2> "$OUT/abicheck.stderr.txt"
+          rc=$?
+          set -e
+          echo "$rc" > "$OUT/abicheck-exit-code.txt"
+          exit 0
+
+      - name: Cross-check common ELF objects with abidiff
+        run: |
+          set -euo pipefail
+          dpkg-deb -x "$OUT/packages/libze1_1.31.0+u24.04_amd64.deb" "$OUT/extracted/old"
+          dpkg-deb -x "$OUT/packages/libze1_1.32.0+u24.04_amd64.deb" "$OUT/extracted/new"
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+          from pathlib import Path
+
+          root = Path("scan-results-level-zero")
+          old_root = root / "extracted" / "old"
+          new_root = root / "extracted" / "new"
+          out = root / "abidiff"
+          out.mkdir(parents=True, exist_ok=True)
+
+          def is_elf(path: Path) -> bool:
+              try:
+                  with path.open("rb") as handle:
+                      return handle.read(4) == b"\x7fELF"
+              except OSError:
+                  return False
+
+          def logical(path: Path) -> str:
+              return path.name.split(".so", 1)[0]
+
+          def collect(base: Path) -> dict[str, Path]:
+              result: dict[str, Path] = {}
+              for path in base.rglob("*.so*"):
+                  if not path.is_file() or path.is_symlink() or not is_elf(path):
+                      continue
+                  key = logical(path)
+                  previous = result.get(key)
+                  if previous is None or path.stat().st_size > previous.stat().st_size:
+                      result[key] = path
+              return result
+
+          def soname(path: Path) -> str | None:
+              proc = subprocess.run(["readelf", "-d", str(path)], capture_output=True, text=True)
+              match = re.search(r"Library soname: \[(.*?)\]", proc.stdout)
+              return match.group(1) if match else None
+
+          old = collect(old_root)
+          new = collect(new_root)
+          records = []
+          for name in sorted(set(old) & set(new)):
+              log = out / f"{name}.txt"
+              err = out / f"{name}.stderr.txt"
+              started = time.perf_counter()
+              proc = subprocess.run(
+                  ["abidiff", str(old[name]), str(new[name])],
+                  capture_output=True,
+                  text=True,
+              )
+              elapsed = time.perf_counter() - started
+              log.write_text(proc.stdout, encoding="utf-8")
+              err.write_text(proc.stderr, encoding="utf-8")
+              records.append(
+                  {
+                      "logical": name,
+                      "old_path": str(old[name].relative_to(old_root)),
+                      "new_path": str(new[name].relative_to(new_root)),
+                      "old_soname": soname(old[name]),
+                      "new_soname": soname(new[name]),
+                      "exit_code": proc.returncode,
+                      "seconds": round(elapsed, 3),
+                      "stdout_bytes": len(proc.stdout.encode()),
+                      "stderr_bytes": len(proc.stderr.encode()),
+                  }
+              )
+          (out / "abidiff-results.json").write_text(json.dumps(records, indent=2) + "\n")
+          print(json.dumps(records, indent=2))
+          PY
+
+      - name: Build Level Zero summary
+        if: always()
+        run: |
+          mkdir -p "$OUT"
+          python - <<'PY'
+          from __future__ import annotations
+
+          import collections
+          import json
+          from pathlib import Path
+
+          root = Path("scan-results-level-zero")
+
+          def load(path: Path):
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, json.JSONDecodeError):
+                  return None
+
+          def read_text(path: Path, default=""):
+              try:
+                  return path.read_text(encoding="utf-8").strip()
+              except OSError:
+                  return default
+
+          report = load(root / "level-zero-1.31.0-to-1.32.0.json")
+          abidiff = load(root / "abidiff" / "abidiff-results.json") or []
+          summary = report.get("summary", {}) if isinstance(report, dict) else {}
+          changes = []
+          if isinstance(report, dict):
+              candidate = report.get("changes") or report.get("findings") or []
+              if isinstance(candidate, list):
+                  changes = [item for item in candidate if isinstance(item, dict)]
+          kinds = collections.Counter(str(item.get("kind")) for item in changes)
+          severities = collections.Counter(str(item.get("severity")) for item in changes)
+          scope = report.get("scope", {}) if isinstance(report, dict) else {}
+          result = {
+              "schema": "agent-level-zero-scan.v1",
+              "base_sha": "5465a8610e2a01f07abcd9f18ff93ecf2256114f",
+              "source": "official oneapi-src/level-zero Ubuntu 24.04 release packages",
+              "old_version": "1.31.0",
+              "new_version": "1.32.0",
+              "abicheck_exit_code": int(read_text(root / "abicheck-exit-code.txt", "99")),
+              "abicheck_seconds": float(read_text(root / "abicheck-seconds.txt", "nan")),
+              "verdict": (report.get("verdict") or summary.get("verdict")) if isinstance(report, dict) else None,
+              "summary": summary,
+              "finding_count": len(changes),
+              "by_severity": dict(severities),
+              "top_kinds": kinds.most_common(25),
+              "scope": scope,
+              "abidiff": abidiff,
+              "report_present": isinstance(report, dict),
+          }
+          (root / "level-zero-results.json").write_text(json.dumps(result, indent=2) + "\n")
+          lines = [
+              "# Level Zero 1.31.0 → 1.32.0",
+              "",
+              f"- Base main SHA: `{result['base_sha']}`",
+              f"- abicheck verdict: `{result['verdict']}`",
+              f"- Findings: `{result['finding_count']}`",
+              f"- Severity counts: `{json.dumps(result['by_severity'], sort_keys=True)}`",
+              f"- Time: `{result['abicheck_seconds']}` seconds",
+              f"- Scope resolved: `{scope.get('resolved')}`; fallback: `{scope.get('fell_back')}`; manual review: `{scope.get('manual_review_required')}`",
+              "",
+              "## abidiff object checks",
+              "",
+              "| Object | SONAME old | SONAME new | Exit | Seconds |",
+              "|---|---|---|---:|---:|",
+          ]
+          for row in abidiff:
+              lines.append(
+                  f"| {row.get('logical')} | {row.get('old_soname')} | {row.get('new_soname')} | {row.get('exit_code')} | {row.get('seconds')} |"
+              )
+          (root / "summary.md").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+          cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload complete Level Zero evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: level-zero-scan-main-5465a861
+          path: scan-results-level-zero/
+          if-no-files-found: error
+          retention-days: 30
