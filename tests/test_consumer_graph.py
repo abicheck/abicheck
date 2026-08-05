@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from abicheck.appcompat import AppRequirements, scope_diff_to_app
+from abicheck.appcompat import AppCompatResult, AppRequirements, scope_diff_to_app
 from abicheck.buildsource.graph_impact import (
     _TIER_CONSUMER_PROVEN,
     _TIER_EXACT,
@@ -893,7 +893,7 @@ class TestDirectRequirementAndFallthroughs:
         )
         return old, new
 
-    def _run(self, tmp_path: Path, changes: list[Change]):
+    def _run(self, tmp_path: Path, changes: list[Change]) -> AppCompatResult:
         old, new = self._snapshots()
         diff = DiffResult(
             old_version="1.0",
