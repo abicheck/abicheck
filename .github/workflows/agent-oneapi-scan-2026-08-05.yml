@@ -1,0 +1,184 @@
+name: Agent oneAPI product scan 2026-08-05
+
+on:
+  push:
+    branches:
+      - ops/oneapi-scan-2026-08-05-5465a861
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      BASE_SHA: 5465a8610e2a01f07abcd9f18ff93ecf2256114f
+      OUT: scan-results-oneapi
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install abicheck and binary tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y binutils zstd bzip2 xz-utils curl ca-certificates time
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" zstandard
+
+      - name: Record provenance
+        run: |
+          mkdir -p "$OUT"
+          {
+            echo "base_main_sha=$BASE_SHA"
+            echo "workflow_head_sha=$(git rev-parse HEAD)"
+            echo "workflow_parent_sha=$(git rev-parse HEAD^)"
+            echo "generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            python --version
+            abicheck --version
+            readelf --version | sed -n '1p'
+          } | tee "$OUT/provenance.txt"
+          git diff --stat "$BASE_SHA"..HEAD > "$OUT/branch-diff-stat.txt"
+
+      - name: Run pinned oneAPI product matrix
+        run: |
+          cat > /tmp/run_oneapi_fresh.py <<'PY'
+          from __future__ import annotations
+
+          import collections
+          import json
+          import shutil
+          import sys
+          import time
+          import traceback
+          from pathlib import Path
+
+          root = Path.cwd()
+          out = root / "scan-results-oneapi"
+          out.mkdir(parents=True, exist_ok=True)
+          sys.path.insert(0, str(root / "validation" / "scripts"))
+          import run_oneapi_scan as lane  # noqa: E402
+
+          started = time.perf_counter()
+          failure = None
+          rows = []
+          try:
+              rows = lane.run()
+          except BaseException:
+              failure = traceback.format_exc()
+          wall = round(time.perf_counter() - started, 3)
+
+          # Preserve every baseline and per-pair report before the lane's atexit cleanup.
+          scratch = out / "scratch"
+          if lane.WORK.exists():
+              shutil.copytree(lane.WORK, scratch, dirs_exist_ok=True)
+
+          for row in rows:
+              expectation = str(row.get("expectation") or "").upper()
+              verdict = str(row.get("verdict") or "").upper()
+              if expectation == "BREAKING":
+                  row["normalized_expected"] = "BREAKING"
+              else:
+                  row["normalized_expected"] = "COMPATIBLE"
+              if verdict in {"BREAKING", "API_BREAK"}:
+                  row["normalized_actual"] = "BREAKING"
+              elif verdict in {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}:
+                  row["normalized_actual"] = "COMPATIBLE"
+              else:
+                  row["normalized_actual"] = "UNKNOWN"
+              row["agreement"] = (
+                  row.get("status") == "OK"
+                  and row["normalized_expected"] == row["normalized_actual"]
+              )
+
+              report = None
+              # The lane names reports as <lib>_<old>_<new>_s0.json.
+              candidate = scratch / f"{row.get('lib')}_{row.get('old')}_{row.get('new')}_s0.json"
+              if candidate.is_file():
+                  try:
+                      report = json.loads(candidate.read_text(encoding="utf-8"))
+                  except (OSError, json.JSONDecodeError):
+                      report = None
+              changes = []
+              if isinstance(report, dict):
+                  candidate_changes = report.get("changes") or report.get("findings") or []
+                  if isinstance(candidate_changes, list):
+                      changes = [c for c in candidate_changes if isinstance(c, dict)]
+              row["finding_count"] = len(changes)
+              row["by_severity"] = dict(collections.Counter(str(c.get("severity")) for c in changes))
+              row["top_kinds"] = collections.Counter(
+                  str(c.get("kind")) for c in changes
+              ).most_common(15)
+              row["report_file"] = str(candidate.relative_to(out)) if candidate.is_file() else None
+
+          result = {
+              "schema": "agent-oneapi-product-scan.v1",
+              "base_sha": "5465a8610e2a01f07abcd9f18ff93ecf2256114f",
+              "runner": "validation/scripts/run_oneapi_scan.py",
+              "wall_seconds": wall,
+              "failure": failure,
+              "rows": rows,
+              "counts": {
+                  "total": len(rows),
+                  "ok": sum(r.get("status") == "OK" for r in rows),
+                  "agreement": sum(bool(r.get("agreement")) for r in rows),
+                  "mismatch": sum(r.get("status") == "OK" and not r.get("agreement") for r in rows),
+                  "failed": sum(r.get("status") != "OK" for r in rows),
+              },
+          }
+          (out / "oneapi-results.json").write_text(json.dumps(result, indent=2) + "\n")
+
+          lines = [
+              "# Fresh oneAPI product scan",
+              "",
+              f"- Base main SHA: `{result['base_sha']}`",
+              f"- Wall time: `{wall}` seconds",
+              f"- Counts: `{json.dumps(result['counts'], sort_keys=True)}`",
+              "",
+              "| Product | Pair | Expected | Actual | Agreement | L0 | L1 | Findings | Seconds |",
+              "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+          ]
+          for row in rows:
+              lines.append(
+                  f"| {row.get('lib')} | {row.get('old')} → {row.get('new')} | "
+                  f"{row.get('normalized_expected')} | {row.get('normalized_actual')} | "
+                  f"{'YES' if row.get('agreement') else 'NO'} | {row.get('L0')} | "
+                  f"{row.get('L1')} | {row.get('finding_count')} | {row.get('wall_s')} |"
+              )
+          if failure:
+              lines.extend(["", "## Runner failure", "", "```", failure, "```"])
+          (out / "summary.md").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          if failure:
+              raise SystemExit(1)
+          PY
+          set +e
+          /usr/bin/time -f '%e' -o "$OUT/wall-command-seconds.txt" \
+            python -u /tmp/run_oneapi_fresh.py 2>&1 | tee "$OUT/run.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "$rc" > "$OUT/exit-code.txt"
+          exit "$rc"
+
+      - name: Add scan summary
+        if: always()
+        run: |
+          if [ -f "$OUT/summary.md" ]; then cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: oneapi-product-scan-main-5465a861
+          path: scan-results-oneapi/
+          if-no-files-found: error
+          retention-days: 30
