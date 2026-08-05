@@ -384,10 +384,15 @@ def explain_required_symbols(
     labels = {n.id: (n.label or n.id) for n in graph.nodes}
 
     # Computed lazily: a run whose every missing symbol turns out to be a
-    # direct public entry never needs the walk at all.
+    # direct public entry never needs the walk at all. Tracked by an explicit
+    # flag rather than by testing the result's contents (CodeRabbit review) —
+    # "have we walked" is what the batch design promises, and reading it off
+    # the mapping would silently couple that promise to another module's
+    # invariant that the mapping is never empty.
     reachability: dict[
         str, tuple[frozenset[str], dict[str, GraphEdge], frozenset[str]]
     ] = {}
+    walked = False
     out: dict[str, ConsumerImpactPath] = {}
     for symbol, mapping_by_decl in mapping_by_symbol.items():
         decl_ids = set(mapping_by_decl)
@@ -417,10 +422,11 @@ def explain_required_symbols(
             )
             continue
 
-        if not reachability:
+        if not walked:
             reachability = _consumer_compiled_reachability(
                 graph, CALL_GRAPH_TRAVERSAL_POLICY, entries, node_by_id
             )
+            walked = True
         candidates: list[tuple[str, list[GraphEdge]]] = []
         for entry in entries:
             # The target's own declaration is itself an "entry" by

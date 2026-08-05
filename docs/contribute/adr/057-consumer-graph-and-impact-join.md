@@ -158,7 +158,14 @@ graph it was already given, so tier 1 needs no new parameter and is **inert**
 — an empty set, behaving exactly as before — for every graph without consumer
 facts folded in, which is every run without `--used-by`.
 
-Tier 1 is deliberately narrower than "the endpoint is consumer-required": the
+Tier 1 matches on the path's **endpoint**, not on any node along it
+(CodeRabbit review): the tier answers "is this path's *subject* something a
+real consumer requires", and a consumer requiring some intermediate hop says
+nothing about the entity the path actually points at — matching anywhere would
+let a path that merely passes through a required node, then continues on to an
+unrelated target, outrank a genuinely exact one.
+
+Tier 1 is also narrower than "the endpoint is consumer-required" alone: the
 overapprox check still runs **first** and still wins. A path crossing a
 virtual or function-pointer call is an over-approximation of the real dispatch
 chain, so the fact that some consumer requires its endpoint says nothing about
@@ -315,7 +322,7 @@ would be dropped) and needs its own design across all three front ends.
 - **An old library with genuinely no snapshot anywhere gets no join.** The
   graph is read off an `AbiSnapshot`'s embedded pack, so a caller that only
   ever had a bare path — and never dumped or loaded a snapshot of it — has
-  nothing to offer. `scope_diff_to_app`'s `old_snapshot` parameter (D7 below)
+  nothing to offer. `scope_diff_to_app`'s `old_snapshot` parameter (D7 above)
   covers every in-tree caller, all of which *do* hold one; closing the
   residual case would mean `appcompat` dumping a snapshot of its own, a
   different and much more expensive contract than "scope an already-computed

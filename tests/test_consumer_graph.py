@@ -502,6 +502,65 @@ def test_a_path_reaching_a_consumer_required_symbol_is_tier_one() -> None:
     assert _graph_path_tier(node_by_id, path, frozenset()) == _TIER_EXACT
 
 
+def test_only_the_endpoint_counts_for_tier_one() -> None:
+    """The tier answers "is this path's *subject* consumer-required". A path
+    that merely passes through a required node on its way somewhere else
+    would otherwise outrank a genuinely exact path to a real target."""
+    joined = join_consumer_graph(
+        _library_graph(), build_consumer_graph("app", _reqs(_DISPATCHER))
+    )
+    joined.add_node(
+        GraphNode(
+            id="decl://elsewhere",
+            kind="source_decl",
+            label="elsewhere",
+            attrs={"visibility": "source"},
+        )
+    )
+    joined.add_edge(
+        GraphEdge(
+            src=symbol_node_id(_DISPATCHER),
+            dst="decl://elsewhere",
+            kind="DECL_REFERENCES_DECL",
+            confidence="high",
+        )
+    )
+    node_by_id = {n.id: n for n in joined.nodes}
+    required = _consumer_required_nodes(joined)
+    call = next(
+        e for e in joined.edges if e.src == "decl://train" and e.dst == "decl://dispatcher"
+    )
+    mapping = next(
+        e
+        for e in joined.edges
+        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+        and e.dst == symbol_node_id(_DISPATCHER)
+    )
+    continuation = next(e for e in joined.edges if e.dst == "decl://elsewhere")
+    # Ends *at* the required symbol -> consumer-proven.
+    assert (
+        _graph_path_tier(node_by_id, [call, mapping], required)
+        == _TIER_CONSUMER_PROVEN
+    )
+    # Passes *through* it and continues elsewhere -> not consumer-proven.
+    assert (
+        _graph_path_tier(node_by_id, [call, mapping, continuation], required)
+        == _TIER_EXACT
+    )
+
+
+def test_an_empty_path_is_never_consumer_proven() -> None:
+    """An empty path (entry == target) has no endpoint to be required."""
+    joined = join_consumer_graph(
+        _library_graph(), build_consumer_graph("app", _reqs(_DISPATCHER))
+    )
+    node_by_id = {n.id: n for n in joined.nodes}
+    assert (
+        _graph_path_tier(node_by_id, [], _consumer_required_nodes(joined))
+        != _TIER_CONSUMER_PROVEN
+    )
+
+
 def test_an_overapprox_path_is_never_consumer_proven() -> None:
     """A virtual/function-pointer hop makes the *chain* an over-approximation;
     that some consumer requires its endpoint does not make the chain proven."""
@@ -800,3 +859,131 @@ class TestCoveredChangeEnrichment:
         assert [c.kind for c in result.breaking_for_app] == [ChangeKind.FUNC_REMOVED]
         assert removed.kind == ChangeKind.FUNC_REMOVED
         assert removed.effective_verdict is None
+
+
+class TestDirectRequirementAndFallthroughs:
+    """The remaining branches of the appcompat wiring: a *direct* public-entry
+    requirement (both wordings), and the two fall-through paths."""
+
+    def _snapshots(self) -> tuple[AbiSnapshot, AbiSnapshot]:
+        old = AbiSnapshot(
+            library="libtrain.so.1",
+            version="1.0",
+            elf=ElfMetadata(
+                soname="libtrain.so.1",
+                symbols=[ElfSymbol(name="_Z5trainv"), ElfSymbol(name=_DISPATCHER)],
+            ),
+        )
+        old.build_source = BuildSourcePack(root=Path(""), source_graph=_library_graph())
+        new = AbiSnapshot(
+            library="libtrain.so.1",
+            version="2.0",
+            elf=ElfMetadata(soname="libtrain.so.1", symbols=[]),
+        )
+        return old, new
+
+    def _run(self, tmp_path: Path, changes: list[Change]):
+        old, new = self._snapshots()
+        diff = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtrain.so.1",
+            changes=changes,
+            verdict=Verdict.BREAKING,
+        )
+        reqs = AppRequirements(undefined_symbols={"_Z5trainv"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            return scope_diff_to_app(diff, tmp_path / "training-service", old, new)
+
+    def test_direct_requirement_overlay_names_the_consumer(
+        self, tmp_path: Path
+    ) -> None:
+        """`train` is declared by a public header, so the consumer requires it
+        directly — the strongest answer, reported with no path."""
+        result = self._run(tmp_path, changes=[])
+        (overlay,) = [
+            c
+            for c in result.breaking_for_app
+            if c.kind == ChangeKind.CONSUMER_REQUIRED_SYMBOL_REMOVED
+        ]
+        assert overlay.affected_public_roots == ["train"]
+        assert overlay.impact_proof_path is None
+        assert overlay.impact_is_direct is True
+        assert (
+            overlay.reachability_proof_path
+            == "training-service requires public entry train directly"
+        )
+
+    def test_direct_requirement_on_a_shared_finding_names_no_consumer(
+        self, tmp_path: Path
+    ) -> None:
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z5trainv", "removed")
+        self._run(tmp_path, changes=[removed])
+        assert removed.reachability_proof_path == (
+            "_Z5trainv is declared by public entry train"
+        )
+
+    def test_a_change_with_no_matching_explanation_is_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        """`_enrich_covered_changes` walks every relevant change; one that
+        matches no explained symbol must simply be left alone."""
+        matching = Change(ChangeKind.FUNC_REMOVED, "_Z5trainv", "removed")
+        unrelated = Change(ChangeKind.TYPE_SIZE_CHANGED, "SomeType", "grew")
+        unrelated.affected_symbols = ["_Z5trainv"]
+        self._run(tmp_path, changes=[matching, unrelated])
+        assert matching.reachability_proof_path is not None
+        # Relevant to the app (via affected_symbols) but not itself the
+        # explained symbol -- enrichment must skip it, not raise or mislabel.
+        assert unrelated.reachability_proof_path is not None
+        assert "_Z5trainv" in unrelated.reachability_proof_path
+
+    def test_a_change_for_an_unexplainable_symbol_is_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        """A finding for a symbol the graph carries no declaration for is
+        relevant to the app and covered — but there is nothing to say about
+        it, so it must be left exactly as it was."""
+        old, new = self._snapshots()
+        # Exported and required, but absent from the graph entirely.
+        old.elf.symbols.append(ElfSymbol(name="_Z4noopv"))
+        explainable = Change(ChangeKind.FUNC_REMOVED, "_Z5trainv", "removed")
+        opaque = Change(ChangeKind.FUNC_REMOVED, "_Z4noopv", "removed")
+        diff = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtrain.so.1",
+            changes=[explainable, opaque],
+            verdict=Verdict.BREAKING,
+        )
+        reqs = AppRequirements(undefined_symbols={"_Z5trainv", "_Z4noopv"})
+        with patch(
+            "abicheck.appcompat.parse_app_requirements", return_value=reqs
+        ), patch("abicheck.appcompat._detect_app_format", return_value="elf"):
+            scope_diff_to_app(diff, tmp_path / "training-service", old, new)
+        assert explainable.reachability_proof_path is not None
+        assert opaque.reachability_proof_path is None
+        assert opaque.impact_proof_path is None
+        assert opaque.affected_public_roots is None
+
+
+def test_library_source_graph_falls_through_a_snapshot_without_a_pack() -> None:
+    """A caller may pass an `old_snapshot` that carries no build_source at all
+    (headers-only dump); the operand's own graph must still be found."""
+    from abicheck.appcompat import _library_source_graph
+
+    bare = AbiSnapshot(library="libtrain.so.1", version="1.0")
+    # A pack with no graph in it at all -- the other fall-through shape, and
+    # the one `dump` produces when no source/header graph could be built.
+    packless = AbiSnapshot(library="libtrain.so.1", version="1.0")
+    packless.build_source = BuildSourcePack(root=Path(""), source_graph=None)
+    with_graph = AbiSnapshot(library="libtrain.so.1", version="1.0")
+    with_graph.build_source = BuildSourcePack(
+        root=Path(""), source_graph=_library_graph()
+    )
+    assert _library_source_graph(with_graph, bare) is not None
+    assert _library_source_graph(with_graph, packless) is not None
+    assert _library_source_graph(bare, bare) is None
+    assert _library_source_graph(packless, packless) is None

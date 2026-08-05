@@ -156,7 +156,7 @@ model:
   making it independently meaningful still needs Phase 6's
   `RootCauseCorrelator`.
 - **G29.5** (Phase 4, **slice 1 done, ADR-057**) — A consumer graph
-  (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_COMPILED_FROM_HEADER`, …) that joins
+  (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_REQUIRES_VERSION`, …) that joins
   with the source graph so a `CONSUMER_REQUIRED_SYMBOL_REMOVED` finding can
   name the public entry point that produced the dependency — **done**
   (`abicheck/impact/consumer_graph.py`; the join is one shared
@@ -655,7 +655,7 @@ abicheck/impact/
     root_causes.py
     consumer_graph.py    # Phase 4 slice 1, DONE — ADR-057 (consumer graph + the source join)
     use_cases.py         # Phase 4, not started
-docs/learn/impact-analysis.md          # Phase 3 slices 1/6/7, DONE (Phase 4 join still open)
+docs/learn/impact-analysis.md          # Phase 3 slices 1/6/7 + Phase 4's consumer join (ADR-057), DONE
 docs/reference/source-graph-schema.md     # Phase 2 D1-D6 identity/merge/traversal-policy schema, DONE
 docs/learn/graph-coverage.md           # Phase 1, DONE
 docs/use/use-case-impact.md        # Phase 4, not started (needs the manifest design first)

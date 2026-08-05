@@ -181,12 +181,17 @@ def _graph_path_tier(
     therefore means "consumer-proven **and** exactly resolved" — the
     conservative reading, matching how ``effect_transitions`` already refuses
     to let a degraded walk present itself as an exact one.
+
+    Tier 1 tests the path's **endpoint**, not any node on it (CodeRabbit
+    review): the tier answers "is this path's subject something a real
+    consumer requires", and a consumer requiring some *intermediate* hop says
+    nothing about the entity the path actually points at. Matching anywhere
+    would let a path that merely passes through a required node — then
+    continues on to an unrelated target — outrank a genuinely exact one.
     """
     if any(_edge_is_overapprox(e) for e in path):
         return _TIER_OVERAPPROX
-    if consumer_required and any(
-        nid in consumer_required for nid in _path_node_ids(path)
-    ):
+    if path and path[-1].dst in consumer_required:
         return _TIER_CONSUMER_PROVEN
     if all(e.confidence == CONF_HIGH for e in path):
         return _TIER_EXACT

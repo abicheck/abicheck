@@ -162,13 +162,11 @@ structured per-hop data their walk's path representation carries:
   empty and the tier is inert. Tier 1 stays out of scope for
   `internal_leak.select_preferred_path`.
 
-Tier 1 is deliberately narrower than "the endpoint is consumer-required":
-the tier-6 overapprox check runs **first** and still wins. A path crossing a
-virtual/function-pointer call is an over-approximation of the real dispatch
-chain, so a consumer requiring its endpoint says nothing about whether *that
-chain* is how it got there — tier 1 means "consumer-proven **and** exactly
-resolved", the same conservative reading `effect_transitions` already
-applies.
+Tier 1 matches on the path's **endpoint**, and the tier-6 overapprox check
+still runs first and wins — so in practice tier 1 means "consumer-proven
+*and* exactly resolved". See
+[ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md) D4 for why
+it is scoped that way.
 
 Both break ties within a tier by shortest path (fewest hops).
 
@@ -186,12 +184,11 @@ public entry point behind the dependency instead of only the missing symbol.
 | `CONSUMER_REQUIRES_VERSION` *(edge)* | populated | An ELF version tag the consumer needs, targeting the `DT_NEEDED` soname's `external_dependency` node. |
 | `CONSUMER_INSTANTIATES_DECL` / `CONSUMER_COMPILED_FROM_HEADER` / `RUNTIME_FAILED_TO_RESOLVE_SYMBOL` *(edges)* | reserved | Same "registered, no data source yet" pattern as the archive/linker kinds. |
 
-There is deliberately **no** `consumer_required_symbol` node kind. A
+There is deliberately **no** `consumer_required_symbol` node kind: a
 requirement is an edge onto the *existing* `binary_symbol://<symbol>` node the
-library graph already uses for that export — one shared node id is the entire
-join, and ADR-046 D2's evidence-preserving merge then leaves the node carrying
-both producers' facts. A parallel node kind would have produced two
-structurally similar, completely disjoint graphs.
+library graph already uses for that export, and that one shared node id is the
+entire join — see
+[ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md) D1.
 
 The vocabulary constants live in `abicheck/buildsource/graph_facts.py` and are
 unioned into `source_graph.NODE_KINDS`/`EDGE_KINDS`; the producer is
