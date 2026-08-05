@@ -1,0 +1,689 @@
+name: Agent real-world scan 2026-08-05
+
+on:
+  push:
+    branches:
+      - ops/realworld-scan-2026-08-05-5465a861
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Curated matrix, oneDAL wheels, Debian package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      SCAN_DIR: scan-results
+      BASE_SHA: 5465a8610e2a01f07abcd9f18ff93ecf2256114f
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install toolchain and abicheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            gcc g++ binutils zstd bzip2 xz-utils curl ca-certificates \
+            abigail-tools zlib1g-dev time
+          bash action/install-castxml.sh
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" zstandard
+
+      - name: Record provenance
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCAN_DIR/manifest/objects" "$SCAN_DIR/onedal" "$SCAN_DIR/zlib"
+          {
+            echo "base_main_sha=$BASE_SHA"
+            echo "workflow_head_sha=$(git rev-parse HEAD)"
+            echo "workflow_head_subject=$(git show -s --format=%s HEAD)"
+            echo "workflow_parent_sha=$(git rev-parse HEAD^)"
+            echo "generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            python --version
+            abicheck --version
+            castxml --version
+            gcc --version
+            g++ --version
+            readelf --version
+            abidiff --version
+          } > "$SCAN_DIR/provenance.txt" 2>&1
+          cat "$SCAN_DIR/provenance.txt"
+          git diff --stat "$BASE_SHA"..HEAD > "$SCAN_DIR/branch-diff-stat.txt"
+
+      - name: Run instrumented curated real-library matrix
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p "$SCAN_DIR/manifest/objects"
+          cat > /tmp/run_manifest_scan.py <<'PY'
+          from __future__ import annotations
+
+          import json
+          import re
+          import shutil
+          import sys
+          import time
+          import traceback
+          from pathlib import Path
+
+          root = Path.cwd()
+          scan_root = root / "scan-results" / "manifest"
+          objects_dir = scan_root / "objects"
+          objects_dir.mkdir(parents=True, exist_ok=True)
+          sys.path.insert(0, str(root / "validation" / "scripts"))
+
+          import conda_harness as ch  # noqa: E402
+          import validate as val  # noqa: E402
+
+          object_records: list[dict] = []
+          pair_timings: list[dict] = []
+          capture_index = 0
+          original_run_abicheck = ch.run_abicheck
+
+          def captured_run_abicheck(old: str, new: str, old_ver: str, new_ver: str):
+              global capture_index
+              capture_index += 1
+              started = time.perf_counter()
+              data = original_run_abicheck(old, new, old_ver, new_ver)
+              elapsed = time.perf_counter() - started
+              logical = ch.logical_name(old)
+              safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{old_ver}_to_{new_ver}__{logical}")
+              report_name = f"{capture_index:03d}__{safe}.json"
+              report_path = objects_dir / report_name
+              if isinstance(data, dict):
+                  report_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+              object_records.append(
+                  {
+                      "index": capture_index,
+                      "logical": logical,
+                      "old_version": old_ver,
+                      "new_version": new_ver,
+                      "old_binary": Path(old).name,
+                      "new_binary": Path(new).name,
+                      "seconds": round(elapsed, 3),
+                      "verdict": ch.verdict_of(data) if isinstance(data, dict) else None,
+                      "report": report_name if isinstance(data, dict) else None,
+                  }
+              )
+              return data
+
+          ch.run_abicheck = captured_run_abicheck
+          original_evaluate_pair = val.evaluate_pair
+
+          def timed_evaluate_pair(pair, api, subdir, tmp, idx, evidence=None):
+              started = time.perf_counter()
+              verdict = None
+              error = None
+              try:
+                  verdict = original_evaluate_pair(pair, api, subdir, tmp, idx, evidence)
+                  return verdict
+              except Exception as exc:
+                  error = f"{type(exc).__name__}: {exc}"
+                  raise
+              finally:
+                  pair_timings.append(
+                      {
+                          "pair": pair.get("pair"),
+                          "library": pair.get("library"),
+                          "old_version": pair.get("old_ver"),
+                          "new_version": pair.get("new_ver"),
+                          "expected": pair.get("expected_verdict"),
+                          "verdict": verdict,
+                          "seconds": round(time.perf_counter() - started, 3),
+                          "error": error,
+                      }
+                  )
+
+          val.evaluate_pair = timed_evaluate_pair
+          label = "manifest-main-5465a861"
+          rc = 1
+          failure = None
+          try:
+              rc = val.main(["--source", "manifest", "-o", label])
+          except BaseException:
+              failure = traceback.format_exc()
+          finally:
+              instrumentation = {
+                  "base_sha": "5465a8610e2a01f07abcd9f18ff93ecf2256114f",
+                  "runner": "validation/scripts/validate.py --source manifest",
+                  "return_code": rc,
+                  "failure": failure,
+                  "pair_timings": pair_timings,
+                  "object_runs": object_records,
+              }
+              (scan_root / "instrumentation.json").write_text(
+                  json.dumps(instrumentation, indent=2) + "\n", encoding="utf-8"
+              )
+              source_report = root / "validation" / "data" / "tracker_parity" / f"{label}.json"
+              if source_report.is_file():
+                  shutil.copy2(source_report, scan_root / "report.json")
+          if failure:
+              print(failure, file=sys.stderr)
+              raise SystemExit(1)
+          raise SystemExit(rc)
+          PY
+          set +e
+          /usr/bin/time -f '%e' -o "$SCAN_DIR/manifest/wall-seconds.txt" \
+            python -u /tmp/run_manifest_scan.py 2>&1 | tee "$SCAN_DIR/manifest/run.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "$rc" > "$SCAN_DIR/manifest/exit-code.txt"
+          exit 0
+
+      - name: Scan real oneDAL release wheels
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p "$SCAN_DIR/onedal"
+          cat > /tmp/run_onedal_scan.py <<'PY'
+          from __future__ import annotations
+
+          import collections
+          import json
+          import re
+          import subprocess
+          import sys
+          import time
+          import zipfile
+          from pathlib import Path
+
+          root = Path.cwd()
+          out = root / "scan-results" / "onedal"
+          inputs = root / ".scan-inputs" / "onedal"
+          out.mkdir(parents=True, exist_ok=True)
+          inputs.mkdir(parents=True, exist_ok=True)
+          versions = ["2024.7.0", "2025.0.0", "2025.0.1"]
+          downloads: dict[str, dict] = {}
+          extracted: dict[str, Path] = {}
+
+          for version in versions:
+              version_dir = inputs / version
+              wheel_dir = version_dir / "wheel"
+              extract_dir = version_dir / "extracted"
+              wheel_dir.mkdir(parents=True, exist_ok=True)
+              started = time.perf_counter()
+              proc = subprocess.run(
+                  [
+                      sys.executable,
+                      "-m",
+                      "pip",
+                      "download",
+                      "--only-binary=:all:",
+                      "--no-deps",
+                      f"daal=={version}",
+                      "-d",
+                      str(wheel_dir),
+                  ],
+                  capture_output=True,
+                  text=True,
+              )
+              record = {
+                  "version": version,
+                  "return_code": proc.returncode,
+                  "seconds": round(time.perf_counter() - started, 3),
+                  "stdout": proc.stdout,
+                  "stderr": proc.stderr,
+              }
+              wheels = sorted(wheel_dir.glob("*.whl"))
+              if proc.returncode == 0 and wheels:
+                  wheel = wheels[-1]
+                  extract_dir.mkdir(parents=True, exist_ok=True)
+                  with zipfile.ZipFile(wheel) as archive:
+                      archive.extractall(extract_dir)
+                  record["wheel"] = wheel.name
+                  extracted[version] = extract_dir
+              else:
+                  record["error"] = "wheel download failed or returned no wheel"
+              downloads[version] = record
+
+          def is_elf(path: Path) -> bool:
+              try:
+                  with path.open("rb") as handle:
+                      return handle.read(4) == b"\x7fELF"
+              except OSError:
+                  return False
+
+          def libraries(version: str) -> dict[str, Path]:
+              base = extracted.get(version)
+              if base is None:
+                  return {}
+              candidates: dict[str, list[Path]] = collections.defaultdict(list)
+              for path in base.rglob("libonedal*.so*"):
+                  if path.is_file() and is_elf(path):
+                      logical = path.name.split(".so", 1)[0]
+                      candidates[logical].append(path)
+              return {
+                  logical: max(paths, key=lambda p: p.stat().st_size)
+                  for logical, paths in candidates.items()
+              }
+
+          def soname(path: Path) -> str | None:
+              proc = subprocess.run(["readelf", "-d", str(path)], capture_output=True, text=True)
+              match = re.search(r"Library soname: \[(.*?)\]", proc.stdout)
+              return match.group(1) if match else None
+
+          def verdict(data: dict | None) -> str | None:
+              if not isinstance(data, dict):
+                  return None
+              summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+              return data.get("verdict") or summary.get("verdict")
+
+          def normalized(value: str | None) -> str:
+              value = (value or "").upper()
+              if value in {"BREAKING", "API_BREAK"}:
+                  return "BREAKING"
+              if value in {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}:
+                  return "COMPATIBLE"
+              return "UNKNOWN"
+
+          rank = {
+              "UNKNOWN": -1,
+              "NO_CHANGE": 0,
+              "COMPATIBLE": 1,
+              "COMPATIBLE_WITH_RISK": 2,
+              "RISK": 2,
+              "API_BREAK": 3,
+              "BREAKING": 4,
+          }
+          pairs = [
+              ("major_2024.7.0_to_2025.0.0", "2024.7.0", "2025.0.0", "BREAKING"),
+              ("patch_2025.0.0_to_2025.0.1", "2025.0.0", "2025.0.1", "COMPATIBLE"),
+          ]
+          pair_results: list[dict] = []
+
+          for pair_id, old_version, new_version, expected in pairs:
+              old_libs = libraries(old_version)
+              new_libs = libraries(new_version)
+              common = sorted(set(old_libs) & set(new_libs))
+              object_results: list[dict] = []
+              for logical in common:
+                  old_path = old_libs[logical]
+                  new_path = new_libs[logical]
+                  report_path = out / f"{pair_id}__{logical}.json"
+                  stdout_path = out / f"{pair_id}__{logical}.stdout.txt"
+                  stderr_path = out / f"{pair_id}__{logical}.stderr.txt"
+                  command = [
+                      "abicheck",
+                      "compare",
+                      str(old_path),
+                      str(new_path),
+                      "--version",
+                      f"old={old_version}",
+                      "--version",
+                      f"new={new_version}",
+                      "--format",
+                      "json",
+                      "-o",
+                      str(report_path),
+                      "--recommend",
+                  ]
+                  started = time.perf_counter()
+                  proc = subprocess.run(command, capture_output=True, text=True)
+                  elapsed = time.perf_counter() - started
+                  stdout_path.write_text(proc.stdout, encoding="utf-8")
+                  stderr_path.write_text(proc.stderr, encoding="utf-8")
+                  data = None
+                  parse_error = None
+                  if report_path.is_file():
+                      try:
+                          data = json.loads(report_path.read_text(encoding="utf-8"))
+                      except (OSError, json.JSONDecodeError) as exc:
+                          parse_error = f"{type(exc).__name__}: {exc}"
+                  changes = []
+                  if isinstance(data, dict):
+                      candidate = data.get("changes") or data.get("findings") or []
+                      if isinstance(candidate, list):
+                          changes = [item for item in candidate if isinstance(item, dict)]
+                  kinds = collections.Counter(str(item.get("kind")) for item in changes)
+                  severities = collections.Counter(str(item.get("severity")) for item in changes)
+                  object_results.append(
+                      {
+                          "logical": logical,
+                          "old_binary": old_path.name,
+                          "new_binary": new_path.name,
+                          "old_soname": soname(old_path),
+                          "new_soname": soname(new_path),
+                          "return_code": proc.returncode,
+                          "seconds": round(elapsed, 3),
+                          "verdict": verdict(data),
+                          "finding_count": len(changes),
+                          "by_severity": dict(severities),
+                          "top_kinds": kinds.most_common(20),
+                          "report": report_path.name if report_path.is_file() else None,
+                          "parse_error": parse_error,
+                      }
+                  )
+              actual = None
+              if object_results:
+                  actual = max(
+                      (item.get("verdict") for item in object_results),
+                      key=lambda item: rank.get((item or "").upper(), -1),
+                  )
+              expected_norm = normalized(expected)
+              actual_norm = normalized(actual)
+              pair_results.append(
+                  {
+                      "pair": pair_id,
+                      "old_version": old_version,
+                      "new_version": new_version,
+                      "expected": expected,
+                      "actual": actual,
+                      "expected_normalized": expected_norm,
+                      "actual_normalized": actual_norm,
+                      "comparison_status": "MATCH" if expected_norm == actual_norm else "MISMATCH",
+                      "common_libraries": common,
+                      "objects": object_results,
+                      "error": None if common else "no common libonedal ELF objects found",
+                  }
+              )
+
+          result = {
+              "schema": "agent-realworld-onedal.v1",
+              "base_sha": "5465a8610e2a01f07abcd9f18ff93ecf2256114f",
+              "source": "PyPI daal manylinux wheels",
+              "downloads": downloads,
+              "libraries": {
+                  version: {name: path.name for name, path in libraries(version).items()}
+                  for version in versions
+              },
+              "pairs": pair_results,
+          }
+          (out / "onedal-results.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps({"pairs": pair_results}, indent=2))
+          PY
+          set +e
+          /usr/bin/time -f '%e' -o "$SCAN_DIR/onedal/wall-seconds.txt" \
+            python -u /tmp/run_onedal_scan.py 2>&1 | tee "$SCAN_DIR/onedal/run.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "$rc" > "$SCAN_DIR/onedal/exit-code.txt"
+          exit 0
+
+      - name: Scan and cross-check a real Debian package
+        if: always()
+        run: |
+          set -uo pipefail
+          mkdir -p "$SCAN_DIR/zlib" .scan-inputs/debs /tmp/abicheck-zlib-old /tmp/abicheck-zlib-new
+          set +e
+          (
+            cd .scan-inputs/debs
+            apt-get download zlib1g zlib1g-dev
+          ) > "$SCAN_DIR/zlib/download.log" 2>&1
+          download_rc=$?
+          set -e
+          echo "$download_rc" > "$SCAN_DIR/zlib/download-exit-code.txt"
+
+          runtime_deb=$(find .scan-inputs/debs -maxdepth 1 -type f -name 'zlib1g_*.deb' | sort | head -1)
+          devel_deb=$(find .scan-inputs/debs -maxdepth 1 -type f -name 'zlib1g-dev_*.deb' | sort | head -1)
+          printf '%s\n' "$runtime_deb" > "$SCAN_DIR/zlib/runtime-package.txt"
+          printf '%s\n' "$devel_deb" > "$SCAN_DIR/zlib/devel-package.txt"
+
+          compare_rc=99
+          if [ -n "$runtime_deb" ] && [ -n "$devel_deb" ]; then
+            set +e
+            /usr/bin/time -f '%e' -o "$SCAN_DIR/zlib/compare-seconds.txt" \
+              abicheck compare \
+                "$runtime_deb" "$runtime_deb" \
+                --devel-pkg "old=$devel_deb" \
+                --devel-pkg "new=$devel_deb" \
+                --no-bundle-analysis \
+                --format json \
+                -o "$SCAN_DIR/zlib/zlib-deb-self.json" \
+                > "$SCAN_DIR/zlib/compare.stdout.txt" \
+                2> "$SCAN_DIR/zlib/compare.stderr.txt"
+            compare_rc=$?
+            set -e
+          fi
+          echo "$compare_rc" > "$SCAN_DIR/zlib/compare-exit-code.txt"
+
+          abidiff_rc=99
+          if [ -n "$runtime_deb" ]; then
+            dpkg-deb -x "$runtime_deb" /tmp/abicheck-zlib-old
+            dpkg-deb -x "$runtime_deb" /tmp/abicheck-zlib-new
+            old_lib=$(find /tmp/abicheck-zlib-old -type f -name 'libz.so.*' | sort | head -1)
+            new_lib=$(find /tmp/abicheck-zlib-new -type f -name 'libz.so.*' | sort | head -1)
+            printf '%s\n' "$old_lib" > "$SCAN_DIR/zlib/abidiff-old-binary.txt"
+            printf '%s\n' "$new_lib" > "$SCAN_DIR/zlib/abidiff-new-binary.txt"
+            if [ -n "$old_lib" ] && [ -n "$new_lib" ]; then
+              set +e
+              /usr/bin/time -f '%e' -o "$SCAN_DIR/zlib/abidiff-seconds.txt" \
+                abidiff "$old_lib" "$new_lib" \
+                > "$SCAN_DIR/zlib/zlib-abidiff.txt" \
+                2> "$SCAN_DIR/zlib/zlib-abidiff.stderr.txt"
+              abidiff_rc=$?
+              set -e
+            fi
+          fi
+          echo "$abidiff_rc" > "$SCAN_DIR/zlib/abidiff-exit-code.txt"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("scan-results/zlib")
+          data = None
+          report = root / "zlib-deb-self.json"
+          if report.is_file():
+              try:
+                  data = json.loads(report.read_text(encoding="utf-8"))
+              except (OSError, json.JSONDecodeError):
+                  data = None
+          summary = data.get("summary", {}) if isinstance(data, dict) else {}
+          result = {
+              "runtime_package": (root / "runtime-package.txt").read_text().strip(),
+              "devel_package": (root / "devel-package.txt").read_text().strip(),
+              "download_exit_code": int((root / "download-exit-code.txt").read_text()),
+              "compare_exit_code": int((root / "compare-exit-code.txt").read_text()),
+              "compare_seconds": float((root / "compare-seconds.txt").read_text()) if (root / "compare-seconds.txt").is_file() else None,
+              "verdict": (data.get("verdict") or summary.get("verdict")) if isinstance(data, dict) else None,
+              "summary": summary,
+              "abidiff_exit_code": int((root / "abidiff-exit-code.txt").read_text()),
+              "abidiff_seconds": float((root / "abidiff-seconds.txt").read_text()) if (root / "abidiff-seconds.txt").is_file() else None,
+          }
+          (root / "zlib-results.json").write_text(json.dumps(result, indent=2) + "\n")
+          print(json.dumps(result, indent=2))
+          PY
+          exit 0
+
+      - name: Build consolidated scan summary
+        if: always()
+        run: |
+          mkdir -p "$SCAN_DIR"
+          python - <<'PY'
+          from __future__ import annotations
+
+          import collections
+          import json
+          from pathlib import Path
+
+          root = Path("scan-results")
+
+          def load(path: Path):
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, json.JSONDecodeError):
+                  return None
+
+          def read_int(path: Path, default=99):
+              try:
+                  return int(path.read_text().strip())
+              except (OSError, ValueError):
+                  return default
+
+          manifest_report = load(root / "manifest" / "report.json") or {}
+          instrumentation = load(root / "manifest" / "instrumentation.json") or {}
+          onedal = load(root / "onedal" / "onedal-results.json") or {}
+          zlib = load(root / "zlib" / "zlib-results.json") or {}
+
+          rows = manifest_report.get("rows", []) if isinstance(manifest_report, dict) else []
+          exclusions = set(manifest_report.get("evidence_limited", [])) | set(manifest_report.get("scope_divergent", []))
+          blocking_manifest = []
+          for row in rows:
+              status = row.get("status")
+              pair = row.get("pair")
+              if status in {"ABICHECK_STRICTER", "ABICHECK_WEAKER"}:
+                  blocking_manifest.append(row)
+              elif status == "UNCOMPARABLE" and pair not in exclusions:
+                  blocking_manifest.append(row)
+
+          object_summaries = []
+          for report_path in sorted((root / "manifest" / "objects").glob("*.json")):
+              data = load(report_path)
+              if not isinstance(data, dict):
+                  continue
+              summary = data.get("summary", {}) if isinstance(data.get("summary"), dict) else {}
+              changes = data.get("changes") or data.get("findings") or []
+              changes = [item for item in changes if isinstance(item, dict)] if isinstance(changes, list) else []
+              kinds = collections.Counter(str(item.get("kind")) for item in changes)
+              severities = collections.Counter(str(item.get("severity")) for item in changes)
+              object_summaries.append(
+                  {
+                      "report": report_path.name,
+                      "verdict": data.get("verdict") or summary.get("verdict"),
+                      "finding_count": len(changes),
+                      "by_severity": dict(severities),
+                      "top_kinds": kinds.most_common(10),
+                  }
+              )
+
+          problems = []
+          manifest_rc = read_int(root / "manifest" / "exit-code.txt")
+          onedal_rc = read_int(root / "onedal" / "exit-code.txt")
+          if manifest_rc != 0:
+              problems.append(f"manifest runner exit code {manifest_rc}")
+          if not manifest_report:
+              problems.append("manifest report missing")
+          for row in blocking_manifest:
+              problems.append(
+                  f"manifest {row.get('pair')}: {row.get('status')} expected={row.get('expected_verdict')} actual={row.get('abicheck_verdict')}"
+              )
+          if onedal_rc != 0:
+              problems.append(f"oneDAL runner exit code {onedal_rc}")
+          onedal_pairs = onedal.get("pairs", []) if isinstance(onedal, dict) else []
+          if not onedal_pairs:
+              problems.append("oneDAL pair results missing")
+          for pair in onedal_pairs:
+              if pair.get("comparison_status") != "MATCH":
+                  problems.append(
+                      f"oneDAL {pair.get('pair')}: expected={pair.get('expected_normalized')} actual={pair.get('actual_normalized')}"
+                  )
+          zverdict = (zlib.get("verdict") or "").upper() if isinstance(zlib, dict) else ""
+          if zverdict not in {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}:
+              problems.append(f"zlib self-compare verdict {zverdict or 'MISSING'}")
+          if zlib.get("abidiff_exit_code") != 0:
+              problems.append(f"zlib abidiff exit code {zlib.get('abidiff_exit_code')}")
+
+          consolidated = {
+              "schema": "agent-realworld-scan-summary.v1",
+              "base_sha": "5465a8610e2a01f07abcd9f18ff93ecf2256114f",
+              "overall_pass": not problems,
+              "problems": problems,
+              "manifest": {
+                  "return_code": manifest_rc,
+                  "counts": manifest_report.get("counts", {}),
+                  "agreement_rate": manifest_report.get("agreement_rate"),
+                  "comparable_pairs": manifest_report.get("comparable_pairs"),
+                  "evidence_limited": manifest_report.get("evidence_limited", []),
+                  "scope_divergent": manifest_report.get("scope_divergent", []),
+                  "rows": rows,
+                  "pair_timings": instrumentation.get("pair_timings", []),
+                  "object_runs": instrumentation.get("object_runs", []),
+                  "object_summaries": object_summaries,
+              },
+              "onedal": onedal,
+              "zlib": zlib,
+          }
+          (root / "summary.json").write_text(json.dumps(consolidated, indent=2) + "\n")
+
+          lines = [
+              "# Real-world scan summary",
+              "",
+              f"- Base main SHA: `{consolidated['base_sha']}`",
+              f"- Overall: **{'PASS' if consolidated['overall_pass'] else 'FAIL'}**",
+              f"- Manifest agreement: `{consolidated['manifest']['agreement_rate']}`",
+              f"- Manifest counts: `{json.dumps(consolidated['manifest']['counts'], sort_keys=True)}`",
+              f"- Evidence-limited: `{len(consolidated['manifest']['evidence_limited'])}`",
+              f"- Scope-divergent: `{len(consolidated['manifest']['scope_divergent'])}`",
+              "",
+              "## Curated matrix",
+              "",
+              "| Pair | Library | Expected | Actual | Status | Seconds |",
+              "|---|---|---:|---:|---:|---:|",
+          ]
+          timing_by_pair = {item.get("pair"): item for item in consolidated["manifest"]["pair_timings"]}
+          for row in rows:
+              timing = timing_by_pair.get(row.get("pair"), {})
+              lines.append(
+                  f"| {row.get('pair')} | {timing.get('library', '')} | {row.get('expected_verdict')} | {row.get('abicheck_verdict')} | {row.get('status')} | {timing.get('seconds', '')} |"
+              )
+          lines.extend(
+              [
+                  "",
+                  "## oneDAL wheels",
+                  "",
+                  "| Pair | Expected | Actual | Status | Objects |",
+                  "|---|---:|---:|---:|---:|",
+              ]
+          )
+          for pair in onedal_pairs:
+              lines.append(
+                  f"| {pair.get('pair')} | {pair.get('expected_normalized')} | {pair.get('actual_normalized')} | {pair.get('comparison_status')} | {len(pair.get('objects', []))} |"
+              )
+          lines.extend(
+              [
+                  "",
+                  "## Debian zlib self-check",
+                  "",
+                  f"- abicheck verdict: `{zlib.get('verdict')}`",
+                  f"- abicheck exit: `{zlib.get('compare_exit_code')}` in `{zlib.get('compare_seconds')}` seconds",
+                  f"- abidiff exit: `{zlib.get('abidiff_exit_code')}` in `{zlib.get('abidiff_seconds')}` seconds",
+                  "",
+                  "## Blocking problems",
+                  "",
+              ]
+          )
+          if problems:
+              lines.extend(f"- {problem}" for problem in problems)
+          else:
+              lines.append("- None")
+          (root / "summary.md").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+          cat "$SCAN_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload complete scan evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: realworld-scan-main-5465a861
+          path: scan-results/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce scan expectations
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = Path("scan-results/summary.json")
+          if not report.is_file():
+              raise SystemExit("summary.json is missing")
+          data = json.loads(report.read_text())
+          if not data.get("overall_pass"):
+              for problem in data.get("problems", []):
+                  print(f"::error::{problem}")
+              raise SystemExit(1)
+          print("Real-world scan expectations passed")
+          PY
