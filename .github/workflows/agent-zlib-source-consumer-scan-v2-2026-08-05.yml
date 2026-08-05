@@ -1,0 +1,429 @@
+name: Agent zlib source and consumer scan v2 2026-08-05
+
+on:
+  push:
+    branches:
+      - ops/zlib-source-consumer-scan-v2-2026-08-05-5465a861
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      BASE_SHA: 5465a8610e2a01f07abcd9f18ff93ecf2256114f
+      OUT: scan-results-zlib-source-v2
+      ABICHECK_L4_JOBS: "2"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install source scanner toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            build-essential cmake ninja-build clang binutils curl ca-certificates \
+            zstd bzip2 xz-utils jq time
+          bash action/install-castxml.sh
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" zstandard
+
+      - name: Record exact provenance and CLI
+        run: |
+          mkdir -p "$OUT/logs" "$OUT/snapshots" "$OUT/reports" "$OUT/runtime"
+          {
+            echo "base_main_sha=$BASE_SHA"
+            echo "workflow_head_sha=$(git rev-parse HEAD)"
+            echo "workflow_parent_sha=$(git rev-parse HEAD^)"
+            echo "generated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            python --version
+            abicheck --version
+            clang --version
+            castxml --version
+            cmake --version
+          } > "$OUT/provenance.txt" 2>&1
+          abicheck dump --help > "$OUT/dump-help.txt"
+          abicheck compare --help > "$OUT/compare-help.txt"
+          git diff --stat "$BASE_SHA"..HEAD > "$OUT/branch-diff-stat.txt"
+          cat "$OUT/provenance.txt"
+
+      - name: Download and build official zlib releases plus a controlled export fault
+        run: |
+          set -euo pipefail
+          base="$GITHUB_WORKSPACE/.scan-inputs/zlib"
+          mkdir -p "$base"
+          cd "$base"
+          curl --fail --location --retry 4 --retry-all-errors \
+            https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz \
+            -o zlib-1.3.1.tar.gz
+          curl --fail --location --retry 4 --retry-all-errors \
+            https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz \
+            -o zlib-1.3.2.tar.gz
+          sha256sum zlib-*.tar.gz | tee "$GITHUB_WORKSPACE/$OUT/source-sha256.txt"
+          tar -xzf zlib-1.3.1.tar.gz
+          tar -xzf zlib-1.3.2.tar.gz
+          cp -a zlib-1.3.2 zlib-1.3.2-fault
+
+          # Keep the official 1.3.2 public headers unchanged, but rename only
+          # the gzwrite implementation. This creates a deterministic missing
+          # public export while leaving the rest of the real release intact.
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("zlib-1.3.2-fault/gzwrite.c")
+          text = path.read_text(encoding="utf-8")
+          old = "int ZEXPORT gzwrite(gzFile file, voidpc buf, unsigned len) {"
+          new = "int ZEXPORT gzwrite_abicheck_control(gzFile file, voidpc buf, unsigned len) {"
+          if text.count(old) != 1:
+              raise SystemExit(f"expected exactly one gzwrite definition, got {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          diff -u zlib-1.3.2/gzwrite.c zlib-1.3.2-fault/gzwrite.c \
+            > "$GITHUB_WORKSPACE/$OUT/control-fault.patch" || true
+
+          cmake -S zlib-1.3.1 -B zlib-1.3.1/build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DBUILD_SHARED_LIBS=ON \
+            > "$GITHUB_WORKSPACE/$OUT/logs/configure-1.3.1.log" 2>&1
+          cmake --build zlib-1.3.1/build -j2 \
+            > "$GITHUB_WORKSPACE/$OUT/logs/build-1.3.1.log" 2>&1
+
+          for variant in zlib-1.3.2 zlib-1.3.2-fault; do
+            cmake -S "$variant" -B "$variant/build" \
+              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              -DZLIB_BUILD_SHARED=ON \
+              -DZLIB_BUILD_STATIC=OFF \
+              -DZLIB_BUILD_TESTING=OFF \
+              > "$GITHUB_WORKSPACE/$OUT/logs/configure-$variant.log" 2>&1
+            cmake --build "$variant/build" -j2 \
+              > "$GITHUB_WORKSPACE/$OUT/logs/build-$variant.log" 2>&1
+          done
+
+          old_lib=$(find zlib-1.3.1/build -type f -name 'libz.so.*' | sort | tail -1)
+          new_lib=$(find zlib-1.3.2/build -type f -name 'libz.so.*' | sort | tail -1)
+          fault_lib=$(find zlib-1.3.2-fault/build -type f -name 'libz.so.*' | sort | tail -1)
+          test -n "$old_lib" && test -n "$new_lib" && test -n "$fault_lib"
+          printf '%s\n' "$old_lib" > "$GITHUB_WORKSPACE/$OUT/old-library-path.txt"
+          printf '%s\n' "$new_lib" > "$GITHUB_WORKSPACE/$OUT/new-library-path.txt"
+          printf '%s\n' "$fault_lib" > "$GITHUB_WORKSPACE/$OUT/fault-library-path.txt"
+
+          readelf --dyn-syms -W "$old_lib" > "$GITHUB_WORKSPACE/$OUT/runtime/old-dynsyms.txt"
+          readelf --dyn-syms -W "$new_lib" > "$GITHUB_WORKSPACE/$OUT/runtime/new-dynsyms.txt"
+          readelf --dyn-syms -W "$fault_lib" > "$GITHUB_WORKSPACE/$OUT/runtime/fault-dynsyms.txt"
+          grep -E '[[:space:]]gzwrite(@|$)' "$GITHUB_WORKSPACE/$OUT/runtime/old-dynsyms.txt" \
+            > "$GITHUB_WORKSPACE/$OUT/runtime/old-gzwrite.txt"
+          grep -E '[[:space:]]gzwrite(@|$)' "$GITHUB_WORKSPACE/$OUT/runtime/new-dynsyms.txt" \
+            > "$GITHUB_WORKSPACE/$OUT/runtime/new-gzwrite.txt"
+          if grep -E '[[:space:]]gzwrite(@|$)' "$GITHUB_WORKSPACE/$OUT/runtime/fault-dynsyms.txt" \
+              > "$GITHUB_WORKSPACE/$OUT/runtime/fault-gzwrite.txt"; then
+            echo "fault library still exports gzwrite" >&2
+            exit 1
+          fi
+          grep -E '[[:space:]]gzwrite_abicheck_control(@|$)' \
+            "$GITHUB_WORKSPACE/$OUT/runtime/fault-dynsyms.txt" \
+            > "$GITHUB_WORKSPACE/$OUT/runtime/fault-control-symbol.txt" || true
+
+      - name: Build and execute a real consumer against official zlib 1.3.1
+        run: |
+          set -euo pipefail
+          base="$GITHUB_WORKSPACE/.scan-inputs/zlib"
+          old_src="$base/zlib-1.3.1"
+          old_build="$old_src/build"
+          old_lib="$GITHUB_WORKSPACE/$(cat "$OUT/old-library-path.txt")"
+          fault_lib="$GITHUB_WORKSPACE/$(cat "$OUT/fault-library-path.txt")"
+          cat > "$base/zlib-consumer.c" <<'C'
+          #include <zlib.h>
+          #include <string.h>
+
+          int main(void) {
+              const char payload[] = "abicheck consumer graph validation";
+              gzFile stream = gzopen("/tmp/abicheck-zlib-consumer.gz", "wb");
+              if (stream == 0) return 10;
+              int written = gzwrite(stream, payload, (unsigned)strlen(payload));
+              int closed = gzclose(stream);
+              return (written == (int)strlen(payload) && closed == Z_OK) ? 0 : 11;
+          }
+          C
+          cc "$base/zlib-consumer.c" \
+            -I"$old_src" -I"$old_build" \
+            -L"$(dirname "$old_lib")" \
+            -Wl,-rpath,"$(dirname "$old_lib")" \
+            -Wl,-z,now -lz -o "$base/zlib-consumer"
+          "$base/zlib-consumer"
+          readelf -d "$base/zlib-consumer" > "$OUT/runtime/consumer-dynamic.txt"
+          readelf --dyn-syms -W "$base/zlib-consumer" > "$OUT/runtime/consumer-dynsyms.txt"
+          grep -E '[[:space:]]gzwrite(@|$)' "$OUT/runtime/consumer-dynsyms.txt" \
+            > "$OUT/runtime/consumer-gzwrite.txt"
+
+          set +e
+          LD_LIBRARY_PATH="$(dirname "$fault_lib")" "$base/zlib-consumer" \
+            > "$OUT/runtime/fault-runtime.stdout.txt" \
+            2> "$OUT/runtime/fault-runtime.stderr.txt"
+          fault_runtime_rc=$?
+          set -e
+          echo "$fault_runtime_rc" > "$OUT/runtime/fault-runtime-exit.txt"
+          if [ "$fault_runtime_rc" -eq 0 ]; then
+            echo "control consumer unexpectedly ran against fault library" >&2
+            exit 1
+          fi
+
+      - name: Build complete source-depth snapshots
+        run: |
+          set -uo pipefail
+          base="$GITHUB_WORKSPACE/.scan-inputs/zlib"
+          old_src="$base/zlib-1.3.1"
+          new_src="$base/zlib-1.3.2"
+          fault_src="$base/zlib-1.3.2-fault"
+          old_lib="$GITHUB_WORKSPACE/$(cat "$OUT/old-library-path.txt")"
+          new_lib="$GITHUB_WORKSPACE/$(cat "$OUT/new-library-path.txt")"
+          fault_lib="$GITHUB_WORKSPACE/$(cat "$OUT/fault-library-path.txt")"
+
+          run_dump() {
+            local label="$1" src="$2" lib="$3" version="$4"
+            set +e
+            /usr/bin/time -f '%e' -o "$OUT/$label-dump-seconds.txt" \
+              abicheck dump "$lib" \
+                -H "$src/zlib.h" -H "$src/build/zconf.h" \
+                --sources "$src" \
+                --compile-db "$src/build/compile_commands.json" \
+                --depth source --lang c --ast-frontend clang \
+                --version "$version" \
+                -o "$OUT/snapshots/$label.json" \
+                > "$OUT/logs/$label-dump.stdout.txt" \
+                2> "$OUT/logs/$label-dump.stderr.txt"
+            local rc=$?
+            set -e
+            echo "$rc" > "$OUT/$label-dump-exit.txt"
+          }
+
+          run_dump old "$old_src" "$old_lib" 1.3.1
+          run_dump new "$new_src" "$new_lib" 1.3.2
+          run_dump fault "$fault_src" "$fault_lib" 1.3.2-control
+          exit 0
+
+      - name: Compare real releases and join consumer evidence
+        run: |
+          set -uo pipefail
+          base="$GITHUB_WORKSPACE/.scan-inputs/zlib"
+          old_src="$base/zlib-1.3.1"
+          fault_src="$base/zlib-1.3.2-fault"
+          old_lib="$GITHUB_WORKSPACE/$(cat "$OUT/old-library-path.txt")"
+          fault_lib="$GITHUB_WORKSPACE/$(cat "$OUT/fault-library-path.txt")"
+          consumer="$base/zlib-consumer"
+
+          compare_and_record() {
+            local label="$1"
+            shift
+            set +e
+            /usr/bin/time -f '%e' -o "$OUT/$label-seconds.txt" \
+              "$@" > "$OUT/logs/$label.stdout.txt" 2> "$OUT/logs/$label.stderr.txt"
+            local rc=$?
+            set -e
+            echo "$rc" > "$OUT/$label-exit.txt"
+          }
+
+          if [ -s "$OUT/snapshots/old.json" ] && [ -s "$OUT/snapshots/new.json" ]; then
+            compare_and_record real-release-compare \
+              abicheck compare "$OUT/snapshots/old.json" "$OUT/snapshots/new.json" \
+                --format json -o "$OUT/reports/zlib-1.3.1-to-1.3.2-source.json"
+          fi
+
+          if [ -s "$OUT/snapshots/old.json" ] && [ -s "$OUT/snapshots/fault.json" ]; then
+            compare_and_record fault-snapshot-compare \
+              abicheck compare "$OUT/snapshots/old.json" "$OUT/snapshots/fault.json" \
+                --used-by "$consumer" --verify-runtime \
+                --format json -o "$OUT/reports/zlib-consumer-fault-snapshot.json"
+          fi
+
+          compare_and_record fault-binary-compare \
+            abicheck compare "$old_lib" "$fault_lib" \
+              --header "old=$old_src/zlib.h" \
+              --header "old=$old_src/build/zconf.h" \
+              --header "new=$fault_src/zlib.h" \
+              --header "new=$fault_src/build/zconf.h" \
+              --sources "old=$old_src" --sources "new=$fault_src" \
+              --depth source --lang c \
+              --used-by "$consumer" --verify-runtime \
+              --format json -o "$OUT/reports/zlib-consumer-fault-binary.json"
+          exit 0
+
+      - name: Build machine-readable summary
+        if: always()
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import collections
+          import json
+          from pathlib import Path
+          from typing import Any
+
+          root = Path("scan-results-zlib-source-v2")
+
+          def load(path: Path) -> Any:
+              try:
+                  return json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, json.JSONDecodeError):
+                  return None
+
+          def read_int(path: Path, default: int = 99) -> int:
+              try:
+                  return int(path.read_text().strip())
+              except (OSError, ValueError):
+                  return default
+
+          def read_seconds(path: Path) -> float | None:
+              try:
+                  for line in reversed(path.read_text().splitlines()):
+                      try:
+                          return float(line.strip())
+                      except ValueError:
+                          continue
+              except OSError:
+                  pass
+              return None
+
+          def walk(value: Any, path: str = ""):
+              yield path, value
+              if isinstance(value, dict):
+                  for key, child in value.items():
+                      child_path = f"{path}.{key}" if path else str(key)
+                      yield from walk(child, child_path)
+              elif isinstance(value, list):
+                  for index, child in enumerate(value):
+                      yield from walk(child, f"{path}[{index}]")
+
+          def graph_inventory(snapshot: Any) -> list[dict[str, Any]]:
+              found = []
+              for path, value in walk(snapshot):
+                  if not isinstance(value, dict):
+                      continue
+                  nodes = value.get("nodes")
+                  edges = value.get("edges")
+                  if isinstance(nodes, (list, dict)) and isinstance(edges, list):
+                      kinds = collections.Counter()
+                      for edge in edges:
+                          if isinstance(edge, dict):
+                              kinds[str(edge.get("kind") or edge.get("edge_kind"))] += 1
+                      found.append({
+                          "path": path,
+                          "nodes": len(nodes),
+                          "edges": len(edges),
+                          "edge_kinds": dict(kinds),
+                          "graph_id": value.get("graph_id"),
+                          "coverage": value.get("coverage"),
+                          "extractor_passes": value.get("extractor_passes"),
+                          "degraded_passes": value.get("degraded_passes"),
+                      })
+              return found
+
+          def report_summary(path: Path) -> dict[str, Any]:
+              report = load(path)
+              if not isinstance(report, dict):
+                  return {"present": False}
+              summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+              changes = report.get("changes") or report.get("findings") or []
+              changes = [c for c in changes if isinstance(c, dict)] if isinstance(changes, list) else []
+              gzwrite = [c for c in changes if "gzwrite" in json.dumps(c, sort_keys=True)]
+              return {
+                  "present": True,
+                  "verdict": report.get("verdict") or summary.get("verdict"),
+                  "full_verdict": report.get("full_verdict"),
+                  "finding_count": len(changes),
+                  "by_kind": dict(collections.Counter(str(c.get("kind")) for c in changes)),
+                  "by_severity": dict(collections.Counter(str(c.get("severity")) for c in changes)),
+                  "used_by": report.get("used_by"),
+                  "gzwrite_findings": gzwrite,
+              }
+
+          snapshots = {}
+          for label in ("old", "new", "fault"):
+              snapshots[label] = {
+                  "exit": read_int(root / f"{label}-dump-exit.txt"),
+                  "seconds": read_seconds(root / f"{label}-dump-seconds.txt"),
+                  "graphs": graph_inventory(load(root / "snapshots" / f"{label}.json")),
+              }
+
+          comparisons = {}
+          report_map = {
+              "real_release": ("real-release-compare", "zlib-1.3.1-to-1.3.2-source.json"),
+              "fault_snapshot": ("fault-snapshot-compare", "zlib-consumer-fault-snapshot.json"),
+              "fault_binary": ("fault-binary-compare", "zlib-consumer-fault-binary.json"),
+          }
+          for name, (prefix, report_name) in report_map.items():
+              comparisons[name] = {
+                  "exit": read_int(root / f"{prefix}-exit.txt"),
+                  "seconds": read_seconds(root / f"{prefix}-seconds.txt"),
+                  **report_summary(root / "reports" / report_name),
+              }
+
+          result = {
+              "schema": "agent-zlib-source-consumer-scan.v2",
+              "base_sha": "5465a8610e2a01f07abcd9f18ff93ecf2256114f",
+              "real_pair": "zlib 1.3.1 -> 1.3.2",
+              "control_fault": "official zlib 1.3.2 with only the gzwrite implementation renamed while zlib.h remains unchanged",
+              "consumer": "compiled C executable with eager binding to gzopen/gzwrite/gzclose against official zlib 1.3.1",
+              "fault_runtime_exit": read_int(root / "runtime" / "fault-runtime-exit.txt"),
+              "snapshots": snapshots,
+              "comparisons": comparisons,
+          }
+          (root / "zlib-source-results.json").write_text(json.dumps(result, indent=2) + "\n")
+
+          lines = [
+              "# zlib source and consumer scan v2",
+              "",
+              f"- Base SHA: `{result['base_sha']}`",
+              f"- Real pair: `{result['real_pair']}`",
+              f"- Fault runtime exit: `{result['fault_runtime_exit']}`",
+              "",
+              "## Source snapshots",
+              "",
+              "| Side | Exit | Seconds | Graphs | Max nodes | Max edges |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          for label, item in snapshots.items():
+              graphs = item["graphs"]
+              lines.append(
+                  f"| {label} | {item['exit']} | {item['seconds']} | {len(graphs)} | "
+                  f"{max((g['nodes'] for g in graphs), default=0)} | "
+                  f"{max((g['edges'] for g in graphs), default=0)} |"
+              )
+          lines.extend([
+              "",
+              "## Comparisons",
+              "",
+              "| Scenario | Exit | Verdict | Full verdict | Findings | gzwrite findings | Seconds |",
+              "|---|---:|---:|---:|---:|---:|---:|",
+          ])
+          for name, item in comparisons.items():
+              lines.append(
+                  f"| {name} | {item.get('exit')} | {item.get('verdict')} | "
+                  f"{item.get('full_verdict')} | {item.get('finding_count')} | "
+                  f"{len(item.get('gzwrite_findings', []))} | {item.get('seconds')} |"
+              )
+          (root / "summary.md").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+          cat "$OUT/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload complete source and consumer evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: zlib-source-consumer-scan-v2-main-5465a861
+          path: scan-results-zlib-source-v2/
+          if-no-files-found: error
+          retention-days: 30
