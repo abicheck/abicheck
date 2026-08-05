@@ -21,7 +21,8 @@
   `ChangeKind`, no report-schema change, and no verdict, finding set, or exit
   code changes. With no graph, no captured declaration, or no
   consumer-compiled public entry reaching the symbol, the finding is exactly
-  what it was before. G29 Phase 4 slice 1
+  what it was before — except that a symbol a public header declares is
+  reported as a direct requirement without needing a walk at all. G29 Phase 4 slice 1
   ([ADR-057](docs/contribute/adr/057-consumer-graph-and-impact-join.md)).
 
 ### Changed

@@ -374,13 +374,18 @@ def explain_required_symbols(
         return {}
 
     node_by_id = {n.id: n for n in graph.nodes}
+    # May legitimately be empty — a library whose every exported declaration
+    # is an ordinary out-of-line function has no consumer-compiled public
+    # entry to walk *from*. That blocks only the walk, not the
+    # direct-requirement answer below, which needs nothing but the
+    # declaration's own visibility (Codex review): returning early here lost
+    # the proof path for the most ordinary case of all, a removed public
+    # function the consumer named directly.
     entries = [
         n.id
         for n in graph.nodes
         if is_consumer_compiled_public_entry(n.id, node_by_id, exported_decls)
     ]
-    if not entries:
-        return {}
     labels = {n.id: (n.label or n.id) for n in graph.nodes}
 
     # Computed lazily: a run whose every missing symbol turns out to be a
@@ -422,6 +427,9 @@ def explain_required_symbols(
             )
             continue
 
+        if not entries:
+            # Nothing to walk from; this symbol is simply unexplainable.
+            continue
         if not walked:
             reachability = _consumer_compiled_reachability(
                 graph, CALL_GRAPH_TRAVERSAL_POLICY, entries, node_by_id

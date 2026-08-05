@@ -122,6 +122,14 @@ Two consequences fall out of the shared predicate and are handled explicitly:
 - **The target's own declaration is excluded from the walk's entries** for the
   same reason: it qualifies as an "entry" by the exported-decl rule, and a
   zero-hop self-path explains nothing.
+- **A direct requirement is answered even when there is nothing to walk from**
+  (Codex review). A library whose every exported declaration is an ordinary
+  out-of-line function has no consumer-compiled public entry at all, so the
+  entry set is empty — but that only blocks the *walk*. Classifying a direct
+  requirement needs nothing but the declaration's own visibility, so bailing
+  out on an empty entry set lost the proof path for the most ordinary case
+  there is: a removed public function the consumer named directly. The empty
+  check now guards the walk, not the whole answer.
 
 The API is **batch-first** (`explain_required_symbols`), with the
 single-symbol form a thin convenience over it. The expensive half — the BFS

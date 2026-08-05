@@ -69,7 +69,10 @@ def _reqs(*symbols: str, versions: dict[str, str] | None = None) -> AppRequireme
 
 
 def _library_graph(
-    *, entry_consumer_compiled: bool = True, virtual_call: bool = False
+    *,
+    entry_consumer_compiled: bool = True,
+    virtual_call: bool = False,
+    library_only_bodies: bool = False,
 ) -> SourceGraphSummary:
     """A minimal library graph: public inline ``train()`` calls internal
     ``detail::train_ops_dispatcher()``, which maps to the exported symbol the
@@ -91,7 +94,9 @@ def _library_graph(
             # False models an ordinary out-of-line exported function.
             attrs={
                 "visibility": "public_header",
-                "consumer_compiled_body": entry_consumer_compiled,
+                "consumer_compiled_body": (
+                    False if library_only_bodies else entry_consumer_compiled
+                ),
             },
         )
     )
@@ -100,7 +105,8 @@ def _library_graph(
             id="decl://dispatcher",
             kind="source_decl",
             label="detail::train_ops_dispatcher",
-            attrs={"visibility": "source"},
+            attrs={"visibility": "source"}
+            | ({"consumer_compiled_body": False} if library_only_bodies else {}),
         )
     )
     g.add_node(
@@ -315,17 +321,22 @@ def test_explain_returns_none_on_a_graph_with_no_edges_at_all() -> None:
     assert explain_required_symbol(SourceGraphSummary(), _DISPATCHER) is None
 
 
-def test_explain_returns_nothing_when_no_entry_is_consumer_compiled() -> None:
-    """The whole-graph degenerate case: every declaration the library exports
-    has a library-only body, so there is no walk to start."""
-    library = _library_graph(entry_consumer_compiled=False)
-    for node_id in ("decl://train", "decl://dispatcher"):
-        library._node_by_id[node_id].facts[0].attrs["consumer_compiled_body"] = False
-        library.add_node(library._node_by_id[node_id])  # re-resolve from facts
+def test_a_direct_requirement_survives_having_no_walkable_entry() -> None:
+    """A library of ordinary out-of-line functions has no consumer-compiled
+    public entry to walk *from* — but a symbol its own public header declares
+    is still a direct requirement, and that answer needs no walk (Codex
+    review). The internal dispatcher, which does need one, stays unexplained.
+    """
+    library = _library_graph(library_only_bodies=True)
     joined = join_consumer_graph(
         library, build_consumer_graph("app", _reqs(_DISPATCHER, "_Z5trainv"))
     )
-    assert explain_required_symbols(joined, [_DISPATCHER, "_Z5trainv"]) == {}
+    explained = explain_required_symbols(
+        joined, [_DISPATCHER, "_Z5trainv"], consumer="app"
+    )
+    assert set(explained) == {"_Z5trainv"}
+    assert explained["_Z5trainv"].is_direct() is True
+    assert explained["_Z5trainv"].public_entries == ("train",)
 
 
 def test_batch_reuses_one_walk_across_several_walked_symbols() -> None:
