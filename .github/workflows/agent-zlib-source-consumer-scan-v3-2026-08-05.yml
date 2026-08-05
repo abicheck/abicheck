@@ -1,0 +1,97 @@
+name: Agent zlib source and consumer scan v3 2026-08-05
+
+on:
+  push:
+    branches:
+      - ops/zlib-source-consumer-scan-v3-2026-08-05-5465a861
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      ABICHECK_L4_JOBS: "2"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install source scan toolchain and main
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            build-essential cmake ninja-build clang binutils curl ca-certificates \
+            zstd bzip2 xz-utils jq time
+          bash action/install-castxml.sh
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" zstandard
+
+      - name: Normalize one-off consumer source literal
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("validation/scripts/agent_zlib_source_consumer_scan.py")
+          text = path.read_text(encoding="utf-8")
+          pattern = re.compile(
+              r'    consumer_source\.write_text\(\n.*?\n        encoding="utf-8",\n    \)',
+              re.DOTALL,
+          )
+          replacement = '''    consumer_source.write_text(
+              """#include <zlib.h>
+          #include <string.h>
+
+          int main(void) {
+            const char payload[] = "abicheck consumer graph validation";
+            gzFile stream = gzopen("/tmp/abicheck-zlib-consumer.gz", "wb");
+            if (stream == 0) return 10;
+            int written = gzwrite(stream, payload, (unsigned)strlen(payload));
+            int closed = gzclose(stream);
+            return (written == (int)strlen(payload) && closed == Z_OK) ? 0 : 11;
+          }
+          """,
+              encoding="utf-8",
+          )'''
+          updated, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"consumer literal replacement count: {count}")
+          path.write_text(updated, encoding="utf-8")
+          PY
+          python -m py_compile validation/scripts/agent_zlib_source_consumer_scan.py
+
+      - name: Run real source and consumer graph scan
+        run: |
+          python -u validation/scripts/agent_zlib_source_consumer_scan.py
+
+      - name: Preserve exact runner and publish summary
+        if: always()
+        run: |
+          mkdir -p scan-results-zlib-source-v3
+          cp validation/scripts/agent_zlib_source_consumer_scan.py \
+            scan-results-zlib-source-v3/executed-runner.py
+          git diff -- validation/scripts/agent_zlib_source_consumer_scan.py \
+            > scan-results-zlib-source-v3/runtime-runner-normalization.patch || true
+          if [ -f scan-results-zlib-source-v3/summary.md ]; then
+            cat scan-results-zlib-source-v3/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload complete source and consumer evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: zlib-source-consumer-scan-v3-main-5465a861
+          path: scan-results-zlib-source-v3/
+          if-no-files-found: error
+          retention-days: 30
