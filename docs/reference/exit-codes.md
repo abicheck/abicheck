@@ -268,8 +268,9 @@ Phase 7), and the exit code is the worst contribution across them:
 - **contract_coverage** — reads back each already-analyzed target's own
   `contract_coverage_exit_contribution` (per-report field; see
   "Contract-coverage contribution" above) and folds it with `max`, same as
-  the other axes — this block is new in aggregate schema `1.3` (below);
-  `aggregate` never recomputes it. This is a different question again from
+  the other axes — added to the aggregate schema alongside this axis
+  (`abicheck.aggregate.AGGREGATE_SCHEMA_VERSION` is the versioned fact
+  owner); `aggregate` never recomputes it. This is a different question again from
   plain `coverage`: a required target can have reported successfully (no
   coverage gap) while its own evidence for the *selected contract domain*
   was still incomplete (a contract-coverage gap). Both can independently
@@ -304,7 +305,9 @@ gap exits `4`; a run whose *only* problem is a missing required target exits
 - `--expect <ids>` (repeatable / comma-separated), with optional `--optional
   <ids>` — an inline alternative to a manifest file.
 - `--discovered-only` — explicitly aggregate whatever reports are present with
-  **no** coverage gate (pure worst-of the gate decisions). Required to run
+  **no required-target coverage gate** (a missing target is simply not
+  counted, never a coverage failure — the `contract_coverage` axis is
+  unaffected and still applies to whatever *is* present). Required to run
   without a manifest/`--expect`: with no declared target set the gate cannot
   tell a missing required target from an intentionally absent one, so a bare
   `aggregate reports/` is a usage error (exit `64`), not a silent pass.
@@ -314,7 +317,8 @@ per-target gate decisions alone then decide the exit code). `--on-unexpected-tar
 (`include`/`warn`/`fail`/`ignore`, default `include`) controls a report whose
 target is not in the expected set: `include` counts its real findings in the
 gate but not in required coverage. The `--format json` output is versioned
-(`aggregate_schema_version`, currently `1.3`) and carries the four axes
+(`aggregate_schema_version` — see `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
+for the current value) and carries the four axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage`
 — the last is `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and
 present even when no target used `--contract-evaluation` (an empty

@@ -19,11 +19,15 @@ generated: false
 
 # Contract-Aware Compatibility
 
-Plain `abicheck compare` treats every detected change as equally in-scope:
-if it's a real difference between the two binaries, it's classified and
-scored. **Contract-aware compatibility** (`compare --contract-evaluation`,
-ADR-049) asks a narrower, more useful question first: *does this change even
-touch the compatibility contract you actually promised?*
+Plain `abicheck compare` already applies its own scoping — public-surface
+filtering (on by default), suppressions, and redundancy collapsing all
+narrow what actually gets scored — but none of that asks about a
+*declared contract*: it's about whether a change is public/reachable or
+explicitly waived, not whether it belongs to a promise you've made about
+what stays stable. **Contract-aware compatibility**
+(`compare --contract-evaluation`, ADR-049) adds that narrower, more useful
+question on top: *does this change even touch the compatibility contract
+you actually promised?*
 
 This page is the mental model — what a "contract" means here, the three
 domains you can select, the outcomes a finding can land in, and why this
@@ -72,7 +76,7 @@ flag maps onto `public`/`all`; an explicit `--contract` always outranks it):
 |---|---|---|
 | `public` (default alias) | The library's declared public headers — the source-level API surface | Header AST, scoped the same way plain `compare`'s public-surface scoping already works |
 | `exports` | Whatever the binary's own observed export table actually exports (`.dynsym`/PE export directory/Mach-O export trie) | The **export table alone decides which declarations are roots** — no header-origin/publicness filtering. But header (or debug-info) declaration data still matters afterward: the closure walk from those roots over the record/enum/typedef graph needs typed declarations to resolve, so giving it headers can turn an otherwise-`UNKNOWN_UNRESOLVED` type edge into a provable one. |
-| `all` | Everything detected — no exclusion, with one exception | Nothing extra; every finding is trivially `IN_CONTRACT` **unless** it's specifically excluded by a committed `--post-manifest` (see below) |
+| `all` | Everything detected — no exclusion, with two exceptions | Nothing extra; every entity-level finding is trivially `IN_CONTRACT` **unless** it's specifically excluded by a committed `--post-manifest` (see below). A `NOT_APPLICABLE` finding (below) is unaffected by mode entirely — it was never a domain-membership question to begin with. |
 
 **Decision table:**
 
@@ -88,12 +92,19 @@ actually exported (stripped, versioned out) — that's out of contract under
 `exports` but in contract under `public` — or vice versa (an
 implementation-detail symbol exported for a narrow, undocumented reason).
 
-**`all` isn't quite unconditional.** A separately-opted-in `--post-manifest`
-(a committed, narrower public-symbol list) is checked *before* the `all`
-mode shortcut, for every mode including `all` — a finding whose symbol the
-manifest specifically excludes still comes back `PROVEN_OUT_OF_CONTRACT`,
-not `IN_CONTRACT`. This only matters if you're also using `--post-manifest`;
-without it, `all` really does mean every finding is `IN_CONTRACT`.
+**`all` isn't quite unconditional, in two independent ways.** A
+separately-opted-in `--post-manifest` (a committed, narrower public-symbol
+list) is checked *before* the `all` mode shortcut, for every mode including
+`all` — a finding whose symbol the manifest specifically excludes still
+comes back `PROVEN_OUT_OF_CONTRACT`, not `IN_CONTRACT`. This only matters if
+you're also using `--post-manifest`. Separately, and unconditionally: a
+mode-independent check (loader/SONAME/security-hardening/deployment-floor
+kinds — the same curated set behind the `NOT_APPLICABLE` row above) runs
+*before any mode dispatch at all*, so those findings stay `NOT_APPLICABLE`
+under `all` too — not because they're excluded, but because they were never
+a domain-membership question in the first place. Without `--post-manifest`,
+every *entity-level* finding under `all` is `IN_CONTRACT`, which is the
+practical reading most users need.
 
 ## What a finding's relevance can be
 

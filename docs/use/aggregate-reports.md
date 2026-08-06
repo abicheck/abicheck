@@ -79,7 +79,8 @@ flowchart TD
 - **coverage** — did every **required** expected target actually report at
   all? A required target with no report is a coverage gap, exit `1` — never
   promoted to a fake ABI-break exit `4`.
-- **contract_coverage** (schema `1.3`, ADR-049 Phase 7) — for a target that
+- **contract_coverage** (ADR-049 Phase 7, `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
+  is the versioned fact owner) — for a target that
   *did* report, was its own selected `--contract` domain's evidence
   complete? Read back from that report's own
   `contract_coverage_exit_contribution` and folded with `max`, exactly the
