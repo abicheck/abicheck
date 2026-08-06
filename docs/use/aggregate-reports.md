@@ -125,9 +125,13 @@ flowchart TD
       "target_id": "windows-x86_64",
       "required": true,
       "state": "unavailable",
+      "compatibility_verdict": null,
+      "gate": null,
+      "contract_coverage_exit": 0,
       "reason": "no report was produced for this expected target"
     }
-  ]
+  ],
+  "unexpected_targets": []
 }
 ```
 

@@ -265,12 +265,17 @@ result = run_scan(ScanRequest(
 
 ## CLI / Python / MCP parity
 
-The same capability, named consistently (or explicitly *not* available)
-across all three front ends:
+The **rules** are shared across all three front ends; the **surface** isn't
+— an MCP tool exposes only the arguments it was given, not every field its
+underlying typed request dataclass has. `CompareRequest.depth`, for
+instance, is a real Python field with no `abi_compare` counterpart at all
+(only `abi_dump` exposes `depth`). Read this table as "where the capability
+is reachable today," not as a promise every dataclass field has an MCP
+twin:
 
 | Capability | CLI | Python (typed) | MCP |
 |---|---|---|---|
-| Depth floor | `dump --depth` → `DumpDepthNotSatisfiedError` | `DumpRequest.depth`/`CompareRequest.depth` → `ValidationError` | `abi_dump(depth=...)` → `{"status": "error", ...}` on a floor miss |
+| Depth floor | `dump --depth` → `DumpDepthNotSatisfiedError` | `DumpRequest.depth`/`CompareRequest.depth` → `ValidationError` | `abi_dump(depth=...)` → `{"status": "error", ...}` on a floor miss. **`abi_compare` has no `depth` argument**, even though `CompareRequest.depth` exists in Python. |
 | Not comparable | exit code `16` | raises `ProfileMismatchError`/`ScopeMismatchError` | `abi_compare` → `{"status": "not_comparable", "reason": ...}` |
 | Contract evaluation | `--contract-evaluation` / `--contract {public,exports,all}` | `CompareRequest.contract_evaluation`/`.contract_mode` (same fields on `ScanRequest`) | `abi_compare(contract_evaluation=, contract_mode=)`, `abi_scan(...)` |
 | Consumer scoping | `compare --used-by` | `abicheck.appcompat.scope_diff_to_app(...)` — no `CompareRequest` field, a post-classification step | `abi_compare(used_by=[...])`; **not available on `abi_scan`** |
