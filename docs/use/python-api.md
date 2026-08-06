@@ -139,12 +139,13 @@ so you can reuse abicheck's exact reporter output from your own code.
 ```python
 from abicheck.service import render_output
 
-report = render_output("sarif", result, old_snapshot, new_snapshot)
+report = render_output("sarif", result, old, new)
 Path("report.sarif").write_text(report)
 ```
 
-Supported `fmt` values: `"markdown"`, `"json"`, `"sarif"`, `"html"`, `"junit"`.
-`render_output` raises `ValidationError` for an unrecognised format.
+Supported `fmt` values: `"markdown"` (alias `"md"`), `"json"`, `"sarif"`,
+`"html"`, `"junit"`, and `"review"` (the compact review digest). `render_output`
+raises `ValidationError` for an unrecognised format.
 
 ## Typed request API
 
