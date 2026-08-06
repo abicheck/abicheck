@@ -117,6 +117,11 @@ topics:
     canonical_page: use/python-api.md
     fact_sources:
       - abicheck/service.py
+      - abicheck/api_types.py
+      - abicheck/service_dump_pipeline.py
+      - abicheck/service_compare_pipeline.py
+      - abicheck/service_scan.py
+      - abicheck/mcp_server.py
     reference_page: reference/python-api-reference.md
 
   config-keys:

@@ -206,7 +206,7 @@ Key `DumpRequest` fields, beyond the `InputSpec` it wraps (`path`,
 | Field | Meaning |
 |---|---|
 | `depth` | `binary`/`headers`/`build`/`source` — an explicit value is an **enforced floor**: `run_dump_request` raises `ValidationError` if the resolved snapshot's evidence doesn't actually reach it, the same guarantee the CLI's `dump --depth` gives via `DumpDepthNotSatisfiedError` (a different exception type, since Tier-2 has no `ClickException` concept — same guarantee, different vocabulary). |
-| `frontend` | Header-AST frontend (`auto`/`castxml`/`clang`/`hybrid`). |
+| `frontend` | Header-AST frontend: `auto`/`castxml`/`clang`/`hybrid`, plus a fifth, source-ABI-only value `android` — rejected unless the request also carries source evidence (`has_sources=True` or `sources`/`build_info` set), since `android` has no header-AST extraction path of its own. |
 | `dwarf_only` / `debug_format` / `enable_debuginfod` / `debuginfod_url` | Debug-info resolution knobs. |
 | `follow_dependencies` / `dependency_search_paths` | Dependency-closure walk. |
 | `has_sources` | Legacy flag consulted by the `android` frontend's source-evidence rule. |
@@ -222,6 +222,7 @@ since a manifest already declares the equivalent surface itself.
 
 ```python
 from abicheck.api_types import CompareRequest, InputSpec
+from abicheck.service import run_compare_request
 from abicheck.service_compare_pipeline import resolve_compare_request, classify_compare_pair
 
 request = CompareRequest(
@@ -230,11 +231,17 @@ request = CompareRequest(
     contract_evaluation=True,
     contract_mode="public",
 )
-pair = resolve_compare_request(request)       # -> ResolvedComparePair (old/new snapshots)
-result = classify_compare_pair(request, pair)  # -> CompareResult
+
+# One call, the normal case:
+result = run_compare_request(request)          # -> CompareResult
+
+# Or the same thing in two steps, e.g. to inspect the resolved snapshots
+# before classifying:
+pair = resolve_compare_request(request)        # -> ResolvedComparePair (old/new snapshots)
+result = classify_compare_pair(request, pair)   # -> CompareResult
 ```
 
-`run_compare_request(request)` does both steps in one call — this two-step
+`run_compare_request(request)` does both steps in one call — the two-step
 form exists because the native CLI runs its own Click-specific resolution
 (`--pack` application, receipt recording) *between* them; a typed caller
 normally just wants `run_compare_request`.

@@ -42,6 +42,12 @@ profiles:
   windows-msvc:
     contract: true
     os: windows                        # -> runs-on: windows-latest
+    # No compile.binding here, unlike the two Linux profiles above — this
+    # is intentional, not an omission. MSVC's cl.exe isn't resolved through
+    # the binding/bindings-file mechanism at all (project validate skips
+    # identity probing for compiler_family: msvc, cl.exe having no
+    # --version flag to probe); this cell relies on the runner's
+    # system-default toolchain instead.
 
 targets:
   libfoo:
@@ -87,12 +93,18 @@ abicheck project plan --toolchain-bindings bindings.yml \
   `profiles.<id>.compile.binding` actually resolves against the bindings
   file. It never reads a build output.
 - `project plan` **requires** the config to already pass validation, then
-  fans the declared `(target, profile)` combinations out into one check
-  cell per pair — only where the target actually appears in that profile's
-  own `build-output.json`, never a blind cross-product — resolving each
-  cell's compiler binding/options and toolchain-identity probe along the
-  way (skipped for a profile with no cells in the resolved plan, so an
-  unused profile can't abort an otherwise-fine plan).
+  creates one check cell for each applicable `checks[]` entry × profile
+  assignment — only where the target actually appears in that profile's
+  own `build-output.json`, never a blind cross-product. A single
+  `(target, profile)` pair can produce **more than one** cell when the
+  target declares several `checks[]` entries (distinct `channel`/`depth`
+  pairs); an implicit sweep (no `checks[].profiles` selector) silently
+  skips a profile the target doesn't apply to, while an *explicit*
+  `checks[].profiles` selector naming a profile the target doesn't build
+  on is a validation error, not a skip. Each cell resolves its own
+  compiler binding/options and toolchain-identity probe along the way
+  (skipped for a profile with no cells in the resolved plan, so an unused
+  profile can't abort an otherwise-fine plan).
 - [`check-project.yml`](../../reference/reusable-workflows.md) consumes the
   run plan and fans out one matrix job per cell — each job runs on the
   profile's own `runs_on` (native `windows-latest` for the MSVC lane above),

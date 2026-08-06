@@ -120,9 +120,10 @@ abicheck's whole CLI is 7 root commands: `dump`, `compare`, `scan`, `deps`, `com
 | Fold per-target ABI reports from a CI build matrix into one gate verdict | [`abicheck aggregate`](https://abicheck.github.io/abicheck/use/aggregate-reports/) |
 | Check a multi-target/multi-build-profile **project** together (advanced, `check-project.yml`) | [`abicheck project`](https://abicheck.github.io/abicheck/reference/cli-reference/) |
 
-`compare` also plans and validates: `project` plans declared multi-target/
-multi-profile checks (advanced), and `aggregate` combines already-produced
-per-check reports — it never analyzes a binary itself.
+`compare` is strictly binary/API comparison. Planning and validating a
+declared multi-target/multi-profile topology is `project`'s job; folding
+already-produced per-check reports back into one gate is `aggregate`'s —
+neither of those two analyzes a binary directly.
 
 ---
 

@@ -22,7 +22,7 @@ API](../use/python-api.md).
 | Change | What breaks | Fix |
 |---|---|---|
 | `CompareResult` instead of a bare tuple | `result, old, new = run_compare(...)` (positional unpack) | `result, old, new = run_compare(...).as_tuple()` — one-line fix |
-| Authoritative contract evaluation | If you already pass `--contract-evaluation`, the verdict/gate can now move in **both directions** compared to earlier releases (a finding proven out-of-contract stops blocking; one that can't be resolved stops being reported as an ABI break) | Re-check any script that parsed `verdict`/exit code under `--contract-evaluation` — see [Contract-Aware Compatibility](../learn/contract-aware-compatibility.md) |
+| Authoritative contract evaluation | If you already pass `--contract-evaluation`, the verdict/gate can now move in **both directions** compared to earlier releases (a finding proven out-of-contract stops blocking; one that can't be resolved stops gating as an ABI break — it still stays in `changes`/audit ledgers, `NOT_EVALUATED`, and can separately trip contract-coverage exit `1`) | Re-check any script that parsed `verdict`/exit code under `--contract-evaluation` — see [Contract-Aware Compatibility](../learn/contract-aware-compatibility.md) |
 | Contract-coverage exit `1` | A script that treats every exit `1` as "a severity error" will now also see `1` for incomplete contract evidence | Read `contract_coverage_exit_contribution` (or the severity block's own pre-fold `exit_code`) to tell the two apart — see [Exit Codes](../reference/exit-codes.md#contract-coverage-contribution-adr-049) |
 | Aggregate schema `1.2`/`1.3` | A JSON consumer with a fixed field list will silently ignore the new `finding_matrix`/`profile_matrix`/`contract_coverage` blocks (additive, not a breaking JSON change) — but a consumer asserting an *exact* key set will fail | Check `aggregate_schema_version` if you need to react to the new blocks; see [Aggregate Reports](../use/aggregate-reports.md) |
 | Scoped severity correction | A `compare --used-by`/`--required-symbol` script that assumed `--severity-*` flags were silently ignored on the scoped path now gets real severity-aware exit codes there too | Re-check any script relying on the old fixed legacy `0`/`2`/`4` mapping for a scoped run — see [Application Compatibility → Exit codes](../use/appcompat.md#exit-codes) |
@@ -32,9 +32,15 @@ API](../use/python-api.md).
 ## `CompareResult` instead of a tuple
 
 `run_compare`/`run_compare_request` returned a bare
-`tuple[DiffResult, AbiSnapshot, AbiSnapshot]` before 0.6. A dataclass can
-gain a field without breaking positional callers, which a tuple cannot — so
-the typed result became the only shape:
+`tuple[DiffResult, AbiSnapshot, AbiSnapshot]` before 0.6. The new
+`CompareResult` dataclass adds a fourth field (`suppression`) — this **does**
+break a caller that unpacked the old return value positionally
+(`result, old, new = run_compare(...)`), since a dataclass isn't a tuple at
+all. What it *doesn't* break is attribute/keyword access to the three
+original values (`result.diff`, `result.old_snapshot`,
+`result.new_snapshot`) — which is exactly why future fields can be added to
+`CompareResult` without a repeat of this migration, the way they couldn't be
+added to a bare tuple:
 
 ```python
 # Before

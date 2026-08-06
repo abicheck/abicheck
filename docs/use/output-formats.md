@@ -573,9 +573,12 @@ to make *any* contract decision at all:
 }
 ```
 
-An incomplete-evidence run looks like this instead — note the failures list
-is populated **and** the run still exits `0` on compatibility, because the
-two are orthogonal:
+An incomplete-evidence run looks like this instead. Compatibility itself has
+no separate process exit — only the overall exit code does — so read this as:
+the compatibility *verdict* stays `NO_CHANGE` (nothing evaluated found a
+problem), while `contract_coverage_exit_contribution: 1` independently
+floors the overall process exit at `1` by default, because the two axes are
+orthogonal:
 
 ```json
 {

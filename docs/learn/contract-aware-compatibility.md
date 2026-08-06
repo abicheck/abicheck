@@ -65,8 +65,8 @@ not) and *how sure* abicheck is (proven or not).
 ## Three contract modes
 
 `--contract public|exports|all` selects which evidence domain a finding is
-judged against (the legacy `--scope-public-headers`/`--no-` flag maps onto
-`public`/`all`; an explicit `--contract` always outranks it):
+judged against (the legacy `--scope-public-headers`/`--no-scope-public-headers`
+flag maps onto `public`/`all`; an explicit `--contract` always outranks it):
 
 | Mode | What's in the contract | Evidence it consults |
 |---|---|---|

@@ -204,7 +204,7 @@ profile can never be reported as either affected or clean:
 | `partial` | Two or more profiles are affected, and at least one other profile is confirmed clean. | |
 | `profile_specific` | Exactly one profile is affected, and at least one other is confirmed clean. | Lowest. |
 
-The critical, unssuppressible invariant: **`unaffected_profiles`** requires
+The critical, unsuppressible invariant: **`unaffected_profiles`** requires
 a profile's report to be *fully known* (every check for that profile
 `complete=True`) — a positive "checked and clean" claim. A profile that
 can't clear that bar goes to **`undetermined_profiles`** instead, never
