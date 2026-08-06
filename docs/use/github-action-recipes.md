@@ -268,15 +268,21 @@ then guarantees the properties the old hand-written gate loop silently violated:
   `abi-report-windows-x86_64.json`, the gate reports Windows as unavailable and
   fails at exit `1` — it does **not** pass green as "all platforms compatible"
   when a required platform was never analyzed.
-* **Gate, coverage, and compatibility stay orthogonal (ADR-042).** Each report
-  carries its own severity gate decision; `aggregate` *combines* those (a
-  policy-blocked `COMPATIBLE` still fails, a demoted `BREAKING` can pass) rather
-  than recomputing a gate from the verdict. The exit code is `0` pass / `1`
-  coverage gap, an addition/quality-only block, or another non-verdict per-report
-  failure (e.g. a `scan` budget overflow) / `2` source break / `4` ABI break
-  (see [`abicheck aggregate`](../reference/exit-codes.md#abicheck-aggregate) for
-  the full contract). A missing required build is a **coverage** failure at `1`
-  — never promoted to a fake ABI-break exit `4`.
+* **Gate, coverage, compatibility, and contract coverage stay orthogonal
+  (ADR-042, extended by ADR-049 Phase 7).** Each report carries its own
+  severity gate decision; `aggregate` *combines* those (a policy-blocked
+  `COMPATIBLE` still fails, a demoted `BREAKING` can pass) rather than
+  recomputing a gate from the verdict. The exit code is `0` pass / `1`
+  coverage gap, an addition/quality-only block, a target's own contract
+  evidence being incomplete under `--contract-evaluation`, or another
+  non-verdict per-report failure (e.g. a `scan` budget overflow) / `2`
+  source break / `4` ABI break (see [`abicheck
+  aggregate`](../reference/exit-codes.md#abicheck-aggregate) for the full
+  contract). A missing required build is a **coverage** failure at `1` —
+  never promoted to a fake ABI-break exit `4`; a *contract*-coverage gap
+  (evidence incomplete for a target that did report) is a separate `1` for a
+  different reason, and the JSON output's own `contract_coverage` block says
+  which targets caused it.
 
 !!! tip
     Set `fail-on-breaking: false` in each matrix job and let the gate decide.
@@ -306,10 +312,12 @@ Gate:
   Failed — exit 1; required coverage incomplete.
 ```
 
-Add `--format json` for a versioned, machine-readable result — the three axes
+Add `--format json` for a versioned, machine-readable result — the four axes
 are kept separate under `gate` (`passed`/`exit_code`/`blocking_targets`),
-`coverage` (`status`/counts/`missing_required_targets`), and `compatibility`
-(`verdict`/`analyzed_targets`), plus a per-`targets` breakdown and an
+`coverage` (`status`/counts/`missing_required_targets`), `compatibility`
+(`verdict`/`analyzed_targets`), and `contract_coverage`
+(`exit_contribution`/`incomplete_targets`, populated only under
+`--contract-evaluation`), plus a per-`targets` breakdown and an
 `unexpected_targets` list — to post elsewhere.
 
 ## Skip system dependency installation

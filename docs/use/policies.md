@@ -14,9 +14,11 @@ generated: false
 
 `abicheck compare` supports policy-based verdict classification.
 
-> Policies are step 1 of the CI gating pipeline (classify → suppress →
-> severity → exit code) — see [CI Gating](ci-gating.md) for how they combine
-> with suppressions, severity, and baselines.
+> Policy classification is one stage of the CI gating pipeline — it runs
+> after contract relevance (under `--contract-evaluation`) has decided which
+> findings are even in scope, and before suppression and severity/exit-code
+> scoring. See [CI Gating](ci-gating.md) for the full order and how policy
+> combines with contract relevance, suppressions, severity, and baselines.
 
 - Built-in profiles: `--policy strict_abi|sdk_vendor|plugin_abi`
 - Custom profile file: `--policy-file <yaml>`

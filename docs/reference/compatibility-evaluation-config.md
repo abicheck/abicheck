@@ -12,30 +12,48 @@ generated: false
 
 # Compatibility evaluation configuration (ADR-049)
 
-!!! warning "Resolved and reported — not yet applied"
+!!! info "Status: resolved *and* applied — opt-in via `--contract-evaluation`"
 
-    Everything on this page is implemented as *configuration resolution*
-    (`abicheck.compatibility_evaluation_frontend`) and is fully tested.
-    `abicheck compare --contract-evaluation` resolves one such object per run
-    and reports it, as the `contract_context.evaluation_context` block of its
-    JSON report.
+    This page is the reference for one typed object
+    (`abicheck.compatibility_evaluation_frontend`) that resolves every
+    setting deciding what a comparison promises, how a change to it is
+    classified, and what blocks CI — resolved once, identically, whichever
+    front end asked for the run. `abicheck compare --contract-evaluation`
+    resolves one such object per run and reports it, as the
+    `contract_context.evaluation_context` block of its JSON report.
 
-    **Two parts of it are live and do change results.** A selected `--pack`
-    really configures the run — a `kind: policy` pack overriding a
-    `ChangeKind` moves the verdict and the exit code (see "Selecting a
-    pack" below). And under `--contract-evaluation` the contract-coverage
-    ledger contributes an orthogonal exit `1` when the selected domain's
-    evidence is incomplete (ADR-049 Phase 7; see
-    [Exit Codes](exit-codes.md)).
+    **The object is not merely reported — under `--contract-evaluation` it is
+    authoritative** (ADR-049 Phase 7, `contract_pipeline.py`). Two
+    independent things follow from a resolved `contract.mode`:
 
-    Everything else on this page is still resolution only: the per-finding
-    contract decisions change no verdict and no finding, and a `compare` run
-    *without* `--contract-evaluation` — and every other command — resolves
-    nothing at all, so its behaviour is unchanged. Making those decisions
-    authoritative, and the default flip, are the rest of
+    - **Per-finding contract relevance.** Each finding's relevance is
+      classified *before* compatibility policy runs, and policy scores only
+      the `EVALUATED` findings (`IN_CONTRACT` / `NOT_APPLICABLE`). A
+      `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN`, or `UNKNOWN_UNRESOLVED`
+      finding is `NOT_EVALUATED`: its `compatibility_decision` is JSON
+      `null` and it moves neither the verdict nor the exit code — but it
+      stays in the report, with the reason code that says why.
+    - **Run-level contract coverage.** An orthogonal axis: if the selected
+      domain's required evidence is incomplete, `compare`/`scan --against`
+      contribute an exit `1`, folded with `max` against the ordinary gate —
+      it can raise a clean `0` to `1`, never lower a `2`/`4`. See
+      [Exit Codes](exit-codes.md).
+
+    Outside `--contract-evaluation`, a `compare` run resolves nothing from
+    this object and every other command is unaffected — this is still an
+    opt-in feature, not a default-on one. Selecting a `--pack` is live
+    regardless: a `kind: policy` pack overriding a `ChangeKind` moves the
+    verdict and the exit code the same way an equivalent `--policy-file`
+    override would (see "Selecting a pack" below), independent of contract
+    evaluation.
+
+    The historical shadow/advisory design this feature shipped with first —
+    where relevance was computed but never consulted by policy — is recorded
+    in
     [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
-    Phase 7. Today's live behaviour is also documented in
-    [Configuration File](config-file.md) and [Exit Codes](exit-codes.md).
+    itself, not repeated here. Today's live behaviour is also documented in
+    [Configuration File](config-file.md), [Exit Codes](exit-codes.md), and
+    [CI Gating](../use/ci-gating.md).
 
 ADR-049 D7 requires that **one** typed object carry every setting that decides
 what a comparison promises, how a change to it is classified, and what blocks

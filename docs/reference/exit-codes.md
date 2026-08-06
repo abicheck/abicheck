@@ -243,8 +243,8 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 
 The multi-target fan-in gate folds the per-target `compare`/`scan` JSON reports
 a CI build matrix produces (one `abi-report-<target>.json` per leg) into one
-gate decision. Three axes stay **orthogonal** (ADR-042), and the exit code is
-the worst contribution across them:
+gate decision. Four axes stay **orthogonal** (ADR-042, extended by ADR-049
+Phase 7), and the exit code is the worst contribution across them:
 
 - **gate** — each report already carries its own severity gate decision
   (`severity.{exit_code,blocking,blocking_categories}`); `aggregate` *combines*
@@ -260,14 +260,26 @@ the worst contribution across them:
   greener legacy path.
 - **coverage** — did every *required* expected target actually report? An
   incomplete required coverage is a *coverage* failure at exit `1`; it is
-  **never** promoted to an ABI-break exit `4`.
+  **never** promoted to an ABI-break exit `4`. This is a different question
+  from contract coverage below: this one asks whether the matrix *ran and
+  reported at all*.
 - **compatibility** — the worst verdict over the analyzed targets, reported for
   context; it does not by itself drive the exit code.
+- **contract_coverage** — reads back each already-analyzed target's own
+  `contract_coverage_exit_contribution` (per-report field; see
+  "Contract-coverage contribution" above) and folds it with `max`, same as
+  the other axes — this block is new in aggregate schema `1.3` (below);
+  `aggregate` never recomputes it. This is a different question again from
+  plain `coverage`: a required target can have reported successfully (no
+  coverage gap) while its own evidence for the *selected contract domain*
+  was still incomplete (a contract-coverage gap). Both can independently
+  produce exit `1`, for unrelated reasons, and `aggregate` records which one
+  fired rather than merging them into one undifferentiated `1`.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
+| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract-evaluation`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -302,8 +314,11 @@ per-target gate decisions alone then decide the exit code). `--on-unexpected-tar
 (`include`/`warn`/`fail`/`ignore`, default `include`) controls a report whose
 target is not in the expected set: `include` counts its real findings in the
 gate but not in required coverage. The `--format json` output is versioned
-(`aggregate_schema_version`) and carries the three axes separately under
-`gate` / `coverage` / `compatibility`.
+(`aggregate_schema_version`, currently `1.3`) and carries the four axes
+separately under `gate` / `coverage` / `compatibility` / `contract_coverage`
+— the last is `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and
+present even when no target used `--contract-evaluation` (an empty
+`incomplete_targets` list, not an omitted block).
 
 When targets are checked under several toolchain profiles (report ids of the
 form `target@profile#channel@depth`), two additional reporting-only blocks

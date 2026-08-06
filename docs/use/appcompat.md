@@ -209,9 +209,15 @@ verdict.
 ## Exit codes
 
 `compare --used-by` computes the exit code from the worst of every
-`--used-by` app's own scoped verdict — the full-library verdict is folded
+`--used-by` app's own scoped result — the full-library verdict is folded
 into the rendered report as informational context (see "Example output"
-above) but does **not** participate in the exit-code calculation:
+above) but does **not** participate in the exit-code calculation. Which
+*scheme* computes that scoped exit code follows the same rule as plain
+`compare`: no severity setting active uses the legacy mapping below; any
+`--severity-*`/`--severity-preset` flag (or a config severity value)
+switches the scoped path to the severity-aware scheme too.
+
+**Legacy scheme (no severity setting active):**
 
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
@@ -220,21 +226,47 @@ above) but does **not** participate in the exit-code calculation:
 | `4` | `BREAKING` | Binary ABI break or missing symbols |
 | `64` | usage error | Bad arguments/invocation |
 
-### `--severity-*` flags have no effect here
+### `--severity-*` flags *do* apply to a scoped run
 
-Unlike plain `compare`, a scoped `--used-by` (or `--required-symbol(s)`) run
-always uses this fixed legacy mapping — passing `--severity-preset` or any
-other `--severity-*` option does **not** switch it to the severity-aware
-`0`/`1`/`2`/`4` scheme described in [Exit Codes](../reference/exit-codes.md).
-The scoped exit code is derived purely from the worst app-scoped `Verdict`
-(`BREAKING` → `4`, `API_BREAK` → `2`, otherwise `0`). One consequence: a
-missing required symbol/version is always `Verdict.BREAKING`, so it always
-exits `4` — even under `--severity-preset info-only` — but that's because
-severity presets don't reach the scoped path at all, not because of a
-special-cased floor. If you need severity-aware exit codes for the
-app-relevant subset of changes, don't pass `--used-by`; run plain `compare`
-with your `--severity-*` flags and use `--show-only`/the JSON report to
-inspect the changes touching your app's imports instead.
+A scoped `--used-by` (or `--required-symbol(s)`) run respects
+`--exit-code-scheme`/`--severity-*`/`--severity-preset` the same way plain
+`compare` does: passing any severity setting switches the scoped exit code
+to the severity-aware `0`/`1`/`2`/`4` scheme described in [Exit
+Codes](../reference/exit-codes.md), computed over the changes relevant to
+that app (`compute_exit_code`/`compute_gate_decision` run against the
+app-scoped change set, not the full library's). One consequence: a missing
+required symbol/version/entrypoint has no matching diff `Change` for the
+severity machinery to see on its own, so it is floored in separately —
+under the severity scheme it counts toward, and can trip, the
+`abi_breaking` category exactly as a real `FUNC_REMOVED` finding would,
+including respecting a demoted `--severity-abi-breaking info` (i.e. a
+missing-contract symbol is not a hidden, unconfigurable floor to `4`
+anymore).
+
+The JSON report distinguishes the two levels explicitly:
+
+- `verdict` / `severity` — the **scoped** result (what the exit code
+  reflects). Under the severity scheme, `severity.categories.*.count` and
+  `severity.blocking_categories` are the scoped tallies too, not the
+  full-library ones.
+- `full_verdict` / `full_severity` — the full-library result, moved aside as
+  informational context. `full_severity` is present only when the scoped
+  gate actually ran under the severity scheme (its absence, with `severity`
+  still present, means the legacy scheme was used).
+- `used_by` — per-app detail (`missing_symbols`/`missing_versions`/
+  `relevant_change_count`), unchanged by which scheme computed the exit
+  code.
+
+SARIF and JUnit output additionally state the scheme explicitly —
+`gateExitCodeScheme`/`scopedExitCodeScheme` in the SARIF run properties, and
+an `abicheck.scoped_exit_code_scheme` JUnit property — for a consumer that
+needs to know legacy-vs-severity without inferring it from field presence.
+
+If you need severity-aware exit codes over the app-relevant subset without
+the app-scoping banner/summary at all, plain `compare` with `--severity-*`
+flags plus `--show-only`/the JSON report remains an option too — but it is
+no longer the *only* way to get severity-aware behavior for a `--used-by`
+run.
 
 ---
 

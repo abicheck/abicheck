@@ -11,20 +11,26 @@ generated: false
 
 # CI Gating: How the Pieces Fit Together
 
-Four mechanisms decide what fails your build: **baselines** (what you compare
-against), **policies** (how each change is classified), **suppressions** (which
-changes are waived), and **severity** (which categories set the exit code).
-Each has its own reference page; this page is the map — what runs in what
-order, and how the knobs interact.
+Several mechanisms decide what fails your build: **baselines** (what you
+compare against), **contract relevance** (whether a change even belongs to
+your declared compatibility contract — opt-in), **policy** (how an evaluated
+change is classified), **suppressions** (which changes are waived),
+**severity** (which categories set the exit code), and **contract coverage**
+(whether there was enough evidence to make a contract decision at all — its
+own, orthogonal axis). Each has its own reference page; this page is the
+map — what runs in what order, and how the knobs interact.
 
 ```mermaid
 flowchart LR
     B["Baseline<br/>(snapshot / library)"] --> D["Detect changes<br/>(compare)"]
     N["New build"] --> D
-    D --> P["1 · Policy classifies<br/>each change"]
-    P --> S["2 · Suppressions<br/>waive changes"]
-    S --> V["3 · Verdict + severity<br/>categories"]
-    V --> E["4 · Exit code<br/>(legacy or severity scheme)"]
+    D --> SC["1 · Explicit consumer/<br/>manifest scope"]
+    SC --> CR["2 · Contract relevance<br/>(--contract-evaluation, opt-in)"]
+    CR --> P["3 · Policy classifies<br/>EVALUATED findings"]
+    P --> S["4 · Suppressions<br/>waive findings"]
+    S --> V["5 · Verdict + severity<br/>categories"]
+    V --> E["6 · Exit code<br/>(legacy or severity scheme)"]
+    CC["Contract coverage<br/>(evidence completeness)"] -.->|max, orthogonal| E
     V -.-> R["Report rendering<br/>(--show-only, --format)"]
 ```
 
@@ -35,23 +41,62 @@ surfaces and produces raw changes. The baseline side is a snapshot or a
 library (there is no CLI baseline registry anymore — keep JSON snapshots
 yourself, plain files, your own storage/naming convention) — see [Baseline
 Management](baseline-management.md). The detected changes then flow through
-four stages (the numbers match the diagram above):
+the stages below (the numbers match the diagram above), which is the
+normative order `contract_pipeline.py` fixes (ADR-049 D9):
 
-1. **Classify (policy).** The active [policy profile](policies.md)
+1. **Scope (explicit consumer/manifest evidence).** `--used-by`/
+   `--required-symbol(s)` evidence (§4.3) can *promote* a finding to
+   `IN_CONTRACT` ahead of the ordinary relevance check below, since a
+   caller-stated consumer or entrypoint outranks anything two snapshots can
+   infer on their own.
+2. **Classify contract relevance — opt-in, `--contract-evaluation`.** Only
+   when this flag is set: each finding is classified against the selected
+   [contract mode](../reference/compatibility-evaluation-config.md)
+   (`public`/`exports`/`all`, or the legacy `--scope-public-headers` alias)
+   as `IN_CONTRACT`, `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN`, or
+   `UNKNOWN_UNRESOLVED`. The first two are `EVALUATED`; the latter two are
+   `NOT_EVALUATED` — their `compatibility_decision` is JSON `null` and they
+   contribute `0` to the gate, but they stay listed in the report with the
+   reason code that says why. Without `--contract-evaluation`, every finding
+   is `EVALUATED` and this stage is a no-op — every exit code is unchanged
+   from before this feature existed.
+3. **Classify (policy).** The active [policy profile](policies.md)
    (`--policy strict_abi|sdk_vendor|plugin_abi` or a custom
-   `--policy-file`) maps each change kind to its impact — the same change can
-   be `API_BREAK` under `strict_abi` but `COMPATIBLE` under `sdk_vendor`.
-2. **Waive (suppressions).** [Suppression rules](suppressions.md)
+   `--policy-file`) maps each *evaluated* change kind to its impact — the
+   same change can be `API_BREAK` under `strict_abi` but `COMPATIBLE` under
+   `sdk_vendor`. A `NOT_EVALUATED` finding is not scored by policy at all.
+4. **Waive (suppressions).** [Suppression rules](suppressions.md)
    (`--suppress FILE`) remove matching changes **before** the verdict and
    severity counts are computed. A suppressed breaking change does not fail
    the build; it is tallied separately (`suppressed_count` in the JSON
-   output).
-3. **Score (verdict + severity).** The surviving changes produce the overall
-   [verdict](../learn/verdicts.md) (`NO_CHANGE` … `BREAKING`) and, when
-   [severity](severity.md) is configured, per-category
+   output). Suppression cannot reach a *contract-coverage* failure (below) —
+   that is not a `Change`, so the suppression machinery structurally cannot
+   see one.
+5. **Score (verdict + severity).** The surviving, evaluated changes produce
+   the overall [verdict](../learn/verdicts.md) (`NO_CHANGE` … `BREAKING`)
+   and, when [severity](severity.md) is configured, per-category
    (`abi_breaking` / `potential_breaking` / `quality_issues` / `addition`)
    severity levels.
-4. **Exit.** The exit code comes from one of the two schemes below.
+6. **Exit.** The exit code comes from one of the two schemes below, folded
+   with the orthogonal contract-coverage contribution (next section).
+
+**Contract coverage runs alongside, not inside, this chain.** Under
+`--contract-evaluation`, if the selected domain's required evidence is
+incomplete (missing, partial, stale, or contradictory), `compare`/
+`scan --against` contribute an additional, independent exit `1` — folded
+with `max` against whatever the six stages above produced, so it can raise a
+clean `0` to `1` but never lowers a `2`/`4`. This is a genuinely different
+question from suppression or policy: those decide what an *observed* finding
+means, while contract coverage asks whether there was enough evidence to
+make that decision at all. See [Exit Codes → Contract-coverage
+contribution](../reference/exit-codes.md#contract-coverage-contribution-adr-049)
+for the full contract.
+
+The important distinction to hold onto: **out-of-contract**, **suppressed**,
+and **not-checkable** are three different reasons a finding does not block
+CI, and they should not be collapsed into one mental "ignored" bucket —
+each is visible in the report under a different field
+(`contract_relevance`, `suppressed_count`, `contract_coverage_failures`).
 
 **Display filtering is outside the pipeline.** `--show-only`, `--stat`,
 `--report-mode`, and `--format` change what the report *renders*, never the
@@ -88,6 +133,12 @@ Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
 
 ## How the knobs interact
 
+- **Contract relevance → policy.** Only `EVALUATED` findings ever reach
+  policy classification; a `NOT_EVALUATED` finding (out-of-contract or
+  unresolved) never gets a `ChangeKind` verdict at all, so downgrading a kind
+  in a custom policy has no effect on a finding contract relevance already
+  excluded. This stage is opt-in (`--contract-evaluation`) and off by
+  default — every other bullet below applies unconditionally.
 - **Policy → severity.** Severity categorizes changes *after* the policy has
   classified them. If `sdk_vendor` downgrades a kind from `potential_breaking`
   to `quality_issues`, the default preset then treats it as `warning`, not
@@ -179,5 +230,7 @@ and the policy recipes in [Getting Started](../start/getting-started.md).
   lifecycle
 - [Severity Configuration](severity.md) — categories, presets, per-category
   flags
+- [Compatibility Evaluation Config](../reference/compatibility-evaluation-config.md) —
+  the full field vocabulary and precedence for contract relevance/coverage
 - [Exit Codes](../reference/exit-codes.md) — the canonical exit-code matrix
 - [GitHub Action](github-action.md) — the same pipeline via `with:` inputs

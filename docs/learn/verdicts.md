@@ -17,8 +17,16 @@ generated: false
 
 Every `abicheck compare` run produces one of five core verdicts, ordered from
 safest to most severe: `NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`,
-`API_BREAK`, `BREAKING`. The verdict is the *worst* classification across all
-detected changes under the active [policy](../use/policies.md).
+`API_BREAK`, `BREAKING`. By default the verdict is the *worst* classification
+across all detected changes under the active [policy](../use/policies.md).
+
+> **Under `--contract-evaluation` (opt-in), that's the worst classification
+> across *evaluated* changes only.** Every detected change still exists and
+> stays in the report, but a change contract relevance proved outside the
+> declared contract, or couldn't resolve, never reaches policy at all — see
+> "Contract evaluation and the verdict" below. There is still no sixth
+> verdict; the five above are unchanged, they're just now computed over a
+> possibly-narrower set of findings.
 
 Each change kind is partitioned into exactly one classification set in
 `checker_policy.py` — `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, or
@@ -120,6 +128,58 @@ Examples:
 - `const` qualifier added to global variable (moves to `.rodata`, breaks writes)
 
 **CI action:** always fail; do not ship.
+
+---
+
+## Contract evaluation and the verdict
+
+`compare --contract-evaluation` (ADR-049 Phase 7) doesn't add a sixth
+verdict — it changes which findings the five verdicts above are computed
+*over*. Three separate questions are worth keeping apart, because collapsing
+them is the most common source of confusion once this flag is in play:
+
+1. **Finding existence.** Did `compare` detect a change at all? This is
+   unaffected by contract evaluation — a detected change is always in
+   `changes`, always rendered, regardless of relevance.
+2. **Compatibility evaluation status.** Under `--contract-evaluation`, each
+   finding is either `EVALUATED` (its contract relevance is `IN_CONTRACT` or
+   `NOT_APPLICABLE`) or `NOT_EVALUATED` (`PROVEN_OUT_OF_CONTRACT`,
+   `UNKNOWN_UNPROVEN`, or `UNKNOWN_UNRESOLVED`). Without the flag, every
+   finding is implicitly `EVALUATED` — nothing about this is new for a plain
+   `compare`.
+3. **Compatibility decision.** Only an `EVALUATED` finding gets one of the
+   five verdict-tier classifications above. A `NOT_EVALUATED` finding's
+   `compatibility_decision` field is JSON `null` — **`null` is not a sixth,
+   compatible-leaning verdict; it means policy never ran on this finding.**
+   The finding still carries its `ChangeKind`, its reason code, and its
+   evidence references, so a reader can see exactly why it wasn't scored.
+
+The run-level `verdict` is then the worst *compatibility decision* among
+`EVALUATED` findings — a run can detect a real binary break and still exit
+clean if that break is `PROVEN_OUT_OF_CONTRACT` (e.g. a private
+implementation detail outside your declared public surface), and,
+separately, a run can fail even with the worst *decision* at `COMPATIBLE`
+if the selected domain's evidence was incomplete — see "the contract
+coverage axis" below, which is independent of the verdict entirely.
+
+Because contract evaluation is strictly opt-in, none of this changes a plain
+`compare` invocation's behavior. Full field-by-field detail:
+[Compatibility Evaluation Config](../reference/compatibility-evaluation-config.md);
+pipeline ordering: [CI Gating](../use/ci-gating.md).
+
+### `BREAKING` doesn't always mean exit `4`
+
+A related simplification worth retiring: in severity-aware mode, the
+run-level *verdict* and the configured *severity gate* can deliberately
+diverge. A scoped comparison (`compare --used-by`/`--required-symbol`) can
+report a `BREAKING` verdict while a severity gate configured to only fail on
+`abi_breaking`-category findings elsewhere in the run still exits `0` if
+that particular category is set to `info`/`warning` rather than `error` —
+the verdict is a fact about what was found, the gate is a separate,
+independently-configured policy decision about what blocks CI. Read the
+`verdict` field from `--format json` if you need the fact regardless of how
+the gate is tuned; see [CI Gating](../use/ci-gating.md) for how the two
+interact.
 
 ---
 
