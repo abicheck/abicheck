@@ -45,9 +45,13 @@ finding is scored exactly as before and every exit code below is unchanged.
 `compare` and `scan --against` carry an **orthogonal contract-coverage axis**
 under `--contract-evaluation`. Complete coverage of the mode-selected evidence
 domain contributes `0`; missing, partial, stale, failed, contradictory, or
-identity-incomplete **required domain evidence** produces
-`UNKNOWN_UNRESOLVED`, `analysis_status=NOT_CHECKABLE`, and contributes `1`.
-Unrelated provider failures stay advisory.
+identity-incomplete **required domain evidence** is recorded as a
+`CoverageFailure` in the run-level `contract_coverage_failures` ledger and
+contributes `1`. Unrelated provider failures stay advisory. This is a
+run-level ledger, not a per-finding field: a coverage gap does not by itself
+force every finding to `UNKNOWN_UNRESOLVED` — an observed root or a
+kind that's `NOT_APPLICABLE` regardless of evidence can still resolve
+normally even while the ledger records incomplete evidence elsewhere.
 
 The axis is folded with `max`, so it raises a clean `0` to `1` and **never
 lowers** a gate's `2`/`4` — missing coverage cannot demote a real ABI break to
@@ -63,7 +67,10 @@ a coverage failure is not a finding, so the suppression machinery structurally
 cannot reach one. To accept incomplete contract assurance, set
 `contract.unresolved: warn` (for example via a `kind: contract` pack). That
 zeroes this contribution and changes nothing else: the failures remain listed
-in `contract_coverage_failures` in every report.
+in `contract_coverage_failures` — but only `--format json` carries that field
+at all; markdown, review, HTML, SARIF, and JUnit output surface the same
+information as a stderr diagnostic, a SARIF notification, or a JUnit error
+suite instead.
 
 Reports state the applied number in `contract_coverage_exit_contribution`,
 which distinguishes contract coverage exit `1` from severity or aggregate

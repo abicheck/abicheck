@@ -330,17 +330,25 @@ chains.
 
 ### The two evidence sides of the chain
 
-- **The app's import table proves the app requires a public symbol** —
-  parsed the same way as the relevance check above (`CONF_HIGH`: "a fact
-  about a real linked binary, not an inference").
-- **The old library's own source graph explains why that public symbol
-  depends on the changed one** — walking `DECL_CALLS_DECL`/
-  `SOURCE_DECL_MAPS_TO_SYMBOL` edges from every consumer-reachable public
-  entry to the declaration that changed.
+- **The app's import table proves the app requires the removed symbol
+  itself** — parsed the same way as the relevance check above (`CONF_HIGH`:
+  "a fact about a real linked binary, not an inference"). The proof-path
+  join only fires for a symbol the app's own binary directly names as
+  undefined; it does not explain a change to some other internal symbol the
+  app never referenced.
+- **The old library's own source graph explains *why* the app ended up
+  requiring that symbol directly** — walking `DECL_CALLS_DECL`/
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edges from every **consumer-compiled** public
+  entry (a declaration whose body was compiled straight into the consumer's
+  own binary — in practice, an `inline` function or template instantiation
+  the app's compiler expanded) to the removed declaration.
 
-Joining the two answers a question neither side can answer alone: not just
-"`X` is missing" but "the public entry point you call, `Y`, itself calls the
-now-removed `X` internally."
+Joining the two answers a question neither side can answer alone: not "some
+symbol went missing" but "the inline/template entry point `Y` your own
+binary expanded is what made you require the now-removed `X` directly." An
+ordinary out-of-line exported function the app calls has no such chain to
+show — if the app requires `Y` itself and `Y` was removed, that is the
+direct case below, not this join.
 
 ### What evidence this needs
 
@@ -372,19 +380,22 @@ myapp requires public entry train directly
 No chain to show — the app's own import table already names the removed
 symbol.
 
-**2. Indirect dependency** — the app imports a *stable* public entry point,
-but that entry point's body (as seen by the old library's source graph) calls
-an internal, now-removed declaration:
+**2. Indirect dependency** — `train()` is an `inline` function defined in the
+header, so the app's compiler expanded it straight into the app's own
+binary; the app's import table therefore directly names the internal,
+now-removed declaration `train()`'s body called, not `train` itself (which
+was never a real exported symbol to begin with):
 
 ```text
 myapp requires detail::train_ops_dispatcher via public entry train:
   train() → detail::train_ops_dispatcher()
 ```
 
-`train()` itself never changed — the app's import table alone would only
-show that `train` is still exported. The proof path is what explains that
-`train`'s own implementation is what makes the app depend on the internal
-symbol that was removed.
+The app's import table alone would only show that it requires
+`detail::train_ops_dispatcher` — an internal-looking name with no obvious
+reason to be a consumer's problem. The proof path is what explains that
+`train`, the header's own inline public entry point, is what made the app
+depend on it directly.
 
 ### Where this shows up in the report
 
