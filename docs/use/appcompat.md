@@ -312,11 +312,21 @@ declaration that changed.
 That source graph comes from one of two producers, and it matters which one
 supplied it: a full **L4/L5 build/source graph** (`--old-sources`/
 `--old-build-info`) sees real call chains through the library's whole
-implementation, while an **L2, header-only graph** — built automatically
-whenever headers are parsed at all, no extra flag needed — only sees
+implementation, while an **L2, header-only graph** — attached automatically
+whenever headers are parsed, no extra flag needed — only sees
 inline/template bodies visible directly in the header text. Both are stored
 as the same `SourceGraphSummary` shape, so the join below works identically
 either way; the L2 graph is just narrower in what it can reach.
+
+The L2 graph's automatic attach still needs `clang`/`clang++` on `PATH` to
+actually see call/type edges — that's true even when the main extraction
+used the default CastXML header backend, since the header-graph attach
+always shells out to clang itself. Without a usable clang, it silently
+degrades to a declaration-visibility-only graph (no `DECL_CALLS_DECL`
+edges), so the join below never fires and findings keep their plain
+symbol-level wording instead of erroring. In a clang-less environment,
+`--old-sources`/`--old-build-info` is the reliable way to get proof-path
+chains.
 
 ### The two evidence sides of the chain
 

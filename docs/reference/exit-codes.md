@@ -24,14 +24,18 @@ Under `--contract-evaluation`, each finding's contract relevance is classified
 is JSON `null` and its `gate_contribution` is `0`, so it moves neither the
 verdict nor the exit code.
 
-This is a real change to what a command exits with, and it goes in both
-directions: a change proven outside the declared contract stops blocking, and
-a change one domain cannot resolve stops being reported as an ABI break. What
-it never does is make either disappear — an excluded finding keeps its
-`ChangeKind`, stays in `changes` and in the audit ledgers, and is rendered
-with the relevance and reason code that say why it did not gate. The
-unresolved case is answered on the separate axis below, which is what stops
-missing evidence from being the cheapest way to pass.
+This is a real change to what the *compatibility verdict* scores, but only in
+one direction: since policy now scores the `EVALUATED` subset of what it used
+to score in full, the verdict can only stay the same or get less severe — a
+change proven outside the declared contract stops blocking, and a change one
+domain cannot resolve stops gating as an ABI break. What it never does is
+make either disappear — an excluded finding keeps its `ChangeKind`, stays in
+`changes` and in the audit ledgers, and is rendered with the relevance and
+reason code that say why it did not gate. The *other* direction — the
+overall process exit getting worse — comes from the separate,
+independently-orthogonal axis below (missing evidence contributing its own
+exit `1`), not from relevance itself; that's what stops missing evidence
+from being the cheapest way to pass.
 
 **Without `--contract-evaluation` no finding carries a relevance**, so every
 finding is scored exactly as before and every exit code below is unchanged.

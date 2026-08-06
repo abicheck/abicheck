@@ -35,7 +35,7 @@ flowchart LR
     PR --> V2["Verdict/gate recomputed<br/>if promotion changed anything"]
     V2 --> E["6 · Exit code<br/>(legacy or severity scheme)"]
     CC["Contract coverage<br/>(evidence completeness)"] -.->|max, orthogonal| E
-    V -.-> R["Report rendering<br/>(--show-only, --format)"]
+    V2 -.-> R["Report rendering<br/>(--show-only, --format)"]
 ```
 
 ## The order of operations
