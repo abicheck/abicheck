@@ -91,6 +91,10 @@ flowchart TD
   produce exit `1`, for unrelated reasons, and the JSON output records which
   targets caused which.
 
+An illustrative report (the exact `aggregate_schema_version` value shown is
+whatever this build emits — `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION` is
+the fact owner, not this example):
+
 ```json
 {
   "aggregate_schema_version": "1.3",

@@ -111,11 +111,13 @@ See the [CLI/Python/MCP parity table](../use/python-api.md#cli-python-mcp-parity
 
 `.abicheck.yml`'s `profiles:` block gained real teeth: `os`/`dependency_source`
 now schedule where a profile's check cell actually runs and how it
-provisions dependencies, and `compile.frontend` actually steers that cell's
-AST frontend end to end (not just documentation of intent). If your
-`profiles:` block already declared these correctly, nothing changes; if it
-declared them as inert notes (e.g. relying on a workflow-level default to
-override them), review [Scenario
+provisions dependencies, and `compile.frontend` actually steers a normal
+(non-bundle) target cell's AST frontend end to end (not just documentation
+of intent) — a `kind: bundle` check is the one exception, where it's still
+projected but not applied, since a directory/package operand rejects any
+non-`auto` frontend. If your `profiles:` block already declared these
+correctly, nothing changes; if it declared them as inert notes (e.g. relying
+on a workflow-level default to override them), review [Scenario
 S17](../integration/scenarios/multi-platform.md) — they're load-bearing
 now.
 
