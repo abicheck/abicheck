@@ -94,10 +94,15 @@ implementation-detail symbol exported for a narrow, undocumented reason).
 
 **`all` isn't quite unconditional, in two independent ways.** A
 separately-opted-in `--post-manifest` (a committed, narrower public-symbol
-list) is checked *before* the `all` mode shortcut, for every mode including
-`all` — a finding whose symbol the manifest specifically excludes still
-comes back `PROVEN_OUT_OF_CONTRACT`, not `IN_CONTRACT`. This only matters if
-you're also using `--post-manifest`. Separately, and unconditionally: a
+list) is checked *before* the `all` mode shortcut for `public`/`all` — a
+finding whose symbol the manifest specifically excludes still comes back
+`PROVEN_OUT_OF_CONTRACT`, not `IN_CONTRACT`, under either of those two
+modes. `exports` mode is the one exception: it dispatches to its own
+export-table-rooted decision *before* the manifest check ever runs, so a
+`--post-manifest` is advisory only there — an observed export the manifest
+omits can still resolve `IN_CONTRACT` under `--contract exports`. This only
+matters if you're also using `--post-manifest`. Separately, and
+unconditionally, across all three modes: a
 mode-independent check (loader/SONAME/security-hardening/deployment-floor
 kinds — the same curated set behind the `NOT_APPLICABLE` row above) runs
 *before any mode dispatch at all*, so those findings stay `NOT_APPLICABLE`
