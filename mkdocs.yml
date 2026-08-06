@@ -42,6 +42,7 @@ nav:
       - Choose Your Workflow: start/choose-your-workflow.md
       - 'Worked Example: Real Library': start/real-world-example.md
       - 'Scanning a Conda-Forge Package': start/scanning-conda-packages.md
+      - Upgrading to 0.6: start/upgrading-to-0.6.md
     - Everyday Use:
       - CLI Usage: use/cli-usage.md
       - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md
