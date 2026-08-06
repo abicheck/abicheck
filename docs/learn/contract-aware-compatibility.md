@@ -71,8 +71,8 @@ judged against (the legacy `--scope-public-headers`/`--no-` flag maps onto
 | Mode | What's in the contract | Evidence it consults |
 |---|---|---|
 | `public` (default alias) | The library's declared public headers — the source-level API surface | Header AST, scoped the same way plain `compare`'s public-surface scoping already works |
-| `exports` | Whatever the binary's own observed export table actually exports (`.dynsym`/PE export directory/Mach-O export trie) | The **binary's own export table** — no header evidence consulted at all |
-| `all` | Everything detected — no exclusion | Nothing extra; every finding is trivially `IN_CONTRACT` |
+| `exports` | Whatever the binary's own observed export table actually exports (`.dynsym`/PE export directory/Mach-O export trie) | The **export table alone decides which declarations are roots** — no header-origin/publicness filtering. But header (or debug-info) declaration data still matters afterward: the closure walk from those roots over the record/enum/typedef graph needs typed declarations to resolve, so giving it headers can turn an otherwise-`UNKNOWN_UNRESOLVED` type edge into a provable one. |
+| `all` | Everything detected — no exclusion, with one exception | Nothing extra; every finding is trivially `IN_CONTRACT` **unless** it's specifically excluded by a committed `--post-manifest` (see below) |
 
 **Decision table:**
 
@@ -87,6 +87,13 @@ views of the same thing: a symbol can be in your public headers but not
 actually exported (stripped, versioned out) — that's out of contract under
 `exports` but in contract under `public` — or vice versa (an
 implementation-detail symbol exported for a narrow, undocumented reason).
+
+**`all` isn't quite unconditional.** A separately-opted-in `--post-manifest`
+(a committed, narrower public-symbol list) is checked *before* the `all`
+mode shortcut, for every mode including `all` — a finding whose symbol the
+manifest specifically excludes still comes back `PROVEN_OUT_OF_CONTRACT`,
+not `IN_CONTRACT`. This only matters if you're also using `--post-manifest`;
+without it, `all` really does mean every finding is `IN_CONTRACT`.
 
 ## What a finding's relevance can be
 
@@ -128,10 +135,14 @@ header-origin/private-namespace/system-header checks already use.
 Four properties hold regardless of mode, and are worth internalizing before
 you turn this on for a real gate:
 
-1. **The finding never disappears.** A `PROVEN_OUT_OF_CONTRACT`/
-   `UNKNOWN_UNRESOLVED` finding stays in `changes`, is rendered in every
-   report format, and carries the reason code that explains why it didn't
-   gate.
+1. **Contract exclusion never hides the finding.** A `PROVEN_OUT_OF_CONTRACT`/
+   `UNKNOWN_UNRESOLVED` finding stays in `changes`, rendered with the reason
+   code that explains why it didn't gate — contract relevance by itself
+   removes nothing. (A *different*, independent mechanism, `--suppress`,
+   can still remove a matching finding from `changes` into
+   `suppression.suppressed_changes`, and public-surface/redundancy
+   filtering have their own audit ledgers — those are unrelated waiver
+   steps, not something contract evaluation does.)
 2. **Suppression cannot reach a contract-coverage failure.** A
    `CoverageFailure` is structurally not a `Change` — no `kind`, no
    `symbol`, no `source_location` for `--suppress` to match against — so

@@ -45,7 +45,16 @@ profiles:
 
 targets:
   libfoo:
-    binary_pattern: "lib/libfoo.so*"   # matched per profile's own build output
+    # A single glob, resolved by the calling workflow against each
+    # profile's OWN build-output directory — not per-OS. Linux's
+    # `libfoo.so`/`libfoo.so.1` and Windows' `foo.dll` don't share a
+    # naming convention a single glob can match, so a target checked on
+    # both platforms needs its build to stage a consistently-named/staged
+    # artifact per profile (e.g. always under `lib/libfoo.*`), not a
+    # pattern this schema resolves for you. This example's `lib/libfoo.*`
+    # only actually works if the Windows build is arranged to produce
+    # `lib/libfoo.dll` in the same relative location.
+    binary_pattern: "lib/libfoo.*"
     checks:
       - channel: accepted-main
         depth: headers
