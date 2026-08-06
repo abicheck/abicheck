@@ -41,7 +41,11 @@ from abicheck.checker_policy import (
     impact_for,
     policy_for,
 )
-from abicheck.contract_gating import contract_relevance_of, is_evaluated
+from abicheck.contract_gating import (
+    contract_relevance_of,
+    evaluation_status_of,
+    is_evaluated,
+)
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
@@ -51,7 +55,7 @@ from abicheck.reporter_markdown import (
     _root_cause_key_and_display,
     root_cause_lookup_for_changes,
 )
-from abicheck.severity import missing_contract_exit_code
+from abicheck.severity import gate_contribution_for_change, missing_contract_exit_code
 
 if TYPE_CHECKING:
     from abicheck.severity import SeverityConfig
@@ -342,6 +346,37 @@ def _result_for(
         properties["rootCauseId"] = root_cause_id
         properties["rootCause"] = root_display
 
+    # CLI-audit P1: bring per-finding contract fields to the same canonical
+    # shape reporter.py's JSON output already has (contract_relevance/
+    # contract_reason_code/contract_assurance/compatibility_evaluation_status/
+    # compatibility_decision/gate_contribution/contract_evidence_refs) --
+    # previously only the NOT_EVALUATED case below set any of these, so an
+    # IN_CONTRACT/NOT_APPLICABLE finding under --contract-evaluation carried
+    # no contract properties at all in SARIF even though it has a real,
+    # stamped decision. `contract_relevance_of` returns None for a run that
+    # never opted into --contract-evaluation, which is what keeps this
+    # unconditional call inert for every pre-existing SARIF report.
+    relevance = contract_relevance_of(change)
+    if relevance is not None:
+        properties["contractRelevance"] = relevance.value
+        if change.contract_reason_code:
+            properties["contractReasonCode"] = change.contract_reason_code
+        if change.contract_assurance is not None:
+            properties["contractAssurance"] = change.contract_assurance.value
+        status = evaluation_status_of(change)
+        if status is not None:
+            properties["compatibilityEvaluationStatus"] = status.value
+        decision = getattr(change, "compatibility_decision", None)
+        properties["compatibilityDecision"] = getattr(decision, "value", None)
+        properties["gateContribution"] = gate_contribution_for_change(
+            change,
+            severity_config,
+            policy=result.policy,
+            policy_file=result.policy_file,
+        )
+        if change.contract_evidence_refs is not None:
+            properties["contractEvidenceRefs"] = list(change.contract_evidence_refs)
+
     level = _severity(change, result, severity_config)
     # ADR-049 D1/D9: compatibility policy did not score this finding, so it
     # contributed nothing to the verdict or the exit code -- emitting
@@ -349,16 +384,10 @@ def _result_for(
     # "error" beside a `NO_CHANGE` verdict and a clean exit (Codex review,
     # reproduced with a proven-out-of-contract type-size change). Downgraded
     # rather than dropped: D9 requires every detector fact to land in exactly
-    # one *visible* outcome, and the relevance/reason below say why it is a
+    # one *visible* outcome, and the relevance/reason above says why it is a
     # note. The same shape the scoped-gate downgrade below already uses.
     if not is_evaluated(change):
         level = "note"
-        properties["compatibilityEvaluationStatus"] = "NOT_EVALUATED"
-        relevance = contract_relevance_of(change)
-        if relevance is not None:
-            properties["contractRelevance"] = relevance.value
-        if change.contract_reason_code:
-            properties["contractReasonCode"] = change.contract_reason_code
     if relevant_ids is not None:
         is_relevant = _finding_id(change) in relevant_ids
         properties["relevantToGate"] = is_relevant

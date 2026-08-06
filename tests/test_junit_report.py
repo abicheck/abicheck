@@ -1545,3 +1545,50 @@ class TestNotComparable:
         assert "1.0" in err.get("message")
         assert "2.0" in err.get("message")
         assert "ADR-050" in err.get("message")
+
+
+class TestContractEvaluationProperties:
+    """CLI-audit P1: a testcase for an evaluated (IN_CONTRACT/NOT_APPLICABLE)
+    finding must carry the same canonical contract-decision fields
+    reporter.py's JSON output and sarif.py's ``properties`` already have --
+    not just the NOT_EVALUATED case a demoted/proven-out-of-contract finding
+    already handled via `_is_failure`'s downgrade."""
+
+    def test_in_contract_finding_carries_full_decision(self) -> None:
+        from abicheck.contract_relevance_types import (
+            CompatibilityEvaluationStatus,
+            ContractAssurance,
+            ContractRelevance,
+        )
+
+        change = Change(
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "Function foo() removed",
+            contract_relevance=ContractRelevance.IN_CONTRACT,
+            contract_reason_code="public_header_direct",
+            contract_assurance=ContractAssurance.COMPLETE,
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.EVALUATED,
+            compatibility_decision=Verdict.BREAKING,
+            contract_evidence_refs=("public_header:old",),
+        )
+        r = _make_result([change], verdict=Verdict.BREAKING)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='_Z3foov']")
+        props = {p.get("name"): p.get("value") for p in tc.find("properties")}
+        assert props["abicheck.contract_relevance"] == "IN_CONTRACT"
+        assert props["abicheck.contract_reason_code"] == "public_header_direct"
+        assert props["abicheck.contract_assurance"] == "complete"
+        assert props["abicheck.compatibility_evaluation_status"] == "EVALUATED"
+        assert props["abicheck.compatibility_decision"] == "BREAKING"
+        assert int(props["abicheck.gate_contribution"]) > 0
+        assert props["abicheck.contract_evidence_refs"] == "public_header:old"
+
+    def test_unstamped_finding_carries_no_contract_properties(self) -> None:
+        change = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Function foo() removed")
+        r = _make_result([change], verdict=Verdict.BREAKING)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='_Z3foov']")
+        assert tc.find("properties") is None

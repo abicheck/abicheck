@@ -1068,3 +1068,45 @@ class TestNotComparable:
         )
         # Round-trips cleanly -- no non-JSON-serializable values snuck in.
         assert json.loads(json.dumps(doc)) == doc
+
+
+class TestContractEvaluationFields:
+    """CLI-audit P1: an evaluated (IN_CONTRACT/NOT_APPLICABLE) finding must
+    carry the same canonical contract-decision fields reporter.py's JSON
+    output already has -- not just a NOT_EVALUATED finding."""
+
+    def test_in_contract_finding_carries_full_decision(self) -> None:
+        from abicheck.contract_relevance_types import (
+            CompatibilityEvaluationStatus,
+            ContractAssurance,
+            ContractRelevance,
+        )
+
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="Function foo() removed",
+            contract_relevance=ContractRelevance.IN_CONTRACT,
+            contract_reason_code="public_header_direct",
+            contract_assurance=ContractAssurance.COMPLETE,
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.EVALUATED,
+            compatibility_decision=Verdict.BREAKING,
+            contract_evidence_refs=("public_header:old",),
+        )
+        result = _make_result([change])
+        doc = to_sarif(result)
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert props["contractRelevance"] == "IN_CONTRACT"
+        assert props["contractReasonCode"] == "public_header_direct"
+        assert props["contractAssurance"] == "complete"
+        assert props["compatibilityEvaluationStatus"] == "EVALUATED"
+        assert props["compatibilityDecision"] == "BREAKING"
+        assert props["gateContribution"] > 0
+        assert props["contractEvidenceRefs"] == ["public_header:old"]
+
+    def test_unstamped_finding_carries_no_contract_properties(self) -> None:
+        result = _make_result([_breaking_change()])
+        doc = to_sarif(result)
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert "contractRelevance" not in props
+        assert "gateContribution" not in props

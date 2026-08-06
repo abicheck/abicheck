@@ -360,7 +360,9 @@ def _count_failures(
     """Count distinct symbols that have at least one failing change."""
     symbols_with_failure: set[str] = set()
     for c in changes:
-        if _is_failure(c, result, kind_sets, severity_config, relevant_ids=relevant_ids):
+        if _is_failure(
+            c, result, kind_sets, severity_config, relevant_ids=relevant_ids
+        ):
             symbols_with_failure.add(c.symbol)
     return len(symbols_with_failure)
 
@@ -430,7 +432,9 @@ def _append_extra_failures(
     ``<testcase>`` with the matching name and attach a new ``<failure>``.
     """
     for c in extra_changes:
-        if _is_failure(c, result, kind_sets, severity_config, relevant_ids=relevant_ids):
+        if _is_failure(
+            c, result, kind_sets, severity_config, relevant_ids=relevant_ids
+        ):
             for tc in ts:
                 if tc.get("name") == c.symbol:
                     _add_failure(
@@ -521,7 +525,9 @@ def _build_testsuite(
         show_only_severities = ShowOnlyFilter.parse(show_only).severities
         if show_only_severities and missing_severity_label not in show_only_severities:
             missing_labels = ()
-    total = (len(all_symbols) if all_symbols else len(change_by_symbol)) + len(missing_labels)
+    total = (len(all_symbols) if all_symbols else len(change_by_symbol)) + len(
+        missing_labels
+    )
     if missing_blocks:
         failure_count += len(missing_labels)
 
@@ -575,8 +581,11 @@ def _build_testsuite(
 
 
 def _emit_missing_contract_testcases(
-    ts: ET.Element, missing_labels: tuple[str, ...], gate_scope: str | None,
-    *, blocks: bool = True,
+    ts: ET.Element,
+    missing_labels: tuple[str, ...],
+    gate_scope: str | None,
+    *,
+    blocks: bool = True,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
     """Emit a ``<testcase>`` per missing required symbol/version/entrypoint.
@@ -594,14 +603,19 @@ def _emit_missing_contract_testcases(
     still visible in the report, but only fails when the gate itself
     considers it blocking.
     """
-    classname = "used_by_contract" if gate_scope == "used_by" else "required_symbol_contract"
+    classname = (
+        "used_by_contract" if gate_scope == "used_by" else "required_symbol_contract"
+    )
     for label in missing_labels:
         tc = ET.SubElement(ts, "testcase")
         tc.set("name", label)
         tc.set("classname", classname)
         if blocks:
             fail = ET.SubElement(tc, "failure")
-            fail.set("message", f"Required symbol/version '{label}' is missing from the new library.")
+            fail.set(
+                "message",
+                f"Required symbol/version '{label}' is missing from the new library.",
+            )
             fail.set("type", "MISSING_CONTRACT_MEMBER")
             if root_cause_lookup is not None:
                 entry = root_cause_lookup.get(label)
@@ -638,7 +652,9 @@ def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
     # Back-compat alias for the property's original name.
     _prop("abicheck.scoped_verdict", scoped_verdict.value)
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
-    relevant_in_changes = sum(1 for c in result.changes if _finding_id(c) in relevant_ids)
+    relevant_in_changes = sum(
+        1 for c in result.changes if _finding_id(c) in relevant_ids
+    )
     # Scoped-only changes and missing-contract members are relevant by
     # construction and never in result.changes, so they count toward
     # relevant_finding_count but not unrelated_finding_count, which only
@@ -648,7 +664,10 @@ def _add_scoped_properties(ts: ET.Element, result: DiffResult) -> None:
     missing_count = len(getattr(result, "scoped_missing_labels", ()) or ())
     relevant_count = relevant_in_changes + scoped_only_count + missing_count
     _prop("abicheck.relevant_finding_count", str(relevant_count))
-    _prop("abicheck.unrelated_finding_count", str(len(result.changes) - relevant_in_changes))
+    _prop(
+        "abicheck.unrelated_finding_count",
+        str(len(result.changes) - relevant_in_changes),
+    )
     scoped_exit_code = getattr(result, "scoped_exit_code", None)
     scoped_exit_code_scheme = getattr(result, "scoped_exit_code_scheme", None)
     if scoped_exit_code is not None:
@@ -678,10 +697,77 @@ def _maybe_add_failure(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
-    """Add a ``<failure>`` child to *tc* if the change is a failure."""
-    if _is_failure(change, result, kind_sets, severity_config, relevant_ids=relevant_ids):
+    """Add a ``<failure>`` child to *tc* if the change is a failure, and a
+    ``<properties>`` block with ADR-049's per-finding contract decision
+    (CLI-audit P1) regardless of pass/fail.
+    """
+    _add_contract_properties(tc, change, result, severity_config)
+    if _is_failure(
+        change, result, kind_sets, severity_config, relevant_ids=relevant_ids
+    ):
         _add_failure(
-            tc, change, result, kind_sets, severity_config, root_cause_lookup=root_cause_lookup
+            tc,
+            change,
+            result,
+            kind_sets,
+            severity_config,
+            root_cause_lookup=root_cause_lookup,
+        )
+
+
+def _add_contract_properties(
+    tc: ET.Element,
+    change: Change,
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
+) -> None:
+    """Append a ``<properties>`` block to testcase *tc* with the same
+    canonical per-finding contract shape reporter.py's JSON output and
+    sarif.py's ``properties`` already carry (contract_relevance/
+    contract_reason_code/contract_assurance/compatibility_evaluation_status/
+    compatibility_decision/gate_contribution/contract_evidence_refs).
+
+    A finding whose ``contract_relevance`` was never stamped (every run
+    without ``--contract-evaluation``, the default) gets nothing appended --
+    this keeps every pre-existing JUnit report byte-for-byte unchanged.
+    """
+    from .contract_gating import contract_relevance_of, evaluation_status_of
+    from .severity import gate_contribution_for_change
+
+    relevance = contract_relevance_of(change)
+    if relevance is None:
+        return
+    props = ET.SubElement(tc, "properties")
+
+    def _prop(name: str, value: str) -> None:
+        p = ET.SubElement(props, "property")
+        p.set("name", name)
+        p.set("value", value)
+
+    _prop("abicheck.contract_relevance", relevance.value)
+    if change.contract_reason_code:
+        _prop("abicheck.contract_reason_code", change.contract_reason_code)
+    if change.contract_assurance is not None:
+        _prop("abicheck.contract_assurance", change.contract_assurance.value)
+    status = evaluation_status_of(change)
+    if status is not None:
+        _prop("abicheck.compatibility_evaluation_status", status.value)
+    decision = getattr(change, "compatibility_decision", None)
+    _prop("abicheck.compatibility_decision", getattr(decision, "value", "") or "")
+    _prop(
+        "abicheck.gate_contribution",
+        str(
+            gate_contribution_for_change(
+                change,
+                severity_config,
+                policy=result.policy,
+                policy_file=result.policy_file,
+            )
+        ),
+    )
+    if change.contract_evidence_refs is not None:
+        _prop(
+            "abicheck.contract_evidence_refs", ",".join(change.contract_evidence_refs)
         )
 
 
