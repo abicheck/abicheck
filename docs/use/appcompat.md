@@ -303,20 +303,29 @@ All other changes are classified as **irrelevant** — the library changed, but 
 ## Why does this consumer depend on the changed declaration?
 
 The relevance test above tells you *whether* a change touches the app's
-imports. When the old library side also carries an **L5 source graph**
-(ADR-057), abicheck can additionally explain *why* — the chain of calls
-inside the old library that connects a symbol the app actually imports to
-the internal declaration that changed.
+imports. When the old library side also carries a **source graph** (ADR-057),
+abicheck can additionally explain *why* — the chain of calls inside the old
+library that connects a symbol the app actually imports to the internal
+declaration that changed.
+
+That source graph comes from one of two producers, and it matters which one
+supplied it: a full **L4/L5 build/source graph** (`--old-sources`/
+`--old-build-info`) sees real call chains through the library's whole
+implementation, while an **L2, header-only graph** — built automatically
+whenever headers are parsed at all, no extra flag needed — only sees
+inline/template bodies visible directly in the header text. Both are stored
+as the same `SourceGraphSummary` shape, so the join below works identically
+either way; the L2 graph is just narrower in what it can reach.
 
 ### The two evidence sides of the chain
 
 - **The app's import table proves the app requires a public symbol** —
   parsed the same way as the relevance check above (`CONF_HIGH`: "a fact
   about a real linked binary, not an inference").
-- **The old library's own L5 graph explains why that public symbol depends
-  on the changed one** — walking `DECL_CALLS_DECL`/`SOURCE_DECL_MAPS_TO_SYMBOL`
-  edges from every consumer-reachable public entry to the declaration that
-  changed.
+- **The old library's own source graph explains why that public symbol
+  depends on the changed one** — walking `DECL_CALLS_DECL`/
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edges from every consumer-reachable public
+  entry to the declaration that changed.
 
 Joining the two answers a question neither side can answer alone: not just
 "`X` is missing" but "the public entry point you call, `Y`, itself calls the
@@ -324,23 +333,22 @@ now-removed `X` internally."
 
 ### What evidence this needs
 
-The join only fires when the **old** library side carries an L5 graph.
-Since header parsing always attempts to build a header-only L5 graph (no
-extra flag needed), even a plain `-H`/`--header` pass can supply it for
-inline/template-reachable chains; passing `--old-sources`/`--old-build-info`
-(or their `--sources`/`--build-info` equivalents) reaches further, into
-call chains a header alone can't see:
+The join only fires when the **old** library side carries a source graph —
+either shape above. A plain `-H`/`--header` pass already supplies the L2
+header-only one, for inline/template-reachable chains; passing
+`--old-sources`/`--old-build-info` (or their `--sources`/`--build-info`
+equivalents) reaches further, into call chains a header alone can't see:
 
 ```bash
 abicheck compare libfoo.so.1 libfoo.so.2 --used-by ./myapp \
   -H old=include/v1/foo.h -H new=include/v2/foo.h
 ```
 
-**Without L5 evidence, abicheck doesn't invent an explanation** — the
-finding keeps exactly the plain symbol-level wording it always had
-(`public_reachable: true`, no proof path), the same as before this feature
-existed. Absence of a graph edge is never treated as evidence of absence of
-a dependency.
+**Without a source graph on the old side, abicheck doesn't invent an
+explanation** — the finding keeps exactly the plain symbol-level wording it
+always had (`public_reachable: true`, no proof path), the same as before
+this feature existed. Absence of a graph edge is never treated as evidence
+of absence of a dependency.
 
 ### Two worked examples
 
@@ -354,7 +362,7 @@ No chain to show — the app's own import table already names the removed
 symbol.
 
 **2. Indirect dependency** — the app imports a *stable* public entry point,
-but that entry point's body (as seen by the old library's L5 graph) calls
+but that entry point's body (as seen by the old library's source graph) calls
 an internal, now-removed declaration:
 
 ```text

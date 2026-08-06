@@ -112,7 +112,22 @@ flowchart TD
     "exit_contribution": 0,
     "incomplete_targets": []
   },
-  "targets": ["..."]
+  "targets": [
+    {
+      "target_id": "linux-x86_64",
+      "required": true,
+      "state": "analyzed",
+      "compatibility_verdict": "BREAKING",
+      "gate": {"exit_code": 4, "blocking": true, "blocking_categories": ["abi_breaking"], "from_report": true},
+      "contract_coverage_exit": 0
+    },
+    {
+      "target_id": "windows-x86_64",
+      "required": true,
+      "state": "unavailable",
+      "reason": "no report was produced for this expected target"
+    }
+  ]
 }
 ```
 
