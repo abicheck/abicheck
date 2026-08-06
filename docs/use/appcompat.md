@@ -212,10 +212,15 @@ verdict.
 `--used-by` app's own scoped result — the full-library verdict is folded
 into the rendered report as informational context (see "Example output"
 above) but does **not** participate in the exit-code calculation. Which
-*scheme* computes that scoped exit code follows the same rule as plain
-`compare`: no severity setting active uses the legacy mapping below; any
-`--severity-*`/`--severity-preset` flag (or a config severity value)
-switches the scoped path to the severity-aware scheme too.
+*scheme* computes that scoped exit code follows the same resolution as
+plain `compare` (`resolve_compare_config`): an explicit `--exit-code-scheme
+legacy|severity` (CLI flag or a config `exit_code_scheme` value) always
+pins that scheme, scoped run or not. Only when the scheme is left at its
+default (`auto`) does a `--severity-*`/`--severity-preset` flag (or a
+config severity value) decide it — `auto` resolves to `severity` if any
+severity setting is active, `legacy` otherwise. So `--severity-preset
+default --exit-code-scheme legacy` still exits under the legacy `0`/`2`/`4`
+mapping, scoped included.
 
 **Legacy scheme (no severity setting active):**
 
@@ -230,8 +235,10 @@ switches the scoped path to the severity-aware scheme too.
 
 A scoped `--used-by` (or `--required-symbol(s)`) run respects
 `--exit-code-scheme`/`--severity-*`/`--severity-preset` the same way plain
-`compare` does: passing any severity setting switches the scoped exit code
-to the severity-aware `0`/`1`/`2`/`4` scheme described in [Exit
+`compare` does — including that an explicit `--exit-code-scheme legacy`
+still pins the legacy mapping even alongside a `--severity-*` flag (see
+above). When the scheme does resolve to severity-aware, it applies to the
+scoped exit code too: `0`/`1`/`2`/`4` as described in [Exit
 Codes](../reference/exit-codes.md), computed over the changes relevant to
 that app (`compute_exit_code`/`compute_gate_decision` run against the
 app-scoped change set, not the full library's). One consequence: a missing
@@ -250,9 +257,12 @@ The JSON report distinguishes the two levels explicitly:
   `severity.blocking_categories` are the scoped tallies too, not the
   full-library ones.
 - `full_verdict` / `full_severity` — the full-library result, moved aside as
-  informational context. `full_severity` is present only when the scoped
-  gate actually ran under the severity scheme (its absence, with `severity`
-  still present, means the legacy scheme was used).
+  informational context. Both `severity` and `full_severity` are present
+  only when the run resolved to the severity scheme; under the legacy
+  scheme neither key is emitted at all (there is no gate config to render),
+  so their absence alone doesn't distinguish "legacy" from "not rendered
+  yet" — check `scoped_exit_code_scheme` via SARIF/JUnit (below) if a
+  consumer needs to tell the two apart explicitly.
 - `used_by` — per-app detail (`missing_symbols`/`missing_versions`/
   `relevant_change_count`), unchanged by which scheme computed the exit
   code.

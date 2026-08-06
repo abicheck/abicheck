@@ -139,8 +139,12 @@ verdict — it changes which findings the five verdicts above are computed
 them is the most common source of confusion once this flag is in play:
 
 1. **Finding existence.** Did `compare` detect a change at all? This is
-   unaffected by contract evaluation — a detected change is always in
-   `changes`, always rendered, regardless of relevance.
+   unaffected by contract evaluation specifically — a finding's contract
+   relevance never removes it from the report. (A *different* mechanism,
+   `--suppress`, does remove a matching finding from `changes` and lists it
+   under `suppression.suppressed_changes` instead — see [Suppressions](../use/suppressions.md)
+   — but that's an independent, unrelated waiver step, not something
+   contract evaluation does.)
 2. **Compatibility evaluation status.** Under `--contract-evaluation`, each
    finding is either `EVALUATED` (its contract relevance is `IN_CONTRACT` or
    `NOT_APPLICABLE`) or `NOT_EVALUATED` (`PROVEN_OUT_OF_CONTRACT`,
