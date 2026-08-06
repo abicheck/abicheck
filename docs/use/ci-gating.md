@@ -5,6 +5,7 @@ audience:
 level: intermediate
 summarizes:
   - verdicts
+  - contract-relevance-and-coverage
 lifecycle: active
 generated: false
 ---
@@ -13,12 +14,14 @@ generated: false
 
 Several mechanisms decide what fails your build: **baselines** (what you
 compare against), **contract relevance** (whether a change even belongs to
-your declared compatibility contract — opt-in), **policy** (how an evaluated
-change is classified), **suppressions** (which changes are waived),
-**severity** (which categories set the exit code), and **contract coverage**
-(whether there was enough evidence to make a contract decision at all — its
-own, orthogonal axis). Each has its own reference page; this page is the
-map — what runs in what order, and how the knobs interact.
+your declared compatibility contract — opt-in; see [Contract-Aware
+Compatibility](../learn/contract-aware-compatibility.md) for the mental
+model), **policy** (how an evaluated change is classified), **suppressions**
+(which changes are waived), **severity** (which categories set the exit
+code), and **contract coverage** (whether there was enough evidence to make
+a contract decision at all — its own, orthogonal axis). Each has its own
+reference page; this page is the map — what runs in what order, and how the
+knobs interact.
 
 ```mermaid
 flowchart LR

@@ -38,23 +38,31 @@ generated: false
       exit code, but the *reason* it's unresolved (missing evidence) can
       still do so, orthogonally, via contract coverage below.
     - **Run-level contract coverage.** An orthogonal axis, independent of
-      any single finding's decision: if the selected domain's required
-      evidence is incomplete, `compare`/`scan --against` contribute an exit
-      `1`, folded with `max` against the ordinary gate — it can raise a
-      clean `0` to `1`, never lower a `2`/`4`, and it never rewrites any
-      finding's `compatibility_decision`. So a run can exit `0` on
-      compatibility (every evaluated finding is fine, and every
-      `NOT_EVALUATED` finding is silent) while still exiting `1` overall
-      because the evidence needed to trust that picture was incomplete. See
-      [Exit Codes](exit-codes.md).
+      any single finding's decision: by default, if the selected domain's
+      required evidence is incomplete, `compare`/`scan --against` contribute
+      an exit `1`, folded with `max` against the ordinary gate — it can
+      raise a clean `0` to `1`, never lower a `2`/`4`, and it never rewrites
+      any finding's `compatibility_decision`. The one exception is a
+      selected `kind: contract` pack setting `contract.unresolved: warn`
+      (see "Pack manifests" below) — that zeroes this contribution
+      specifically, while the failures stay listed in
+      `contract_coverage_failures` regardless. So, absent that override, a
+      run can exit `0` on compatibility (every evaluated finding is fine,
+      and every `NOT_EVALUATED` finding is silent) while still exiting `1`
+      overall because the evidence needed to trust that picture was
+      incomplete. See [Exit Codes](exit-codes.md).
 
-    Outside `--contract-evaluation`, a `compare` run resolves nothing from
-    this object and every other command is unaffected — this is still an
-    opt-in feature, not a default-on one. Selecting a `--pack` is live
-    regardless: a `kind: policy` pack overriding a `ChangeKind` moves the
+    Outside both `--contract-evaluation` and a selected `--pack`, a
+    `compare`/`scan` run resolves nothing from this object at all and every
+    other command is unaffected — contract evaluation is still an opt-in
+    feature, not a default-on one. A selected `--pack` **alone** (no
+    `--contract-evaluation`) still resolves and applies its own fields,
+    though: a `kind: policy` pack overriding a `ChangeKind` moves the
     verdict and the exit code the same way an equivalent `--policy-file`
     override would (see "Selecting a pack" below), independent of contract
-    evaluation.
+    evaluation. (A `kind: contract` pack's `contract.unresolved` is the one
+    field that specifically needs `--contract-evaluation` too, since nothing
+    consumes it otherwise — see "Pack manifests" below.)
 
     The historical shadow/advisory design this feature shipped with first —
     where relevance was computed but never consulted by policy — is recorded

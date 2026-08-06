@@ -300,6 +300,103 @@ All other changes are classified as **irrelevant** — the library changed, but 
 
 ---
 
+## Why does this consumer depend on the changed declaration?
+
+The relevance test above tells you *whether* a change touches the app's
+imports. When the old library side also carries an **L5 source graph**
+(ADR-057), abicheck can additionally explain *why* — the chain of calls
+inside the old library that connects a symbol the app actually imports to
+the internal declaration that changed.
+
+### The two evidence sides of the chain
+
+- **The app's import table proves the app requires a public symbol** —
+  parsed the same way as the relevance check above (`CONF_HIGH`: "a fact
+  about a real linked binary, not an inference").
+- **The old library's own L5 graph explains why that public symbol depends
+  on the changed one** — walking `DECL_CALLS_DECL`/`SOURCE_DECL_MAPS_TO_SYMBOL`
+  edges from every consumer-reachable public entry to the declaration that
+  changed.
+
+Joining the two answers a question neither side can answer alone: not just
+"`X` is missing" but "the public entry point you call, `Y`, itself calls the
+now-removed `X` internally."
+
+### What evidence this needs
+
+The join only fires when the **old** library side carries an L5 graph.
+Since header parsing always attempts to build a header-only L5 graph (no
+extra flag needed), even a plain `-H`/`--header` pass can supply it for
+inline/template-reachable chains; passing `--old-sources`/`--old-build-info`
+(or their `--sources`/`--build-info` equivalents) reaches further, into
+call chains a header alone can't see:
+
+```bash
+abicheck compare libfoo.so.1 libfoo.so.2 --used-by ./myapp \
+  -H old=include/v1/foo.h -H new=include/v2/foo.h
+```
+
+**Without L5 evidence, abicheck doesn't invent an explanation** — the
+finding keeps exactly the plain symbol-level wording it always had
+(`public_reachable: true`, no proof path), the same as before this feature
+existed. Absence of a graph edge is never treated as evidence of absence of
+a dependency.
+
+### Two worked examples
+
+**1. Direct dependency** — the app imports the removed function itself:
+
+```text
+myapp requires public entry train directly
+```
+
+No chain to show — the app's own import table already names the removed
+symbol.
+
+**2. Indirect dependency** — the app imports a *stable* public entry point,
+but that entry point's body (as seen by the old library's L5 graph) calls
+an internal, now-removed declaration:
+
+```text
+myapp requires detail::train_ops_dispatcher via public entry train:
+  train() → detail::train_ops_dispatcher()
+```
+
+`train()` itself never changed — the app's import table alone would only
+show that `train` is still exported. The proof path is what explains that
+`train`'s own implementation is what makes the app depend on the internal
+symbol that was removed.
+
+### Where this shows up in the report
+
+- On the synthesized "missing required symbol" finding (for a symbol the
+  library diff itself has no ordinary change for), and
+- On an **ordinary** library change (e.g. `FUNC_REMOVED`) that already
+  covers the same symbol — in that case the wording is consumer-neutral
+  (`"... is reachable from public entry train: ..."`, no app name), since
+  that finding is also rendered in the unscoped, full-library report.
+
+In `--format json`, the structured chain is `impact_proof_path` — an
+alternating list of node/edge dicts — alongside `affected_public_roots`
+(the public entry point name(s)) and `impact_is_direct`. These live on the
+`ImpactAssessment.proof_path` object described in the [Impact
+Analysis](../learn/impact-analysis.md) reference for the general model this
+feature builds on; this section only covers the consumer-scoped join.
+
+### Current limits
+
+This is a **static** proof over the graphs abicheck already builds, not a
+runtime trace: it does not ingest anything the app actually did at
+runtime, doesn't yet read a project-declared use-case manifest, and doesn't
+yet join **multiple** `--used-by` apps into one shared graph (each app's
+scoping is computed independently, repeatably — not a unified
+multi-consumer picture). There is also no consumer-side build-evidence
+edge yet (what the *consumer's own* source does with the symbol, as opposed
+to what the library's old implementation does) — only the library side of
+the chain is graph-backed.
+
+---
+
 ## Supported binary formats
 
 | Format | Application | Library | Symbol filtering |

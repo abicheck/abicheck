@@ -146,6 +146,126 @@ Path("report.sarif").write_text(report)
 Supported `fmt` values: `"markdown"`, `"json"`, `"sarif"`, `"html"`, `"junit"`.
 `render_output` raises `ValidationError` for an unrecognised format.
 
+## Typed request API
+
+`run_compare`/`run_dump` are convenience shims — keyword arguments in,
+typed result out. Underneath, every front end (native CLI, this Python API,
+the MCP server) ultimately resolves through the **same typed request
+objects**: `DumpRequest`, `CompareRequest`, and `ScanRequest`. Reaching for
+the typed request directly buys you three things a keyword shim can't:
+
+- **The identical validation contract** every front end gets — a bad
+  combination of fields raises the same `ValidationError` whichever way you
+  called in.
+- **Repeatable configuration** — build one `CompareRequest` once (from a
+  config file, a test fixture, a stored preset) and reuse it, rather than
+  re-threading a dozen keyword arguments.
+- **API/MCP parity** — the MCP server builds these exact same dataclasses
+  from its own tool arguments, so a capability documented for one is
+  reachable, by the same field name, from the other.
+
+| Operation | Convenience API | Typed API | Result |
+|---|---|---|---|
+| Dump | `run_dump(...)` | `run_dump_request(DumpRequest(...))` | `AbiSnapshot` |
+| Compare | `run_compare(...)` | `run_compare_request(CompareRequest(...))` | `CompareResult` |
+| Scan | *(none — always typed)* | `run_scan(ScanRequest(...))` | `ScanResult` |
+
+### `DumpRequest`
+
+```python
+from pathlib import Path
+from abicheck.api_types import DumpRequest, InputSpec
+from abicheck.service_dump_pipeline import run_dump_request
+
+request = DumpRequest(
+    input=InputSpec(
+        path=Path("libfoo.so"),
+        headers=[Path("include/foo.h")],
+        version="1.0",
+    ),
+    depth="headers",     # a floor, not a target — see below
+)
+snapshot = run_dump_request(request)
+```
+
+Key `DumpRequest` fields, beyond the `InputSpec` it wraps (`path`,
+`headers`, `includes`, `version`, `pdb`, `debug_roots`,
+`include_dependencies`, `sources`, `build_info`, `dump_manifest`,
+`compile`, `public_header_dirs`):
+
+| Field | Meaning |
+|---|---|
+| `depth` | `binary`/`headers`/`build`/`source` — an explicit value is an **enforced floor**: `run_dump_request` raises `ValidationError` if the resolved snapshot's evidence doesn't actually reach it, the same guarantee the CLI's `dump --depth` gives via `DumpDepthNotSatisfiedError` (a different exception type, since Tier-2 has no `ClickException` concept — same guarantee, different vocabulary). |
+| `frontend` | Header-AST frontend (`auto`/`castxml`/`clang`/`hybrid`). |
+| `dwarf_only` / `debug_format` / `enable_debuginfod` / `debuginfod_url` | Debug-info resolution knobs. |
+| `follow_dependencies` / `dependency_search_paths` | Dependency-closure walk. |
+| `has_sources` | Legacy flag consulted by the `android` frontend's source-evidence rule. |
+
+`InputSpec.sources`/`build_info`/`dump_manifest` are mutually exclusive with
+`headers`/`includes`/`public_header_dirs` — a request combining them fails
+validation before any extraction runs (`DumpRequest.validation_errors()`).
+
+### `CompareRequest`
+
+```python
+from abicheck.api_types import CompareRequest, InputSpec
+from abicheck.service_compare_pipeline import resolve_compare_request, classify_compare_pair
+
+request = CompareRequest(
+    old=InputSpec(path=Path("libfoo.so.1")),
+    new=InputSpec(path=Path("libfoo.so.2")),
+    contract_evaluation=True,
+    contract_mode="public",
+)
+pair = resolve_compare_request(request)       # -> ResolvedComparePair (old/new snapshots)
+result = classify_compare_pair(request, pair)  # -> CompareResult
+```
+
+`run_compare_request(request)` does both steps in one call — this two-step
+form exists because the native CLI runs its own Click-specific resolution
+(`--pack` application, receipt recording) *between* them; a typed caller
+normally just wants `run_compare_request`.
+
+### `ScanRequest`
+
+Scan never had an untyped convenience shim — `ScanRequest` is the only way
+in from Python:
+
+```python
+from abicheck.service_scan import ScanRequest, run_scan
+
+result = run_scan(ScanRequest(
+    binaries=[Path("build/libfoo.so")],
+    baseline=Path("baseline.json"),
+    depth="headers",
+    contract_evaluation=True,
+    contract_mode="exports",
+))
+```
+
+## CLI / Python / MCP parity
+
+The same capability, named consistently (or explicitly *not* available)
+across all three front ends:
+
+| Capability | CLI | Python (typed) | MCP |
+|---|---|---|---|
+| Depth floor | `dump --depth` → `DumpDepthNotSatisfiedError` | `DumpRequest.depth`/`CompareRequest.depth` → `ValidationError` | `abi_dump(depth=...)` → `{"status": "error", ...}` on a floor miss |
+| Not comparable | exit code `16` | raises `ProfileMismatchError`/`ScopeMismatchError` | `abi_compare` → `{"status": "not_comparable", "reason": ...}` |
+| Contract evaluation | `--contract-evaluation` / `--contract {public,exports,all}` | `CompareRequest.contract_evaluation`/`.contract_mode` (same fields on `ScanRequest`) | `abi_compare(contract_evaluation=, contract_mode=)`, `abi_scan(...)` |
+| Consumer scoping | `compare --used-by` | `abicheck.appcompat.scope_diff_to_app(...)` — no `CompareRequest` field, a post-classification step | `abi_compare(used_by=[...])`; **not available on `abi_scan`** |
+
+Two asymmetries worth knowing about, not bugs to work around:
+
+- **Consumer scoping has no `CompareRequest` field.** `--used-by` is a
+  *post-classification* scoping pass layered on top of an already-computed
+  `CompareResult` (`appcompat.scope_diff_to_app`), not a resolution input —
+  the CLI, MCP `abi_compare`, and a direct Python caller all call the same
+  function afterward, rather than a field on the request itself.
+- **`abi_scan` has no `used_by` parameter at all.** Consumer scoping is
+  specific to `compare`'s pairwise old/new model; `scan`'s one-build
+  audit+optional-comparison shape has no equivalent concept.
+
 ## Result types
 
 - **`DiffResult`** (`abicheck.checker_types`) — the comparison result. Key

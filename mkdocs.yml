@@ -54,6 +54,8 @@ nav:
       - Troubleshooting: use/troubleshooting.md
     - CI & Gating:
       - CI Gating Pipeline: use/ci-gating.md
+      - Contract Evaluation: use/contract-evaluation.md
+      - Aggregate Reports: use/aggregate-reports.md
       - GitHub Action:
         - Overview & Setup: use/github-action.md
         - More Recipes: use/github-action-recipes.md
@@ -114,6 +116,7 @@ nav:
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:
     - Verdicts: learn/verdicts.md
+    - Contract-Aware Compatibility: learn/contract-aware-compatibility.md
     - Evidence & Detectability: learn/evidence-and-detectability.md
     - What Each Level Sees: learn/what-each-level-sees.md
     - Architecture: learn/architecture.md
