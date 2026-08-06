@@ -49,6 +49,7 @@ _TAINTED_MODULE_NAMES = (
     "abicheck.mcp_shared",
     "abicheck.mcp_server",
     "abicheck.mcp_server_project",
+    "abicheck.mcp_server_scan",
 )
 
 

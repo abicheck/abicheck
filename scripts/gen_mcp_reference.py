@@ -17,7 +17,8 @@
 """gen_mcp_reference.py — exhaustive MCP tool parameter reference, generated
 from every `@mcp.tool()` function registered on the shared `mcp` instance
 (`abicheck/mcp_server.py`'s own tools, plus `abicheck/mcp_server_project.py`'s
-sibling-module tools it imports for side effect) instead of hand-copied.
+and `abicheck/mcp_server_scan.py`'s sibling-module tools it imports for side
+effect) instead of hand-copied.
 
 Each `@mcp.tool()` function's signature (names, types, defaults) and Google-
 style docstring `Args:` section are already the fact owner for its parameter
@@ -152,7 +153,8 @@ def render() -> str:
         "# MCP Tools Reference",
         "",
         "Every parameter of every `abicheck-mcp` tool, generated directly from "
-        "`abicheck/mcp_server.py`'s and `abicheck/mcp_server_project.py`'s "
+        "`abicheck/mcp_server.py`'s and its sibling modules' "
+        "(`abicheck/mcp_server_project.py`, `abicheck/mcp_server_scan.py`) "
         "function signatures and docstrings. See "
         "[MCP Server (Agent Integration)](../use/mcp-integration.md) "
         "for install/configure steps, response envelope shapes, agent "

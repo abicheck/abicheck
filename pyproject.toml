@@ -200,7 +200,11 @@ disable_error_code = ["no-any-return", "misc", "type-arg"]
 
 [[tool.mypy.overrides]]
 # FastMCP decorators (@mcp.tool, etc.) are untyped.
-module = ["abicheck.mcp_server", "abicheck.mcp_server_project"]
+module = [
+    "abicheck.mcp_server",
+    "abicheck.mcp_server_project",
+    "abicheck.mcp_server_scan",
+]
 disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
