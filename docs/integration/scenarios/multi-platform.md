@@ -66,7 +66,16 @@ targets:
         depth: headers
         # no explicit `profiles:` selector — the implicit sweep runs on
         # every `contract: true` profile that actually built this target
+
+baseline:
+  channels:
+    accepted-main: {source: actions-cache, key_prefix: "abicheck-baseline-main"}
 ```
+
+Every `checks[].channel` must resolve to a declared `baseline.channels` id
+(or the `"none"` no-baseline sentinel) — `project validate` rejects an
+undeclared channel like a bare `accepted-main` above with no matching
+`baseline:` block.
 
 ```yaml
 # bindings.yml — operator/CI-managed, never auto-discovered

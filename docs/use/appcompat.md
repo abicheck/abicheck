@@ -272,11 +272,12 @@ SARIF and JUnit output additionally state the scheme explicitly —
 an `abicheck.scoped_exit_code_scheme` JUnit property — for a consumer that
 needs to know legacy-vs-severity without inferring it from field presence.
 
-If you need severity-aware exit codes over the app-relevant subset without
-the app-scoping banner/summary at all, plain `compare` with `--severity-*`
-flags plus `--show-only`/the JSON report remains an option too — but it is
-no longer the *only* way to get severity-aware behavior for a `--used-by`
-run.
+Note that `--show-only`/the JSON report alone, **without** `--used-by`,
+cannot substitute for this: only `--used-by` actually reads the app's
+imports and computes the app-relevant subset in the first place — plain
+`compare` (even with `--severity-*`) has no app to scope against, and gates
+on the full library diff regardless of what `--show-only` filters out of
+the *rendered* output.
 
 ---
 

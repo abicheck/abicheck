@@ -99,7 +99,7 @@ the fact owner, not this example):
 {
   "aggregate_schema_version": "1.3",
   "status": "fail",
-  "compatibility": {"verdict": "BREAKING", "analyzed_targets": 3},
+  "compatibility": {"verdict": "BREAKING", "analyzed_targets": 2},
   "coverage": {
     "status": "partial",
     "required_targets": 3,
@@ -124,6 +124,14 @@ the fact owner, not this example):
       "state": "analyzed",
       "compatibility_verdict": "BREAKING",
       "gate": {"exit_code": 4, "blocking": true, "blocking_categories": ["abi_breaking"], "from_report": true},
+      "contract_coverage_exit": 0
+    },
+    {
+      "target_id": "macos-arm64",
+      "required": true,
+      "state": "analyzed",
+      "compatibility_verdict": "COMPATIBLE",
+      "gate": {"exit_code": 0, "blocking": false, "blocking_categories": [], "from_report": true},
       "contract_coverage_exit": 0
     },
     {
