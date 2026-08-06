@@ -24,12 +24,13 @@ map — what runs in what order, and how the knobs interact.
 flowchart LR
     B["Baseline<br/>(snapshot / library)"] --> D["Detect changes<br/>(compare)"]
     N["New build"] --> D
-    D --> SC["1 · Explicit consumer/<br/>manifest scope"]
-    SC --> CR["2 · Contract relevance<br/>(--contract-evaluation, opt-in)"]
-    CR --> P["3 · Policy classifies<br/>EVALUATED findings"]
-    P --> S["4 · Suppressions<br/>waive findings"]
-    S --> V["5 · Verdict + severity<br/>categories"]
-    V --> E["6 · Exit code<br/>(legacy or severity scheme)"]
+    D --> CR["1 · Contract relevance<br/>(--contract-evaluation, opt-in)"]
+    CR --> P["2 · Policy classifies<br/>EVALUATED findings"]
+    P --> S["3 · Suppressions<br/>waive findings"]
+    S --> V["4 · Verdict + severity<br/>categories"]
+    V --> PR["5 · Explicit-scope promotion<br/>(--used-by/--required-symbol only)"]
+    PR --> V2["Verdict/gate recomputed<br/>if promotion changed anything"]
+    V2 --> E["6 · Exit code<br/>(legacy or severity scheme)"]
     CC["Contract coverage<br/>(evidence completeness)"] -.->|max, orthogonal| E
     V -.-> R["Report rendering<br/>(--show-only, --format)"]
 ```
@@ -42,43 +43,55 @@ library (there is no CLI baseline registry anymore — keep JSON snapshots
 yourself, plain files, your own storage/naming convention) — see [Baseline
 Management](baseline-management.md). The detected changes then flow through
 the stages below (the numbers match the diagram above), which is the
-normative order `contract_pipeline.py` fixes (ADR-049 D9):
+normative order `contract_pipeline.py` fixes (ADR-049 D9) for the ordinary,
+unscoped path:
 
-1. **Scope (explicit consumer/manifest evidence).** `--used-by`/
-   `--required-symbol(s)` evidence (§4.3) can *promote* a finding to
-   `IN_CONTRACT` ahead of the ordinary relevance check below, since a
-   caller-stated consumer or entrypoint outranks anything two snapshots can
-   infer on their own.
-2. **Classify contract relevance — opt-in, `--contract-evaluation`.** Only
+1. **Classify contract relevance — opt-in, `--contract-evaluation`.** Only
    when this flag is set: each finding is classified against the selected
    [contract mode](../reference/compatibility-evaluation-config.md)
    (`public`/`exports`/`all`, or the legacy `--scope-public-headers` alias)
-   as `IN_CONTRACT`, `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN`, or
-   `UNKNOWN_UNRESOLVED`. The first two are `EVALUATED`; the latter two are
-   `NOT_EVALUATED` — their `compatibility_decision` is JSON `null` and they
-   contribute `0` to the gate, but they stay listed in the report with the
-   reason code that says why. Without `--contract-evaluation`, every finding
-   is `EVALUATED` and this stage is a no-op — every exit code is unchanged
-   from before this feature existed.
-3. **Classify (policy).** The active [policy profile](policies.md)
+   as one of five values — `IN_CONTRACT`, `NOT_APPLICABLE`,
+   `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN`, or `UNKNOWN_UNRESOLVED`.
+   Only `IN_CONTRACT` and `NOT_APPLICABLE` are `EVALUATED`; the other three —
+   including `PROVEN_OUT_OF_CONTRACT` — are `NOT_EVALUATED`: their
+   `compatibility_decision` is JSON `null` and they contribute `0` to the
+   gate, but they stay listed in the report with the reason code that says
+   why. Without `--contract-evaluation`, every finding is `EVALUATED` and
+   this stage is a no-op — every exit code is unchanged from before this
+   feature existed.
+2. **Classify (policy).** The active [policy profile](policies.md)
    (`--policy strict_abi|sdk_vendor|plugin_abi` or a custom
    `--policy-file`) maps each *evaluated* change kind to its impact — the
    same change can be `API_BREAK` under `strict_abi` but `COMPATIBLE` under
    `sdk_vendor`. A `NOT_EVALUATED` finding is not scored by policy at all.
-4. **Waive (suppressions).** [Suppression rules](suppressions.md)
+3. **Waive (suppressions).** [Suppression rules](suppressions.md)
    (`--suppress FILE`) remove matching changes **before** the verdict and
    severity counts are computed. A suppressed breaking change does not fail
    the build; it is tallied separately (`suppressed_count` in the JSON
    output). Suppression cannot reach a *contract-coverage* failure (below) —
    that is not a `Change`, so the suppression machinery structurally cannot
    see one.
-5. **Score (verdict + severity).** The surviving, evaluated changes produce
+4. **Score (verdict + severity).** The surviving, evaluated changes produce
    the overall [verdict](../learn/verdicts.md) (`NO_CHANGE` … `BREAKING`)
    and, when [severity](severity.md) is configured, per-category
    (`abi_breaking` / `potential_breaking` / `quality_issues` / `addition`)
-   severity levels.
+   severity levels. `compare()` returns here for a plain, unscoped run.
+5. **Explicit-scope promotion — `compare --used-by`/`--required-symbol(s)`
+   only, and only after step 4 returned.** This is evidence *precedence*,
+   not a step earlier in the pipeline: a `--used-by`/`--required-symbol`
+   run has been *told* what the contract is (a concrete consumer's imports,
+   or an explicit entrypoint list — ADR-049 §4.3), and that outranks
+   whatever the snapshot-derived relevance in step 1 concluded on its own.
+   For a finding already carrying a relevance (i.e. `--contract-evaluation`
+   was also set), a match against that explicit scope *promotes* it to
+   `IN_CONTRACT` — never demotes — and the affected verdict/gate is then
+   recomputed, monotonically: promotion can only raise it. Without
+   `--contract-evaluation`, findings carry no relevance to promote, so this
+   step has nothing to do.
 6. **Exit.** The exit code comes from one of the two schemes below, folded
-   with the orthogonal contract-coverage contribution (next section).
+   with the orthogonal contract-coverage contribution (next section) —
+   computed over the promoted, scoped result for a `--used-by`/
+   `--required-symbol` run.
 
 **Contract coverage runs alongside, not inside, this chain.** Under
 `--contract-evaluation`, if the selected domain's required evidence is
