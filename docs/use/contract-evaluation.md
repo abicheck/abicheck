@@ -142,10 +142,16 @@ summary usually wants to say which one fired.
   build info) or accept the gap explicitly with `contract.unresolved: warn`.
 - **Reading `compatibility_decision: null` as "compatible."** It means
   policy never scored the finding — check `contract_relevance` for why.
-- **Assuming `exports` mode consults headers.** It doesn't — only the
-  binary's own observed export table. A header-only snapshot pair under
-  `--contract exports` will generally land in `UNKNOWN_UNRESOLVED`/coverage
-  failure, not a confident exclusion.
+- **Assuming `exports` mode never benefits from headers.** Root selection
+  really is export-table-only — headers/publicness play no part in
+  deciding *which declarations are roots*. But the closure walk from those
+  roots still needs typed declaration data to resolve, so a header-only (or
+  debug-info-only) snapshot with *no* observed export table at all will
+  generally land in `UNKNOWN_UNRESOLVED`/coverage failure — not because
+  headers are useless under `exports`, but because there was no export
+  table to root the closure on in the first place. Passing headers/debug
+  info alongside a real export table can still turn an otherwise-unresolved
+  type edge into a provable exclusion.
 
 ## See also
 
