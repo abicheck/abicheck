@@ -31,7 +31,7 @@ import hashlib
 import json
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.checker_policy import (
@@ -46,6 +46,7 @@ from abicheck.contract_gating import (
     evaluation_status_of,
     is_evaluated,
 )
+from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
@@ -55,7 +56,7 @@ from abicheck.reporter_markdown import (
     _root_cause_key_and_display,
     root_cause_lookup_for_changes,
 )
-from abicheck.severity import gate_contribution_for_change, missing_contract_exit_code
+from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
     from abicheck.severity import SeverityConfig
@@ -363,11 +364,17 @@ def _result_for(
             properties["contractReasonCode"] = change.contract_reason_code
         if change.contract_assurance is not None:
             properties["contractAssurance"] = change.contract_assurance.value
-        status = evaluation_status_of(change)
-        if status is not None:
-            properties["compatibilityEvaluationStatus"] = status.value
+        # evaluation_status_of always resolves to a real status once
+        # `relevance` is known non-None (it falls back to deriving one from
+        # the relevance itself -- see its own docstring), so there is no
+        # reachable `None` branch to guard here -- `cast` tells mypy that
+        # without adding one.
+        status = cast(CompatibilityEvaluationStatus, evaluation_status_of(change))
+        properties["compatibilityEvaluationStatus"] = status.value
         decision = getattr(change, "compatibility_decision", None)
         properties["compatibilityDecision"] = getattr(decision, "value", None)
+        from abicheck.severity import gate_contribution_for_change
+
         properties["gateContribution"] = gate_contribution_for_change(
             change,
             severity_config,

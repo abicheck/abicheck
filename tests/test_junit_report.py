@@ -1592,3 +1592,27 @@ class TestContractEvaluationProperties:
         root = _parse(xml_str)
         tc = root.find("testsuite/testcase[@name='_Z3foov']")
         assert tc.find("properties") is None
+
+    def test_stamped_finding_without_optional_fields_omits_them(self) -> None:
+        # contract_reason_code/contract_assurance/contract_evidence_refs are
+        # independent optional fields -- a finding can have a stamped
+        # relevance without any of them set.
+        from abicheck.contract_relevance_types import ContractRelevance
+
+        change = Change(
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "Function foo() removed",
+            contract_relevance=ContractRelevance.NOT_APPLICABLE,
+        )
+        r = _make_result([change], verdict=Verdict.BREAKING)
+        xml_str = to_junit_xml(r)
+        root = _parse(xml_str)
+        tc = root.find("testsuite/testcase[@name='_Z3foov']")
+        props = {p.get("name"): p.get("value") for p in tc.find("properties")}
+        assert props["abicheck.contract_relevance"] == "NOT_APPLICABLE"
+        assert "abicheck.contract_reason_code" not in props
+        assert "abicheck.contract_assurance" not in props
+        assert "abicheck.contract_evidence_refs" not in props
+        assert props["abicheck.compatibility_evaluation_status"] == "EVALUATED"
+        assert props["abicheck.compatibility_decision"] == ""

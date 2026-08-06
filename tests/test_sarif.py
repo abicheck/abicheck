@@ -1110,3 +1110,25 @@ class TestContractEvaluationFields:
         props = doc["runs"][0]["results"][0]["properties"]
         assert "contractRelevance" not in props
         assert "gateContribution" not in props
+
+    def test_stamped_finding_without_optional_fields_omits_them(self) -> None:
+        # contract_reason_code/contract_assurance/contract_evidence_refs are
+        # independent optional fields -- a finding can have a stamped
+        # relevance without any of them set.
+        from abicheck.contract_relevance_types import ContractRelevance
+
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z3foov",
+            description="Function foo() removed",
+            contract_relevance=ContractRelevance.NOT_APPLICABLE,
+        )
+        result = _make_result([change])
+        doc = to_sarif(result)
+        props = doc["runs"][0]["results"][0]["properties"]
+        assert props["contractRelevance"] == "NOT_APPLICABLE"
+        assert "contractReasonCode" not in props
+        assert "contractAssurance" not in props
+        assert "contractEvidenceRefs" not in props
+        assert props["compatibilityEvaluationStatus"] == "EVALUATED"
+        assert props["compatibilityDecision"] is None
