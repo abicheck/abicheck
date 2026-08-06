@@ -185,7 +185,7 @@ directly buys you three things a keyword shim can't:
 ```python
 from pathlib import Path
 from abicheck.api_types import DumpRequest, InputSpec
-from abicheck.service_dump_pipeline import run_dump_request
+from abicheck.service import run_dump_request
 
 request = DumpRequest(
     input=InputSpec(
@@ -223,7 +223,7 @@ since a manifest already declares the equivalent surface itself.
 ```python
 from abicheck.api_types import CompareRequest, InputSpec
 from abicheck.service import run_compare_request
-from abicheck.service_compare_pipeline import resolve_compare_request, classify_compare_pair
+from abicheck.service import resolve_compare_request, classify_compare_pair
 
 request = CompareRequest(
     old=InputSpec(path=Path("libfoo.so.1")),
@@ -252,7 +252,7 @@ Scan never had an untyped convenience shim — `ScanRequest` is the only way
 in from Python:
 
 ```python
-from abicheck.service_scan import ScanRequest, run_scan
+from abicheck.service import ScanRequest, run_scan
 
 result = run_scan(ScanRequest(
     binaries=[Path("build/libfoo.so")],

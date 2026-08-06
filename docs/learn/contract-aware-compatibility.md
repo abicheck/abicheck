@@ -175,12 +175,17 @@ you turn this on for a real gate:
 ### 1. Private implementation removal
 
 ```bash
-# Plain compare -- the internal type change is a real, gating BREAKING finding
-abicheck compare old.json new.json
+# Plain compare, with default public-surface scoping disabled -- the
+# internal type change is a real, gating BREAKING finding. (Plain compare's
+# OWN default scoping, --scope-public-headers, would filter this exact case
+# too -- disabling it here isolates contract evaluation, not ordinary
+# surface scoping, as what's making the difference between the two runs.)
+abicheck compare old.json new.json --no-scope-public-headers
 # verdict: BREAKING
 
 # Contract-aware, public mode -- visible, but not evaluated
-abicheck compare old.json new.json --contract-evaluation --contract public
+abicheck compare old.json new.json --no-scope-public-headers \
+  --contract-evaluation --contract public
 # verdict: NO_CHANGE (nothing EVALUATED changed)
 # the finding is still in `changes`, with:
 #   "contract_relevance": "PROVEN_OUT_OF_CONTRACT",
