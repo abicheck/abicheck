@@ -31,12 +31,21 @@ generated: false
       the `EVALUATED` findings (`IN_CONTRACT` / `NOT_APPLICABLE`). A
       `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN`, or `UNKNOWN_UNRESOLVED`
       finding is `NOT_EVALUATED`: its `compatibility_decision` is JSON
-      `null` and it moves neither the verdict nor the exit code — but it
-      stays in the report, with the reason code that says why.
-    - **Run-level contract coverage.** An orthogonal axis: if the selected
-      domain's required evidence is incomplete, `compare`/`scan --against`
-      contribute an exit `1`, folded with `max` against the ordinary gate —
-      it can raise a clean `0` to `1`, never lower a `2`/`4`. See
+      `null`, and it moves neither the *compatibility* verdict nor the
+      ordinary gate's exit contribution — but it stays in the report, with
+      the reason code that says why. This is a separate question from the
+      next bullet: a `NOT_EVALUATED` finding by itself never raises the
+      exit code, but the *reason* it's unresolved (missing evidence) can
+      still do so, orthogonally, via contract coverage below.
+    - **Run-level contract coverage.** An orthogonal axis, independent of
+      any single finding's decision: if the selected domain's required
+      evidence is incomplete, `compare`/`scan --against` contribute an exit
+      `1`, folded with `max` against the ordinary gate — it can raise a
+      clean `0` to `1`, never lower a `2`/`4`, and it never rewrites any
+      finding's `compatibility_decision`. So a run can exit `0` on
+      compatibility (every evaluated finding is fine, and every
+      `NOT_EVALUATED` finding is silent) while still exiting `1` overall
+      because the evidence needed to trust that picture was incomplete. See
       [Exit Codes](exit-codes.md).
 
     Outside `--contract-evaluation`, a `compare` run resolves nothing from

@@ -154,13 +154,17 @@ them is the most common source of confusion once this flag is in play:
    The finding still carries its `ChangeKind`, its reason code, and its
    evidence references, so a reader can see exactly why it wasn't scored.
 
-The run-level `verdict` is then the worst *compatibility decision* among
-`EVALUATED` findings — a run can detect a real binary break and still exit
-clean if that break is `PROVEN_OUT_OF_CONTRACT` (e.g. a private
-implementation detail outside your declared public surface), and,
-separately, a run can fail even with the worst *decision* at `COMPATIBLE`
-if the selected domain's evidence was incomplete — see "the contract
-coverage axis" below, which is independent of the verdict entirely.
+Under `--contract-evaluation`, the run-level `verdict` is the worst
+*compatibility decision* among `EVALUATED` findings — a run can detect a
+real binary break and still exit clean if that break is
+`PROVEN_OUT_OF_CONTRACT` (e.g. a private implementation detail outside your
+declared public surface). Separately — not part of the verdict computation
+at all — a run can still fail even with the worst evaluated *decision* at
+`COMPATIBLE` if the selected domain's evidence was incomplete: contract
+coverage (see [Exit Codes → Contract-coverage
+contribution](../reference/exit-codes.md#contract-coverage-contribution-adr-049))
+folds an independent exit `1` in with `max`, without touching any finding's
+`compatibility_decision` or the verdict itself.
 
 Because contract evaluation is strictly opt-in, none of this changes a plain
 `compare` invocation's behavior. Full field-by-field detail:

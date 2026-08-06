@@ -393,12 +393,15 @@ contract evidence is a separate `1` from a missing target entirely.
 See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_aggregate)
 for the exhaustive, generated parameter list, including the mutually
 exclusive `manifest`/`run_plan`/`expect`+`optional`/`discovered_only`
-expected-target sources.
+expected-target sources. See the [aggregate exit-code
+contract](../reference/exit-codes.md#abicheck-aggregate) for the canonical
+axis and exit-code semantics.
 
-**Response fields:** `exit_code` (`0` pass / `1` coverage-or-policy-or-contract-coverage
-gap / `2` API break / `4` ABI break) and `result` (the full aggregate report:
-`status`, `compatibility`, `coverage`, `gate`, `contract_coverage`,
-`targets`).
+**Response fields:** `exit_code` (`0` pass / `1` coverage, policy,
+contract-coverage, or non-verdict per-report failure (e.g. a `scan` report's
+budget-overflow exit `5`) / `2` API break / `4` ABI break) and `result` (the
+full aggregate report: `status`, `compatibility`, `coverage`, `gate`,
+`contract_coverage`, `targets`).
 
 ---
 

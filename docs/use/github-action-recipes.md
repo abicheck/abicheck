@@ -316,9 +316,9 @@ Add `--format json` for a versioned, machine-readable result — the four axes
 are kept separate under `gate` (`passed`/`exit_code`/`blocking_targets`),
 `coverage` (`status`/counts/`missing_required_targets`), `compatibility`
 (`verdict`/`analyzed_targets`), and `contract_coverage`
-(`exit_contribution`/`incomplete_targets`, populated only under
-`--contract-evaluation`), plus a per-`targets` breakdown and an
-`unexpected_targets` list — to post elsewhere.
+(`exit_contribution`/`incomplete_targets`; always present, with zero/empty
+values when `--contract-evaluation` is not enabled), plus a per-`targets`
+breakdown and an `unexpected_targets` list — to post elsewhere.
 
 ## Skip system dependency installation
 
