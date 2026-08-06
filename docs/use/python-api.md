@@ -221,6 +221,7 @@ since a manifest already declares the equivalent surface itself.
 ### `CompareRequest`
 
 ```python
+from pathlib import Path
 from abicheck.api_types import CompareRequest, InputSpec
 from abicheck.service import run_compare_request
 from abicheck.service import resolve_compare_request, classify_compare_pair
@@ -252,6 +253,7 @@ Scan never had an untyped convenience shim — `ScanRequest` is the only way
 in from Python:
 
 ```python
+from pathlib import Path
 from abicheck.service import ScanRequest, run_scan
 
 result = run_scan(ScanRequest(
