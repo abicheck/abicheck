@@ -584,6 +584,7 @@ two are orthogonal:
     {
       "provider": "export_table",
       "side": "old",
+      "record_id": "export_table:old",
       "reason": "provider_unavailable",
       "status": "unavailable",
       "completeness": "not_started",

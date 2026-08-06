@@ -149,10 +149,14 @@ Supported `fmt` values: `"markdown"`, `"json"`, `"sarif"`, `"html"`, `"junit"`.
 ## Typed request API
 
 `run_compare`/`run_dump` are convenience shims — keyword arguments in,
-typed result out. Underneath, every front end (native CLI, this Python API,
-the MCP server) ultimately resolves through the **same typed request
-objects**: `DumpRequest`, `CompareRequest`, and `ScanRequest`. Reaching for
-the typed request directly buys you three things a keyword shim can't:
+typed result out. Underneath, this Python API and the MCP server both
+resolve through the **same typed request objects**: `DumpRequest`,
+`CompareRequest`, and `ScanRequest`. The native `compare` CLI resolves
+through `CompareRequest` too (`cli_compare_receipt.py`); the native `dump`
+CLI is the one exception — it still runs its own `dump_cmd` argument path
+rather than building a `DumpRequest` (see G33 Phase 5's note in `AGENTS.md`
+for what that migration still needs). Reaching for the typed request
+directly buys you three things a keyword shim can't:
 
 - **The identical validation contract** every front end gets — a bad
   combination of fields raises the same `ValidationError` whichever way you
@@ -201,9 +205,12 @@ Key `DumpRequest` fields, beyond the `InputSpec` it wraps (`path`,
 | `follow_dependencies` / `dependency_search_paths` | Dependency-closure walk. |
 | `has_sources` | Legacy flag consulted by the `android` frontend's source-evidence rule. |
 
-`InputSpec.sources`/`build_info`/`dump_manifest` are mutually exclusive with
-`headers`/`includes`/`public_header_dirs` — a request combining them fails
-validation before any extraction runs (`DumpRequest.validation_errors()`).
+`InputSpec.headers` combines fine with `sources`/`build_info` — that's the
+normal way to collect additive L2 (headers) plus L3/L4 (build/source)
+evidence in one request. Only `dump_manifest` is mutually exclusive with
+`headers`/`includes`/`public_header_dirs` — a request combining those fails
+validation before any extraction runs (`DumpRequest.validation_errors()`),
+since a manifest already declares the equivalent surface itself.
 
 ### `CompareRequest`
 
