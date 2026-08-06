@@ -158,9 +158,15 @@ rather than building a `DumpRequest` (see G33 Phase 5's note in `AGENTS.md`
 for what that migration still needs). Reaching for the typed request
 directly buys you three things a keyword shim can't:
 
-- **The identical validation contract** every front end gets — a bad
-  combination of fields raises the same `ValidationError` whichever way you
-  called in.
+- **The identical validation *rules*** every front end applies — a bad
+  combination of fields is rejected the same way regardless of which
+  front end built the request. How that rejection *surfaces* still differs
+  per transport: calling the typed API directly raises `ValidationError`;
+  an MCP tool catches it internally and returns a structured
+  `{"status": "error", ...}` response; the CLI translates the equivalent
+  failure into its own usage-error/exit-code behavior. The **rule** is
+  shared, not the **exception type** — see the parity table below for how
+  each transport represents the same failure.
 - **Repeatable configuration** — build one `CompareRequest` once (from a
   config file, a test fixture, a stored preset) and reuse it, rather than
   re-threading a dozen keyword arguments.

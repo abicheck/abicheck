@@ -239,13 +239,14 @@ exit code.
 
 ## Reason codes
 
-Every `NOT_EVALUATED`/excluded decision carries one of eleven stable reason
-codes (`contract_relevance_types.CONTRACT_REASON_CODES`) — the two you'll
-see most often are `terminal_authoritative_exclusion` (a confident
-exclusion) and `required_evidence_incomplete` (an unresolved one); the rest
-cover narrower cases (identity ambiguity, `all`-mode's trivial inclusion,
-the legacy-alias variants, and explicit-consumer-evidence promotion — see
-[Consumer proof paths](../use/appcompat.md#why-does-this-consumer-depend-on-the-changed-declaration)
+Every `NOT_EVALUATED`/excluded decision carries one of a fixed set of stable
+reason codes — see `contract_relevance_types.CONTRACT_REASON_CODES` for the
+exhaustive, machine-checked list. The two you'll see most often are
+`terminal_authoritative_exclusion` (a confident exclusion) and
+`required_evidence_incomplete` (an unresolved one); the rest cover narrower
+cases (identity ambiguity, `all`-mode's trivial inclusion, the legacy-alias
+variants, and explicit-consumer-evidence promotion — see [Consumer proof
+paths](../use/appcompat.md#why-does-this-consumer-depend-on-the-changed-declaration)
 for that last one).
 
 ## See also
