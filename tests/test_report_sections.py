@@ -129,3 +129,31 @@ def test_html_compatible_is_100_percent() -> None:
     )
     # Pure additions keep binary compatibility at 100%.
     assert "100" in html
+
+
+def test_html_evaluated_finding_carries_contract_decision() -> None:
+    # CLI-audit P1: an evaluated (IN_CONTRACT/NOT_APPLICABLE) finding must
+    # surface the same contract-decision fields SARIF/JUnit already carry,
+    # not just an unevaluated finding's "Not Evaluated" appendix.
+    from abicheck.contract_relevance_types import ContractAssurance, ContractRelevance
+
+    result = _removal_result()
+    change = result.changes[0]
+    change.contract_relevance = ContractRelevance.IN_CONTRACT
+    change.contract_reason_code = "public_header_direct"
+    change.contract_assurance = ContractAssurance.COMPLETE
+    html = generate_html_report(
+        result, lib_name="libfoo.so",
+        old_version="1.0", new_version="2.0",
+    )
+    assert "relevance: IN_CONTRACT" in html
+    assert "reason: public_header_direct" in html
+    assert "assurance: complete" in html
+
+
+def test_html_unstamped_finding_has_no_contract_badge() -> None:
+    html = generate_html_report(
+        _removal_result(), lib_name="libfoo.so",
+        old_version="1.0", new_version="2.0",
+    )
+    assert "Contract —" not in html

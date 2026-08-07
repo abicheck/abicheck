@@ -194,6 +194,35 @@ def _changes_table(changes: list[object]) -> str:
                 f"<div style='font-size:0.82em; color:#e65100; margin-top:2px;'>"
                 f"🔗 {caused_count} derived change(s) collapsed</div>"
             )
+        # CLI-audit P1: same per-finding contract-decision parity SARIF's
+        # `properties`/JUnit's `<properties>` carry -- every finding this
+        # table renders is, by construction, one compatibility policy
+        # scored (an un-evaluated finding is filtered into its own
+        # "Not Evaluated" section above, never reaches this table), so
+        # `contract_relevance` here is always IN_CONTRACT/NOT_APPLICABLE.
+        # `gate_contribution` is left out: unlike SARIF/JUnit, this table
+        # has no severity_config/policy in scope to compute it from, and
+        # threading those through every _section/_changes_table caller
+        # for one more field is its own follow-up, not a drive-by here.
+        contract_relevance = getattr(ch, "contract_relevance", None)
+        if contract_relevance is not None:
+            bits = [f"relevance: {html.escape(str(contract_relevance.value))}"]
+            reason = getattr(ch, "contract_reason_code", None)
+            if reason:
+                bits.append(f"reason: {html.escape(str(reason))}")
+            assurance = getattr(ch, "contract_assurance", None)
+            if assurance is not None:
+                bits.append(f"assurance: {html.escape(str(assurance.value))}")
+            decision = getattr(ch, "compatibility_decision", None)
+            if decision is not None:
+                bits.append(f"decision: {html.escape(str(decision.value))}")
+            evidence_refs = getattr(ch, "contract_evidence_refs", None)
+            if evidence_refs:
+                bits.append(f"evidence: {html.escape(', '.join(evidence_refs))}")
+            desc_parts.append(
+                f"<div style='font-size:0.82em; color:#6a1b9a; margin-top:2px;'>"
+                f"📜 Contract — {' · '.join(bits)}</div>"
+            )
         full_desc = "".join(desc_parts)
 
         rows.append(
