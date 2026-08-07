@@ -51,6 +51,15 @@ lowers** a gate's `2`/`4` — missing coverage cannot demote a real ABI break to
 gate contribution either; it is a floor on the exit status alone. Both
 commands fold it identically.
 
+A directory/package `compare` (the per-library release fan-out) applies the
+same flag per library, then `max`s every library's own contribution into the
+release's exit code — one library's incomplete coverage still raises a clean
+release exit `0` to `1`, and the release JSON summary states the aggregate in
+the same `contract_coverage_exit_contribution` field. `--fail-on-removed-
+library`'s exit `8` is checked ahead of the coverage-only fallback, so a
+removed library's own signal is never masked by an unrelated coverage gap
+(and a real verdict-based `2`/`4` still wins outright over both, unchanged).
+
 **Without `--contract-evaluation` there is no selected domain, so the
 contribution is always `0`** and every other exit code below is unchanged.
 

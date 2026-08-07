@@ -109,6 +109,8 @@ def _run_compare_pair(
     scope_to_public_surface: bool = True,
     pattern_verdicts: bool = False,
     include_dependencies: bool = True,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -120,7 +122,12 @@ def _run_compare_pair(
     reasoning applied to dependency-scope: without threading it through here
     too, a directory/package `compare` would silently stay unfiltered
     regardless of `--include-dependencies`, drifting from a single-pair
-    `compare` of the identical library (Codex review).
+    `compare` of the identical library (Codex review). ``contract_evaluation``/
+    ``contract_mode`` (CLI-audit P1, release/package contract parity) are the
+    same pass-through: ``service.run_compare`` already runs ADR-049's whole
+    contract-relevance pipeline internally when asked, so threading these two
+    flags here is what makes a library compared through the release fan-out
+    get the identical contract decision it would from comparing it alone.
     """
     from . import service
 
@@ -141,6 +148,8 @@ def _run_compare_pair(
         lang=lang,
         suppress=suppress,
         policy=policy,
+        contract_evaluation=contract_evaluation,
+        contract_mode=contract_mode,
         policy_file_path=policy_file_path,
         old_pdb_path=old_pdb_path,
         new_pdb_path=new_pdb_path,
@@ -169,6 +178,8 @@ _CompareReleaseCommonArgs = tuple[
     Path | None,
     bool,
     bool,
+    bool,
+    str | None,
 ]
 
 
@@ -209,6 +220,8 @@ def _compare_one_library(
     output_dir: Path | None,
     scope_to_public_surface: bool = True,
     include_dependencies: bool = True,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -243,6 +256,8 @@ def _compare_one_library(
             new_pdb_path=new_dbg,
             scope_to_public_surface=scope_to_public_surface,
             include_dependencies=include_dependencies,
+            contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
         )
         result = compare_result.diff
         v = result.verdict.value
@@ -263,6 +278,15 @@ def _compare_one_library(
             "quality_issues": n_quality,
             "_diff_result": result,
         }
+        if contract_evaluation:
+            # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
+            # read off this library's own persisted contract context --
+            # aggregated with max() into the release-level exit code in
+            # _exit_compare_release, the same "raises a clean 0 to 1, never
+            # lowers a real 2/4" rule a single-pair `compare` applies.
+            from .contract_coverage_exit import coverage_exit_floor
+
+            entry["contract_coverage_exit_contribution"] = coverage_exit_floor(result)
         if scope_to_public_surface:
             # Per-library public-surface scoping outcome (ADR-024, issue #235),
             # aggregated into the release-level scope block by the formatter.
@@ -403,6 +427,8 @@ def _compare_release_libraries(
     scope_to_public_surface: bool = True,
     include_dependencies: bool = True,
     severity_config: SeverityConfig | None = None,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -440,6 +466,8 @@ def _compare_release_libraries(
         output_dir,
         scope_to_public_surface,
         include_dependencies,
+        contract_evaluation,
+        contract_mode,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -515,6 +543,8 @@ def _compare_release_libraries(
             include_dependencies=include_dependencies,
             severity_config=severity_config,
             worst_verdict=worst_verdict,
+            contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
         )
         diff_pairs.extend(extra_pairs)
         all_annotations.extend(extra_annotations)
@@ -599,6 +629,8 @@ def _collect_release_extras(
     include_dependencies: bool = True,
     severity_config: SeverityConfig | None = None,
     worst_verdict: str = "NO_CHANGE",
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
     """Collect optional re-run artifacts for JUnit and annotations.
 
@@ -635,6 +667,8 @@ def _collect_release_extras(
                 new_pdb_path=new_dbg,
                 scope_to_public_surface=scope_to_public_surface,
                 include_dependencies=include_dependencies,
+                contract_evaluation=contract_evaluation,
+                contract_mode=contract_mode,
             )
         except Exception as exc:
             click.echo(
@@ -761,6 +795,7 @@ def _finalize_release_output(
     matrix_result: DiffResult | None = None,
     severity_exit_code: int | None = None,
     severity_config: SeverityConfig | None = None,
+    contract_coverage_exit_contribution: int = 0,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit."""
     text = _format_release_summary(
@@ -779,6 +814,7 @@ def _finalize_release_output(
         matrix_result=matrix_result,
         severity_config=severity_config,
         severity_exit_code=severity_exit_code,
+        contract_coverage_exit_contribution=contract_coverage_exit_contribution,
     )
     _write_or_echo(output, text)
 
@@ -797,7 +833,11 @@ def _finalize_release_output(
         )
 
     _exit_compare_release(
-        worst_verdict, fail_on_removed, removed_keys, severity_exit_code
+        worst_verdict,
+        fail_on_removed,
+        removed_keys,
+        severity_exit_code,
+        contract_coverage_exit_contribution=contract_coverage_exit_contribution,
     )
 
 
@@ -1169,6 +1209,8 @@ def compare_release_cmd(
     severity_quality_issues: str | None,
     severity_addition: str | None,
     release_exit_code_scheme: str | None = None,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -1192,6 +1234,12 @@ def compare_release_cmd(
       4  error in abi_breaking
     A removed library (--fail-on-removed-library) still exits 8, and a per-library
     comparison ERROR still floors the exit at 4, regardless of severity settings.
+
+    \b
+    Under --contract-evaluation, each library's own ADR-049 Phase 7 contract-
+    coverage floor (0/1) folds into the release exit code with max() -- the
+    same orthogonal axis a single-pair `compare` applies: it can raise a
+    clean 0 to 1 but never lowers a real 2/4/8.
 
     \b
     Examples:
@@ -1349,6 +1397,27 @@ def compare_release_cmd(
             scope_to_public_surface=scope_public_headers,
             include_dependencies=include_dependencies,
             severity_config=severity_config,
+            contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
+        )
+
+        # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
+        # across every library with max() -- one library's incomplete
+        # evidence must still raise the release's exit code, the same rule
+        # contract_coverage_exit.fold_coverage_exit applies to a single pair.
+        # `0` (the default fold value) when --contract-evaluation was never
+        # given, or every library's own selected domain closed cleanly.
+        contract_coverage_exit_contribution = max(
+            (
+                contribution
+                for entry in library_results
+                if isinstance(entry, dict)
+                and isinstance(
+                    contribution := entry.get("contract_coverage_exit_contribution", 0),
+                    int,
+                )
+            ),
+            default=0,
         )
 
         # Compute the severity-aware exit code while per-library DiffResults
@@ -1431,6 +1500,7 @@ def compare_release_cmd(
             matrix_result=matrix_result,
             severity_exit_code=severity_exit_code,
             severity_config=severity_config,
+            contract_coverage_exit_contribution=contract_coverage_exit_contribution,
         )
     finally:
         _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)
