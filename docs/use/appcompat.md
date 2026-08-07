@@ -212,15 +212,12 @@ verdict.
 `--used-by` app's own scoped result — the full-library verdict is folded
 into the rendered report as informational context (see "Example output"
 above) but does **not** participate in the exit-code calculation. Which
-*scheme* computes that scoped exit code follows the same resolution as
-plain `compare` (`resolve_compare_config`): an explicit `--exit-code-scheme
-legacy|severity` (CLI flag or a config `exit_code_scheme` value) always
-pins that scheme, scoped run or not. Only when the scheme is left at its
-default (`auto`) does a `--severity-*`/`--severity-preset` flag (or a
-config severity value) decide it — `auto` resolves to `severity` if any
-severity setting is active, `legacy` otherwise. So `--severity-preset
-default --exit-code-scheme legacy` still exits under the legacy `0`/`2`/`4`
-mapping, scoped included.
+*scheme* computes that scoped exit code follows the exact same `auto`/
+`legacy`/`severity` resolution as plain `compare` — see [The two exit-code
+schemes](ci-gating.md#the-two-exit-code-schemes) for the resolution rule
+(an explicit `--exit-code-scheme` pin is always authoritative; `auto`
+follows whether any severity setting is active). Scoped and unscoped runs
+share that one resolution — nothing here overrides it.
 
 **Legacy scheme (no severity setting active):**
 

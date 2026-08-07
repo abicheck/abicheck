@@ -153,7 +153,8 @@ raises `ValidationError` for an unrecognised format.
 typed result out. Underneath, this Python API and the MCP server both
 resolve through the **same typed request objects**: `DumpRequest`,
 `CompareRequest`, and `ScanRequest`. The native `compare` CLI resolves
-through `CompareRequest` too (`cli_compare_receipt.py`); the native `dump`
+through `CompareRequest` too (`cli_resolve.py` assembles it from `compare`'s
+loose arguments and hands it to `resolve_compare_request`); the native `dump`
 CLI is the one exception — it still runs its own `dump_cmd` argument path
 rather than building a `DumpRequest` (see G33 Phase 5's note in `AGENTS.md`
 for what that migration still needs). Reaching for the typed request
@@ -211,6 +212,11 @@ Key `DumpRequest` fields, beyond the `InputSpec` it wraps (`path`,
 | `dwarf_only` / `debug_format` / `enable_debuginfod` / `debuginfod_url` | Debug-info resolution knobs. |
 | `follow_dependencies` / `dependency_search_paths` | Dependency-closure walk. |
 | `has_sources` | Legacy flag consulted by the `android` frontend's source-evidence rule. |
+
+The exhaustive, generated field/type/default table for `DumpRequest` (and
+every other typed request/result dataclass) lives in the [Python API
+Reference](../reference/python-api-reference.md); the table above is a
+curated subset for the fields most callers actually reach for.
 
 `InputSpec.headers` combines fine with `sources`/`build_info` — that's the
 normal way to collect additive L2 (headers) plus L3/L4 (build/source)

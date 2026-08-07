@@ -273,6 +273,9 @@ abicheck aggregate REPORTS_DIR \
 | `--on-unexpected-target` | `include` | `include` \| `warn` \| `fail` \| `ignore`. |
 | `--format` | `text` | `text` \| `json`. |
 
+Full generated flag reference, pulled from the live `--help` output: [CLI
+Reference](../reference/cli-reference.md#aggregate).
+
 See [Exit Codes → `abicheck aggregate`](../reference/exit-codes.md#abicheck-aggregate)
 for the exhaustive exit-code matrix, and [GitHub Action:
 Recipes](github-action-recipes.md) for the full fan-out/fan-in CI workflow
@@ -283,5 +286,5 @@ Recipes](github-action-recipes.md) for the full fan-out/fan-in CI workflow
 - [Exit Codes](../reference/exit-codes.md) — the canonical per-axis exit-code contract
 - [Project Targets Schema](../reference/project-targets-schema.md) — `profiles:`/`checks:`, the source of `target@profile#channel@depth` report ids
 - [GitHub Action: Recipes](github-action-recipes.md) — the worked matrix + gate workflow
-- [MCP Integration](mcp-integration.md#abi_aggregate--fold-per-target-reports-into-one-gate-decision) — the `abi_aggregate` tool
+- [MCP Integration](mcp-integration.md#abi_aggregate-fold-per-target-reports-into-one-gate-decision) — the `abi_aggregate` tool
 - [Compatibility Evaluation Config](../reference/compatibility-evaluation-config.md) — what feeds a report's `contract_coverage_exit_contribution`

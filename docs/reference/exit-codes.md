@@ -313,6 +313,11 @@ gap exits `4`; a run whose *only* problem is a missing required target exits
   which targets the matrix must produce: `{"targets": [{"id": "linux-x86_64",
   "required": true}, ...]}`. Generate it once in the plan job and feed the same
   file to both the matrix and this gate so they never drift.
+- `--run-plan run-plan.json` — a project run-plan from `abicheck project
+  plan`, projected to the same expected-target shape internally (recommended
+  for a `project plan`-driven workflow instead of a separate manifest
+  projection step); each check's own `check_id` becomes the expected target
+  id, matching what `check-target` writes as every report's `target_id`.
 - `--expect <ids>` (repeatable / comma-separated), with optional `--optional
   <ids>` — an inline alternative to a manifest file.
 - `--discovered-only` — explicitly aggregate whatever reports are present with
