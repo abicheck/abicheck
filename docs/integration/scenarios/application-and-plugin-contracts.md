@@ -40,6 +40,17 @@ Action's `--used-by`; see
 [`check-target` reference](../../reference/check-target.md) for the target-kind
 input table.
 
+> **Beyond "is it affected": why.** When the library side also carries a
+> source graph — an L2, header-only one built automatically whenever
+> headers are parsed at all, or a broader L4/L5 build/source graph from
+> `--sources`/`--build-info` — abicheck can explain the actual call chain
+> connecting a symbol `myapp` imports to the internal declaration that
+> changed — not just "symbol X is missing" but "the public entry point you
+> call internally reaches the thing that broke." See [Application
+> Compatibility → Why does this consumer depend on the changed
+> declaration?](../../use/appcompat.md#why-does-this-consumer-depend-on-the-changed-declaration)
+> for the full model and its current limits.
+
 ## S23: `target-kind: plugin-contract`
 
 ```yaml

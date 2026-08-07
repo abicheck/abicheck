@@ -42,6 +42,7 @@ nav:
       - Choose Your Workflow: start/choose-your-workflow.md
       - 'Worked Example: Real Library': start/real-world-example.md
       - 'Scanning a Conda-Forge Package': start/scanning-conda-packages.md
+      - Upgrading to 0.6: start/upgrading-to-0.6.md
     - Everyday Use:
       - CLI Usage: use/cli-usage.md
       - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md
@@ -54,6 +55,8 @@ nav:
       - Troubleshooting: use/troubleshooting.md
     - CI & Gating:
       - CI Gating Pipeline: use/ci-gating.md
+      - Contract Evaluation: use/contract-evaluation.md
+      - Aggregate Reports: use/aggregate-reports.md
       - GitHub Action:
         - Overview & Setup: use/github-action.md
         - More Recipes: use/github-action-recipes.md
@@ -114,6 +117,7 @@ nav:
   # what each data source can see → how the pipeline is built → deep internals.
   - Concepts:
     - Verdicts: learn/verdicts.md
+    - Contract-Aware Compatibility: learn/contract-aware-compatibility.md
     - Evidence & Detectability: learn/evidence-and-detectability.md
     - What Each Level Sees: learn/what-each-level-sees.md
     - Architecture: learn/architecture.md
@@ -139,7 +143,7 @@ nav:
     - publish-baseline / update-main-baseline: reference/publish-baseline.md
     - Configuration File: reference/config-file.md
     - Config Keys Reference: reference/config-keys-reference.md
-    - Compatibility Evaluation Config (proposed): reference/compatibility-evaluation-config.md
+    - Compatibility Evaluation Config: reference/compatibility-evaluation-config.md
     - Environment Variables: reference/environment.md
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md

@@ -535,6 +535,76 @@ gets two additional fields alongside the existing `config`/`categories`/
 
 ---
 
+### Contract-evaluation report fields (`contract_relevance`, `contract_coverage_failures`)
+
+Under `--contract-evaluation`, two field groups appear that aren't present
+in a plain `compare` report — mental model and command reference:
+[Contract-Aware Compatibility](../learn/contract-aware-compatibility.md),
+[Contract Evaluation](contract-evaluation.md).
+
+**Per finding** — whether policy actually scored it, and why:
+
+```json
+{
+  "kind": "func_removed",
+  "symbol": "detail::internal_helper",
+  "contract_relevance": "PROVEN_OUT_OF_CONTRACT",
+  "contract_reason_code": "terminal_authoritative_exclusion",
+  "contract_assurance": "complete",
+  "compatibility_evaluation_status": "NOT_EVALUATED",
+  "compatibility_decision": null,
+  "gate_contribution": 0
+}
+```
+
+Read this as: **the finding is real and detected — `compatibility_decision:
+null` means policy never ran on it, not that it was judged compatible.**
+`contract_relevance`/`contract_reason_code` say why it was excluded from
+scoring; `gate_contribution: 0` confirms it moved neither the verdict nor
+the exit code.
+
+**Run level** — the separate question of whether there was enough evidence
+to make *any* contract decision at all:
+
+```json
+{
+  "contract_coverage_failures": [],
+  "contract_coverage_exit_contribution": 0
+}
+```
+
+An incomplete-evidence run looks like this instead. Compatibility itself has
+no separate process exit — only the overall exit code does — so read this as:
+the compatibility *verdict* stays `NO_CHANGE` (nothing evaluated found a
+problem), while `contract_coverage_exit_contribution: 1` independently
+floors the overall process exit at `1` by default, because the two axes are
+orthogonal:
+
+```json
+{
+  "verdict": "NO_CHANGE",
+  "contract_coverage_failures": [
+    {
+      "provider": "export_table",
+      "side": "old",
+      "record_id": "export_table:old",
+      "reason": "provider_unavailable",
+      "status": "unavailable",
+      "completeness": "not_started",
+      "mode": "exports",
+      "suppressible": false
+    }
+  ],
+  "contract_coverage_exit_contribution": 1
+}
+```
+
+`suppressible: false` is structural, not a default someone forgot to flip —
+a `CoverageFailure` has no `kind`/`symbol`/`source_location` for
+`--suppress` to match against, so it cannot silence one even in principle.
+
+---
+
 ## JSON schema and stability guarantees
 
 The `compare --format json` document is a **stable, machine-readable contract**.
@@ -620,6 +690,17 @@ from abicheck.schemas import load_compare_report_schema
 report = json.loads(open("report.json").read())
 jsonschema.validate(report, load_compare_report_schema())
 ```
+
+### `aggregate`'s own report shape
+
+`abicheck aggregate --format json` is a **separate document**, not a
+`compare`/`scan` report — it's versioned by its own
+`aggregate_schema_version` and describes a fan-in over already-produced
+reports rather than one comparison. Its four independent axes
+(`compatibility`/`coverage`/`gate`/`contract_coverage`) and the
+`profile_matrix`/`finding_matrix` reconciliation blocks are documented,
+with a fully annotated example, in [Aggregate
+Reports](aggregate-reports.md) rather than repeated here.
 
 ---
 

@@ -381,20 +381,27 @@ renders (`root_binary`, `verdict.loadability`/`abi_risk`/`risk_score`,
 
 The MCP counterpart of [`abicheck aggregate`](../reference/reusable-workflows.md):
 folds a directory of per-target `compare`/`scan` report JSON files into one
-CI gate decision (ADR-042). Three axes stay separate — compatibility (worst
-verdict), gate (each report's own recorded severity decision, combined —
-never recomputed from the verdict), and coverage (did every required target
-report?) — a required target with no report is unavailable, never treated as
-compatible.
+CI gate decision (ADR-042, extended by ADR-049 Phase 7). Four axes stay
+separate — compatibility (worst verdict), gate (each report's own recorded
+severity decision, combined — never recomputed from the verdict), coverage
+(did every required target report?), and contract_coverage (for a target
+that *did* report, was its own contract-evidence domain complete under
+`--contract-evaluation`?) — a required target with no report is
+unavailable, never treated as compatible, and a target with incomplete
+contract evidence is a separate `1` from a missing target entirely.
 
 See the [MCP Tools Reference](../reference/mcp-tools-reference.md#abi_aggregate)
 for the exhaustive, generated parameter list, including the mutually
 exclusive `manifest`/`run_plan`/`expect`+`optional`/`discovered_only`
-expected-target sources.
+expected-target sources. See the [aggregate exit-code
+contract](../reference/exit-codes.md#abicheck-aggregate) for the canonical
+axis and exit-code semantics.
 
-**Response fields:** `exit_code` (`0` pass / `1` coverage-or-policy gap /
-`2` API break / `4` ABI break) and `result` (the full aggregate report:
-`status`, `compatibility`, `coverage`, `gate`, `targets`).
+**Response fields:** `exit_code` (`0` pass / `1` coverage, policy,
+contract-coverage, or non-verdict per-report failure (e.g. a `scan` report's
+budget-overflow exit `5`) / `2` API break / `4` ABI break) and `result` (the
+full aggregate report: `status`, `compatibility`, `coverage`, `gate`,
+`contract_coverage`, `targets`).
 
 ---
 
