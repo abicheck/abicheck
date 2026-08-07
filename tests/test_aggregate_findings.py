@@ -1437,6 +1437,16 @@ class TestProfileContractState:
         )
         assert finding.gate_contribution is None
 
+    def test_from_report_entry_rejects_a_bool_gate_contribution(self) -> None:
+        # bool is an int subclass in Python -- a plain isinstance(x, int)
+        # check would accept a JSON true/false and round-trip it back out
+        # as a JSON boolean, which no schema's gate_contribution allows
+        # (CodeRabbit review).
+        finding = ReportFinding.from_report_entry(
+            {**_SIZE_CHANGED, "gate_contribution": True}
+        )
+        assert finding.gate_contribution is None
+
     def test_profile_contract_state_to_dict(self) -> None:
         state = ProfileContractState(
             profile="gcc",

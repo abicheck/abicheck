@@ -349,7 +349,12 @@ class ReportFinding:
                 else None
             ),
             gate_contribution=(
-                gate_contribution if isinstance(gate_contribution, int) else None
+                # bool is an int subclass in Python -- isinstance() alone
+                # would accept a JSON true/false as a gate_contribution and
+                # round-trip it back out as a JSON boolean, which neither
+                # this schema nor compare_report.schema.json's own
+                # gate_contribution allow (Codex/CodeRabbit review).
+                gate_contribution if type(gate_contribution) is int else None
             ),
         )
 

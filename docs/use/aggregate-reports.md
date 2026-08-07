@@ -91,13 +91,12 @@ flowchart TD
   produce exit `1`, for unrelated reasons, and the JSON output records which
   targets caused which.
 
-An illustrative report (the exact `aggregate_schema_version` value shown is
-whatever this build emits — `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION` is
-the fact owner, not this example):
+An illustrative report (`aggregate_schema_version` is omitted here since
+`abicheck.aggregate.AGGREGATE_SCHEMA_VERSION` is its fact owner, not this
+example — every real report carries the field):
 
 ```json
 {
-  "aggregate_schema_version": "1.4",
   "status": "fail",
   "compatibility": {"verdict": "BREAKING", "analyzed_targets": 2},
   "coverage": {
@@ -264,13 +263,14 @@ present that as one uniformly-understood break.
 
 When at least one affected profile's report ran `--contract-evaluation`,
 its `finding_matrix` entry carries a `profile_contract` array — one entry
-per *affected* profile (a profile confirmed clean of the finding has no
-contract decision about it to report), each with that profile's own
-`contract_relevance`, `compatibility_evaluation_status`,
-`compatibility_decision`, and `gate_contribution`, read back verbatim from
-that profile's own report. A comparison where no profile ever evaluated a
-contract omits the field entirely, so `finding_matrix` for an
-ADR-049-unaware CI matrix renders exactly as before:
+per *affected* profile, in the same order as `affected_profiles` (a
+profile confirmed clean of the finding has no contract decision about it
+to report), each with that profile's own `contract_relevance`,
+`compatibility_evaluation_status`, `compatibility_decision`, and
+`gate_contribution`, read back verbatim from that profile's own report. A
+comparison where no profile ever evaluated a contract omits the field
+entirely, so `finding_matrix` for an ADR-049-unaware CI matrix renders
+exactly as before:
 
 ```json
 {
@@ -280,18 +280,18 @@ ADR-049-unaware CI matrix renders exactly as before:
   "affected_profiles": ["linux-clang20", "linux-gcc14"],
   "profile_contract": [
     {
-      "profile": "linux-gcc14",
-      "contract_relevance": "IN_CONTRACT",
-      "compatibility_evaluation_status": "EVALUATED",
-      "compatibility_decision": "BREAKING",
-      "gate_contribution": 1
-    },
-    {
       "profile": "linux-clang20",
       "contract_relevance": "UNKNOWN_UNRESOLVED",
       "compatibility_evaluation_status": "NOT_EVALUATED",
       "compatibility_decision": null,
       "gate_contribution": 0
+    },
+    {
+      "profile": "linux-gcc14",
+      "contract_relevance": "IN_CONTRACT",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 1
     }
   ]
 }
