@@ -625,7 +625,7 @@ class TestReleaseFanOutContractParity:
             main,
             ["compare", str(old_dir), str(new_dir), "--contract", "public"],
         )
-        assert result.exit_code != 0
+        assert result.exit_code == 64, result.output
         assert "--contract requires --contract-evaluation" in result.output
 
     def test_pack_still_rejected_on_directory_inputs(self, tmp_path):
@@ -651,7 +651,7 @@ class TestReleaseFanOutContractParity:
             main,
             ["compare", str(old_dir), str(new_dir), "--pack", str(pack_path)],
         )
-        assert result.exit_code != 0
+        assert result.exit_code == 64, result.output
         assert "not supported for directory/package" in result.output
         assert "--pack" in result.output
 

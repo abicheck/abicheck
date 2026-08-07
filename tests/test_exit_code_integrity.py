@@ -191,21 +191,23 @@ class TestReleaseContractCoverageFold:
         )
         assert code == 8
 
-    def test_zero_contribution_is_a_true_no_op(self) -> None:
+    @pytest.mark.parametrize(
+        "worst", ["BREAKING", "API_BREAK", "COMPATIBLE", "NO_CHANGE"]
+    )
+    def test_zero_contribution_is_a_true_no_op(self, worst: str) -> None:
         # The default (no --contract-evaluation) must reproduce every
         # pre-existing exit code exactly -- this is what
         # test_compare_release_flow_matches_canonical already asserts
         # without the new keyword; this locks the explicit-zero case too.
         from abicheck.cli_compare_release import _exit_compare_release
 
-        for worst in ("BREAKING", "API_BREAK", "COMPATIBLE", "NO_CHANGE"):
-            code = _exit_code_of(
-                _exit_compare_release,
-                worst, False, [],
-                severity_exit_code=None,
-                contract_coverage_exit_contribution=0,
-            )
-            assert code == legacy_exit_code(Verdict[worst])
+        code = _exit_code_of(
+            _exit_compare_release,
+            worst, False, [],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=0,
+        )
+        assert code == legacy_exit_code(Verdict[worst])
 
 
 def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:

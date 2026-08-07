@@ -740,8 +740,10 @@ Once a root command genuinely clears the bar above, pick the right home:
   `compare` (the per-library release fan-out) applies the same flag to
   each library and `max`s every library's own contribution into the
   release's exit code, stated in the release JSON summary under the same
-  `contract_coverage_exit_contribution` field (checked ahead of
-  `--fail-on-removed-library`'s exit `8` when both could apply)
+  `contract_coverage_exit_contribution` field. `--fail-on-removed-library`'s
+  exit `8` is checked ahead of this coverage-only fallback when both could
+  apply, so a removed library's own signal is never masked by an unrelated
+  coverage gap
 - `compat` command: 0 = compatible, 1 = BREAKING, 2 = API_BREAK (source-level), 3-11 = errors (see `compat/cli.py:_classify_compat_error_exit_code`)
 - `64` = usage error (bad flags/inputs; `cli._EXIT_USAGE_ERROR`) — applies across commands
 - Full per-command matrix: `docs/reference/exit-codes.md`

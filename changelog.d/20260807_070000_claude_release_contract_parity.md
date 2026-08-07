@@ -19,9 +19,10 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   code, surfaced in the release JSON summary as
   `contract_coverage_exit_contribution` — the same field name and fold
   rule (raises a clean `0` to `1`, never lowers a real `2`/`4`) a
-  single-pair `compare` already uses, checked ahead of
-  `--fail-on-removed-library`'s exit `8` so a removed library's own signal
-  is never masked by an unrelated coverage gap. `--pack` remains rejected
+  single-pair `compare` already uses. `--fail-on-removed-library`'s exit
+  `8` is checked ahead of this coverage-only fallback, so a removed
+  library's own signal is never masked by an unrelated coverage gap.
+  `--pack` remains rejected
   for directory/package comparisons — applying a pack's policy/contract/
   gate overrides per library still needs its own resolve-once-apply-
   per-pair design.
