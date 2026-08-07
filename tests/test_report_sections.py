@@ -142,6 +142,8 @@ def test_html_evaluated_finding_carries_contract_decision() -> None:
     change.contract_relevance = ContractRelevance.IN_CONTRACT
     change.contract_reason_code = "public_header_direct"
     change.contract_assurance = ContractAssurance.COMPLETE
+    change.compatibility_decision = Verdict.BREAKING
+    change.contract_evidence_refs = ("public_header:old",)
     html = generate_html_report(
         result, lib_name="libfoo.so",
         old_version="1.0", new_version="2.0",
@@ -149,6 +151,8 @@ def test_html_evaluated_finding_carries_contract_decision() -> None:
     assert "relevance: IN_CONTRACT" in html
     assert "reason: public_header_direct" in html
     assert "assurance: complete" in html
+    assert "decision: BREAKING" in html
+    assert "evidence: public_header:old" in html
 
 
 def test_html_unstamped_finding_has_no_contract_badge() -> None:
@@ -157,3 +161,21 @@ def test_html_unstamped_finding_has_no_contract_badge() -> None:
         old_version="1.0", new_version="2.0",
     )
     assert "Contract —" not in html
+
+
+def test_html_stamped_finding_without_optional_fields_shows_relevance_only() -> None:
+    # contract_reason_code/contract_assurance/compatibility_decision/
+    # contract_evidence_refs are independent optional fields -- a finding
+    # can have a stamped relevance without any of them set.
+    from abicheck.contract_relevance_types import ContractRelevance
+
+    result = _removal_result()
+    change = result.changes[0]
+    change.contract_relevance = ContractRelevance.NOT_APPLICABLE
+    html = generate_html_report(
+        result, lib_name="libfoo.so",
+        old_version="1.0", new_version="2.0",
+    )
+    start = html.index("📜 Contract — ") + len("📜 Contract — ")
+    badge = html[start : html.index("</div>", start)]
+    assert badge == "relevance: NOT_APPLICABLE"
