@@ -97,7 +97,7 @@ the fact owner, not this example):
 
 ```json
 {
-  "aggregate_schema_version": "1.3",
+  "aggregate_schema_version": "1.4",
   "status": "fail",
   "compatibility": {"verdict": "BREAKING", "analyzed_targets": 2},
   "coverage": {
@@ -246,6 +246,56 @@ one.
    upload) → that profile lands in `undetermined_profiles` for *every*
    finding in the matrix, never in `unaffected_profiles` — a report that
    was never produced proves nothing was clean.
+
+### Per-profile contract decisions (`profile_contract`)
+
+`scope`/`affected_profiles` answer *whether* a profile has a finding, not
+*why compatibility policy did or didn't act on it* — a question ADR-049's
+contract-relevance model (see [Compatibility Evaluation
+Config](../reference/compatibility-evaluation-config.md)) already answers
+per finding on a single-pair `compare`, and that a matrix can disagree on
+just as easily as it can disagree on the finding itself. Two profiles
+compared under different `--contract` domains can both report the same
+`type_size_changed` finding while reaching opposite conclusions about it —
+one's evidence proves the type is in the public contract (`IN_CONTRACT`,
+gating), the other's evidence can't resolve it either way
+(`UNKNOWN_UNRESOLVED`, not gating) — and `scope: all_profiles` alone would
+present that as one uniformly-understood break.
+
+When at least one affected profile's report ran `--contract-evaluation`,
+its `finding_matrix` entry carries a `profile_contract` array — one entry
+per *affected* profile (a profile confirmed clean of the finding has no
+contract decision about it to report), each with that profile's own
+`contract_relevance`, `compatibility_evaluation_status`,
+`compatibility_decision`, and `gate_contribution`, read back verbatim from
+that profile's own report. A comparison where no profile ever evaluated a
+contract omits the field entirely, so `finding_matrix` for an
+ADR-049-unaware CI matrix renders exactly as before:
+
+```json
+{
+  "kinds": ["type_size_changed"],
+  "symbol": "Foo",
+  "scope": "all_profiles",
+  "affected_profiles": ["linux-clang20", "linux-gcc14"],
+  "profile_contract": [
+    {
+      "profile": "linux-gcc14",
+      "contract_relevance": "IN_CONTRACT",
+      "compatibility_evaluation_status": "EVALUATED",
+      "compatibility_decision": "BREAKING",
+      "gate_contribution": 1
+    },
+    {
+      "profile": "linux-clang20",
+      "contract_relevance": "UNKNOWN_UNRESOLVED",
+      "compatibility_evaluation_status": "NOT_EVALUATED",
+      "compatibility_decision": null,
+      "gate_contribution": 0
+    }
+  ]
+}
+```
 
 Neither `profile_matrix` nor `finding_matrix` changes the exit code — they
 are reporting views over the same gate/coverage/contract_coverage axes

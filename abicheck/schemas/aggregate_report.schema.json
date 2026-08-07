@@ -246,6 +246,35 @@
         "cross_abi_declaration": {
           "type": ["string", "null"],
           "description": "The declaration this finding is about, spelled independently of its C++ mangling scheme (e.g. lib::add, recovered from either _ZN3lib3addEii or ?add@lib@@YAHHH@Z), or null when none could be recovered (a type-level finding, an extern \"C\" symbol, or a mangling the deliberately conservative parsers decline to model). Two entries sharing it concern the same declaration under different manglings. They are deliberately NOT merged into one entry: neither parser recovers parameter types, so nothing in a report distinguishes \"both profiles lost the same overload\" from \"each lost a different one\". The link is exposed here so a consumer can present them together without the report asserting a pairing it cannot prove."
+        },
+        "profile_contract": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/profile_contract_state"},
+          "description": "Added in schema 1.4. Per-affected-profile ADR-049 contract-decision detail for this finding -- one entry per profile in affected_profiles, using that profile's own representative report entry. Present only when at least one affected profile's report carries a contract_relevance (i.e. that profile ran --contract-evaluation); entirely absent for a comparison where no profile ever evaluated contract relevance, so a report using none of ADR-049's contract machinery renders byte-identical to schema 1.3. Answers, per profile, the four questions a single scope/verdict pair collapses together: whether the finding was IN_CONTRACT/NOT_APPLICABLE/etc (contract_relevance), whether policy actually scored it (compatibility_evaluation_status), what it resolved to (compatibility_decision), and whether it contributed to that profile's own gate (gate_contribution)."
+        }
+      }
+    },
+    "profile_contract_state": {
+      "type": "object",
+      "description": "Added in schema 1.4. One profile's ADR-049 contract-decision state for one finding_matrix_entry -- see finding_matrix_entry.profile_contract.",
+      "required": ["profile", "contract_relevance", "compatibility_evaluation_status", "compatibility_decision", "gate_contribution"],
+      "properties": {
+        "profile": {"type": "string", "description": "The profile this state belongs to; one of the entry's affected_profiles."},
+        "contract_relevance": {
+          "type": ["string", "null"],
+          "description": "ADR-049 relevance classification for this finding on this profile (e.g. IN_CONTRACT, NOT_APPLICABLE, PROVEN_OUT_OF_CONTRACT, UNKNOWN_UNRESOLVED), or null when this profile's report never stamped one -- it did not run --contract-evaluation, or ran it under a mode that never reached this finding."
+        },
+        "compatibility_evaluation_status": {
+          "type": ["string", "null"],
+          "description": "Whether compatibility policy actually scored this finding on this profile (EVALUATED vs NOT_EVALUATED), or null when unstamped -- mirrors the per-finding compatibility_evaluation_status field in a compare report."
+        },
+        "compatibility_decision": {
+          "type": ["string", "null"],
+          "description": "The resolved per-finding compatibility_decision on this profile, or null when policy never ran for this finding (NOT_EVALUATED) or the profile never stamped one at all -- these two null cases are not distinguished here; compatibility_evaluation_status disambiguates them."
+        },
+        "gate_contribution": {
+          "type": ["integer", "null"],
+          "description": "Whether this finding contributed to this profile's own gate decision (non-zero) or not (0), or null when unstamped."
         }
       }
     },

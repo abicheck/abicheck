@@ -67,6 +67,7 @@ from .aggregate_findings import (
     FINDING_SCOPE_PROFILE_SPECIFIC as FINDING_SCOPE_PROFILE_SPECIFIC,
     FINDING_SCOPE_UNDETERMINED as FINDING_SCOPE_UNDETERMINED,
     FindingMatrixEntry as FindingMatrixEntry,
+    ProfileContractState as ProfileContractState,
     ReportFinding as ReportFinding,
     ReportFindings as ReportFindings,
     build_finding_matrix,
@@ -89,7 +90,17 @@ from .change_registry_types import Verdict
 #: Phase 7). Additive in shape, but not inert: the contribution folds
 #: into ``gate.exit_code``, so a matrix whose targets exited ``1`` for
 #: incomplete contract evidence no longer aggregates to ``0``.
-AGGREGATE_SCHEMA_VERSION = "1.3"
+#:
+#: ``1.4`` adds an optional ``profile_contract`` array to each
+#: ``finding_matrix`` entry (CLI-audit P1) -- one ADR-049 contract-decision
+#: record per affected profile, so "GCC: IN_CONTRACT and gating" and
+#: "Clang: UNKNOWN_UNRESOLVED and not gating" no longer collapse into the
+#: same ``affected_profiles`` membership fact for one logical finding.
+#: Purely additive and inert: present only when at least one profile ran
+#: ``--contract-evaluation`` for that target, never changes ``scope`` or
+#: any existing key, and a ``1.3``-shaped consumer that ignores unknown
+#: keys keeps reading a ``1.4`` document correctly.
+AGGREGATE_SCHEMA_VERSION = "1.4"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
