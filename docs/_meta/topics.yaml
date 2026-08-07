@@ -117,6 +117,11 @@ topics:
     canonical_page: use/python-api.md
     fact_sources:
       - abicheck/service.py
+      - abicheck/api_types.py
+      - abicheck/service_dump_pipeline.py
+      - abicheck/service_compare_pipeline.py
+      - abicheck/service_scan.py
+      - abicheck/mcp_server.py
     reference_page: reference/python-api-reference.md
 
   config-keys:
@@ -156,6 +161,46 @@ topics:
       - abicheck/compatibility_evaluation_wiring.py
       - abicheck/compatibility_evaluation_frontend.py
       - abicheck/compatibility_evaluation_packs.py
+
+  # ADR-049 Phase 7's mental model: what a contract mode means, the finding
+  # outcomes, why exclusion can't be used to hide a break, and the
+  # orthogonal contract-coverage exit axis. Distinct from
+  # `compatibility-evaluation-config` (which owns the *resolved
+  # configuration object* field-by-field, not the mental model) — this
+  # page's own `reference_page` points there rather than re-deriving it.
+  contract-relevance-and-coverage:
+    canonical_page: learn/contract-aware-compatibility.md
+    fact_sources:
+      - abicheck/contract_relevance_types.py
+      - abicheck/contract_evaluation.py
+      - abicheck/export_surface.py
+      - abicheck/contract_pipeline.py
+      - abicheck/contract_coverage_ledger.py
+      - abicheck/contract_coverage_exit.py
+    reference_page: reference/compatibility-evaluation-config.md
+    task_pages:
+      - use/contract-evaluation.md
+      - use/ci-gating.md
+    allowed_summaries:
+      - learn/verdicts.md
+      - reference/exit-codes.md
+
+  # A CI matrix's per-target compare/scan JSON reports, folded into one
+  # gate. Distinct from `verdicts`/`compatibility-evaluation-config` (which
+  # own a single comparison's own result) -- this topic is about
+  # reconciling several already-produced reports against each other.
+  aggregate-reporting:
+    canonical_page: use/aggregate-reports.md
+    fact_sources:
+      - abicheck/aggregate.py
+      - abicheck/aggregate_findings.py
+      - abicheck/cli_aggregate.py
+    reference_page: reference/exit-codes.md
+    task_pages:
+      - use/github-action-recipes.md
+      - integration/scenarios/multi-platform.md
+    allowed_summaries:
+      - use/mcp-integration.md
 
   suppressions:
     canonical_page: use/suppressions.md

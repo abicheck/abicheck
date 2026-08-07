@@ -209,9 +209,17 @@ verdict.
 ## Exit codes
 
 `compare --used-by` computes the exit code from the worst of every
-`--used-by` app's own scoped verdict — the full-library verdict is folded
+`--used-by` app's own scoped result — the full-library verdict is folded
 into the rendered report as informational context (see "Example output"
-above) but does **not** participate in the exit-code calculation:
+above) but does **not** participate in the exit-code calculation. Which
+*scheme* computes that scoped exit code follows the exact same `auto`/
+`legacy`/`severity` resolution as plain `compare` — see [The two exit-code
+schemes](ci-gating.md#the-two-exit-code-schemes) for the resolution rule
+(an explicit `--exit-code-scheme` pin is always authoritative; `auto`
+follows whether any severity setting is active). Scoped and unscoped runs
+share that one resolution — nothing here overrides it.
+
+**Legacy scheme (no severity setting active):**
 
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
@@ -220,21 +228,53 @@ above) but does **not** participate in the exit-code calculation:
 | `4` | `BREAKING` | Binary ABI break or missing symbols |
 | `64` | usage error | Bad arguments/invocation |
 
-### `--severity-*` flags have no effect here
+### `--severity-*` flags *do* apply to a scoped run
 
-Unlike plain `compare`, a scoped `--used-by` (or `--required-symbol(s)`) run
-always uses this fixed legacy mapping — passing `--severity-preset` or any
-other `--severity-*` option does **not** switch it to the severity-aware
-`0`/`1`/`2`/`4` scheme described in [Exit Codes](../reference/exit-codes.md).
-The scoped exit code is derived purely from the worst app-scoped `Verdict`
-(`BREAKING` → `4`, `API_BREAK` → `2`, otherwise `0`). One consequence: a
-missing required symbol/version is always `Verdict.BREAKING`, so it always
-exits `4` — even under `--severity-preset info-only` — but that's because
-severity presets don't reach the scoped path at all, not because of a
-special-cased floor. If you need severity-aware exit codes for the
-app-relevant subset of changes, don't pass `--used-by`; run plain `compare`
-with your `--severity-*` flags and use `--show-only`/the JSON report to
-inspect the changes touching your app's imports instead.
+A scoped `--used-by` (or `--required-symbol(s)`) run respects
+`--exit-code-scheme`/`--severity-*`/`--severity-preset` the same way plain
+`compare` does — including that an explicit `--exit-code-scheme legacy`
+still pins the legacy mapping even alongside a `--severity-*` flag (see
+above). When the scheme does resolve to severity-aware, it applies to the
+scoped exit code too: `0`/`1`/`2`/`4` as described in [Exit
+Codes](../reference/exit-codes.md), computed over the changes relevant to
+that app (`compute_exit_code`/`compute_gate_decision` run against the
+app-scoped change set, not the full library's). One consequence: a missing
+required symbol/version/entrypoint has no matching diff `Change` for the
+severity machinery to see on its own, so it is floored in separately —
+under the severity scheme it counts toward, and can trip, the
+`abi_breaking` category exactly as a real `FUNC_REMOVED` finding would,
+including respecting a demoted `--severity-abi-breaking info` (i.e. a
+missing-contract symbol is not a hidden, unconfigurable floor to `4`
+anymore).
+
+The JSON report distinguishes the two levels explicitly:
+
+- `verdict` / `severity` — the **scoped** result (what the exit code
+  reflects). Under the severity scheme, `severity.categories.*.count` and
+  `severity.blocking_categories` are the scoped tallies too, not the
+  full-library ones.
+- `full_verdict` / `full_severity` — the full-library result, moved aside as
+  informational context. Both `severity` and `full_severity` are present
+  only when the run resolved to the severity scheme; under the legacy
+  scheme neither key is emitted at all (there is no gate config to render),
+  so their absence alone doesn't distinguish "legacy" from "not rendered
+  yet" — check `scoped_exit_code_scheme` via SARIF/JUnit (below) if a
+  consumer needs to tell the two apart explicitly.
+- `used_by` — per-app detail (`missing_symbols`/`missing_versions`/
+  `relevant_change_count`), unchanged by which scheme computed the exit
+  code.
+
+SARIF and JUnit output additionally state the scheme explicitly —
+`gateExitCodeScheme`/`scopedExitCodeScheme` in the SARIF run properties, and
+an `abicheck.scoped_exit_code_scheme` JUnit property — for a consumer that
+needs to know legacy-vs-severity without inferring it from field presence.
+
+Note that `--show-only`/the JSON report alone, **without** `--used-by`,
+cannot substitute for this: only `--used-by` actually reads the app's
+imports and computes the app-relevant subset in the first place — plain
+`compare` (even with `--severity-*`) has no app to scope against, and gates
+on the full library diff regardless of what `--show-only` filters out of
+the *rendered* output.
 
 ---
 
@@ -255,6 +295,132 @@ A library change is **relevant** to an app if any of these conditions hold:
 5. The change is `SYMBOL_VERSION_DEFINED_REMOVED` for a version the app requires
 
 All other changes are classified as **irrelevant** — the library changed, but the application doesn't use the affected symbols.
+
+---
+
+## Why does this consumer depend on the changed declaration?
+
+The relevance test above tells you *whether* a change touches the app's
+imports. When the old library side also carries a **source graph** (ADR-057),
+abicheck can additionally explain *why* — the chain of calls inside the old
+library that connects a symbol the app actually imports to the internal
+declaration that changed.
+
+That source graph comes from one of two producers, and it matters which one
+supplied it: a full **L4/L5 build/source graph** (`--old-sources`/
+`--old-build-info`) sees real call chains through the library's whole
+implementation, while an **L2, header-only graph** — attached automatically
+whenever headers are parsed, no extra flag needed — only sees
+inline/template bodies visible directly in the header text. Both are stored
+as the same `SourceGraphSummary` shape, so the join below works identically
+either way; the L2 graph is just narrower in what it can reach.
+
+The L2 graph's automatic attach still needs `clang`/`clang++` on `PATH` to
+actually see call/type edges — that's true even when the main extraction
+used the default CastXML header backend, since the header-graph attach
+always shells out to clang itself. Without a usable clang, it silently
+degrades to a declaration-visibility-only graph (no `DECL_CALLS_DECL`
+edges), so the join below never fires and findings keep their plain
+symbol-level wording instead of erroring. In a clang-less environment,
+`--old-sources`/`--old-build-info` is the reliable way to get proof-path
+chains.
+
+### The two evidence sides of the chain
+
+- **The app's import table proves the app requires the removed symbol
+  itself** — parsed the same way as the relevance check above (`CONF_HIGH`:
+  "a fact about a real linked binary, not an inference"). The proof-path
+  join only fires for a symbol the app's own binary directly names as
+  undefined; it does not explain a change to some other internal symbol the
+  app never referenced.
+- **The old library's own source graph explains *why* the app ended up
+  requiring that symbol directly** — walking `DECL_CALLS_DECL`/
+  `SOURCE_DECL_MAPS_TO_SYMBOL` edges from every **consumer-compiled** public
+  entry (a declaration whose body was compiled straight into the consumer's
+  own binary — in practice, an `inline` function or template instantiation
+  the app's compiler expanded) to the removed declaration.
+
+Joining the two answers a question neither side can answer alone: not "some
+symbol went missing" but "the inline/template entry point `Y` your own
+binary expanded is what made you require the now-removed `X` directly." An
+ordinary out-of-line exported function the app calls has no such chain to
+show — if the app requires `Y` itself and `Y` was removed, that is the
+direct case below, not this join.
+
+### What evidence this needs
+
+The join only fires when the **old** library side carries a source graph —
+either shape above. A plain `-H`/`--header` pass already supplies the L2
+header-only one, for inline/template-reachable chains; passing
+`--old-sources`/`--old-build-info` (or their `--sources`/`--build-info`
+equivalents) reaches further, into call chains a header alone can't see:
+
+```bash
+abicheck compare libfoo.so.1 libfoo.so.2 --used-by ./myapp \
+  -H old=include/v1/foo.h -H new=include/v2/foo.h
+```
+
+**Without a source graph on the old side, abicheck doesn't invent an
+explanation** — the finding keeps exactly the plain symbol-level wording it
+always had (`public_reachable: true`, no proof path), the same as before
+this feature existed. Absence of a graph edge is never treated as evidence
+of absence of a dependency.
+
+### Two worked examples
+
+**1. Direct dependency** — the app imports the removed function itself:
+
+```text
+myapp requires public entry train directly
+```
+
+No chain to show — the app's own import table already names the removed
+symbol.
+
+**2. Indirect dependency** — `train()` is an `inline` function defined in the
+header, so the app's compiler expanded it straight into the app's own
+binary; the app's import table therefore directly names the internal,
+now-removed declaration `train()`'s body called, not `train` itself (which
+was never a real exported symbol to begin with):
+
+```text
+myapp requires detail::train_ops_dispatcher via public entry train:
+  train() → detail::train_ops_dispatcher()
+```
+
+The app's import table alone would only show that it requires
+`detail::train_ops_dispatcher` — an internal-looking name with no obvious
+reason to be a consumer's problem. The proof path is what explains that
+`train`, the header's own inline public entry point, is what made the app
+depend on it directly.
+
+### Where this shows up in the report
+
+- On the synthesized "missing required symbol" finding (for a symbol the
+  library diff itself has no ordinary change for), and
+- On an **ordinary** library change (e.g. `FUNC_REMOVED`) that already
+  covers the same symbol — in that case the wording is consumer-neutral
+  (`"... is reachable from public entry train: ..."`, no app name), since
+  that finding is also rendered in the unscoped, full-library report.
+
+In `--format json`, the structured chain is `impact_proof_path` — an
+alternating list of node/edge dicts — alongside `affected_public_roots`
+(the public entry point name(s)) and `impact_is_direct`. These live on the
+`ImpactAssessment.proof_path` object described in the [Impact
+Analysis](../learn/impact-analysis.md) reference for the general model this
+feature builds on; this section only covers the consumer-scoped join.
+
+### Current limits
+
+This is a **static** proof over the graphs abicheck already builds, not a
+runtime trace: it does not ingest anything the app actually did at
+runtime, doesn't yet read a project-declared use-case manifest, and doesn't
+yet join **multiple** `--used-by` apps into one shared graph (each app's
+scoping is computed independently, repeatably — not a unified
+multi-consumer picture). There is also no consumer-side build-evidence
+edge yet (what the *consumer's own* source does with the symbol, as opposed
+to what the library's old implementation does) — only the library side of
+the chain is graph-backed.
 
 ---
 

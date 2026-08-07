@@ -27,6 +27,10 @@ It catches removed or renamed symbols, changed function signatures, struct layou
 - **More than one library at a time.** Compare co-versioned multi-library releases as a single bundle ([`compare` on directory/package inputs](https://abicheck.github.io/abicheck/user-guide/multi-binary/)), check whether a specific application still works ([`compare --used-by`](https://abicheck.github.io/abicheck/user-guide/appcompat/)), or validate a binary's full dependency stack across sysroots ([`deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/)).
 - **Drop-in for existing tools.** A [`compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) mode mirrors `abi-compliance-checker` flags, and migration guides cover [ABICC](https://abicheck.github.io/abicheck/user-guide/from-abicc/) and [libabigail](https://abicheck.github.io/abicheck/user-guide/from-libabigail/).
 - **Agent- and script-friendly.** Structured JSON, a [Python API](#python-api), and an [MCP server](https://abicheck.github.io/abicheck/user-guide/mcp-integration/) for AI-driven workflows. Pure Python (3.10+), no heavyweight native toolchain required for binary-only mode.
+- **Contract-aware decisions** (opt-in). Gate only on changes that belong to your *declared* compatibility contract — public headers, the binary's actual export table, or everything — while excluded and unresolved findings stay in an auditable report instead of silently vanishing. See [Contract-Aware Compatibility](https://abicheck.github.io/abicheck/learn/contract-aware-compatibility/).
+- **Cross-compiler reconciliation.** When one target is checked under several compiler/build profiles (GCC, Clang, MSVC), `aggregate` folds the reports back together and tells you whether a break is universal or profile-specific. See [Aggregate Reports](https://abicheck.github.io/abicheck/use/aggregate-reports/).
+- **Consumer impact explanations.** `compare --used-by` doesn't just say an application is affected — with source evidence on the library side, it can show the public-to-internal call chain that makes the app depend on the changed declaration. See [Application Compatibility](https://abicheck.github.io/abicheck/user-guide/appcompat/#why-does-this-consumer-depend-on-the-changed-declaration).
+- **One automation model.** The Python API and MCP server resolve through the same typed request objects and compatibility semantics (native `compare` does too; native `dump` is migrating — see the [CLI/Python/MCP parity table](https://abicheck.github.io/abicheck/user-guide/python-api/#cli-python-mcp-parity)).
 
 ---
 
@@ -113,8 +117,13 @@ abicheck's whole CLI is 7 root commands: `dump`, `compare`, `scan`, `deps`, `com
 | Validate a binary's full dependency stack across two sysroots | [`abicheck deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/) |
 | Drop-in replacement for `abi-compliance-checker` | [`abicheck compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) |
 | Save a reusable ABI snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/getting-started/) |
-| Fold per-target ABI reports from a CI build matrix into one gate verdict | [`abicheck aggregate`](https://abicheck.github.io/abicheck/user-guide/github-action-recipes/) |
+| Fold per-target ABI reports from a CI build matrix into one gate verdict | [`abicheck aggregate`](https://abicheck.github.io/abicheck/use/aggregate-reports/) |
 | Check a multi-target/multi-build-profile **project** together (advanced, `check-project.yml`) | [`abicheck project`](https://abicheck.github.io/abicheck/reference/cli-reference/) |
+
+`compare` is strictly binary/API comparison. Planning and validating a
+declared multi-target/multi-profile topology is `project`'s job; folding
+already-produced per-check reports back into one gate is `aggregate`'s —
+neither of those two analyzes a binary directly.
 
 ---
 
@@ -129,7 +138,7 @@ Use these to gate CI pipelines.
 | `4` | `BREAKING` | Binary ABI break (old binaries will crash or misbehave) |
 | `8` | `REMOVED_LIBRARY` | Library removed in new version (multi-library compare with `--fail-on-removed-library`) |
 
-Any active severity setting (a `--severity-*` flag or a severity value in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level *finding* in the addition/quality categories (`0` still passes, `4` is still worst). `scan`, `deps compare`, and `compat` add per-command codes (e.g. `scan` also has a `5` for `--budget` overflow). The canonical matrix is the [exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine into the exit code is covered in [CI Gating](https://abicheck.github.io/abicheck/user-guide/ci-gating/).
+Any active severity setting (a `--severity-*` flag or a severity value in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level *finding* in the addition/quality categories (`0` still passes, `4` is still worst). Under `--contract-evaluation` (opt-in), an orthogonal contract-coverage axis can also raise a clean `0` to `1` when the selected contract domain's evidence is incomplete — a *different* reason for exit `1` than a severity error, both foldable with `max`; see [Contract-Aware Compatibility](https://abicheck.github.io/abicheck/learn/contract-aware-compatibility/). `scan`, `deps compare`, and `compat` add per-command codes (e.g. `scan` also has a `5` for `--budget` overflow). The canonical matrix is the [exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine into the exit code is covered in [CI Gating](https://abicheck.github.io/abicheck/user-guide/ci-gating/).
 
 ---
 

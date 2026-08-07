@@ -74,6 +74,26 @@ The docs are two complementary tracks, each ordered from introductory to expert:
 - [Exit Codes](reference/exit-codes.md) — for gating CI.
 - [Policy Profiles](use/policies.md) and [Suppressions](use/suppressions.md).
 
+**Maintaining a public compatibility contract?**
+
+- [Contract-Aware Compatibility](learn/contract-aware-compatibility.md) — gate only on what you actually promised (public headers, exports, or everything).
+- [Contract Evaluation](use/contract-evaluation.md) — the commands and CI recipes.
+
+**Checking multiple compilers and platforms?**
+
+- [Scenario S17: Multiple Build and Compiler Profiles](integration/scenarios/multi-platform.md) — a worked GCC + Clang + MSVC `.abicheck.yml`.
+- [Aggregate Reports](use/aggregate-reports.md) — fold the matrix back into one gate, and tell a universal break from a profile-specific one.
+
+**Checking real applications and plugins?**
+
+- [Application Compatibility](use/appcompat.md) — `compare --used-by`, including *why* a consumer depends on a changed declaration.
+- [Plugin Systems](use/plugin-systems.md) — `compare --required-symbol`.
+
+**Automating through Python or an agent?**
+
+- [Python API](use/python-api.md) — typed requests, and a CLI/Python/MCP parity table.
+- [MCP Integration](use/mcp-integration.md) — the MCP server for AI-agent workflows.
+
 **Migrating from another tool?**
 
 - [Migrating from ABICC](use/from-abicc.md)

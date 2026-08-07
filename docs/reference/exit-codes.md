@@ -24,14 +24,18 @@ Under `--contract-evaluation`, each finding's contract relevance is classified
 is JSON `null` and its `gate_contribution` is `0`, so it moves neither the
 verdict nor the exit code.
 
-This is a real change to what a command exits with, and it goes in both
-directions: a change proven outside the declared contract stops blocking, and
-a change one domain cannot resolve stops being reported as an ABI break. What
-it never does is make either disappear — an excluded finding keeps its
-`ChangeKind`, stays in `changes` and in the audit ledgers, and is rendered
-with the relevance and reason code that say why it did not gate. The
-unresolved case is answered on the separate axis below, which is what stops
-missing evidence from being the cheapest way to pass.
+This is a real change to what the *compatibility verdict* scores, but only in
+one direction: since policy now scores the `EVALUATED` subset of what it used
+to score in full, the verdict can only stay the same or get less severe — a
+change proven outside the declared contract stops blocking, and a change one
+domain cannot resolve stops gating as an ABI break. What it never does is
+make either disappear — an excluded finding keeps its `ChangeKind`, stays in
+`changes` and in the audit ledgers, and is rendered with the relevance and
+reason code that say why it did not gate. The *other* direction — the
+overall process exit getting worse — comes from the separate,
+independently-orthogonal axis below (missing evidence contributing its own
+exit `1`), not from relevance itself; that's what stops missing evidence
+from being the cheapest way to pass.
 
 **Without `--contract-evaluation` no finding carries a relevance**, so every
 finding is scored exactly as before and every exit code below is unchanged.
@@ -41,9 +45,13 @@ finding is scored exactly as before and every exit code below is unchanged.
 `compare` and `scan --against` carry an **orthogonal contract-coverage axis**
 under `--contract-evaluation`. Complete coverage of the mode-selected evidence
 domain contributes `0`; missing, partial, stale, failed, contradictory, or
-identity-incomplete **required domain evidence** produces
-`UNKNOWN_UNRESOLVED`, `analysis_status=NOT_CHECKABLE`, and contributes `1`.
-Unrelated provider failures stay advisory.
+identity-incomplete **required domain evidence** is recorded as a
+`CoverageFailure` in the run-level `contract_coverage_failures` ledger and
+contributes `1`. Unrelated provider failures stay advisory. This is a
+run-level ledger, not a per-finding field: a coverage gap does not by itself
+force every finding to `UNKNOWN_UNRESOLVED` — an observed root or a
+kind that's `NOT_APPLICABLE` regardless of evidence can still resolve
+normally even while the ledger records incomplete evidence elsewhere.
 
 The axis is folded with `max`, so it raises a clean `0` to `1` and **never
 lowers** a gate's `2`/`4` — missing coverage cannot demote a real ABI break to
@@ -68,7 +76,10 @@ a coverage failure is not a finding, so the suppression machinery structurally
 cannot reach one. To accept incomplete contract assurance, set
 `contract.unresolved: warn` (for example via a `kind: contract` pack). That
 zeroes this contribution and changes nothing else: the failures remain listed
-in `contract_coverage_failures` in every report.
+in `contract_coverage_failures` — but only `--format json` carries that field
+at all; markdown, review, HTML, SARIF, and JUnit output surface the same
+information as a stderr diagnostic, a SARIF notification, or a JUnit error
+suite instead.
 
 Reports state the applied number in `contract_coverage_exit_contribution`,
 which distinguishes contract coverage exit `1` from severity or aggregate
@@ -252,8 +263,8 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 
 The multi-target fan-in gate folds the per-target `compare`/`scan` JSON reports
 a CI build matrix produces (one `abi-report-<target>.json` per leg) into one
-gate decision. Three axes stay **orthogonal** (ADR-042), and the exit code is
-the worst contribution across them:
+gate decision. Four axes stay **orthogonal** (ADR-042, extended by ADR-049
+Phase 7), and the exit code is the worst contribution across them:
 
 - **gate** — each report already carries its own severity gate decision
   (`severity.{exit_code,blocking,blocking_categories}`); `aggregate` *combines*
@@ -269,14 +280,27 @@ the worst contribution across them:
   greener legacy path.
 - **coverage** — did every *required* expected target actually report? An
   incomplete required coverage is a *coverage* failure at exit `1`; it is
-  **never** promoted to an ABI-break exit `4`.
+  **never** promoted to an ABI-break exit `4`. This is a different question
+  from contract coverage below: this one asks whether the matrix *ran and
+  reported at all*.
 - **compatibility** — the worst verdict over the analyzed targets, reported for
   context; it does not by itself drive the exit code.
+- **contract_coverage** — reads back each already-analyzed target's own
+  `contract_coverage_exit_contribution` (per-report field; see
+  "Contract-coverage contribution" above) and folds it with `max`, same as
+  the other axes — added to the aggregate schema alongside this axis
+  (`abicheck.aggregate.AGGREGATE_SCHEMA_VERSION` is the versioned fact
+  owner); `aggregate` never recomputes it. This is a different question again from
+  plain `coverage`: a required target can have reported successfully (no
+  coverage gap) while its own evidence for the *selected contract domain*
+  was still incomplete (a contract-coverage gap). Both can independently
+  produce exit `1`, for unrelated reasons, and `aggregate` records which one
+  fired rather than merging them into one undifferentiated `1`.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
+| `1` | A required target was unavailable (coverage gap, default `--on-missing-required fail`); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract-evaluation`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -298,10 +322,17 @@ gap exits `4`; a run whose *only* problem is a missing required target exits
   which targets the matrix must produce: `{"targets": [{"id": "linux-x86_64",
   "required": true}, ...]}`. Generate it once in the plan job and feed the same
   file to both the matrix and this gate so they never drift.
+- `--run-plan run-plan.json` — a project run-plan from `abicheck project
+  plan`, projected to the same expected-target shape internally (recommended
+  for a `project plan`-driven workflow instead of a separate manifest
+  projection step); each check's own `check_id` becomes the expected target
+  id, matching what `check-target` writes as every report's `target_id`.
 - `--expect <ids>` (repeatable / comma-separated), with optional `--optional
   <ids>` — an inline alternative to a manifest file.
 - `--discovered-only` — explicitly aggregate whatever reports are present with
-  **no** coverage gate (pure worst-of the gate decisions). Required to run
+  **no required-target coverage gate** (a missing target is simply not
+  counted, never a coverage failure — the `contract_coverage` axis is
+  unaffected and still applies to whatever *is* present). Required to run
   without a manifest/`--expect`: with no declared target set the gate cannot
   tell a missing required target from an intentionally absent one, so a bare
   `aggregate reports/` is a usage error (exit `64`), not a silent pass.
@@ -311,8 +342,12 @@ per-target gate decisions alone then decide the exit code). `--on-unexpected-tar
 (`include`/`warn`/`fail`/`ignore`, default `include`) controls a report whose
 target is not in the expected set: `include` counts its real findings in the
 gate but not in required coverage. The `--format json` output is versioned
-(`aggregate_schema_version`) and carries the three axes separately under
-`gate` / `coverage` / `compatibility`.
+(`aggregate_schema_version` — see `abicheck.aggregate.AGGREGATE_SCHEMA_VERSION`
+for the current value) and carries the four axes
+separately under `gate` / `coverage` / `compatibility` / `contract_coverage`
+— the last is `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and
+present even when no target used `--contract-evaluation` (an empty
+`incomplete_targets` list, not an omitted block).
 
 When targets are checked under several toolchain profiles (report ids of the
 form `target@profile#channel@depth`), two additional reporting-only blocks
