@@ -857,8 +857,15 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         # gcc-prefix has no RunPlanCheck counterpart -- stays global-only.
         assert run_step["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
 
+    @pytest.mark.parametrize(
+        ("key", "global_input"),
+        [
+            ("gcc-path", "inputs.gcc-path"),
+            ("gcc-options", "inputs.gcc-options"),
+        ],
+    )
     def test_per_cell_gcc_path_and_options_are_not_forwarded_to_bundle_cells(
-        self,
+        self, key: str, global_input: str
     ) -> None:
         """The same hazard `test_per_cell_ast_frontend_is_not_forwarded_to_
         bundle_cells` covers for `ast-frontend`, for `gcc-path`/`gcc-options`
@@ -883,25 +890,27 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         forwarding is unchanged by this fix and deliberately stays
         unconditional — gating it would be a new, undecided behaviour
         change (silently dropping an explicit global `--sysroot` for bundle
-        cells), not a fix for the acknowledged bug.
+        cells), not a fix for the acknowledged bug. Covered separately by
+        `test_sysroot_stays_unconditional_for_bundle_cells` below.
         """
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["check"])
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
-        for key, global_input in (
-            ("gcc-path", "inputs.gcc-path"),
-            ("gcc-options", "inputs.gcc-options"),
-        ):
-            expr = run_step["with"][key]
-            assert "matrix.kind != 'bundle'" in expr, (
-                f"a bundle cell compares a directory, where the CLI rejects "
-                f"--{key} for a directory/package compare outright"
-            )
-            # GitHub's `a && b || c`: when `a` is false the result is `c`, so
-            # a bundle cell lands on the workflow-global input, not ''.
-            assert expr.endswith(f"|| {global_input} }}}}")
-        # sysroot has no per-cell overlay field, so it stays unconditional
-        # rather than gated -- see the docstring above for why.
+        expr = run_step["with"][key]
+        assert "matrix.kind != 'bundle'" in expr, (
+            f"a bundle cell compares a directory, where the CLI rejects "
+            f"--{key} for a directory/package compare outright"
+        )
+        # GitHub's `a && b || c`: when `a` is false the result is `c`, so a
+        # bundle cell lands on the workflow-global input, not ''.
+        assert expr.endswith(f"|| {global_input} }}}}")
+
+    def test_sysroot_stays_unconditional_for_bundle_cells(self) -> None:
+        """`sysroot` has no per-cell overlay field, so it stays unconditional
+        rather than gated -- see the docstring above for why."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
         assert run_step["with"]["sysroot"] == "${{ inputs.sysroot }}"
 
     def test_run_check_target_prefers_per_cell_ast_frontend(self) -> None:
