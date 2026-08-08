@@ -3907,6 +3907,78 @@ it). Without a case where the two domains are *supposed* to disagree, the
 — the same vacuity the `public` domain already has a guard against, now
 given to `exports` too.
 
+**Updated (2026-08-08): "zero unexplained public-break losses" is not
+literally zero for `public`, and the root cause of the three named losses
+was found to be deeper than a spelling mismatch.**
+`scripts/measure_contract_shadow.py`'s own gate is
+`UNRESOLVED_LOSS_BASELINE = {"public": 3, "exports": 20, "all": 0}`, with
+three specific, individually pinned cases in
+`UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES` (`ambiguous_namespaced_leaf`,
+`public_std_string_typedef_alias_layout_changed`,
+`public_stdlib_type_used_directly_layout_changed`) — the baseline this
+section's own "Gate" line calls zero is a *tracked, named* three, not an
+oversight, but this plan text never previously said so explicitly. A
+status-review follow-up asked for a fix; investigating it found the
+tracked-but-unexplained losses are genuinely two different problems, not
+one:
+
+The two `..._layout_changed` cases (a `std::vector<int, ...>`/`std::string`
+taken directly by a public function) were suspected to be the same
+bare-vs-qualified spelling gap `AGENTS.md`'s "Type reachability" section
+documents at length for `type_reachability.py` — but empirically running
+`compute_public_surface()` against the exact corpus fixtures (a synthetic
+snapshot built the same way `scripts/check_fp_rate.py` does, RecordType
+named `"vector<int, std::allocator<int> >"`) showed `public_types` comes
+back **empty**, not merely missing the right spelling. The actual cause is
+one level upstream: `surface.py`'s `_type_identifiers()` tokenizes a type
+spelling with `_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_:]*")`, which
+splits `"vector<int, std::allocator<int> >"` into the three disconnected
+identifier tokens `{"vector", "allocator", "std::allocator"}` and discards
+the template-argument structure entirely — while `record_by_name` (built by
+`_index_surface_types`) indexes records by their *exact* `RecordType.name`
+string, template arguments included. A signature seed can therefore never
+exact-match a template-instantiated record's own key; this is not specific
+to `std::` types, it reaches any public function taking *any* template
+instantiation by value, and it predates this plan (`_type_identifiers` is
+older than the contract-relevance feature). `type_reachability.py`'s own
+`directly_referenced_stdlib_types()` computes the right answer today
+(confirmed empirically: it correctly returns
+`{"std::vector<int, std::allocator<int> >"}` for the same fixture) but nothing
+threads it, or an equivalent template-preserving candidate, into
+`surface.py`'s seed/closure computation or into `contract_evaluation.py`'s
+`_type_candidates`/`_confirmed_type_matches`.
+
+The third case, `ambiguous_namespaced_leaf`, is unrelated to the above: it is
+exactly what `_confirmed_type_matches`'s own docstring already says (§ "An
+'indecisive ambiguity' shortcut was tried here and reverted") — proving a
+bare-tail collision (`ns1::Cache`/`ns2::Cache` both spelled `Cache`) is
+resolvable one way or the other needs **per-identity reachability**
+(distinguishing "reached via an exact qualified match" from "reached only
+via the ambiguous bare-tail fallback") that `PublicSurface`'s closure does
+not record at all today — a change to the shared closure's data model
+every other `public`-domain consumer depends on, not a local fix.
+
+**Sizing, not attempted here.** The two `..._layout_changed` cases are a
+contained fix: thread a template-argument-preserving candidate (either
+`type_reachability.directly_referenced_stdlib_types()` generalized past
+`std::`-only, or a new seed derived the same way) from
+`contract_pipeline.build_contract_stage()` (which already holds both
+`AbiSnapshot`s) through `ContractEvaluationStage` into
+`evaluate_change_contract_relevance`/`evaluate_snapshot_pair_contract_relevance`,
+consulted in `_confirmed_type_matches`/`_type_candidates` the way
+`diff_types._is_abi_surface_type` already consults a `directly_referenced`
+set for its own, narrower purpose (emission gating, not contract
+relevance). `ambiguous_namespaced_leaf` is the larger half: it needs new
+per-record provenance in `PublicSurface`/`_walk_type_closure` (which record
+records depend on many `public`-domain consumers beyond contract
+evaluation — `classify_change_surface`, `_confirmed_type_matches`, and
+every other detector than reads `public_types`/`ambiguous_type_names`), so
+it needs its own scoped, independently-verified design and a full
+FP-rate/tier-accuracy/mutation-score re-verification, not a same-round
+extension of the smaller fix. Neither is implemented as part of this
+update; this note exists so a future round starts from the actual root
+cause instead of re-deriving it.
+
 **Bounded honestly.** Two lanes the Gate lists are named in
 `UNCOVERED_LANES` with their reason and reported in the output rather than
 silently omitted: `package` (`compare` rejects `--contract-evaluation` for
@@ -3985,10 +4057,38 @@ lives.
 
 What remains, in dependency order: flipping `--contract-evaluation` on by
 default (this reorder is its precondition, not a substitute for the migration
-corpus §10.3 calls for — and release/package fan-out, `aggregate` and the MCP
-tool do not yet resolve the same config, so a flip today would give
-single-library and release comparisons different semantics); and `aggregate`
-folding the ledger into its coverage axis.
+corpus §10.3 calls for).
+
+**Updated (2026-08-08): the release/package half of this paragraph is
+done; `aggregate`'s own item was stale even before this update, and the
+MCP caveat narrows to a specific known gap rather than a blanket one.**
+The directory/package `compare` fan-out previously hard-rejected
+`--contract-evaluation`/`--contract` outright — it now threads both
+straight into each library pair's own `service.run_compare()` call, the
+identical Tier-2 chokepoint a single-pair `compare` uses, so a library
+compared through the fan-out gets the same ADR-049 decision it would from
+comparing it individually; ADR-049 Phase 7's orthogonal contract-coverage
+floor is `max()`-aggregated across every library into the release's own
+exit code the same way. `aggregate` folding the coverage ledger into its
+own exit axis (`AggregateResult.contract_coverage_exit`, schema 1.3) was
+already implemented before this note — this paragraph's own "and
+`aggregate` folding the ledger into its coverage axis" trailer was
+already inaccurate as a *remaining* item, just never corrected; a
+separate, later addition (`finding_matrix` entries carrying each
+profile's own `contract_relevance`/`compatibility_decision`/
+`gate_contribution`, schema 1.4) is a reporting-detail improvement over
+an already-working coverage fold, not the fold itself. The MCP tool does
+call `checker.compare(..., contract_evaluation=..., contract_mode=...)`
+directly (`mcp_server.py`), so its actual verdict/gate computation already
+goes through the same authoritative pipeline a single-pair CLI `compare`
+does — the still-real gap is narrower than "different semantics": the
+tool has no `--pack` equivalent, so `contract.unresolved=warn` and any
+other pack-sourced field are unreachable from it, and
+`mcp_compare_receipt.resolve_tool_config` resolves a config only for the
+persisted receipt, never applies one to the run (unlike the CLI's
+`resolve_and_apply`) — investigated this session and deliberately not
+attempted, since a rushed fix risks the same "decorative `--pack`" bug
+class CodeRabbit already caught twice on the CLI side.
 
 SARIF's invocation exit code is **no longer** on that list: it publishes its
 own machine-readable exit contract, so leaving it unfolded meant an artifact
