@@ -1229,8 +1229,6 @@ def run_compare(
             exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
-            contract_evaluation=contract_evaluation,
-            contract_mode=contract_mode,
             audit_suppressions=audit_suppressions,
             pack_paths=pack_paths,
             include_labels=include_labels,
@@ -1306,6 +1304,8 @@ def run_compare(
             probe_matrix_old=probe_matrix_old, probe_matrix_new=probe_matrix_new,
             annotate=annotate, annotate_additions=annotate_additions,
             verbose=verbose,
+            contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

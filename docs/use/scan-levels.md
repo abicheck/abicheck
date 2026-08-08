@@ -407,7 +407,9 @@ abicheck scan new/libfoo.so --against old/libfoo.abi.json --depth binary
 L4 cost scales with C++ template depth, so on a heavy library project the per-TU
 replay cost first. `--dry-run` resolves and validates the invocation (depth,
 scope, tool availability) and prints the projected per-layer cost for *this*
-project without scanning anything or writing output (always exits 0).
+project without scanning anything or writing output. Exits 0 for a resolvable
+preview; an invalid invocation or an unsatisfiable requested depth still
+exits nonzero, the same as the real run would.
 
 ```bash
 abicheck scan libfoo.so --sources . --depth source --dry-run

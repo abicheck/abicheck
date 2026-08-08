@@ -43,7 +43,7 @@ from __future__ import annotations
 import hashlib
 import io
 import xml.etree.ElementTree as ET
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
@@ -678,10 +678,74 @@ def _maybe_add_failure(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
 ) -> None:
-    """Add a ``<failure>`` child to *tc* if the change is a failure."""
+    """Add a ``<failure>`` child to *tc* if the change is a failure, and a
+    ``<properties>`` block with ADR-049's per-finding contract decision
+    (CLI-audit P1) regardless of pass/fail.
+    """
+    _add_contract_properties(tc, change, result, severity_config)
     if _is_failure(change, result, kind_sets, severity_config, relevant_ids=relevant_ids):
         _add_failure(
             tc, change, result, kind_sets, severity_config, root_cause_lookup=root_cause_lookup
+        )
+
+
+def _add_contract_properties(
+    tc: ET.Element,
+    change: Change,
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
+) -> None:
+    """Append a ``<properties>`` block to testcase *tc* with the same
+    canonical per-finding contract shape reporter.py's JSON output and
+    sarif.py's ``properties`` already carry (contract_relevance/
+    contract_reason_code/contract_assurance/compatibility_evaluation_status/
+    compatibility_decision/gate_contribution/contract_evidence_refs).
+
+    A finding whose ``contract_relevance`` was never stamped (every run
+    without ``--contract-evaluation``, the default) gets nothing appended --
+    this keeps every pre-existing JUnit report byte-for-byte unchanged.
+    """
+    from .contract_gating import contract_relevance_of, evaluation_status_of
+    from .contract_relevance_types import CompatibilityEvaluationStatus
+    from .severity import gate_contribution_for_change
+
+    relevance = contract_relevance_of(change)
+    if relevance is None:
+        return
+    props = ET.SubElement(tc, "properties")
+
+    def _prop(name: str, value: str) -> None:
+        p = ET.SubElement(props, "property")
+        p.set("name", name)
+        p.set("value", value)
+
+    _prop("abicheck.contract_relevance", relevance.value)
+    if change.contract_reason_code:
+        _prop("abicheck.contract_reason_code", change.contract_reason_code)
+    if change.contract_assurance is not None:
+        _prop("abicheck.contract_assurance", change.contract_assurance.value)
+    # evaluation_status_of always resolves to a real status once `relevance`
+    # is known non-None (it falls back to deriving one from the relevance
+    # itself -- see its own docstring), so there is no reachable `None`
+    # branch to guard here -- `cast` tells mypy that without adding one.
+    status = cast(CompatibilityEvaluationStatus, evaluation_status_of(change))
+    _prop("abicheck.compatibility_evaluation_status", status.value)
+    decision = getattr(change, "compatibility_decision", None)
+    _prop("abicheck.compatibility_decision", getattr(decision, "value", "") or "")
+    _prop(
+        "abicheck.gate_contribution",
+        str(
+            gate_contribution_for_change(
+                change,
+                severity_config,
+                policy=result.policy,
+                policy_file=result.policy_file,
+            )
+        ),
+    )
+    if change.contract_evidence_refs is not None:
+        _prop(
+            "abicheck.contract_evidence_refs", ",".join(change.contract_evidence_refs)
         )
 
 

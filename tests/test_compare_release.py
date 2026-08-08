@@ -1296,3 +1296,35 @@ def test_release_json_omits_severity_block_without_config() -> None:
         "COMPATIBLE", Path("/o"), Path("/n"), [], [], [], {}, {}, [], None, None,
     )
     assert "severity" not in json.loads(out)
+
+
+def test_release_json_emits_contract_coverage_block_when_active() -> None:
+    # CLI-audit P1 (release/package contract parity): present, and matches
+    # single-pair compare JSON's field name, whenever any library entry
+    # carries the per-library contract_coverage_exit_contribution key --
+    # the marker that --contract-evaluation was active for this run.
+    libs = [
+        {
+            "library": "liba.so",
+            "verdict": "NO_CHANGE",
+            "contract_coverage_exit_contribution": 0,
+        },
+        {
+            "library": "libb.so",
+            "verdict": "NO_CHANGE",
+            "contract_coverage_exit_contribution": 1,
+        },
+    ]
+    out = _format_release_json(
+        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, [], None, None,
+        contract_coverage_exit_contribution=1,
+    )
+    assert json.loads(out)["contract_coverage_exit_contribution"] == 1
+
+
+def test_release_json_omits_contract_coverage_block_by_default() -> None:
+    libs = [{"library": "liba.so", "verdict": "NO_CHANGE"}]
+    out = _format_release_json(
+        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, [], None, None,
+    )
+    assert "contract_coverage_exit_contribution" not in json.loads(out)

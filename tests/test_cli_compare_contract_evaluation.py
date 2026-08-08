@@ -532,13 +532,87 @@ class TestShowFilteredAuditLedger:
         assert "[contract:" not in result.output
 
 
-class TestRejectedOnSetInputs:
-    def test_contract_evaluation_rejected_on_directory_inputs(self, tmp_path):
-        # The per-library directory/package (release) fan-out doesn't wire
-        # ADR-049 Phase 3's shadow evaluator -- reject the flag loudly
-        # rather than silently accept and ignore it (mirrors
-        # test_compare_dispatch.py's identical --diagnostic-comparison
-        # coverage).
+class TestReleaseFanOutContractParity:
+    """CLI-audit P1 (release/package contract parity): the per-library
+    directory/package fan-out now threads --contract-evaluation/--contract
+    straight into each pair's own service.run_compare() call, the exact
+    same Tier-2 chokepoint a single-pair `compare` uses -- so a library
+    compared through the fan-out gets the identical contract decision it
+    would from comparing it individually. This used to be an outright
+    UsageError ("not supported for directory/package comparisons yet");
+    replaced here by positive coverage now that it works."""
+
+    def test_contract_evaluation_applies_per_library(self, tmp_path):
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old, new = _breaking_pair()
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        out_dir = tmp_path / "reports"
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--contract-evaluation",
+                "--format",
+                "json",
+                "--output-dir",
+                str(out_dir),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        summary = json.loads(result.stdout)
+        assert summary["verdict"] == "BREAKING"
+
+        # The per-library --output-dir report is a full single-pair-shaped
+        # `to_json()` document, so it already carries the complete ADR-049
+        # per-finding shape for free -- no extra plumbing needed beyond
+        # threading contract_evaluation into service.run_compare.
+        lib_report = json.loads((out_dir / "libfoo.json").read_text())
+        stamped = [c for c in lib_report["changes"] if "contract_relevance" in c]
+        assert stamped, "per-library report must carry ADR-049 contract fields"
+
+    def test_contract_evaluation_off_by_default(self, tmp_path):
+        # No --contract-evaluation: every pre-existing directory/package
+        # report is unaffected -- library JSON carries no contract fields.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old, new = _breaking_pair()
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        out_dir = tmp_path / "reports"
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--format",
+                "json",
+                "--output-dir",
+                str(out_dir),
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        summary = json.loads(result.stdout)
+        assert "contract_coverage_exit_contribution" not in summary
+        lib_report = json.loads((out_dir / "libfoo.json").read_text())
+        assert not any("contract_relevance" in c for c in lib_report["changes"])
+
+    def test_contract_requires_contract_evaluation_on_directory_inputs(self, tmp_path):
+        # The generic --contract-without--contract-evaluation UsageError
+        # (cli_compare_helpers._reject_incoherent_compare_flags) runs
+        # unconditionally ahead of the directory/package dispatch, so this
+        # still rejects -- unlike --contract-evaluation itself, --contract
+        # alone was never meaningfully "rejected only for directories".
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -549,11 +623,37 @@ class TestRejectedOnSetInputs:
 
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--contract-evaluation"],
+            ["compare", str(old_dir), str(new_dir), "--contract", "public"],
         )
-        assert result.exit_code != 0
+        assert result.exit_code == 64, result.output
+        assert "--contract requires --contract-evaluation" in result.output
+
+    def test_pack_still_rejected_on_directory_inputs(self, tmp_path):
+        # --pack is deliberately NOT part of this parity slice: applying a
+        # pack's policy/contract/gate overrides per library still needs its
+        # own resolve-once-apply-per-pair design.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old, new = _breaking_pair()
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        pack_path = pack_dir / "pack.yml"
+        pack_path.write_text(
+            "kind: contract\nversion: 1\nassignments:\n  contract.mode: public\n",
+            encoding="utf-8",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), "--pack", str(pack_path)],
+        )
+        assert result.exit_code == 64, result.output
         assert "not supported for directory/package" in result.output
-        assert "--contract-evaluation" in result.output
+        assert "--pack" in result.output
 
 
 class TestUsedByScopingStampsExplicitEvidence:

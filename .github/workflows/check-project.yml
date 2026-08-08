@@ -884,9 +884,43 @@ jobs:
           # compile_gcc_path stays empty) falls back to the global input
           # unchanged, so an existing project with no profiles.*.compile
           # block sees no behavior change at all.
-          gcc-path: ${{ matrix.compile_gcc_path || inputs.gcc-path }}
+          #
+          # Also gated on `kind != 'bundle'`, for the identical reason
+          # ast-frontend above is: a bundle cell's operand is the
+          # bundle-staging *directory*, and cli_resolve.py's
+          # `_reject_compile_context_for_set_inputs` hard-rejects
+          # --gcc-path/--gcc-options for a directory/package compare (the
+          # per-library release fan-out never threads a single-pair L2
+          # compile context to each pair). Before this line, a profile that
+          # set compile.binding for its target cells would have that same
+          # per-cell override silently reach every bundle cell too, turning
+          # a previously working bundle check into a hard operational
+          # error -- flagged as a known, unfixed pre-existing bug in the
+          # G34 producer/consumer-compiler-profile-separation plan
+          # (Phase B) until this change. Falling back to the workflow-
+          # global input for a bundle cell (rather than to the empty
+          # string) matches ast-frontend's own precedent exactly: it
+          # leaves a bundle cell's behaviour exactly as it was before any
+          # per-cell overlay existed, including that a workflow-global
+          # non-default gcc-path/gcc-options still hard-errors a bundle
+          # cell loudly, same as it always has -- this line declines to
+          # add a *new* source of the error via the per-cell mechanism, it
+          # does not silence the pre-existing one.
+          #
+          # `sysroot` has no per-cell overlay field at all (unlike
+          # gcc-path/gcc-options, no `profiles.<id>.compile.sysroot` is
+          # wired into RunPlanCheck), so its forwarding here is unchanged
+          # by the P1 toolchain-profile audit and is deliberately left
+          # unconditional rather than gated: gating it would be a new,
+          # speculative behaviour change (silently dropping an explicit
+          # workflow-global --sysroot for bundle cells specifically) the
+          # G34 plan doc explicitly flags as needing its own decision --
+          # "не молча удалять параметры" applies here as much as it does
+          # to the per-cell fields above, so this fix does not invent a
+          # third option beyond what was already reviewed.
+          gcc-path: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_path || inputs.gcc-path }}
           gcc-prefix: ${{ inputs.gcc-prefix }}
-          gcc-options: ${{ matrix.compile_gcc_options || inputs.gcc-options }}
+          gcc-options: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_options || inputs.gcc-options }}
           sysroot: ${{ inputs.sysroot }}
           sources: ${{ inputs.sources }}
           build-info: ${{ inputs.build-info }}

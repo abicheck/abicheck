@@ -302,12 +302,28 @@ class ReportFinding:
     #: one or merely indistinguishable.
     mangling: str | None = None
     comparable_symbol: str = ""
+    #: ADR-049's per-finding contract-decision quartet, read verbatim off
+    #: the report entry (see ``reporter._add_contract_evaluation_fields``
+    #: for what stamps them) -- ``None`` for every field when the profile's
+    #: run never opted into ``--contract-evaluation``, which is what keeps
+    #: a matrix built from pre-ADR-049 reports unaffected. Kept here rather
+    #: than only surfaced in :class:`FindingMatrixEntry` so a caller working
+    #: with raw per-profile findings (not yet reconciled into the matrix)
+    #: still has them.
+    contract_relevance: str | None = None
+    compatibility_evaluation_status: str | None = None
+    compatibility_decision: str | None = None
+    gate_contribution: int | None = None
 
     @classmethod
     def from_report_entry(cls, entry: Mapping[str, Any]) -> ReportFinding:
         identity = resolve_report_change_identity(entry)
         cross = resolve_cross_abi_identity(entry)
         severity = entry.get("severity")
+        contract_relevance = entry.get("contract_relevance")
+        compatibility_evaluation_status = entry.get("compatibility_evaluation_status")
+        compatibility_decision = entry.get("compatibility_decision")
+        gate_contribution = entry.get("gate_contribution")
         return cls(
             identity=identity.primary_id,
             identity_tier=identity.tier,
@@ -319,6 +335,27 @@ class ReportFinding:
             cross_declaration=cross_abi_declaration(str(entry.get("symbol") or "")),
             mangling=mangling_scheme(str(entry.get("symbol") or "")),
             comparable_symbol=comparable_mangled_symbol(str(entry.get("symbol") or "")),
+            contract_relevance=(
+                contract_relevance if isinstance(contract_relevance, str) else None
+            ),
+            compatibility_evaluation_status=(
+                compatibility_evaluation_status
+                if isinstance(compatibility_evaluation_status, str)
+                else None
+            ),
+            compatibility_decision=(
+                compatibility_decision
+                if isinstance(compatibility_decision, str)
+                else None
+            ),
+            gate_contribution=(
+                # bool is an int subclass in Python -- isinstance() alone
+                # would accept a JSON true/false as a gate_contribution and
+                # round-trip it back out as a JSON boolean, which neither
+                # this schema nor compare_report.schema.json's own
+                # gate_contribution allow (Codex/CodeRabbit review).
+                gate_contribution if type(gate_contribution) is int else None
+            ),
         )
 
 
@@ -648,6 +685,38 @@ def parse_report_findings(data: Mapping[str, Any]) -> ReportFindings:
 
 
 @dataclass(frozen=True)
+class ProfileContractState:
+    """One affected profile's own ADR-049 contract decision for one
+    :class:`FindingMatrixEntry` (CLI-audit P1: the aggregate semantic
+    matrix).
+
+    A single ``finding_matrix`` entry today only says a profile *observed*
+    a finding (``affected_profiles``) -- it collapses "GCC: IN_CONTRACT and
+    gating" and "Clang: UNKNOWN_UNRESOLVED and not gating" into the same
+    membership fact, even though under ``--contract-evaluation`` those are
+    different outcomes for the *same* logical finding. This is the
+    per-profile answer that distinction needs, read verbatim off that
+    profile's own report entry -- never re-derived, so it can't disagree
+    with what the profile's own run actually decided.
+    """
+
+    profile: str
+    contract_relevance: str | None
+    compatibility_evaluation_status: str | None
+    compatibility_decision: str | None
+    gate_contribution: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "profile": self.profile,
+            "contract_relevance": self.contract_relevance,
+            "compatibility_evaluation_status": self.compatibility_evaluation_status,
+            "compatibility_decision": self.compatibility_decision,
+            "gate_contribution": self.gate_contribution,
+        }
+
+
+@dataclass(frozen=True)
 class FindingMatrixEntry:
     """One logical finding, reconciled across every profile that checked its
     target.
@@ -690,6 +759,18 @@ class FindingMatrixEntry:
     #: since nothing in a report proves they are the same overload, but a
     #: consumer that wants to present them together has the link here.
     cross_abi_declaration: str | None = None
+    #: One :class:`ProfileContractState` per profile in
+    #: :attr:`affected_profiles` (same order), each that profile's own
+    #: ADR-049 contract decision for this finding. Empty when no affected
+    #: profile's report carried a ``contract_relevance`` at all -- i.e. no
+    #: profile checking this target ran ``--contract-evaluation`` -- so a
+    #: matrix built from pre-ADR-049 reports serializes identically to
+    #: before this field existed. A profile that *did* opt in but whose own
+    #: entry for this finding somehow carries none still gets a state
+    #: record here (every field ``None``), so "this profile ran without
+    #: --contract-evaluation" and "this profile's own report was missing
+    #: the field" are never conflated with each other by omission.
+    profile_contract: tuple[ProfileContractState, ...] = ()
 
     @property
     def scope(self) -> str:
@@ -708,7 +789,7 @@ class FindingMatrixEntry:
         return FINDING_SCOPE_PARTIAL
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "base_target": self.base_target,
             "finding_identity": self.finding_identity,
             "identity_tier": self.identity_tier,
@@ -721,6 +802,14 @@ class FindingMatrixEntry:
             "undetermined_profiles": list(self.undetermined_profiles),
             "cross_abi_declaration": self.cross_abi_declaration,
         }
+        # CLI-audit P1: present only when at least one affected profile's
+        # report actually carried a contract decision -- i.e. some profile
+        # checking this target ran --contract-evaluation. Omitted rather
+        # than emitted empty so a matrix built entirely from pre-ADR-049
+        # reports serializes byte-for-byte as it always did.
+        if self.profile_contract:
+            d["profile_contract"] = [p.to_dict() for p in self.profile_contract]
+        return d
 
 
 #: One profile's per-check finding sets: one :class:`ReportFindings` per check
@@ -941,6 +1030,31 @@ def build_finding_matrix(
                 if cross
                 else set()
             )
+            # CLI-audit P1: one profile's own contract decision for this
+            # finding, per affected profile -- the first sample per profile,
+            # mirroring `first = samples[0]` above's "representative, not
+            # merged" precedent (two checks for one profile reporting the
+            # same identity should already agree on its contract decision;
+            # this does not attempt to reconcile a disagreement). Built only
+            # when at least one profile's sample actually carries a
+            # contract_relevance, so a matrix with no --contract-evaluation
+            # profile anywhere never allocates the field at all.
+            profile_contract: tuple[ProfileContractState, ...] = ()
+            if any(s.contract_relevance is not None for s in samples):
+                profile_contract = tuple(
+                    ProfileContractState(
+                        profile=pid,
+                        contract_relevance=known[pid][identity][0].contract_relevance,
+                        compatibility_evaluation_status=known[pid][identity][
+                            0
+                        ].compatibility_evaluation_status,
+                        compatibility_decision=known[pid][identity][
+                            0
+                        ].compatibility_decision,
+                        gate_contribution=known[pid][identity][0].gate_contribution,
+                    )
+                    for pid in affected
+                )
             entries.append(
                 FindingMatrixEntry(
                     base_target=base_target,
@@ -957,6 +1071,7 @@ def build_finding_matrix(
                         p for p in rest if p in undetermined or p in sibling
                     ),
                     cross_abi_declaration=first.cross_declaration,
+                    profile_contract=profile_contract,
                 )
             )
     entries.sort(key=lambda e: (e.base_target, e.kinds, e.symbol, e.finding_identity))

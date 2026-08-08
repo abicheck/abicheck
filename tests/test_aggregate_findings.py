@@ -41,6 +41,7 @@ import pytest
 from abicheck.aggregate import ExpectedTargets, aggregate_reports_dir
 from abicheck.aggregate_findings import (
     _CONFORMANT_CHANGE_FIELDS,
+    ProfileContractState,
     ReportFinding,
     ReportFindings,
     build_finding_matrix,
@@ -1381,3 +1382,163 @@ class TestManglingComparability:
         assert comparable_mangled_symbol("__ZN3lib3addEii") == "_ZN3lib3addEii"
         assert comparable_mangled_symbol("_ZN3lib3addEii") == "_ZN3lib3addEii"
         assert comparable_mangled_symbol("?add@lib@@YAHHH@Z") == "?add@lib@@YAHHH@Z"
+
+
+#: Same finding as `_SIZE_CHANGED`, but as a profile that ran
+#: `--contract-evaluation` would stamp it -- IN_CONTRACT and gating.
+_SIZE_CHANGED_IN_CONTRACT = {
+    **_SIZE_CHANGED,
+    "contract_relevance": "IN_CONTRACT",
+    "compatibility_evaluation_status": "EVALUATED",
+    "compatibility_decision": "BREAKING",
+    "gate_contribution": 1,
+}
+#: The same logical finding, as a profile that ran `--contract-evaluation`
+#: under a domain that could not resolve it would stamp it -- unresolved and
+#: not gating.
+_SIZE_CHANGED_UNRESOLVED = {
+    **_SIZE_CHANGED,
+    "contract_relevance": "UNKNOWN_UNRESOLVED",
+    "compatibility_evaluation_status": "NOT_EVALUATED",
+    "compatibility_decision": None,
+    "gate_contribution": 0,
+}
+
+
+class TestProfileContractState:
+    """CLI-audit P1 (aggregate semantic matrix): `finding_matrix` entries
+    carry each affected profile's own ADR-049 contract decision, not just
+    membership -- the review's own example of "GCC: IN_CONTRACT/gating" vs.
+    "Clang: UNKNOWN_UNRESOLVED/not evaluated" for what looks like one finding."""
+
+    def _findings(self, *entries: dict) -> ReportFindings:
+        return ReportFindings(
+            findings=tuple(ReportFinding.from_report_entry(e) for e in entries),
+            complete=True,
+        )
+
+    def test_from_report_entry_reads_the_four_fields(self) -> None:
+        finding = ReportFinding.from_report_entry(_SIZE_CHANGED_IN_CONTRACT)
+        assert finding.contract_relevance == "IN_CONTRACT"
+        assert finding.compatibility_evaluation_status == "EVALUATED"
+        assert finding.compatibility_decision == "BREAKING"
+        assert finding.gate_contribution == 1
+
+    def test_from_report_entry_defaults_to_none_when_unstamped(self) -> None:
+        finding = ReportFinding.from_report_entry(_SIZE_CHANGED)
+        assert finding.contract_relevance is None
+        assert finding.compatibility_evaluation_status is None
+        assert finding.compatibility_decision is None
+        assert finding.gate_contribution is None
+
+    def test_from_report_entry_ignores_a_wrongly_typed_gate_contribution(self) -> None:
+        finding = ReportFinding.from_report_entry(
+            {**_SIZE_CHANGED, "gate_contribution": "not-an-int"}
+        )
+        assert finding.gate_contribution is None
+
+    def test_from_report_entry_rejects_a_bool_gate_contribution(self) -> None:
+        # bool is an int subclass in Python -- a plain isinstance(x, int)
+        # check would accept a JSON true/false and round-trip it back out
+        # as a JSON boolean, which no schema's gate_contribution allows
+        # (CodeRabbit review).
+        finding = ReportFinding.from_report_entry(
+            {**_SIZE_CHANGED, "gate_contribution": True}
+        )
+        assert finding.gate_contribution is None
+
+    def test_profile_contract_state_to_dict(self) -> None:
+        state = ProfileContractState(
+            profile="gcc",
+            contract_relevance="IN_CONTRACT",
+            compatibility_evaluation_status="EVALUATED",
+            compatibility_decision="BREAKING",
+            gate_contribution=1,
+        )
+        assert state.to_dict() == {
+            "profile": "gcc",
+            "contract_relevance": "IN_CONTRACT",
+            "compatibility_evaluation_status": "EVALUATED",
+            "compatibility_decision": "BREAKING",
+            "gate_contribution": 1,
+        }
+
+    def test_absent_when_no_profile_ever_evaluated_a_contract(self) -> None:
+        (entry,) = build_finding_matrix(
+            {"libfoo": {"gcc": [self._findings(_SIZE_CHANGED)]}}
+        )
+        assert entry.profile_contract == ()
+        assert "profile_contract" not in entry.to_dict()
+
+    def test_present_and_per_profile_when_one_profile_evaluated_a_contract(
+        self,
+    ) -> None:
+        (entry,) = build_finding_matrix(
+            {
+                "libfoo": {
+                    "gcc": [self._findings(_SIZE_CHANGED_IN_CONTRACT)],
+                    "clang": [self._findings(_SIZE_CHANGED_UNRESOLVED)],
+                }
+            }
+        )
+        assert entry.affected_profiles == ("clang", "gcc")
+        by_profile = {p.profile: p for p in entry.profile_contract}
+        assert set(by_profile) == {"clang", "gcc"}
+        assert by_profile["gcc"].contract_relevance == "IN_CONTRACT"
+        assert by_profile["gcc"].compatibility_decision == "BREAKING"
+        assert by_profile["gcc"].gate_contribution == 1
+        assert by_profile["clang"].contract_relevance == "UNKNOWN_UNRESOLVED"
+        assert by_profile["clang"].compatibility_decision is None
+        assert by_profile["clang"].gate_contribution == 0
+
+    def test_to_dict_includes_profile_contract_when_populated(self) -> None:
+        (entry,) = build_finding_matrix(
+            {"libfoo": {"gcc": [self._findings(_SIZE_CHANGED_IN_CONTRACT)]}}
+        )
+        d = entry.to_dict()
+        assert d["profile_contract"] == [
+            {
+                "profile": "gcc",
+                "contract_relevance": "IN_CONTRACT",
+                "compatibility_evaluation_status": "EVALUATED",
+                "compatibility_decision": "BREAKING",
+                "gate_contribution": 1,
+            }
+        ]
+
+    def test_only_affected_profiles_carry_a_contract_state(self) -> None:
+        # A profile unaffected by this finding says nothing about its
+        # contract decision *for this finding* -- there is none to report.
+        (entry,) = build_finding_matrix(
+            {
+                "libfoo": {
+                    "gcc": [self._findings(_SIZE_CHANGED_IN_CONTRACT)],
+                    "clang": [self._findings()],
+                }
+            }
+        )
+        assert entry.unaffected_profiles == ("clang",)
+        assert {p.profile for p in entry.profile_contract} == {"gcc"}
+
+    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    def test_matrix_output_validates_against_schema(self, tmp_path: Path) -> None:
+        from abicheck.schemas import load_aggregate_report_schema
+
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED_IN_CONTRACT])
+        _write_findings_report(tmp_path, CLANG, "BREAKING", [_SIZE_CHANGED_UNRESOLVED])
+        d = aggregate_reports_dir(tmp_path, expected=_expect(GCC, CLANG)).to_dict()
+        jsonschema.validate(d, load_aggregate_report_schema())
+        (entry,) = d["finding_matrix"]
+        assert entry["profile_contract"]
+
+    @pytest.mark.skipif(jsonschema is None, reason="jsonschema not installed")
+    def test_matrix_output_without_any_contract_evaluation_still_validates(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.schemas import load_aggregate_report_schema
+
+        _write_findings_report(tmp_path, GCC, "BREAKING", [_SIZE_CHANGED])
+        d = aggregate_reports_dir(tmp_path, expected=_expect(GCC)).to_dict()
+        jsonschema.validate(d, load_aggregate_report_schema())
+        (entry,) = d["finding_matrix"]
+        assert "profile_contract" not in entry

@@ -326,7 +326,16 @@ inputs:
   dry-run:
     description: >
       Resolve inputs/config and print what the run would do, without
-      performing any analysis or writing output (always exits 0). Maps to
+      performing any analysis or writing output. Exits 0 for a resolvable
+      preview; an invocation the real run would itself reject (an invalid
+      flag combination) still exits with that same usage error, and a
+      requested-but-unsatisfiable depth/evidence contract still exits
+      nonzero — a dry run validates what it can see, it does not turn every
+      outcome into success. The one deliberate exception is this
+      composite Action's own baseline resolution: an unresolved
+      abi-baseline is tolerated under dry-run rather than hard-failing,
+      since the point of a preview is to report what *would* be compared,
+      not to require the comparison already be resolvable. Maps to
       --dry-run; supported by every mode (compare, dump, scan, deps-tree,
       deps-compare). For scan, this also reports the projected per-layer
       cost (the same preview the deprecated estimate input below used to

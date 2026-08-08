@@ -130,12 +130,15 @@ FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"
 # Baseline auto-fetch: resolve INPUT_ABI_BASELINE → INPUT_OLD_LIBRARY
 #
 # A fetch failure (missing release/token/asset) reports and continues rather
-# than exiting 1 under --dry-run: dry-run is documented as "always exits 0"
-# (action.yml), but this block runs before any mode branch ever consults
-# INPUT_DRY_RUN, so an unavailable baseline used to hard-fail a preview run
-# before it ever got the chance to no-op (Codex review). BASELINE_FILE is
-# left unset in that case; the mode branches' existing required-input checks
-# still apply if no other old-library/against source was given.
+# than exiting 1 under --dry-run: an unresolved baseline is the one
+# deliberate exception action.yml's dry-run description carves out (tolerate
+# it rather than hard-fail, since a preview shouldn't require the comparison
+# already be resolvable) -- but this block runs before any mode branch ever
+# consults INPUT_DRY_RUN, so an unavailable baseline used to hard-fail a
+# preview run before it ever got the chance to no-op (Codex review).
+# BASELINE_FILE is left unset in that case; the mode branches' existing
+# required-input checks still apply if no other old-library/against source
+# was given.
 # ---------------------------------------------------------------------------
 _baseline_unavailable() {
   local message="$1"
@@ -219,11 +222,12 @@ if [[ -n "$ABI_BASELINE" \
       INPUT_OLD_LIBRARY="$BASELINE_FILE"
     fi
   elif [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
-    # The fetch was tolerated above (dry-run never hard-fails on it), but if
-    # no other old-library/against was independently given there is nothing
-    # left to preview -- report and stop here rather than falling through to
-    # `${INPUT_OLD_LIBRARY:?...}` below, whose bash parameter-expansion abort
-    # would itself violate the documented "dry-run always exits 0" contract.
+    # The fetch was tolerated above (dry-run never hard-fails on an
+    # unresolved baseline), but if no other old-library/against was
+    # independently given there is nothing left to preview -- report and
+    # stop here rather than falling through to `${INPUT_OLD_LIBRARY:?...}`
+    # below, whose bash parameter-expansion abort would turn this specific,
+    # deliberately-tolerated case into a hard failure after all.
     if [[ "$MODE" == "scan" && -z "${INPUT_AGAINST:-}" ]] ||
        [[ "$MODE" == "compare" && -z "${INPUT_OLD_LIBRARY:-}" ]]; then
       echo "::notice::--dry-run: no ABI baseline could be resolved and no other old-library/against was given, so there is nothing to preview."
