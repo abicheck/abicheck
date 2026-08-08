@@ -113,6 +113,103 @@ def test_compat_scheme_is_distinct() -> None:
     assert legacy_exit_code(Verdict.BREAKING) == 4
 
 
+class TestReleaseContractCoverageFold:
+    """CLI-audit P1 (release/package contract parity): the release fan-out's
+    own aggregated contract-coverage floor (0/1, max()-folded across every
+    library) must obey the same "raises a clean 0, never lowers a real
+    2/4/8" rule single-pair `compare` applies via
+    `contract_coverage_exit.fold_coverage_exit` -- and must not mask, or be
+    masked by, the separately-aggregated removed-library exit 8 (AGENTS.md:
+    "не смешивая его с entity contract relevance")."""
+
+    def test_raises_a_clean_compatible_exit_to_one(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+
+        code = _exit_code_of(
+            _exit_compare_release,
+            "NO_CHANGE", False, [],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=1,
+        )
+        assert code == 1
+
+    def test_never_lowers_a_real_breaking_exit(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+
+        code = _exit_code_of(
+            _exit_compare_release,
+            "BREAKING", False, [],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=1,
+        )
+        assert code == 4
+
+    def test_removed_library_exit_still_wins_over_coverage_only(self) -> None:
+        # A removed library's own exit 8 is checked ahead of the
+        # coverage-only fallback -- the same precedence the pre-existing
+        # severity-scheme branch already gives fail_on_removed.
+        from abicheck.cli_compare_release import _exit_compare_release
+
+        code = _exit_code_of(
+            _exit_compare_release,
+            "NO_CHANGE", True, ["removed_lib"],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=1,
+        )
+        assert code == 8
+
+    def test_error_verdict_still_floors_at_four_with_coverage_folded(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+
+        code = _exit_code_of(
+            _exit_compare_release,
+            "ERROR", False, [],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=1,
+        )
+        assert code == 4
+
+    def test_severity_scheme_folds_coverage_too(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+
+        code = _exit_code_of(
+            _exit_compare_release,
+            "COMPATIBLE", False, [],
+            severity_exit_code=0,
+            contract_coverage_exit_contribution=1,
+        )
+        assert code == 1
+
+    def test_severity_scheme_removed_library_still_wins(self) -> None:
+        from abicheck.cli_compare_release import _exit_compare_release
+
+        code = _exit_code_of(
+            _exit_compare_release,
+            "COMPATIBLE", True, ["removed_lib"],
+            severity_exit_code=0,
+            contract_coverage_exit_contribution=1,
+        )
+        assert code == 8
+
+    @pytest.mark.parametrize(
+        "worst", ["BREAKING", "API_BREAK", "COMPATIBLE", "NO_CHANGE"]
+    )
+    def test_zero_contribution_is_a_true_no_op(self, worst: str) -> None:
+        # The default (no --contract-evaluation) must reproduce every
+        # pre-existing exit code exactly -- this is what
+        # test_compare_release_flow_matches_canonical already asserts
+        # without the new keyword; this locks the explicit-zero case too.
+        from abicheck.cli_compare_release import _exit_compare_release
+
+        code = _exit_code_of(
+            _exit_compare_release,
+            worst, False, [],
+            severity_exit_code=None,
+            contract_coverage_exit_contribution=0,
+        )
+        assert code == legacy_exit_code(Verdict[worst])
+
+
 def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
     # ADR-050 D2: compat check's not_comparable code (9) is the one integer
     # the 3-11 range documented no meaning for, and deliberately different

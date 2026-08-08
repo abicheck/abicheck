@@ -498,6 +498,8 @@ def _exit_compare_release(
     fail_on_removed: bool,
     removed_keys: list[str],
     severity_exit_code: int | None = None,
+    *,
+    contract_coverage_exit_contribution: int = 0,
 ) -> None:
     """Exit compare-release with ABI-compatible status code mapping.
 
@@ -517,6 +519,15 @@ def _exit_compare_release(
     entitled to its own exit code. Exits 16 — identical to native
     ``compare``'s own not_comparable code, since it fires before severity
     classification or the removed-library check ever run.
+
+    *contract_coverage_exit_contribution* is ADR-049 Phase 7's orthogonal
+    axis (release/package parity, CLI-audit P1), already aggregated with
+    max() across every library by the caller. Folded in with max() at every
+    exit point below (mirroring ``contract_coverage_exit.fold_coverage_exit``
+    for a single-pair ``compare``) except ``not_comparable``, which fires
+    before any library was even scored: it can raise a clean 0 to 1, never
+    lower a real 2/4/8, and is `0` (a no-op fold) for every run that never
+    passed ``--contract-evaluation``.
     """
     if worst_verdict == "not_comparable":
         sys.exit(16)
@@ -528,6 +539,7 @@ def _exit_compare_release(
         code = severity_exit_code
         if worst_verdict == "ERROR":
             code = max(code, 4)
+        code = max(code, contract_coverage_exit_contribution)
         if code != 0:
             sys.exit(code)
         return
@@ -535,7 +547,7 @@ def _exit_compare_release(
     # Verdict); it floors at 4. Otherwise the verdict→code mapping is the shared
     # canonical one, so compare and compare-release never disagree (C7).
     if worst_verdict == "ERROR":
-        sys.exit(4)
+        sys.exit(max(4, contract_coverage_exit_contribution))
     from .checker_policy import Verdict
     from .severity import legacy_exit_code
 
@@ -545,9 +557,19 @@ def _exit_compare_release(
         else 0
     )
     if code != 0:
-        sys.exit(code)
+        # A real verdict-based break always wins outright; folding coverage
+        # in here is a no-op in practice (its own floor is 0/1, never above
+        # a real 2/4) but keeps the "never lowers a real code" invariant
+        # explicit rather than implicit in max()'s commutativity.
+        sys.exit(max(code, contract_coverage_exit_contribution))
     if fail_on_removed and removed_keys:
+        # A removed library stays its own, separately-aggregated signal
+        # (AGENTS.md: "не смешивая его с entity contract relevance") --
+        # it is checked ahead of the coverage-only fallback below, mirroring
+        # the severity-scheme branch above.
         sys.exit(8)
+    if contract_coverage_exit_contribution != 0:
+        sys.exit(contract_coverage_exit_contribution)
 
 
 def _format_release_summary(
@@ -566,6 +588,7 @@ def _format_release_summary(
     matrix_result: DiffResult | None = None,
     severity_config: SeverityConfig | None = None,
     severity_exit_code: int | None = None,
+    contract_coverage_exit_contribution: int = 0,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
@@ -587,6 +610,7 @@ def _format_release_summary(
             matrix_result,
             severity_config=severity_config,
             severity_exit_code=severity_exit_code,
+            contract_coverage_exit_contribution=contract_coverage_exit_contribution,
         )
     return _format_release_markdown(
         worst_verdict,
@@ -662,6 +686,7 @@ def _format_release_json(
     matrix_result: DiffResult | None,
     severity_config: SeverityConfig | None = None,
     severity_exit_code: int | None = None,
+    contract_coverage_exit_contribution: int = 0,
 ) -> str:
     """Render the release summary as a JSON document."""
     changed_libraries = [
@@ -692,6 +717,17 @@ def _format_release_json(
             },
             "exit_code": severity_exit_code,
         }
+    # ADR-049 Phase 7's orthogonal contract-coverage axis (CLI-audit P1,
+    # release/package parity), max()-aggregated across every library. Only
+    # present when at least one library entry carries the per-library key --
+    # i.e. --contract-evaluation was active -- mirroring the severity block's
+    # own "present only when active" convention, and matching single-pair
+    # `compare` JSON's `contract_coverage_exit_contribution` field name so a
+    # consumer reads the same key regardless of which command produced it.
+    if any("contract_coverage_exit_contribution" in lib for lib in library_results):
+        summary["contract_coverage_exit_contribution"] = (
+            contract_coverage_exit_contribution
+        )
     # Release-level public-surface scoping rollup (ADR-024, issue #235).
     # Present only when --scope-public-headers was active (per-library
     # entries then carry a "scope_resolved" key).

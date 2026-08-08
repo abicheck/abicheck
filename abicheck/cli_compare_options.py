@@ -84,8 +84,6 @@ def _reject_set_input_flags(
     used_by_apps: tuple[Path, ...] = (),
     required_symbols: tuple[str, ...] = (),
     diagnostic_comparison: bool = False,
-    contract_evaluation: bool = False,
-    contract_mode: str | None = None,
     audit_suppressions: bool = False,
     pack_paths: tuple[Path, ...] = (),
     include_labels: dict[Path, str] | None = None,
@@ -142,20 +140,17 @@ def _reject_set_input_flags(
             "hatch (a mismatch there still raises unhandled). Compare the "
             "specific library individually to use it."
         )
-    if contract_evaluation:
-        raise click.UsageError(
-            "--contract-evaluation is not supported for directory/package "
-            "(release) comparisons yet: the per-library fan-out does not "
-            "wire ADR-049 Phase 3's shadow contract evaluator. Compare the "
-            "specific library individually to use it."
-        )
-    if contract_mode is not None:
-        raise click.UsageError(
-            "--contract is not supported for directory/package (release) "
-            "comparisons yet: it selects the evidence domain for the shadow "
-            "contract evaluator, which the per-library fan-out does not wire "
-            "either. Compare the specific library individually to use it."
-        )
+    # --contract-evaluation/--contract are deliberately NOT rejected here
+    # (CLI-audit P1, release/package contract parity): the per-library
+    # fan-out now threads both straight into each pair's own
+    # service.run_compare(contract_evaluation=..., contract_mode=...) call
+    # (compare_release_cmd), the exact same Tier-2 chokepoint a single-pair
+    # `compare` uses -- so a library compared through the fan-out gets the
+    # identical contract decision it would from comparing it individually.
+    # --pack stays rejected below: applying a pack's policy/contract/gate
+    # overrides per library still needs its own resolve-once-apply-per-pair
+    # design (ADR-049 D8 pack-vs-pack conflict detection resolves against a
+    # single library pair today), which this change does not attempt.
     if audit_suppressions:
         raise click.UsageError(
             "--audit-suppressions is not supported for directory/package "

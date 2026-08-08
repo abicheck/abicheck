@@ -939,21 +939,24 @@ def test_contract_requires_contract_evaluation(tmp_path) -> None:
     assert "--contract requires --contract-evaluation" in result.output
 
 
-def test_contract_is_rejected_for_directory_comparisons() -> None:
-    """``--contract`` has no per-library fan-out wiring (ADR-037 D12).
-
-    The shadow evaluator itself is already rejected for directory/package
-    inputs, so the domain selector must be too -- otherwise it would be
-    silently ignored rather than refused.
+def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> None:
+    """``--contract-evaluation``/``--contract`` now DO have per-library
+    fan-out wiring (CLI-audit P1, release/package contract parity) --
+    ``_reject_set_input_flags`` no longer even accepts these two kwargs.
+    See ``test_cli_compare_contract_evaluation.py::
+    TestReleaseFanOutContractParity`` for the positive CLI-level coverage
+    (directory `compare` with `--contract-evaluation` now applies per
+    library, same as a single-pair `compare`). ``--pack`` stays rejected
+    for directory inputs -- see the same test class's
+    ``test_pack_still_rejected_on_directory_inputs``.
     """
-    import click
+    import inspect
 
     from abicheck.cli_compare_helpers import _reject_set_input_flags
 
-    with pytest.raises(click.UsageError) as excinfo:
-        _reject_set_input_flags(None, False, None, contract_mode="exports")
-    assert "--contract is not supported for directory/package" in str(excinfo.value)
-
-    # The same call without the flag passes through untouched, so the
-    # rejection is attributable to `--contract` alone.
+    params = inspect.signature(_reject_set_input_flags).parameters
+    assert "contract_evaluation" not in params
+    assert "contract_mode" not in params
+    # Passes through untouched -- neither kwarg exists on this function
+    # anymore, so there is nothing left here to reject.
     _reject_set_input_flags(None, False, None)

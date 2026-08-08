@@ -839,18 +839,79 @@ class TestBaselineRequiredAndCandidateBuildOutputForwarded:
         override from that cell's profiles.<id>.compile overlay
         (run_plan.RunPlanCheck.compile_gcc_path/compile_gcc_options), falling
         back to this workflow's own global gcc-path/gcc-options inputs when
-        the profile declares no overlay (backward compatible)."""
+        the profile declares no overlay (backward compatible).
+
+        Gated on `kind != 'bundle'` — see the bundle test below for why.
+        """
         data = _load(CHECK_PROJECT)
         steps = _steps(data["jobs"]["check"])
         run_step = next(s for s in steps if s.get("name") == "Run check-target")
         assert run_step["with"]["gcc-path"] == (
-            "${{ matrix.compile_gcc_path || inputs.gcc-path }}"
+            "${{ matrix.kind != 'bundle' && matrix.compile_gcc_path "
+            "|| inputs.gcc-path }}"
         )
         assert run_step["with"]["gcc-options"] == (
-            "${{ matrix.compile_gcc_options || inputs.gcc-options }}"
+            "${{ matrix.kind != 'bundle' && matrix.compile_gcc_options "
+            "|| inputs.gcc-options }}"
         )
         # gcc-prefix has no RunPlanCheck counterpart -- stays global-only.
         assert run_step["with"]["gcc-prefix"] == "${{ inputs.gcc-prefix }}"
+
+    @pytest.mark.parametrize(
+        ("key", "global_input"),
+        [
+            ("gcc-path", "inputs.gcc-path"),
+            ("gcc-options", "inputs.gcc-options"),
+        ],
+    )
+    def test_per_cell_gcc_path_and_options_are_not_forwarded_to_bundle_cells(
+        self, key: str, global_input: str
+    ) -> None:
+        """The same hazard `test_per_cell_ast_frontend_is_not_forwarded_to_
+        bundle_cells` covers for `ast-frontend`, for `gcc-path`/`gcc-options`
+        (CLI-audit P1, G34 Phase B plan doc's acknowledged "pre-existing
+        bug, not one this phase introduced"): a bundle cell's `new-library`
+        is the `bundle-staging` *directory* it stages its members into, and
+        `cli_resolve._reject_compile_context_for_set_inputs` hard-rejects
+        `--gcc-path`/`--gcc-options` for a directory/package compare, since
+        the per-library release fan-out never threads a single-pair L2
+        compile context to each pair. Before this guard, a profile that set
+        `compile.binding` for its target cells would have that same per-cell
+        override reach every bundle cell too, turning a previously working
+        bundle check into a hard operational error.
+
+        As with `ast-frontend`, the fallback for a bundle cell is the
+        workflow-global input, not the empty string — a bundle cell must
+        behave exactly as it did before the per-cell override existed,
+        including that a workflow-global gcc-path/gcc-options can still
+        hard-error a bundle cell exactly as before. `sysroot` has no
+        per-cell overlay field (unlike gcc-path/gcc-options, nothing wires
+        `profiles.<id>.compile.sysroot` into `RunPlanCheck`), so its
+        forwarding is unchanged by this fix and deliberately stays
+        unconditional — gating it would be a new, undecided behaviour
+        change (silently dropping an explicit global `--sysroot` for bundle
+        cells), not a fix for the acknowledged bug. Covered separately by
+        `test_sysroot_stays_unconditional_for_bundle_cells` below.
+        """
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        expr = run_step["with"][key]
+        assert "matrix.kind != 'bundle'" in expr, (
+            f"a bundle cell compares a directory, where the CLI rejects "
+            f"--{key} for a directory/package compare outright"
+        )
+        # GitHub's `a && b || c`: when `a` is false the result is `c`, so a
+        # bundle cell lands on the workflow-global input, not ''.
+        assert expr.endswith(f"|| {global_input} }}}}")
+
+    def test_sysroot_stays_unconditional_for_bundle_cells(self) -> None:
+        """`sysroot` has no per-cell overlay field, so it stays unconditional
+        rather than gated -- see the docstring above for why."""
+        data = _load(CHECK_PROJECT)
+        steps = _steps(data["jobs"]["check"])
+        run_step = next(s for s in steps if s.get("name") == "Run check-target")
+        assert run_step["with"]["sysroot"] == "${{ inputs.sysroot }}"
 
     def test_run_check_target_prefers_per_cell_ast_frontend(self) -> None:
         """G34 Phase B: the cell's own `profiles.<id>.compile.frontend`

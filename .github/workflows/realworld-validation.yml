@@ -13,6 +13,25 @@ on:
       - "tests/test_compare_release.py"
       - "tests/test_bundle.py"
       - ".github/workflows/realworld-validation.yml"
+      # CLI-audit P1 (CI hardening): this job is the one lane that runs
+      # `abicheck compare` against a real package binary rather than a
+      # synthetic snapshot, so it must not be skipped for a change to the
+      # subsystems it actually exercises -- an earlier gap the review
+      # flagged by name (contract pipeline, comparability, compiler
+      # profile, report schemas), which a paths filter scoped only to
+      # package/bundle plumbing silently missed.
+      - "abicheck/contract_*.py"
+      - "abicheck/compatibility_evaluation_*.py"
+      - "abicheck/comparability*.py"
+      - "abicheck/pack_application.py"
+      - "abicheck/impact/**"
+      - "abicheck/buildsource/project_targets.py"
+      - "abicheck/buildsource/run_plan.py"
+      - "abicheck/buildsource/toolchain_probe.py"
+      - "abicheck/buildsource/toolchain_bindings.py"
+      - "abicheck/schemas/*.schema.json"
+      - "abicheck/checker.py"
+      - "abicheck/checker_policy.py"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
@@ -84,6 +103,41 @@ jobs:
           data = json.load(open("reports/realworld/zlib-deb-self.json"))
           assert data["verdict"] in {"NO_CHANGE", "COMPATIBLE"}
           assert "bundle_findings" not in data
+          PY
+
+      - name: Compare a real Debian package against itself, with --contract-evaluation
+        # CLI-audit P1: this is the one lane exercising the release/package
+        # contract-evaluation parity fix against a real package binary
+        # (rather than a synthetic snapshot) -- --contract-evaluation used
+        # to be a hard UsageError on a directory/package compare at all.
+        # Real package export-table/header evidence, not a hand-built
+        # fixture, is what actually catches a regression here.
+        run: |
+          set -euo pipefail
+          cd inputs/debs
+          runtime_deb="$(ls zlib1g_*.deb | head -1)"
+          devel_deb="$(ls zlib1g-dev_*.deb | head -1)"
+          cd ../..
+          abicheck compare \
+            "inputs/debs/${runtime_deb}" \
+            "inputs/debs/${runtime_deb}" \
+            --devel-pkg "old=inputs/debs/${devel_deb}" \
+            --devel-pkg "new=inputs/debs/${devel_deb}" \
+            --no-bundle-analysis \
+            --contract-evaluation --contract public \
+            --format json \
+            -o reports/realworld/zlib-deb-self-contract.json
+          python - <<'PY'
+          import json
+          data = json.load(open("reports/realworld/zlib-deb-self-contract.json"))
+          assert data["verdict"] in {"NO_CHANGE", "COMPATIBLE"}, data["verdict"]
+          # ADR-049 Phase 7's orthogonal coverage axis must resolve cleanly
+          # against a real package's real export table/headers -- 0, not
+          # merely "present", since this is a self-compare with complete
+          # evidence on both sides.
+          assert data["contract_coverage_exit_contribution"] == 0, data
+          for lib in data["libraries"]:
+              assert lib["contract_coverage_exit_contribution"] == 0, lib
           PY
 
       - name: Cross-check package self-compare with abidiff

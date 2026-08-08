@@ -127,12 +127,9 @@ def contract_options(f: F) -> F:
                        "markdown; --format review's compact digest does not (its "
                        "top-impacted-symbols list predates this field), except for the "
                        "--used-by/--required-symbol scoped-gate appendix, which renders it "
-                       "under json/markdown/review alike. SARIF annotates an excluded "
-                       "finding with a contractRelevance property (level 'note', not "
-                       "'error') instead of dropping it, and HTML renders the same "
-                       "relevance/reason in its not-evaluated sections; JUnit does not "
-                       "yet carry it. --format json additionally carries "
-                       "contract_evidence_refs "
+                       "under json/markdown/review alike. Also rendered per finding in "
+                       "sarif/junit (properties/<properties>) and as a contract badge in "
+                       "html. --format json additionally carries contract_evidence_refs "
                        "per finding (which evidence records its decision rests on) and a "
                        "top-level contract_context block (the observed provider evidence, "
                        "the resolved evaluation context, and the decision receipt), so a "
@@ -151,6 +148,8 @@ def contract_options(f: F) -> F:
                        "it never lowers an ABI break's 2/4. Set contract.unresolved=warn "
                        "(e.g. via a `kind: contract` --pack) to accept incomplete "
                        "coverage: that zeroes the contribution while still reporting "
-                       "every failure. Default off; a run without this flag is "
-                       "unaffected in every respect.")(f)
+                       "every failure. Also applies to a directory/package (release) "
+                       "comparison: each library's own contract-coverage floor is "
+                       "max()-folded into the release's exit code the same way. Default "
+                       "off; a run without this flag is unaffected in every respect.")(f)
     return f

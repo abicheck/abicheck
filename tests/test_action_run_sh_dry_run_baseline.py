@@ -16,12 +16,14 @@
 """Behavioral tests for ``action/run.sh``'s ``--dry-run``/``abi-baseline``
 interaction (Codex review).
 
-``dry-run`` is documented in ``action.yml`` as "always exits 0", but the
-baseline auto-fetch block used to run (and ``exit 1`` on a missing
-release/token/asset) before any mode branch ever consulted
-``INPUT_DRY_RUN`` -- so a workflow previewing its config with `dry-run: true`
-plus an `abi-baseline` that hadn't been published yet got a hard failure
-instead of the promised no-op preview.
+An unresolved ``abi-baseline`` is the one deliberate exception
+``action.yml``'s ``dry-run`` description carves out (tolerated rather than
+hard-failed, since a preview shouldn't require the comparison already be
+resolvable) -- but the baseline auto-fetch block used to run (and
+``exit 1`` on a missing release/token/asset) before any mode branch ever
+consulted ``INPUT_DRY_RUN`` -- so a workflow previewing its config with
+`dry-run: true` plus an `abi-baseline` that hadn't been published yet got a
+hard failure instead of the promised no-op preview.
 
 These tests extract the relevant fragment verbatim from run.sh (the same
 "parse the real file, don't hand-copy it" discipline as
@@ -101,7 +103,9 @@ class TestDryRunToleratesUnavailableBaseline:
 
     def test_dry_run_exits_0_instead_of_failing_on_unavailable_baseline(self) -> None:
         """Regression: --dry-run must never hard-fail on a missing baseline
-        (action.yml documents dry-run as "always exits 0")."""
+        -- action.yml documents this as the one deliberate exception to
+        dry-run's own contract (a malformed invocation or an unsatisfiable
+        requested depth still exits nonzero)."""
         result = self._run({
             "INPUT_MODE": "compare",
             "INPUT_ABI_BASELINE": "latest-release",
