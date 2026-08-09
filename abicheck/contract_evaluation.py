@@ -95,7 +95,6 @@ from .surface import (
     classify_change_surface,
     surface_unions,
 )
-from .type_reachability import type_string_references_name
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     # Imported for annotations only: at runtime `contract_evidence_collect`
@@ -809,8 +808,7 @@ def _in_surface_result_is_confirmed(
     churn) -- so the finding can reach this function on real evidence
     (``diff_types.py``'s own reachability gate is what let it be *emitted*
     at all) that ``public_types`` was never built to record. Matched against
-    ``change.symbol``/``change.caused_by_type`` *directly*
-    (:func:`~abicheck.type_reachability.type_string_references_name`), not
+    ``change.symbol``/``change.caused_by_type`` by *exact* equality, not
     :func:`_type_candidates`'s decomposed tokens: a
     ``TYPE_SIZE_CHANGED``-shaped finding's ``symbol`` is the type's own full
     spelling (``"vector<int, std::allocator<int> >"``), and
@@ -819,12 +817,30 @@ def _in_surface_result_is_confirmed(
     template instantiation into its bare head and each argument
     separately (confirmed empirically: it never yields the type's own full
     spelling back), so intersecting it against a set of full spellings
-    could never match. Checked without the bare-tail ambiguity guard
-    ``_confirmed_type_matches`` applies to ``public_types``: these spellings
-    come from a per-type signature scan over the snapshot's own stdlib
-    ``RecordType`` identities, a different, unambiguous data source, not
-    ``surface.py``'s shared-bare-key closure where two distinct records can
-    collide.
+    could never match.
+
+    Deliberately **not**
+    :func:`~abicheck.type_reachability.type_string_references_name`
+    (boundary-safe *containment*, an earlier revision of this check) --
+    reproduced empirically (Codex review, fresh evidence) that containment
+    lets an unrelated, *smaller* directly-referenced identity confirm an
+    unrelated *larger* finding purely because one spelling is a substring
+    of the other: an authoritative side that directly references
+    ``std::allocator<int>`` (a real, independent public root) would also
+    "confirm" a `TYPE_SIZE_CHANGED` finding on the unrelated, non-authoritative
+    -side-only ``std::vector<int, std::allocator<int> >`` that merely embeds
+    that spelling in its own template arguments, letting new-side-only
+    evidence manufacture confidence about an old, unresolved obligation --
+    exactly the D4 violation ``_authoritative_surface`` exists to prevent.
+    Exact-string matching only ever matches a finding against a type that
+    *is itself* the reachability walk's own root/reached record, never a
+    template argument nested inside a coincidentally-larger finding.
+
+    Checked without the bare-tail ambiguity guard ``_confirmed_type_matches``
+    applies to ``public_types``: these spellings come from a per-type
+    signature scan over the snapshot's own stdlib ``RecordType`` identities,
+    a different, unambiguous data source, not ``surface.py``'s
+    shared-bare-key closure where two distinct records can collide.
     """
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _hidden_friend_confirmed_public(change, surf_old, surf_new)
@@ -842,10 +858,12 @@ def _in_surface_result_is_confirmed(
     )
     if not directly_referenced_stdlib:
         return False
-    return any(
-        raw and type_string_references_name(raw, identity)
-        for raw in (change.symbol, change.caused_by_type)
-        for identity in directly_referenced_stdlib
+    return bool(
+        (change.symbol and change.symbol in directly_referenced_stdlib)
+        or (
+            change.caused_by_type
+            and change.caused_by_type in directly_referenced_stdlib
+        )
     )
 
 
