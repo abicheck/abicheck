@@ -1241,7 +1241,16 @@ run establishes one (mirroring `SURVIVOR_BASELINE`'s pattern for mutation
 testing — establish, then gate on non-regression, not an arbitrary target
 chosen up front).
 
-**Dependencies:** P0.1–P0.3, P0.8.
+**Dependencies:** P0.1–P0.3, P0.8 for a *first* pass — but, same freshness
+caveat as P1.5's below, **the run P1.4 relies on for publication must
+postdate P0.4/P0.5's own required follow-up commits** (P0.2's "Dependencies"
+note: P0.4/P0.5 each require a small follow-up commit updating the skills
+to actually consume `info`'s capability discovery and typed
+`reason_codes`). A P1.1 pass completed before those follow-ups land never
+exercised the capability-discovery or non-comparability branches those
+commits add, so it can't stand in as evidence those branches work —
+re-run (or initially defer) the publication-relied-on pass until after
+they land.
 
 **PR boundary:** own PR per skill is reasonable given the evaluation volume
 (four PRs), or one combined PR if reviewed together — team's call.
@@ -1344,7 +1353,16 @@ typed comparability reasons) validates a tree that no longer matches what
 P1.4 would publish. P1.4 checks that P1.5 is *complete*, not that its
 recorded output was validated against the artifact being published today
 — those are different claims, and only the latter is the one that
-matters here.
+matters here. **P1.6 (CI integration flow) is also a publication
+prerequisite, not a follow-on that can trail publication.** ADR-058's own
+admission-criteria decision on CI setup states it "ships as a documented
+action a skill performs at the end of `native-binary-compatibility-review`
+or `native-release-compatibility`" — i.e. that content is part of what
+those two skills' first release *is*, not an optional addition layered on
+after publication. Publishing before P1.6 lands would ship
+`native-binary-compatibility-review`/`native-release-compatibility`
+without the CI-wiring step ADR-058 already commits those skills to
+carrying from their first release.
 
 **PR boundary:** N/A — this is largely an external-service action, not a
 code PR; any repo changes it does require (a `skills.sh` manifest file, if
