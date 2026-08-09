@@ -1263,11 +1263,24 @@ there is no equivalent "should this be automatic" question for them.
    *same* node instead of a disconnected duplicate, so a change traced to one
    object correlates across both slices. `LINK_UNIT_EXPORTS_SYMBOL` is added
    once `_augment_with_source_abi` resolves which symbols the owning target
-   actually exports. `archive_member`/`linker_script`/`export_map`/
-   `comdat_group` and the `ARCHIVE_CONTAINS_OBJECT`/`OBJECT_DEFINES_SYMBOL`
-   edges stay reserved (schema-only): true archive-member/per-object-symbol
-   enumeration needs a real `ar`/`nm`-equivalent introspection extractor this
-   increment does not add.
+   actually exports. `linker_script`/`export_map`/`comdat_group` stay
+   reserved (schema-only) — no normalized data source for those three yet.
+   **`archive_member` and the `ARCHIVE_CONTAINS_OBJECT`/
+   `OBJECT_DEFINES_SYMBOL` edges: done (G29 Phase 5 item 6)** —
+   `abicheck/buildsource/archive_graph.py`'s `augment_graph_with_archives`
+   is the real archive-introspection pass this item originally deferred: a
+   pure parser over the `ar` container's own linker-written symbol index
+   (GNU `/`/`/SYM64/` and BSD/Mach-O `__.SYMDEF`/`__.SYMDEF_64`, both plain
+   and thin-archive flavors), driven by
+   `inline_graph_fold.fold_archive_graph` over every `static_library` node
+   `_fold_link_provenance` already created. Needs no compiler, so it runs
+   whenever a graph has archive link inputs, independent of clang
+   availability. An `OBJECT_DEFINES_SYMBOL` edge only ever joins onto a
+   `binary_symbol` node the graph already carries (the same "one shared
+   node id is the whole join mechanism" rule ADR-057 D1 states for the
+   consumer graph) — an archive's thousands of internal-only symbols mint
+   no node, keeping the graph compact (ADR-031 D7). See
+   `docs/reference/source-graph-schema.md` for the field-level detail.
 3. ~~**Public-entry impact closure.**~~ — **done, this change.**
    `poi.resolve_changed_paths_public_impact(changed_paths, graph)`
    is the reverse of `resolve_symbol_tus` (export delta → declaring TU): given

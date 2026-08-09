@@ -59,6 +59,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from .. import deadline
 from .build_evidence import BuildEvidence
+from .inline_graph_fold import fold_archive_graph
 from .model import (
     CoverageStatus,
     DataLayer,
@@ -1751,17 +1752,15 @@ def _build_inline_graph(
     When ``with_call_graph`` is set, Clang call/type-graph passes fold
     ``DECL_CALLS_DECL``/``TYPE_INHERITS``/``TYPE_HAS_FIELD_TYPE``/
     ``DECL_HAS_TYPE``/``DECL_REFERENCES_DECL`` edges into the graph
-    (best-effort — a missing ``clang++`` or a parse failure records an
-    extractor row and leaves the graph without those edges, never aborting),
-    and an include-graph pass folds ``COMPILE_UNIT_INCLUDES_FILE`` edges the
-    same way (preferring already-recorded build-tool inputs over a fresh
-    ``clang -M`` invocation when available). Those edges are what the
-    decl-dependency cross-checks (ADR-035 D4) and the D6
-    ``include_graph_public_header_drift`` finding consume, so this is gated to
-    the semantic L4 modes by the caller — no separate opt-in flag for any of
-    the three (ADR-041 header-only-graph addendum follow-up: these used to be
-    ``collect``-only, explicit-flag-gated passes with no equivalent here at
-    all).
+    (best-effort — a missing ``clang++``/parse failure records an extractor
+    row and leaves the graph without those edges, never aborting), and an
+    include-graph pass folds ``COMPILE_UNIT_INCLUDES_FILE`` edges the same
+    way (preferring recorded build-tool inputs over a fresh ``clang -M``).
+    Those feed the decl-dependency cross-checks (ADR-035 D4) and the D6
+    ``include_graph_public_header_drift`` finding, so all three are gated to
+    the semantic L4 modes by the caller (ADR-041 header-only-graph addendum
+    follow-up). ``fold_archive_graph`` (G29 Phase 5 item 6) needs no clang
+    and always runs.
     """
     has_build = bool(merged.compile_units or merged.targets)
     if not has_build and surface is None:
@@ -1812,6 +1811,7 @@ def _build_inline_graph(
             changed_paths,
             scoped_units=call_graph_units,
         )
+    fold_archive_graph(graph, merged, extractors)
     graph.finalize()
     return graph
 

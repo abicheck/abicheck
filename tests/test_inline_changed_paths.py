@@ -28,7 +28,7 @@ from pathlib import Path
 
 import abicheck.buildsource.inline as inline
 from abicheck.buildsource import source_replay
-from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, LinkUnit
 from abicheck.buildsource.source_abi import SourceAbiSurface
 
 
@@ -921,3 +921,176 @@ def test_inline_include_graph_prefers_recorded_inputs_over_live_clang(monkeypatc
     )
     assert graph is not None
     assert any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges)
+
+
+# --------------------------------------------------------------------------- #
+# G29 Phase 5 item 6: fold_archive_graph runs unconditionally (no clang) over
+# any static_library node build_source_graph created from a LinkUnit's inputs.
+# --------------------------------------------------------------------------- #
+
+
+def _write_minimal_gnu_archive(
+    path: Path, member_symbols: dict[str, list[str]]
+) -> None:
+    """A minimal valid GNU ``ar`` archive with a real symbol index, built
+    without needing ``ar``/a compiler — just enough structure for
+    :mod:`abicheck.buildsource.archive_graph`'s parser."""
+    import struct
+
+    def header(name: str, size: int) -> bytes:
+        h = name.ljust(16).encode("ascii")
+        h += b"0".ljust(12) + b"0".ljust(6) + b"0".ljust(6) + b"100644".ljust(8)
+        h += str(size).ljust(10).encode("ascii") + b"`\n"
+        assert len(h) == 60
+        return h
+
+    def pad(data: bytes) -> bytes:
+        return data + (b"\n" if len(data) % 2 else b"")
+
+    members = list(member_symbols.items())
+    entries = [(sym, name) for name, syms in members for sym in syms]
+    names_blob = b"\x00".join(s.encode("ascii") for s, _ in entries) + (
+        b"\x00" if entries else b""
+    )
+    index_body_len = 4 + 4 * len(entries) + len(names_blob)
+    index_total = 60 + index_body_len + (index_body_len % 2)
+    pos = 8 + index_total
+    offsets: dict[str, int] = {}
+    body = b""
+    for name, _ in members:
+        offsets[name] = pos
+        data = b"\x00" * 4  # placeholder object content
+        body += header(name + "/", len(data)) + pad(data)
+        pos += 60 + len(pad(data))
+    index_body = (
+        struct.pack(">I", len(entries))
+        + struct.pack(f">{len(entries)}I", *(offsets[m] for _, m in entries))
+        + names_blob
+    )
+    out = b"!<arch>\n" + header("/", len(index_body)) + pad(index_body) + body
+    path.write_bytes(out)
+
+
+def _build_with_archive_link_unit(archive_path: Path) -> BuildEvidence:
+    merged = _build_with_one_unit()
+    merged.link_units.append(
+        LinkUnit(
+            id="link://libfoo.so",
+            target_id="",
+            output="libfoo.so",
+            kind="shared_library",
+            inputs=[str(archive_path)],
+        )
+    )
+    return merged
+
+
+def test_inline_graph_folds_archive_edges_independent_of_call_graph(
+    tmp_path: Path,
+) -> None:
+    """The archive pass needs no clang: it runs even when ``with_call_graph``
+    is False, as long as a ``static_library`` node exists."""
+    archive = tmp_path / "libfoo.a"
+    _write_minimal_gnu_archive(archive, {"a.o": ["alpha"]})
+    merged = _build_with_archive_link_unit(archive)
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=False, extractors=rows
+    )
+    assert graph is not None
+    assert any(n.kind == "archive_member" for n in graph.nodes)
+    assert any(e.kind == "ARCHIVE_CONTAINS_OBJECT" for e in graph.edges)
+    assert any(r.name == "archive_graph:ar_index" for r in rows)
+
+
+def test_inline_graph_archive_symbol_edge_joins_binary_symbol_node(
+    tmp_path: Path,
+) -> None:
+    archive = tmp_path / "libinternal_dispatch.a"
+    _write_minimal_gnu_archive(archive, {"dispatch.o": ["train_dispatch"]})
+    merged = _build_with_archive_link_unit(archive)
+    graph = inline._build_inline_graph(merged, surface=None, with_call_graph=False)
+    assert graph is not None
+    # No binary_symbol node exists yet -> the symbol edge cannot join (Codex
+    # review's "only join onto a node the graph already carries" rule).
+    assert not any(e.kind == "OBJECT_DEFINES_SYMBOL" for e in graph.edges)
+
+    from abicheck.buildsource.source_graph import GraphNode
+
+    graph2 = inline._build_inline_graph(merged, surface=None, with_call_graph=False)
+    assert graph2 is not None
+    graph2.add_node(
+        GraphNode(id="binary_symbol://train_dispatch", kind="binary_symbol")
+    )
+    from abicheck.buildsource.archive_graph import augment_graph_with_archives
+
+    augment_graph_with_archives(graph2)
+    assert any(
+        e.kind == "OBJECT_DEFINES_SYMBOL" and e.dst == "binary_symbol://train_dispatch"
+        for e in graph2.edges
+    )
+
+
+def test_inline_graph_archive_search_roots_default_to_compile_unit_directory(
+    tmp_path: Path,
+) -> None:
+    # No explicit search_roots: fold_archive_graph derives them from the
+    # compile units' own recorded `directory` (the default a build system's
+    # link step typically shares).
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    archive = build_dir / "libfoo.a"
+    _write_minimal_gnu_archive(archive, {"a.o": ["alpha"]})
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(
+                id="cu://src/foo.cpp", source="src/foo.cpp", directory=str(build_dir)
+            )
+        ]
+    )
+    merged.link_units.append(
+        LinkUnit(
+            id="link://libfoo.so",
+            output="libfoo.so",
+            kind="shared_library",
+            inputs=["libfoo.a"],  # relative — only resolvable via search_roots
+        )
+    )
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=False, extractors=rows
+    )
+    assert graph is not None
+    assert any(n.kind == "archive_member" for n in graph.nodes)
+    assert any(
+        r.name == "archive_graph:ar_index" and "1/1 archive(s) read" in r.detail
+        for r in rows
+    )
+
+
+def test_inline_graph_no_static_library_nodes_skips_archive_pass(
+    tmp_path: Path,
+) -> None:
+    merged = _build_with_one_unit()  # no link_units at all
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=False, extractors=rows
+    )
+    assert graph is not None
+    assert not any(r.name == "archive_graph:ar_index" for r in rows)
+    assert "archive_graph" not in graph.extractor_passes
+    assert "archive_graph" not in graph.degraded_passes
+
+
+def test_inline_graph_missing_archive_is_degraded_not_fatal(tmp_path: Path) -> None:
+    merged = _build_with_archive_link_unit(tmp_path / "does_not_exist.a")
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=False, extractors=rows
+    )
+    assert graph is not None
+    assert graph.degraded_passes.get("archive_graph") is True
+    assert "archive_graph" not in graph.extractor_passes
+    row = next(r for r in rows if r.name == "archive_graph:ar_index")
+    assert row.status == "failed"
+    assert "not found" in row.detail

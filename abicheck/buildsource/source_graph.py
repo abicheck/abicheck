@@ -115,8 +115,8 @@ NODE_KINDS: frozenset[str] = frozenset(
         "generated_file",
         "external_dependency",
         # ADR-041 P1 #2: object/link provenance (a symbol change attributed to "which object/archive member/link step", not only "which target"). object_file/static_library/version_script are populated
-        # from BuildEvidence.compile_units/link_units below; archive_member/linker_script/export_map/comdat_group are reserved for a future archive/linker-artifact introspection extractor (no normalized
-        # data source yet — same "reserved, not yet populated" pattern this ADR's own P0 slice 1 used for the edge kinds it later filled in), so an inputs-pack/hand-built graph naming one is never rejected.
+        # from BuildEvidence.compile_units/link_units below; archive_member is populated by archive_graph.augment_graph_with_archives (G29 Phase 5 item 6, via inline_graph_fold.fold_archive_graph) — a
+        # real `ar`-index introspection pass, not build-evidence alone. linker_script/export_map/comdat_group remain reserved (no normalized data source yet) for a future linker-artifact extractor.
         "object_file",
         "archive_member",
         "static_library",
@@ -159,10 +159,9 @@ EDGE_KINDS: frozenset[str] = frozenset(
         "LINK_UNIT_HAS_INPUT",
         "LINK_UNIT_USES_VERSION_SCRIPT",
         "LINK_UNIT_EXPORTS_SYMBOL",
-        # Reserved (no normalized data source yet — see the NODE_KINDS note
-        # above): a future archive/nm-style introspection extractor emits
-        # these against the object_file/static_library nodes this phase
-        # already creates.
+        # Populated by archive_graph.augment_graph_with_archives (G29 Phase 5
+        # item 6) over the object_file/static_library nodes above — see the
+        # NODE_KINDS note.
         "ARCHIVE_CONTAINS_OBJECT",
         "OBJECT_DEFINES_SYMBOL",
     }
@@ -1242,13 +1241,14 @@ def _fold_link_provenance(graph: SourceGraphSummary, build: BuildEvidence) -> No
       duplicate, so a change traced to one object correlates across both
       slices. A non-empty ``version_script`` gets its own node
       (``LINK_UNIT_USES_VERSION_SCRIPT``).
-    - ``archive_member``/``linker_script``/``export_map``/``comdat_group`` and
-      the ``ARCHIVE_CONTAINS_OBJECT``/``OBJECT_DEFINES_SYMBOL`` edges stay
-      reserved (schema-only): true archive-member/per-object-symbol
-      enumeration needs a real archive/object introspection extractor
-      (``ar``/``nm``-equivalent) this increment does not add, matching the
-      same "reserved, not yet populated" pattern this ADR's own P0 slice 1
-      used for the edge kinds it later filled in.
+    - ``linker_script``/``export_map``/``comdat_group`` stay reserved
+      (schema-only) — no normalized data source for those three yet.
+      ``archive_member``/``ARCHIVE_CONTAINS_OBJECT``/``OBJECT_DEFINES_SYMBOL``
+      are *not* populated here — that needs a real archive introspection
+      pass (:mod:`~abicheck.buildsource.archive_graph`, G29 Phase 5 item 6),
+      run separately over the ``static_library`` nodes this function
+      creates; this function only classifies a link input by filename
+      suffix, it never opens the archive.
 
     ``LINK_UNIT_EXPORTS_SYMBOL`` (a link unit's own exported symbols) is added
     by :func:`_augment_with_source_abi` instead, once ``BINARY_EXPORTS_SYMBOL``

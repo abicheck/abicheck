@@ -194,6 +194,48 @@ The vocabulary constants live in `abicheck/buildsource/graph_facts.py` and are
 unioned into `source_graph.NODE_KINDS`/`EDGE_KINDS`; the producer is
 `abicheck/impact/consumer_graph.py`.
 
+## The archive/object half of the graph (G29 Phase 5 item 6)
+
+`source_graph._fold_link_provenance` (ADR-041 P1 #2) already creates an
+`object_file`/`static_library` node for each `BuildEvidence` link input, by
+filename suffix alone. `abicheck/buildsource/archive_graph.py` is the real
+`ar`-index introspection that fills in the rest, driven by
+`inline_graph_fold.fold_archive_graph` whenever a graph carries at least one
+`static_library` node — no compiler required.
+
+| Kind | Status | Meaning |
+|---|---|---|
+| `archive_member` *(node)* | populated | One member (object file) of a `static_library`, scoped by its owning archive's label (`archive_member://<archive>::<member>`) — two archives may share a member name without colliding. |
+| `ARCHIVE_CONTAINS_OBJECT` *(edge)* | populated | `static_library` → `archive_member`, one per member the archive's headers name. |
+| `OBJECT_DEFINES_SYMBOL` *(edge)* | populated | `archive_member` → `binary_symbol`, one per symbol the archive's own linker-written index attributes to that member. |
+| `linker_script` / `export_map` / `comdat_group` *(nodes)* | reserved | No normalized data source yet. |
+
+Evidence source is deliberately the archive's **own symbol index** (GNU
+`/`/`/SYM64/`, or BSD/Mach-O `__.SYMDEF`/`__.SYMDEF_64`; both plain and
+*thin* (`ar rcT`) archives) — the same table the linker itself reads to
+decide which member to pull in — not a per-member ELF/COFF/Mach-O symbol
+table walk: the index is format-agnostic (one parser covers all three
+object formats) and encodes exactly "this member defines this symbol",
+which is what `OBJECT_DEFINES_SYMBOL` means. An archive built without an
+index (`ar rc` with no `s`, or a stripped `ranlib`-less one) still yields
+`archive_member` nodes from its header chain, just no `OBJECT_DEFINES_SYMBOL`
+edges — recorded as a diagnostic, not inferred around.
+
+Like the consumer join, **`OBJECT_DEFINES_SYMBOL` only ever joins onto a
+`binary_symbol` node the graph already carries** — an archive's internal-only
+indexed symbols (never exported by any side) mint no node, keeping the graph
+compact (ADR-031 D7). `archive_graph.defining_members(graph, symbol)` is the
+localization read view: every `(archive label, member name)` pair the graph
+records as defining a symbol, for a "`cache_dispatch.o` in
+`libinternal_dispatch.a`" finding detail.
+
+Coverage is tracked at `extractor_passes["archive_graph"]` (every
+`static_library` node the graph named was found, read, and index-backed) /
+`degraded_passes["archive_graph"]` (some archive was missing, unreadable, not
+an archive, or lacked an index) — the same family-level coverage-honesty
+contract the call/type/include-graph passes use (see "Coverage matrix"
+below), just gated on disk access rather than clang availability.
+
 ## `primary_path` / `alternative_paths` / `discarded_path_count`
 
 `select_preferred_graph_path`'s caller (`buildsource.graph_impact.attach_impact_metadata`)

@@ -189,6 +189,11 @@ model:
   dispatch, macro/config, callback/function-pointer, object/archive link
   provenance) implemented behind the same coverage-honesty discipline as the
   existing call/type graph (narrowed/degraded flags, `extractor_passes`).
+  **Object/archive link provenance is done** (`archive_graph.py`,
+  `extractor_passes["archive_graph"]`/`degraded_passes["archive_graph"]` —
+  see Phase 5 item 6 above); template instantiation, virtual dispatch,
+  macro/config, and callback/function-pointer remain open — each needs its
+  own Clang AST pass this phase has not added.
 - **G29.7** — The minimal new user-facing detector set from the review
   (8 detector surfaces: 6 `ChangeKind`s and 2 report-level overlays — see
   Phase 6) plus `case194`-`case205` positive/negative example pairs and the
@@ -606,7 +611,9 @@ decisions.
 
 ### Phase 5 — New semantic graph families
 
-In review-stated priority order:
+In review-stated priority order. Item 6 (**done**) shipped out of order —
+it needed no compiler frontend, unlike items 1-5, which all depend on a
+Clang AST pass this phase has not added yet.
 
 1. **Template instantiation**: `DECL_INSTANTIATES_TEMPLATE`,
    `TEMPLATE_USES_DECL`/`TEMPLATE_USES_TYPE`, `INSTANTIATION_EMITS_SYMBOL`,
@@ -630,10 +637,27 @@ In review-stated priority order:
    default template argument, concept/constraint dependency, function-pointer
    signature, member-pointer type — feeds the Phase 2 per-role coverage
    matrix.
-6. **Object/link provenance**: a real `ar`/`nm`-style extractor for the
-   currently schema-only `ARCHIVE_CONTAINS_OBJECT`/`OBJECT_DEFINES_SYMBOL`
-   edges, so a removed-symbol finding can localize to
-   "`cache_dispatch.o` in `libinternal_dispatch.a`".
+6. **Object/link provenance — done.** `abicheck/buildsource/archive_graph.py`
+   is the real `ar`-index introspection pass: a pure parser over the
+   archive's own linker-written symbol index (GNU `/`/`/SYM64/` and
+   BSD/Mach-O `__.SYMDEF`/`__.SYMDEF_64`, both plain and thin-archive
+   flavors), driven by `inline_graph_fold.fold_archive_graph` over every
+   `static_library` node `source_graph._fold_link_provenance` already
+   creates from `BuildEvidence.link_units`. Populates `archive_member`
+   nodes and the previously schema-only `ARCHIVE_CONTAINS_OBJECT`/
+   `OBJECT_DEFINES_SYMBOL` edges, so a removed-symbol finding can localize
+   to "`cache_dispatch.o` in `libinternal_dispatch.a`" via
+   `archive_graph.defining_members`. Needs no compiler (unlike items 1-5
+   above), so it runs whenever an archive link input is present, gated only
+   on finding and reading the archive on disk — never on clang. An
+   `OBJECT_DEFINES_SYMBOL` edge only ever joins onto a `binary_symbol` node
+   the graph already carries (ADR-057 D1's "one shared node id is the whole
+   join mechanism" rule, reapplied here), so a real static library's
+   thousands of internal-only indexed symbols mint no new node.
+   `linker_script`/`export_map`/`comdat_group` (a member archive's other
+   three reserved node kinds) stay unpopulated — no normalized data source
+   for those; a real static-library symbol *removal* can already be
+   localized end to end today.
 
 ### Phase 6 — New detectors, examples, FP gates
 

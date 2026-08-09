@@ -18,14 +18,15 @@
 Split out of ``inline.py`` (which sits at its 2000-line hard cap) to keep
 adding scoping/coverage fields — ``narrowed_scope``, ``degraded_passes`` —
 from pushing that file over the limit (ADR-041 P0). ``inline.py`` imports
-:func:`fold_call_graph`/:func:`fold_type_graph`/:func:`fold_include_graph` and
-calls them exactly as it called the former same-module
-``_fold_call_graph``/``_fold_type_graph``.
+:func:`fold_call_graph`/:func:`fold_type_graph`/:func:`fold_include_graph`/
+:func:`fold_archive_graph` and calls them exactly as it called the former
+same-module ``_fold_call_graph``/``_fold_type_graph``.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .build_evidence import BuildEvidence
@@ -399,6 +400,82 @@ def fold_include_graph(
             detail=(
                 f"{added} include edges from {len(includes)} compile "
                 f"unit(s){scoped_note}"
+            ),
+        )
+    )
+
+
+def _default_archive_search_roots(merged: BuildEvidence) -> tuple[Path, ...]:
+    """Every distinct compile-unit ``directory`` — the default base a
+    relative archive link-input path is tried against (G29 Phase 5 item 6):
+    for most generators it's the same directory the link step itself ran
+    from. An absolute link-input path ignores this entirely (see
+    :func:`~abicheck.buildsource.archive_graph._resolve_archive_path`)."""
+    roots: list[Path] = []
+    for cu in merged.compile_units:
+        if cu.directory and Path(cu.directory) not in roots:
+            roots.append(Path(cu.directory))
+    return tuple(roots)
+
+
+def fold_archive_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord] | None,
+    *,
+    search_roots: tuple[Path, ...] = (),
+) -> None:
+    """``ar``-index introspection over *graph*'s ``static_library`` nodes
+    (G29 Phase 5 item 6): populates ``ARCHIVE_CONTAINS_OBJECT``/
+    ``OBJECT_DEFINES_SYMBOL``, closing the last of the five graph families
+    G29.6 named.
+
+    Unlike :func:`fold_call_graph`/:func:`fold_type_graph`/
+    :func:`fold_include_graph`, this pass needs no compiler at all — it reads
+    the archive's own symbol index off disk — so it always runs whenever the
+    graph has at least one ``static_library`` node, independent of
+    ``with_call_graph``/clang availability. *search_roots* are tried, in
+    order, for a link-input path that is not already absolute; when omitted
+    (the ``inline.py`` caller's only use today), they default to
+    :func:`_default_archive_search_roots`.
+
+    Coverage honesty mirrors the clang-backed passes: ``archive_graph`` in
+    ``extractor_passes`` means every ``static_library`` node the graph named
+    was found, opened, and carried a linker-readable symbol index —
+    :attr:`~abicheck.buildsource.archive_graph.ArchiveGraphResult.complete`.
+    Anything less (some archives missing, unreadable, or built without an
+    index) is a ``degraded_passes`` entry with the per-archive reasons on the
+    extractor row's ``detail`` — never silently upgraded to "confirmed", and
+    never downgraded to an error (ADR-028 D3): the nodes/edges this pass did
+    manage to extract stay in the graph either way.
+    """
+    from .archive_graph import augment_graph_with_archives
+
+    if not any(n.kind == "static_library" for n in graph.nodes):
+        return  # no archive link inputs recorded — nothing to introspect
+    rows = extractors if extractors is not None else []
+    result = augment_graph_with_archives(
+        graph, search_roots=search_roots or _default_archive_search_roots(merged)
+    )
+    if result.complete:
+        graph.extractor_passes["archive_graph"] = True
+    elif result.archives_read > 0 or result.diagnostics:
+        graph.degraded_passes["archive_graph"] = True
+    rows.append(
+        ExtractorRecord(
+            name="archive_graph:ar_index",
+            status="ok"
+            if result.complete
+            else ("partial" if result.archives_read else "failed"),
+            detail=(
+                f"{result.archives_read}/{result.archives_seen} archive(s) read, "
+                f"{result.members} member(s), {result.symbol_edges} symbol edge(s)"
+                + (
+                    f", {result.unjoined_symbols} unjoined"
+                    if result.unjoined_symbols
+                    else ""
+                )
+                + ("; " + "; ".join(result.diagnostics) if result.diagnostics else "")
             ),
         )
     )
