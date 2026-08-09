@@ -370,7 +370,7 @@ jobs:
               # degrades to report-only, exactly like "script not present on
               # base" above; every other failure still propagates (Codex
               # review, fresh evidence).
-              if grep -q "^FAIL: castxml required but unusable:" base_measure.log; then
+              if grep -q "^FAIL: castxml version rejected by this build's policy:" base_measure.log; then
                 echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
               else
                 exit "$status"

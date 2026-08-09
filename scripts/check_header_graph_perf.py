@@ -89,9 +89,14 @@ run isn't. Pass ``--require-castxml`` to turn that off for a caller that
 knows it *should* have a working pinned castxml (e.g. a CI job that just
 installed one via ``action/install-castxml.sh``): there, a missing or
 out-of-policy castxml means the install/policy regressed, not that the tool
-is merely an optional local convenience, so the run fails loudly
-(``FAIL: castxml required but unusable: ...``, exit 1) instead of silently
-narrowing the sweep to the ``clang`` backend alone.
+is merely an optional local convenience, so the run fails loudly instead of
+silently narrowing the sweep to the ``clang`` backend alone. The two failure
+shapes print distinct message prefixes so a caller can tell them apart:
+``FAIL: castxml version rejected by this build's policy: ...`` specifically
+for ``UnsupportedCastxmlVersionError`` (a version-policy mismatch), and
+``FAIL: header extraction failed: ...`` for any other extraction error (a
+timeout, a crash, malformed output) -- a genuine regression, never treated
+as skippable.
 
 Usage::
 
@@ -651,7 +656,7 @@ def main(argv: list[str] | None = None) -> int:
     # already honors) to a throwaway directory for the run's lifetime instead.
     # Windows has no equivalent env-var override in _cache_path, so this is a
     # best-effort mitigation there, matching the module's Linux/ELF scope.
-    from abicheck.errors import SnapshotError
+    from abicheck.errors import SnapshotError, UnsupportedCastxmlVersionError
 
     with tempfile.TemporaryDirectory(prefix="hgperf_cache_") as cache_dir:
         old_xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
@@ -660,12 +665,30 @@ def main(argv: list[str] | None = None) -> int:
             points = measure(
                 tuple(args.sizes), args.repeat, require_castxml=args.require_castxml
             )
-        except SnapshotError as exc:
+        except UnsupportedCastxmlVersionError as exc:
             # Only reachable with --require-castxml (without it, _measure_size
-            # already turns a castxml-only SnapshotError into a SKIP+continue)
-            # -- a clean FAIL here, not an unhandled traceback, matching this
-            # script's existing --baseline-read-error convention.
-            print(f"\nFAIL: castxml required but unusable: {exc}")
+            # already turns this specific error into a SKIP+continue) -- a
+            # clean FAIL here, not an unhandled traceback, matching this
+            # script's existing --baseline-read-error convention. Kept as its
+            # own except clause, with its own distinct message prefix, so a
+            # caller (e.g. header-graph-regression's base-measurement step)
+            # can tell a genuine version-policy rejection apart from any
+            # *other* SnapshotError below -- a castxml timeout, a crash, or
+            # malformed output is a real extraction regression, not an
+            # optional/skippable condition, and must not be mistaken for one
+            # by string-matching a shared message (Codex review, fresh
+            # evidence: an earlier version of this used one shared message
+            # for both, which made that distinction impossible from the
+            # printed output alone).
+            print(f"\nFAIL: castxml version rejected by this build's policy: {exc}")
+            return 1
+        except SnapshotError as exc:
+            # Any other castxml/clang extraction failure under
+            # --require-castxml (a timeout, a crash, malformed output) --
+            # deliberately NOT the same message prefix as the version-policy
+            # FAIL above, so the two are never conflated by a caller matching
+            # on the printed text.
+            print(f"\nFAIL: header extraction failed: {exc}")
             return 1
         finally:
             if old_xdg_cache_home is None:

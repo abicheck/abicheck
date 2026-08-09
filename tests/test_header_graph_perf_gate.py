@@ -329,6 +329,60 @@ class TestMainEntryPoint:
         assert rc == 1
         assert "FAIL" in out
 
+    def test_require_castxml_version_error_prints_distinct_message(
+        self, monkeypatch, capsys
+    ):
+        # A castxml *version-policy* rejection under --require-castxml must
+        # print a message a caller (header-graph-regression's base-branch
+        # step) can grep for specifically -- distinct from any other
+        # extraction failure below, so the two are never conflated by a
+        # shared message prefix (Codex review, fresh evidence).
+        from abicheck.errors import UnsupportedCastxmlVersionError
+
+        monkeypatch.setattr(hg_gate, "_have", lambda tool: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        def _fake_measure(
+            sizes, repeat, backends=hg_gate.BACKENDS, require_castxml=False
+        ):
+            raise UnsupportedCastxmlVersionError("out-of-policy castxml build")
+
+        monkeypatch.setattr(hg_gate, "measure", _fake_measure)
+
+        rc = hg_gate.main(["--sizes", "10", "--require-castxml"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "FAIL: castxml version rejected by this build's policy:" in out
+        # And must NOT be mistakable for the other-extraction-failure message.
+        assert "FAIL: header extraction failed:" not in out
+
+    def test_require_castxml_other_snapshot_error_prints_distinct_message(
+        self, monkeypatch, capsys
+    ):
+        # Any OTHER SnapshotError (a timeout, a crash, malformed output) is a
+        # genuine extraction regression, not a version-policy mismatch -- it
+        # must print a different message than the version-rejection case
+        # above, so a caller string-matching on the version-specific message
+        # never mistakes this for the skippable condition (Codex review,
+        # fresh evidence).
+        from abicheck.errors import SnapshotError
+
+        monkeypatch.setattr(hg_gate, "_have", lambda tool: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        def _fake_measure(
+            sizes, repeat, backends=hg_gate.BACKENDS, require_castxml=False
+        ):
+            raise SnapshotError("clang crashed parsing this header")
+
+        monkeypatch.setattr(hg_gate, "measure", _fake_measure)
+
+        rc = hg_gate.main(["--sizes", "10", "--require-castxml"])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "FAIL: header extraction failed:" in out
+        assert "FAIL: castxml version rejected by this build's policy:" not in out
+
 
 class TestPositiveInt:
     def test_accepts_a_positive_value(self):
