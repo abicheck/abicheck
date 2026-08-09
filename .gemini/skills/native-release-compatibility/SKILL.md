@@ -67,8 +67,21 @@ derived from real configuration rather than assumption:
 
 ```bash
 abicheck project validate
-abicheck project plan
 ```
+
+`project plan` turns that configuration into the concrete list of check cells,
+but it resolves a cell only for a profile whose build output it is given —
+each as `--build-output PROFILE=DIR` — and exits 1 if that resolves to zero
+checks. So it belongs *after* the builds exist, not at this enumeration step:
+
+```bash
+abicheck project plan .abicheck.yml \
+  --build-output gcc=build/gcc/abicheck-build \
+  --build-output clang=build/clang/abicheck-build
+```
+
+A profile you cannot supply a build output for is a matrix cell in state
+**not run** (step 4) — an unknown that blocks, never a pass by omission.
 
 ## Step 3 — Run the release comparison
 
@@ -99,11 +112,17 @@ that vanished from the shipped set is a release-level break no per-library
 comparison can see.
 
 Across profiles or environments, use `--env-matrix`; across independently
-produced per-target reports, fan in with:
+produced per-target reports, fan in by pointing `aggregate` at the directory
+holding them:
 
 ```bash
-abicheck aggregate --manifest targets.json --format json -o aggregate.json
+abicheck aggregate release-reports/ --format json -o aggregate.json
 ```
+
+`REPORTS_DIR` is a required operand, not an option — `aggregate` with only
+flags exits 64. Add `--manifest targets.json` when the expected target set is
+declared, so a target that produced no report at all is reported as missing
+rather than silently absent (matrix state **not run**, per step 4).
 
 Gate configuration — `--policy`/`--policy-file`, `--severity-*`,
 `--exit-code-scheme` — belongs here rather than in review runs; see

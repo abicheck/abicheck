@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -351,3 +352,110 @@ def test_every_shared_fragment_is_cited_by_at_least_one_skill():
     synthetic fixture."""
     gen.render_all()  # raises SkillGenerationError on an orphaned fragment
     assert sorted(p.name for p in gen.SHARED_DIR.glob("*.md"))
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (PR #686)
+# ---------------------------------------------------------------------------
+
+
+def test_a_removed_or_renamed_skill_is_detected_and_removed(synthetic, tmp_path):
+    """A skill deleted or renamed in `skills-src/` must not stay published.
+
+    Ownership is read off the emitted marker rather than the current render:
+    a render-derived ownership set stops considering the stale directory
+    owned the moment its name disappears from the source, which left it
+    published in every tree while `--check` still reported "in sync".
+    """
+    synthetic(
+        skills={
+            "demo": {"SKILL.md": "---\nname: demo\n---\n\n[a](../shared/a.md)\n"},
+            "going-away": {
+                "SKILL.md": "---\nname: going-away\n---\n\n[a](../shared/a.md)\n"
+            },
+        },
+        shared={"a.md": "# A\n"},
+    )
+    root = tmp_path / "out"
+    gen.write_trees(gen.render_all(gen.SRC_DIR), roots=(root,))
+    assert (root / "going-away" / "SKILL.md").is_file()
+
+    # The skill is removed from the source tree.
+    shutil.rmtree(gen.SRC_DIR / "going-away")
+    rendered = gen.render_all(gen.SRC_DIR)
+
+    problems = " ".join(gen.check_trees(rendered, roots=(root,)))
+    assert "going-away" in problems and "stale" in problems, (
+        "a removed skill left published was not reported as stale"
+    )
+
+    gen.write_trees(rendered, roots=(root,))
+    assert not (root / "going-away").exists(), "the stale skill was not removed"
+    assert (root / "demo" / "SKILL.md").is_file()
+    assert gen.check_trees(rendered, roots=(root,)) == []
+
+
+def test_stale_detection_still_leaves_hand_authored_skills_alone(synthetic, tmp_path):
+    """The counterpart to the test above: a directory with no generated marker
+    is not generator output, so stale-detection must not claim it."""
+    synthetic(
+        skills={"demo": {"SKILL.md": "---\nname: demo\n---\n\n[a](../shared/a.md)\n"}},
+        shared={"a.md": "# A\n"},
+    )
+    root = tmp_path / "out"
+    foreign = root / "hand-authored" / "SKILL.md"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("---\nname: hand-authored\n---\n\n# Mine\n", encoding="utf-8")
+
+    rendered = gen.render_all(gen.SRC_DIR)
+    assert gen.check_trees(rendered, roots=(root,)) != []  # nothing written yet
+    gen.write_trees(rendered, roots=(root,))
+
+    assert foreign.is_file()
+    assert gen.check_trees(rendered, roots=(root,)) == []
+
+
+def test_render_all_resolves_fragments_against_its_own_src_dir(tmp_path, monkeypatch):
+    """`render_all(src_dir)` must resolve shared fragments — and orphan-check —
+    against that tree's own `shared/`, not whatever the module globals point
+    at, or an alternate source tree silently mixes with the repository's own.
+    """
+    other = tmp_path / "other-src"
+    (other / "shared").mkdir(parents=True)
+    (other / "shared" / "own.md").write_text("# Own\n", encoding="utf-8")
+    (other / "demo").mkdir()
+    (other / "demo" / "SKILL.md").write_text(
+        "---\nname: demo\n---\n\n[own](../shared/own.md)\n", encoding="utf-8"
+    )
+    # Module globals deliberately left pointing at the real repository tree.
+    monkeypatch.setattr(gen, "REPO_DIR", tmp_path)
+
+    rendered = gen.render_all(other)
+    assert set(rendered) == {"demo/SKILL.md", "demo/references/shared/own.md"}
+    # None of the repository's own fragments leaked in, and its own fragments
+    # did not trip this render's orphan check either.
+    assert not [rel for rel in rendered if "safety-invariants" in rel]
+
+
+def test_missing_site_url_is_a_hard_error_not_a_root_relative_link(
+    synthetic, tmp_path, monkeypatch
+):
+    """An empty `site_url` would silently yield `/learn/foo/` — a root-relative
+    link that resolves to nothing from an installed skill, contradicting this
+    generator's own no-dangling-references guarantee."""
+    docs = tmp_path / "docs" / "learn"
+    docs.mkdir(parents=True)
+    (docs / "foo.md").write_text("# Foo\n", encoding="utf-8")
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": "---\nname: demo\n---\n\n[foo](../../docs/learn/foo.md)\n"
+            }
+        },
+        shared={},
+    )
+    monkeypatch.setattr(gen, "DOCS_DIR", tmp_path / "docs")
+    monkeypatch.setattr(gen, "MKDOCS_YML", tmp_path / "no-such-mkdocs.yml")
+
+    with pytest.raises(gen.SkillGenerationError, match="site_url"):
+        gen.render_all(gen.SRC_DIR)

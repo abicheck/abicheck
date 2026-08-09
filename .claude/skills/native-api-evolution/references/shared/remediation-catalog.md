@@ -16,7 +16,7 @@ problem and report the new result
 | Break | Remediation |
 |---|---|
 | Removed export | Keep the old symbol as a thin forwarding shim; deprecate rather than delete. On ELF, a versioned symbol lets old and new coexist. |
-| Changed function signature | Add an overload / a new differently-named entry point and keep the old one delegating to it. Never mutate a shipped signature in place. |
+| Changed function signature | Add a new, differently-named entry point and keep the old one delegating to it. Never mutate a shipped signature in place. An *overload* of the existing name also preserves the ABI, but can make an existing call ambiguous on rebuild (implicit conversions, `&f`), so prefer a new name when source compatibility matters. |
 | Added parameter | Same — a defaulted parameter is source-compatible but ABI-breaking, because the mangled name changes. |
 | Struct/class size or layout change | Do not change a public aggregate. Move state behind an opaque pointer (pImpl), or spend a previously reserved field. |
 | New data member | Only safe in a type consumers never allocate, embed, or derive from. Otherwise, pImpl or a new versioned type. |

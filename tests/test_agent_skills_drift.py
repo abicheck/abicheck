@@ -84,9 +84,58 @@ def _walk(
     return out
 
 
+def _commands(
+    cmd: click.Command, path: tuple[str, ...] = ()
+) -> dict[tuple[str, ...], click.Command]:
+    out = {path: cmd}
+    for name, sub in getattr(cmd, "commands", {}).items():
+        out.update(_commands(sub, (*path, name)))
+    return out
+
+
 CLI_TREE = _walk(cli_main)
+COMMAND_OBJECTS = _commands(cli_main)
 ALL_OPTIONS = {opt for opts in CLI_TREE.values() for opt in opts}
 COMMAND_PATHS = {path for path in CLI_TREE if path}
+
+
+def _takes_a_value(command: click.Command, token: str) -> bool:
+    """True if `token` is an option that consumes the following argv word."""
+    for source in (command, cli_main):
+        for param in source.params:
+            if token in (*param.opts, *param.secondary_opts):
+                return not getattr(param, "is_flag", False) and not isinstance(
+                    param, click.Argument
+                )
+    return False
+
+
+def _operands(command: click.Command, words: list[str]) -> list[str]:
+    """The positional operands in `words`, with option values removed.
+
+    An option's *value* looks exactly like an operand (`--manifest t.json`),
+    so counting bare words would badly miscount. Click knows which options
+    consume a following word; ask it rather than guessing.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word.startswith("-"):
+            if "=" not in word and _takes_a_value(command, word):
+                index += 1
+        else:
+            out.append(word)
+        index += 1
+    return out
+
+
+def _required_argument_names(command: click.Command) -> list[str]:
+    return [
+        param.name or "<arg>"
+        for param in command.params
+        if isinstance(param, click.Argument) and param.required
+    ]
 
 
 def _abicheck_invocations(text: str) -> list[tuple[int, str]]:
@@ -119,6 +168,26 @@ def _fenced_and_inline_invocations(path: Path) -> list[tuple[int, str]]:
             line = text.count("\n", 0, match.start()) + 1
             found.append((line, token))
     return found
+
+
+def _runnable_invocations(path: Path) -> list[tuple[int, str]]:
+    """Only the invocations a reader would actually copy and run.
+
+    A line in a fenced block is a real example. An inline span is usually just
+    *naming* a command (`abicheck deps compare`), which carries no operands by
+    design — demanding them there would flag correct prose. An inline span
+    that carries an option is a one-liner command, so it counts.
+    """
+    text = path.read_text(encoding="utf-8")
+    runnable = list(_abicheck_invocations(text))
+    for match in _INLINE_RE.finditer(text):
+        token = match.group(1).strip()
+        if token.startswith("abicheck ") and any(
+            word.startswith("-") for word in token.split()
+        ):
+            line = text.count("\n", 0, match.start()) + 1
+            runnable.append((line, token))
+    return runnable
 
 
 @pytest.mark.parametrize(
@@ -170,6 +239,41 @@ def test_every_option_used_in_an_invocation_exists_on_that_command(path: Path):
                     f"{path.relative_to(REPO)}:{line}: {token} is not an option "
                     f"of `abicheck {' '.join(command) or '<root>'}`"
                 )
+    assert offenders == []
+
+
+@pytest.mark.parametrize(
+    "path", SKILL_FILES, ids=lambda p: p.relative_to(REPO).as_posix()
+)
+def test_every_invocation_supplies_the_required_positional_arguments(path: Path):
+    """A command whose required positional argument a skill omits exits 64 for
+    the user, exactly as if the flag had been renamed.
+
+    This half of the gate was missing when `aggregate --manifest ... -o ...`
+    shipped in a skill without its required `REPORTS_DIR` operand: checking
+    only command names and option names cannot see it.
+    """
+    offenders: list[str] = []
+    for line, invocation in _runnable_invocations(path):
+        words = invocation.split()[1:]
+        command_path: tuple[str, ...] = ()
+        bare = [w for w in words if not w.startswith("-")]
+        for size in (2, 1):
+            if tuple(bare[:size]) in COMMAND_PATHS:
+                command_path = tuple(bare[:size])
+                break
+        if not command_path:
+            continue
+        command = COMMAND_OBJECTS[command_path]
+        operands = _operands(command, words)[len(command_path) :]
+        required = _required_argument_names(command)
+        if len(operands) < len(required):
+            offenders.append(
+                f"{path.relative_to(REPO)}:{line}: `abicheck "
+                f"{' '.join(command_path)}` requires {len(required)} positional "
+                f"argument(s) ({', '.join(required).upper()}) but the example "
+                f"supplies {len(operands)}"
+            )
     assert offenders == []
 
 
@@ -315,3 +419,10 @@ def test_the_drift_check_actually_has_teeth():
     assert "--used-by" in ALL_OPTIONS
     assert "--no-scope-public-headers" in ALL_OPTIONS  # a Click flag pair's other half
     assert ("project", "validate") in COMMAND_PATHS
+    # The positional-argument check must actually know `aggregate` needs one,
+    # and must not miscount an option's value as an operand.
+    assert _required_argument_names(COMMAND_OBJECTS[("aggregate",)]) == ["reports_dir"]
+    assert _operands(
+        COMMAND_OBJECTS[("aggregate",)],
+        "aggregate --manifest t.json --format json reports/".split(),
+    ) == ["aggregate", "reports/"]

@@ -131,8 +131,23 @@ def published_docs_url(docs_relative: str, anchor: str = "") -> str:
     follows `use_directory_urls` (mkdocs's own default is `true`, applied only
     when the key is genuinely absent — not frozen as a second fact owner).
     Anchors pass through unchanged; mkdocs does not rewrite them.
+
+    A missing or unreadable `site_url` is a hard error, not a fallback: an
+    empty host silently yields a root-relative `/learn/verdicts/`, which
+    resolves to nothing at all from an installed skill and contradicts this
+    module's whole no-dangling-references guarantee. Failing here is what
+    makes that guarantee real rather than best-effort.
     """
-    site_url = (_read_mkdocs_scalar("site_url") or "").rstrip("/")
+    raw_site_url = _read_mkdocs_scalar("site_url")
+    if not raw_site_url or "://" not in raw_site_url:
+        raise SkillGenerationError(
+            f"{MKDOCS_YML.name}: no usable `site_url` (read {raw_site_url!r}) — "
+            "it is the fact owner for the published docs host every generated "
+            "skill's outbound links are rewritten against; without it the "
+            "output would carry root-relative links that resolve nowhere from "
+            "an installed skill"
+        )
+    site_url = raw_site_url.rstrip("/")
     raw_dir_urls = _read_mkdocs_scalar("use_directory_urls")
     directory_urls = True if raw_dir_urls is None else raw_dir_urls.lower() == "true"
 
@@ -354,9 +369,16 @@ def _render(
     return f"{head}{GENERATED_MARKER}\n\n{body.lstrip(chr(10))}"
 
 
-def render_skill(skill_dir: Path) -> dict[str, str]:
-    """The complete generated content of one skill, keyed by skill-relative path."""
-    fragments = resolve_shared_fragments(skill_dir)
+def render_skill(skill_dir: Path, shared_dir: Path | None = None) -> dict[str, str]:
+    """The complete generated content of one skill, keyed by skill-relative path.
+
+    `shared_dir` defaults to the module-global `SHARED_DIR`, but a caller
+    rendering a different source tree must pass that tree's own `shared/` —
+    resolving fragments against one tree while discovering skills in another
+    would mix two unrelated sources into one output.
+    """
+    shared_dir = SHARED_DIR if shared_dir is None else shared_dir
+    fragments = resolve_shared_fragments(skill_dir, shared_dir)
     shared_names = set(fragments)
     out: dict[str, str] = {}
 
@@ -366,6 +388,7 @@ def render_skill(skill_dir: Path) -> dict[str, str]:
         shared_names,
         keep_front_matter=True,
         containment_root=skill_dir,
+        shared_dir=shared_dir,
     )
 
     references = skill_dir / "references"
@@ -378,16 +401,18 @@ def render_skill(skill_dir: Path) -> dict[str, str]:
                 shared_names,
                 keep_front_matter=False,
                 containment_root=skill_dir,
+                shared_dir=shared_dir,
             )
 
     for name in fragments:
         rel = f"{SHARED_SUBDIR}/{name}"
         out[rel] = _render(
-            SHARED_DIR / name,
+            shared_dir / name,
             rel,
             shared_names,
             keep_front_matter=False,
-            containment_root=SHARED_DIR,
+            containment_root=shared_dir,
+            shared_dir=shared_dir,
         )
     return out
 
@@ -399,6 +424,11 @@ def render_all(src_dir: Path | None = None) -> dict[str, str]:
     directly or transitively, is dead content and fails generation.
     """
     src_dir = SRC_DIR if src_dir is None else src_dir
+    # The shared tree always belongs to the source tree being rendered, never
+    # to whatever the module globals happen to point at — otherwise a caller
+    # rendering an alternate `src_dir` silently resolves fragments against,
+    # and orphan-checks, this repository's own `skills-src/shared/`.
+    shared_dir = src_dir / "shared"
     skills = discover_skills(src_dir)
     if not skills:
         raise SkillGenerationError(f"no skills found under {src_dir}")
@@ -406,12 +436,12 @@ def render_all(src_dir: Path | None = None) -> dict[str, str]:
     rendered: dict[str, str] = {}
     cited: set[str] = set()
     for skill_dir in skills:
-        cited.update(resolve_shared_fragments(skill_dir))
-        for rel, content in render_skill(skill_dir).items():
+        cited.update(resolve_shared_fragments(skill_dir, shared_dir))
+        for rel, content in render_skill(skill_dir, shared_dir).items():
             rendered[f"{skill_dir.name}/{rel}"] = content
 
     available = (
-        {p.name for p in SHARED_DIR.glob("*.md")} if SHARED_DIR.is_dir() else set()
+        {p.name for p in shared_dir.glob("*.md")} if shared_dir.is_dir() else set()
     )
     orphans = sorted(available - cited)
     if orphans:
@@ -427,17 +457,48 @@ def render_all(src_dir: Path | None = None) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _owned_skill_names(rendered: dict[str, str]) -> set[str]:
-    """The `<skill-name>` directories this generator owns inside an output
-    root.
-
-    Scoping matters: an output root can legitimately hold skills this
-    generator did not produce (`.claude/skills/` is also where a repository's
-    own hand-authored Claude Code skills live), and wiping the whole root
-    would silently delete them. The generator owns exactly the directories it
-    emits, and nothing else under the root.
-    """
+def _rendered_skill_names(rendered: dict[str, str]) -> set[str]:
+    """The `<skill-name>` directories this render produced."""
     return {rel.split("/", 1)[0] for rel in rendered}
+
+
+def _is_generated_skill_dir(path: Path) -> bool:
+    """True if `path` is a skill directory *this* generator produced.
+
+    Ownership is read off the emitted content itself — the `SKILL.md`'s own
+    generated-file marker — rather than inferred from the current render.
+    That distinction is what makes a removed or renamed skill detectable: its
+    name is gone from the render, so a render-derived ownership set would stop
+    considering the stale directory owned and leave it published forever while
+    `--check` still passed. A hand-authored skill sharing the output root
+    carries no marker and is never touched.
+    """
+    skill_md = path / "SKILL.md"
+    if not skill_md.is_file():
+        return False
+    return GENERATED_MARKER_SUBSTRING in skill_md.read_text(encoding="utf-8").lower()
+
+
+def _owned_skill_names(rendered: dict[str, str], root: Path) -> set[str]:
+    """Every skill directory the generator owns under `root`.
+
+    The union of what this render emits and what a previous render left
+    behind (identified by its marker), so a stale directory stays in scope
+    for both removal and drift reporting.
+
+    Scoping still matters in the other direction: an output root can
+    legitimately hold skills this generator did not produce (`.claude/skills/`
+    is also where a repository's own hand-authored Claude Code skills live),
+    and wiping the whole root would silently delete them.
+    """
+    owned = _rendered_skill_names(rendered)
+    if root.is_dir():
+        owned |= {
+            child.name
+            for child in root.iterdir()
+            if child.is_dir() and _is_generated_skill_dir(child)
+        }
+    return owned
 
 
 def _existing_tree(root: Path, owned: set[str]) -> dict[str, str]:
@@ -455,9 +516,11 @@ def write_trees(
     rendered: dict[str, str], roots: tuple[Path, ...] | None = None
 ) -> None:
     roots = OUTPUT_ROOTS if roots is None else roots
-    owned = _owned_skill_names(rendered)
     for root in roots:
-        for name in owned:
+        # Includes previously-generated directories no longer in the render,
+        # so a renamed or deleted skill is actually removed from the published
+        # trees rather than left behind.
+        for name in _owned_skill_names(rendered, root):
             if (root / name).exists():
                 shutil.rmtree(root / name)
         for rel, content in rendered.items():
@@ -470,14 +533,13 @@ def check_trees(
     rendered: dict[str, str], roots: tuple[Path, ...] | None = None
 ) -> list[str]:
     roots = OUTPUT_ROOTS if roots is None else roots
-    owned = _owned_skill_names(rendered)
     problems: list[str] = []
     for root in roots:
         try:
             rel_root = root.relative_to(REPO_DIR).as_posix()
         except ValueError:  # a test-supplied root outside the repo
             rel_root = root.as_posix()
-        existing = _existing_tree(root, owned)
+        existing = _existing_tree(root, _owned_skill_names(rendered, root))
         for rel in sorted(set(rendered) | set(existing)):
             if rel not in existing:
                 problems.append(f"{rel_root}/{rel}: missing")

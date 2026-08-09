@@ -65,7 +65,8 @@ cases and their verdicts before any mitigation:
 | reorder virtuals or members | ABI-breaking, always |
 | add a parameter (even defaulted) | ABI-breaking — the mangled name changes |
 | change a return type | ABI-breaking |
-| add a new free function / overload | compatible |
+| add a new free function (new name) | compatible |
+| add an **overload** of an existing function | ABI-compatible; **not** unconditionally source-compatible |
 | add an enumerator at the end | usually compatible |
 | renumber an enumerator | ABI-breaking if it reaches a signature or field |
 | remove or rename anything public | breaking |
@@ -75,8 +76,17 @@ cases and their verdicts before any mitigation:
 
 Work down this list; the first that fits is usually right.
 
-1. **Additive only.** New free function, new overload with a new name, new
-   type. Nothing existing changes. Always prefer this.
+1. **Additive only.** A new function under a *new name*, or a new type.
+   Nothing existing changes. Always prefer this.
+
+   A new **overload** of an existing name is additive for the ABI — every
+   already-compiled caller keeps binding to the symbol it linked — but it is
+   not automatically source-compatible: an existing call that reached the old
+   function through an implicit conversion can become ambiguous on rebuild,
+   and so can an existing `&f` that names the function. When source
+   compatibility is part of the contract (step 0), give the new function a
+   distinct name instead, or constrain the overload so it cannot participate
+   in an existing call's resolution.
 2. **Spend a reserved slot** if the type was designed with reserved fields.
    Size and layout are unchanged.
 3. **Hide the state.** pImpl or an opaque handle, so the public type's size

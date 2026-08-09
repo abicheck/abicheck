@@ -69,8 +69,21 @@ abicheck compare OLD NEW \
   -o consumer.json
 ```
 
-`--used-by` is repeatable — pass every consumer you were asked about, and
-report per consumer rather than merging.
+**One run per consumer when you were asked about several.** `--used-by` is
+repeatable, and a single run does answer every consumer — but only its
+*per-app summary* is per app (each app's own verdict, required-symbol count,
+missing symbols/versions, relevant-change count, symbol coverage). The
+findings themselves are reported as one **deduplicated union across all
+apps**, with no app-to-finding association. So a multi-app run can tell you
+*that* app B is affected, but not *which* finding affects it — and reading
+the merged finding list as if it were app B's would misattribute app A's
+break to app B, exactly the provenance failure
+[safety invariants](references/shared/safety-invariants.md) item 11 forbids.
+
+Run the comparison once per consumer, into its own report, whenever you must
+name the findings that reach each one. Use a single multi-app run only for the
+coarser question "which of these consumers is affected at all", and report
+only the per-app summary from it.
 
 Go to `--depth source` (with `--sources`/`--build-info`) when the question is
 "does the changed field actually reach this consumer" rather than "does this
@@ -107,7 +120,8 @@ Two failure shapes are specific to this branch, and are different findings:
 ## Step 3 — Read the result consumer-first
 
 Per [report interpretation](references/shared/report-interpretation.md), then narrow
-to the consumer-relevant fields:
+to the consumer-relevant fields. These are per *report*, so they are the
+answer for one consumer only when the run scoped to one consumer (above):
 
 - `verdict` — the library's global answer. Context, not the answer here.
 - `changes[].affected_symbols` — what each finding touches.
