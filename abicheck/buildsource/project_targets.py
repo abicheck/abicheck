@@ -1252,40 +1252,72 @@ def _forbidden_field_issues(target: TargetSpec) -> list[str]:
     return issues
 
 
+def _library_target_issues(
+    config: ProjectTargetsConfig, target: TargetSpec
+) -> list[str]:
+    """Validate a ``kind: library`` target's own required/consistent fields."""
+    issues: list[str] = []
+    if not target.binary_pattern:
+        issues.append(f"target {target.id!r}: kind: library requires binary_pattern.")
+    if target.bundle_only and not target.bundle:
+        issues.append(f"target {target.id!r}: bundle_only requires bundle to be set.")
+    if target.bundle_only and target.checks:
+        issues.append(
+            f"target {target.id!r}: bundle_only: true target must not set "
+            "its own checks: — it is checked only as a bundle member, "
+            "never standalone, so a target-level check here would never "
+            "run; declare it under bundles:.checks instead."
+        )
+    if not target.bundle:
+        return issues
+    declared_bundle = config.bundles.get(target.bundle)
+    if declared_bundle is None:
+        issues.append(
+            f"target {target.id!r}: bundle {target.bundle!r} is not "
+            "declared under bundles:."
+        )
+    elif target.id not in declared_bundle.targets:
+        issues.append(
+            f"target {target.id!r}: declares bundle: {target.bundle!r} "
+            f"but bundles.{target.bundle}.targets does not list "
+            f"{target.id!r} back — a target's own bundle: field and its "
+            "membership in that bundle's targets: list must agree in "
+            "both directions."
+        )
+    return issues
+
+
+def _no_baseline_channel_issues(target: TargetSpec) -> list[str]:
+    """Reject ``channel: none`` on any target kind other than ``library``.
+
+    ``actions/check-target/validate-inputs.sh`` rejects ``baseline-channel:
+    none`` for any target kind other than library -- a no-baseline audit routes
+    to ``scan`` (a one-build check), which has no ``--used-by``/
+    ``--required-symbols`` equivalent to scope an app-consumer/plugin-contract
+    check against. Rejected at generation time rather than letting a
+    validated-looking config produce a run-plan cell that check-target refuses
+    with no per-cell report for aggregate to read.
+    """
+    if target.kind == TARGET_KIND_LIBRARY:
+        return []
+    return [
+        f"target {target.id!r}.checks[{i}]: channel: "
+        f"{NO_BASELINE_CHANNEL!r} is not supported for kind: "
+        f"{target.kind!r} -- a no-baseline audit check has no "
+        "--used-by/--required-symbols equivalent to scope an "
+        "app-consumer/plugin-contract check against "
+        "(actions/check-target/validate-inputs.sh). Use kind: "
+        "library for a no-baseline audit, or set a real channel."
+        for i, check in enumerate(target.checks)
+        if check.channel == NO_BASELINE_CHANNEL
+    ]
+
+
 def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str]:
     issues = _identifier_issues("target", target.id)
     issues.extend(_forbidden_field_issues(target))
     if target.kind == TARGET_KIND_LIBRARY:
-        if not target.binary_pattern:
-            issues.append(
-                f"target {target.id!r}: kind: library requires binary_pattern."
-            )
-        if target.bundle_only and not target.bundle:
-            issues.append(
-                f"target {target.id!r}: bundle_only requires bundle to be set."
-            )
-        if target.bundle_only and target.checks:
-            issues.append(
-                f"target {target.id!r}: bundle_only: true target must not set "
-                "its own checks: — it is checked only as a bundle member, "
-                "never standalone, so a target-level check here would never "
-                "run; declare it under bundles:.checks instead."
-            )
-        if target.bundle:
-            declared_bundle = config.bundles.get(target.bundle)
-            if declared_bundle is None:
-                issues.append(
-                    f"target {target.id!r}: bundle {target.bundle!r} is not "
-                    "declared under bundles:."
-                )
-            elif target.id not in declared_bundle.targets:
-                issues.append(
-                    f"target {target.id!r}: declares bundle: {target.bundle!r} "
-                    f"but bundles.{target.bundle}.targets does not list "
-                    f"{target.id!r} back — a target's own bundle: field and its "
-                    "membership in that bundle's targets: list must agree in "
-                    "both directions."
-                )
+        issues.extend(_library_target_issues(config, target))
     elif target.kind == TARGET_KIND_APP_CONSUMER:
         if not target.consumer_binary_pattern:
             issues.append(
@@ -1299,26 +1331,7 @@ def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str
                 f"target {target.id!r}: kind: plugin-contract requires contract_file."
             )
         issues.extend(_library_reference_issues(config, target))
-    if target.kind != TARGET_KIND_LIBRARY:
-        # actions/check-target/validate-inputs.sh rejects baseline-channel:
-        # none for any target-kind other than library -- a no-baseline audit
-        # routes to `scan` (a one-build check), which has no
-        # --used-by/--required-symbols equivalent to scope an app-consumer/
-        # plugin-contract check against. Reject at generation time rather
-        # than letting a validated-looking config produce a run-plan cell
-        # that check-target refuses with no per-cell report for aggregate
-        # to read.
-        for i, check in enumerate(target.checks):
-            if check.channel == NO_BASELINE_CHANNEL:
-                issues.append(
-                    f"target {target.id!r}.checks[{i}]: channel: "
-                    f"{NO_BASELINE_CHANNEL!r} is not supported for kind: "
-                    f"{target.kind!r} -- a no-baseline audit check has no "
-                    "--used-by/--required-symbols equivalent to scope an "
-                    "app-consumer/plugin-contract check against "
-                    "(actions/check-target/validate-inputs.sh). Use kind: "
-                    "library for a no-baseline audit, or set a real channel."
-                )
+    issues.extend(_no_baseline_channel_issues(target))
     for i, check in enumerate(target.checks):
         issues.extend(_check_issues(config, f"target {target.id!r}.checks[{i}]", check))
     return issues
