@@ -66,7 +66,12 @@ sketches, nothing more:
   `source_decl` (or other) node whose own declared visibility is public. A
   name can be spelled either as the graph's internal node id
   (`binary_symbol://_ZN6detail4evalEv`) or as the node's plain label
-  (`_ZN6detail4evalEv`, `train`) — both resolve to the same node.
+  (`_ZN6detail4evalEv`, `train`). An exact node id always resolves and
+  always takes precedence over a label. A plain label resolves **only**
+  when exactly one public node in the graph carries that label — a label
+  two or more public nodes share (a common shape for overloaded C++
+  entries) is genuinely ambiguous and is treated the same as an
+  unresolvable name (below), never guessed at.
 - **`tests`** (optional list of strings) — free-form test identifiers that
   cover this use case. Recorded as `test_case` nodes with no resolution
   step, since there is no graph node kind an external test identifier could
@@ -82,12 +87,26 @@ far more likely explanation than a genuinely broken manifest entry, and
 treating the two the same way would make an ordinary coverage gap look like
 a manifest bug.
 
-Only the document shape itself is validated as a hard error: the top-level
-document must be a YAML list, each entry a mapping, and each entry's
-`use_case` a non-empty string. A malformed manifest raises
-`abicheck.errors.UseCaseManifestError` rather than silently dropping the bad
-entry — silently skipping a malformed entry could make a use case's declared
-coverage quietly disappear from every future run with no indication why.
+The document's own shape is validated as a hard error, raising
+`abicheck.errors.UseCaseManifestError` rather than silently dropping or
+misreading the bad entry — silently accepting a malformed manifest could
+make a use case's declared coverage quietly disappear or misresolve from
+every future run with no indication why. Rejected:
+
+- invalid YAML syntax, or a mapping that repeats a key (e.g. two
+  `entrypoints:` lines pasted into one entry — YAML's own default keeps
+  only the last value) or uses an unhashable key (a YAML sequence used as a
+  mapping key);
+- a top-level document that isn't a YAML list, or a list entry that isn't a
+  mapping;
+- an entry with an unrecognized field — only `use_case`/`entrypoints`/
+  `tests` are accepted, so a misspelling (`entrypoint` instead of
+  `entrypoints`) fails loudly instead of silently contributing nothing;
+- a missing or blank `use_case` name;
+- an `entrypoints`/`tests` value that isn't a YAML list of strings.
+
+An empty document (no file content at all) is a valid, empty manifest —
+no use cases declared, not an error.
 
 ## Entrypoint mapping and test association
 

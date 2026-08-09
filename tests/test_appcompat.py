@@ -2323,7 +2323,12 @@ class TestEnrichCoveredChangesRefreshesCache:
         _enrich_covered_changes([change], {"_Z9dispatchv": explained}, graph)
 
         assert change.affected_public_roots == ["run"]
-        assert change.impact_assessment.proof_path is not None
-        # The refreshed cache must agree with a fresh, uncached derivation.
+        refreshed = change.impact_assessment
+        assert refreshed.proof_path is not None
+        # The refreshed cache must agree with a genuinely uncached
+        # derivation -- assess_change() prefers change.impact_assessment
+        # when it's non-None, so clear it first or this comparison would
+        # just read the very cache under test.
+        change.impact_assessment = None
         fresh = assess_change(change)
-        assert change.impact_assessment.proof_path == fresh.proof_path
+        assert refreshed.proof_path == fresh.proof_path

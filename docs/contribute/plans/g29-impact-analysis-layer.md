@@ -105,18 +105,18 @@ model:
     fields — confirmed (fresh repo-wide grep, not carried over from Slice 8's
     claim) to be the only step that mutates those fields on an existing
     `Change`, so nothing downstream invalidates the cache.
-  - `source_graph_findings.py` — re-audited with ten `Change(...)`
-    construction sites (not nine; `_public_reachability_findings` alone has
-    two). None are individually cacheable at construction time: unlike
-    `internal_leak.py`'s builder (itself a later `DEFAULT_PIPELINE` step),
-    these builders' output is merged into `checker.compare`'s `changes`
-    *before* `_run_post_processing`/`DEFAULT_PIPELINE.run()`, so
+  - `source_graph_findings.py` — re-audited: none of its `Change(...)`
+    construction sites are individually cacheable at construction time,
+    unlike `internal_leak.py`'s builder (itself a later `DEFAULT_PIPELINE`
+    step) — these builders' output is merged into `checker.compare`'s
+    `changes` *before* `_run_post_processing`/`DEFAULT_PIPELINE.run()`, so
     `MarkReachability` still runs downstream of them and would invalidate an
-    eagerly-cached assessment. Each of the ten sites got a short comment
-    documenting this instead of a (would-be-wrong) construction-time cache
-    write — but the practical gap is closed anyway: `MarkReachability`'s own
-    new caching (above) reaches every `source_graph_findings.py` finding too,
-    once it's tagged.
+    eagerly-cached assessment. Each site got a brief comment documenting
+    this instead of a (would-be-wrong) construction-time cache write — but
+    the practical gap is closed anyway: `MarkReachability`'s own new caching
+    (above) reaches every `source_graph_findings.py` finding too, once it's
+    tagged. See the Phase 3 section below ("Slice 10") for the exact
+    per-function site count and breakdown.
 
   A third entry D2's original decision text named, `suppression.py`, still
   contains **no** `Change(...)` construction at all (confirmed by direct
@@ -461,7 +461,7 @@ sites, each resolved by a real audit rather than an assumption:
   these builders' findings are merged into `checker.compare`'s `changes`
   *before* `_run_post_processing`/`DEFAULT_PIPELINE.run()`, so
   `MarkReachability` still runs downstream and would invalidate an
-  eagerly-cached assessment. Each site got a short comment recording this
+  eagerly-cached assessment. Each site got a brief comment recording this
   instead of a construction-time cache write; `MarkReachability`'s own new
   caching reaches every one of these findings anyway, once tagged.
 

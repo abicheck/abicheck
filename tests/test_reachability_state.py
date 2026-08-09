@@ -603,18 +603,22 @@ class TestMarkReachabilityImpactAssessmentCache:
         ctx = DEFAULT_PIPELINE.run(
             [raw_change], old, new, suppression=_needs_evidence_suppression()
         )
-        found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED][0]
+        found = next(c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED)
         assert found.reachability_state == ReachabilityState.PROVEN_REACHABLE
         assert found.impact_assessment is not None
-        # The cached object must be the same evidence a fresh, uncached
+        cached = found.impact_assessment
+        # The cached object must be the same evidence a genuinely uncached
         # derivation would produce from the *current* (post-tag) flat
         # fields -- proving the two paths never disagree, same discipline
-        # Slice 8/9's own tests use.
+        # Slice 8/9's own tests use. assess_change() prefers
+        # found.impact_assessment when it's non-None, so clear it first or
+        # this comparison would just read the cache under test.
+        found.impact_assessment = None
         fresh = assess_change(found)
-        assert found.impact_assessment.reachability_state == fresh.reachability_state
-        assert found.impact_assessment.public_reachable == fresh.public_reachable
-        assert found.impact_assessment.reachability_kind == fresh.reachability_kind
-        assert found.impact_assessment.proof_path == fresh.proof_path
+        assert cached.reachability_state == fresh.reachability_state
+        assert cached.public_reachable == fresh.public_reachable
+        assert cached.reachability_kind == fresh.reachability_kind
+        assert cached.proof_path == fresh.proof_path
 
     def test_unreachable_change_also_gets_cached_assessment(self) -> None:
         """The ``else``/fallthrough tagging path (PROVEN_UNREACHABLE/UNKNOWN,
@@ -676,7 +680,7 @@ class TestMarkReachabilityImpactAssessmentCache:
             description="size changed",
         )
         ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=None)
-        found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED][0]
+        found = next(c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED)
         assert found.impact_assessment is None
 
 

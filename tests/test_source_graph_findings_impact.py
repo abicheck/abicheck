@@ -140,15 +140,16 @@ def test_source_graph_finding_gets_cached_assessment_once_it_reaches_mark_reacha
     assert change.public_reachable is True
     assert change.reachability_state == ReachabilityState.PROVEN_REACHABLE
     assert change.impact_assessment is not None
-    assert (
-        change.impact_assessment.reachability_state
-        == ReachabilityState.PROVEN_REACHABLE
-    )
-    # Matches a fresh, uncached derivation from the same (now post-tag) flat
-    # fields -- the two paths never disagree.
+    cached = change.impact_assessment
+    assert cached.reachability_state == ReachabilityState.PROVEN_REACHABLE
+    # Matches a genuinely uncached derivation from the same (now post-tag)
+    # flat fields -- the two paths never disagree. assess_change() prefers
+    # change.impact_assessment when it's non-None, so clear it first or
+    # this comparison would just read the cache under test.
+    change.impact_assessment = None
     fresh = assess_change(change)
-    assert change.impact_assessment.reachability_state == fresh.reachability_state
-    assert change.impact_assessment.public_reachable == fresh.public_reachable
+    assert cached.reachability_state == fresh.reachability_state
+    assert cached.public_reachable == fresh.public_reachable
 
 
 def test_no_suppression_leaves_findings_uncached_same_as_before() -> None:
