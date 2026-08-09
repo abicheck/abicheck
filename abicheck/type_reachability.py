@@ -820,28 +820,30 @@ class _StdlibReferenceScan:
         self._reached_records: set[str] = set()
         self._worklist: list[str] = []
         self._resolved_typedefs: set[str] = set()
-        # Provenance a reached record was *first* discovered under (Codex
-        # review, fresh evidence): reaching a record is deduplicated (a
-        # record's fields are only ever walked once, matching
-        # ``reach_record``'s own pre-existing "queue once" semantics), but
-        # the previous version always scanned a reached record's own
-        # fields/bases with the *default* ``via_typedef=False`` regardless
-        # of how the record itself was reached -- so a stdlib type named
-        # directly in a field of a record that was only reachable through
-        # an *ambiguous* typedef alias (colliding with an unrelated enum's
-        # bare spelling) was still credited as unconditionally exact.
-        # Confirmed empirically: ``std::exception`` inside a struct reached
-        # only via such an alias was wrongly treated as directly referenced
-        # with full confidence. Storing the provenance a record was first
-        # queued under, and threading it into the scan of that record's own
-        # fields/bases (see :func:`_walk_reached_records`), closes this --
-        # "first reach wins" is the same safe, conservative direction this
-        # whole module already commits to: a record reached first via an
-        # ambiguous route and *later* also via a trustworthy one keeps the
-        # ambiguous provenance (a missed confirmation, never a false one),
-        # which is the same trade-off ``reach_record``'s pre-existing
-        # dedup-on-first-reach already makes for reachability itself.
-        self._record_provenance: dict[str, tuple[bool, str | None]] = {}
+        # Every reach of a record, accumulated -- not just the *first*
+        # (Codex review, fresh evidence, two rounds). Reaching a record is
+        # still deduplicated for *queuing* purposes (a record's fields are
+        # only ever walked once, matching ``reach_record``'s own
+        # pre-existing "queue once" semantics for the worklist), but the
+        # previous version stored only the *first* reach's provenance --
+        # meaning a record reached first via an ambiguous typedef alias and
+        # only *later* also via a trustworthy direct declaration kept the
+        # ambiguous provenance forever, making the confirmation result
+        # depend on declaration order (confirmed empirically: reversing two
+        # otherwise-unrelated declarations changed a genuine layout break
+        # from confirmed to `UNKNOWN_UNRESOLVED`) -- exactly the class of
+        # order-dependence this whole module has repeatedly had to close
+        # elsewhere (see :func:`_seed_scan_from_public_declarations`'s own
+        # ``stop_when_exhausted`` docstring for the analogous fix on stdlib
+        # identities). Safe to accumulate rather than gate on "first only":
+        # :func:`_seed_scan_from_public_declarations` runs to completion
+        # (``full_scan=True`` disables its own early exit) *before*
+        # :func:`_walk_reached_records` ever starts popping the worklist, so
+        # every seed-level reach of a record is already accumulated here by
+        # the time that record's own fields are scanned -- see
+        # ``_record_direct``/``_record_typedef_origins`` below.
+        self._record_direct: set[str] = set()
+        self._record_typedef_origins: dict[str, set[str]] = {}
         # Per-alias cache of exact/any-spelling stdlib identities reachable
         # from that alias's own target chain, memoized once per alias
         # (Codex review, fresh evidence): the previous version re-walked an
@@ -1091,27 +1093,41 @@ class _StdlibReferenceScan:
         via_typedef: bool = False,
         origin_alias: str | None = None,
     ) -> None:
-        """Queue a non-stdlib record's own fields/bases to be walked, once.
-
-        *via_typedef*/*origin_alias* -- the context this record was first
-        discovered under -- are stored (first reach only, matching this
-        method's own pre-existing "queue once" dedup) so
-        :func:`_walk_reached_records` can scan that record's own fields
-        with the *same* trust level, instead of unconditionally trusting
-        them regardless of how ambiguously the record itself was reached
-        (see ``_record_provenance``'s own docstring on ``__init__``).
+        """Queue a non-stdlib record's own fields/bases to be walked (the
+        worklist itself still dedupes -- a record is only ever queued
+        once), and accumulate *via_typedef*/*origin_alias* provenance for
+        *every* reach, not only the first (Codex review, fresh evidence,
+        two rounds -- see ``_record_direct``/``_record_typedef_origins``'s
+        own docstring on ``__init__`` for why accumulating instead of
+        "first reach wins" is required for order-independence).
+        :func:`_walk_reached_records` reads this accumulated state via
+        :meth:`record_provenance` so a record's own fields are scanned with
+        every trust level it was ever reached under, instead of
+        unconditionally trusting them regardless of how ambiguously the
+        record itself was reached.
         """
+        if not via_typedef:
+            self._record_direct.add(identity)
+        elif origin_alias is not None:
+            self._record_typedef_origins.setdefault(identity, set()).add(origin_alias)
         if identity not in self._reached_records:
             self._reached_records.add(identity)
             self._worklist.append(identity)
-            self._record_provenance[identity] = (via_typedef, origin_alias)
 
-    def record_provenance(self, identity: str) -> tuple[bool, str | None]:
-        """The ``(via_typedef, origin_alias)`` context *identity* (a
-        reached record) was first queued under -- ``(False, None)`` if
-        never reached (should not happen for a caller that only queries an
-        identity it itself popped from :meth:`next_reached_record`)."""
-        return self._record_provenance.get(identity, (False, None))
+    def record_provenance(self, identity: str) -> tuple[bool, frozenset[str]]:
+        """``(is_direct, typedef_origins)`` -- every trust level *identity*
+        (a reached record) has ever been reached under. ``is_direct`` is
+        ``True`` as soon as *any* reach was ``via_typedef=False``
+        (unconditionally trustworthy on its own, matching this whole
+        module's "one genuinely unambiguous route is real proof" principle
+        used everywhere else); ``typedef_origins`` is every top-level alias
+        spelling that reached it only via a typedef, to be judged the same
+        way :meth:`referenced_exact_typedef_aliases` already is by the
+        outer caller."""
+        return (
+            identity in self._record_direct,
+            frozenset(self._record_typedef_origins.get(identity, ())),
+        )
 
     def next_reached_record(self) -> str | None:
         """Pop the next queued record identity, or ``None`` when the queue
@@ -1263,13 +1279,16 @@ def _walk_reached_records(
     :func:`_seed_scan_from_public_declarations`'s own parameter -- see its
     docstring.
 
-    Each record's own fields/bases are scanned with the *same*
-    ``via_typedef``/``origin_alias`` context the record itself was first
-    reached under (Codex review, fresh evidence: see
+    Each record's own fields/bases are scanned with *every* trust level the
+    record itself has ever been reached under, accumulated across every
+    declaration seeding it (Codex review, fresh evidence, two rounds: see
     ``_StdlibReferenceScan.reach_record``'s own docstring) -- a record
     reached only through an ambiguous typedef alias must not have a stdlib
     type named directly in one of its own fields treated as unconditionally
-    exact/trusted just because the field's own text is "direct".
+    exact/trusted just because the field's own text is "direct", but a
+    record reached via *any* trustworthy route (direct, or an alias later
+    found unambiguous) must not have that route's confirmation depend on
+    which declaration happened to be processed first.
     """
     while True:
         if stop_when_exhausted and scan.exhausted:
@@ -1277,22 +1296,31 @@ def _walk_reached_records(
         identity = scan.next_reached_record()
         if identity is None:
             return
-        via_typedef, origin_alias = scan.record_provenance(identity)
+        is_direct, typedef_origins = scan.record_provenance(identity)
         for rec in non_stdlib_records[identity]:
             if rec.origin in _NON_PUBLIC_ORIGINS:
                 continue
             if exclude_export_only and rec.origin is ScopeOrigin.EXPORT_ONLY:
                 continue
-            for f in rec.fields:
-                scan.scan(f.type, via_typedef=via_typedef, origin_alias=origin_alias)
+            texts = [f.type for f in rec.fields] + [
+                *rec.bases,
+                *rec.virtual_bases,
+            ]
             # Both direct and virtual bases are ABI-reachable through the
             # derived type (virtual inheritance still embeds the base
             # subobject + vtable path), same as surface.py's own closure
             # (Codex review, fresh evidence): a public Derived inheriting a
             # non-stdlib Base whose own field is a stdlib record was
             # otherwise never reached, since only rec.fields was followed.
-            for base in (*rec.bases, *rec.virtual_bases):
-                scan.scan(base, via_typedef=via_typedef, origin_alias=origin_alias)
+            for text in texts:
+                if is_direct:
+                    scan.scan(text)
+                # Scanned once per distinct alias that reached this record
+                # (not just one) -- one genuinely unambiguous route among
+                # several is real proof, the same principle already applied
+                # to a plain stdlib identity's own multi-alias provenance.
+                for alias in typedef_origins:
+                    scan.scan(text, via_typedef=True, origin_alias=alias)
 
 
 def _run_stdlib_reference_scan(

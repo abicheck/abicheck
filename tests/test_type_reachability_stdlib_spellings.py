@@ -1075,6 +1075,50 @@ class TestRecordFieldExactnessRespectsTheOwningRecordsOwnProvenance:
             {"std::exception", "exception"}
         )
 
+    def test_a_later_trustworthy_reach_upgrades_an_earlier_ambiguous_one(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: a record reached first through an
+        ambiguous alias, and only *later* also directly, must still
+        confirm its fields -- storing only the *first* reach's provenance
+        made the result depend on declaration order (reversing the two
+        declarations below flipped the result before this fix)."""
+        enum = EnumType(name="Alias", qualified_name="mine::Alias")
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        exc = RecordType(name="std::exception", kind="class")
+        typedefs = {"other::Alias": "Wrapper"}
+        # Ambiguous-alias declaration first, direct declaration second.
+        alias_first = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_alias", params=[Param(name="a", type="Alias")]),
+                _fn("use_direct", params=[Param(name="w", type="Wrapper")]),
+            ],
+            types=[wrapper, exc],
+            enums=[enum],
+            typedefs=dict(typedefs),
+        )
+        # Same declarations, reversed order.
+        direct_first = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_direct", params=[Param(name="w", type="Wrapper")]),
+                _fn("use_alias", params=[Param(name="a", type="Alias")]),
+            ],
+            types=[wrapper, exc],
+            enums=[enum],
+            typedefs=dict(typedefs),
+        )
+        expected = frozenset({"std::exception", "exception"})
+        assert directly_referenced_stdlib_type_spellings(alias_first) == expected
+        assert directly_referenced_stdlib_type_spellings(direct_first) == expected
+
 
 class TestReachableStdlibCacheHandlesADiamondAliasGraph:
     """`_reachable_stdlib`'s memoized cache (the fix for the quadratic
