@@ -71,6 +71,7 @@ on:
       - "abicheck/dumper_clang.py"
       - "abicheck/dumper_clang_errors.py"
       - "abicheck/dumper_toolchain.py"
+      - "abicheck/dumper_castxml.py"
       - "abicheck/castxml_policy.py"
       - "abicheck/header_utils.py"
       - "action/install-castxml.sh"
