@@ -64,3 +64,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   provenance entry (always unconditionally stamped `"castxml"`, regardless
   of schema version) stays trusted either way — only an absence on a
   legacy hybrid snapshot is treated as unreliable.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_CHANGED` when a field
+  initializer is a declaration reference or function call** (Codex review,
+  fresh evidence): the direct-clang backend's structural fingerprint
+  (`_canonical_expr`) dropped a `DeclRefExpr`'s `referencedDecl` sibling
+  entirely, so `int x = DEFAULT_A;` vs. `int x = DEFAULT_B;` (or `one()`
+  vs. `two()`) fingerprinted identically — verified against real Clang 18
+  output before fixing. Since `Param.default` shares this same helper, this
+  also closes the identical gap in `PARAM_DEFAULT_VALUE_CHANGED` for a
+  clang-parsed default argument. The referenced declaration's stable
+  `kind`/`name`/`type` are now folded into the fingerprint (never its raw
+  memory-address `id`, which stays excluded per this function's existing
+  build-stability contract); the same declaration referenced twice still
+  fingerprints identically.

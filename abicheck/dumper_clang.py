@@ -1763,6 +1763,31 @@ def _canonical_expr(node: Any) -> Any:
     type_obj = node.get("type")
     if isinstance(type_obj, dict) and "qualType" in type_obj:
         out["type"] = type_obj["qualType"]
+    referenced = node.get("referencedDecl")
+    if isinstance(referenced, dict):
+        # A DeclRefExpr's own top-level keys (kind "DeclRefExpr", a "type"
+        # that's just the reference's static type) never identify WHICH
+        # declaration it names -- that identity lives only in this compact
+        # sibling stub, previously dropped entirely (Codex review, fresh
+        # evidence). Verified against real Clang 18 output: `int x =
+        # DEFAULT_A;` vs `int x = DEFAULT_B;`, and `int v = one();` vs
+        # `int v = two();`, produced byte-identical fingerprints without
+        # this -- a real initializer/default-argument CHANGE silently
+        # missed on the direct-clang backend (both TypeField.default and
+        # the pre-existing Param.default share this same helper). Its own
+        # "id" is a compile-time-only memory address, never stable across
+        # builds, so only "kind"/"name" (and "type", if present) are kept
+        # -- the same stability contract this function's own docstring
+        # already promises ("drop ids/locations").
+        ref_out: dict[str, Any] = {}
+        for key in ("kind", "name"):
+            if key in referenced:
+                ref_out[key] = referenced[key]
+        ref_type = referenced.get("type")
+        if isinstance(ref_type, dict) and "qualType" in ref_type:
+            ref_out["type"] = ref_type["qualType"]
+        if ref_out:
+            out["referencedDecl"] = ref_out
     inner = node.get("inner")
     if isinstance(inner, list):
         out["inner"] = [_canonical_expr(c) for c in inner]

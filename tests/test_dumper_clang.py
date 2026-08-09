@@ -653,6 +653,71 @@ def test_parse_types_populates_field_default_initializer() -> None:
     assert fields["plain"].default is None
 
 
+def _decl_ref_initializer(field_name: str, referenced_name: str) -> dict:
+    """A synthetic ``FieldDecl`` shaped like ``int <field_name> =
+    <referenced_name>;`` -- the real Clang 18 ``DeclRefExpr``/
+    ``referencedDecl`` nesting confirmed in
+    ``dumper_clang._canonical_expr``'s own docstring."""
+    return {
+        "kind": "FieldDecl",
+        "name": field_name,
+        "type": {"qualType": "int"},
+        "hasInClassInitializer": True,
+        "inner": [
+            {
+                "kind": "ImplicitCastExpr",
+                "type": {"qualType": "int"},
+                "castKind": "LValueToRValue",
+                "inner": [
+                    {
+                        "kind": "DeclRefExpr",
+                        "type": {"qualType": "const int"},
+                        "referencedDecl": {
+                            "kind": "VarDecl",
+                            "name": referenced_name,
+                            "type": {"qualType": "const int"},
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def test_field_default_fingerprint_distinguishes_referenced_declarations() -> None:
+    """Codex review, PR #687, fresh evidence: ``_canonical_expr`` dropped
+    ``DeclRefExpr``'s ``referencedDecl`` sibling entirely, so ``int x =
+    DEFAULT_A;`` and ``int x = DEFAULT_B;`` (or two different function
+    calls) fingerprinted identically -- a real
+    ``FIELD_DEFAULT_INITIALIZER_CHANGED`` (and, since ``Param.default``
+    shares the same ``_canonical_expr``/``_expr_fingerprint`` helper, a real
+    ``PARAM_DEFAULT_VALUE_CHANGED``) would go completely undetected on this
+    backend whenever both initializers were declaration references."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                _decl_ref_initializer("a", "DEFAULT_A"),
+                _decl_ref_initializer("b", "DEFAULT_B"),
+                _decl_ref_initializer("a_again", "DEFAULT_A"),
+            ],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    fields = {f.name: f for f in t.fields}
+
+    assert fields["a"].default is not None
+    assert fields["a"].default != fields["b"].default
+    # The SAME referenced declaration still fingerprints identically --
+    # this fix must not turn every decl-ref initializer into a fresh,
+    # nondeterministic value.
+    assert fields["a"].default == fields["a_again"].default
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {
@@ -1348,7 +1413,9 @@ def test_clang_self_heal_auto_detected_is_debug(
     header = tmp_path / "umbrella.h"
     header.write_text("int foo(void);\n")
     with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
-        root, _resolved_kind = _clang_header_dump([header], [])  # lang=None → auto-detect
+        root, _resolved_kind = _clang_header_dump(
+            [header], []
+        )  # lang=None → auto-detect
     assert root["kind"] == "TranslationUnitDecl"
     assert not any(r.levelno == logging.WARNING for r in caplog.records)
     assert any(
@@ -2703,9 +2770,7 @@ def test_clang_header_dump_device_context_selects_real_fixture(
         return _fake_proc(stderr=stderr_text, returncode=0)
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind = _clang_header_dump(
-        [header], [], frontend_context="device"
-    )
+    root, resolved_kind = _clang_header_dump([header], [], frontend_context="device")
     assert resolved_kind == "device"
     assert root["kind"] == "TranslationUnitDecl"
 
@@ -2831,7 +2896,9 @@ def test_clang_header_dump_non_host_on_plain_frontend_raises_immediately(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/usr/bin/clang++")
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_bin", lambda *a, **k: "/usr/bin/clang++"
+    )
     calls = {"n": 0}
 
     def _run(cmd, **kwargs):
