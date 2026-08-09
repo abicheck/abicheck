@@ -553,16 +553,22 @@ CLI/MCP `compare` paths this item was originally scoped to; add the same
 `reason_codes` field here too, since `scan`'s CLI and MCP surfaces share
 this one engine and would otherwise still have to parse prose for exactly
 the causes this item exists to type. **`SCAN_SCHEMA_VERSION` is a version
-marker with no schema behind it** — confirmed: no `abicheck/schemas/
-scan_report.schema.json` exists (only `aggregate_report`, `build_evidence`,
-`build_source_pack`, and `compare_report` do), and `ScanOutcome.
-diff_summary` is typed as plain `dict[str, Any]` — so P0.7's schema-based
-drift check has nothing to validate `diff.reason_codes` against for `scan`
-either, the identical gap as the `deps compare`/stack case below. Add the
-actual `scan_report.schema.json` and its published mirror as part of this
-change too, or narrow this item's schema-based-drift claim to exclude
-`scan` until that schema exists — don't let the claim outrun what's
-actually registered), `abicheck/aggregate.py`
+marker with no schema behind it, and it marks three distinct shapes, not
+one** — confirmed: no `abicheck/schemas/scan_report.schema.json` exists
+(only `aggregate_report`, `build_evidence`, `build_source_pack`, and
+`compare_report` do); `ScanOutcome.diff_summary` (`scan_engine.py`) is
+typed as plain `dict[str, Any]`; and the same version constant is also
+stamped onto `ScanResult.to_dict()` and `ScanSetResult.to_dict()`
+(`service_scan.py`) — the service/MCP single-scan envelope and the
+multi-artifact scan-set envelope, both structurally different from
+`ScanOutcome`'s own shape and from each other. Testing only `scan
+--against`'s CLI output (as an earlier draft of this item implied) would
+leave the other two shapes free to claim the same schema version without
+ever being validated against it. Add the actual `scan_report.schema.json`
+and its published mirror as part of this change, either as one schema
+with explicit `oneOf` branches for the three shapes or as distinct schema
+families each with their own version — and cover all three with real
+validation tests, not just `scan --against`'s, `abicheck/aggregate.py`
 (`TargetReport.reason` is itself a bare `str | None` — `_load_report_file`
 reads a per-target report's structured `reason: {kind, message}` object
 and flattens it straight into that one string field, line ~1471 — so
@@ -962,21 +968,31 @@ above.
 **Files:** `validation/scripts/run_skill_evals.py` (new, alongside the
 existing `validation/scripts/run_example_owner_proofs.py`-style harness
 scripts — indexes cases via **`examples/ground_truth.json`**, the
-repository's actual canonical per-case catalog (keyed by case directory
-name, carrying `expected`/`expected_kinds`/`min_evidence` per case — this
-is what the named categories above, e.g. "removed export," "vtable
-change," resolve against). `validation/data/manifest.json` is a different,
-unrelated index — 11 real-world *package pairs* keyed by `pair`, not
-`examples/` case IDs — and cannot serve this item's purpose; an earlier
-draft of this item named it in error); `validation/data/skill_eval_scenarios.yaml`
+repository's actual canonical per-case catalog, but **not by iterating
+its top level directly**: the file's top-level keys are file-wide metadata
+(`version`, `description`, `verdicts`, `cross_references`,
+`test_crosscheck_catalog`), and the 195 case records themselves live
+nested one level down, under `ground_truth["verdicts"]`, keyed there by
+case directory name and carrying `expected`/`expected_kinds`/
+`min_evidence` per case — this is what the named categories above, e.g.
+"removed export," "vtable change," resolve against, reached via
+`catalog["verdicts"][case_dir]`, not `catalog[case_dir]`. `validation/
+data/manifest.json` is a different, unrelated index — 11 real-world
+*package pairs* keyed by `pair`, not `examples/` case IDs — and cannot
+serve this item's purpose; an earlier draft of this item named it in
+error); `validation/data/skill_eval_scenarios.yaml`
 (new — the second-category scenario manifest above, for cases
 `ground_truth.json` structurally can't index); `validation/data/skill_eval_results.json`
 (new results artifact, mirroring the existing `results.json` convention).
 
-**Tests:** the eval harness itself is the test; gate a minimum pass rate in
-CI once the first baseline run establishes one (mirroring `SURVIVOR_BASELINE`'s
-pattern for mutation testing — establish, then gate on non-regression, not
-an arbitrary target chosen up front).
+**Tests:** a fixture-resolution test asserting the harness's `ground_truth.
+json` lookup correctly reaches every named category's case through
+`catalog["verdicts"][case_dir]` (not the top level) before the eval
+harness itself is trusted to run against real fixtures; the eval harness
+itself is the test; gate a minimum pass rate in CI once the first baseline
+run establishes one (mirroring `SURVIVOR_BASELINE`'s pattern for mutation
+testing — establish, then gate on non-regression, not an arbitrary target
+chosen up front).
 
 **Dependencies:** P0.1–P0.3, P0.8.
 

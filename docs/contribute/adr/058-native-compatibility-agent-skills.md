@@ -773,9 +773,14 @@ This ADR is validated when:
    `examples/` cases named in the companion plan's evaluation matrix, with
    the skill reaching the documented ground-truth verdict and preserving
    uncertainty where the example is deliberately incomplete-evidence.
-3. `abicheck info --format json` and the comparability reason-code field
-   both ship, are covered by tests, and are consumed by at least one P0
-   skill's workflow (not added speculatively and left unused).
+3. Whichever machine-readable capability-discovery surface the maintainer
+   decision in G36 P0.4 settles on (an `info` command under an approved
+   bar exception, or an extended `--version --format json`) and the
+   comparability reason-code field both ship, are covered by tests, and
+   are consumed by at least one P0 skill's workflow (not added
+   speculatively and left unused) — this criterion is about the
+   capability, not a specific command spelling that P0.4 itself leaves
+   open.
 4. The trigger-test negative set (REST/OpenAPI, DB migrations, Java API,
    generic JSON-schema compatibility) does not false-trigger any `native-*`
    skill, confirmed by an automated test, not manual spot-checking.
