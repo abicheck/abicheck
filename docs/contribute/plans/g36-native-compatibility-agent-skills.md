@@ -1278,15 +1278,29 @@ pack" bundling all four together) in this item's `Status` once done —
 speculative packaging steps are not pre-specified here since the real
 submission UX may differ from what's documented today.
 
-**Dependencies:** P1.1, and — since ADR-058 requires cross-agent
-validation before a skill is presented to the public as ready, not just
-correct against abicheck's own output — at minimum a completed P1.5 pass
-on the two non-Claude targets ADR-058 names as required (Codex and
-Copilot; Gemini CLI/Cursor validation may still be in progress). Submitting
-before that minimum would let a skill go public with an unvalidated
-trigger, reference-resolution, or shell-access assumption on a target
-agent P1.5 exists specifically to catch — exactly the gap ADR-058's
-cross-agent validation requirement is meant to close.
+**Dependencies:** the full required P0 release, not only the P0.1–P0.3/P0.8
+subset P1.1 itself depends on — **P0.4 (capability discovery), P0.5 (typed
+comparability reasons), P0.6 (AI-readiness gate coverage for the generated
+tree), P0.7 (structural/drift gates), and P0.9 (including its dogfooding
+pass, which P0.9 itself states must happen "before any external
+publication") are all publication prerequisites in their own right, not
+merely P1.1/P1.5 prerequisites that this item inherits transitively.**
+Depending on P1.1 alone doesn't reach them: P1.1's own dependency list is
+P0.1–P0.3 and P0.8 only, so a P1.4 that names just "P1.1" as its
+precondition would structurally permit submitting skills to `skills.sh`
+with capability discovery unimplemented, comparability reasons still
+loosely typed, no drift gate protecting the published content, and no
+recorded dogfooding pass — every one of which ADR-058 and this plan's own
+other items treat as required, not optional, ahead of external
+publication. And — since ADR-058 requires cross-agent validation before a
+skill is presented to the public as ready, not just correct against
+abicheck's own output — at minimum a completed P1.5 pass on the two
+non-Claude targets ADR-058 names as required (Codex and Copilot; Gemini
+CLI/Cursor validation may still be in progress). Submitting before that
+minimum would let a skill go public with an unvalidated trigger,
+reference-resolution, or shell-access assumption on a target agent P1.5
+exists specifically to catch — exactly the gap ADR-058's cross-agent
+validation requirement is meant to close.
 
 **PR boundary:** N/A — this is largely an external-service action, not a
 code PR; any repo changes it does require (a `skills.sh` manifest file, if
