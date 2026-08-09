@@ -405,6 +405,21 @@ jobs:
               - 'tests/**'
               - 'examples/**'
               - '.github/workflows/**'
+              # The gated jobs' *infrastructure*, not just their inputs. Every
+              # one of them does `pip install -e ".[dev]"` and sets up CastXML
+              # through the composite action, and the two parity lanes are
+              # driven by scripts/verify.py's step catalog — so a PR touching
+              # only those would skip the very jobs that validate them. The
+              # sharpest case: re-pinning CastXML in action/install-castxml.sh
+              # (asset names, SHA256s, expected versions) would otherwise land
+              # without a single job that uses CastXML having run.
+              # (Codex review on PR #685; the gap predates this PR for the two
+              # parity lanes, and integration-tests inherited it when it moved
+              # behind this gate.)
+              - 'pyproject.toml'
+              - 'action/**'
+              - '.github/actions/**'
+              - 'scripts/verify.py'
 
       - name: Resolve parity gate output
         id: resolve
