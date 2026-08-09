@@ -2332,3 +2332,157 @@ class TestEnrichCoveredChangesRefreshesCache:
         change.impact_assessment = None
         fresh = assess_change(change)
         assert refreshed.proof_path == fresh.proof_path
+
+
+class TestAttachConsumerImpactStampsReachability:
+    """:func:`abicheck.appcompat._attach_consumer_impact` must stamp
+    ``public_reachable``/``reachability_kind``/``reachability_state`` on the
+    change it enriches, not just the proof-path fields (Codex review, fresh
+    evidence): a shared ``Change`` reaching ``_enrich_covered_changes`` with
+    no reachability-aware suppression configured at all never had
+    ``MarkReachability`` run on it, so it still carries the dataclass
+    defaults (``UNKNOWN``/``False``) -- attaching a concrete consumer-proven
+    proof path without also raising those fields left an internally
+    contradictory finding (a real proof path, but 'unknown'/'unreachable'
+    status)."""
+
+    def test_enrichment_marks_the_change_consumer_proven(self):
+        from abicheck.appcompat import _enrich_covered_changes
+        from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z9dispatchv",
+            description="Function removed: _Z9dispatchv",
+            # Left at the dataclass defaults, same as a real Change that
+            # never went through MarkReachability (no suppression file, or
+            # one whose rules never need reachability evidence).
+        )
+        assert change.reachability_state == ReachabilityState.UNKNOWN
+        assert change.public_reachable is False
+
+        graph = SourceGraphSummary()
+        graph.add_node(GraphNode(id="decl://run", kind="source_decl", label="run"))
+        explained = ConsumerImpactPath(
+            consumer="training-service",
+            symbol="_Z9dispatchv",
+            declarations=("_Z9dispatchv",),
+            public_entries=("run",),
+        )
+
+        _enrich_covered_changes([change], {"_Z9dispatchv": explained}, graph)
+
+        assert change.public_reachable is True
+        assert change.reachability_kind == "consumer_proven"
+        assert change.reachability_state == ReachabilityState.PROVEN_REACHABLE
+        # The cached assessment must agree -- assess_change() derives these
+        # fields straight from the flat ones this stamps.
+        assert change.impact_assessment.public_reachable is True
+        assert change.impact_assessment.reachability_state == (
+            ReachabilityState.PROVEN_REACHABLE
+        )
+
+
+class TestMergeConsumerImpactPaths:
+    """:func:`abicheck.appcompat._merge_consumer_impact_paths` must combine
+    every matching symbol-level explanation for a shared Change, not keep
+    only the first and silently discard the rest (Codex review, fresh
+    evidence): a single Change can cover more than one missing export via
+    ``affected_symbols`` (e.g. one type-size change breaking several
+    removed functions), and _change_covers_symbol treats every one of them
+    as covered."""
+
+    def test_single_match_is_returned_unchanged(self):
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        only = ConsumerImpactPath(
+            consumer="app", symbol="foo", public_entries=("run",)
+        )
+        assert _merge_consumer_impact_paths([only]) is only
+
+    def test_multiple_matches_union_public_entries_and_declarations(self):
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        first = ConsumerImpactPath(
+            consumer="app",
+            symbol="foo",
+            declarations=("foo",),
+            public_entries=("run",),
+        )
+        second = ConsumerImpactPath(
+            consumer="app",
+            symbol="bar",
+            declarations=("bar",),
+            public_entries=("train",),
+        )
+        # A duplicate entry across matches must not appear twice.
+        third = ConsumerImpactPath(
+            consumer="app",
+            symbol="baz",
+            declarations=("bar",),
+            public_entries=("run",),
+        )
+        merged = _merge_consumer_impact_paths([first, second, third])
+        assert merged.consumer == "app"
+        assert merged.symbol == "foo"  # display-only, first match's value
+        assert merged.public_entries == ("run", "train")
+        assert merged.declarations == ("foo", "bar")
+
+    def test_non_primary_entry_paths_become_alternatives(self):
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        edge_a = GraphEdge(src="a", dst="foo", kind="DECL_CALLS_DECL")
+        edge_b = GraphEdge(src="b", dst="bar", kind="DECL_CALLS_DECL")
+        first = ConsumerImpactPath(
+            consumer="app",
+            symbol="foo",
+            public_entries=("run",),
+            entry_path=[edge_a],
+        )
+        second = ConsumerImpactPath(
+            consumer="app",
+            symbol="bar",
+            public_entries=("train",),
+            entry_path=[edge_b],
+        )
+        merged = _merge_consumer_impact_paths([first, second])
+        assert merged.entry_path == [edge_a]
+        assert [edge_b] in merged.alternative_entry_paths
+
+    def test_enrichment_uses_the_merged_explanation_end_to_end(self):
+        """_enrich_covered_changes' own next(...)-vs-merge regression: a
+        single shared Change whose affected_symbols names two missing
+        exports must report both public roots, not just the first
+        explanation found."""
+        from abicheck.appcompat import _enrich_covered_changes
+        from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="Config",
+            description="Type size changed: Config",
+            affected_symbols=["_Z3foov", "_Z3barv"],
+        )
+        graph = SourceGraphSummary()
+        graph.add_node(GraphNode(id="decl://run", kind="source_decl", label="run"))
+        graph.add_node(GraphNode(id="decl://train", kind="source_decl", label="train"))
+        explanations = {
+            "_Z3foov": ConsumerImpactPath(
+                consumer="app", symbol="_Z3foov", public_entries=("run",)
+            ),
+            "_Z3barv": ConsumerImpactPath(
+                consumer="app", symbol="_Z3barv", public_entries=("train",)
+            ),
+        }
+
+        _enrich_covered_changes([change], explanations, graph)
+
+        # Both symbols' public entries must be represented, not just the
+        # first one found in dict iteration order.
+        assert set(change.affected_public_roots) == {"run", "train"}

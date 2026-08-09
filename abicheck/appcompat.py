@@ -1091,23 +1091,84 @@ def _enrich_covered_changes(
     ``change.impact_assessment`` as its own cache, so recomputing while the
     old object is still assigned would just hand back that same stale
     object unchanged.
+
+    Aggregates *every* matching explanation, not just the first
+    (:func:`_merge_consumer_impact_paths`) — a single shared ``Change`` can
+    cover more than one missing export at once via ``affected_symbols``
+    (e.g. one type-size change breaking several removed functions), and
+    :func:`_change_covers_symbol` treats all of them as covered. Keeping
+    only the first match's ``next(...)`` pick (Codex review, fresh
+    evidence) silently discarded every other symbol's own public root and
+    proof path, reporting a narrower explanation than the same logic
+    already claims this finding accounts for.
     """
     for change in changes:
         if _has_impact_evidence(change):
             continue
-        explained = next(
-            (
-                e
-                for sym, e in explanations.items()
-                if _change_covers_symbol(change, sym)
-            ),
-            None,
-        )
-        if explained is None:
+        matches = [
+            e for sym, e in explanations.items() if _change_covers_symbol(change, sym)
+        ]
+        if not matches:
             continue
+        explained = _merge_consumer_impact_paths(matches)
         _attach_consumer_impact(change, explained, graph, name_consumer=False)
         change.impact_assessment = None
         change.impact_assessment = assess_change(change)
+
+
+def _merge_consumer_impact_paths(
+    matches: list[ConsumerImpactPath],
+) -> ConsumerImpactPath:
+    """Combine every symbol-level explanation one shared ``Change`` covers
+    (via ``affected_symbols`` naming more than one missing export) into a
+    single :class:`~abicheck.impact.consumer_graph.ConsumerImpactPath`,
+    instead of silently keeping only the first and discarding the rest
+    (Codex review, fresh evidence).
+
+    ``consumer``/``symbol`` keep the first match's values — display-only
+    fields a single merged explanation can only ever name one of.
+    ``public_entries``/``declarations`` are the order-preserving deduped
+    union across every match, so a finding covering several requirements
+    reports every public root/declaration that explains it, not just the
+    first. ``entry_path`` stays the first non-empty (indirect) match's own
+    path; every *other* match's ``entry_path``/``alternative_entry_paths``
+    is folded into the merged ``alternative_entry_paths`` instead of
+    dropped outright, so no explanation is lost even though only one path
+    can be primary (``attach_impact_metadata`` caps how many of these are
+    actually kept).
+    """
+    if len(matches) == 1:
+        return matches[0]
+    primary = matches[0]
+    entries: list[str] = []
+    seen_entries: set[str] = set()
+    declarations: list[str] = []
+    seen_decls: set[str] = set()
+    for m in matches:
+        for e in m.public_entries:
+            if e not in seen_entries:
+                seen_entries.add(e)
+                entries.append(e)
+        for d in m.declarations:
+            if d not in seen_decls:
+                seen_decls.add(d)
+                declarations.append(d)
+    entry_path = next((m.entry_path for m in matches if m.entry_path), [])
+    alternatives = []
+    for m in matches:
+        if m.entry_path and m.entry_path != entry_path:
+            alternatives.append(m.entry_path)
+        alternatives.extend(m.alternative_entry_paths)
+    from .impact.consumer_graph import ConsumerImpactPath as _ConsumerImpactPath
+
+    return _ConsumerImpactPath(
+        consumer=primary.consumer,
+        symbol=primary.symbol,
+        declarations=tuple(declarations),
+        public_entries=tuple(entries),
+        entry_path=entry_path,
+        alternative_entry_paths=alternatives,
+    )
 
 
 def _attach_consumer_impact(
@@ -1120,8 +1181,19 @@ def _attach_consumer_impact(
     """Attach one :class:`ConsumerImpactPath` to *change* in place.
 
     Enrichment only — never constructs a finding, never changes a verdict or
-    a severity. The overlay was already ``PROVEN_REACHABLE``/
-    ``consumer_proven`` before this ran; all this adds is *why*.
+    a severity. The overlay call site already stamps ``PROVEN_REACHABLE``/
+    ``consumer_proven`` on its freshly-built ``Change`` before calling this
+    (see its own comment) — this function stamps the identical three fields
+    itself too (Codex review, fresh evidence), a no-op there, but load-bearing
+    for :func:`_enrich_covered_changes`'s *shared*-``Change`` caller: that
+    change's ``reachability_state``/``public_reachable`` are whatever
+    ``MarkReachability`` left them (``UNKNOWN``/``False`` by default when no
+    reachability-aware suppression rule is even configured, so that step never
+    ran at all) — attaching a concrete proof path here without also raising
+    those fields would otherwise leave the *same* internal contradiction the
+    overlay's own comment already reasons its way out of: a real consumer
+    requirement resolving to a real, walked call chain is not a "maybe
+    internal, maybe not" ambiguity, by construction, for either caller.
     """
     from .buildsource.graph_impact import attach_impact_metadata
 
@@ -1135,6 +1207,9 @@ def _attach_consumer_impact(
     change.reachability_proof_path = _format_consumer_impact(
         explained, graph, name_consumer=name_consumer
     )
+    change.public_reachable = True
+    change.reachability_kind = "consumer_proven"
+    change.reachability_state = ReachabilityState.PROVEN_REACHABLE
 
 
 def scope_diff_to_app(
