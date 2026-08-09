@@ -5,6 +5,29 @@
 for the phased implementation plan.
 **Decision maker:** (pending — recorded per repository convention)
 
+> **Amendment (2026-08-09, same date — MCP retired hours after this ADR was
+> accepted).** #684 removed the MCP server (`abicheck-mcp`,
+> `abicheck/mcp_server.py` and its sibling modules) from the shipped
+> product entirely — see
+> [ADR-021b](021-mcp-security-model.md) (retired the same date) and
+> [ADR-055's retirement note](055-typed-request-result-completeness-and-schema-registry.md).
+> Every "MCP is an optional adapter" / "CLI is normative, MCP is optional"
+> claim below is now stale in the specific sense that there is no MCP
+> adapter left to be optional — read every such statement as "CLI (and the
+> typed Python API) is the sole execution backend; no MCP adapter exists or
+> is planned." This does not change this ADR's actual decision, which never
+> depended on MCP existing (Design principle 4 and the Execution-backend
+> section below already concluded no P0 skill workflow needs MCP) — it only
+> retires the "optional adapter" framing as a live possibility. G36 (the
+> companion implementation plan) carries the same amendment and drops the
+> MCP-specific file-level work items this ADR's Required product
+> capabilities section implied (the `abi_compare` `reason_codes` sibling
+> field, `mcp_server.py` edits) since there is no MCP surface left to
+> extend. Everything else in this ADR — the four-skill taxonomy, the
+> admission criteria, the Layer A/B/C model, the safety invariants, the
+> source-of-truth/generation model — is unaffected and remains this
+> decision's current guidance.
+
 ---
 
 ## Context

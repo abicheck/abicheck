@@ -12,6 +12,26 @@ lifecycle: active
 product/tooling initiative, not a detector capability, so it is tracked here
 rather than in the registry (consistent with how G19/G24/G30 track their
 own initiative work).
+
+> **Amendment (2026-08-09).** #684, merged the same day this plan was
+> written, removed the MCP server (`abicheck-mcp`, `abicheck/mcp_server.py`
+> and its sibling modules) entirely — see
+> [ADR-021b](../adr/021-mcp-security-model.md) and
+> [ADR-055's retirement note](../adr/055-typed-request-result-completeness-and-schema-registry.md).
+> None of this plan's items are still started against this backend, so
+> nothing here needed unwinding, only correcting: P0.5's `codes`/
+> `reason_codes` item below no longer has an `abicheck/mcp_server.py`
+> file or an MCP `abi_compare` envelope to extend — read every remaining
+> `abi_compare`/`mcp_server.py`/"MCP" reference in P0.5 as historical
+> context for why the field was originally scoped the way it was, not as
+> a live implementation target. The producer-surface count that item
+> gives is six (`compare`, `scan`, the release JSON, the release summary,
+> `aggregate`, `deps compare`/stack), not seven. No other phase in this
+> plan referenced MCP. This plan's actual scope — the four P0 skills,
+> `skills-src/` → `.agents/skills/`/`.claude/skills/`/`.gemini/skills/`
+> generation, the CLI-only execution backend — was never MCP-dependent and
+> is unaffected.
+
 **Effort:** L/XL (phased P0/P1/P2) · **Risk:** medium — the two required
 product changes (`abicheck info`, a comparability reason-code field) are
 small and additive; the real risk is scope creep in the skill portfolio and
@@ -269,8 +289,8 @@ already used elsewhere in this plan for a
 non-`docs/` link (P0.9's full-GitHub-URL convention) — a generated skill
 file should never contain a bare relative link to something outside its
 own installed tree. Modeled
-directly on the existing `scripts/gen_cli_reference.py`/
-`scripts/gen_mcp_reference.py` pattern (`docs/AGENTS.md`'s "regenerating
+directly on the existing `scripts/gen_cli_reference.py`
+pattern (`docs/AGENTS.md`'s "regenerating
 generated docs" contract) — same idempotency and same "verify.py fails on
 drift" requirement, applied to a new artifact family.
 
