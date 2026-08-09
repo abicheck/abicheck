@@ -1300,13 +1300,24 @@ recorded dogfooding pass — every one of which ADR-058 and this plan's own
 other items treat as required, not optional, ahead of external
 publication. And — since ADR-058 requires cross-agent validation before a
 skill is presented to the public as ready, not just correct against
-abicheck's own output — at minimum a completed P1.5 pass on the two
-non-Claude targets ADR-058 names as required (Codex and Copilot; Gemini
-CLI/Cursor validation may still be in progress). Submitting before that
-minimum would let a skill go public with an unvalidated trigger,
-reference-resolution, or shell-access assumption on a target agent P1.5
-exists specifically to catch — exactly the gap ADR-058's cross-agent
-validation requirement is meant to close.
+abicheck's own output — **a completed P1.5 pass on all four of ADR-058's
+named minimum targets: Claude Code, Codex, Copilot, and Gemini CLI.**
+(Cursor is the one target ADR-058 itself lists as conditional — "Gemini
+CLI at minimum, Cursor if current" — so it alone may remain in progress at
+publication time; Claude Code, Codex, Copilot, and Gemini CLI may not.)
+Submitting before all four minimum targets pass would let a skill go
+public with an unvalidated trigger, reference-resolution, or shell-access
+assumption on a target agent P1.5 exists specifically to catch — exactly
+the gap ADR-058's cross-agent validation requirement is meant to close.
+**P1.5's pass must also be run against the *final* generated artifact, not
+an earlier one** — see P1.5's own "Dependencies" note below: a P1.5 run
+completed before P0.4/P0.5's required follow-up commits land (the ones
+that change skill content to actually consume capability discovery and
+typed comparability reasons) validates a tree that no longer matches what
+P1.4 would publish. P1.4 checks that P1.5 is *complete*, not that its
+recorded output was validated against the artifact being published today
+— those are different claims, and only the latter is the one that
+matters here.
 
 **PR boundary:** N/A — this is largely an external-service action, not a
 code PR; any repo changes it does require (a `skills.sh` manifest file, if
@@ -1339,7 +1350,17 @@ exemption, confirmed against how its own model page is actually navigated).
 **Tests:** N/A — manual validation, recorded as data, not a CI gate (the
 scriptable subset already lives in P0.8).
 
-**Dependencies:** P0.1–P0.3.
+**Dependencies:** P0.1–P0.3 for a *first* pass, but **the pass P1.4 relies
+on for publication must additionally postdate P0.4/P0.5's own required
+follow-up commits** — P0.4/P0.5 each explicitly require a small follow-up
+commit updating the four `SKILL.md` files to actually consume capability
+discovery and typed comparability reasons once those land (see P0.2's own
+"Dependencies" note), which changes the generated tree's content after an
+early P1.5 run could have already validated it. Re-run (or initially defer)
+this item's validation pass until after those follow-up commits land, so
+the recorded log reflects the artifact P1.4 actually publishes rather than
+an earlier one — a P1.5 entry that predates them is stale for publication
+purposes even though it is marked complete.
 
 **PR boundary:** own PR per validation-log update, or batched — low risk.
 
