@@ -394,11 +394,33 @@ def build_contract_stage(
     # dependency-layout finding as `IN_CONTRACT`/`COMPLETE`, even though no
     # *committed* export references that type at all (Codex review, fresh
     # evidence; see `_is_public_non_stdlib_declaration`'s own docstring).
+    #
+    # A forced-public symbol (`--public-symbol`) must widen this same
+    # allowlist, not just `post_processing._run_allowlist`'s own filter pass
+    # (Codex review, fresh evidence): `--post-manifest --public-symbol api`
+    # with header scoping also on keeps a `Change` on the forced symbol as a
+    # widening overlay (`_run_allowlist` line ~341), but this scan's own
+    # seeding never consulted `force_public_symbols` at all, so an
+    # uncommitted-but-forced-public `api(vector<int>)` was rejected as a
+    # root here -- a real `std::vector` layout break under it classified
+    # `UNKNOWN_UNRESOLVED` instead of `IN_CONTRACT`, even though the same
+    # comparison without the manifest is correctly `BREAKING`. Gated on
+    # `scope_to_public_surface` to mirror `_run_allowlist`'s own condition
+    # exactly: the widening overlay is a header-scoping concept the CLI
+    # already warns is ignored under `--no-scope-public-headers`, so
+    # applying it here unconditionally would contradict that warning.
+    committed_roots = committed_exports
+    if (
+        committed_exports is not None
+        and scope_to_public_surface
+        and force_public_symbols
+    ):
+        committed_roots = committed_exports | frozenset(force_public_symbols)
     directly_referenced_stdlib_old = directly_referenced_stdlib_type_spellings(
-        old, exclude_export_only_roots=True, committed_roots=committed_exports
+        old, exclude_export_only_roots=True, committed_roots=committed_roots
     )
     directly_referenced_stdlib_new = directly_referenced_stdlib_type_spellings(
-        new, exclude_export_only_roots=True, committed_roots=committed_exports
+        new, exclude_export_only_roots=True, committed_roots=committed_roots
     )
 
     # ADR-049 Phase 3's observed provider ledger (plan Section 4.1).
