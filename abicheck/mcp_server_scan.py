@@ -484,9 +484,12 @@ def abi_scan_set(
         bin_paths = [_safe_read_path(p, label="artifact_paths") for p in artifact_paths]
         for p in bin_paths:
             if not p.exists():
-                return json.dumps(
-                    {"status": "error", "error": f"Binary file not found: {p}"}
-                )
+                # No resolved path in the message (Codex review): unlike
+                # `abi_scan`'s identical check, `_safe_read_path` has already
+                # resolved *p* against the server's cwd, and echoing it back
+                # would disclose server filesystem layout the same sanitized-
+                # error contract every other tool here avoids.
+                return json.dumps({"status": "error", "error": "Binary file not found"})
             _check_file_size(p, label="artifact_paths")
         try:
             depth = _validate_public_depth(depth)

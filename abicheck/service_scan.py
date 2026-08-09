@@ -1849,9 +1849,7 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
             return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5,
                                   per_artifact=per_artifact)
 
-    remaining = (
-        None if budget_s is None else budget_s - (_time.monotonic() - start)
-    )
+    remaining = None if budget_s is None else budget_s - (_time.monotonic() - start)
     if remaining is not None and remaining <= 0:
         return ScanSetResult(
             verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
@@ -1965,6 +1963,8 @@ def _scan_set_subprocess_worker(req: ScanRequest, q: Any) -> None:
         pass
     try:
         q.put(("ok", run_scan_set(req).to_dict()))
+    except ValueError as exc:
+        q.put(("value_err", str(exc)))
     except BaseException as exc:  # noqa: BLE001 — convey, don't crash the worker
         q.put(("err", f"{type(exc).__name__}: {exc}"))
 
@@ -1995,6 +1995,6 @@ def run_scan_set_subprocess(req: ScanRequest, timeout: float) -> dict[str, Any]:
             _kill_process_tree(proc)
         else:
             proc.join(1)
-    if status == "err":
-        raise RuntimeError(payload)
+    if status in ("value_err", "err"):
+        raise (ValueError if status == "value_err" else RuntimeError)(payload)
     return payload  # type: ignore[no-any-return]
