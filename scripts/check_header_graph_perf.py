@@ -89,6 +89,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -434,26 +435,53 @@ def main(argv: list[str] | None = None) -> int:
             "(the default castxml backend's genuine second-clang-invocation cost "
             "is not covered by this run)."
         )
-    points = measure(tuple(args.sizes), args.repeat)
+
+    # Every repeat deliberately forces a cache *miss* (see _build_fixture's
+    # docstring), so every one of those parses writes a real, never-reused
+    # entry into the persistent AST cache (~/.cache/abi_check or platform
+    # equivalent) that nothing then cleans up — repeated runs, especially at
+    # larger --sizes, accumulate real disk usage there for no benefit (Codex
+    # review). Redirect XDG_CACHE_HOME (the same env var dumper_cache._cache_path
+    # already honors) to a throwaway directory for the run's lifetime instead.
+    # Windows has no equivalent env-var override in _cache_path, so this is a
+    # best-effort mitigation there, matching the module's Linux/ELF scope.
+    with tempfile.TemporaryDirectory(prefix="hgperf_cache_") as cache_dir:
+        old_xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+        os.environ["XDG_CACHE_HOME"] = cache_dir
+        try:
+            points = measure(tuple(args.sizes), args.repeat)
+        finally:
+            if old_xdg_cache_home is None:
+                os.environ.pop("XDG_CACHE_HOME", None)
+            else:
+                os.environ["XDG_CACHE_HOME"] = old_xdg_cache_home
 
     if args.markdown:
         _print_markdown(points)
     else:
         _print_table(points)
 
+    # Load the baseline BEFORE writing --json-out: the two may name the same
+    # path (e.g. re-running the exact command used to establish the baseline
+    # with --baseline added), and writing first would silently overwrite the
+    # historical baseline with this run's own numbers before it's read --
+    # every point then trivially matches itself and the gate reports OK
+    # having destroyed the one file that could have shown a regression
+    # (Codex review).
+    baseline = _load_baseline(args.baseline) if args.baseline is not None else None
+
     if args.json_out is not None:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(json.dumps({"points": points}, indent=2) + "\n")
         print(f"\nWrote {args.json_out}")
 
-    if args.baseline is None:
+    if baseline is None:
         print(
             "\nNo --baseline given: report-only run. Pass a previously written "
             "--json-out report via --baseline to gate future runs against it."
         )
         return 0
 
-    baseline = _load_baseline(args.baseline)
     matched = matched_points(points, baseline)
     if not matched:
         print(

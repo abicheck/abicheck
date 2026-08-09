@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -197,6 +198,74 @@ class TestMainSkipsWithoutToolchain:
         assert rc == 1
         assert "FAIL" in out
         assert "no entry matching" in out
+
+    def test_measure_runs_under_a_redirected_xdg_cache_home(
+        self, monkeypatch, tmp_path
+    ):
+        # Regression guard: every repeat forces a cache miss (see
+        # _build_fixture), so a real (non-redirected) XDG_CACHE_HOME would
+        # accumulate a never-reused AST cache entry on every run.
+        monkeypatch.setattr(hg_gate, "_have", lambda tool: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+        seen_during_measure = {}
+
+        def _fake_measure(sizes, repeat, backends=hg_gate.BACKENDS):
+            seen_during_measure["xdg"] = os.environ.get("XDG_CACHE_HOME")
+            return [
+                {"size": s, "backend": "clang", "baseline_ms": 1.0, "attach_ms": 1.0}
+                for s in sizes
+            ]
+
+        monkeypatch.setattr(hg_gate, "measure", _fake_measure)
+        monkeypatch.setenv("XDG_CACHE_HOME", "/should/not/be/used")
+
+        rc = hg_gate.main(["--sizes", "5"])
+
+        assert rc == 0
+        # measure() ran under a redirected, throwaway cache dir, not the
+        # caller's real XDG_CACHE_HOME.
+        assert seen_during_measure["xdg"] != "/should/not/be/used"
+        assert seen_during_measure["xdg"] is not None
+        # And the env var is restored to its original value afterward.
+        assert os.environ.get("XDG_CACHE_HOME") == "/should/not/be/used"
+
+    def test_json_out_same_path_as_baseline_still_gates_correctly(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        # Regression guard: --baseline must be read before --json-out
+        # (potentially the same file) overwrites it.
+        monkeypatch.setattr(hg_gate, "_have", lambda tool: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(
+            hg_gate,
+            "measure",
+            lambda sizes, repeat, backends=hg_gate.BACKENDS: [
+                {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 100.0}
+                for s in sizes
+            ],
+        )
+        shared = tmp_path / "report.json"
+        shared.write_text(
+            json.dumps({"points": [{"size": 10, "backend": "clang", "attach_ms": 1.0}]})
+        )
+
+        rc = hg_gate.main(
+            [
+                "--sizes",
+                "10",
+                "--baseline",
+                str(shared),
+                "--json-out",
+                str(shared),
+            ]
+        )
+        out = capsys.readouterr().out
+        # attach_ms 100.0 vs. the pre-existing baseline's 1.0 is a real,
+        # detected regression -- not a comparison against the just-written
+        # (and therefore self-matching) new report.
+        assert rc == 1
+        assert "FAIL" in out
+        assert "regression" in out
 
 
 @pytest.mark.integration
