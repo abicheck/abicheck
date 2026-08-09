@@ -1,7 +1,10 @@
 # Platform Support
 
 abicheck runs on **Linux, macOS, and Windows** and can analyze binaries from any of these platforms.
-However, the depth of analysis depends on the **host platform** and whether headers are available.
+However, the depth of analysis depends on the **host platform**, whether the
+binary carries **debug info**, and whether **headers** are available — see
+["What 'No Headers' Actually Means"](#what-no-headers-actually-means) below
+for why those last two are independent axes, not one.
 
 ---
 
@@ -94,26 +97,42 @@ mangling, header-only scoping) remain covered by the castxml integration lane.
 
 ---
 
-## What "Symbols Only" Mode Means
+## What "No Headers" Actually Means
 
-When scanning a binary **without headers**, or scanning a non-native binary cross-platform,
-abicheck operates in **symbol-table mode**:
+**"No headers" is not the same as "symbols only."** Whether a headerless scan
+still sees type/layout facts depends on whether the binary carries **debug
+info** (DWARF/PDB) — a separate axis from whether headers were given. Don't
+conflate the two; see [Evidence & Detectability](../learn/evidence-and-detectability.md)
+for the full `L0`–`L5` model this table summarizes:
 
-✅ **Detected:**
+| Input | Evidence layer | What's available |
+|---|---|---|
+| Stripped binary, no headers | **L0 — symbols only** | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, dependency list |
+| Binary **with** DWARF/PDB, no headers | **L0+L1 — binary + debug** | Everything L0 sees, **plus** struct/class layout, field offsets, enum values, vtable slots, calling convention, packing — recovered straight from debug info, no castxml needed (see "Castxml-free validation" above) |
+| Binary + headers | **L0–L2 — header-aware** | Everything above, plus the declared public API surface (parameter/return types, qualifiers, public-surface scoping) |
+| + build/source context | **L3–L5** | Build flags, source-only facts (macros, default arguments, inline bodies), the source/impact graph |
+
+A headerless scan of a `-g`/`/Zi` build (L0+L1) **does** detect:
+- Struct/class layout changes (`type_size_changed`, `type_field_*`)
+- vtable changes (`type_vtable_changed`)
+- Enum value changes, calling-convention changes
+
+Only a genuinely stripped binary with no debug info (L0 only) is limited to:
 - Function added / removed (`func_added`, `func_removed`)
 - SONAME changed (`soname_changed`)
 - Symbol visibility changed (`func_visibility_changed`)
 - Variable added / removed
 
-❌ **Not detected** (requires type information from headers + castxml):
+❌ **Neither L0 nor L1 alone detects** (needs L2 headers, since these leave no
+symbol-table or DWARF trace at all):
 - Parameter type changes (`func_params_changed`)
 - Return type changes (`func_return_changed`)
-- Struct/class layout changes (`type_size_changed`, `type_field_*`)
-- vtable changes (`type_vtable_changed`)
-- Inline/noexcept changes
+- Inline/noexcept/`final`/access-level changes
 
-**Recommendation:** for complete ABI analysis, always provide `-H <header_dir>` and run on the
-native platform (Linux for ELF, macOS for Mach-O, Windows for PE).
+**Recommendation:** for complete ABI analysis, provide `-H <header_dir>` and run on the
+native platform (Linux for ELF, macOS for Mach-O, Windows for PE) — but if you
+can't, a debug build (`-g`/`/Zi`) alone already recovers layout-level breaks
+that a fully stripped binary would miss.
 
 ---
 
@@ -202,9 +221,10 @@ jobs:
 - Two-level namespace (`LC_LOAD_DYLIB`) not fully analyzed
 - Tracked: abicc upstream issues #116, #119
 
-### All platforms (symbols-only mode)
+### All platforms (no headers — applies whether or not debug info is present)
 - `int → long` parameter change: mangled name changes → detected as `func_removed + func_added`
-  (not `func_params_changed`) when headers are absent
+  (not `func_params_changed`) when headers are absent — mangled-name churn, so
+  L1 debug info doesn't recover it either
 - Template inner-type changes (`std::vector<T>` with changed `T`) — not detected (tracked: #38)
 
 ---
