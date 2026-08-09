@@ -109,9 +109,36 @@ jobs:
       # different case subsets.
       - name: Resolve this shard's case list
         run: |
-          echo "SHARD_CASES=$(python tests/example_shards.py list --shard ${{ matrix.shard }} --of 3)" >> "$GITHUB_ENV"
-          echo "SHARD_K=$(python tests/example_shards.py list --shard ${{ matrix.shard }} --of 3 --pytest-k)" >> "$GITHUB_ENV"
+          # Assign first, THEN echo. `echo "V=$(cmd)" >> $GITHUB_ENV` exits 0
+          # even when cmd fails -- the echo succeeds -- so a failing resolver
+          # would silently export an EMPTY value. Empty is the worst possible
+          # value here: an empty positional filter means "the whole catalog"
+          # and an empty -k means "every test", so all six legs would quietly
+          # run all 195 cases and still report green, turning the shard split
+          # into a 6x duplication. It would also defeat example_shards.py's own
+          # assert_names_are_unambiguous guard, whose whole job is to fail
+          # loudly here rather than as a puzzling "duplicate case ids" error in
+          # the merge two jobs later. A plain assignment propagates the
+          # command's exit status under the default `bash -e`, and the explicit
+          # emptiness check covers a resolver that exits 0 with no output.
+          cases="$(python tests/example_shards.py list --shard ${{ matrix.shard }} --of 3)"
+          pytest_k="$(python tests/example_shards.py list --shard ${{ matrix.shard }} --of 3 --pytest-k)"
+          if [ -z "$cases" ] || [ -z "$pytest_k" ]; then
+            echo "::error::shard ${{ matrix.shard }}/3 resolved to an empty case list"
+            exit 1
+          fi
+          echo "resolved $(printf '%s' "$cases" | wc -w) cases for shard ${{ matrix.shard }}/3"
+          echo "SHARD_CASES=$cases" >> "$GITHUB_ENV"
+          echo "SHARD_K=$pytest_k" >> "$GITHUB_ENV"
 
+      # NOTE on the -k filter's source of truth: the shard list comes from
+      # examples/ground_truth.json, while test_example_pipeline is parametrized
+      # from the examples/case*/ directory listing. Those agree today, and the
+      # ai-readiness `examples-ground-truth` check (ERROR severity) is what
+      # keeps them agreeing — it fails when a case directory has no ground-truth
+      # entry. Without that check a case dir missing from ground truth would be
+      # deselected in *every* shard, i.e. silently lose coverage rather than
+      # fail. Don't relax that check without giving this filter its own guard.
       - name: Run example cases (pytest autodiscovery)
         env:
           # This workflow checks out and executes repository-owned fixtures only.
@@ -145,7 +172,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: examples-validation-shard-${{ matrix.toolchain }}-${{ matrix.shard }}
+          name: examples-shard-${{ matrix.toolchain }}-${{ matrix.shard }}
           path: results/
           retention-days: 14
 
@@ -201,7 +228,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: shards
-          pattern: examples-validation-shard-${{ matrix.toolchain }}-*
+          pattern: examples-shard-${{ matrix.toolchain }}-*
 
       - name: Merge shard artifacts into the whole-catalog artifact
         run: |
