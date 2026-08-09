@@ -53,6 +53,7 @@ from abicheck.mcp_server import (  # noqa: E402
     abi_dump,
     abi_estimate,
     abi_scan,
+    abi_scan_set,
     main,
 )
 from abicheck.mcp_shared import _env_int  # noqa: E402
@@ -300,6 +301,204 @@ class TestAbiScan:
         monkeypatch.setattr(service, "run_scan_subprocess", _fake)
         data = json.loads(abi_scan(str(snap), depth=good_depth))
         assert data["status"] == "ok"
+
+
+class TestAbiScanSet:
+    """G35 MCP parity: ``abi_scan_set`` is the multi-artifact sibling of
+    ``abi_scan``, routed through ``run_scan_set_subprocess`` (ADR-056).
+    """
+
+    def test_rejects_single_artifact(self, tmp_path: Path):
+        so = _fake_elf(tmp_path)
+        data = json.loads(abi_scan_set([str(so)]))
+        assert data["status"] == "error"
+        assert "2 or more" in data["error"]
+
+    def test_missing_artifact_returns_error(self, tmp_path: Path):
+        so = _fake_elf(tmp_path, "a.so")
+        data = json.loads(abi_scan_set([str(so), str(tmp_path / "absent.so")]))
+        assert data["status"] == "error"
+        assert "not found" in data["error"].lower()
+
+    def test_missing_artifact_does_not_leak_resolved_path(self, tmp_path: Path):
+        # P2 regression (Codex review): unlike abi_scan's identical check,
+        # this one must not echo the server-resolved absolute path back to
+        # the caller -- matches abi_scan's own generic "Binary file not
+        # found" message (no path disclosure).
+        so = _fake_elf(tmp_path, "a.so")
+        data = json.loads(abi_scan_set([str(so), str(tmp_path / "absent.so")]))
+        assert data["status"] == "error"
+        assert data["error"] == "Binary file not found"
+        assert str(tmp_path) not in data["error"]
+
+    def test_artifact_set_error_surfaces_actionable_message(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # P2 regression (Codex review): an ArtifactSetError (ValueError
+        # subclass) raised inside run_scan_set must reach the caller as its
+        # own real message, not collapse to a generic "unexpected error"
+        # the way a bare RuntimeError from the subprocess boundary would.
+        from abicheck.bundle import ArtifactSetError
+
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _fake(req, timeout):
+            raise ArtifactSetError(
+                "--artifact-set has ambiguous duplicate SONAME provider(s): ..."
+            )
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _fake)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "error"
+        assert "ambiguous duplicate SONAME" in data["error"]
+
+    def test_artifact_set_error_redacts_resolved_paths(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # P2 regression (Codex review): discover_artifact_set()'s own
+        # ArtifactSetError for a non-ELF/colliding-identity member embeds
+        # str(Path) for the *resolved* member paths -- those must not reach
+        # the caller verbatim (server filesystem disclosure), so each is
+        # swapped back to the basename the caller actually supplied.
+        from abicheck.bundle import ArtifactSetError
+
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _fake(req, timeout):
+            raise ArtifactSetError(
+                f"--artifact-set has colliding library identities: "
+                f"'liba.so': [{a.resolve()!s}, {b.resolve()!s}]."
+            )
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _fake)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "error"
+        assert str(tmp_path) not in data["error"]
+        assert "liba.so" in data["error"]
+        assert "libb.so" in data["error"]
+
+    def test_forwards_binaries_and_bundle_system_providers(
+        self, tmp_path: Path, monkeypatch
+    ):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        captured: dict[str, object] = {}
+
+        def _fake(req, timeout):
+            captured["binaries"] = req.binaries
+            captured["mode"] = req.mode
+            captured["bundle_system_providers"] = req.bundle_system_providers
+            return {"verdict": "COMPATIBLE", "exit_code": 0, "per_artifact": []}
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _fake)
+        data = json.loads(
+            abi_scan_set(
+                [str(a), str(b)],
+                bundle_system_providers=["libexternal.so"],
+            )
+        )
+        assert data["status"] == "ok"
+        assert data["verdict"] == "COMPATIBLE"
+        assert set(captured["binaries"]) == {a.resolve(), b.resolve()}
+        assert captured["mode"] == "audit"
+        assert captured["bundle_system_providers"] == ("libexternal.so",)
+
+    def test_successful_response_redacts_per_artifact_paths(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # P2 regression (Codex review, fresh evidence): ScanArtifactResult.
+        # to_dict()'s "artifact" field is the server-resolved absolute path
+        # too -- a successful call must not disclose it any more than the
+        # error paths above do.
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _fake(req, timeout):
+            return {
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "per_artifact": [
+                    {"artifact": str(a.resolve()), "verdict": "COMPATIBLE"},
+                    {"artifact": str(b.resolve()), "verdict": "COMPATIBLE"},
+                ],
+            }
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _fake)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "ok"
+        artifacts = {entry["artifact"] for entry in data["per_artifact"]}
+        assert artifacts == {"liba.so", "libb.so"}
+        assert str(tmp_path) not in json.dumps(data)
+
+    def test_forwards_headers_and_checks_their_size(self, tmp_path: Path, monkeypatch):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+        hdr = tmp_path / "api.h"
+        hdr.write_text("int foo(void);\n", encoding="utf-8")
+
+        captured: dict[str, object] = {}
+
+        def _fake(req, timeout):
+            captured["headers"] = req.headers
+            return {"verdict": "COMPATIBLE", "exit_code": 0, "per_artifact": []}
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _fake)
+        data = json.loads(abi_scan_set([str(a), str(b)], headers=[str(hdr)]))
+        assert data["status"] == "ok"
+        assert captured["headers"] == [hdr.resolve()]
+
+    def test_rejects_android_frontend(self, tmp_path: Path):
+        # abi_scan_set has no request-level frontend field to carry a
+        # source-ABI-only frontend into L4 (mirrors abi_scan's own rejection
+        # -- see _source_abi_only_frontend_error's docstring).
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+        data = json.loads(abi_scan_set([str(a), str(b)], ast_frontend="android"))
+        assert data["status"] == "error"
+        assert data["error"]
+
+    def test_rejects_invalid_frontend_context(self, tmp_path: Path):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+        data = json.loads(abi_scan_set([str(a), str(b)], frontend_context="bogus"))
+        assert data["status"] == "error"
+        assert data["error"]
+
+    def test_timeout_branch(self, tmp_path: Path, monkeypatch):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _timeout(req, timeout):
+            raise TimeoutError
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _timeout)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "error"
+        assert "timed out" in data["error"]
+
+    def test_exception_branch_is_sanitized(self, tmp_path: Path, monkeypatch):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _boom(req, timeout):
+            raise RuntimeError("secret 0xBEEF")
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _boom)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "error"
+        assert "0xBEEF" not in data["error"]
+        assert "unexpected error" in data["error"]
+
+    @pytest.mark.parametrize("bad_depth", ["full", "symbols", "graph"])
+    def test_rejects_internal_only_depth(self, tmp_path: Path, bad_depth: str):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+        data = json.loads(abi_scan_set([str(a), str(b)], depth=bad_depth))
+        assert data["status"] == "error"
+        assert "Unknown depth" in data["error"]
 
 
 class TestAbiEstimateDepthValidation:

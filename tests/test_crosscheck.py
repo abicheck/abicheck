@@ -920,6 +920,65 @@ def test_public_not_exported_flags_missing_symbol():
     assert hits[0].confidence == Confidence.HIGH
 
 
+def test_public_not_exported_sibling_export_satisfies_obligation():
+    # G35 (`scan --artifact-set`): a shared umbrella header declares `bar` too,
+    # but *this* member's own binary only exports `foo` -- `bar` is a sibling
+    # library's own export. With `sibling_exported_symbols` naming it, the
+    # obligation is satisfied and no finding fires; a symbol no set member
+    # exports at all (`gone`) is still flagged.
+    snap = _snap(elf=_elf("_Z3fooi"))
+    snap.functions = [
+        Function(
+            name="foo",
+            mangled="_Z3fooi",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        Function(
+            name="bar",
+            mangled="_Z3barv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        Function(
+            name="gone",
+            mangled="_Z4gonev",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(
+        snap, CrosscheckConfig(sibling_exported_symbols=frozenset({"_Z3barv"}))
+    )
+    hits = [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)]
+    assert hits == ["_Z4gonev"]
+
+
+def test_public_not_exported_without_sibling_exports_flags_everything_missing():
+    # Default `CrosscheckConfig()` (every single-binary scan/compare caller)
+    # carries no sibling exports -- `bar` is flagged exactly as before this
+    # feature existed, confirming the new field is a strictly additive
+    # relaxation that changes nothing when unset.
+    snap = _snap(elf=_elf("_Z3fooi"))
+    snap.functions = [
+        Function(
+            name="foo",
+            mangled="_Z3fooi",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        Function(
+            name="bar",
+            mangled="_Z3barv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap, CrosscheckConfig())
+    hits = [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)]
+    assert hits == ["_Z3barv"]
+
+
 def test_public_not_exported_reconciles_l4_variant_export():
     # Two-way reconciliation: a public ctor decl mangled `_ZN6WidgetC1Ev` whose
     # binary lists only the base-object clone `_ZN6WidgetC2Ev` is NOT missing — the

@@ -183,3 +183,28 @@ Run a deterministic source-intelligence scan (ADR-035 D3/D10 / ADR-043).
 | `sysroot` | `str \| None` | no | `None` | Alternate sysroot for the header frontend. |
 | `nostdinc` | `bool` | no | `False` | Suppress the standard include paths for the header frontend. |
 | `frontend_context` | `str` | no | `host` | Which AST context the header frontend targets — "host" (default) or "device" (SYCL/DPC++ offload target). |
+
+## `abi_scan_set`
+
+Audit a declared multi-library artifact set as one product (ADR-056/G35).
+
+| Parameter | Type | Required | Default | Description |
+|---|---|:--:|---|---|
+| `artifact_paths` | `list[str]` | yes | — | 2 or more library files that together make up one logical product (e.g. ``libcore.so`` + ``libalgo.so`` behind one shared header tree). Each is validated the same way ``--artifact-set``'s explicit path-list form is — a real ELF shared object, not just matching magic bytes. |
+| `headers` | `list[str] \| None` | no | `None` | Public header files shared across the set (provenance + pattern pre-scan), fed to every member's own scan. |
+| `include_dirs` | `list[str] \| None` | no | `None` | Extra include directories for the parser. |
+| `public_header_dirs` | `list[str] \| None` | no | `None` | Directories whose headers are public; see ``abi_scan``'s own argument of the same name. |
+| `sources` | `str \| None` | no | `None` | Source tree (compile DB auto-discovered within it). |
+| `compile_db` | `str \| None` | no | `None` | Explicit compile_commands.json (else discovered in sources). |
+| `build_info` | `str \| None` | no | `None` | Out-of-tree build dir / compile_commands.json / pack. |
+| `depth` | `str \| None` | no | `None` | Coarse evidence-depth selector: "binary", "headers", "build", or "source" (None = inferred from inputs). |
+| `changed_paths` | `list[str] \| None` | no | `None` | Changed-path set focusing the scan (ADR-035 D7). |
+| `language` | `str` | no | `c++` | Language mode — "c++" (default) or "c". |
+| `bundle_system_providers` | `list[str] \| None` | no | `None` | Caller-declared external DSO allow-list for the bundle-audit detector's closed-world resolution (mirrors ``scan --bundle-system-providers``). |
+| `ast_frontend` | `str` | no | `auto` | L2 header-AST frontend — "auto" (default), "castxml", "clang", or "hybrid" (see ``abi_scan``'s own argument). |
+| `gcc_path` | `str \| None` | no | `None` | Explicit compiler binary for the header frontend. |
+| `gcc_prefix` | `str \| None` | no | `None` | Cross-toolchain prefix for the header frontend. |
+| `gcc_options` | `str \| None` | no | `None` | Extra compiler flags for the header frontend, as one shell-quoted string. |
+| `sysroot` | `str \| None` | no | `None` | Alternate sysroot for the header frontend. |
+| `nostdinc` | `bool` | no | `False` | Suppress the standard include paths for the header frontend. |
+| `frontend_context` | `str` | no | `host` | Which AST context the header frontend targets — "host" (default) or "device" (SYCL/DPC++ offload target). |

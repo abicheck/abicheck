@@ -178,6 +178,19 @@ class CrosscheckConfig:
     enabled: frozenset[str] = frozenset(ALL_CHECKS)
     max_per_check: int = 200
     changed_paths: frozenset[str] = frozenset()
+    # ``scan --artifact-set`` (ADR-056/G35): the union of every *other*
+    # member's own default-exported symbol names, so ``public_not_exported``
+    # does not flag a declaration a sibling library in the same set actually
+    # exports. A shared umbrella header commonly declares more than one
+    # member's own public API (e.g. an ``oneDAL``-shaped product where
+    # ``libcore.so`` and ``libalgo.so`` both ``#include`` one header) --
+    # scanning each member's own snapshot in isolation has no way to see
+    # that a symbol it doesn't itself export is satisfied elsewhere in the
+    # same product. Empty for every caller outside the artifact-set path
+    # (single-binary ``scan``/``compare`` never set this), so this is a
+    # strictly additive relaxation, never a narrowing of the single-artifact
+    # check's own exported-symbol evidence.
+    sibling_exported_symbols: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -461,6 +474,18 @@ def _check_public_not_exported(
     mangled name. Inline / templated / constexpr / hidden-visibility decls are
     public source surface that legitimately emit no symbol and are excluded, so
     the check does not light up a healthy header-only API.
+
+    ``cfg.sibling_exported_symbols`` (G35, ``scan --artifact-set`` only) is a
+    third satisfaction source alongside this snapshot's own exports and the L4
+    reconciliation set: a declaration a *sibling* member of the same artifact
+    set exports satisfies the obligation just as well as this library
+    exporting it directly — a shared umbrella header naming more than one
+    member's own public API is a normal multi-DSO product shape, not a bad
+    export. Minimum viable fix (not full per-declaration ownership
+    attribution): "some sibling exports it" clears the finding regardless of
+    which member the header intended to own it, since a wrong-owner shift with
+    no genuinely missing export is not, on its own, a link-time failure for
+    any consumer of the set.
     """
     providers = [PROVIDER_PUBLIC_HEADER_AST, PROVIDER_BINARY_EXPORTS]
     exported = _exported_symbol_names(snapshot)
@@ -475,12 +500,13 @@ def _check_public_not_exported(
     # to an export under a variant spelling (ctor clone / Mach-O / demangle drift),
     # so the check does not double-report a symbol that is genuinely exported.
     reconciled = _l4_reconciled_symbols(snapshot, exported)
+    satisfied = exported | reconciled | cfg.sibling_exported_symbols
 
     findings: list[Change] = []
     for fn in snapshot.functions:
         if not _has_export_obligation(fn):
             continue
-        if fn.mangled not in exported and fn.mangled not in reconciled:
+        if fn.mangled not in satisfied:
             findings.append(
                 _change(
                     ChangeKind.PUBLIC_NOT_EXPORTED,
@@ -496,7 +522,7 @@ def _check_public_not_exported(
     for var in snapshot.variables:
         if not _var_has_export_obligation(var):
             continue
-        if var.mangled not in exported and var.mangled not in reconciled:
+        if var.mangled not in satisfied:
             findings.append(
                 _change(
                     ChangeKind.PUBLIC_NOT_EXPORTED,
