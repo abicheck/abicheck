@@ -25,6 +25,7 @@ import pytest
 from abicheck.buildsource.source_graph import (
     EDGE_KINDS,
     NODE_KINDS,
+    GraphEdge,
     GraphNode,
     SourceGraphSummary,
 )
@@ -318,6 +319,34 @@ def test_build_use_case_graph_skips_an_ambiguous_label_silently() -> None:
         library,
     )
     assert [e for e in graph.edges if e.kind == "USE_CASE_USES_ENTRY"] == []
+
+
+def test_build_use_case_graph_coalesces_a_mapped_decl_and_symbol_pair() -> None:
+    """An ordinary exported C function's decl and the binary_symbol it maps
+    to (via SOURCE_DECL_MAPS_TO_SYMBOL) share the exact same label -- this
+    must resolve as ONE public entry, not a two-way ambiguity, or the most
+    common real-world entrypoint shape (a plain C function's label matching
+    its own linker symbol) would silently fail to resolve at all (Codex
+    review, fresh evidence)."""
+    library = _library_graph()
+    library.add_node(
+        GraphNode(id="binary_symbol://train", kind="binary_symbol", label="train")
+    )
+    library.add_edge(
+        GraphEdge(
+            src="decl://train",
+            dst="binary_symbol://train",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    graph = build_use_case_graph(
+        [UseCaseDefinition(use_case="training-workflow", entrypoints=("train",))],
+        library,
+    )
+    edges = {e.dst for e in graph.edges if e.kind == "USE_CASE_USES_ENTRY"}
+    # Coalesced onto the mapped binary_symbol node, matching
+    # consumer_graph.py's own preference for the exported representation.
+    assert edges == {"binary_symbol://train"}
 
 
 def test_build_use_case_graph_an_exact_id_wins_over_a_colliding_label() -> None:

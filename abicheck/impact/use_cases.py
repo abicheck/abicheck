@@ -285,13 +285,31 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     A node's own id is always registered (exact-id lookups can never be
     ambiguous — two distinct nodes never share one id). A node's ``label``
     (when set) is registered only when it resolves *uniquely* across every
-    public node in the graph: overloaded C++ entry points routinely share
-    one display label, and silently picking an arbitrary one of them would
-    hand a manifest's ``entrypoints: [foo]`` a wrong-but-confident answer
-    instead of the "degrade to no answer" this module otherwise guarantees
+    public node in the graph, **after** coalescing a declaration onto the
+    binary symbol it maps to (below) — overloaded C++ entry points routinely
+    share one display label with no such mapping between them, and silently
+    picking an arbitrary one of them would hand a manifest's
+    ``entrypoints: [foo]`` a wrong-but-confident answer instead of the
+    "degrade to no answer" this module otherwise guarantees
     (:func:`build_use_case_graph`). An id also always wins over a label —
     built as a separate pass, an ambiguous or colliding label can never
     shadow an exact id already registered.
+
+    Coalescing (Codex review, fresh evidence): an ordinary exported C
+    function like ``train`` produces **two** public nodes sharing the exact
+    label ``"train"`` — the ``source_decl`` (``build_source_graph``'s
+    ``label=ent.qualified_name or ent.identity()``) and the ``binary_symbol``
+    it maps to (``label=symbol``, joined by a ``SOURCE_DECL_MAPS_TO_SYMBOL``
+    edge) — since a plain C function's declared name, qualified name, and
+    linker symbol are all the identical string. Without coalescing, this is
+    exactly the common case a manifest's plain-label ``entrypoints: [train]``
+    is meant to name, yet it would read as a genuine two-way ambiguity and be
+    silently dropped. A declaration and the export it maps to are one public
+    entry represented twice in the graph, not two candidates competing for
+    one label — collapsed onto the mapped symbol id before the
+    ambiguity/uniqueness check runs, so only a *real* overload collision
+    (two distinct declarations sharing a label with no mapping edge joining
+    them) is still treated as ambiguous.
     """
     from ..buildsource.source_graph import PUBLIC_VISIBILITIES
 
@@ -300,13 +318,29 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
         return node.kind == "binary_symbol" or visibility in PUBLIC_VISIBILITIES
 
     public_nodes = [n for n in library_graph.nodes if is_public(n)]
+    public_ids = {n.id for n in public_nodes}
 
     index: dict[str, str] = {n.id: n.id for n in public_nodes}
+
+    # A public decl's mapped-to public symbol id, when one exists — the
+    # coalescing key. Restricted to edges between two *public* nodes so a
+    # mapping onto an internal/unresolved target can't smuggle a non-public
+    # id into the label index.
+    mapped_symbol: dict[str, str] = {
+        e.src: e.dst
+        for e in library_graph.edges
+        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+        and e.src in public_ids
+        and e.dst in public_ids
+    }
+
+    def coalesced(node_id: str) -> str:
+        return mapped_symbol.get(node_id, node_id)
 
     label_targets: dict[str, set[str]] = {}
     for node in public_nodes:
         if node.label:
-            label_targets.setdefault(node.label, set()).add(node.id)
+            label_targets.setdefault(node.label, set()).add(coalesced(node.id))
     for label, targets in label_targets.items():
         if label in index:
             continue  # an exact id already claims this string; it wins
