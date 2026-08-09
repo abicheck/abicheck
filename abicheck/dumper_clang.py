@@ -1297,6 +1297,7 @@ class _ClangAstParser:
             is_volatile=bool(re.search(r"\bvolatile\b", cv_type)),
             is_mutable=bool(child.get("mutable")),
             access=self._access_level(access),
+            default=_field_initializer_value(child),
             deprecated=_clang_deprecated_message(child),
         )
 
@@ -1568,6 +1569,47 @@ def _param_has_default(param: dict[str, Any]) -> bool:
         isinstance(c, dict) and not str(c.get("kind", "")).endswith(("Attr", "Comment"))
         for c in param.get("inner", []) or []
     )
+
+
+def _field_initializer_value(field: dict[str, Any]) -> str | None:
+    """A ``TypeField.default`` value for a ``FieldDecl``, or ``None``.
+
+    G31 Phase C: the last of that phase's fact-completeness list that the
+    direct-clang backend genuinely can close (vptr *placement* it still
+    cannot — clang's plain ``-ast-dump=json`` carries no secondary-vtable
+    offsets without the optional ``ABICHECK_CLANG_LAYOUT_TOOL`` companion).
+
+    Presence is taken from clang's own ``hasInClassInitializer`` flag rather
+    than from "does this decl have a non-attribute ``inner`` child" the way
+    :func:`_param_has_default` does, because a ``FieldDecl``'s ``inner`` list
+    is overloaded: a **bitfield width** is nested there as a ``ConstantExpr``
+    too. Verified against real Clang 18 output — ``int bf : 3;`` (no
+    initializer at all) nests exactly one ``ConstantExpr`` child with
+    ``value: "3"``, which the param-style "any non-attribute child" heuristic
+    would read as a default member initializer of ``3``, fabricating an
+    initializer for a field that has none. ``hasInClassInitializer`` is
+    present-only-when-true (absent, never present-and-``false``, for both the
+    plain and the bitfield case), matching the same convention
+    ``scopedEnumTag`` uses.
+
+    The width/initializer ordering is what makes reusing
+    :func:`_initializer_value` safe for the combined form: ``int bfi : 3 = 2;``
+    nests the width ``ConstantExpr`` *first* and the initializer second, and
+    :func:`_init_expr` takes the last non-``Decl``/``Attr``/``Comment`` child
+    — so the initializer wins. (A trailing ``[[deprecated]]`` is a
+    ``DeprecatedAttr``, which that same filter already drops; confirmed
+    against real output, where clang emits it *after* the initializer.)
+
+    Value representation matches :func:`_initializer_value`'s contract, i.e.
+    the same-backend-comparable one ``Param.default`` already uses on this
+    backend: a bare literal keeps its readable value, anything compound
+    reduces to a structural fingerprint. That is deliberately NOT
+    cross-comparable with castxml's verbatim source expression — see
+    ``diff_types._diff_field_default_initializer``'s same-producer gate.
+    """
+    if not field.get("hasInClassInitializer"):
+        return None
+    return _initializer_value(field)
 
 
 def _evaluated_int_value(node: dict[str, Any]) -> int | None:

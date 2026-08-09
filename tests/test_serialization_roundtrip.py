@@ -224,7 +224,7 @@ class TestHeaderCvFactsReliableRoundTrip:
 
         snap = _make_snap()
         j = json.loads(snapshot_to_json(snap))
-        assert j["schema_version"] == SCHEMA_VERSION == 19
+        assert j["schema_version"] == SCHEMA_VERSION == 20
 
     def test_legacy_castxml_header_snapshot_loads_as_unreliable(self) -> None:
         d = _minimal_dict(schema_version=8, from_headers=True, ast_producer="castxml")
@@ -293,7 +293,7 @@ class TestHeaderCvFactsReliableRoundTrip:
         assert legacy.header_cv_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 19
+        assert reserialized["schema_version"] == 20
         assert reserialized["header_cv_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
@@ -383,7 +383,7 @@ class TestClangDeprecationFactsReliableRoundTrip:
         assert legacy.clang_deprecation_facts_reliable is False
 
         reserialized = snapshot_to_dict(legacy)
-        assert reserialized["schema_version"] == 19
+        assert reserialized["schema_version"] == 20
         assert reserialized["clang_deprecation_facts_reliable"] is False
 
         reloaded = snapshot_from_dict(reserialized)
@@ -408,6 +408,111 @@ class TestClangDeprecationFactsReliableRoundTrip:
         )
         assert fact_producer(legacy_clang, enum_fact_key("Color", "is_scoped")) is None
         # Unaffected fact on the same legacy snapshot: still trusted.
+        assert (
+            fact_producer(legacy_clang, func_fact_key("_Z3foov", "param_defaults"))
+            == "clang"
+        )
+
+
+class TestClangFieldInitializerFactsReliableRoundTrip:
+    """AbiSnapshot.clang_field_initializer_facts_reliable (schema v20, G31
+    Phase C continuation) — same derivation shape as
+    TestClangDeprecationFactsReliableRoundTrip above, one schema version and
+    one fact (TypeField.default) later. Tracked as its own flag rather than
+    folded into clang_deprecation_facts_reliable: a v19 snapshot has
+    reliable deprecated/is_scoped but unreliable field defaults, which one
+    shared flag could not express.
+    """
+
+    def test_fresh_in_memory_snapshot_defaults_reliable(self) -> None:
+        snap = _make_snap()
+        assert snap.clang_field_initializer_facts_reliable is True
+
+    def test_legacy_clang_header_snapshot_loads_as_unreliable(self) -> None:
+        d = _minimal_dict(schema_version=19, from_headers=True, ast_producer="clang")
+        restored = snapshot_from_dict(d)
+        assert restored.clang_field_initializer_facts_reliable is False
+
+    def test_current_clang_header_snapshot_loads_as_reliable(self) -> None:
+        d = _minimal_dict(schema_version=20, from_headers=True, ast_producer="clang")
+        restored = snapshot_from_dict(d)
+        assert restored.clang_field_initializer_facts_reliable is True
+
+    def test_legacy_header_snapshot_predating_ast_producer_stays_reliable(
+        self,
+    ) -> None:
+        """Same reasoning as clang_deprecation_facts_reliable's identical
+        test: an absent/unknown ast_producer already fails fact_producer()'s
+        check on its own, so this flag's own value is moot for it."""
+        d = _minimal_dict(schema_version=19, from_headers=True)
+        assert "ast_producer" not in d
+        assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is True
+
+    def test_legacy_dwarf_only_snapshot_stays_reliable(self) -> None:
+        d = _minimal_dict(schema_version=19, from_headers=False)
+        assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is True
+
+    def test_legacy_castxml_header_snapshot_stays_reliable(self) -> None:
+        d = _minimal_dict(schema_version=19, from_headers=True, ast_producer="castxml")
+        assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is True
+
+    def test_legacy_hybrid_snapshot_stays_reliable(self) -> None:
+        """A legacy hybrid snapshot's field ``default`` provenance was
+        always recorded "castxml" for a matched pair under the OLD (pre-G31
+        Phase C) merge code, since clang could never populate it then --
+        no equivalent false-reliability risk exists for this producer."""
+        d = _minimal_dict(schema_version=19, from_headers=True, ast_producer="hybrid")
+        assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is True
+
+    def test_missing_schema_version_key_on_clang_header_snapshot_is_legacy(
+        self,
+    ) -> None:
+        d = _minimal_dict(from_headers=True, ast_producer="clang")
+        assert "schema_version" not in d
+        assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is False
+
+    def test_round_trip_preserves_reliable_true(self) -> None:
+        snap = _make_snap()
+        j = json.loads(snapshot_to_json(snap))
+        assert snapshot_from_dict(j).clang_field_initializer_facts_reliable is True
+
+    def test_reserialized_legacy_snapshot_stays_unreliable(self) -> None:
+        legacy = snapshot_from_dict(
+            _minimal_dict(schema_version=19, from_headers=True, ast_producer="clang")
+        )
+        assert legacy.clang_field_initializer_facts_reliable is False
+
+        reserialized = snapshot_to_dict(legacy)
+        assert reserialized["schema_version"] == 20
+        assert reserialized["clang_field_initializer_facts_reliable"] is False
+
+        reloaded = snapshot_from_dict(reserialized)
+        assert reloaded.clang_field_initializer_facts_reliable is False
+
+    def test_gates_fact_producer_for_field_default_only(self) -> None:
+        """Direct fact_provenance.fact_producer() coverage: the gate must
+        apply to exactly the field ``:default`` suffix, not blanket-
+        invalidate every fact on a legacy clang snapshot (e.g.
+        deprecated/is_scoped, which are reliable as of v19, one version
+        earlier than this flag)."""
+        from abicheck.fact_provenance import (
+            fact_producer,
+            field_fact_key,
+            func_fact_key,
+        )
+
+        legacy_clang = snapshot_from_dict(
+            _minimal_dict(schema_version=19, from_headers=True, ast_producer="clang")
+        )
+        assert (
+            fact_producer(legacy_clang, field_fact_key("Cfg", "timeout", "default"))
+            is None
+        )
+        # Unaffected facts on the same legacy snapshot: still trusted.
+        assert (
+            fact_producer(legacy_clang, func_fact_key("_Z3foov", "deprecated"))
+            == "clang"
+        )
         assert (
             fact_producer(legacy_clang, func_fact_key("_Z3foov", "param_defaults"))
             == "clang"

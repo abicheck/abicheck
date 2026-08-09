@@ -271,3 +271,60 @@ def test_clang_backend_still_false_positives_case61_alignment_risk(
     # TestCastxmlExtraction.test_variable_alignment) does not have this gap.
     assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
     assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in {c.kind for c in result.changes}
+
+
+def test_clang_backend_field_default_initializer_removed_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """G31 Phase C: TypeField.default (default member initializer) is now
+    extracted for real on the clang L2 header backend
+    (dumper_clang._field_initializer_value). Verified end-to-end against a
+    real compiled library through the actual dump()/compare() pipeline —
+    not just at the parser-unit level (test_dumper_clang.py) or the
+    hand-built-snapshot detector level (test_castxml_schema_completeness.py)
+    — following the same discipline the G31 plan doc's Phase C section used
+    for is_standard_layout/is_trivially_copyable.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip("clang and g++ are required for this end-to-end regression")
+
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "struct Cfg { int timeout = 30; };\nint use_cfg(const Cfg&);\n"
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text(
+        '#include "api.h"\nint use_cfg(const Cfg& c) { return c.timeout; }\n'
+    )
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True, capture_output=True,
+    )
+
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    new_header = new_dir / "api.h"
+    new_header.write_text(
+        "struct Cfg { int timeout; };\nint use_cfg(const Cfg&);\n"
+    )
+    new_src = new_dir / "new.cpp"
+    new_src.write_text(
+        '#include "api.h"\nint use_cfg(const Cfg& c) { return c.timeout; }\n'
+    )
+    v2_so = tmp_path / "libv2.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v2_so), str(new_src), f"-I{new_dir}"],
+        check=True, capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    new_snap = dump(v2_so, [new_header], header_backend="clang")
+    assert old_snap.clang_field_initializer_facts_reliable is True
+    cfg = next(t for t in old_snap.types if t.name == "Cfg")
+    assert next(f for f in cfg.fields if f.name == "timeout").default == "30"
+
+    result = compare(old_snap, new_snap)
+    assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in {c.kind for c in result.changes}

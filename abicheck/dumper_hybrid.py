@@ -38,12 +38,16 @@ their two independent :class:`~abicheck.model.AbiSnapshot`\\ s to
   ``deprecated`` on fields, ``is_scoped``/``deprecated`` on enums) are taken
   from castxml when present, backfilled from clang only when castxml's own
   value is ``None``. G31 Phase C closed the gap this backfill originally
-  anticipated for two of these facts specifically — ``deprecated`` (every
-  surface kind) and ``is_scoped`` — by wiring real extraction into
-  ``dumper_clang.py`` too, so this backfill is genuinely live for those two
-  now, not forward-looking scaffolding; ``is_override``/``is_abstract``/
-  field ``default`` remain castxml-only, so the backfill is still a no-op
-  for those three specifically. Every such fact records its source in the
+  anticipated for three of these facts specifically — ``deprecated`` (every
+  surface kind), ``is_scoped``, and field ``default`` — by wiring real
+  extraction into ``dumper_clang.py`` too, so this backfill is genuinely
+  live for those three now, not forward-looking scaffolding;
+  ``is_override``/``is_abstract`` remain castxml-only, so the backfill is
+  still a no-op for those two specifically. Note that field ``default`` is
+  cross-*producer* without being cross-*comparable*: castxml keeps the
+  verbatim source expression where clang emits a literal or a structural
+  fingerprint, so its detector gates on the two sides sharing one producer
+  rather than on both merely having a known one. Every such fact records its source in the
   returned snapshot's ``fact_provenance`` map (see
   ``abicheck/fact_provenance.py``), so detectors can tell which backend
   backs a fact apart from an unbacked one on a per-declaration basis
@@ -461,15 +465,19 @@ def _merge_field(
 ) -> TypeField:
     updates: dict[str, Any] = {}
     for attr in ("default", "deprecated"):
-        # "default" stays castxml-only (both_castxml_backed_fact) and keeps
-        # the bare owning-type-name key every other castxml-only fact
-        # already uses. "deprecated" is genuinely cross-producer since G31
-        # Phase C, and a clang-only sibling type sharing t's bare name can
-        # independently write to this same provenance dict (see
-        # merge_snapshots' clang-only-type append loop below) -- qualify
-        # the key so the two don't collide (Codex review, fresh evidence).
-        type_key = type_map_key(t) if attr == "deprecated" else t.name
-        key = field_fact_key(type_key, f.name, attr)
+        # Both facts are genuinely cross-producer since G31 Phase C
+        # ("deprecated" from that phase's first pass, "default" from
+        # dumper_clang._field_initializer_value), so both need the qualified
+        # key: a clang-only sibling type sharing t's bare name independently
+        # writes to this same provenance dict (see merge_snapshots'
+        # clang-only-type append loop below), and a bare key would let one
+        # writer's entry silently overwrite the other's (Codex review, fresh
+        # evidence). "default" was deliberately left bare when only
+        # "deprecated" got a clang-only-append write -- that exemption no
+        # longer holds now that "default" gets one too. Legacy hybrid
+        # baselines keyed bare are still read via
+        # diff_helpers.fact_same_producer_qualified's bare fallback.
+        key = field_fact_key(type_map_key(t), f.name, attr)
         value = _backfill_fact(
             getattr(f, attr), getattr(clang_f, attr, None), key, provenance
         )
@@ -634,6 +642,15 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         provenance[type_fact_key(type_key, "deprecated")] = "clang"
         for f in t.fields:
             provenance[field_fact_key(type_key, f.name, "deprecated")] = "clang"
+            # "default" joined "deprecated" as a genuinely clang-sourced field
+            # fact in G31 Phase C (dumper_clang._field_initializer_value).
+            # Its detector gates on SAME producer rather than any-known
+            # producer (the two backends' initializer representations aren't
+            # cross-comparable), so this stamp is what lets a hybrid-vs-hybrid
+            # pair compare a clang-only field's initializer at all -- and,
+            # equally, what lets a mixed pair be correctly declined instead of
+            # silently compared as if same-producer.
+            provenance[field_fact_key(type_key, f.name, "default")] = "clang"
     merged_types.extend(clang_only_types)
 
     merged_enums = [

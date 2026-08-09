@@ -192,7 +192,24 @@ from .model import (
 #     instead of misreporting a false `*_DEPRECATED_ADDED`/`ENUM_BECAME_SCOPED`
 #     purely from a tool upgrade comparing a legacy clang-backed snapshot to
 #     a fresh dump of unchanged headers (Codex review, fresh evidence).
-SCHEMA_VERSION: int = 19
+# v20: the direct-clang L2 header backend started populating
+#     `TypeField.default` (the default member initializer) — G31 Phase C's
+#     last remaining fact-completeness gap that backend can actually close,
+#     see `dumper_clang._field_initializer_value`. Exactly v19's shape, one
+#     version later and for one more fact: a pre-v20 CLANG-producer
+#     snapshot's `TypeField.default` is unconditionally `None`, and that
+#     field's own docstring makes `None` mean "no initializer" AND "this
+#     dumper doesn't capture it" alike — so the stale value is real but
+#     WRONG, not merely absent, and cannot be told from a genuine
+#     no-initializer field by value. `snapshot_from_dict` marks such a
+#     snapshot's `AbiSnapshot.clang_field_initializer_facts_reliable` False
+#     so `fact_provenance.fact_producer` declines to trust it, instead of
+#     reporting a false `FIELD_DEFAULT_INITIALIZER_REMOVED` for every
+#     defaulted field purely from a tool upgrade. Tracked as its own flag
+#     rather than reusing v19's: a v19 snapshot has reliable
+#     deprecated/is_scoped but unreliable field defaults, which one shared
+#     flag could not express.
+SCHEMA_VERSION: int = 20
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -200,6 +217,10 @@ _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
 # Schema version at which the direct-clang backend's deprecated/is_scoped
 # facts became reliable (see v19 above).
 _MIN_SCHEMA_VERSION_FOR_CLANG_DEPRECATION_FACTS = 19
+
+# Schema version at which the direct-clang backend's TypeField.default facts
+# became reliable (see v20 above).
+_MIN_SCHEMA_VERSION_FOR_CLANG_FIELD_INITIALIZER_FACTS = 20
 
 # ADR-050 D1 — the schema version at which a verdict-blocking field
 # (``AbiSnapshot.contract``) was first introduced. This constant only takes
@@ -1057,6 +1078,19 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_DEPRECATION_FACTS
         )
 
+    if "clang_field_initializer_facts_reliable" in d:
+        # Same explicit-marker-wins reasoning as the two flags above.
+        clang_field_initializer_facts_reliable_value = bool(
+            d["clang_field_initializer_facts_reliable"]
+        )
+    else:
+        # Only the clang producer path is affected -- see v20 above.
+        clang_field_initializer_facts_reliable_value = (
+            not from_headers
+            or ast_producer_value != "clang"
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_FIELD_INITIALIZER_FACTS
+        )
+
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
@@ -1151,6 +1185,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # derives from schema_version, scoped to the clang-producer path
         # specifically (Codex review, fresh evidence).
         clang_deprecation_facts_reliable=clang_deprecation_facts_reliable_value,
+        # See clang_field_initializer_facts_reliable_value's computation
+        # above: prefers an explicit dict key, falling back to a
+        # schema_version + producer derivation.
+        clang_field_initializer_facts_reliable=(
+            clang_field_initializer_facts_reliable_value
+        ),
         # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
         # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
         # loads as the empty dict (same "unknown" default as a fresh snapshot).

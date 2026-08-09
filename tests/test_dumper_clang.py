@@ -581,6 +581,78 @@ def test_parse_types_and_enums_populate_deprecated() -> None:
     assert enums["Mode"].is_scoped is True
 
 
+def test_parse_types_populates_field_default_initializer() -> None:
+    """G31 Phase C's last direct-clang fact-completeness gap:
+    TypeField.default (the default member initializer) previously stayed
+    None unconditionally on this backend -- verified against real
+    Clang 18 ``-ast-dump=json`` output before wiring this up (see
+    dumper_clang._field_initializer_value's docstring for the exact shapes
+    below)."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                # int bf : 3; -- a bitfield width with NO initializer. The
+                # width is nested as a ConstantExpr child, structurally
+                # identical to how an initializer would be nested, but
+                # hasInClassInitializer is absent -- must NOT be read as a
+                # default value of "3".
+                {
+                    "kind": "FieldDecl",
+                    "name": "bf",
+                    "type": {"qualType": "int"},
+                    "isBitfield": True,
+                    "inner": [{"kind": "ConstantExpr", "value": "3"}],
+                },
+                # int bfi : 3 = 2; -- a bitfield WITH an initializer. The
+                # width comes first, the initializer second; _init_expr's
+                # "last non-Decl/Attr/Comment child" rule must pick the
+                # initializer, not the width.
+                {
+                    "kind": "FieldDecl",
+                    "name": "bfi",
+                    "type": {"qualType": "int"},
+                    "isBitfield": True,
+                    "hasInClassInitializer": True,
+                    "inner": [
+                        {"kind": "ConstantExpr", "value": "3"},
+                        {"kind": "IntegerLiteral", "value": "2"},
+                    ],
+                },
+                # [[deprecated("old")]] int d = 7; -- initializer followed
+                # by a trailing DeprecatedAttr (real clang ordering); the
+                # attr must not be mistaken for the initializer either.
+                {
+                    "kind": "FieldDecl",
+                    "name": "d",
+                    "type": {"qualType": "int"},
+                    "hasInClassInitializer": True,
+                    "inner": [
+                        {"kind": "IntegerLiteral", "value": "7"},
+                        {"kind": "DeprecatedAttr", "message": "old"},
+                    ],
+                },
+                # int plain; -- no initializer, no bitfield.
+                {
+                    "kind": "FieldDecl",
+                    "name": "plain",
+                    "type": {"qualType": "int"},
+                },
+            ],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    fields = {f.name: f for f in t.fields}
+    assert fields["bf"].default is None
+    assert fields["bfi"].default == "2"
+    assert fields["d"].default == "7"
+    assert fields["plain"].default is None
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {

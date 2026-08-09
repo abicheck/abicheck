@@ -26,12 +26,14 @@ from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reus
 from .diff_helpers import (
     build_type_map as _build_type_map,
     fact_known_qualified,
+    fact_same_producer_qualified,
     lookup_matched_type as _lookup_matched_type,
     make_change,
     type_map_key,
 )
 from .diff_symbols import (
     _PUBLIC_VIS,
+    _both_header_aware,
     _public_functions,
     _public_variables,
     _should_filter_transitive_runtime_symbols,
@@ -1549,30 +1551,32 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a field's default member initializer being removed or changed.
 
-    Header-tier only (like ``param_defaults``): the initializer expression is
-    populated solely from castxml header parsing, and ``TypeField.default``
-    is ``None`` both for "no initializer" and "the dumper doesn't capture
-    this" — see its docstring in model.py. Gaining an initializer is not
-    tracked (matches ``PARAM_DEFAULT_VALUE_*``'s convention: an added default
-    is purely additive, never itself flagged).
+    Header-tier only (like ``param_defaults``): ``TypeField.default`` is
+    ``None`` both for "no initializer" and "not captured" — see its
+    docstring in model.py. Gaining an initializer is not tracked (matches
+    ``PARAM_DEFAULT_VALUE_*``'s convention).
 
-    Gates per-field on :func:`fact_provenance.both_castxml_backed_fact` (not
-    just ``_both_header_aware``): the clang header backend does not populate
-    ``TypeField.default`` yet, so a castxml-vs-clang comparison would
-    otherwise read as every initializer having been removed (Codex review,
-    PR #582). Per-field gating (rather than the whole-snapshot
-    ``_both_castxml_backed``) is what correctly supports a ``--ast-frontend
-    hybrid`` snapshot (G28 Phase 3).
+    Gates per-field on :func:`diff_helpers.fact_same_producer_qualified`, in
+    addition to ``_both_header_aware`` up front (the producer check alone
+    would treat an unconfirmed/legacy side's unset ``ast_producer`` as
+    "unknown, don't skip"). Used to be ``both_castxml_backed_fact`` because
+    clang did not populate this fact at all (Codex review, PR #582); G31
+    Phase C closed that gap (``dumper_clang._field_initializer_value``), but
+    the two backends' VALUE representations still differ (castxml: verbatim
+    source expression; clang: a literal/structural fingerprint) — the same
+    shape ``Param.default`` has, hence ``_diff_param_defaults``'s
+    SAME-producer gate rather than ``both_known_backed_fact``'s
+    any-known-producer check (only correct for a cross-comparable fact like
+    ``deprecated``). The provenance key is namespace-qualified with the
+    ``deprecated``/``is_scoped`` call sites' bare-key fallback, since the
+    hybrid merge now stamps a ``default`` producer for clang-only fields.
 
     Unions are NOT excluded (unlike most field-level detectors, which leave
-    them to ``_diff_unions``): a C++ union may have a default member
-    initializer on (at most) one of its variant members
-    (``union U { int x = 1; float y; };``), CastXML parses that member's
-    ``init`` attribute the same as an ordinary struct field, and
-    ``_diff_unions`` never looks at ``default`` at all — so without this,
-    a union variant's initializer being removed or changed went completely
-    undetected (Codex review, PR #582).
+    them to ``_diff_unions``): a union variant may carry a default member
+    initializer, and ``_diff_unions`` never checks ``default``.
     """
+    if not _both_header_aware(old, new):
+        return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
     directly_referenced = _directly_referenced(old, new)
@@ -1592,9 +1596,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
             f_new = new_fields.get(fname)
             if f_new is None or f_old.default is None:
                 continue
-            if not both_castxml_backed_fact(
-                old, new, field_fact_key(name, fname, "default")
-            ):
+            if not fact_same_producer_qualified(old, new, old_map, new_map, name, field_fact_key(type_map_key(t_old), fname, "default"), field_fact_key(type_map_key(t_new), fname, "default"), field_fact_key(name, fname, "default")):
                 continue
             if f_new.default is None:
                 changes.append(make_change(
