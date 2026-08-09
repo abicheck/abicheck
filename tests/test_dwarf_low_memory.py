@@ -158,6 +158,16 @@ class TestDwarfLowMemoryMode:
         huge = _FakeDwarfInfo(500 * 1024 * 1024)  # 500 MiB
         assert dwarf_low_memory_mode(huge) is False
 
+    def test_negative_env_override_disables_low_memory_mode(self, monkeypatch) -> None:
+        # A negative threshold is the documented disable switch. A naive
+        # ``size_mb > threshold_mb`` alone would do the *opposite* here,
+        # since every real (non-negative) size compares greater than a
+        # negative threshold -- this must return False regardless of size.
+        monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "-1")
+        huge = _FakeDwarfInfo(500 * 1024 * 1024)  # 500 MiB
+        assert dwarf_low_memory_mode(huge) is False
+        assert dwarf_low_memory_mode(_FakeDwarfInfo(0)) is False
+
     def test_invalid_env_override_falls_back_to_default(self, monkeypatch) -> None:
         monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "not-a-number")
         small = _FakeDwarfInfo(1024 * 1024)  # 1 MiB, below default threshold

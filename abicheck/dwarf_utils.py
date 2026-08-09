@@ -319,8 +319,9 @@ def resolve_type_die(die: Any, CU: Any) -> Any | None:
 #: Default ``.debug_info`` size (MiB) above which DWARF walks free each
 #: CompileUnit's DIE cache as soon as they finish with it, instead of
 #: leaving it cached for the rest of the process (see module docstring
-#: above). Override with ``ABICHECK_DWARF_LOW_MEMORY_MB`` (set to a very
-#: large number, or a negative one, to disable low-memory mode entirely).
+#: above). Override with ``ABICHECK_DWARF_LOW_MEMORY_MB`` (a negative value
+#: disables low-memory mode entirely -- every ``.debug_info`` size is >= 0,
+#: so it can never exceed a negative threshold).
 DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB = 32
 
 
@@ -334,8 +335,11 @@ def dwarf_low_memory_mode(dwarf_info: Any) -> bool:
     (default :data:`DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB`), compared
     against the raw ``.debug_info`` section size in MiB -- the same section
     whose in-memory DIE representation is what actually drives peak RSS on
-    a large binary (see module docstring). An unparsable override falls
-    back to the default rather than raising.
+    a large binary (see module docstring). A negative override always
+    returns False (documented disable switch -- a plain ``>`` comparison
+    alone would do the opposite, since every real size is >= 0 and so
+    would compare greater than any negative threshold). An unparsable
+    override falls back to the default rather than raising.
     """
     threshold_mb: float = DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB
     env = os.environ.get("ABICHECK_DWARF_LOW_MEMORY_MB")
@@ -350,6 +354,8 @@ def dwarf_low_memory_mode(dwarf_info: Any) -> bool:
                 DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB,
             )
             threshold_mb = DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB
+    if threshold_mb < 0:
+        return False
     debug_info_sec = getattr(dwarf_info, "debug_info_sec", None)
     try:
         size = int(getattr(debug_info_sec, "size", 0) or 0)
@@ -364,21 +370,26 @@ def dwarf_low_memory_mode(dwarf_info: Any) -> bool:
 def free_cu_die_cache(CU: Any) -> None:
     """Drop a CompileUnit's cached DIE objects so the GC can reclaim them.
 
-    Clearing the two parallel lists pyelftools uses to represent "no DIEs
-    parsed yet" (matching ``CompileUnit.__init__``'s own initial state) is
-    safe: every DIE accessor (``get_top_DIE``, ``iter_DIEs``,
-    ``_get_cached_DIE``, ``get_DIE_from_refaddr``) re-parses transparently
-    from the underlying stream on a cache miss, so a caller that revisits
-    this CU later gets a byte-for-byte identical (if freshly allocated) DIE
-    tree -- the cost is pure CPU (re-decoding), never a correctness change.
-    See the module docstring above for why this trade is worth making on a
-    large binary.
+    Clears (rather than reassigns) the two pyelftools cache containers in
+    place, so this works regardless of the exact container type a given
+    pyelftools release uses internally (parallel lists as of the versions
+    this project has checked, but ``.clear()`` degrades safely instead of
+    raising ``AttributeError``/type-mismatches if that ever changes) --
+    every DIE accessor (``get_top_DIE``, ``iter_DIEs``, ``_get_cached_DIE``,
+    ``get_DIE_from_refaddr``) re-parses transparently from the underlying
+    stream on a cache miss once cleared, so a caller that revisits this CU
+    later gets a byte-for-byte identical (if freshly allocated) DIE tree --
+    the cost is pure CPU (re-decoding), never a correctness change. See the
+    module docstring above for why this trade is worth making on a large
+    binary.
 
     No-ops if *CU* doesn't carry the private pyelftools cache attributes (a
     version mismatch, or a CU that hasn't cached anything yet) rather than
     raising -- freeing is always best-effort.
     """
-    if hasattr(CU, "_dielist"):
-        CU._dielist = []
-    if hasattr(CU, "_diemap"):
-        CU._diemap = []
+    dielist = getattr(CU, "_dielist", None)
+    if dielist is not None:
+        dielist.clear()
+    diemap = getattr(CU, "_diemap", None)
+    if diemap is not None:
+        diemap.clear()
