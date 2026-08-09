@@ -40,6 +40,7 @@ from abicheck.type_reachability import (
     _non_stdlib_signature_spellings,
     _stripped_signature_spelling,
     _typedef_spelling_targets,
+    directly_referenced_stdlib_type_spellings,
     directly_referenced_stdlib_types,
     type_string_references_name,
 )
@@ -1723,5 +1724,256 @@ class TestStdlibOwnerNotSeededAsReferenced:
                 ),
                 RecordType(name="std::string", kind="class"),
             ],
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestDirectlyReferencedStdlibTypeSpellingsCollisionGuard:
+    """Codex review, fresh evidence: an earlier revision of
+    ``directly_referenced_stdlib_type_spellings`` unconditionally exported a
+    stdlib identity's stripped spelling, without the same
+    non-stdlib-collision guard :func:`_spelling_index` applies internally --
+    letting a real ``std::vector<int>`` root's stripped ``"vector<int>"``
+    collide with an unrelated, non-stdlib ``api::vector<int>``'s own bare
+    signature spelling, which is exactly the ``symbol`` a ``Change`` on that
+    unrelated type would carry."""
+
+    def test_stripped_spelling_colliding_with_a_non_stdlib_bare_alias_is_dropped(
+        self,
+    ) -> None:
+        # The public signature spells the root by its full, unambiguous
+        # qualified identity (e.g. a DWARF-derived snapshot, which bakes the
+        # namespace directly into a signature type string) -- proving
+        # std::vector<int> is directly referenced regardless of any
+        # collision. The unrelated api::vector<int>'s own bare alias
+        # collides only with the *stripped* form this function derives,
+        # which is exactly the shape the fix guards.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_vec", params=[Param(name="v", type="std::vector<int>")])
+            ],
+            types=[
+                RecordType(
+                    name="vector<int>", kind="class", qualified_name="std::vector<int>"
+                ),
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="api::vector<int>",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+        )
+        spellings = directly_referenced_stdlib_type_spellings(snap)
+        # The real root is still reported by its unambiguous full identity...
+        assert "std::vector<int>" in spellings
+        # ...but the collision-prone stripped form -- which a Change on the
+        # unrelated api::vector<int> would carry as its own bare symbol --
+        # must not be exported.
+        assert "vector<int>" not in spellings
+
+    def test_non_colliding_stripped_spelling_is_still_exported(self) -> None:
+        # Sanity check alongside the guard above: a stripped spelling with no
+        # non-stdlib collision at all is unaffected.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "use_vec",
+                    params=[Param(name="v", type="vector<int, std::allocator<int> >")],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="vector<int, std::allocator<int> >",
+                    kind="class",
+                    qualified_name="std::vector<int, std::allocator<int> >",
+                ),
+            ],
+        )
+        spellings = directly_referenced_stdlib_type_spellings(snap)
+        assert "vector<int, std::allocator<int> >" in spellings
+        assert "std::vector<int, std::allocator<int> >" in spellings
+
+
+class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
+    """Codex review, fresh evidence, two rounds: a stripped spelling shared
+    by two or more *distinct referenced stdlib identities* (e.g. a
+    signature naming bare ``vector<int>``, which cannot distinguish
+    ``std::vector<int>`` from ``__gnu_debug::vector<int>``) means neither
+    identity's presence in ``directly_referenced_stdlib_types`` is
+    independently confirmed -- both the shared stripped spelling *and*
+    each identity's own full qualified spelling must be excluded, not only
+    the shared spelling (a first-round fix left the full spellings
+    exported, reproduced wrong: a finding whose own ``symbol`` happens to
+    be spelled as one candidate's full qualified form was confirmed
+    anyway)."""
+
+    def test_ambiguous_group_exports_neither_stripped_nor_full_spellings(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_vec", params=[Param(name="v", type="vector<int>")])],
+            types=[
+                RecordType(
+                    name="vector<int>", kind="class", qualified_name="std::vector<int>"
+                ),
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="__gnu_debug::vector<int>",
+                ),
+            ],
+        )
+        # Both are legitimately "referenced" -- the scan can't tell which
+        # one the bare signature spelling means, so it keeps both rather
+        # than silently dropping either (diff_types.py's own conservative
+        # default).
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::vector<int>", "__gnu_debug::vector<int>"}
+        )
+        spellings = directly_referenced_stdlib_type_spellings(snap)
+        # Neither identity's presence was independently confirmed -- not
+        # the shared bare spelling, and not either one's own full spelling
+        # either, since that "referenced" answer is exactly as unproven.
+        assert spellings == frozenset()
+
+    def test_known_conservative_gap_group_excluded_even_if_one_member_is_also_confirmed_elsewhere(
+        self,
+    ) -> None:
+        # Documents a deliberate limitation rather than asserting an ideal:
+        # even when a *different* public signature separately names one
+        # ambiguous candidate's full qualified spelling directly (a
+        # genuine, independent confirmation for that one identity), this
+        # function still excludes the whole group -- it groups by "does
+        # this identity's stripped spelling collide with another
+        # referenced identity's", which doesn't distinguish "reached only
+        # via the ambiguous route" from "also reached via an unambiguous
+        # one". Recovering that distinction needs per-match-route
+        # provenance from the underlying scan (_StdlibReferenceScan), which
+        # today only returns a flat set of referenced identities -- a
+        # deeper change than this collision-guard fix, not attempted here.
+        # Same false-negative-over-false-positive direction this whole
+        # module already commits to throughout.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_vec", params=[Param(name="v", type="vector<int>")]),
+                _fn(
+                    "use_debug_vec",
+                    params=[Param(name="v", type="__gnu_debug::vector<int>")],
+                ),
+            ],
+            types=[
+                RecordType(
+                    name="vector<int>", kind="class", qualified_name="std::vector<int>"
+                ),
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="__gnu_debug::vector<int>",
+                ),
+            ],
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+
+
+class TestExcludeExportOnlyRoots:
+    """Codex review, fresh evidence: a declaration whose ``origin`` is
+    ``ScopeOrigin.EXPORT_ONLY`` (exported by the binary, no header at all)
+    must not be able to stand in for public-header-domain contract evidence
+    -- that is precisely the boundary the separate ``exports`` contract
+    domain exists to evaluate. ``exclude_export_only_roots=True`` is what
+    ``contract_pipeline.py`` passes; the default ``False`` preserves this
+    module's pre-existing, evidence-tier-agnostic behaviour for
+    ``diff_types.py``'s unrelated caller."""
+
+    def _snapshot_with_export_only_reference(self) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="s", type="std::string")],
+                    origin=ScopeOrigin.EXPORT_ONLY,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+
+    def test_export_only_root_counts_by_default(self) -> None:
+        # Unchanged default behaviour: diff_types.py's evidence-tier-agnostic
+        # use of directly_referenced_stdlib_types must not regress.
+        snap = self._snapshot_with_export_only_reference()
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::string", "string"}
+        )
+
+    def test_export_only_root_is_excluded_when_requested(self) -> None:
+        snap = self._snapshot_with_export_only_reference()
+        assert (
+            directly_referenced_stdlib_types(snap, exclude_export_only_roots=True)
+            == frozenset()
+        )
+        assert (
+            directly_referenced_stdlib_type_spellings(
+                snap, exclude_export_only_roots=True
+            )
+            == frozenset()
+        )
+
+    def test_public_header_root_is_unaffected_by_the_flag(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="s", type="std::string")],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(
+            snap, exclude_export_only_roots=True
+        ) == frozenset({"std::string"})
+
+    def test_export_only_record_field_is_excluded_when_requested(self) -> None:
+        # A record reached from a public-header root, but whose own
+        # definition is export-only, must not leak its fields as
+        # public-header evidence either -- same reasoning, applied to the
+        # record-walk half of the scan rather than the root-seeding half.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    return_type="MyPublicType",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="MyPublicType",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                    origin=ScopeOrigin.EXPORT_ONLY,
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert (
+            directly_referenced_stdlib_types(snap, exclude_export_only_roots=True)
+            == frozenset()
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})

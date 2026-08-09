@@ -150,11 +150,11 @@ FACT_LOSS_BASELINE = 0
 #: the gate defaults open. Both directions are worth knowing about, so the
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
-    "public": 3,
+    "public": 1,
     "exports": 20,
     "all": 0,
 }
-#: The `public` entry's remaining cases, named so the budget cannot be
+#: The `public` entry's remaining case, named so the budget cannot be
 #: mistaken for "nothing left to do".
 #:
 #: `ambiguous_namespaced_leaf` is a real break on a type whose bare tail
@@ -164,17 +164,20 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 #: confirming an unreachable sibling (see
 #: `contract_evaluation._confirmed_type_matches`).
 #:
-#: The other two are the same gap as each other:
 #: `public_stdlib_type_used_directly_layout_changed` and
-#: `public_std_string_typedef_alias_layout_changed` are layout breaks on a
-#: dependency type a public signature *names outright*, which is the very
-#: evidence `diff_types._is_abi_surface_type` consults to keep the finding
-#: rather than filter it as toolchain churn -- so the pipeline keeps the
-#: finding on evidence the evaluator then declines to read, and the gate
-#: loses them. Closing that needs
-#: `type_reachability.directly_referenced_stdlib_types` reaching the
-#: evaluator, which today receives surfaces and no snapshot; that is a
-#: threaded parameter and its own change, not a drive-by here.
+#: `public_std_string_typedef_alias_layout_changed` were the same gap as
+#: each other -- both layout breaks on a dependency type a public signature
+#: *names outright*, which is the very evidence `diff_types._is_abi_surface_type`
+#: consults to keep the finding rather than filter it as toolchain churn, so
+#: the pipeline kept the finding on evidence the evaluator declined to read.
+#: **Closed**: `contract_pipeline.build_contract_stage` now computes each
+#: side's `type_reachability.directly_referenced_stdlib_type_spellings` once
+#: (the only point still holding both raw snapshots) and threads it through
+#: `evaluate_snapshot_pair_contract_relevance` ->
+#: `evaluate_change_contract_relevance` -> `_in_surface_result_is_confirmed`,
+#: which now confirms a finding whose `symbol`/`caused_by_type` matches one
+#: of those spellings by exact equality, independent of `public_types`' own
+#: stdlib-excluding closure.
 #: Full finding keys (`case:mode:kind:symbol:finding_id`), not case names.
 #: A case can emit several findings, so pinning only the case let one
 #: accepted gap be fixed while a *different* finding in the same case
@@ -191,11 +194,6 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 #: entries deliberately; do not widen the key to make a failure go away.
 UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES = (
     "ambiguous_namespaced_leaf:public:type_size_changed:Cache:6c6732052b32c3ad",
-    "public_std_string_typedef_alias_layout_changed:public:type_size_changed:"
-    "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
-    ":a136b571e0c96a81",
-    "public_stdlib_type_used_directly_layout_changed:public:type_size_changed:"
-    "vector<int, std::allocator<int> >:24d8295b1b1fd647",
 )
 #: A replayed decision that out-claims the live one that wrote it. The
 #: persisted evaluator may only ever *weaken*, so this baseline is 0 and is
@@ -685,7 +683,9 @@ def render_markdown(m: dict[str, object]) -> str:
     # unresolved exactly on the lanes carrying no evidence for it is working
     # as designed, and one unresolved on a lane that does carry evidence is
     # a defect the aggregate would hide.
-    lanes = sorted({lane for row in modes.values() for lane in row["unresolved_by_lane"]})
+    lanes = sorted(
+        {lane for row in modes.values() for lane in row["unresolved_by_lane"]}
+    )
     if lanes:
         lines += [
             "",
@@ -770,7 +770,9 @@ def main(argv: list[str] | None = None) -> int:
     # happen to carry export tables, which is not a claim worth pinning.
     cases = gate["unresolved_public_break_cases"]
     assert isinstance(cases, dict)
-    unexpected = sorted(set(cases.get("public", ())) - set(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES))
+    unexpected = sorted(
+        set(cases.get("public", ())) - set(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
+    )
     if unexpected:
         print(
             "ERROR: unresolved public-break loss in case(s) not on the known "
@@ -779,7 +781,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         failed = True
-    fixed = sorted(set(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES) - set(cases.get("public", ())))
+    fixed = sorted(
+        set(UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES) - set(cases.get("public", ()))
+    )
     if fixed:
         print(
             f"NOTE: known unresolved public-break case(s) no longer losing: "

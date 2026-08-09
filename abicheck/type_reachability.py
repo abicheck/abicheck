@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType, Variable
 
 __all__ = [
+    "directly_referenced_stdlib_type_spellings",
     "directly_referenced_stdlib_types",
     "type_string_references_name",
 ]
@@ -581,7 +582,9 @@ def _partition_snapshot_types(
     return stdlib_identities, frozenset(non_stdlib_identities), non_stdlib_records
 
 
-def _is_public_non_stdlib_declaration(decl: Function | Variable) -> bool:
+def _is_public_non_stdlib_declaration(
+    decl: Function | Variable, *, exclude_export_only: bool = False
+) -> bool:
     """True when *decl* may seed the scan as a public reachability root.
 
     Four independent reasons a retained declaration must not be treated as a
@@ -597,12 +600,28 @@ def _is_public_non_stdlib_declaration(decl: Function | Variable) -> bool:
     * its *recovered* qualified name (from ``mangled``, Itanium or MSVC) is
       stdlib-namespaced, which is the only check that catches a stdlib-internal
       declaration whose backend recorded the display name bare.
+
+    ``exclude_export_only``, when set, additionally rejects a declaration
+    whose ``origin`` is ``ScopeOrigin.EXPORT_ONLY`` (Codex review, fresh
+    evidence): the default (``False``, this module's own general-purpose ABI-
+    surface use in ``diff_types.py``) deliberately keeps such a declaration,
+    since there ``directly_referenced_stdlib_types`` only answers "is this
+    stdlib type ABI-reachable at all", evidence-tier-agnostic by design. A
+    caller building evidence specifically scoped to the *public-header*
+    contract domain (``contract_pipeline.py``) must not let a declaration
+    that exists only because the binary exports it — with no header backing
+    it at all — stand in for public-header evidence: that is precisely the
+    boundary the ``exports`` domain exists to evaluate separately, and
+    conflating the two let an export-only stdlib reference confirm a
+    ``--contract public`` finding it has no bearing on.
     """
     if decl.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
         return False
     if decl.visibility != Visibility.PUBLIC:
         return False
     if decl.origin in _NON_PUBLIC_ORIGINS:
+        return False
+    if exclude_export_only and decl.origin is ScopeOrigin.EXPORT_ONLY:
         return False
     qualified = itanium_qualified_name(decl.mangled) or msvc_qualified_name(
         decl.mangled
@@ -706,6 +725,8 @@ def _seed_scan_from_public_declarations(
     snapshot: AbiSnapshot,
     scan: _StdlibReferenceScan,
     non_stdlib_identities: frozenset[str],
+    *,
+    exclude_export_only: bool = False,
 ) -> None:
     """Scan every public, non-stdlib function signature and variable type.
 
@@ -717,11 +738,17 @@ def _seed_scan_from_public_declarations(
     namespace, so a bare namespace fragment could otherwise collide with an
     unrelated internal record's bare suffix (see the public function's
     docstring).
+
+    ``exclude_export_only`` is forwarded to
+    :func:`_is_public_non_stdlib_declaration` unchanged — see its own
+    docstring.
     """
     for fn in snapshot.functions:
         if scan.exhausted:
             break
-        if not _is_public_non_stdlib_declaration(fn):
+        if not _is_public_non_stdlib_declaration(
+            fn, exclude_export_only=exclude_export_only
+        ):
             continue
         scan.scan(fn.return_type)
         for param in fn.params:
@@ -733,19 +760,30 @@ def _seed_scan_from_public_declarations(
     for var in snapshot.variables:
         if scan.exhausted:
             break
-        if not _is_public_non_stdlib_declaration(var):
+        if not _is_public_non_stdlib_declaration(
+            var, exclude_export_only=exclude_export_only
+        ):
             continue
         scan.scan(var.type)
 
 
 def _walk_reached_records(
-    scan: _StdlibReferenceScan, non_stdlib_records: dict[str, list[RecordType]]
+    scan: _StdlibReferenceScan,
+    non_stdlib_records: dict[str, list[RecordType]],
+    *,
+    exclude_export_only: bool = False,
 ) -> None:
     """Walk each reached non-stdlib record's own fields and bases, transitively.
 
     Every entry sharing the reached identity is walked, each checking its own
     ``origin`` independently: a private-origin duplicate excludes only itself,
     not a public-origin sibling of the same identity.
+
+    ``exclude_export_only``, same meaning as
+    :func:`_is_public_non_stdlib_declaration`'s own parameter: a record
+    defined only via the binary's export table (no header at all) must not
+    contribute its fields as public-header-domain evidence either, for the
+    same reason a bare export-only function/variable root must not.
     """
     while not scan.exhausted:
         identity = scan.next_reached_record()
@@ -753,6 +791,8 @@ def _walk_reached_records(
             return
         for rec in non_stdlib_records[identity]:
             if rec.origin in _NON_PUBLIC_ORIGINS:
+                continue
+            if exclude_export_only and rec.origin is ScopeOrigin.EXPORT_ONLY:
                 continue
             for f in rec.fields:
                 scan.scan(f.type)
@@ -766,7 +806,9 @@ def _walk_reached_records(
                 scan.scan(base)
 
 
-def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
+def directly_referenced_stdlib_types(
+    snapshot: AbiSnapshot, *, exclude_export_only_roots: bool = False
+) -> frozenset[str]:
     """Stdlib/runtime-namespaced :class:`RecordType` names in *snapshot* that
     are directly referenced by a **public**, non-stdlib function's
     return/parameter type or a non-stdlib :class:`RecordType`'s own field
@@ -907,6 +949,15 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     already handled downstream by the existing opaque-size-change filter
     (``diff_filtering._filter_opaque_size_changes``, gated on
     ``RecordType.is_opaque``), not by this reachability computation.
+
+    ``exclude_export_only_roots``, when set, additionally excludes any root
+    or reached record whose ``origin`` is ``ScopeOrigin.EXPORT_ONLY`` — see
+    :func:`_is_public_non_stdlib_declaration`'s own docstring for why a
+    caller building public-header-domain contract evidence
+    (``directly_referenced_stdlib_type_spellings``, used by
+    ``contract_pipeline.py``) must set this, while this function's other,
+    evidence-tier-agnostic caller (``diff_types.py``) leaves it at the
+    default ``False``.
     """
     stdlib_identities, non_stdlib_identities, non_stdlib_records = (
         _partition_snapshot_types(snapshot)
@@ -917,6 +968,134 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     scan = _StdlibReferenceScan(
         stdlib_identities, non_stdlib_identities, dict(snapshot.typedefs)
     )
-    _seed_scan_from_public_declarations(snapshot, scan, non_stdlib_identities)
-    _walk_reached_records(scan, non_stdlib_records)
+    _seed_scan_from_public_declarations(
+        snapshot,
+        scan,
+        non_stdlib_identities,
+        exclude_export_only=exclude_export_only_roots,
+    )
+    _walk_reached_records(
+        scan, non_stdlib_records, exclude_export_only=exclude_export_only_roots
+    )
     return scan.referenced()
+
+
+def directly_referenced_stdlib_type_spellings(
+    snapshot: AbiSnapshot, *, exclude_export_only_roots: bool = False
+) -> frozenset[str]:
+    """:func:`directly_referenced_stdlib_types`, re-expressed in the spelling
+    a finding's own ``symbol``/``caused_by_type`` actually carries, for a
+    caller that needs to match against those fields rather than against
+    ``RecordType`` identities.
+
+    ``directly_referenced_stdlib_types`` returns each type's *identity* --
+    ``qualified_name or name`` (see :func:`_record_identity`), the
+    fully-qualified spelling. A ``Change``'s own ``symbol``/``caused_by_type``
+    is populated from ``diff_types.py``'s comparison of two ``RecordType``
+    entries' own ``name`` fields, which per-backend may be that same
+    identity (DWARF bakes the qualified form directly into ``name``) or the
+    namespace-prefix-stripped form a signature actually spells it with
+    (castxml/direct-clang keep ``name`` bare) -- see
+    :func:`_stripped_signature_spelling`'s own docstring for the empirical
+    basis. Returning the union of both forms for every identity, rather than
+    picking one, means a caller does not have to know which backend
+    produced the snapshot it's matching against.
+
+    Contract evaluation's own use case (confirming a layout-change finding
+    on a stdlib type a public signature names outright, independent of
+    ``surface.py``'s header-origin-scoped ``public_types`` closure, which
+    deliberately excludes stdlib types as non-ABI-surface toolchain
+    internals) is why this exists as a public, separately-tested function
+    rather than an inline transform at the call site: reusing
+    :func:`_stripped_signature_spelling` here is what keeps the two stdlib
+    spelling normalizations (the one this module's own signature-matching
+    index already performs internally, and the one a caller outside this
+    module needs) from silently drifting apart.
+
+    A stripped spelling that collides with an unrelated non-stdlib record's
+    own signature spelling is dropped, mirroring :func:`_spelling_index`'s
+    identical guard (Codex review, fresh evidence): a snapshot can carry its
+    own, unrelated ``api::vector<int>`` whose bare signature spelling is the
+    same ``"vector<int>"`` a real ``std::vector<int>`` strips to, and a
+    ``Change`` on that unrelated user type carries that identical bare
+    ``RecordType.name`` as its own ``symbol`` -- so exporting the collided
+    spelling here would let contract evaluation confirm a finding about the
+    user type using evidence about the unrelated stdlib type. Reuses
+    :func:`_non_stdlib_signature_spellings` rather than re-deriving the
+    collision set, the same reasoning :func:`_spelling_index` documents for
+    its own use of it. The unstripped, fully-qualified ``identity`` is never
+    guarded this way (matching :func:`_spelling_index`'s own asymmetry): a
+    qualified stdlib spelling colliding with an unrelated type would require
+    that type to live in a namespace literally named a stdlib prefix
+    (``std::``, ...), which is reserved and not something a real snapshot
+    encodes as a legitimate user declaration.
+
+    A stripped spelling shared by **two or more distinct referenced stdlib
+    identities** means neither identity's own presence in
+    :func:`directly_referenced_stdlib_types`'s return value is independently
+    confirmed (Codex review, fresh evidence, two rounds): e.g. a signature
+    naming bare ``vector<int>`` cannot distinguish ``std::vector<int>`` from
+    ``__gnu_debug::vector<int>``, so that scan correctly marks *both*
+    referenced (never missing a real reference is the safe direction for
+    its purpose -- deciding whether to keep a layout finding at all) purely
+    because each shares the one spelling the signature actually contains,
+    not because either was independently matched. A first fix dropped only
+    the shared *stripped* spelling itself, reasoning each identity's own
+    full qualified spelling was still safe to export -- reproduced wrong:
+    a finding whose own ``symbol``/``caused_by_type`` happens to be spelled
+    as the *full* qualified form of either ambiguous candidate (e.g. a
+    DWARF-derived snapshot, which bakes the qualified spelling directly
+    into ``name``) was then confirmed via that unconditionally-exported
+    full identity, even though neither identity's reachability was ever
+    independently established -- only one of the two, at most, is real, and
+    the evidence cannot say which. Closed by excluding **every** spelling
+    (stripped and full alike) for every identity in an ambiguous group, not
+    only the shared stripped one: this function's own answer for that
+    identity is exactly as unproven as the shared spelling that produced
+    it. Unlike the non-stdlib collision above, this ambiguity can only be
+    resolved among identities this function itself already has in hand, so
+    it is computed locally rather than reusing a module-level helper.
+
+    **Known conservative gap, deliberately not attempted here:** grouping
+    is keyed purely on whether an identity's stripped spelling collides
+    with another *referenced* identity's -- it cannot distinguish "reached
+    only via the ambiguous shared spelling" from "also independently
+    reached via its own unique full spelling elsewhere in the same
+    snapshot". A whole ambiguous group is excluded even when one member is
+    separately, unambiguously confirmable another way, which is a real but
+    rare false negative. Recovering that distinction needs per-match-route
+    provenance from the underlying scan (:class:`_StdlibReferenceScan`),
+    which today only returns a flat set of referenced identities with no
+    record of *which* match(es) produced each one -- a deeper change than
+    this collision-guard fix. Same false-negative-over-false-positive
+    direction this whole module already commits to throughout.
+
+    ``exclude_export_only_roots`` is forwarded to
+    ``directly_referenced_stdlib_types`` unchanged (Codex review, fresh
+    evidence): contract evaluation's own public-header-domain use must set
+    this, since an export-only declaration is exactly the evidence the
+    separate ``exports`` domain exists to evaluate, not ``public``'s.
+    """
+    _, non_stdlib_identities, _ = _partition_snapshot_types(snapshot)
+    non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
+    referenced = directly_referenced_stdlib_types(
+        snapshot, exclude_export_only_roots=exclude_export_only_roots
+    )
+    stripped_owners: dict[str, set[str]] = {}
+    for identity in referenced:
+        stripped = _stripped_signature_spelling(identity)
+        if stripped is not None:
+            stripped_owners.setdefault(stripped, set()).add(identity)
+    spellings: set[str] = set()
+    for identity in referenced:
+        stripped = _stripped_signature_spelling(identity)
+        if stripped is not None and len(stripped_owners[stripped]) > 1:
+            # This identity's own presence in `referenced` is exactly as
+            # unproven as its stripped spelling's ambiguity -- exporting
+            # neither form avoids treating that shared, unconfirmed
+            # evidence as proof about any one specific identity.
+            continue
+        spellings.add(identity)
+        if stripped is not None and stripped not in non_stdlib_spellings:
+            spellings.add(stripped)
+    return frozenset(spellings)

@@ -54,22 +54,71 @@ jobs:
     name: Verify published schema IDs
     needs: deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # actions/deploy-pages reporting success only means the artifact was handed
+    # to the Pages backend, not that it's live on the CDN yet — propagation is
+    # eventually consistent and has been observed to take over a minute after
+    # deploy returns. A "200 OK" alone isn't proof either: a CDN edge can keep
+    # serving a stale cached response after the new artifact is live elsewhere.
+    # The poll loop below treats "reachable" and "matches the checked-out
+    # bytes" as one condition and keeps retrying until both hold, rather than
+    # letting a stale-but-200 response fall through into an unretried `cmp`
+    # failure. 15 minutes leaves comfortable headroom over its own ~10 minute
+    # budget.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
-      - name: Retrieve and compare every canonical schema URL
+      - name: Wait for every canonical schema URL to serve current bytes
         shell: bash
         run: |
           set -euo pipefail
           temp_dir="$(mktemp -d)"
           trap 'rm -rf "$temp_dir"' EXIT
-          for schema in abicheck/schemas/*.schema.json; do
-            url="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["$id"])' "$schema")"
-            downloaded="$temp_dir/$(basename "$schema")"
-            echo "Checking $url"
-            curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
-              --connect-timeout 15 --max-time 60 "$url" --output "$downloaded"
-            cmp -- "$schema" "$downloaded"
+
+          mapfile -t schemas < <(printf '%s\n' abicheck/schemas/*.schema.json | sort)
+          deadline=$((SECONDS + 600))
+          delay=5
+          while true; do
+            all_match=true
+            for schema in "${schemas[@]}"; do
+              url="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["$id"])' "$schema")"
+              downloaded="$temp_dir/$(basename "$schema")"
+              remaining=$((deadline - SECONDS))
+              if [ "$remaining" -le 0 ]; then
+                echo "::error::Pages deployment did not serve current schema bytes within the poll budget"
+                exit 1
+              fi
+              # Cache-bust so a CDN edge can't keep answering from a stale
+              # cached response every retry — this query string never touches
+              # the schema's own $id, only our verification request.
+              bust="cachebust=$(date +%s%N)-${RANDOM}"
+              request_url="${url}?${bust}"
+              echo "Checking $url"
+              # Bound this attempt to whatever's left of the poll budget, so a
+              # stalled connection can't sit past the deadline check below —
+              # curl's own timeout is what actually returns control here.
+              if ! curl --fail --silent --show-error --location --output "$downloaded" \
+                --connect-timeout "$remaining" --max-time "$remaining" "$request_url"; then
+                all_match=false
+                continue
+              fi
+              if ! cmp -s -- "$schema" "$downloaded"; then
+                echo "Bytes don't match yet for $url"
+                all_match=false
+              fi
+            done
+            if [ "$all_match" = true ]; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Pages deployment did not serve current schema bytes within the poll budget"
+              exit 1
+            fi
+            remaining=$((deadline - SECONDS))
+            wait="$((delay < remaining ? delay : remaining))"
+            echo "Not fully propagated yet, retrying in ${wait}s..."
+            sleep "$wait"
+            delay=$((delay * 2 > 30 ? 30 : delay * 2))
           done
+          echo "All canonical schema URLs are live and byte-identical to the checked-out copies"
