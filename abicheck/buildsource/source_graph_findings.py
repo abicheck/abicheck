@@ -766,6 +766,31 @@ def _mapping_drift_findings(
         if old_sym != new_sym:
             label = new_labels.get(decl, decl)
             findings.append(
+                # ADR-052 D2 follow-up (G29 Phase 3 slice 10 audit): NOT
+                # cached with `change.impact_assessment = assess_change(change)`
+                # here, unlike Slice 8/9's `internal_leak.py`/`appcompat.py`
+                # sites. Those builders run as (or after) a
+                # `post_processing.DEFAULT_PIPELINE` *step*, downstream of
+                # `MarkReachability`, so their own Change objects are never
+                # touched by it. This module's findings are different: their
+                # caller (`cli_buildsource_helpers.prepare_embedded_build_source`)
+                # folds them into `checker.compare`'s `extra_changes`, which
+                # `compare()` merges into `changes` *before* calling
+                # `_run_post_processing` (checker.py) — i.e. before
+                # `DEFAULT_PIPELINE.run()`, where `MarkReachability` (the
+                # only step that mutates `public_reachable`/
+                # `reachability_state`/`reachability_kind`/
+                # `reachability_proof_path` on an existing Change) still runs
+                # on every one of these findings when suppression needs
+                # reachability evidence. None of the ten `Change(...)` sites
+                # in this module set those four fields themselves — caching
+                # here would freeze them at their unset defaults, which
+                # `MarkReachability` would then silently make stale.
+                # `MarkReachability` itself now caches
+                # `impact_assessment` right after it finalizes those fields
+                # (`post_processing_reachability.py`), so every finding here
+                # still ends up with a correctly cached assessment once it
+                # reaches that step — just not from this construction site.
                 Change(
                     kind=ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
                     symbol=label,
@@ -816,6 +841,10 @@ def _public_reachability_findings(
                 continue
             label = new_labels.get(decl, decl)
             findings.append(
+                # ADR-052 D2 follow-up: not cached here -- see
+                # _mapping_drift_findings's comment above for the full audit
+                # (MarkReachability runs downstream of this module and would
+                # make an eagerly-cached assessment stale).
                 Change(
                     kind=ChangeKind.PUBLIC_REACHABILITY_CHANGED,
                     symbol=label,
@@ -834,6 +863,8 @@ def _public_reachability_findings(
                 continue
             label = old_labels.get(decl, decl)
             findings.append(
+                # ADR-052 D2 follow-up: not cached -- see
+                # _mapping_drift_findings's comment above.
                 Change(
                     kind=ChangeKind.PUBLIC_REACHABILITY_CHANGED,
                     symbol=label,
@@ -867,6 +898,8 @@ def _generated_public_closure_findings(
     for gen in sorted(newly_generated):
         label = new_labels.get(gen, gen)
         findings.append(
+            # ADR-052 D2 follow-up: not cached -- see
+            # _mapping_drift_findings's comment above.
             Change(
                 kind=ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
                 symbol=label,
@@ -918,6 +951,8 @@ def _call_reachability_findings(
                     example = f" Example newly-reachable path: {_format_dependency_path(new, path)}."
                     break
             findings.append(
+                # ADR-052 D2 follow-up: not cached -- see
+                # _mapping_drift_findings's comment above.
                 Change(
                     kind=ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
                     symbol=label,
@@ -1062,6 +1097,8 @@ def _include_graph_drift_findings(
         is_entered = hdr in new_inc
         label = (new_labels if is_entered else old_labels).get(hdr, hdr)
         findings.append(
+            # ADR-052 D2 follow-up: not cached -- see
+            # _mapping_drift_findings's comment above.
             Change(
                 kind=ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
                 symbol=label,
@@ -1106,6 +1143,8 @@ def _build_option_reach_findings(
         label = new_labels.get(opt, opt)
         n_syms = len(reached_by_option[opt])
         findings.append(
+            # ADR-052 D2 follow-up: not cached -- see
+            # _mapping_drift_findings's comment above.
             Change(
                 kind=ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL,
                 symbol=label,
@@ -1246,6 +1285,17 @@ def _internal_dependency_findings(
             if own_change is not None
             else ""
         )
+        # ADR-052 D2 follow-up: not cached immediately after construction --
+        # see _mapping_drift_findings's comment above. Unlike the other
+        # eight sites, this one also calls attach_impact_metadata below,
+        # which sets impact_proof_path/affected_public_roots/impact_is_direct/
+        # impact_alternative_paths -- but those fields are never touched by
+        # MarkReachability (confirmed: it only mutates public_reachable/
+        # reachability_state/reachability_kind/reachability_proof_path), so
+        # they are already stable by the time MarkReachability runs and
+        # caches this change's assessment; only the reachability fields
+        # this site leaves unset are the reason caching here (before
+        # attach_impact_metadata even runs) would be unsafe.
         change = Change(
             kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
             symbol=label,
@@ -1310,6 +1360,8 @@ def _target_dependency_findings(
         tlabel = new_labels.get(target, target)
         dlabel = new_labels.get(dep, dep)
         findings.append(
+            # ADR-052 D2 follow-up: not cached -- see
+            # _mapping_drift_findings's comment above.
             Change(
                 kind=ChangeKind.TARGET_DEPENDENCY_ADDED,
                 symbol=tlabel,
@@ -1431,6 +1483,8 @@ def _symbol_owner_findings(
             # "[L5_SOURCE_GRAPH]" placeholder when the real one is on hand).
             new_owner_label = new_labels.get(new_owner[symbol], new_owner[symbol])
             findings.append(
+                # ADR-052 D2 follow-up: not cached -- see
+                # _mapping_drift_findings's comment above.
                 Change(
                     kind=ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
                     symbol=label,
