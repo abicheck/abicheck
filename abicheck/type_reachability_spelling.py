@@ -263,7 +263,7 @@ def _spelling_index(
     stdlib_identities: list[str],
     non_stdlib_identities: frozenset[str],
     enum_identities: frozenset[str] = frozenset(),
-    typedef_spellings: frozenset[str] = frozenset(),
+    typedef_spelling_targets: dict[str, frozenset[str]] | None = None,
 ) -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
     """Returns ``(stdlib_index, record_index)`` — separate spelling ->
     {identity, ...} maps for stdlib candidates (the ultimate targets) and
@@ -331,21 +331,31 @@ def _spelling_index(
     mirroring how :func:`_non_stdlib_signature_spellings` is reused for the
     identical purpose everywhere else in this module.
 
-    *typedef_spellings* (default empty; see :func:`_raw_typedef_spellings`)
-    is the same kind of collision guard against ``snapshot.typedefs`` (Codex
-    review, fresh evidence): this index was built entirely independently of
-    the typedef vocabulary, so a record's spelling could unconditionally
-    shadow a typedef alias reducing to the identical spelling -- ``other::
-    Wrapper -> Other`` alongside a global record ``Wrapper``, both bare
-    ``"Wrapper"``, previously always resolved to the record even though
-    :func:`_typedef_spelling_targets` independently drops its own candidate
-    for the identical collision (checked one-directionally, against records
-    only). Deliberately the *raw* candidate vocabulary
-    (:func:`_raw_typedef_spellings`), not the resolved
-    :func:`_typedef_spelling_targets` index or the already-non-stdlib-
-    filtered :func:`_typedef_candidate_spellings` -- both of those already
-    assume a record collision means the record wins, which is exactly the
-    one-directional gap being closed here.
+    *typedef_spelling_targets* (default ``None``; see
+    :func:`_raw_typedef_spellings`) is the same kind of collision guard
+    against ``snapshot.typedefs`` (Codex review, fresh evidence): this index
+    was built entirely independently of the typedef vocabulary, so a
+    record's spelling could unconditionally shadow a typedef alias reducing
+    to the identical spelling -- ``other::Wrapper -> Other`` alongside a
+    global record ``Wrapper``, both bare ``"Wrapper"``, previously always
+    resolved to the record even though :func:`_typedef_spelling_targets`
+    independently drops its own candidate for the identical collision
+    (checked one-directionally, against records only). Deliberately the
+    *raw* candidate vocabulary (:func:`_raw_typedef_spellings`), not the
+    resolved :func:`_typedef_spelling_targets` index or the already-non-
+    stdlib-filtered :func:`_typedef_candidate_spellings` -- both of those
+    already assume a record collision means the record wins, which is
+    exactly the one-directional gap being closed here.
+
+    A colliding spelling is dropped only when some typedef's target names
+    something *other* than the record identity being checked (Codex review,
+    fresh evidence, a second round): a typedef spelling colliding with a
+    record but *resolving to that same record* (``other::Wrapper ->
+    Wrapper``) is not a real ambiguity -- both routes name the identical
+    entity, so keeping the record here is correct and required, not merely
+    safe, the same "target genuinely names the very identity being
+    evaluated" exception :func:`directly_referenced_stdlib_type_spellings`
+    already applies for the analogous stdlib-identity case.
     """
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     stdlib_index: dict[str, set[str]] = {}
@@ -360,6 +370,12 @@ def _spelling_index(
         if enum_identities
         else frozenset()
     )
+    typedef_spelling_targets = typedef_spelling_targets or {}
+
+    def _typedef_collides(bare: str, identity: str) -> bool:
+        targets = typedef_spelling_targets.get(bare)
+        return targets is not None and targets != {identity}
+
     record_index: dict[str, set[str]] = {}
     generic_bare: dict[str, set[str]] = {}
     for identity in non_stdlib_identities:
@@ -376,7 +392,9 @@ def _spelling_index(
         # by default since this registration ran unconditionally for every
         # non-stdlib identity's own full form, never checked against either
         # collision vocabulary the way a *derived* suffix already was).
-        if identity not in enum_bare_spellings and identity not in typedef_spellings:
+        if identity not in enum_bare_spellings and not _typedef_collides(
+            identity, identity
+        ):
             record_index.setdefault(identity, set()).add(identity)
         for suffix in _namespace_suffix_spellings(identity)[1:]:
             generic_bare.setdefault(suffix, set()).add(identity)
@@ -384,20 +402,24 @@ def _spelling_index(
         if (
             bare in non_stdlib_identities
             or bare in enum_bare_spellings
-            or bare in typedef_spellings
+            or (len(ids) == 1 and _typedef_collides(bare, next(iter(ids))))
         ):
             # A derived suffix that collides with a *different* record's own
             # full identity (Codex review, fresh evidence: identities "Inner"
             # and "api::Inner" both present), with an unrelated enum's own
             # spelling (a record and an enum both reducing to bare
             # "Wrapper"), or with a spelling some typedef key or its own
-            # derived suffix could also produce (a record `Wrapper` and a
-            # typedef `other::Wrapper -> Other`, both reducing to bare
-            # "Wrapper" -- `_typedef_spelling_targets` already excludes its
-            # own candidate for this same collision, so treating the record
-            # side identically means neither interpretation wins by
-            # default), is ambiguous the same way two colliding derived
-            # suffixes are. Removing the spelling entirely
+            # derived suffix could also produce for a *different* target
+            # than this record (a record `Wrapper` and a typedef
+            # `other::Wrapper -> Other`, both reducing to bare "Wrapper" --
+            # `_typedef_spelling_targets` already excludes its own candidate
+            # for this same collision, so treating the record side
+            # identically means neither interpretation wins by default; a
+            # typedef resolving to *this same record* instead, e.g.
+            # `other::Wrapper -> Wrapper`, is not a collision at all --
+            # `_typedef_collides` only fires when genuinely ambiguous), is
+            # ambiguous the same way two colliding derived suffixes are.
+            # Removing the spelling entirely
             # (not just refusing to add the *other* record's candidates) is
             # required, not merely safe (Codex review, fresh evidence):
             # direct-clang's own "drop the enclosing namespace" convention
@@ -561,33 +583,43 @@ def _typedef_candidate_spellings(
     return frozenset(candidates)
 
 
-def _raw_typedef_spellings(typedefs: dict[str, str]) -> frozenset[str]:
-    """Every spelling *some* typedef key could produce -- its own key, its
-    stdlib-stripped form, and every namespace-suffix form -- with **no**
-    filtering against any other vocabulary at all (Codex review, fresh
-    evidence).
+def _raw_typedef_spellings(typedefs: dict[str, str]) -> dict[str, frozenset[str]]:
+    """spelling -> every raw target *some* typedef key could produce that
+    spelling for -- own key, stdlib-stripped form, and every namespace-
+    suffix form -- with **no** filtering against any other vocabulary at
+    all (Codex review, fresh evidence).
 
     Deliberately distinct from both :func:`_typedef_spelling_targets` (which
-    resolves a spelling to a target, dropping an ambiguous one) and
-    :func:`_typedef_candidate_spellings` (which already excludes a spelling
-    colliding with ``non_stdlib_identities``, since that function exists to
-    check whether a *stdlib* candidate's stripped form is safe against the
-    typedef vocabulary, and a record collision already means "not safe"
-    there): a caller checking a *record's own* spelling against the typedef
-    vocabulary needs the raw candidate set, unfiltered by any assumption
-    about which side wins a collision -- that's exactly the question being
-    asked, not a foregone conclusion to filter away before the check.
+    resolves a spelling to a *single* target, dropping the spelling
+    entirely the moment it's ambiguous) and :func:`_typedef_candidate_spellings`
+    (which already excludes a spelling colliding with ``non_stdlib_identities``,
+    since that function exists to check whether a *stdlib* candidate's
+    stripped form is safe against the typedef vocabulary, and a record
+    collision already means "not safe" there): a caller checking a
+    *record's own* spelling against the typedef vocabulary needs both the
+    raw candidate set (unfiltered by any assumption about which side wins a
+    collision) *and* the raw target(s), not just a yes/no membership test
+    (Codex review, fresh evidence, a second round beyond the raw-membership
+    version this function used to be): a typedef spelling that collides
+    with a record but *resolves to that same record*
+    (``other::Wrapper -> Wrapper``, ``typedefs={"other::Wrapper":
+    "Wrapper"}``) is not a real ambiguity at all -- both routes name the
+    identical entity -- and a caller must be able to tell that case apart
+    from a spelling whose typedef target names something genuinely
+    different, the same "target genuinely names the very identity being
+    evaluated" exception :func:`directly_referenced_stdlib_type_spellings`
+    already applies for the analogous stdlib-identity case.
     """
-    spellings: set[str] = set()
-    for key in typedefs:
-        spellings.add(key)
+    targets: dict[str, set[str]] = {}
+    for key, target in typedefs.items():
+        targets.setdefault(key, set()).add(target)
         for form in (
             _stripped_signature_spelling(key),
             *_namespace_suffix_spellings(key),
         ):
             if form is not None:
-                spellings.add(form)
-    return frozenset(spellings)
+                targets.setdefault(form, set()).add(target)
+    return {spelling: frozenset(ts) for spelling, ts in targets.items()}
 
 
 def _compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | None:

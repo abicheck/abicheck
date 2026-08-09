@@ -1318,3 +1318,32 @@ class TestExactRecordKeyTypedefCollisionGuard:
             typedefs=typedefs,
         )
         assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+
+
+class TestTypedefResolvingToTheSameRecordIsNotACollision:
+    """Codex review, fresh evidence: a typedef spelling colliding with a
+    record but *resolving to that same record* is not a real ambiguity --
+    both routes name the identical entity. The typedef-collision guard
+    (`TestExactRecordKeyTypedefCollisionGuard` above) must not drop the
+    record in this case, unlike when the typedef's target genuinely names
+    something else."""
+
+    def test_a_typedef_resolving_to_the_same_record_it_collides_with_still_confirms(
+        self,
+    ) -> None:
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        typedefs = {"other::Wrapper": "Wrapper"}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="w", type="Wrapper")])],
+            types=[wrapper, RecordType(name="std::exception", kind="class")],
+            typedefs=typedefs,
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::exception", "exception"}
+        )
