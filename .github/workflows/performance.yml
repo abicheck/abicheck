@@ -63,6 +63,7 @@ on:
       - "abicheck/buildsource/include_graph.py"
       - "abicheck/buildsource/call_graph.py"
       - "abicheck/buildsource/source_graph.py"
+      - "abicheck/buildsource/graph_facts.py"
       - "abicheck/buildsource/type_graph.py"
       - "abicheck/provenance.py"
       - "abicheck/dumper_cache.py"
