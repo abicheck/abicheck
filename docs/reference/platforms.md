@@ -108,14 +108,15 @@ for the full `L0`–`L5` model this table summarizes:
 | Input | Evidence layer | What's available |
 |---|---|---|
 | Stripped binary, no headers | **L0 — symbols only** | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, dependency list |
-| Binary **with** DWARF/PDB, no headers | **L0+L1 — binary + debug** | Everything L0 sees, **plus** struct/class layout, field offsets, enum values, vtable slots, calling convention, packing — recovered straight from debug info, no castxml needed (see "Castxml-free validation" above) |
-| Binary + headers | **L0–L2 — header-aware** | Everything above, plus the declared public API surface (parameter/return types, qualifiers, public-surface scoping) |
+| Binary **with** DWARF/PDB, no headers | **L0+L1 — binary + debug** | Everything L0 sees, **plus** struct/class layout, field offsets, enum values, vtable slots, calling convention, packing, and — since debug info also encodes a function's parameter/return types (`DW_TAG_formal_parameter`/`DW_AT_type`) — parameter and return type changes too. No castxml needed (see "Castxml-free validation" above) |
+| Binary + headers | **L0–L2 — header-aware** | Everything above, plus qualifiers/visibility that only a declaration carries (`inline`, `noexcept`, `final`, access level), default-argument values, and public-surface scoping |
 | + build/source context | **L3–L5** | Build flags, source-only facts (macros, default arguments, inline bodies), the source/impact graph |
 
 A headerless scan of a `-g`/`/Zi` build (L0+L1) **does** detect:
 - Struct/class layout changes (`type_size_changed`, `type_field_*`)
 - vtable changes (`type_vtable_changed`)
 - Enum value changes, calling-convention changes
+- Parameter type changes (`func_params_changed`), return type changes (`func_return_changed`)
 
 Only a genuinely stripped binary with no debug info (L0 only) is limited to:
 - Function added / removed (`func_added`, `func_removed`)
@@ -123,11 +124,10 @@ Only a genuinely stripped binary with no debug info (L0 only) is limited to:
 - Symbol visibility changed (`func_visibility_changed`)
 - Variable added / removed
 
-❌ **Neither L0 nor L1 alone detects** (needs L2 headers, since these leave no
-symbol-table or DWARF trace at all):
-- Parameter type changes (`func_params_changed`)
-- Return type changes (`func_return_changed`)
+❌ **Neither L0 nor L1 alone detects** (needs L2 headers — a declaration-only
+qualifier or a default-argument value that leaves no DWARF/symbol-table trace):
 - Inline/noexcept/`final`/access-level changes
+- Default-argument value changes
 
 **Recommendation:** for complete ABI analysis, provide `-H <header_dir>` and run on the
 native platform (Linux for ELF, macOS for Mach-O, Windows for PE) — but if you
