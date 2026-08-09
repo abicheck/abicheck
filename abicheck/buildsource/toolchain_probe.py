@@ -74,6 +74,7 @@ import os
 import re
 import subprocess
 from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
@@ -620,46 +621,273 @@ class _HasCompileOverlays(Protocol):
     consumer_compile: Any
 
 
+def _family_errors(
+    where: str,
+    declared_family: str,
+    actual_family: str | None,
+    binding_id: str,
+    path: Any,
+) -> list[str]:
+    """Errors for a declared ``compiler_family`` against the probed one."""
+    if actual_family is None:
+        return [
+            f"{where}.compiler_family declares {declared_family!r} but the "
+            f"actual family of toolchain binding {binding_id!r} ({path!r}) "
+            f"could not be determined from its resolved path or --version "
+            f"output"
+        ]
+    wanted = _FAMILY_ALIASES.get(
+        declared_family.strip().lower(), declared_family.strip().lower()
+    )
+    if actual_family != wanted:
+        return [
+            f"{where}.compiler_family declares {declared_family!r} but "
+            f"toolchain binding {binding_id!r} ({path!r}) resolved to "
+            f"family {actual_family!r}"
+        ]
+    return []
+
+
+def _version_errors(
+    where: str,
+    declared: _OverlayDeclaration,
+    actual_family: str | None,
+    metadata: dict[str, Any],
+    binding_id: str,
+    path: Any,
+) -> list[str]:
+    """Errors for a declared ``compiler_version`` constraint."""
+    errors: list[str] = []
+    if not declared.family and not declared.target and actual_family is None:
+        # Only reported here when neither of the other two checks
+        # already covers it (both have their own actual_family-is-None
+        # error) -- a bare compiler_version: constraint is otherwise the one
+        # declaration shape with no family/target check to ever notice the
+        # resolved binding isn't recognizably a compiler at all (Codex
+        # review, fresh evidence).
+        errors.append(
+            f"{where}.compiler_version declares {declared.version!r} but the "
+            f"actual family of toolchain binding {binding_id!r} ({path!r}) "
+            f"could not be determined from its resolved path or --version "
+            f"output, so it cannot be verified to be a compiler at all"
+        )
+    try:
+        satisfied = version_satisfies(metadata.get("version", ""), declared.version)
+    except ToolchainProbeError as exc:
+        errors.append(f"{where}.compiler_version: {exc}")
+        return errors
+    if not satisfied:
+        errors.append(
+            f"{where}.compiler_version declares {declared.version!r} but "
+            f"toolchain binding {binding_id!r} ({path!r}) reported version "
+            f"output {metadata.get('version', '')!r}, which does not satisfy it"
+        )
+    return errors
+
+
+def _clang_target_errors(
+    where: str, declared_target: str, metadata: dict[str, Any], binding_id: str, path: Any
+) -> list[str]:
+    """Target errors for a Clang-family binding, probed with ``--target=``.
+
+    Clang is inherently multi-target: ``-dumpmachine`` (what ``target_triple``
+    comes from) reports only its host default, not a constraint -- the
+    profile's own compose logic passes the declared target explicitly via
+    ``--target=``, which a single Clang binary genuinely honors for
+    cross-compilation. Unlike GCC (a fixed single-target binary per install),
+    the bare dumpmachine probe has nothing to compare (Codex review, fresh
+    evidence: a real x86_64 Clang with ``target: aarch64-linux-gnu`` was
+    falsely rejected). But an entirely bogus/misspelled target must still be
+    rejected, so probe Clang directly with the declared ``--target=`` instead
+    (a second review round, fresh evidence: ``target: not-a-real-target``
+    previously passed unconditionally). Intel's oneAPI icx/icpx driver shares
+    this branch: it is a clang-based binary accepting the identical
+    ``--target=`` flag (``abicheck.dumper_clang`` already treats it as
+    clang-family for AST parsing), so the same exemption and real-probe
+    validation apply.
+    """
+    digest = metadata.get("sha256")
+    if not digest:
+        return []
+    accepted = _clang_accepts_target(path, digest, declared_target)
+    if accepted is False:
+        return [
+            f"{where}.target declares {declared_target!r} but "
+            f"toolchain binding {binding_id!r} ({path!r}) does not "
+            f"recognize it as a valid --target= triple"
+        ]
+    if accepted is None:
+        # _clang_accepts_target returns None only when the probe compile
+        # couldn't even run (timeout, OSError) -- e.g. a wrapper that answers
+        # --version fine but hangs on a real invocation. Silently accepting
+        # that leaves the declared target completely unverified, against the
+        # same "can't verify -> error, not a silent pass" principle this
+        # module applies everywhere else (Codex review, fresh evidence).
+        return [
+            f"{where}.target declares {declared_target!r} but "
+            f"toolchain binding {binding_id!r} ({path!r}) could "
+            f"not be probed for --target= support (the "
+            f"validation compile did not complete), so the "
+            f"declared target cannot be verified"
+        ]
+    return []
+
+
+def _triple_mismatches(declared_target: str, probed_triple: str) -> list[str]:
+    """Human-readable mismatches between a declared and a probed triple.
+
+    A mismatch is flagged whenever the two sides disagree, including when only
+    one side's OS/environment marker is recognized -- an unrecognized marker
+    on either side is itself unverifiable, not evidence of a match. Only "both
+    unrecognized" is a genuine skip. Previously this only fired when BOTH
+    sides were non-None, so an unrecognized declared OS/env (e.g.
+    ``x86_64-pc-solaris2.11``, ``arm-none-eabi``) silently passed against any
+    real probed triple (Codex review, fresh evidence).
+
+    The raw-suffix fallback covers the remaining hole: when NEITHER side's OS
+    nor environment marker is recognized, two triples that differ only after
+    the architecture (``arm-none-eabi`` vs ``arm-none-elf`` -- bare-metal EABI
+    vs ELF object-format spellings) previously passed as long as architecture
+    agreed. Every remaining ``-``-separated component is compared
+    case-insensitively after normalizing away an optional generic vendor
+    placeholder on either side (:func:`_strip_generic_vendor`) --
+    ``arm-none-eabi`` (vendor omitted) and ``arm-unknown-none-eabi`` (vendor
+    explicitly ``unknown``) name the same real target.
+    """
+    mismatches: list[str] = []
+    declared_arch = _normalize_arch(declared_target.split("-", 1)[0])
+    probed_arch = _normalize_arch(probed_triple.split("-", 1)[0])
+    if declared_arch and probed_arch and declared_arch != probed_arch:
+        mismatches.append(f"architecture {declared_arch!r} vs {probed_arch!r}")
+
+    declared_os = _os_family(declared_target)
+    probed_os = _os_family(probed_triple)
+    if (declared_os is not None or probed_os is not None) and declared_os != probed_os:
+        mismatches.append(f"OS {declared_os!r} vs {probed_os!r}")
+
+    declared_env = _env_family(declared_target)
+    probed_env = _env_family(probed_triple)
+    if (
+        declared_env is not None or probed_env is not None
+    ) and declared_env != probed_env:
+        mismatches.append(f"environment {declared_env!r} vs {probed_env!r}")
+
+    if declared_os is None and probed_os is None and declared_env is None and probed_env is None:
+        declared_rest = _strip_generic_vendor(
+            [p for p in declared_target.split("-")[1:] if p]
+        )
+        probed_rest = _strip_generic_vendor(
+            [p for p in probed_triple.split("-")[1:] if p]
+        )
+        if (
+            declared_rest
+            and probed_rest
+            and [p.lower() for p in declared_rest] != [p.lower() for p in probed_rest]
+        ):
+            mismatches.append(
+                "unrecognized target suffix "
+                f"{'-'.join(declared_rest)!r} vs {'-'.join(probed_rest)!r}"
+            )
+    return mismatches
+
+
+def _target_errors(
+    where: str,
+    declared_target: str,
+    actual_family: str | None,
+    metadata: dict[str, Any],
+    binding_id: str,
+    path: Any,
+) -> list[str]:
+    """Errors for a declared ``target`` triple."""
+    if actual_family is None:
+        return [
+            f"{where}.target declares {declared_target!r} but the actual "
+            f"family of toolchain binding {binding_id!r} ({path!r}) could "
+            f"not be determined, so its target cannot be verified"
+        ]
+    if actual_family in ("clang", "icx"):
+        return _clang_target_errors(where, declared_target, metadata, binding_id, path)
+
+    probed_triple = metadata.get("target_triple")
+    if not probed_triple:
+        return [
+            f"{where}.target declares {declared_target!r} but toolchain "
+            f"binding {binding_id!r} ({path!r}) has no probed target "
+            f"triple, so the declared target cannot be verified"
+        ]
+    mismatches = _triple_mismatches(declared_target, probed_triple)
+    if not mismatches:
+        return []
+    return [
+        f"{where}.target declares {declared_target!r} but "
+        f"toolchain binding {binding_id!r} ({path!r}) resolved to "
+        f"target triple {probed_triple!r} ({'; '.join(mismatches)})"
+    ]
+
+
+@dataclass(frozen=True)
+class _OverlayDeclaration:
+    """What one ``profiles.<id>.<overlay>.compile`` block declares about its tool."""
+
+    binding: str
+    family: str
+    version: str
+    target: str
+
+    @property
+    def declares_anything(self) -> bool:
+        return bool(self.family or self.version or self.target)
+
+
+def _overlay_declaration(compile_spec: Any) -> _OverlayDeclaration:
+    """Read the four declared identity fields off one compile overlay."""
+    if not compile_spec:
+        return _OverlayDeclaration("", "", "", "")
+    return _OverlayDeclaration(
+        getattr(compile_spec, "binding", ""),
+        getattr(compile_spec, "compiler_family", ""),
+        getattr(compile_spec, "compiler_version", ""),
+        getattr(compile_spec, "target", ""),
+    )
+
+
+def _is_unprobeable_msvc(path: Any, declared_family: str) -> bool:
+    """True for a binding that genuinely cannot be identity-checked here.
+
+    MSVC's ``cl.exe`` has no ``--version`` flag -- the fixed probe this module
+    reuses always runs exactly that flag -- so a binding that actually
+    resolves to ``cl.exe`` cannot be checked with the plumbing available here
+    (see module docstring), whether ``compiler_family: msvc`` was declared
+    explicitly or left unset.
+
+    Both conditions are required, not resolved-path-alone: an earlier revision
+    skipped whenever ``compiler_family: msvc`` was merely *declared*,
+    regardless of what the binding resolved to -- so a profile declaring
+    ``compiler_family: msvc`` whose binding resolves to a real, probeable
+    ``/usr/bin/gcc`` was also silently exempted (Codex review, fresh
+    evidence). A later revision keyed the skip on the resolved path alone
+    instead, which overcorrected: a profile explicitly declaring a genuinely
+    different, checkable family (``compiler_family: gcc``) against a binding
+    that resolves to a real ``cl.exe`` must still fall through to the probe
+    and be reported as unprobeable.
+    """
+    return Path(path).stem.lower() in _UNPROBED_FAMILIES and (
+        not declared_family or declared_family.strip().lower() in _UNPROBED_FAMILIES
+    )
+
+
 def _check_one_overlay(
     profile_id: str, overlay_key: str, compile_spec: Any, bindings_file: BindingsFile
 ) -> list[str]:
-    binding_id = getattr(compile_spec, "binding", "") if compile_spec else ""
-    declared_family = (
-        getattr(compile_spec, "compiler_family", "") if compile_spec else ""
-    )
-    declared_version = (
-        getattr(compile_spec, "compiler_version", "") if compile_spec else ""
-    )
-    declared_target = getattr(compile_spec, "target", "") if compile_spec else ""
-    if not binding_id or not (declared_family or declared_version or declared_target):
+    declared = _overlay_declaration(compile_spec)
+    if not declared.binding or not declared.declares_anything:
         return []
-    path = bindings_file.bindings.get(binding_id)
+    path = bindings_file.bindings.get(declared.binding)
     if path is None:
         # Already reported by check_profile_bindings_resolve; avoid duplicating.
         return []
-    if Path(path).stem.lower() in _UNPROBED_FAMILIES and (
-        not declared_family or declared_family.strip().lower() in _UNPROBED_FAMILIES
-    ):
-        # MSVC's cl.exe has no --version flag -- the fixed probe this
-        # module reuses always runs exactly that flag -- so a binding that
-        # actually resolves to cl.exe genuinely cannot be identity-checked
-        # with the plumbing available here (see module docstring), whether
-        # compiler_family: msvc was declared explicitly or left unset.
-        #
-        # Both conditions are required, not resolved-path-alone: an earlier
-        # revision of this guard skipped whenever `compiler_family: msvc`
-        # was merely *declared*, regardless of what the binding actually
-        # resolved to -- so a profile declaring `compiler_family: msvc`
-        # whose binding resolves to a real, probeable `/usr/bin/gcc` was
-        # also silently exempted (Codex review, fresh evidence). A later
-        # revision fixed that by keying the skip on the resolved path
-        # alone instead, but that overcorrected in the other direction:
-        # a profile explicitly declaring a genuinely different, checkable
-        # family (`compiler_family: gcc`) against a binding that resolves
-        # to a real `cl.exe` must still fall through to the probe below
-        # and be reported as unprobeable, not silently exempted just
-        # because the resolved binary happens to be MSVC -- exactly the
-        # regression the combined condition here restores.
+    if _is_unprobeable_msvc(path, declared.family):
         return []
 
     where = f"profiles.{profile_id}.{overlay_key}"
@@ -677,215 +905,35 @@ def _check_one_overlay(
         # all (Codex review, fresh evidence).
         reason = metadata.get("error") or version_text
         return [
-            f"{where}: toolchain binding {binding_id!r} (resolved to {path!r}) "
+            f"{where}: toolchain binding {declared.binding!r} (resolved to {path!r}) "
             f"could not be probed: {reason}"
         ]
 
-    errors: list[str] = []
-    # Resolved once, needed by the family check, the version check, and the
-    # target check (target's own semantics depend on whether the actual
-    # compiler is Clang -- see below). An indeterminate family is itself a
-    # failure whenever family, version, or target is declared: silently
-    # passing an unidentifiable executable defeats the point of a hard
-    # validation gate (Codex review, fresh evidence -- a family-only
+    # Resolved once, needed by all three checks (target's own semantics depend
+    # on whether the actual compiler is Clang). An indeterminate family is
+    # itself a failure whenever family, version, or target is declared:
+    # silently passing an unidentifiable executable defeats the point of a
+    # hard validation gate (Codex review, fresh evidence -- a family-only
     # profile previously accepted literally any unrecognized binary, and a
     # *version-only* profile skipped family detection entirely, so binding
-    # e.g. compiler_version: ">=3" to a real /usr/bin/cmake -- not a
-    # compiler at all -- passed unconditionally as long as its own
-    # --version banner happened to contain a matching dotted number).
-    actual_family = (
-        _probe_compiler_family(metadata)
-        if (declared_family or declared_version or declared_target)
-        else None
-    )
-    if declared_family:
-        if actual_family is None:
-            errors.append(
-                f"{where}.compiler_family declares {declared_family!r} but the "
-                f"actual family of toolchain binding {binding_id!r} ({path!r}) "
-                f"could not be determined from its resolved path or --version "
-                f"output"
-            )
-        else:
-            wanted_family = _FAMILY_ALIASES.get(
-                declared_family.strip().lower(), declared_family.strip().lower()
-            )
-            if actual_family != wanted_family:
-                errors.append(
-                    f"{where}.compiler_family declares {declared_family!r} but "
-                    f"toolchain binding {binding_id!r} ({path!r}) resolved to "
-                    f"family {actual_family!r}"
-                )
-    if declared_version:
-        if not declared_family and not declared_target and actual_family is None:
-            # Only reported here when neither of the other two checks
-            # already covers it (both have their own actual_family-is-None
-            # error above/below) -- a bare compiler_version: constraint is
-            # otherwise the one declaration shape with no family/target
-            # check to ever notice the resolved binding isn't recognizably
-            # a compiler at all (Codex review, fresh evidence).
-            errors.append(
-                f"{where}.compiler_version declares {declared_version!r} but the "
-                f"actual family of toolchain binding {binding_id!r} ({path!r}) "
-                f"could not be determined from its resolved path or --version "
-                f"output, so it cannot be verified to be a compiler at all"
-            )
-        try:
-            satisfied = version_satisfies(metadata.get("version", ""), declared_version)
-        except ToolchainProbeError as exc:
-            errors.append(f"{where}.compiler_version: {exc}")
-        else:
-            if not satisfied:
-                errors.append(
-                    f"{where}.compiler_version declares {declared_version!r} but "
-                    f"toolchain binding {binding_id!r} ({path!r}) reported version "
-                    f"output {metadata.get('version', '')!r}, which does not satisfy it"
-                )
-    if declared_target:
-        if actual_family is None:
-            errors.append(
-                f"{where}.target declares {declared_target!r} but the actual "
-                f"family of toolchain binding {binding_id!r} ({path!r}) could "
-                f"not be determined, so its target cannot be verified"
-            )
-        elif actual_family in ("clang", "icx"):
-            # Clang is inherently multi-target: -dumpmachine (what
-            # target_triple comes from) reports only its host default, not
-            # a constraint -- the profile's own compose logic passes the
-            # declared target explicitly via --target=, which a single
-            # Clang binary genuinely honors for cross-compilation. Unlike
-            # GCC (a fixed single-target binary per install), the bare
-            # dumpmachine probe has nothing to compare here (Codex review,
-            # fresh evidence: a real x86_64 Clang with target:
-            # aarch64-linux-gnu was falsely rejected). But an entirely
-            # bogus/misspelled target must still be rejected, so probe
-            # Clang directly with the declared --target= instead (a
-            # second review round, fresh evidence: target:
-            # not-a-real-target previously passed unconditionally).
-            # Intel's oneAPI icx/icpx driver shares this same branch: it is
-            # a clang-based binary accepting the identical --target= flag
-            # (abicheck.dumper_clang already treats it as clang-family for
-            # AST-parsing purposes), so the same multi-target exemption and
-            # real-probe validation apply.
-            digest = metadata.get("sha256")
-            if digest:
-                accepted = _clang_accepts_target(path, digest, declared_target)
-                if accepted is False:
-                    errors.append(
-                        f"{where}.target declares {declared_target!r} but "
-                        f"toolchain binding {binding_id!r} ({path!r}) does not "
-                        f"recognize it as a valid --target= triple"
-                    )
-                elif accepted is None:
-                    # _clang_accepts_target itself returns None only when
-                    # the probe compile couldn't even run (timeout, OSError)
-                    # -- e.g. a wrapper that answers --version fine but
-                    # hangs or fails on a real invocation. Silently
-                    # accepting that leaves the declared target completely
-                    # unverified, the same "can't verify -> error, not a
-                    # silent pass" principle this module applies to every
-                    # other unprobeable case (Codex review, fresh
-                    # evidence).
-                    errors.append(
-                        f"{where}.target declares {declared_target!r} but "
-                        f"toolchain binding {binding_id!r} ({path!r}) could "
-                        f"not be probed for --target= support (the "
-                        f"validation compile did not complete), so the "
-                        f"declared target cannot be verified"
-                    )
-        else:
-            probed_triple = metadata.get("target_triple")
-            if not probed_triple:
-                errors.append(
-                    f"{where}.target declares {declared_target!r} but toolchain "
-                    f"binding {binding_id!r} ({path!r}) has no probed target "
-                    f"triple, so the declared target cannot be verified"
-                )
-            else:
-                declared_arch = _normalize_arch(declared_target.split("-", 1)[0])
-                probed_arch = _normalize_arch(probed_triple.split("-", 1)[0])
-                arch_mismatch = bool(
-                    declared_arch and probed_arch and declared_arch != probed_arch
-                )
-                # A mismatch is flagged whenever the two sides disagree,
-                # including when only one side's OS/environment marker is
-                # recognized -- an unrecognized marker on either side is
-                # itself unverifiable, not evidence of a match. Only "both
-                # unrecognized" is a genuine skip (nothing to compare on
-                # either side). Previously this only fired when BOTH sides
-                # were non-None, so an unrecognized declared OS/env (e.g.
-                # `x86_64-pc-solaris2.11`, `arm-none-eabi`) silently passed
-                # against any real probed triple (Codex review, fresh
-                # evidence).
-                declared_os = _os_family(declared_target)
-                probed_os = _os_family(probed_triple)
-                os_mismatch = bool(
-                    (declared_os is not None or probed_os is not None)
-                    and declared_os != probed_os
-                )
-                declared_env = _env_family(declared_target)
-                probed_env = _env_family(probed_triple)
-                env_mismatch = bool(
-                    (declared_env is not None or probed_env is not None)
-                    and declared_env != probed_env
-                )
-                # Fall back to a raw suffix comparison when NEITHER the OS
-                # nor the environment marker table recognized anything on
-                # EITHER side: os_mismatch/env_mismatch above only fail
-                # closed when at least one side is recognized, so two
-                # triples that are both entirely unrecognized after the
-                # architecture (e.g. `arm-none-eabi` vs `arm-none-elf` --
-                # bare-metal EABI vs ELF object-format spellings, neither
-                # matching any OS/env marker) previously still passed
-                # silently as long as architecture agreed (Codex review,
-                # fresh evidence). Compares every remaining `-`-separated
-                # component (case-insensitive) after normalizing away an
-                # optional, generic vendor placeholder on either side
-                # (`_strip_generic_vendor`) -- `arm-none-eabi` (vendor
-                # omitted) and `arm-unknown-none-eabi` (vendor explicitly
-                # `unknown`) name the same real target, and comparing the
-                # raw component lists without that normalization rejected
-                # the equivalent spelling as a mismatch (Codex review,
-                # fresh evidence).
-                declared_rest = _strip_generic_vendor(
-                    [p for p in declared_target.split("-")[1:] if p]
-                )
-                probed_rest = _strip_generic_vendor(
-                    [p for p in probed_triple.split("-")[1:] if p]
-                )
-                suffix_mismatch = bool(
-                    declared_os is None
-                    and probed_os is None
-                    and declared_env is None
-                    and probed_env is None
-                    and declared_rest
-                    and probed_rest
-                    and [p.lower() for p in declared_rest]
-                    != [p.lower() for p in probed_rest]
-                )
-                if arch_mismatch or os_mismatch or env_mismatch or suffix_mismatch:
-                    mismatches = []
-                    if arch_mismatch:
-                        mismatches.append(
-                            f"architecture {declared_arch!r} vs {probed_arch!r}"
-                        )
-                    if os_mismatch:
-                        mismatches.append(f"OS {declared_os!r} vs {probed_os!r}")
-                    if env_mismatch:
-                        mismatches.append(
-                            f"environment {declared_env!r} vs {probed_env!r}"
-                        )
-                    if suffix_mismatch:
-                        mismatches.append(
-                            "unrecognized target suffix "
-                            f"{'-'.join(declared_rest)!r} vs "
-                            f"{'-'.join(probed_rest)!r}"
-                        )
-                    errors.append(
-                        f"{where}.target declares {declared_target!r} but "
-                        f"toolchain binding {binding_id!r} ({path!r}) resolved to "
-                        f"target triple {probed_triple!r} ({'; '.join(mismatches)})"
-                    )
+    # e.g. compiler_version: ">=3" to a real /usr/bin/cmake -- not a compiler
+    # at all -- passed unconditionally as long as its own --version banner
+    # happened to contain a matching dotted number).
+    actual_family = _probe_compiler_family(metadata)
+
+    errors: list[str] = []
+    if declared.family:
+        errors += _family_errors(
+            where, declared.family, actual_family, declared.binding, path
+        )
+    if declared.version:
+        errors += _version_errors(
+            where, declared, actual_family, metadata, declared.binding, path
+        )
+    if declared.target:
+        errors += _target_errors(
+            where, declared.target, actual_family, metadata, declared.binding, path
+        )
     return errors
 
 

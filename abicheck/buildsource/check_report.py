@@ -312,6 +312,105 @@ def _is_valid_coverage_contribution(raw: object) -> bool:
     return not isinstance(raw, bool) and isinstance(raw, int) and raw in (0, 1)
 
 
+def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
+    """Stamp the schema marker matching *report*'s actual shape.
+
+    A scan report (baseline-channel: none) has its own schema marker and shape
+    (level/risk/coverage/... -- no library/old_file/summary/changes/...) -- bump
+    it to the latest version for this envelope's new additive fields instead of
+    also stamping ``report_schema_version`` (the *compare*-report schema's
+    marker), which would make a downstream validator select
+    ``compare_report.schema.json`` for a report that structurally can never
+    satisfy it (Codex review).
+
+    A ``kind: bundle`` / directory-package compare report (the per-library
+    release fan-out's own summary shape: verdict/old_dir/new_dir/libraries/...)
+    has never had a schema of its own; it is left unversioned rather than
+    falsely claiming the single-pair compare schema (same rationale). ADR-047
+    §7's identity/policy-gate fields still apply regardless of report shape.
+    """
+    if "scan_schema_version" in report:
+        out["scan_schema_version"] = SCAN_SCHEMA_VERSION
+    elif not ("libraries" in report and "old_dir" in report):
+        out["report_schema_version"] = REPORT_SCHEMA_VERSION
+
+
+def _escalate_removed_library_severity(out: dict[str, Any]) -> None:
+    """Fold ``--fail-on-removed-library``'s exit 8 into the severity block.
+
+    Exit 8 is the *only* value ``cli_compare_release_helpers.
+    _exit_compare_release`` applies "in preference to the severity code" --
+    every other severity-aware exit path there emits ``severity_exit_code``
+    directly, so 8 is the sole case where the real outcome can diverge from
+    what is already persisted. Escalating ``policy_gate_decision``/
+    ``real_exit_code`` is not enough on its own: ``gate-mode: deferred`` relies
+    on ``check-project.yml``'s trailing aggregate job, and
+    ``abicheck.aggregate.GateInfo.from_report_data`` reads ONLY the persisted
+    ``severity.exit_code`` -- it cannot see ``policy_gate_decision`` or
+    ``analysis_exit_code`` at all. Without also updating severity here, a
+    removed-library gate on a deferred bundle check would still be silently
+    missed by aggregate even though the check's own local exit code is correct
+    (Codex review, second pass).
+
+    A whole library disappearing is unambiguously an ABI break, so it is
+    encoded as the ``abi_breaking`` tier (exit_code 4 -- the ceiling of
+    ``aggregate.py``'s ``_VALID_GATE_EXIT = {0, 1, 2, 4}``; 8 itself is not a
+    legal ``severity.exit_code`` and would raise ``_MalformedGate`` there).
+    Only escalates -- never downgrades an already->=4 severity block, though 4
+    is already that ceiling so there is nothing to downgrade from.
+    """
+    severity = out.get("severity")
+    if not isinstance(severity, dict) or severity.get("exit_code", 0) >= 4:
+        return
+    cats = list(severity.get("blocking_categories") or [])
+    if "abi_breaking" not in cats:
+        cats.append("abi_breaking")
+    out["severity"] = {
+        **severity,
+        "exit_code": 4,
+        "blocking": True,
+        "blocking_categories": cats,
+    }
+
+
+def _classify_verdict(
+    out: dict[str, Any], report: dict[str, Any], raw_verdict: Any
+) -> None:
+    """Split *raw_verdict* into a compatibility verdict or an operational error.
+
+    Any verdict string a scan run can produce that is neither a legacy
+    compatibility verdict nor the explicit operational-error sentinel (e.g.
+    ``"BUDGET_OVERFLOW"``/``"EVIDENCE_CONTRACT_ERROR"`` -- ``service_scan.py``'s
+    guard sentinels) is not a compatibility finding either: it is the scan
+    never completing its comparison at all, the same class of problem as an
+    analysis CLI error, not something ADR-047 §7's "deferred only defers the
+    *compatibility* verdict" rule was meant to cover. Treated as operational so
+    ``gate-mode: deferred``/``advisory`` cannot turn a guard failure into a
+    quiet pass (Codex review).
+    """
+    if raw_verdict in LEGACY_VERDICT_VALUES:
+        out["compatibility_verdict"] = raw_verdict
+        out.setdefault("operational_errors", [])
+        return
+    if raw_verdict == OPERATIONAL_ERROR_VERDICT:
+        out["operational_errors"] = [
+            {
+                "kind": "analysis_error",
+                "message": str(report.get("error") or "the analysis step failed"),
+            }
+        ]
+        return
+    out["operational_errors"] = [
+        {
+            "kind": "scan_guard_triggered",
+            "message": str(
+                report.get("error")
+                or f"the analysis reported a non-compatibility verdict: {raw_verdict!r}"
+            ),
+        }
+    ]
+
+
 def augment_report(
     report: dict[str, Any],
     *,
@@ -350,27 +449,7 @@ def augment_report(
     out = dict(report)
     check_id = build_check_id(name, profile_id, baseline_channel, requested_depth)
     effective_depth, coverage = derive_effective_depth(report, requested_depth)
-    if "scan_schema_version" in report:
-        # A scan report (baseline-channel: none) has its own schema marker
-        # and shape (level/risk/coverage/... -- no library/old_file/summary/
-        # changes/...) -- bump it to the latest version for this envelope's
-        # new additive fields instead of also stamping report_schema_version
-        # (the *compare*-report schema's marker), which would make a
-        # downstream validator select compare_report.schema.json for a
-        # report that structurally can never satisfy it (Codex review).
-        out["scan_schema_version"] = SCAN_SCHEMA_VERSION
-    elif "libraries" in report and "old_dir" in report:
-        # A kind: bundle / directory-package compare report (the per-library
-        # release fan-out's own summary shape: verdict/old_dir/new_dir/
-        # libraries/... -- no singular library/old_file/new_file/summary/
-        # changes/... either) has never had a schema of its own; leave it
-        # unversioned here too rather than falsely claiming the single-pair
-        # compare schema (same rationale as the scan case above, Codex
-        # review). ADR-047 §7's identity/policy-gate fields below still
-        # apply regardless of report shape.
-        pass
-    else:
-        out["report_schema_version"] = REPORT_SCHEMA_VERSION
+    _stamp_schema_version(out, report)
     out["check_id"] = check_id
     out["target_id"] = check_id
     out["profile_id"] = profile_id
@@ -391,67 +470,8 @@ def augment_report(
     real_exit_code = max(_real_exit_code(report), analysis_exit_code or 0)
     out["policy_gate_decision"] = "fail" if real_exit_code != 0 else "pass"
     if analysis_exit_code == _REMOVED_LIBRARY_EXIT_CODE:
-        # --fail-on-removed-library's exit 8 is the *only* value
-        # cli_compare_release_helpers._exit_compare_release applies "in
-        # preference to the severity code" -- every other severity-aware
-        # exit path there just emits severity_exit_code directly, so 8 is
-        # the sole case where the real outcome can diverge from what's
-        # already in the persisted severity block. Escalating
-        # policy_gate_decision/real_exit_code above isn't enough on its
-        # own: gate-mode: deferred relies on check-project.yml's trailing
-        # aggregate job, and abicheck.aggregate.GateInfo.from_report_data
-        # reads ONLY the persisted severity.exit_code -- it has no way to
-        # see policy_gate_decision or analysis_exit_code at all. Without
-        # also updating severity here, a removed-library gate on a
-        # deferred bundle check would still be silently missed by
-        # aggregate, even though this check's own local exit code is
-        # correct (Codex review, second pass). A whole library
-        # disappearing is unambiguously an ABI break, so it's encoded as
-        # the abi_breaking tier (exit_code 4 -- the ceiling of
-        # aggregate.py's _VALID_GATE_EXIT = {0, 1, 2, 4}; 8 itself isn't a
-        # legal severity.exit_code and would raise _MalformedGate there).
-        # Only escalates -- never downgrades an already-≥4 severity block,
-        # though 4 is already that ceiling so there's nothing to downgrade
-        # from in this scheme.
-        severity = out.get("severity")
-        if isinstance(severity, dict) and severity.get("exit_code", 0) < 4:
-            cats = list(severity.get("blocking_categories") or [])
-            if "abi_breaking" not in cats:
-                cats.append("abi_breaking")
-            out["severity"] = {
-                **severity,
-                "exit_code": 4,
-                "blocking": True,
-                "blocking_categories": cats,
-            }
-    if raw_verdict in LEGACY_VERDICT_VALUES:
-        out["compatibility_verdict"] = raw_verdict
-        out.setdefault("operational_errors", [])
-    elif raw_verdict == OPERATIONAL_ERROR_VERDICT:
-        out["operational_errors"] = [
-            {
-                "kind": "analysis_error",
-                "message": str(report.get("error") or "the analysis step failed"),
-            }
-        ]
-    else:
-        # Any other verdict string a scan run can produce (e.g. "BUDGET_OVERFLOW",
-        # "EVIDENCE_CONTRACT_ERROR" -- service_scan.py's guard sentinels) is not
-        # a compatibility finding either -- it's the scan never completing its
-        # comparison at all, the same class of problem as an analysis CLI error,
-        # not something ADR-047 §7's "deferred only defers the *compatibility*
-        # verdict" rule was ever meant to cover. Treated as operational so
-        # gate-mode: deferred/advisory can't turn a guard failure into a quiet
-        # pass (Codex review).
-        out["operational_errors"] = [
-            {
-                "kind": "scan_guard_triggered",
-                "message": str(
-                    report.get("error")
-                    or f"the analysis reported a non-compatibility verdict: {raw_verdict!r}"
-                ),
-            }
-        ]
+        _escalate_removed_library_severity(out)
+    _classify_verdict(out, report, raw_verdict)
     # check-target's own nested analysis step always disables add-job-summary/
     # pr-comment/upload-sarif (action.yml's "Run analysis" step), and the
     # finalize step itself only writes the report JSON to disk + sets
