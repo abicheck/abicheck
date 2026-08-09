@@ -791,8 +791,12 @@ This ADR is validated when:
    `skills-src/`, and each independently passes the structural, drift,
    trigger, and behavioral tests in the Testing section.
 2. Each P0 skill has been exercised end-to-end against at least the
-   `examples/` cases named in the companion plan's evaluation matrix, with
-   the skill reaching the documented ground-truth verdict and preserving
+   `examples/` cases named in the companion plan's evaluation matrix — the
+   concrete case-ID-to-skill mapping this criterion is checked against is
+   G36 P1.1's own `validation/scripts/run_skill_evals.py` case selection
+   plus `validation/data/skill_eval_scenarios.yaml`'s scenario manifest
+   (P1.1's "Files" list), not a matrix defined in this ADR — with the
+   skill reaching the documented ground-truth verdict and preserving
    uncertainty where the example is deliberately incomplete-evidence.
 3. Whichever machine-readable capability-discovery surface the maintainer
    decision in G36 P0.4 settles on (an `info` command under an approved
@@ -805,6 +809,12 @@ This ADR is validated when:
 4. The trigger-test negative set (REST/OpenAPI, DB migrations, Java API,
    generic JSON-schema compatibility) does not false-trigger any `native-*`
    skill, confirmed by an automated test, not manual spot-checking.
-5. At least two non-Claude agent targets (per the Testing section's
-   cross-agent list) have been used to run at least one P0 skill through
-   one real scenario end-to-end, with results recorded in the plan.
+5. All four of the Testing section's named minimum cross-agent targets —
+   Claude Code, Codex, Copilot, and Gemini CLI (Cursor is the one target
+   this ADR itself marks conditional, "if current") — have each been used
+   to run *every* P0 skill through at least one real scenario end-to-end,
+   per G36 P1.5's per-target/per-skill validation-log procedure, with
+   results recorded there. Exercising only two targets, or only one skill
+   per target, does not satisfy this criterion — G36 P1.4's own publication
+   gate already depends on this same full-coverage bar (see G36 P1.4/P1.5),
+   and this criterion is stated to match it rather than a narrower one.
