@@ -1217,6 +1217,22 @@ def _merge_consumer_impact_paths(
             return m.entry_path[0].src == primary.entry_path[0].src
         return bool(m.public_entries) and m.public_entries[0] == primary_root
 
+    # A non-primary match's OWN alternative_entry_paths need the identical
+    # per-alt filter the primary's own alternatives get below (Codex
+    # review, fresh evidence): _same_root(m) only proves m's PREFERRED
+    # entry_path shares the primary's root -- explain_required_symbols
+    # builds m.alternative_entry_paths from every candidate path across
+    # every consumer-compiled entry that reached the target, not just the
+    # entry m's own preferred path happens to start at, so one of m's own
+    # alternatives can start at yet another, third entry. Bulk-extending
+    # all of them once m's preferred path passes the root check would
+    # still let a differently-rooted path through and have it serialized
+    # under the primary's single root. Filtered against m's own verified
+    # entry_path[0].src (equal to primary's by construction once same_root
+    # is True) rather than re-deriving it from primary directly, so the
+    # comparison reads as "does this alt start where m's OWN already-
+    # verified path starts" -- the same question the primary-side filter
+    # answers about primary's own alternatives.
     alternatives = []
     for m in matches:
         if m is primary:
@@ -1224,8 +1240,10 @@ def _merge_consumer_impact_paths(
         same_root = _same_root(m)
         if m.entry_path and same_root:
             alternatives.append(m.entry_path)
-        if same_root:
-            alternatives.extend(m.alternative_entry_paths)
+            m_start = m.entry_path[0].src
+            alternatives.extend(
+                alt for alt in m.alternative_entry_paths if alt and alt[0].src == m_start
+            )
     # primary's OWN alternative_entry_paths need the identical guard (Codex
     # review, fresh evidence): explain_required_symbols builds these from
     # every candidate path across every consumer-compiled entry the walk

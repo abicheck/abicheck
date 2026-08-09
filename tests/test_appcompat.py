@@ -2599,6 +2599,51 @@ class TestMergeConsumerImpactPaths:
         assert merged.entry_path == [primary_edge]
         assert [overload_edge] not in merged.alternative_entry_paths
 
+    def test_non_primarys_own_differently_rooted_alternative_is_excluded(self):
+        """Codex review, fresh evidence: a non-primary match's OWN
+        alternative_entry_paths must be filtered per-alt too, not bulk
+        folded in once the match's PREFERRED entry_path passes the
+        same-root check. explain_required_symbols can attach a non-primary
+        match's own alternative that started at a THIRD entry -- neither
+        the primary's root nor the non-primary match's own preferred
+        entry -- and that third-rooted path must not be smuggled in as
+        though it shared the primary's root."""
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        primary_edge = GraphEdge(src="entry_A", dst="foo", kind="DECL_CALLS_DECL")
+        # second's own preferred path shares the primary's root (entry_A).
+        second_preferred = GraphEdge(src="entry_A", dst="bar2", kind="DECL_CALLS_DECL")
+        # But one of second's OWN alternatives starts at a THIRD entry.
+        second_own_alt_same_root = GraphEdge(
+            src="entry_A", dst="bar3", kind="DECL_CALLS_DECL"
+        )
+        second_own_alt_third_root = GraphEdge(
+            src="entry_C", dst="bar4", kind="DECL_CALLS_DECL"
+        )
+        primary = ConsumerImpactPath(
+            consumer="app",
+            symbol="foo",
+            public_entries=("entry_A",),
+            entry_path=[primary_edge],
+        )
+        second = ConsumerImpactPath(
+            consumer="app",
+            symbol="bar",
+            public_entries=("entry_A",),
+            entry_path=[second_preferred],
+            alternative_entry_paths=[
+                [second_own_alt_same_root],
+                [second_own_alt_third_root],
+            ],
+        )
+        merged = _merge_consumer_impact_paths([primary, second])
+        assert merged.entry_path == [primary_edge]
+        assert [second_preferred] in merged.alternative_entry_paths
+        assert [second_own_alt_same_root] in merged.alternative_entry_paths
+        assert [second_own_alt_third_root] not in merged.alternative_entry_paths
+
     def test_symbol_entry_and_path_come_from_the_same_match(self):
         """The exact contradiction Codex flagged: the first match is
         direct (entry_path=[]) and the second is indirect. symbol,

@@ -60,3 +60,15 @@
   root. Now compares `entry_path[0].src` node ids whenever both sides have
   a walked path, falling back to the label comparison only when one side
   is a direct match with no path to read a node id from.
+- **A non-primary match's own `alternative_entry_paths` are now filtered
+  per-alternative, not bulk-folded in once its preferred `entry_path`
+  passes the root check** (Codex review, fresh evidence):
+  `impact.consumer_graph.explain_required_symbols` builds
+  `alternative_entry_paths` from every candidate path across every
+  consumer-compiled entry that reached the target, not just the one entry
+  the match's own preferred path happens to start at — so one of a
+  same-rooted non-primary match's own alternatives could still start at a
+  *third*, unrelated entry and get folded in and serialized under the
+  primary's single root. Now filters each alternative against the
+  non-primary match's own verified `entry_path[0].src`, mirroring the
+  identical filter the primary's own alternatives already got.
