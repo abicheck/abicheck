@@ -80,9 +80,10 @@ correction actually gets made and where every skill picks it up from,
 closing the two-manually-maintained-copies risk a living second copy would
 otherwise create. Each fragment states, at its top, which
 canonical `docs/learn/`/`docs/use/`/`docs/reference/` page(s) it summarizes
-(mirroring `docs/AGENTS.md`'s `summarizes:` front-matter field convention),
-so a docs-contract-style check (P0.6) can verify the summary hasn't drifted
-from its source.
+— not just informally, but registered as real `summarizes:` entries against
+the corresponding topic(s) in `docs/_meta/topics.yaml` (P0.6 is where this
+registration actually happens; see that item for the mechanism this
+paragraph only motivates).
 
 **Files:** `skills-src/shared/*.md` (11 new files);
 `skills-src/CLAUDE.md` (required — this is a new major sub-tree per
@@ -190,10 +191,14 @@ directly on the existing `scripts/gen_cli_reference.py`/
 generated docs" contract) — same idempotency and same "verify.py fails on
 drift" requirement, applied to a new artifact family.
 
-**Files:** `scripts/gen_agent_skills.py` (new); `.agents/skills/**`
-(generated output, committed); `scripts/verify.py` (new step,
-`agent-skills-generated`, wired into the `pr` profile alongside the
-existing generated-doc regeneration checks).
+**Files:** `scripts/gen_agent_skills.py` (new); `scripts/CLAUDE.md`
+(add the new script to its inventory table in the same PR — the
+`script-inventory` AI-readiness check warns on any `scripts/*.py` not
+listed there, and a generator this load-bearing is exactly the kind of
+maintenance entry point that check exists to keep discoverable);
+`.agents/skills/**` (generated output, committed); `scripts/verify.py`
+(new step, `agent-skills-generated`, wired into the `pr` profile alongside
+the existing generated-doc regeneration checks).
 
 **Tests:** `tests/test_gen_agent_skills.py` — idempotency (running the
 generator twice produces identical output), dead-fragment detection,
@@ -354,7 +359,16 @@ only `diff_summary = {"reason": str(exc)}` — free text, same gap as the
 CLI/MCP `compare` paths this item was originally scoped to; add the same
 `reason_codes` field here too, since `scan`'s CLI and MCP surfaces share
 this one engine and would otherwise still have to parse prose for exactly
-the causes this item exists to type), `abicheck/schemas/__init__.py`
+the causes this item exists to type), `abicheck/aggregate.py`
+(`TargetReport.reason` is itself a bare `str | None` — `_load_report_file`
+reads a per-target report's structured `reason: {kind, message}` object
+and flattens it straight into that one string field, line ~1471 — so
+`native-release-compatibility`'s documented multi-profile/multi-target
+`project`/`aggregate` path would still be untyped prose even after every
+producer above emits `codes`; add a `reason_codes: list[str] | None` field
+to `TargetReport` alongside `reason`, carried through from the per-target
+report's `codes`, and expose it from `TargetReport.to_dict()` /
+`abicheck/schemas/aggregate_report.schema.json`), `abicheck/schemas/__init__.py`
 (schema version bump + field registration, covering both the compare and
 scan report schemas), `docs/reference/change-kinds.md` or a new
 `docs/reference/comparability-reason-codes.md` (document the closed enum —
@@ -386,7 +400,11 @@ library's entry in the directory/package release JSON/`summary.json`
 (`_compare_one_library`/`_format_release_json`) carries `reason_codes` too,
 not just the separate not-comparable document — this is the report path
 `native-release-compatibility` actually reads, so it's the one that must
-not be left with only untyped text.
+not be left with only untyped text; a `tests/test_aggregate.py`-style test
+asserting `TargetReport.reason_codes` round-trips a not-comparable
+per-target report's `codes` through `_load_report_file` into
+`TargetReport.to_dict()`'s output — the multi-profile/multi-target path,
+not just the single-comparison one.
 
 **Docs:** whichever comparability doc the field lands in, plus a
 changelog fragment (`### Added`).
@@ -403,30 +421,57 @@ Dependencies note.
 
 ### P0.6 — AI-readiness gate coverage for the new tree — **not started**
 
-**Problem:** `skills-src/` is a new major sub-tree; without registration it
-silently falls outside `claude-md-coverage`, and `.agents/skills/` (fully
-generated) needs an explicit "don't hand-edit" marker convention so a
-contributor doesn't patch generated output directly the way
+**Problem:** Three separate gaps, all closed here rather than left
+unregistered: (1) `skills-src/` is a new major sub-tree that silently falls
+outside `claude-md-coverage` without registration; (2) `.agents/skills/`
+(fully generated) needs an explicit "don't hand-edit" marker convention so
+a contributor doesn't patch generated output directly, the way
 `generated-file-ownership` already prevents for `docs/reference/examples/
-case*.md`.
+case*.md`; (3) P0.1's `skills-src/shared/*.md` fragments each summarize a
+real `docs/learn/`/`docs/use/`/`docs/reference/` canonical page, but
+without registering that claim somewhere machine-checked, the summary can
+silently drift from its source with nothing to catch it — links staying
+valid (P0.7 checks that) is not the same guarantee as the *summarized
+semantics* staying current.
 
-**Change:** Add `skills-src/CLAUDE.md` (scoped context, not an `@AGENTS.md`
-adapter, per this repo's own convention — see this file's own
+**Change:** For (1)/(2): add `skills-src/CLAUDE.md` (scoped context, not an
+`@AGENTS.md` adapter, per this repo's own convention — see this file's own
 `AGENTS.md`/`CLAUDE.md` split as the model); add `skills-src` to
 `REQUIRED_CLAUDE_MD_DIRS` in `scripts/check_ai_readiness.py`; add a
 "this file is generated by `scripts/gen_agent_skills.py` — do not hand-edit"
 marker comment convention to every generated `.agents/skills/**/SKILL.md`
-and register that marker pattern in `GENERATED_FILE_MARKERS` so
-`generated-file-ownership` covers it the same way it covers every other
-generated artifact family in this repo.
+and register that marker pattern in `GENERATED_FILE_MARKERS`. For (3):
+**don't invent a new bespoke drift checker** — register each
+`skills-src/shared/*.md` fragment in `docs/_meta/topics.yaml` as a
+`task_pages`/`allowed_summaries` entry against the topic(s) it summarizes
+(the existing pilot registry already models exactly this "summary page
+citing a canonical owner" relationship for `getting-started.md` and
+friends), and give each fragment the `summarizes:` front-matter field
+naming those topic ids. `scripts/check_docs_contract.py` — already wired
+into `scripts/verify.py --profile pr` as the `docs-contract` step — then
+enforces the round-trip that already exists for every other page in this
+registry (every `summarizes` entry must be backed by a real, existing
+topic; a page can't claim to summarize a topic it isn't registered
+against) *for free*, with no new checking logic. This doesn't detect
+prose-level semantic drift line-by-line (`check_docs_contract.py` doesn't
+do that for any existing page either), but it does mean a `shared/*.md`
+fragment can never point at a stale/renamed/nonexistent topic without
+failing the same gate every other doc page already goes through — the
+realistic bar this repo already holds itself to, not a stronger one
+invented just for this new tree.
 
 **Files:** `skills-src/CLAUDE.md` (new); `scripts/check_ai_readiness.py`
 (`REQUIRED_CLAUDE_MD_DIRS`, `GENERATED_FILE_MARKERS`); `scripts/
-gen_agent_skills.py` (emit the marker — depends on P0.3).
+gen_agent_skills.py` (emit the marker — depends on P0.3);
+`docs/_meta/topics.yaml` (one new/extended entry per topic a
+`skills-src/shared/*.md` fragment summarizes); `skills-src/shared/*.md`
+(add `summarizes:` front matter to each, from P0.1).
 
 **Tests:** `python scripts/check_ai_readiness.py` passes with no new
 errors; a regression test asserting `skills-src` is in the required-dirs
-tuple.
+tuple; `python scripts/check_docs_contract.py` passes with every
+`skills-src/shared/*.md` fragment's `summarizes` claim round-tripping
+against its registered topic.
 
 **Dependencies:** P0.1 (the tree must exist), P0.3 (the generator emits the
 marker).
