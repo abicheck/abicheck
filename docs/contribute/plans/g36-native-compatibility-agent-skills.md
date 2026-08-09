@@ -208,11 +208,21 @@ root command list (so a skill can self-check "does my target support
 detected on the host the same way existing dumper-provider auto-detection
 already probes), and platform capabilities (ELF/PE/Mach-O support — all
 three ship unconditionally today, but this keeps the field meaningful if
-that ever changes). Clears `AGENTS.md`'s "Adding a new top-level command"
-admission bar (ADR-054 D6) on all six criteria — see that section for the
-exact wording; lands with `tests/test_cli_root_surface.py` + `AGENTS.md` +
-`README.md` + generated CLI reference updated in the same PR per that
-bar's own sixth criterion.
+that ever changes). Checked against `AGENTS.md`'s "Adding a new top-level
+command" admission bar (ADR-054 D6) — see that section for the exact
+wording. Five of the six criteria are unambiguous; criterion 2 ("its
+operand is a domain object a user already thinks in terms of") is the one
+genuinely debatable call, since `info` takes no operand at all. The
+precedent this leans on is `--version` — already an existing zero-operand
+top-level surface, whose "operand" is likewise the installation itself, not
+a binary/report/config. `info` is that same case promoted from a flag to a
+proper structured-output command because a skill needs to parse it
+reliably. This reading should be treated as needing explicit maintainer
+sign-off when P0.4 actually lands, not as a foregone conclusion — flag it
+for discussion in that PR rather than asserting the bar is mechanically
+cleared. Lands with `tests/test_cli_root_surface.py` + `AGENTS.md` +
+`README.md` + generated CLI reference updated in the same PR per the bar's
+own sixth criterion.
 
 **Files:** `abicheck/cli_info.py` (new, sibling module per the "Adding a
 new top-level command" convention in `AGENTS.md`); `abicheck/cli.py` (side
@@ -237,7 +247,7 @@ bundled in.
 
 ---
 
-### P0.5 — Finer-grained `reason.code` on the existing not-comparable object — **not started**
+### P0.5 — Finer-grained `reason.codes` on the existing not-comparable object — **not started**
 
 **CLI/API change:** yes — additive report-schema field.
 
@@ -245,24 +255,33 @@ bundled in.
 `"reason": {"kind": ..., "message": ...}` object in the `--format json`
 document (schema 2.17, `cli_compare_helpers._report_not_comparable`), but
 `kind` today is only ever `"profile_mismatch"` or `"scope_mismatch"` — two
-coarse buckets. The *specific* mismatched field (compiler family vs.
-compiler version vs. language standard vs. ...) is only recoverable from
+coarse buckets. The *specific* mismatched field(s) (compiler family vs.
+compiler version vs. language standard vs. ...) are only recoverable from
 the free-text `message`, so a skill (or any caller) branching on the real
 cause has to parse prose. `native-binary-compatibility-review`'s "establish
 comparability" workflow step and `native-release-compatibility`'s
 "baseline comparability" step both need a typed reason instead.
 
-**Change:** Add a `code` field alongside the existing `kind`/`message` on
+**Change:** Add a `codes` field — an **array**, not a singular `code` — on
 that same `reason` object (no new top-level block — `comparability` does
-not exist in the current schema and this does not invent one). `code` is a
-documented, closed enum covering every field
-`comparability.py`'s `PROFILE_FIELD_KEYS` (`compiler_family`,
+not exist in the current schema and this does not invent one). An array is
+required, not a convenience: `check_contracts_comparable` raises one
+exception whose message can already list *multiple* simultaneously
+mismatched fields (e.g. `compiler_family` and `abi_dialect` differing in
+the same comparison), and a singular code would force discarding all but
+one cause or inventing an arbitrary precedence order — a skill that fixes
+the reported cause and re-runs would then fail again on the silently
+omitted one. Values are drawn from a documented, closed enum covering every
+field `comparability.py`'s `PROFILE_FIELD_KEYS` (`compiler_family`,
 `compiler_version`, `abi_dialect`, `language_standard`, `target_triple`,
 `pointer_width`, `endianness`, `macro_ops`, `pass_through_flags`,
-`include_sequence`, `header_sequence`) and `SCOPE_FIELD_KEYS`/
+`include_sequence`, `header_sequence`), `_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`'s
+DPC++-only addition (`frontend_context_kind` — its own dedicated code, not
+folded into the generic fallback, since G32 Phase D already makes it a
+known, stable, independently-mismatching field), and `SCOPE_FIELD_KEYS`/
 `_MANIFEST_SCOPE_FIELD_KEYS` (`headers`, `public_header_dirs`,
-`translation_units`) can each independently mismatch on, plus one explicit
-fallback per exception category already carved out in `comparability.py`
+`translation_units`) can each independently contribute, plus one explicit
+code per exception category already carved out in `comparability.py`
 (`_PLATFORM_IDENTITY_FIELDS`, `_BUILD_CONTEXT_FIELDS`) and one
 `other_profile_mismatch`/`other_scope_mismatch` catch-all for any field not
 individually enumerated — so a future `PROFILE_FIELD_KEYS`/
@@ -274,28 +293,46 @@ promotes existing internal evidence to a stable public field, adds no new
 detection logic. Report-schema version bump per the existing
 `REPORT_SCHEMA_VERSION` convention (ADR-047 §7 / ADR-055 D3's registry).
 
-**Files:** `abicheck/comparability.py` (`ProfileMismatchError`/
-`ScopeMismatchError` carry the specific mismatched field(s), not just a
-rendered message, so `code` can be derived without re-parsing text),
-`abicheck/cli_compare_helpers.py` (`_report_not_comparable` emits `code`),
-`abicheck/cli_compare_release.py` (its own `"reason": {...}` construction
-site gets the same field), `abicheck/mcp_server.py` (`abi_compare`'s
-`{"status": "not_comparable", "reason": ...}` path), `abicheck/schemas/
-__init__.py` (schema version bump + field registration), `docs/reference/
-change-kinds.md` or a new `docs/reference/comparability-reason-codes.md`
-(document the closed enum — new page only if it doesn't fit as a section of
-an existing comparability doc; check `docs/use/contract-evaluation.md` and
-`docs/reference/compatibility-evaluation-config.md` first per `docs/
-AGENTS.md`'s "extend an existing canonical owner" rule before creating one).
+MCP's `abi_compare` tool needs its own, separate treatment, not a
+copy-the-CLI-field assumption: its `not_comparable` envelope emits
+`"reason"` as a bare **string** (`str(exc)`, `mcp_server.py`), not an
+object — adding `codes` there cannot mean mutating `reason`'s type without
+breaking existing MCP consumers. Add a new sibling field,
+`reason_codes` (array, same enum, same derivation), alongside the existing
+string `reason`, and leave `reason` itself untouched — this is an additive,
+backward-compatible envelope change, not a type migration, and should be
+implemented and tested as such.
 
-**Tests:** `tests/test_comparability_gate.py` (extend with `code`
-assertions covering every `PROFILE_FIELD_KEYS`/`SCOPE_FIELD_KEYS` entry,
-each exception carve-out, and the fallback code for an unrecognized
-field — one case each, not just the two current coarse kinds);
-`tests/test_report_schema_receipt.py`-style version-bump check if one
-exists for this schema family; a test asserting `abi_compare`'s MCP
-`not_comparable` path emits the identical `code` the CLI does (ADR-055 D4's
-"one shared implementation" invariant, applied to this new field).
+**Files:** `abicheck/comparability.py` (`ProfileMismatchError`/
+`ScopeMismatchError` carry the specific mismatched field(s) as structured
+data, not just a rendered message, so `codes` can be derived without
+re-parsing text — and so a multi-field mismatch keeps every field, not just
+the first one hit), `abicheck/cli_compare_helpers.py`
+(`_report_not_comparable` emits `codes`), `abicheck/cli_compare_release.py`
+(its own `"reason": {...}` construction site gets the same field),
+`abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
+"reason": ..., "reason_codes": [...]}` — additive sibling field, `reason`
+unchanged), `abicheck/schemas/__init__.py` (schema version bump + field
+registration), `docs/reference/change-kinds.md` or a new `docs/reference/
+comparability-reason-codes.md` (document the closed enum — new page only
+if it doesn't fit as a section of an existing comparability doc; check
+`docs/use/contract-evaluation.md` and `docs/reference/
+compatibility-evaluation-config.md` first per `docs/AGENTS.md`'s "extend an
+existing canonical owner" rule before creating one).
+
+**Tests:** `tests/test_comparability_gate.py` (extend with `codes`
+assertions covering every `PROFILE_FIELD_KEYS`/`_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`/
+`SCOPE_FIELD_KEYS` entry, each exception carve-out, and the fallback code
+for an unrecognized field — one single-cause case each, **plus** at least
+one dedicated multi-field-mismatch case asserting `codes` contains every
+simultaneously-mismatched field, not just the two current coarse kinds and
+not just single-cause cases); `tests/test_report_schema_receipt.py`-style
+version-bump check if one exists for this schema family; a test asserting
+`abi_compare`'s MCP `not_comparable` path emits `reason_codes` matching the
+CLI's `codes` for the same mismatch (ADR-055 D4's "one shared
+implementation" invariant, applied to this new field) while leaving its
+existing string `reason` field's shape unchanged (an explicit
+backward-compatibility regression test, not just a new-field test).
 
 **Docs:** whichever comparability doc the field lands in, plus a
 changelog fragment (`### Added`).

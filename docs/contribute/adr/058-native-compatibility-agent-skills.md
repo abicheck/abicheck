@@ -491,23 +491,27 @@ dependencies/surface without strong justification":
   trial-and-error. This is a small, additive, read-only command that clears
   AGENTS.md's CLI-command admission bar (ADR-054 D6) — see G36 P0.4 for the
   full six-criterion check.
-- **A finer-grained `reason.code` on the existing `not_comparable` object.**
-  Rather than inventing a new top-level block, extend the existing `reason`
-  object with a `code` field: a documented, closed enum covering every
-  `PROFILE_FIELD_KEYS`/`SCOPE_FIELD_KEYS` mismatch cause
-  `comparability.py` already checks (`compiler_family`, `compiler_version`,
-  `abi_dialect`, `language_standard`, `target_triple`/`pointer_width`/
-  `endianness`, `macro_ops`, `pass_through_flags`, `include_sequence`/
-  `header_sequence`, `headers`/`public_header_dirs`, plus scope/manifest
-  fields), each mapped to a stable code, with an explicit
-  `other_profile_mismatch`/`other_scope_mismatch` fallback for any field
-  not individually enumerated (so a future `SCOPE_FIELD_KEYS` addition
-  degrades to a generic-but-still-typed code instead of silently emitting
-  nothing) — never collapsed to the two coarse existing `kind` values a
-  skill would otherwise have to re-derive the real cause from free text.
-  This is a report-schema addition (a `SCHEMA_VERSION`-gated field), not a
-  new command; see G36 P0.5 for the exact field-by-field mapping and test
-  matrix.
+- **A finer-grained `reason.codes` array on the existing `not_comparable`
+  object.** Rather than inventing a new top-level block, extend the
+  existing `reason` object with a `codes` field — an array, since
+  `check_contracts_comparable` can raise on multiple simultaneously
+  mismatched fields (e.g. `compiler_family` and `abi_dialect` both
+  differing at once) and a singular code would force discarding a cause or
+  inventing an arbitrary precedence. Values are a documented, closed enum
+  covering every `PROFILE_FIELD_KEYS`/`_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`
+  (including the DPC++-only `frontend_context_kind`)/`SCOPE_FIELD_KEYS`
+  mismatch cause `comparability.py` already checks, each mapped to a stable
+  code, with an explicit `other_profile_mismatch`/`other_scope_mismatch`
+  fallback for any field not individually enumerated (so a future
+  `SCOPE_FIELD_KEYS` addition degrades to a generic-but-still-typed code
+  instead of silently emitting nothing) — never collapsed to the two
+  coarse existing `kind` values a skill would otherwise have to re-derive
+  the real cause from free text. MCP's `abi_compare` envelope emits
+  `reason` as a bare string today, not an object, so its own counterpart
+  is an additive sibling field (`reason_codes`) alongside the unchanged
+  string `reason`, not a type migration. This is a report-schema addition
+  (a `SCHEMA_VERSION`-gated field), not a new command; see G36 P0.5 for the
+  exact field-by-field mapping and test matrix.
 - Every other candidate capability considered (finding/root-cause querying,
   project discovery, baseline-candidate discovery) is **P1, contingent on
   the P0 skills actually needing it in practice** — not committed here. In
