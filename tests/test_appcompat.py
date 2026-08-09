@@ -2471,13 +2471,20 @@ class TestMergeConsumerImpactPaths:
 
     def test_non_primary_entry_paths_become_alternatives(self):
         """Two matches that share the SAME root: the non-primary's own
-        path is a valid alternative for that root, so it is folded in."""
+        path is a valid alternative for that root, so it is folded in.
+
+        Both edges start at the SAME node id ("a") -- not just the same
+        display label (Codex review, fresh evidence: an earlier version of
+        this test used two DIFFERENT node ids ("a"/"b") sharing one label
+        to model "same root", which is exactly the label-vs-node-identity
+        conflation _merge_consumer_impact_paths must not make, since
+        distinct nodes commonly share a label for C++ overloads)."""
         from abicheck.appcompat import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         edge_a = GraphEdge(src="a", dst="foo", kind="DECL_CALLS_DECL")
-        edge_b = GraphEdge(src="b", dst="bar", kind="DECL_CALLS_DECL")
+        edge_b = GraphEdge(src="a", dst="bar", kind="DECL_CALLS_DECL")
         first = ConsumerImpactPath(
             consumer="app",
             symbol="foo",
@@ -2558,6 +2565,39 @@ class TestMergeConsumerImpactPaths:
         assert merged.entry_path == [primary_edge]
         assert [same_root_alt] in merged.alternative_entry_paths
         assert [other_root_alt] not in merged.alternative_entry_paths
+
+    def test_non_primary_root_comparison_uses_node_id_not_label(self):
+        """Codex review, fresh evidence: distinct public-entry nodes can
+        share one display label -- C++ overloads are the common case -- so
+        comparing m.public_entries[0] (a label) against the primary's own
+        label is not proof m's path starts at the SAME graph node. Two
+        matches here share the label "run" but their entry_path edges
+        start at genuinely different node ids (entry_A vs entry_B); the
+        non-primary match must NOT be folded in as a same-rooted
+        alternative just because the labels collide."""
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        primary_edge = GraphEdge(src="entry_A", dst="foo", kind="DECL_CALLS_DECL")
+        overload_edge = GraphEdge(src="entry_B", dst="bar", kind="DECL_CALLS_DECL")
+        primary = ConsumerImpactPath(
+            consumer="app",
+            symbol="foo",
+            public_entries=("run",),
+            entry_path=[primary_edge],
+        )
+        # Same label "run", but a DIFFERENT graph node (entry_B, an
+        # overload of "run" sharing its display name with entry_A).
+        overload = ConsumerImpactPath(
+            consumer="app",
+            symbol="bar",
+            public_entries=("run",),
+            entry_path=[overload_edge],
+        )
+        merged = _merge_consumer_impact_paths([primary, overload])
+        assert merged.entry_path == [primary_edge]
+        assert [overload_edge] not in merged.alternative_entry_paths
 
     def test_symbol_entry_and_path_come_from_the_same_match(self):
         """The exact contradiction Codex flagged: the first match is

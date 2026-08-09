@@ -1200,12 +1200,28 @@ def _merge_consumer_impact_paths(
     # "confident but wrong" shape this module otherwise never allows, so a
     # differently-rooted match's own path is left out of the merged
     # alternatives rather than mislabeled.
+    #
+    # Compares by the actual graph node id (entry_path[0].src) whenever BOTH
+    # sides have a walked path, not by display label (Codex review, fresh
+    # evidence): distinct public-entry nodes can share one display label --
+    # C++ overloads are the common case -- so a label match alone does not
+    # prove m's path starts at the SAME node primary's does. Falls back to
+    # the label comparison only when one side has no entry_path at all (a
+    # *direct* match, whose declaration-is-the-entry "path" has no edge to
+    # read a node id from) -- the label is the only signal available then,
+    # same as before this fix.
     primary_root = primary.public_entries[0] if primary.public_entries else None
+
+    def _same_root(m: ConsumerImpactPath) -> bool:
+        if m.entry_path and primary.entry_path:
+            return m.entry_path[0].src == primary.entry_path[0].src
+        return bool(m.public_entries) and m.public_entries[0] == primary_root
+
     alternatives = []
     for m in matches:
         if m is primary:
             continue
-        same_root = bool(m.public_entries) and m.public_entries[0] == primary_root
+        same_root = _same_root(m)
         if m.entry_path and same_root:
             alternatives.append(m.entry_path)
         if same_root:

@@ -50,3 +50,13 @@
   recomputes an id when the stored value is empty — silently describing
   the join's different content under an unrelated, stale id. Fixed by
   clearing `joined.graph_id` before returning.
+- **`appcompat._merge_consumer_impact_paths`'s non-primary same-root check
+  now compares graph node ids, not display labels** (Codex review, fresh
+  evidence): distinct public-entry nodes can share one display label (C++
+  overloads are the common case), so `m.public_entries[0] ==
+  primary_root` alone did not prove a non-primary match's walked path
+  actually started at the same node as the primary's — it could fold in
+  an unrelated overload's path and have it serialized under the primary's
+  root. Now compares `entry_path[0].src` node ids whenever both sides have
+  a walked path, falling back to the label comparison only when one side
+  is a direct match with no path to read a node id from.
