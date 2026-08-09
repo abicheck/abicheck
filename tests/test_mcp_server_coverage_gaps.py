@@ -406,6 +406,33 @@ class TestAbiScanSet:
         assert captured["mode"] == "audit"
         assert captured["bundle_system_providers"] == ("libexternal.so",)
 
+    def test_successful_response_redacts_per_artifact_paths(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # P2 regression (Codex review, fresh evidence): ScanArtifactResult.
+        # to_dict()'s "artifact" field is the server-resolved absolute path
+        # too -- a successful call must not disclose it any more than the
+        # error paths above do.
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _fake(req, timeout):
+            return {
+                "verdict": "COMPATIBLE",
+                "exit_code": 0,
+                "per_artifact": [
+                    {"artifact": str(a.resolve()), "verdict": "COMPATIBLE"},
+                    {"artifact": str(b.resolve()), "verdict": "COMPATIBLE"},
+                ],
+            }
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _fake)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "ok"
+        artifacts = {entry["artifact"] for entry in data["per_artifact"]}
+        assert artifacts == {"liba.so", "libb.so"}
+        assert str(tmp_path) not in json.dumps(data)
+
     def test_forwards_headers_and_checks_their_size(self, tmp_path: Path, monkeypatch):
         a = _fake_elf(tmp_path, "liba.so")
         b = _fake_elf(tmp_path, "libb.so")

@@ -482,6 +482,13 @@ def abi_scan_set(
                 }
             )
         bin_paths = [_safe_read_path(p, label="artifact_paths") for p in artifact_paths]
+        # Resolved absolute path -> caller-supplied basename, reused by both
+        # the ArtifactSetError-message and per_artifact-response redaction
+        # below (Codex review): built once so both paths agree.
+        resolved_to_name = {
+            str(resolved): Path(orig).name
+            for orig, resolved in zip(artifact_paths, bin_paths)
+        }
         for p in bin_paths:
             if not p.exists():
                 # No resolved path in the message (Codex review): unlike
@@ -568,11 +575,19 @@ def abi_scan_set(
             # same disclosure concern the missing-artifact check above
             # already guards against.
             msg = str(exc)
-            for orig, resolved in zip(artifact_paths, bin_paths):
-                msg = msg.replace(str(resolved), Path(orig).name)
+            for resolved, name in resolved_to_name.items():
+                msg = msg.replace(resolved, name)
             elapsed = _time.monotonic() - t0
             _audit_log("abi_scan_set", {"artifacts": ",".join(names)}, elapsed, "error")
             return json.dumps({"status": "error", "error": msg})
+
+        # Same redaction on the success path (Codex review, fresh evidence):
+        # ScanArtifactResult.to_dict()'s "artifact" field is the resolved
+        # Path too, so every per_artifact entry would otherwise disclose the
+        # server working-directory layout on every successful call.
+        for entry in payload.get("per_artifact", []):
+            if isinstance(entry, dict) and entry.get("artifact") in resolved_to_name:
+                entry["artifact"] = resolved_to_name[entry["artifact"]]
 
         elapsed = _time.monotonic() - t0
         _audit_log("abi_scan_set", {"artifacts": ",".join(names)}, elapsed, "ok")
