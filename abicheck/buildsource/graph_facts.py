@@ -84,6 +84,41 @@ CONSUMER_EDGE_KINDS: frozenset[str] = frozenset(
     }
 )
 
+#: The use-case half of the graph vocabulary (G29 Phase 4 slice 2, ADR-057
+#: amendment) — ``source_graph.NODE_KINDS``/``EDGE_KINDS`` union these in the
+#: same way ``CONSUMER_NODE_KINDS``/``CONSUMER_EDGE_KINDS`` above are unioned
+#: in, and ``abicheck.impact.use_cases`` (which populates them) re-exports
+#: them. Same two reasons for living in this leaf module rather than beside
+#: the rest of the vocabulary: ``source_graph.py`` is at its 2000-line hard
+#: cap, and the producer imports ``source_graph`` (function-local, to avoid a
+#: cycle), so ``source_graph`` cannot import the producer back.
+#:
+#: A ``use_case``/``test_case`` node is declared by an optional, hand-authored
+#: ``impact-use-cases.yaml`` manifest — deliberately a **separate** schema
+#: from ``docs/contribute/usecase-registry.yaml`` (which tracks abicheck's own
+#: feature coverage, not a consumer project's business use cases; conflating
+#: the two would read "abicheck supports header-only analysis" and "the DAL
+#: training workflow uses ``train()``" as the same kind of fact).
+#:
+#: Only ``USE_CASE_USES_ENTRY`` and ``TEST_COVERS_USE_CASE`` are populated in
+#: this slice, both from the manifest alone. ``TRACE_OBSERVED_ENTRY``/
+#: ``TRACE_OBSERVED_EDGE`` are **reserved** — same "registered so a hand-built
+#: or newer graph naming one is never rejected, but no normalized data source
+#: yet" pattern ``CONSUMER_INSTANTIATES_DECL`` etc. use above: runtime-trace
+#: ingestion is explicitly out of scope for this slice (ADR-057's
+#: "Deliberately not implemented this slice" — absence of a trace must never
+#: read as "not used", a semantics decision with no data to validate against
+#: yet).
+USE_CASE_NODE_KINDS: frozenset[str] = frozenset({"use_case", "test_case"})
+USE_CASE_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "USE_CASE_USES_ENTRY",
+        "TEST_COVERS_USE_CASE",
+        "TRACE_OBSERVED_ENTRY",
+        "TRACE_OBSERVED_EDGE",
+    }
+)
+
 
 def _precedence_key(fact: GraphFact) -> tuple[int, str, str]:
     """Deterministic total order over facts: highest confidence first, tie

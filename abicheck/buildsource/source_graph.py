@@ -59,6 +59,8 @@ from .graph_facts import (
     CONF_UNKNOWN as CONF_UNKNOWN,
     CONSUMER_EDGE_KINDS,  # G29 Phase 4 (ADR-057)
     CONSUMER_NODE_KINDS,
+    USE_CASE_EDGE_KINDS,  # G29 Phase 4 slice 2 (ADR-057 amendment)
+    USE_CASE_NODE_KINDS,
     FactConflict as FactConflict,
     GraphEdge as GraphEdge,
     GraphFact as GraphFact,
@@ -112,16 +114,9 @@ NODE_KINDS: frozenset[str] = frozenset(
         "toolchain",
         "generated_file",
         "external_dependency",
-        # ADR-041 P1 #2: object/link provenance (a symbol change attributed
-        # to "which object/archive member/link step", not only "which
-        # target"). object_file/static_library/version_script are populated
-        # from BuildEvidence.compile_units/link_units below;
-        # archive_member/linker_script/export_map/comdat_group are reserved
-        # for a future archive/linker-artifact introspection extractor (no
-        # normalized data source yet — same "reserved, not yet populated"
-        # pattern this ADR's own P0 slice 1 used for the edge kinds it later
-        # filled in), so an inputs-pack/hand-built graph naming one is never
-        # rejected.
+        # ADR-041 P1 #2: object/link provenance (a symbol change attributed to "which object/archive member/link step", not only "which target"). object_file/static_library/version_script are populated
+        # from BuildEvidence.compile_units/link_units below; archive_member/linker_script/export_map/comdat_group are reserved for a future archive/linker-artifact introspection extractor (no normalized
+        # data source yet — same "reserved, not yet populated" pattern this ADR's own P0 slice 1 used for the edge kinds it later filled in), so an inputs-pack/hand-built graph naming one is never rejected.
         "object_file",
         "archive_member",
         "static_library",
@@ -129,7 +124,9 @@ NODE_KINDS: frozenset[str] = frozenset(
         "version_script",
         "export_map",
         "comdat_group",
-    } | CONSUMER_NODE_KINDS
+    }
+    | CONSUMER_NODE_KINDS
+    | USE_CASE_NODE_KINDS
 )
 
 #: Edge kinds the graph schema understands (ADR-031 D2).
@@ -168,7 +165,9 @@ EDGE_KINDS: frozenset[str] = frozenset(
         # already creates.
         "ARCHIVE_CONTAINS_OBJECT",
         "OBJECT_DEFINES_SYMBOL",
-    } | CONSUMER_EDGE_KINDS
+    }
+    | CONSUMER_EDGE_KINDS
+    | USE_CASE_EDGE_KINDS
 )
 
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
