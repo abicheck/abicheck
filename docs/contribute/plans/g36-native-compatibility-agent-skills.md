@@ -194,7 +194,11 @@ identifying which `shared/*.md` fragments are used, and resolve this
 **transitively** — a copied `shared/*.md` fragment can itself reference
 another `shared/*.md` fragment, so keep resolving until a fixed point,
 not just one pass; (2) copy the skill's own `SKILL.md` and `references/`
-verbatim into `.agents/skills/<name>/`; (3) copy (not symlink) each cited
+verbatim into `.agents/skills/<name>/`, then produce the same tree again at
+`.claude/skills/<name>/` (a second output root from the same resolved
+content, not a second hand-authored copy — per ADR-058's "packaging
+targets, not separate source" rule) so this repository's own Claude Code
+sessions have something to scan; (3) copy (not symlink) each cited
 `shared/*.md` fragment (transitively resolved per above) into
 `.agents/skills/<name>/references/shared/`, rewriting every referencing
 file's internal link — `SKILL.md`'s, each `references/*.md` file's, and
@@ -239,9 +243,15 @@ drift" requirement, applied to a new artifact family.
 `script-inventory` AI-readiness check warns on any `scripts/*.py` not
 listed there, and a generator this load-bearing is exactly the kind of
 maintenance entry point that check exists to keep discoverable);
-`.agents/skills/**` (generated output, committed); `scripts/verify.py`
+`.agents/skills/**` (the authoritative generated output, committed) **and
+`.claude/skills/**` (the generated packaging-target copy for this
+repository's own dogfooded Claude Code use, per ADR-058's source-of-truth
+model — also committed, not left as an untracked manual copy: without it,
+Claude Code has nothing to scan in this repository at all, since it does
+not read `.agents/skills`)**; `scripts/verify.py`
 (new step, `agent-skills-generated`, wired into the `pr` profile alongside
-the existing generated-doc regeneration checks).
+the existing generated-doc regeneration checks — covering drift in both
+generated trees, not just `.agents/skills/`).
 
 **Tests:** `tests/test_gen_agent_skills.py` — idempotency (running the
 generator twice produces identical output), dead-fragment detection,
