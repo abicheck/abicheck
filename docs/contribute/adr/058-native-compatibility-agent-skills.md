@@ -415,9 +415,13 @@ skills-src/                              # editable source (this repo, DRY)
     references/
 ```
 
-- `.agents/skills/` is the **authoritative publication target** — validated
-  by the ecosystem research as the one location every P0 target agent reads
-  without vendor-specific configuration. It is generated, not hand-edited;
+- `.agents/skills/` is the **authoritative publication target for the
+  clients that document it** — validated by the ecosystem research as the
+  one location Copilot, Codex, Cursor, and Gemini CLI each read without
+  vendor-specific configuration. Claude Code is the documented exception,
+  per "Canonical portable default" above: it does not scan `.agents/skills`
+  at all, so it depends on the generated `.claude/skills/` packaging target
+  below, not on this directory. It is generated, not hand-edited;
   a generator script (Layer C tooling, `scripts/gen_agent_skills.py` in the
   implementation plan) resolves each skill's `references:` manifest (which
   `shared/` fragments it actually uses) and copies/renders the result —
@@ -432,12 +436,14 @@ skills-src/                              # editable source (this repo, DRY)
   Claude Code plugin bundle, and any `skills.sh` listing are packaging
   targets, not separate source** — each is either (a) unnecessary, because
   the vendor already reads `.agents/skills/` directly (Copilot, Codex,
-  Cursor, Gemini CLI, per the ecosystem research), or (b) a thin copy/symlink
-  of the generated `.agents/skills/<name>/` tree produced by the same
-  generator, for a vendor directory that is scanned but not identical
-  (dogfooding this repository's own `.claude/skills/` alongside the
-  portable target, for instance). None of these hand-maintains its own
-  prose.
+  Cursor, Gemini CLI, per the ecosystem research), or (b) a thin **copy**
+  (never a symlink — the same self-containment invariant above applies to
+  every generated tree, not just `.agents/skills/`) of the generated
+  `.agents/skills/<name>/` tree, rendered by the same generator, for a
+  vendor directory that is scanned but not identical — `.claude/skills/` is
+  case (b), not case (a): Claude Code needs its own committed copy (see
+  above), it is not merely "dogfooded alongside" the portable target as an
+  optional convenience. None of these hand-maintains its own prose.
 - **abicheck/abicheck stays the single authoritative repository.** Nothing
   in this model requires a second repository; `skills-src/` and
   `.agents/skills/` are ordinary tracked directories in this repo, gated by

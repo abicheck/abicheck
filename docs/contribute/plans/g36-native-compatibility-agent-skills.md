@@ -362,15 +362,25 @@ resolved, whichever design ships lands with `tests/test_cli_root_surface.py`
 PR per the bar's own sixth criterion (if path (a) is chosen) or the
 equivalent flag-level tests (if path (b) is chosen).
 
-**Files:** `abicheck/cli.py` — `info` is a small, one-function, no-operand
-command with no significant helpers, so `AGENTS.md`'s "Adding a new
-top-level command" convention places it directly in `cli.py` with
-`@main.command(...)`, not in a sibling `cli_<name>.py` module (that split
-is reserved for a larger command or command group, which `info` is
-neither); `tests/test_cli_root_surface.py` (extend the pinned
-root-command-set assertion to include `info`); `README.md` ("Which command
-do I need?" table gets one more row); `docs/reference/cli-reference.md`
-(regenerated).
+**Files, conditional on which design the maintainer decision above
+selects — the two paths are not interchangeable file lists, so don't apply
+both:**
+- **If path (a), a new `info` root command:** `abicheck/cli.py` — `info` is
+  a small, one-function, no-operand command with no significant helpers, so
+  `AGENTS.md`'s "Adding a new top-level command" convention places it
+  directly in `cli.py` with `@main.command(...)`, not in a sibling
+  `cli_<name>.py` module (that split is reserved for a larger command or
+  command group, which `info` is neither); `tests/test_cli_root_surface.py`
+  (extend the pinned root-command-set assertion to include `info`);
+  `README.md` ("Which command do I need?" table gets one more row);
+  `docs/reference/cli-reference.md` (regenerated).
+- **If path (b), extending `--version --format json`:** `abicheck/cli.py`
+  — replace the built-in `click.version_option` with a custom eager
+  callback; no root-command surface changes at all, so
+  `tests/test_cli_root_surface.py`'s pinned set is untouched (adding `info`
+  there would assert a command that was never created) and `README.md`'s
+  command table gets no new row — this design's only surface change is to
+  `--version`'s own existing flag-level behavior/tests.
 
 **Tests:** `tests/test_cli_info.py` — JSON shape, schema-version values
 match `serialization.SCHEMA_VERSION`/the report-schema constant at import
@@ -1085,11 +1095,11 @@ signature, struct layout drift, enum value change, vtable change,
 API-only break, different compile profiles, public/private scope false
 positive, incomplete evidence, profile-specific finding — for each, drive
 the relevant P0 skill end-to-end against the case's old/new fixture, and
-grade against ADR-058's five-point rubric (correct workflow choice,
+grade against ADR-058's six-point rubric (correct workflow choice,
 preserved uncertainty, deterministic evidence obtained where appropriate,
-root-cause explanation, appropriate remediation proposed, no compatibility
-claim without sufficient evidence) rather than only "did it invoke
-abicheck." **Non-comparable snapshots, consumer-unaffected-despite-
+root-cause explanation, appropriate remediation proposed, and no
+compatibility claim without sufficient evidence — six independently graded
+dimensions, not five) rather than only "did it invoke abicheck." **Non-comparable snapshots, consumer-unaffected-despite-
 global-break, consumer-actually-affected, plugin required-symbol loss, and
 missing matrix target are a different, second category** — `ground_truth.json`'s
 per-case entries carry verdict/finding metadata for a single old/new
