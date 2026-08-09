@@ -668,6 +668,29 @@ class AbiSnapshot:
     # (Codex review, PR #582).
     header_cv_facts_reliable: bool = field(default=True, kw_only=True)
 
+    # True when this snapshot's deprecated (every surface kind) and
+    # EnumType.is_scoped facts are known-reliable when its own
+    # ``ast_producer`` is ``"clang"`` -- G31 Phase C (schema v19) wired real
+    # extraction of both into the direct-clang backend, previously
+    # unconditionally None/False. Same "real but WRONG data" shape as
+    # ``header_cv_facts_reliable`` above: a pre-v19 clang-producer snapshot's
+    # ``deprecated=None``/``is_scoped=False`` is indistinguishable by value
+    # alone from a genuine "not deprecated"/"not scoped" fact, so only a
+    # snapshot-level marker can tell them apart. False only for a snapshot
+    # rehydrated from a persisted pre-v19, clang-producer schema (see
+    # serialization.SCHEMA_VERSION); a freshly-built in-memory snapshot
+    # defaults True, since it was necessarily produced by the current, fixed
+    # parser. Does NOT need to be checked for "castxml" or "hybrid"
+    # producers: castxml's own deprecated/is_scoped extraction predates this
+    # field entirely (G28 Phase 1, always reliable), and a hybrid snapshot's
+    # per-declaration ``fact_provenance`` already resolves to "castxml" for
+    # these two facts under the OLD (pre-fix) merge code — the old
+    # backfill's own "prefer castxml, backfill from clang only when
+    # castxml's own value is null" policy always recorded "castxml"
+    # provenance for a fact clang could never populate, so a legacy hybrid
+    # snapshot carries no equivalent false-reliability risk.
+    clang_deprecation_facts_reliable: bool = field(default=True, kw_only=True)
+
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.
     # Populated by detect_platform() in pipeline or by the dumper.

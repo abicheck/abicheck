@@ -335,7 +335,55 @@ building a second identity-resolution mechanism from scratch.
   or reworking `_dedup_exact`'s key) has a blast radius across every
   bare-name-keyed detector in `diff_types.py`/`diff_symbols.py`/
   `diff_layout.py` alike — its own scoped follow-up, not a drive-by
-  extension of the matching fix.
+  extension of the matching fix. Re-flagged by Codex in a later review
+  round on the same PR; no new code fix applied (the reasoning above still
+  holds — a real fix needs the codebase-wide `Change.symbol` convention
+  change, not a local patch), but `diff_layout._diff_layout_descriptor`'s
+  own `name = new_rec.name` line now carries an inline comment stating this
+  deferral directly at the source, so a future reader doesn't have to find
+  this plan doc to rediscover it.
+
+  **Two more real gaps found in the very next review round on the same
+  fix** (Codex review, fresh evidence): both are cross-producer schema
+  bookkeeping gaps, not detector logic bugs. (1) `SCHEMA_VERSION` was not
+  bumped alongside wiring real clang-side `deprecated`/`is_scoped`
+  extraction — following the same precedent `header_cv_facts_reliable`
+  (schema v9) already established for the mirror-image castxml case: a
+  snapshot serialized under an *older* schema version, on the clang header
+  path, has `deprecated`/`is_scoped` values that were never actually
+  extracted (always `None`/absent from before this fix), and reloading
+  that JSON without a version gate would let `fact_producer()` claim those
+  stale `None`s are a reliably-known "not deprecated"/"not scoped" answer
+  — a real cross-producer detector could then fire a false
+  `FUNC_DEPRECATED_ADDED`/-`REMOVED` purely from re-loading old data, not a
+  genuine transition. Fixed by bumping `SCHEMA_VERSION` to **19** and
+  adding a new `AbiSnapshot.clang_deprecation_facts_reliable: bool` field
+  (default `True`, mirroring `header_cv_facts_reliable`'s exact shape) plus
+  a `_MIN_SCHEMA_VERSION_FOR_CLANG_DEPRECATION_FACTS = 19` gate in
+  `serialization.snapshot_from_dict` — a legacy clang-header snapshot
+  predating v19 loads as unreliable (prefers the explicit dict key on
+  round-trip, same "don't silently heal an already-known-unreliable
+  reserialized snapshot" precedent). `fact_provenance.fact_producer()`
+  gates on it narrowly, by key suffix (`:deprecated`/`:is_scoped` only,
+  not `:param_defaults` or any other fact), so the two flags stay
+  independent. Deliberately *not* needed for castxml or hybrid: castxml's
+  own extraction has been reliable since G28 Phase 1 (well before this
+  PR), and `merge_snapshots()`'s pre-fix backfill always stamped these two
+  facts' `fact_provenance` as `"castxml"` even under the old code, so no
+  legacy hybrid snapshot can carry a stale clang-attributed answer for
+  them. (2) `tests/test_castxml_clang_parity_gate.py`'s
+  `test_deprecated_attribute_is_expected_producer_difference` still
+  asserted the *pre*-Phase-C behavior (`Parity.UNSUPPORTED_ON_ONE_PRODUCER`
+  from `unsupported_on_clang=True`) — a real, `integration`-marked CI
+  failure only surfaced once the `integration-tests` job actually ran real
+  castxml+clang+gcc (not reproducible in a sandbox lacking those tools;
+  found by reading the CI job's own log output). Fixed by renaming it to
+  `test_deprecated_attribute_now_agrees_across_producers` and asserting
+  `Parity.EQUAL` on a plain `classify()` call with no `unsupported_on_clang`
+  flag, plus updating `classify()`'s own docstring (which still listed
+  `Function.deprecated` in its "clang structurally cannot populate this"
+  example list) to note the capability gap closed and callers should no
+  longer pass the flag for this fact.
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

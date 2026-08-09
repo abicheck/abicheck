@@ -32,4 +32,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   identity instead of the bare declaration name, so two distinct types
   sharing only a bare leaf name in different namespaces (e.g. `a::Foo` /
   `b::Foo`) no longer collide.
+- **Snapshot schema bumped to v19** to gate the clang-side `deprecated`/
+  `is_scoped` extraction above: a snapshot serialized on the
+  `--ast-frontend clang` header path under an older schema version never
+  actually extracted these two facts, so reloading it now correctly marks
+  them unreliable (`AbiSnapshot.clang_deprecation_facts_reliable`,
+  mirroring `header_cv_facts_reliable`'s existing v9 pattern) instead of
+  treating a stale `None` as a trustworthy "not deprecated"/"not scoped"
+  answer.
 

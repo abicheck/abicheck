@@ -176,10 +176,30 @@ from .model import (
 #     differing tag; a `None` on either side is left unchecked on this axis
 #     (see `AbiSnapshot.dependency_scope`'s own docstring for the full
 #     reasoning).
-SCHEMA_VERSION: int = 18
+# v19: the direct-clang (`--ast-frontend clang`) L2 header backend started
+#     populating `Function`/`Variable`/`TypeField`/`RecordType`/
+#     `EnumType.deprecated` and `EnumType.is_scoped` (G31 Phase C -- see
+#     `dumper_clang._clang_deprecated_message`/the enum "scopedEnumTag"
+#     handling), both previously castxml-only. Like v9's CV facts, a pre-v19
+#     CLANG-producer snapshot has real but WRONG data here -- every one of
+#     these fields is unconditionally `None`/`False`, indistinguishable by
+#     value alone from a genuine "not deprecated"/"not scoped" fact. Unlike
+#     v9 (scoped to castxml), this only affects the `clang`/`hybrid`
+#     producer path -- a pre-v19 CASTXML-producer snapshot's own value for
+#     these facts was always reliable (G28 Phase 1). `snapshot_from_dict`
+#     marks such a snapshot's `AbiSnapshot.clang_deprecation_facts_reliable`
+#     False so `fact_provenance.fact_producer` can decline to trust it,
+#     instead of misreporting a false `*_DEPRECATED_ADDED`/`ENUM_BECAME_SCOPED`
+#     purely from a tool upgrade comparing a legacy clang-backed snapshot to
+#     a fresh dump of unchanged headers (Codex review, fresh evidence).
+SCHEMA_VERSION: int = 19
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
+
+# Schema version at which the direct-clang backend's deprecated/is_scoped
+# facts became reliable (see v19 above).
+_MIN_SCHEMA_VERSION_FOR_CLANG_DEPRECATION_FACTS = 19
 
 # ADR-050 D1 — the schema version at which a verdict-blocking field
 # (``AbiSnapshot.contract``) was first introduced. This constant only takes
@@ -1018,6 +1038,25 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CV_FACTS
         )
 
+    if "clang_deprecation_facts_reliable" in d:
+        # Same round-trip-stability reasoning as header_cv_facts_reliable
+        # above: trust an explicit marker over re-deriving from
+        # schema_version, since a load -> save -> load round-trip always
+        # re-stamps schema_version to the CURRENT SCHEMA_VERSION.
+        clang_deprecation_facts_reliable_value = bool(
+            d["clang_deprecation_facts_reliable"]
+        )
+    else:
+        # Only the clang/hybrid producer path is affected -- a castxml (or
+        # a from-scratch, non-header) snapshot's own deprecated/is_scoped
+        # values were always reliable (G28 Phase 1), regardless of
+        # schema_version (v19 above).
+        clang_deprecation_facts_reliable_value = (
+            not from_headers
+            or ast_producer_value != "clang"
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_DEPRECATION_FACTS
+        )
+
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
@@ -1107,6 +1146,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # from schema_version scoped to the CastXML header path specifically
         # (Codex review, PR #582).
         header_cv_facts_reliable=header_cv_facts_reliable_value,
+        # See clang_deprecation_facts_reliable_value's computation above:
+        # prefers an explicit dict key (round-trip stability) and otherwise
+        # derives from schema_version, scoped to the clang-producer path
+        # specifically (Codex review, fresh evidence).
+        clang_deprecation_facts_reliable=clang_deprecation_facts_reliable_value,
         # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
         # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
         # loads as the empty dict (same "unknown" default as a fresh snapshot).

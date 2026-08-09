@@ -274,7 +274,16 @@ def _diff_layout_descriptor(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
 
         # Bare, not the qualified matching key — matches every other type
-        # detector's Change.symbol convention (see diff_types.py).
+        # detector's Change.symbol convention (see diff_types.py). This is a
+        # known, deliberately-deferred sharp edge: two distinct records that
+        # share the same bare name in different namespaces (already matched
+        # correctly above via the qualified TypeMap key) still emit findings
+        # under the same bare Change.symbol/name, so a downstream consumer
+        # keying off those alone (e.g. dedup) can't tell them apart. Fixing
+        # it needs a codebase-wide convention change to Change.symbol across
+        # diff_types.py/diff_symbols.py/diff_layout.py together, not a
+        # drive-by fix here — see the G31 Phase C plan doc for the full
+        # investigation and reasoning.
         name = new_rec.name
         changes.extend(_check_base_offsets(name, old_rec, new_rec))
         changes.extend(_check_vptr_introduced(name, old_rec, new_rec))

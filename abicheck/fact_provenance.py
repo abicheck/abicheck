@@ -123,14 +123,32 @@ def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
     ``--ast-frontend castxml``/``--ast-frontend clang`` run already does.
 
     - Not (confirmed) header-aware: None.
-    - ``ast_producer in ("castxml", "clang")``: that value unconditionally —
-      every fact on a single-backend snapshot came from that one backend.
+    - ``ast_producer == "clang"`` AND *key* is a ``deprecated``/``is_scoped``
+      fact AND ``snap.clang_deprecation_facts_reliable`` is False (a
+      snapshot persisted before schema v19/G31 Phase C): None — a legacy
+      clang-producer snapshot's value for exactly these two facts is real
+      but WRONG (unconditional None/False), not merely absent.
+    - ``ast_producer in ("castxml", "clang")`` (and the above didn't apply):
+      that value unconditionally — every fact on a single-backend snapshot
+      came from that one backend.
     - ``ast_producer == "hybrid"``: whatever the merge recorded for *key*
       (``None`` if neither backend's value made it into the map).
     - Anything else (``None``/unknown producer, legacy snapshot): None.
     """
     if not (snap.from_headers and not snap.from_headers_inferred):
         return None
+    if snap.ast_producer == "clang" and not snap.clang_deprecation_facts_reliable:
+        # G31 Phase C / schema v19 (Codex review, fresh evidence): a
+        # deprecated/is_scoped comparison against a snapshot persisted
+        # before the direct-clang backend genuinely extracted these facts
+        # cannot trust a "clang" producer tag for them -- every declaration
+        # on that legacy snapshot has real but WRONG data (an
+        # unconditional None/False, indistinguishable by value alone from
+        # a genuine "not deprecated"/"not scoped" fact). Scoped to exactly
+        # the two affected fact suffixes so this doesn't spuriously
+        # invalidate an unrelated multi-backend fact (e.g. param_defaults).
+        if key.endswith(":deprecated") or key.endswith(":is_scoped"):
+            return None
     if snap.ast_producer in ("castxml", "clang"):
         return snap.ast_producer
     if snap.ast_producer == "hybrid":
