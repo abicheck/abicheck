@@ -373,11 +373,54 @@ def build_contract_stage(
     # evaluate separately; conflating the two let an export-only stdlib
     # reference confirm a `--contract public` finding it has no bearing on
     # (Codex review, fresh evidence).
+    # `is not None`, not truthiness: `post_manifest.parse_manifest()`
+    # explicitly supports a manifest committing to *no* exports, and that
+    # empty allowlist actively scopes every concrete export out --
+    # `post_processing` itself branches on `is not None` for exactly that
+    # reason. Computed once here (not inline at each use site below) so both
+    # the scan's own seeding and the persisted `committed_exports` field
+    # agree on the identical allowlist.
+    committed_exports = (
+        frozenset(pp_ctx.public_surface_allowlist)
+        if pp_ctx.public_surface_allowlist is not None
+        else None
+    )
+    # `committed_roots=committed_exports`: a manifest-scoped run demotes any
+    # *export* finding whose symbol is not in the committed allowlist, but
+    # this scan's own seeding otherwise starts from every still-`PUBLIC`,
+    # header-committed declaration regardless -- an uncommitted-by-manifest
+    # function whose signature happens to mention a stdlib template type
+    # could still seed a direct-reference root and confirm an unrelated
+    # dependency-layout finding as `IN_CONTRACT`/`COMPLETE`, even though no
+    # *committed* export references that type at all (Codex review, fresh
+    # evidence; see `_is_public_non_stdlib_declaration`'s own docstring).
+    #
+    # A forced-public symbol (`--public-symbol`) must widen this same
+    # allowlist, not just `post_processing._run_allowlist`'s own filter pass
+    # (Codex review, fresh evidence): `--post-manifest --public-symbol api`
+    # with header scoping also on keeps a `Change` on the forced symbol as a
+    # widening overlay (`_run_allowlist` line ~341), but this scan's own
+    # seeding never consulted `force_public_symbols` at all, so an
+    # uncommitted-but-forced-public `api(vector<int>)` was rejected as a
+    # root here -- a real `std::vector` layout break under it classified
+    # `UNKNOWN_UNRESOLVED` instead of `IN_CONTRACT`, even though the same
+    # comparison without the manifest is correctly `BREAKING`. Gated on
+    # `scope_to_public_surface` to mirror `_run_allowlist`'s own condition
+    # exactly: the widening overlay is a header-scoping concept the CLI
+    # already warns is ignored under `--no-scope-public-headers`, so
+    # applying it here unconditionally would contradict that warning.
+    committed_roots = committed_exports
+    if (
+        committed_exports is not None
+        and scope_to_public_surface
+        and force_public_symbols
+    ):
+        committed_roots = committed_exports | frozenset(force_public_symbols)
     directly_referenced_stdlib_old = directly_referenced_stdlib_type_spellings(
-        old, exclude_export_only_roots=True
+        old, exclude_export_only_roots=True, committed_roots=committed_roots
     )
     directly_referenced_stdlib_new = directly_referenced_stdlib_type_spellings(
-        new, exclude_export_only_roots=True
+        new, exclude_export_only_roots=True, committed_roots=committed_roots
     )
 
     # ADR-049 Phase 3's observed provider ledger (plan Section 4.1).
@@ -410,19 +453,7 @@ def build_contract_stage(
         forced_public=(
             frozenset(force_public_symbols) if force_public_symbols else None
         ),
-        # `is not None`, not truthiness: `post_manifest.parse_manifest()`
-        # explicitly supports a manifest committing to *no* exports, and that
-        # empty allowlist actively scopes every concrete export out --
-        # `post_processing` itself branches on `is not None` for exactly that
-        # reason. Collapsing it to `None` here made the persisted ledger and
-        # configuration claim no manifest was selected at all, so the
-        # resulting exclusions cited header evidence instead of the manifest
-        # that caused them (Codex review, fresh evidence).
-        committed_exports=(
-            frozenset(pp_ctx.public_surface_allowlist)
-            if pp_ctx.public_surface_allowlist is not None
-            else None
-        ),
+        committed_exports=committed_exports,
     )
 
 
