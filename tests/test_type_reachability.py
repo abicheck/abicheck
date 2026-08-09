@@ -22,6 +22,8 @@ cap)."""
 
 from __future__ import annotations
 
+import sys
+
 from abicheck.diff_cxx_rules import owner_class_of
 from abicheck.model import (
     AbiSnapshot,
@@ -1526,16 +1528,33 @@ class TestNestedMatchesWithinTheSameSpellingIndex:
         Python call per nesting level in _finditer_allow_nested, raising
         RecursionError under Python's default 1,000-frame limit and
         aborting the whole comparison. An explicit stack has no such
-        limit."""
-        depth = 1000
-        inner = "X"
-        candidates = ["X"]
-        for i in range(depth, 0, -1):
-            inner = f"Wrapper{i}<{inner}>"
-            candidates.append(inner)
-        pattern = _compile_spelling_pattern(set(candidates))
-        matches = _finditer_allow_nested(pattern, inner)
-        assert len(matches) == len(candidates)
+        limit.
+
+        What matters is depth exceeding the recursion *limit in effect*,
+        not the real interpreter default -- temporarily lowering the limit
+        lets a much shallower (and much cheaper to build/compile) chain
+        exercise the same guarantee. At the original depth=1000 this test
+        was the single most expensive item in the whole unit suite
+        (~10-22s, dominated by compiling a regex alternation whose total
+        pattern text grows quadratically with depth); depth=150 against a
+        limit of 120 is >80x cheaper and proves the identical thing: an
+        explicit-stack search added no per-level recursion, so it never
+        approaches the frame ceiling regardless of where that ceiling
+        sits."""
+        original_limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(120)
+        try:
+            depth = 150
+            inner = "X"
+            candidates = ["X"]
+            for i in range(depth, 0, -1):
+                inner = f"Wrapper{i}<{inner}>"
+                candidates.append(inner)
+            pattern = _compile_spelling_pattern(set(candidates))
+            matches = _finditer_allow_nested(pattern, inner)
+            assert len(matches) == len(candidates)
+        finally:
+            sys.setrecursionlimit(original_limit)
 
     def test_explicit_end_bound_restricts_the_search_window(self) -> None:
         """Direct unit coverage for the explicit start/end window this
