@@ -1264,3 +1264,57 @@ class TestCachedAliasProvenancePropagatesToReachedRecords:
         )
         assert directly_referenced_stdlib_type_spellings(bad_first) == expected
         assert directly_referenced_stdlib_type_spellings(good_first) == expected
+
+
+class TestExactRecordKeyEnumCollisionGuard:
+    """Codex review, fresh evidence, second round: `_spelling_index`'s
+    enum-collision guard (`TestRecordIndexEnumCollisionGuard` above) only
+    covered a record's *derived* suffix -- a record whose own full identity
+    carries no namespace at all (already bare, structurally
+    indistinguishable from a derived suffix) was never checked against the
+    same enum-collision vocabulary at all."""
+
+    def test_a_global_records_exact_identity_colliding_with_an_enum_is_dropped(
+        self,
+    ) -> None:
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        enum = EnumType(name="Wrapper", qualified_name="other::Wrapper")
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="w", type="Wrapper")])],
+            types=[wrapper, RecordType(name="std::exception", kind="class")],
+            enums=[enum],
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+
+
+class TestExactRecordKeyTypedefCollisionGuard:
+    """Codex review, fresh evidence: a record's own exact/global identity
+    must also be checked against the typedef vocabulary, not just against
+    other records/enums -- `_typedef_spelling_targets` already drops its
+    own candidate for this collision (checked one-directionally against
+    records only), but the record side previously won unconditionally by
+    default regardless."""
+
+    def test_a_global_records_exact_identity_colliding_with_a_typedef_is_dropped(
+        self,
+    ) -> None:
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        typedefs = {"other::Wrapper": "Other"}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="w", type="Wrapper")])],
+            types=[wrapper, RecordType(name="std::exception", kind="class")],
+            typedefs=typedefs,
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
