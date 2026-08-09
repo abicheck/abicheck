@@ -269,6 +269,15 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
     function's guarded block at all, so a real-world non-UTF-8 manifest
     raised a bare ``UnicodeDecodeError`` instead of the documented
     exception type).
+
+    Also wraps a bare ``ValueError`` from PyYAML's own implicit-resolver
+    scalar constructors (Codex review, fresh evidence): a value that looks
+    like a YAML timestamp but has an invalid component (``2023-99-99`` —
+    no such month) is resolved to the timestamp tag by PyYAML's *resolver*
+    before construction even reaches this loader's own overrides, and its
+    built-in timestamp constructor raises a plain ``ValueError`` (not a
+    ``yaml.YAMLError`` subclass) for an out-of-range date/time part — a
+    document shape neither the syntax nor the UTF-8 guard above catches.
     """
     try:
         text = Path(path).read_text(encoding="utf-8")
@@ -280,6 +289,10 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
     except yaml.YAMLError as exc:
         raise UseCaseManifestError(
             f"impact-use-cases.yaml: {path}: invalid YAML syntax: {exc}"
+        ) from exc
+    except ValueError as exc:
+        raise UseCaseManifestError(
+            f"impact-use-cases.yaml: {path}: invalid scalar value: {exc}"
         ) from exc
     return parse_use_case_manifest(raw)
 

@@ -1197,7 +1197,25 @@ def _merge_consumer_impact_paths(
             alternatives.append(m.entry_path)
         if same_root:
             alternatives.extend(m.alternative_entry_paths)
-    alternatives.extend(primary.alternative_entry_paths)
+    # primary's OWN alternative_entry_paths need the identical guard (Codex
+    # review, fresh evidence): explain_required_symbols builds these from
+    # every candidate path across every consumer-compiled entry the walk
+    # reached, not just ones starting at the SAME entry select_preferred_graph_path
+    # chose as primary -- so an entry in here can legitimately start at a
+    # different node than primary.entry_path's own first hop. There is no
+    # per-alternative root field to compare by label (unlike the
+    # cross-match case above), so this compares each alternative's actual
+    # first-edge source node against primary.entry_path's own first-edge
+    # source directly -- the same underlying question ("does this
+    # alternative start where the primary path starts"), answered without
+    # needing graph/label access this function doesn't have.
+    if primary.entry_path:
+        primary_start = primary.entry_path[0].src
+        alternatives.extend(
+            alt
+            for alt in primary.alternative_entry_paths
+            if alt and alt[0].src == primary_start
+        )
     from .impact.consumer_graph import ConsumerImpactPath as _ConsumerImpactPath
 
     return _ConsumerImpactPath(

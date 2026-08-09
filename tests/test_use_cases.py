@@ -227,6 +227,20 @@ def test_load_use_case_manifest_wraps_a_utf8_decoding_error(tmp_path: Path) -> N
         load_use_case_manifest(manifest)
 
 
+def test_load_use_case_manifest_wraps_an_invalid_timestamp_scalar(
+    tmp_path: Path,
+) -> None:
+    """A value PyYAML's implicit resolver recognizes as a timestamp but
+    with an invalid component (no such month) makes PyYAML's own
+    timestamp constructor raise a bare ValueError, not a yaml.YAMLError --
+    a document shape neither the syntax nor the UTF-8 guard catches
+    (Codex review, fresh evidence)."""
+    manifest = tmp_path / "impact-use-cases.yaml"
+    manifest.write_text("- use_case: 2023-99-99\n")
+    with pytest.raises(UseCaseManifestError, match="invalid scalar value"):
+        load_use_case_manifest(manifest)
+
+
 def test_load_use_case_manifest_missing_file_is_a_plain_oserror(
     tmp_path: Path,
 ) -> None:

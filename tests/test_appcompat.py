@@ -2489,6 +2489,38 @@ class TestMergeConsumerImpactPaths:
         # (the union), just not smuggled in as a same-rooted alternative.
         assert "train" in merged.public_entries
 
+    def test_primarys_own_differently_rooted_alternative_is_excluded_too(self):
+        """The identical guard applies to the PRIMARY match's own
+        alternative_entry_paths, not just non-primary matches (Codex
+        review, fresh evidence): explain_required_symbols can attach an
+        alternative that started at a different consumer-compiled entry
+        than the one select_preferred_graph_path chose as primary -- that
+        alternative must not be folded in either, since
+        assess_change()/GraphProofPath has no per-alternative root field
+        and would serialize it as though it shared the primary's own
+        start."""
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        primary_edge = GraphEdge(src="entry_A", dst="foo", kind="DECL_CALLS_DECL")
+        same_root_alt = GraphEdge(src="entry_A", dst="foo2", kind="DECL_CALLS_DECL")
+        other_root_alt = GraphEdge(src="entry_C", dst="foo3", kind="DECL_CALLS_DECL")
+        first = ConsumerImpactPath(
+            consumer="app",
+            symbol="foo",
+            public_entries=("entry_A",),
+            entry_path=[primary_edge],
+            alternative_entry_paths=[[same_root_alt], [other_root_alt]],
+        )
+        second = ConsumerImpactPath(
+            consumer="app", symbol="bar", public_entries=("entry_A",)
+        )
+        merged = _merge_consumer_impact_paths([first, second])
+        assert merged.entry_path == [primary_edge]
+        assert [same_root_alt] in merged.alternative_entry_paths
+        assert [other_root_alt] not in merged.alternative_entry_paths
+
     def test_symbol_entry_and_path_come_from_the_same_match(self):
         """The exact contradiction Codex flagged: the first match is
         direct (entry_path=[]) and the second is indirect. symbol,
