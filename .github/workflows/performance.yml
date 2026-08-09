@@ -71,6 +71,7 @@ on:
       - "abicheck/dumper_clang.py"
       - "abicheck/dumper_clang_errors.py"
       - "abicheck/dumper_toolchain.py"
+      - "abicheck/castxml_policy.py"
       - "abicheck/header_utils.py"
       - "action/install-castxml.sh"
       - "scripts/check_header_graph_perf.py"
@@ -351,9 +352,30 @@ jobs:
           # degraded pass) must fail this job rather than be silently
           # swallowed by a blanket `|| true` (Codex review, fresh evidence).
           if [ -f base/scripts/check_header_graph_perf.py ]; then
+            set +e
             ./base_env/bin/python base/scripts/check_header_graph_perf.py \
               --sizes 25 100 400 --repeat 2 --require-castxml \
-              --json-out base_header_graph.json
+              --json-out base_header_graph.json 2>&1 | tee base_measure.log
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -ne 0 ]; then
+              # --require-castxml turns *any* castxml unusability into a
+              # hard failure -- including the one case that's a legitimate
+              # cross-checkout mismatch rather than a real regression: a PR
+              # that bumps the pinned castxml version together with its
+              # supported-range policy leaves the base checkout's *older*
+              # castxml_policy.py rejecting the single castxml install this
+              # job set up from head's script, since only one system castxml
+              # is installed for both measurements. That specific rejection
+              # degrades to report-only, exactly like "script not present on
+              # base" above; every other failure still propagates (Codex
+              # review, fresh evidence).
+              if grep -q "^FAIL: castxml required but unusable:" base_measure.log; then
+                echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
+              else
+                exit "$status"
+              fi
+            fi
           else
             echo "Gate not present on base branch -- report-only." >&2
           fi
