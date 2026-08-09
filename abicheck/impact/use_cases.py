@@ -78,6 +78,44 @@ if TYPE_CHECKING:
 USE_CASE_PROVENANCE = "declared_use_case"
 
 
+class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
+    """``yaml.SafeLoader`` with one behavior change: a mapping that repeats a
+    key is a load error instead of the PyYAML default of silently keeping
+    only the last value.
+
+    A manifest author who accidentally repeats a field (two ``entrypoints:``
+    lines in one use-case entry, most plausibly from a copy-paste) would
+    otherwise have part of their declared coverage silently dropped with no
+    signal at all — exactly the "coverage quietly disappears" failure mode
+    :func:`load_use_case_manifest`'s docstring already promises this module
+    never allows. Scoped to this loader class alone (not a process-wide
+    ``yaml`` monkeypatch), so it affects nothing outside this module.
+    """
+
+
+def _construct_mapping_rejecting_duplicates(
+    loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[Any, Any]:
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key: {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_DuplicateKeyCheckingLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_mapping_rejecting_duplicates,
+)
+
+
 def use_case_node_id(name: str) -> str:
     """Node id for a declared use case. Mirrors the ``<scheme>://<name>``
     convention every other id helper in this package/``source_graph.py``
@@ -175,14 +213,16 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
 
     Raises :class:`~abicheck.errors.UseCaseManifestError` for a structurally
     malformed document (not a list, a non-mapping entry, a missing/blank
-    ``use_case`` name) — the same hard-load-error discipline
-    ``policy_file.py``/``suppression.py`` already use for user-supplied YAML,
-    since silently skipping a malformed entry could make a use case's
-    declared coverage quietly disappear.
+    ``use_case`` name), a syntactically invalid one, or one that repeats a
+    mapping key (:class:`_DuplicateKeyCheckingLoader`) — the same
+    hard-load-error discipline ``policy_file.py``/``suppression.py`` already
+    use for user-supplied YAML, since silently skipping or overwriting a
+    malformed entry could make a use case's declared coverage quietly
+    disappear.
     """
     text = Path(path).read_text(encoding="utf-8")
     try:
-        raw = yaml.safe_load(text)
+        raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)
     except yaml.YAMLError as exc:
         raise UseCaseManifestError(
             f"impact-use-cases.yaml: {path}: invalid YAML syntax: {exc}"

@@ -189,6 +189,19 @@ def test_load_use_case_manifest_wraps_a_yaml_syntax_error(tmp_path: Path) -> Non
         load_use_case_manifest(manifest)
 
 
+def test_load_use_case_manifest_rejects_a_duplicate_key(tmp_path: Path) -> None:
+    """A repeated mapping key (e.g. two 'entrypoints:' lines pasted into one
+    entry) must be a hard error, not PyYAML's default of silently keeping
+    only the last value -- the latter would drop declared coverage with no
+    signal at all."""
+    manifest = tmp_path / "impact-use-cases.yaml"
+    manifest.write_text(
+        "- use_case: training-workflow\n  entrypoints: [train]\n  entrypoints: [eval]\n"
+    )
+    with pytest.raises(UseCaseManifestError, match="duplicate key"):
+        load_use_case_manifest(manifest)
+
+
 def test_load_use_case_manifest_of_an_empty_file_is_empty(tmp_path: Path) -> None:
     manifest = tmp_path / "impact-use-cases.yaml"
     manifest.write_text("")
