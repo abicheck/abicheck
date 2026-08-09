@@ -689,6 +689,31 @@ def test_join_of_an_empty_use_case_graph_is_a_pure_copy() -> None:
     assert joined is not library
 
 
+def test_join_clears_the_inherited_graph_id(tmp_path) -> None:
+    """Codex review, fresh evidence: join_use_case_graph is this module's
+    documented public Python API (docs/use/use-case-impact.md), so a caller
+    following that doc and calling joined.to_dict() on the result is a real,
+    reachable path -- not join_consumer_graph's situation, whose result
+    never leaves appcompat.py's own in-memory analysis. Left un-cleared, the
+    deep copy inherits the library graph's own finalized graph_id even
+    though the node/edge content just changed, and to_dict() only
+    recomputes an id when the stored value is empty -- silently describing
+    this join's different content under the library graph's own unrelated,
+    now-stale id."""
+    library = _library_graph()
+    library.finalize()
+    assert library.graph_id  # sanity: the library graph really is finalized
+    use_cases = build_use_case_graph(
+        [UseCaseDefinition(use_case="training-workflow", entrypoints=("train",))],
+        library,
+    )
+    joined = join_use_case_graph(library, use_cases)
+    assert joined.graph_id == ""
+    # A caller who does want an id for the joined graph gets one that
+    # actually reflects the new content, not the stale inherited one.
+    assert joined.to_dict()["graph_id"] != library.graph_id
+
+
 # ── end-to-end: a use_case node joined onto a public entry ────────────────
 
 

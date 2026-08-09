@@ -607,6 +607,27 @@ def join_use_case_graph(
     decision of its own, not a drive-by fix bundled into this module's join.
     Whoever wires :func:`join_use_case_graph`'s result into a real pipeline
     that might re-merge or re-serialize it must close this gap first.
+
+    Clears the copied ``graph_id`` before returning (Codex review, fresh
+    evidence): unlike :func:`~abicheck.impact.consumer_graph.join_consumer_graph`
+    — whose result never leaves ``appcompat.py``'s own in-memory analysis —
+    this function is the module's *documented public Python API* (see
+    ``docs/use/use-case-impact.md``), so a caller following that doc and
+    calling ``joined.to_dict()`` on the result is a real, reachable path,
+    not a hypothetical future pipeline. ``library_graph`` may already carry
+    a non-empty ``graph_id`` from its own :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`;
+    left untouched, the deep copy would inherit that same id even though the
+    node/edge content just changed, and ``to_dict()`` only recomputes an id
+    when the stored value is empty — silently describing this join's
+    different content under the library graph's own unrelated id, which
+    could corrupt a content-addressed cache or an identity comparison keyed
+    on it. Clearing (rather than eagerly recomputing via
+    :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.compute_graph_id`)
+    matches this function's own choice to leave the rest of ``finalize()``'s
+    output (``coverage``/etc.) untouched — the join result is still not
+    :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`\\ d,
+    so an empty id is the honest "not finalized" signal a caller who does
+    want one can resolve via ``compute_graph_id()``/``finalize()`` itself.
     """
     original = {n.id: (n.provenance, n.confidence) for n in library_graph.nodes}
     joined = copy.deepcopy(library_graph)
@@ -618,4 +639,5 @@ def join_use_case_graph(
         restore = original.get(node.id)
         if restore is not None:
             node.provenance, node.confidence = restore
+    joined.graph_id = ""
     return joined

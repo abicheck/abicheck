@@ -38,3 +38,15 @@
   single-symbol case, letting a differently-rooted alternative be
   serialized in JSON/SARIF under the primary's own root
   (`impact.engine._build_proof_path`'s single `affected_public_roots[0]`).
+- **`impact.use_cases.join_use_case_graph` no longer leaves a stale,
+  inherited `graph_id` on its returned graph** (Codex review, fresh
+  evidence): unlike `impact.consumer_graph.join_consumer_graph` — whose
+  result never leaves `appcompat.py`'s own in-memory analysis —
+  `join_use_case_graph` is this module's documented public Python API, so a
+  caller following `docs/use/use-case-impact.md` and calling
+  `joined.to_dict()` is a real, reachable path. Left un-cleared, the deep
+  copy inherited `library_graph`'s own already-finalized `graph_id` even
+  though the joined node/edge content had changed, and `to_dict()` only
+  recomputes an id when the stored value is empty — silently describing
+  the join's different content under an unrelated, stale id. Fixed by
+  clearing `joined.graph_id` before returning.
