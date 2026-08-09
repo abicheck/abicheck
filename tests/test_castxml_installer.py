@@ -16,9 +16,16 @@ WORKFLOWS = (
     ROOT / ".github/workflows/ci.yml",
     ROOT / ".github/workflows/examples-validation.yml",
     ROOT / ".github/workflows/examples-validation-nightly.yml",
+    ROOT / ".github/workflows/performance.yml",
     ROOT / ".github/workflows/publish.yml",
     ROOT / ".github/workflows/realworld-validation.yml",
 )
+# Most jobs no longer call the installer script directly: they go through this
+# composite, which wraps it in actions/cache. A job reaching the installer that
+# way is bound by exactly the same runner allowlist, so the contract test below
+# has to recognise both spellings -- matching only `run:` text silently skipped
+# every migrated job (Codex review on PR #685).
+CASTXML_COMPOSITE = "./.github/actions/setup-castxml"
 
 
 def _host_asset() -> str | None:
@@ -64,6 +71,7 @@ def test_linux_workflow_jobs_using_installer_pin_supported_runner() -> None:
             steps = job.get("steps", [])
             if not any(
                 "action/install-castxml.sh" in str(step.get("run", ""))
+                or str(step.get("uses", "")).strip() == CASTXML_COMPOSITE
                 for step in steps
             ):
                 continue
@@ -190,3 +198,23 @@ def test_local_archive_checksum_rejection_is_fail_closed(tmp_path: Path) -> None
     )
     assert result.returncode != 0
     assert "FAILED" in result.stdout + result.stderr
+
+
+def test_composite_castxml_action_invokes_the_pinned_installer() -> None:
+    """The runner-allowlist contract above treats a job that uses the composite
+    as a job that runs the installer. That equivalence is only true while the
+    composite actually invokes it, so assert the linkage rather than assuming
+    it -- otherwise the contract test would keep passing while checking
+    nothing."""
+    action = ROOT / ".github/actions/setup-castxml/action.yml"
+    spec = yaml.safe_load(action.read_text(encoding="utf-8"))
+    steps = spec["runs"]["steps"]
+    assert any("action/install-castxml.sh" in str(step.get("run", "")) for step in steps), (
+        "the composite must still run the pinned installer"
+    )
+    # The cache is keyed on the installer's own contents; if that stops being
+    # true a re-pin would silently reuse the previous build's cache entry.
+    assert any(
+        "hashFiles('action/install-castxml.sh')" in str(step.get("with", {}).get("key", ""))
+        for step in steps
+    ), "the cache key must still be derived from the installer script"

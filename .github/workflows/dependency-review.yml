@@ -16,12 +16,24 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Requires Dependency Graph enabled in repo Settings → Security → Code security.
-    # continue-on-error: true keeps the check informational when the feature is unavailable.
-    continue-on-error: true
+    #
+    # This is now the repository's single dependency-review run; security.yml
+    # previously carried a duplicate of the same action at the same pinned SHA.
+    # That copy was the *stricter* of the two — it had no continue-on-error and
+    # no fail-on-severity override, so it blocked on any advisory at the default
+    # `low` threshold — while this one was informational-only. Consolidating on
+    # the more permissive settings would have silently weakened the gate, so
+    # this job takes over the strict behaviour instead: no continue-on-error,
+    # and the default severity threshold rather than `moderate`. This workflow
+    # is the survivor because it is the one with `pull-requests: write`, which
+    # is what lets the action post its findings on the PR.
+    #
+    # The tolerance the old comment described (continue-on-error for when
+    # Dependency Graph is unavailable) is not carried over: the duplicate in
+    # security.yml has been blocking on every PR without it, so the feature is
+    # demonstrably enabled here.
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
-        continue-on-error: true
-        with:
-          fail-on-severity: moderate

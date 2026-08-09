@@ -39,6 +39,7 @@ jobs:
   test-compare-breaking:
     name: 'Compare: detect breaking change'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -71,6 +72,7 @@ jobs:
   test-compare-compatible:
     name: 'Compare: compatible (no change)'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -96,6 +98,7 @@ jobs:
   test-compare-sarif:
     name: 'Compare: SARIF output'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -140,6 +143,7 @@ jobs:
   test-compare-json:
     name: 'Compare: JSON output'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -170,6 +174,7 @@ jobs:
   test-fail-on-breaking:
     name: 'Verify fail-on-breaking=true fails the step'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -197,6 +202,7 @@ jobs:
   test-action-infrastructure:
     name: 'Verify: action infrastructure with compare mode'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -231,6 +237,7 @@ jobs:
   test-check-target:
     name: 'check-target: gate-mode: deferred never fails on a real finding, report envelope is well-formed'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -313,6 +320,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -338,6 +346,7 @@ jobs:
   test-severity-addition-error:
     name: 'severity-addition error: detect unexpected API expansion'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -375,6 +384,7 @@ jobs:
   test-appcompat-full:
     name: 'Appcompat: detect breaking change affecting app'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -412,6 +422,7 @@ jobs:
   test-appcompat-weak:
     name: 'Appcompat: weak mode symbol check'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -443,6 +454,7 @@ jobs:
   test-additions-pass-by-default:
     name: 'additions pass through without severity-addition error'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -468,6 +480,7 @@ jobs:
   test-scan-baseline-breaking:
     name: 'Scan: baseline comparison detects breaking change'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -500,6 +513,7 @@ jobs:
   test-scan-audit:
     name: 'Scan: single-release audit (no baseline)'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -530,6 +544,7 @@ jobs:
   test-scan-estimate:
     name: 'Scan: --estimate dry run'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -578,6 +593,7 @@ jobs:
           - os: macos-latest
             dependency-source: conda-forge-clang20
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -622,6 +638,7 @@ jobs:
   test-dependency-source-none-and-legacy-alias:
     name: 'dependency-source: none, and legacy install-deps=true/false aliasing'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:

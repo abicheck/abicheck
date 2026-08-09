@@ -21,6 +21,7 @@ jobs:
     name: Repository Scan
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -62,6 +63,7 @@ jobs:
     name: PR Readiness Diff
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write

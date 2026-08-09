@@ -246,6 +246,7 @@ jobs:
   plan:
     name: 'Generate run-plan'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       has-checks: ${{ steps.plan.outputs.has-checks }}
@@ -404,6 +405,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.has-checks != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Fail
         run: |
@@ -428,6 +430,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.has-checks == 'true'
     runs-on: ${{ matrix.runs_on || 'ubuntu-latest' }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -1023,6 +1026,7 @@ jobs:
     # status past a real gate-mode: deferred operational failure.
     if: always() && needs.plan.outputs.has-checks == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     outputs:
       exit-code: ${{ steps.aggregate.outputs.exit-code }}
     steps:

@@ -54,6 +54,12 @@ CTF_MAGIC = 0xCFF1
 CTF_VERSION_2 = 2
 CTF_VERSION_3 = 3
 
+# Cap on zlib-decompressed CTF payload size, to prevent a zip-bomb DoS.
+# Module-level rather than a function-local literal so the guard's threshold is
+# a named, patchable knob: the zip-bomb regression test can lower it and cross
+# it with a few MiB instead of allocating and compressing a real 257 MiB buffer.
+_MAX_DECOMPRESS = 256 * 1024 * 1024
+
 # CTF type kinds (encoded in ctt_info)
 CTF_K_UNKNOWN = 0
 CTF_K_INTEGER = 1
@@ -237,14 +243,14 @@ def _decompress_if_needed(data: bytes, header: CtfHeader) -> bytes:
     """Decompress CTF data if CTF_F_COMPRESS flag is set."""
     if not (header.flags & CTF_F_COMPRESS):
         return data
-    # Data after the preamble (4 bytes) is zlib-compressed.
-    # Limit decompressed size to 256 MiB to prevent zip-bomb DoS.
-    _MAX_DECOMPRESS = 256 * 1024 * 1024
+    # Data after the preamble (4 bytes) is zlib-compressed; _MAX_DECOMPRESS
+    # caps the output to prevent a zip-bomb DoS.
     try:
         decompressor = zlib.decompressobj()
         decompressed = decompressor.decompress(data[_CTF_PREAMBLE_SIZE:], _MAX_DECOMPRESS)
         if decompressor.unconsumed_tail:
-            raise ValueError("CTF decompressed data exceeds 256 MiB limit")
+            limit_mib = _MAX_DECOMPRESS // (1024 * 1024)
+            raise ValueError(f"CTF decompressed data exceeds {limit_mib} MiB limit")
     except zlib.error as exc:
         raise ValueError(f"CTF decompression failed: {exc}") from exc
     # Reassemble: preamble + decompressed body
