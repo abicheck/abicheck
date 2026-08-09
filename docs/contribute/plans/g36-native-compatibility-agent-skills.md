@@ -365,15 +365,22 @@ equivalent flag-level tests (if path (b) is chosen).
 **Files, conditional on which design the maintainer decision above
 selects — the two paths are not interchangeable file lists, so don't apply
 both:**
-- **If path (a), a new `info` root command:** `abicheck/cli.py` — `info` is
-  a small, one-function, no-operand command with no significant helpers, so
-  `AGENTS.md`'s "Adding a new top-level command" convention places it
-  directly in `cli.py` with `@main.command(...)`, not in a sibling
-  `cli_<name>.py` module (that split is reserved for a larger command or
-  command group, which `info` is neither); `tests/test_cli_root_surface.py`
-  (extend the pinned root-command-set assertion to include `info`);
-  `README.md` ("Which command do I need?" table gets one more row);
-  `docs/reference/cli-reference.md` (regenerated).
+- **If path (a), a new `info` root command:** `abicheck/cli.py` is already
+  1,980 of the AI-readiness gate's 2,000-line hard cap — only ~20 lines of
+  headroom — and `info`'s own body (Click registration, `--format`
+  handling, schema-version discovery via `schemas.all_current()`, provider
+  detection, platform-capability probing, JSON/text rendering) is not a
+  20-line function. `AGENTS.md`'s "small command, no significant helpers"
+  convention still governs *where the `@main.command(...)` registration
+  itself* lives, but landing `info` here needs a same-PR extraction that
+  shrinks `cli.py` first — moving an existing self-contained slice of it
+  into a sibling module the way prior commands already have (see the
+  module map's `cli_<name>.py` precedent) — so the command lands with
+  headroom instead of being the change that trips the hard cap; `abicheck/
+  cli.py` (the `info` command itself, post-extraction); `tests/
+  test_cli_root_surface.py` (extend the pinned root-command-set assertion
+  to include `info`); `README.md` ("Which command do I need?" table gets
+  one more row); `docs/reference/cli-reference.md` (regenerated).
 - **If path (b), extending `--version --format json`:** `abicheck/cli.py`
   — replace the built-in `click.version_option` with a custom eager
   callback; no root-command surface changes at all, so
