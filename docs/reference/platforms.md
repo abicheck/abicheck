@@ -108,12 +108,13 @@ for the full `L0`–`L5` model this table summarizes:
 | Input | Evidence layer | What's available |
 |---|---|---|
 | Stripped binary, no headers | **L0 — symbols only** | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, dependency list |
-| ELF/Mach-O **with DWARF**, no headers | **L0+L1 — binary + debug** | Everything L0 sees, **plus** struct/class layout, field offsets, enum values, vtable slots, calling convention, packing, and — since DWARF also encodes a function's parameter/return types (`DW_TAG_formal_parameter`/`DW_AT_type`) — parameter and return type changes too. No castxml needed (see "Castxml-free validation" above) |
+| ELF **with DWARF**, no headers | **L0+L1 — binary + debug** | Everything L0 sees, **plus** struct/class layout, field offsets, enum values, vtable slots, calling convention, packing, and — since DWARF also encodes a function's parameter/return types (`DW_TAG_formal_parameter`/`DW_AT_type`) — parameter and return type changes too. No castxml needed (see "Castxml-free validation" above) |
 | PE **with PDB**, no headers | **L0+L1 — binary + debug, narrower** | Everything L0 sees, **plus** struct/class layout, field offsets, enum values, and calling convention **for class methods only** — `pdb_metadata.parse_pdb_debug_info()` extracts struct/enum/toolchain facts from the TPI stream but does not reconstruct free-function signatures or vtable slots, so parameter/return type changes and vtable changes still need `-H`/castxml on this platform |
+| Mach-O, no headers | **L0 only, always** | `_dump_macho` never parses DWARF or a debug map (dSYM/`N_OSO`) — headerless is always exports + load-command metadata only, no debug-info fallback at all, regardless of whether the dylib carries debug info |
 | Binary + headers | **L0–L2 — header-aware** | Everything above, plus qualifiers/visibility that only a declaration carries (`inline`, `noexcept`, `final`, access level), default-argument values, and public-surface scoping |
 | + build/source context | **L3–L5** | Build flags, source-only facts (macros, default arguments, inline bodies), the source/impact graph |
 
-A headerless scan of an ELF/Mach-O `-g` build (L0+L1) **does** detect:
+A headerless scan of an ELF `-g` build (L0+L1) **does** detect:
 - Struct/class layout changes (`type_size_changed`, `type_field_*`)
 - vtable changes (`type_vtable_changed`)
 - Enum value changes, calling-convention changes
@@ -123,6 +124,10 @@ A headerless scan of a PE `/Zi` build (L0+L1, PDB) is **narrower** — it detect
 struct/class layout and enum value changes, plus calling-convention changes on
 class methods, but **not** vtable changes or free-function parameter/return
 type changes (those still need `-H`/castxml).
+
+A headerless scan of a Mach-O dylib is **always L0 only**, even if it carries
+DWARF/dSYM debug info — abicheck has no Mach-O debug-map reader today, so
+`-H`/castxml is the only way to get past exports-only on this platform.
 
 Only a genuinely stripped binary with no debug info (L0 only) is limited to:
 - Function added / removed (`func_added`, `func_removed`)
@@ -137,10 +142,15 @@ DWARF/PDB/symbol-table trace):
 - Default-argument value changes
 
 ❌ **PDB (PE) additionally misses, even with L1 debug info** (needs L2
-headers to recover, unlike the ELF/Mach-O DWARF path above):
+headers to recover, unlike the ELF DWARF path above):
 - Parameter type changes (`func_params_changed`), return type changes (`func_return_changed`) for free functions
 - vtable changes (`type_vtable_changed`)
 - Calling-convention changes on free (non-method) functions
+
+❌ **Mach-O misses everything past L0 without headers, unconditionally** —
+struct/class layout, enum values, vtable slots, calling convention, and
+parameter/return types all need `-H`/castxml on this platform; there is no
+debug-info-only middle ground the way ELF/PE have.
 
 **Recommendation:** for complete ABI analysis, provide `-H <header_dir>` and run on the
 native platform (Linux for ELF, macOS for Mach-O, Windows for PE) — but if you
