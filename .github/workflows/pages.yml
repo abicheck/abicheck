@@ -54,11 +54,40 @@ jobs:
     name: Verify published schema IDs
     needs: deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # actions/deploy-pages reporting success only means the artifact was handed
+    # to the Pages backend, not that it's live on the CDN yet — propagation is
+    # eventually consistent and has been observed to take over a minute after
+    # deploy returns. The wait-for-live step below absorbs that lag with a
+    # generous, backed-off poll budget; 15 minutes leaves comfortable headroom
+    # on top of that poll budget plus the per-file byte comparison below.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - name: Wait for Pages deployment to become live
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Poll one canonical, always-published URL until the CDN actually
+          # serves it, rather than immediately racing the byte-comparison loop
+          # below against propagation. Bounded, exponential-ish backoff over a
+          # ~5 minute budget — comfortably above the propagation lag we've
+          # observed in practice, without risking a hung job on a real outage.
+          probe_url="$(python -c 'import json; print(json.load(open("abicheck/schemas/aggregate_report.schema.json", encoding="utf-8"))["$id"])')"
+          echo "Polling $probe_url until live"
+          deadline=$((SECONDS + 300))
+          delay=5
+          until curl --fail --silent --show-error --location --output /dev/null "$probe_url"; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Pages deployment did not become live within the poll budget"
+              exit 1
+            fi
+            echo "Not live yet, retrying in ${delay}s..."
+            sleep "$delay"
+            delay=$((delay * 2 > 30 ? 30 : delay * 2))
+          done
+          echo "Pages deployment is live"
       - name: Retrieve and compare every canonical schema URL
         shell: bash
         run: |
@@ -69,7 +98,10 @@ jobs:
             url="$(python -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["$id"])' "$schema")"
             downloaded="$temp_dir/$(basename "$schema")"
             echo "Checking $url"
-            curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
+            # The probe step above already confirmed the deployment is live, so
+            # this retry budget is just a safety net for transient network
+            # blips, not a substitute for the propagation wait.
+            curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 \
               --connect-timeout 15 --max-time 60 "$url" --output "$downloaded"
             cmp -- "$schema" "$downloaded"
           done
