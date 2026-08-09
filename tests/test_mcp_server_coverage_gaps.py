@@ -353,6 +353,32 @@ class TestAbiScanSet:
         assert data["status"] == "error"
         assert "ambiguous duplicate SONAME" in data["error"]
 
+    def test_artifact_set_error_redacts_resolved_paths(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # P2 regression (Codex review): discover_artifact_set()'s own
+        # ArtifactSetError for a non-ELF/colliding-identity member embeds
+        # str(Path) for the *resolved* member paths -- those must not reach
+        # the caller verbatim (server filesystem disclosure), so each is
+        # swapped back to the basename the caller actually supplied.
+        from abicheck.bundle import ArtifactSetError
+
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _fake(req, timeout):
+            raise ArtifactSetError(
+                f"--artifact-set has colliding library identities: "
+                f"'liba.so': [{a.resolve()!s}, {b.resolve()!s}]."
+            )
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _fake)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "error"
+        assert str(tmp_path) not in data["error"]
+        assert "liba.so" in data["error"]
+        assert "libb.so" in data["error"]
+
     def test_forwards_binaries_and_bundle_system_providers(
         self, tmp_path: Path, monkeypatch
     ):

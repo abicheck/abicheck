@@ -559,6 +559,20 @@ def abi_scan_set(
                     "error": f"abi_scan_set timed out after {mcp_shared.MCP_TIMEOUT}s",
                 }
             )
+        except ValueError as exc:
+            # Redact server-resolved absolute paths (Codex review): an
+            # ArtifactSetError from discover_artifact_set()'s non-ELF/
+            # colliding-identity checks embeds str(Path) for the resolved
+            # member paths, not the caller's own spellings -- swap each back
+            # to the basename the caller actually named before surfacing,
+            # same disclosure concern the missing-artifact check above
+            # already guards against.
+            msg = str(exc)
+            for orig, resolved in zip(artifact_paths, bin_paths):
+                msg = msg.replace(str(resolved), Path(orig).name)
+            elapsed = _time.monotonic() - t0
+            _audit_log("abi_scan_set", {"artifacts": ",".join(names)}, elapsed, "error")
+            return json.dumps({"status": "error", "error": msg})
 
         elapsed = _time.monotonic() - t0
         _audit_log("abi_scan_set", {"artifacts": ",".join(names)}, elapsed, "ok")
