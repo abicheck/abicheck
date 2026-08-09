@@ -225,8 +225,14 @@ present at all. P0.7's structural tests only check that a target exists
 *in this repo* (self-containment "no path outside the installed
 directory" is checked at generation time, against the repo, not against a
 standalone-install scenario), so this gap can pass every planned test and
-still ship dangling references in a real standalone install. Rewrite each
-copied fragment's outbound canonical-doc links to the real published docs
+still ship dangling references in a real standalone install. **This isn't
+only a `shared/*.md` problem, either: a skill's own `SKILL.md` or
+skill-specific `references/*.md` file can link directly to a canonical
+`docs/` page too** — P1.6's CI-wiring links are exactly this case — so the
+rewrite must run over every staged Markdown file the generator produces
+(`SKILL.md`, every `references/*.md`, and every copied `shared/*.md`
+fragment alike), not only the copied-fragment subset. Rewrite each staged
+file's outbound canonical-doc links to the real published docs
 site at generation time — read the host from `mkdocs.yml`'s own `site_url`
 key rather than hardcoding the literal URL, so the generator (and its
 tests, which must derive their expected output from that same `mkdocs.yml`

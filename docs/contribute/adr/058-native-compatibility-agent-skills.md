@@ -398,7 +398,11 @@ skills-src/                              # editable source (this repo, DRY)
   native-consumer-compatibility/
     SKILL.md
     references/
-  _generator/                            # builds .agents/skills/ from the above
+
+scripts/gen_agent_skills.py              # the sole generator (Layer C
+                                          # tooling, not part of skills-src/
+                                          # itself) — builds .agents/skills/
+                                          # and .claude/skills/ from the above
 
 .agents/skills/                          # GENERATED, canonical publication surface
   native-binary-compatibility-review/
