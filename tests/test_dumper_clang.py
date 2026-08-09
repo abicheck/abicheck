@@ -1032,6 +1032,74 @@ def test_field_default_fingerprint_distinguishes_sizeof_operand_type() -> None:
     assert fields["a"].default == fields["a_again"].default
 
 
+def test_normalize_qual_type_strips_anonymous_type_location() -> None:
+    from abicheck.dumper_clang import _normalize_qual_type
+
+    assert _normalize_qual_type("(unnamed enum at t.hpp:1:1)") == "(unnamed enum)"
+    assert (
+        _normalize_qual_type("union (unnamed union at t.hpp:2:5)")
+        == "union (unnamed union)"
+    )
+    assert (
+        _normalize_qual_type("struct (unnamed struct at /abs/other/path/t.hpp:9:1)")
+        == "struct (unnamed struct)"
+    )
+    # A named type (the overwhelming common case) passes through unchanged.
+    assert _normalize_qual_type("const int") == "const int"
+    assert _normalize_qual_type("std::vector<int>") == "std::vector<int>"
+
+
+def test_field_default_fingerprint_stable_across_anonymous_type_location() -> None:
+    """Codex review, PR #687, fourth round, fresh evidence: clang spells an
+    anonymous enum/struct/union's type as ``"(unnamed <kind> at <file>:
+    <line>:<col>)"`` -- an absolute path and line embedded directly in the
+    ``qualType`` string. Verified against real Clang 17 output that parsing
+    identical source from two different checkout paths, or merely inserting
+    a blank line before an anonymous ``enum { VALUE = 3 };``, produced two
+    DIFFERENT ``TypeField.default`` fingerprints for an unrelated, unchanged
+    initializer referencing it -- a false
+    ``FIELD_DEFAULT_INITIALIZER_CHANGED`` purely from where/how the source
+    was checked out."""
+
+    def _anon_enum_ref_field(loc: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "x",
+            "type": {"qualType": "int"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "DeclRefExpr",
+                    "type": {"qualType": f"(unnamed enum at {loc})"},
+                    "referencedDecl": {
+                        "kind": "EnumConstantDecl",
+                        "name": "VALUE",
+                        "type": {"qualType": f"(unnamed enum at {loc})"},
+                    },
+                }
+            ],
+        }
+
+    def _snap(loc: str):
+        root = _tu(
+            {
+                "kind": "CXXRecordDecl",
+                "name": "S",
+                "tagUsed": "struct",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "completeDefinition": True,
+                "inner": [_anon_enum_ref_field(loc)],
+            },
+        )
+        (t,) = _ClangAstParser(root, set(), set()).parse_types()
+        return t.fields[0].default
+
+    same_checkout = _snap("t.hpp:1:1")
+    different_checkout = _snap("/different/checkout/path/t.hpp:2:1")
+    assert same_checkout is not None
+    assert same_checkout == different_checkout
+
+
 def test_index_disambiguates_specializations_via_scope_key() -> None:
     """Codex review, PR #687, third round, fresh evidence: an earlier
     version derived the specialization disambiguator from whichever direct

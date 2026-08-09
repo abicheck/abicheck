@@ -1794,31 +1794,25 @@ def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
     A single, dedicated pass over the WHOLE AST root (independent of
     :class:`_ClangAstParser`'s own categorizing walk, which only tracks the
     ABI-surface kinds it collects): a ``DeclRefExpr``'s ``referencedDecl``
-    can name any declaration in the TU (a namespace-scope ``VarDecl``, an
-    ``EnumConstantDecl``, a class's static member, ...), so this needs to see
-    everything.
+    can name any declaration in the TU, so this needs to see everything.
 
     Feeds :func:`_canonical_expr`'s referenced-declaration fingerprinting: a
     ``referencedDecl`` stub is compact and carries only a bare, unqualified
-    ``name`` (Codex review, fresh evidence, verified against real Clang 17/18
-    output: `a::VALUE` and `b::VALUE` share the byte-identical stub `{"kind":
-    "VarDecl", "name": "VALUE", "type": {...}}` — nothing in the stub itself
-    distinguishes them). Its own ``id`` IS unique per declaration, but is a
-    compile-time-only memory address, never stable across builds, so it is
-    exchanged for this index's qualified-name string rather than hashed
-    directly.
+    ``name`` (Codex review, fresh evidence: `a::VALUE`/`b::VALUE` share the
+    byte-identical stub). Its own ``id`` IS unique but is a compile-time-only
+    memory address, never stable across builds, so it is exchanged for this
+    index's qualified-name string rather than hashed directly.
 
     Same namespace/class scope-tracking rule as
     ``_ClangAstParser._walk``/``_SCOPE_NODE_KINDS``, EXCEPT for
-    ``ClassTemplateSpecializationDecl`` (Codex review, fresh evidence,
-    second round): distinct specializations of the same template (``A<int>``
-    vs. ``A<long>``) are separate nodes but both expose only the bare
-    primary-template name ``"A"`` — verified against real Clang 17 output
-    that the node itself carries no template-argument spelling at all (no
-    ``type``/``templateArgs`` key). ``_SCOPE_NODE_KINDS`` deliberately stays
-    untouched (it also drives ``_ClangAstParser._walk``'s own public-surface
-    qualified names, a much larger blast radius); this function instead
-    special-cases the kind locally via :func:`_first_mangled_name`.
+    ``ClassTemplateSpecializationDecl`` (Codex review, second round):
+    distinct specializations of the same template (``A<int>`` vs.
+    ``A<long>``) both expose only the bare primary-template name ``"A"``, no
+    template-argument spelling at all on the node itself.
+    ``_SCOPE_NODE_KINDS`` deliberately stays untouched (it also drives
+    ``_ClangAstParser._walk``'s own public-surface qualified names, a much
+    larger blast radius); this function special-cases the kind locally via
+    :func:`_specialization_scope_key`.
 
     A redeclaration (e.g. a function declared then defined) shares its real
     entity's name, so the first sighting of a given ``id`` is kept rather
@@ -1891,6 +1885,30 @@ def _specialization_scope_key(node: dict[str, Any]) -> str:
     return ""
 
 
+#: Matches clang's anonymous-tag-type spelling, e.g. ``"(unnamed enum at
+#: t.hpp:1:1)"`` or ``"union (unnamed union at t.hpp:2:5)"`` -- the location
+#: is the only volatile part; ``\1`` (the tag kind) is kept.
+_ANON_TYPE_LOCATION_RE = re.compile(r"\(unnamed (\w+) at [^)]*\)")
+
+
+def _normalize_qual_type(qual_type: str) -> str:
+    """Strip the source location out of an anonymous-tag ``qualType`` before
+    it's folded into a build-stable fingerprint.
+
+    clang spells an anonymous enum/struct/union/class's type as ``"(unnamed
+    <kind> at <file>:<line>:<col>)"`` -- an absolute path and line embedded
+    right in the type string (Codex review, fresh evidence, verified against
+    real Clang 17 output: parsing identical source from two checkout paths,
+    or merely inserting a blank line before an anonymous `enum { VALUE = 3
+    };`, produced two DIFFERENT `TypeField.default` fingerprints for an
+    unrelated, unchanged initializer referencing it). The "unnamed <kind>"
+    portion is kept (still distinguishes anonymous from named); only the
+    location collapses to a fixed placeholder. A non-matching (the common,
+    named-type) qualType passes through unchanged.
+    """
+    return _ANON_TYPE_LOCATION_RE.sub(r"(unnamed \1)", qual_type)
+
+
 def _canonical_expr(node: Any, id_index: dict[str, str] | None = None) -> Any:
     """Reduce an expression node to a structural form (drop ids/locations)."""
     if not isinstance(node, dict):
@@ -1901,53 +1919,36 @@ def _canonical_expr(node: Any, id_index: dict[str, str] | None = None) -> Any:
             out[key] = node[key]
     type_obj = node.get("type")
     if isinstance(type_obj, dict) and "qualType" in type_obj:
-        out["type"] = type_obj["qualType"]
+        out["type"] = _normalize_qual_type(type_obj["qualType"])
     # A UnaryExprOrTypeTraitExpr (sizeof/alignof/... applied to a TYPE, not
     # an expression) stores its operand EXCLUSIVELY in "argType" -- "type" is
-    # just the trait's own result type (always "unsigned long" for sizeof,
-    # identical regardless of the operand), and "name" only says which trait
-    # ("sizeof"), not what it was applied to (Codex review, fresh evidence:
-    # verified against real Clang 18 output that `sizeof(int)` and
-    # `sizeof(long long)` produce byte-identical nodes apart from this key,
-    # so a field/param default changing between the two fingerprinted
-    # identically without it). Other trait-expression operand shapes this
-    # module hasn't verified against real output (e.g. a multi-operand
-    # TypeTraitExpr's own array) are a known, narrower residual gap -- not
-    # fixed here without the same empirical verification this fix required.
+    # just the trait's result type (always "unsigned long" for sizeof,
+    # regardless of operand) (Codex review: `sizeof(int)` vs `sizeof(long
+    # long)` fingerprinted identically without this). Other trait-expression
+    # operand shapes are an unverified, narrower residual gap.
     arg_type_obj = node.get("argType")
     if isinstance(arg_type_obj, dict) and "qualType" in arg_type_obj:
-        out["argType"] = arg_type_obj["qualType"]
+        out["argType"] = _normalize_qual_type(arg_type_obj["qualType"])
     referenced = node.get("referencedDecl")
     if isinstance(referenced, dict):
-        # A DeclRefExpr's own top-level keys (kind "DeclRefExpr", a "type"
-        # that's just the reference's static type) never identify WHICH
-        # declaration it names -- that identity lives only in this compact
-        # sibling stub, previously dropped entirely (Codex review, fresh
-        # evidence). Verified against real Clang 18 output: `int x =
-        # DEFAULT_A;` vs `int x = DEFAULT_B;`, and `int v = one();` vs
-        # `int v = two();`, produced byte-identical fingerprints without
-        # this -- a real initializer/default-argument CHANGE silently
-        # missed on the direct-clang backend (both TypeField.default and
-        # the pre-existing Param.default share this same helper). Its own
-        # "id" is a compile-time-only memory address, never stable across
-        # builds, so only "kind"/"name" (and "type", if present) are kept
-        # -- the same stability contract this function's own docstring
-        # already promises ("drop ids/locations").
+        # A DeclRefExpr's own top-level keys never identify WHICH declaration
+        # it names -- that lives only in this compact stub, previously
+        # dropped entirely (Codex review: `int x = DEFAULT_A;` vs `int x =
+        # DEFAULT_B;` fingerprinted identically without this -- affects both
+        # TypeField.default and the pre-existing Param.default, which share
+        # this helper). Its own "id" is a compile-time memory address, never
+        # stable across builds, so only "kind"/"name"/"type" are kept.
         ref_out: dict[str, Any] = {}
         for key in ("kind", "name"):
             if key in referenced:
                 ref_out[key] = referenced[key]
         ref_type = referenced.get("type")
         if isinstance(ref_type, dict) and "qualType" in ref_type:
-            ref_out["type"] = ref_type["qualType"]
-        # The bare "name" above collides across scopes (Codex review, fresh
-        # evidence, second round): `a::VALUE` vs `b::VALUE` share it, so a
-        # real initializer CHANGE between two same-named declarations in
-        # different namespaces/classes still fingerprinted identically
-        # without this. Resolve via id_index when available -- falls back
-        # to the bare-name-only behavior above (still better than nothing)
-        # when the id isn't found, e.g. a builtin or a declaration outside
-        # this AST root.
+            ref_out["type"] = _normalize_qual_type(ref_type["qualType"])
+        # The bare "name" above collides across scopes (Codex review, second
+        # round): `a::VALUE` vs `b::VALUE` share it. Resolve via id_index
+        # when available -- falls back to bare-name-only (still better than
+        # nothing) when the id isn't found, e.g. a builtin.
         ref_id = referenced.get("id")
         if id_index and isinstance(ref_id, str):
             qualified = id_index.get(ref_id)

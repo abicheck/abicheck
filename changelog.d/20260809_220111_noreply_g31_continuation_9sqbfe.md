@@ -124,3 +124,15 @@ it should read in CHANGELOG.md. Delete the other sections.
   `diff_cxx_rules.itanium_scope_components`, dropping the member's own
   trailing leaf component), which is identical regardless of which member
   of the same specialization contributed it.
+- **Fixed the direct-clang initializer fingerprint above embedding a
+  source location for an anonymous type** (Codex review, fresh evidence,
+  fourth round): clang spells an anonymous enum/struct/union/class's type
+  as `"(unnamed <kind> at <file>:<line>:<col>)"` — an absolute path and
+  line number baked directly into the type spelling. Verified against real
+  Clang 17 output that parsing identical source from two different
+  checkout paths, or merely inserting a blank line before an anonymous
+  `enum { VALUE = 3 };`, produced two different `TypeField.default`
+  fingerprints for an unrelated, unchanged initializer referencing it. The
+  location is now normalized to a fixed placeholder before hashing (the
+  "unnamed `<kind>`" portion itself is kept, still distinguishing an
+  anonymous type from a named one).
