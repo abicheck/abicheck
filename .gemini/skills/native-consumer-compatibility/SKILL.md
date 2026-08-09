@@ -3,7 +3,7 @@ name: native-consumer-compatibility
 description: Determine whether one specific application, plugin, or host program will keep working against a new version of a C/C++ (or other compiled native) library. Use when asked whether an existing or old application will still work with a new library build, whether a plugin will still load in a host, whether upgrading a shared library will break a particular program that links it, or which of several consumers a library change actually affects. Answers per consumer, which can differ from the library's own global verdict in either direction.
 license: Apache-2.0
 metadata:
-  abicheck-version-range: ">=0.5.0,<0.6.0"
+  abicheck-version-range: ">=0.6.0,<0.7.0"
   layer: A
   source: skills-src/native-consumer-compatibility/SKILL.md
 ---

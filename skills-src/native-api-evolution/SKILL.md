@@ -3,7 +3,7 @@ name: native-api-evolution
 description: Design a C/C++ (or other compiled native) library API change so it does not break existing consumers. Use when asked how to make a public API change without breaking compatibility, whether adding a field, a virtual function, or a parameter is safe, how to evolve a struct or class that consumers already depend on, or how to deprecate and replace part of a shipped native API. Provides ABI-safe design patterns — pImpl, reserved slots, versioned interfaces, deprecation lifecycles — and ends by verifying the resulting change.
 license: Apache-2.0
 metadata:
-  abicheck-version-range: ">=0.5.0,<0.6.0"
+  abicheck-version-range: ">=0.6.0,<0.7.0"
   layer: A
   source: skills-src/native-api-evolution/SKILL.md
 ---

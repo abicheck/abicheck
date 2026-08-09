@@ -25,10 +25,12 @@ category; `--exit-code-scheme auto|legacy|severity` selects which exit-code
 contract applies.
 
 In the report, `severity.exit_code`, `severity.blocking`, and
-`severity.blocking_categories` express the gate decision — and the whole
-`severity` block is present **only when the run passed a `--severity-*` flag**.
-Without one there is no gate: the exit code follows the legacy verdict
-mapping. (`policy_gate_decision` is an Action `check-target` field, not
+`severity.blocking_categories` express the gate decision. The block is present
+whenever severity-aware grading was **resolved from any source** — a
+`--severity-*` flag, a `.abicheck.yml` `severity:` map or
+`exit_code_scheme: severity`, a run profile, or a gate pack — not only from a
+flag you passed. Absent means no gate was resolved anywhere and the exit code
+follows the legacy verdict mapping. (`policy_gate_decision` is an Action `check-target` field, not
 something a direct `compare` emits — see
 [report-interpretation.md](report-interpretation.md).)
 

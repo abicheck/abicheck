@@ -16,10 +16,11 @@
 """Structural gate for the published Agent Skills (ADR-058 / G36 P0.7).
 
 Frontmatter validity, self-containment of the generated trees, and — the
-check that is *not* implied by the syntactic drift tests — abicheck
-version-range containment in **both** directions: a skill declaring a minimum
-because it depends on a command or field introduced in that release would
-otherwise pass silently against an older installation that predates it.
+check that is *not* implied by the syntactic drift tests — that each skill's
+declared abicheck version range names a release actually providing the CLI
+surface its workflow drives. A skill whose minimum predates that surface
+would approve an installation it then fails on, which is exactly the failure
+the range exists to prevent.
 
 Scope: this closes syntactic and declarative drift only. A flag or field that
 keeps its name while its behaviour changes is not caught here (nor anywhere
@@ -32,7 +33,6 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
-from importlib.metadata import version as installed_version
 from pathlib import Path
 
 import pytest
@@ -133,31 +133,56 @@ def test_skill_declares_an_abicheck_version_range(skill_dir: Path):
     )
 
 
-@pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)
-def test_installed_abicheck_is_inside_each_declared_range(skill_dir: Path):
-    """Containment in both directions, failing loudly rather than degrading.
+def _repo_facts() -> dict:
+    import json
 
-    This is a CI-time check over *this* repository's committed skills; it does
-    not reach a user's own installation. Each `SKILL.md`'s own workflow
-    performs the equivalent check at the start of a real session, which is
-    what covers a standalone install.
+    return json.loads((REPO / "repo_facts.json").read_text(encoding="utf-8"))
+
+
+def _has_unreleased_work() -> bool:
+    """True while `changelog.d/` still holds fragments `scriv collect` has not
+    folded into a dated CHANGELOG section — i.e. the working tree carries
+    surface no published release contains."""
+    return any((REPO / "changelog.d").glob("*.md")) and not all(
+        p.name.lower() == "readme.md" for p in (REPO / "changelog.d").glob("*.md")
+    )
+
+
+@pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)
+def test_declared_minimum_is_not_a_release_that_lacks_the_surface(skill_dir: Path):
+    """The declared minimum must name a release that actually provides the CLI
+    surface these workflows drive.
+
+    This replaces an earlier "installed version is inside the range" check,
+    which was actively harmful: in an unreleased tree `importlib.metadata`
+    reports the *last published* version (there is no separate dev marker), so
+    satisfying that assertion forced the minimum down to a release that
+    predates `aggregate`, `project plan`, `--report-mode root-cause`,
+    `--diagnostic-comparison`, and `--contract-evaluation`. The preflight then
+    approved exactly the installation the workflow cannot run on — the failure
+    the version range exists to prevent.
+
+    While unreleased work is pending, the minimum must therefore be *newer*
+    than the last release. Once it ships, `latest_release` catches up and the
+    same assertion holds as equality.
     """
     raw = _front_matter(skill_dir / "SKILL.md")["metadata"]["abicheck-version-range"]
     match = _VERSION_RANGE_RE.match(raw)
     assert match is not None
     minimum, maximum = (_version_tuple(g) for g in match.groups())
-    current = _version_tuple(installed_version("abicheck"))
+    latest_release = _version_tuple(_repo_facts()["latest_release"])
 
-    assert current >= minimum, (
-        f"installed abicheck {installed_version('abicheck')} is BELOW "
-        f"{skill_dir.name}'s declared minimum — the skill depends on surface "
-        "this installation predates"
-    )
-    assert current < maximum, (
-        f"installed abicheck {installed_version('abicheck')} has reached or "
-        f"passed {skill_dir.name}'s declared maximum — re-validate the skill "
-        "and widen the range deliberately"
-    )
+    if _has_unreleased_work():
+        assert minimum > latest_release, (
+            f"{skill_dir.name} declares a minimum of {match.group(1)}, but "
+            f"{'.'.join(map(str, latest_release))} is the last published "
+            "release and this tree still carries unreleased surface the "
+            "skills depend on — a user installing the published version would "
+            "pass the preflight and then fail on unknown commands"
+        )
+    else:
+        assert minimum >= latest_release
+    assert maximum > minimum, "the range must be non-empty"
 
 
 @pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)

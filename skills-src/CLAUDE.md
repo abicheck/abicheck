@@ -63,8 +63,18 @@ Generated output, per skill, per target tree:
 6. **Safety invariants live in `shared/safety-invariants.md`.** That file —
    not ADR-058's frozen prose — is where a safety correction is made.
 7. **Every `SKILL.md` declares an abicheck version range** in its `metadata`
-   frontmatter (`abicheck-version-range`). The structural test enforces
-   containment of the installed version in both directions.
+   frontmatter (`abicheck-version-range`), naming the release that actually
+   provides the CLI surface its workflow drives — **not** whatever version
+   happens to be installed here. In an unreleased tree
+   `importlib.metadata` reports the *last published* version, so calibrating
+   the range to it would approve an installation lacking the surface: that is
+   how the range first came to say `>=0.5.0` while every workflow depended on
+   `aggregate`, `project plan`, `--report-mode root-cause`,
+   `--diagnostic-comparison`, and `--contract-evaluation`, none of which
+   0.5.0 shipped. `tests/test_agent_skills_structural.py` enforces that the
+   minimum is newer than `repo_facts.json`'s `latest_release` while
+   `changelog.d/` still holds unreleased fragments. Bump the ranges when the
+   surface a skill needs first ships, not when the tree's own version moves.
 
 ## Adding a public skill
 

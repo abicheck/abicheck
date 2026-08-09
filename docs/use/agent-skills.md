@@ -66,9 +66,14 @@ protocol server or other setup beyond installing the skill itself. (ADR-058
 wrote this as "CLI normative, MCP an optional adapter"; abicheck has since
 removed its MCP server, so the CLI is simply the backend.)
 
-Each skill declares the abicheck version range it was validated against and
-checks the installed version before doing anything else, rather than
-degrading silently on an installation outside that range.
+Each skill declares, in its frontmatter, the abicheck version range it
+requires — the releases that actually provide the CLI surface it drives — and
+checks the installed version before doing anything else rather than degrading
+silently. The current portfolio targets **0.6.x**: several commands and
+options these workflows depend on (`aggregate`, `project plan`,
+`--report-mode root-cause`, `--diagnostic-comparison`,
+`--contract-evaluation`) postdate the 0.5.0 release, so an older installation
+is refused up front instead of failing partway through a workflow.
 
 ## Contributing
 

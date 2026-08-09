@@ -46,7 +46,17 @@ from abicheck.cli import main as cli_main
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "skills-src"
 
-SKILL_FILES = sorted(SRC.rglob("*.md"))
+#: The files the generator actually publishes into an installed skill — each
+#: skill's `SKILL.md`, its own `references/`, and the shared fragments. This
+#: gate protects what ships to an agent, so `skills-src/CLAUDE.md` (the
+#: contributor contract, never published) is deliberately out of scope: it
+#: discusses repository internals like `latest_release` that are not report
+#: fields, and scanning it would generate false positives indefinitely.
+SKILL_FILES = sorted(
+    path
+    for path in SRC.rglob("*.md")
+    if path.parent != SRC  # skills-src/CLAUDE.md and any future sibling doc
+)
 
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
 _LONG_OPT_RE = re.compile(r"^--[a-z][a-z0-9-]*$")
@@ -573,5 +583,46 @@ def test_no_skill_tells_an_agent_to_read_an_integration_only_field(tmp_path):
                 offenders.append(
                     f"{path.relative_to(REPO)}: cites {cited} without naming the "
                     f"check-target envelope that alone emits it — in: {unit.strip()!r}"
+                )
+    assert offenders == []
+
+
+def test_cited_aggregate_invocations_satisfy_its_required_option_group(tmp_path):
+    """`aggregate` requires one of `--manifest`/`--run-plan`/`--expect`, or an
+    explicit `--discovered-only`, and enforces it **in the command body** —
+    not in the Click parser. So neither the option-name check nor the
+    positional-argument check above can see a violation: both passed while the
+    documented example exited 64 with "no expected-target set".
+
+    Running the real invocation is the only thing that catches this class, so
+    that is what this does. Scoped to `aggregate` deliberately: it is the one
+    command the skills drive that gates on an option *group* rather than on
+    individual parameters, and a speculative general mechanism would have to
+    execute every cited command against fabricated operands.
+    """
+    from click.testing import CliRunner
+
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    runner = CliRunner()
+    offenders: list[str] = []
+
+    for path in SKILL_FILES:
+        for line, invocation in _runnable_invocations(path):
+            words = invocation.split()[1:]
+            if not words or words[0] != "aggregate":
+                continue
+            argv = []
+            for word in words:
+                # Substitute the real, empty reports dir for the operand; the
+                # manifest/expect values stay as written so a missing mode is
+                # still a missing mode.
+                argv.append(str(reports) if word.endswith("/") else word)
+            result = runner.invoke(cli_main, argv)
+            output = (result.output or "") + str(result.exception or "")
+            if "no expected-target set" in output or "Missing argument" in output:
+                offenders.append(
+                    f"{path.relative_to(REPO)}:{line}: `{invocation}` fails "
+                    f"`aggregate`'s own usage check: {output.strip().splitlines()[-1]}"
                 )
     assert offenders == []

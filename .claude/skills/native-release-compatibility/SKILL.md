@@ -3,7 +3,7 @@ name: native-release-compatibility
 description: Decide whether a release of a C/C++ (or other compiled native) library can ship as a minor or patch version, or whether it requires a major version and SONAME bump. Use when asked if a release can go out as a minor version, what version number a release should get, whether a SONAME bump is needed, or whether a set of libraries is ready to release without breaking consumers. Judges the whole release — every library, platform, and build profile — against the last supported release, and treats an unrun matrix target as unknown rather than passing.
 license: Apache-2.0
 metadata:
-  abicheck-version-range: ">=0.5.0,<0.6.0"
+  abicheck-version-range: ">=0.6.0,<0.7.0"
   layer: A
   source: skills-src/native-release-compatibility/SKILL.md
 ---
@@ -132,13 +132,25 @@ produced per-target reports, fan in by pointing `aggregate` at the directory
 holding them:
 
 ```bash
-abicheck aggregate release-reports/ --format json -o aggregate.json
+abicheck aggregate release-reports/ \
+  --manifest targets.json \
+  --format json -o aggregate.json
 ```
 
-`REPORTS_DIR` is a required operand, not an option — `aggregate` with only
-flags exits 64. Add `--manifest targets.json` when the expected target set is
-declared, so a target that produced no report at all is reported as missing
-rather than silently absent (matrix state **not run**, per step 4).
+Two things are required, not optional, and omitting either exits 64:
+
+- **`REPORTS_DIR`** — a positional operand, not an option.
+- **An expected-target mode** — `--manifest`, `--run-plan`, or `--expect`.
+  Prefer one of these: they declare the targets the matrix *must* produce, so
+  a target that produced no report at all is reported as missing instead of
+  silently absent. That is precisely the **not run** state of step 4, and
+  getting it from the tool beats reconstructing it by hand.
+
+`--discovered-only` aggregates whatever happens to be present with no
+coverage gate. It is the wrong default for a release decision — it cannot
+distinguish "this target passed" from "this target never ran" — so use it
+only when there is genuinely no declared target set, and say so in the
+report.
 
 Gate configuration — `--policy`/`--policy-file`, `--severity-*`,
 `--exit-code-scheme` — belongs here rather than in review runs; see

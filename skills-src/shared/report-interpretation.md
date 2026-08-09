@@ -54,10 +54,18 @@ severity.blocking   whether anything blocks
 severity.blocking_categories / categories / config
 ```
 
-The whole `severity` block appears **only when the run passed a
-`--severity-*` flag** (including `--severity-preset`). Without one there is no
-gate to report: the exit code follows the legacy verdict mapping instead, and
-`verdict` is the entire answer.
+The `severity` block appears whenever severity-aware grading was **resolved**
+— which is not only from a `--severity-*` flag. A `.abicheck.yml` carrying a
+`severity:` map or `exit_code_scheme: severity`, a selected run profile, or a
+gate pack all activate it just as well, so a repository can have a gate you
+did not ask for on the command line. Verified: a `compare` run with no
+severity flag at all still emits the block when the project config supplies
+one.
+
+So do not infer "there is no gate" from the absence of a flag in the command
+you typed. Read the block: present means a gate graded this run; absent means
+none was resolved from any source, the exit code follows the legacy verdict
+mapping, and `verdict` is the entire answer.
 
 `verdict` is the compatibility answer; `severity.*` is the *grading* of it
 under this project's configuration. They can legitimately disagree; report
