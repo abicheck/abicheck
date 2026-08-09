@@ -216,9 +216,16 @@ Then check the axes that are not per-finding, reading each report per
 
 Given the matrix, the decision rule:
 
-- Any **break** in the shipped surface → **major bump and SONAME change**.
-  No amount of gate configuration changes this; it changes only whether CI
-  says so.
+- Any **`BREAKING`** cell in the shipped surface → **major bump and a new
+  ABI epoch** (SONAME on ELF, install name on Mach-O, DLL name on PE).
+  Already-compiled consumers cannot survive it, so the loader-facing identity
+  must change. No amount of gate configuration alters this; it alters only
+  whether CI says so.
+- Any **`API_BREAK`** cell (source-only) → a **major version bump under most
+  schemes, but usually no ABI-epoch change**: already-compiled binaries keep
+  working, only rebuilds break. Resolve the version level against the scheme
+  from step 0 and say which rule you applied; do not prescribe a SONAME
+  change for a break no installed consumer can observe.
 - Any **not comparable** or **not run** cell → **cannot decide yet**. Say
   what is missing and what would resolve it. Never default to the
   permissive answer.
@@ -230,9 +237,9 @@ Given the matrix, the decision rule:
   evidence does not support.
 - Only compatible additions → **minor**.
 - No public surface change at all → **patch**.
-- Breaks that are source-only (`API_BREAK`) but not binary → allowed under
-  some projects' schemes and not others; resolve against the scheme
-  established in step 0, and say which rule you applied.
+(The two break rows above already split binary from source-only; the
+distinction matters because conflating them either under-protects installed
+consumers or forces a needless epoch bump on the whole ecosystem.)
 
 See [SONAME and semantic versioning](references/soname-and-semver.md) for
 how the version number and the SONAME relate — they are not the same dial.

@@ -101,8 +101,10 @@ exactly. The order matters:
 2. `evidence_tier`, `evidence_tiers`, `coverage_warnings`,
    `scope.resolved` → what the run could actually see.
 3. `verdict` and `summary` → the compatibility answer.
-4. `severity.*` → the grading of that answer, present only if the run
-   passed a `--severity-*` flag.
+4. `severity.*` → the grading of that answer, present whenever
+   severity-aware grading was resolved from any source (a flag, the
+   project's `.abicheck.yml`, a run profile, or a gate pack) — not only
+   from a flag you passed.
 5. `contract_coverage_failures` /
    `contract_coverage_exit_contribution` → the orthogonal coverage axis.
 6. `root_causes` / `root_cause_count` → the findings, grouped.

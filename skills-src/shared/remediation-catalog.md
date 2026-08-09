@@ -31,7 +31,7 @@ problem and report the new result
 | Changed enum value | Enum values reaching a public signature or a struct field are ABI. Never renumber. Appending is safe only when the underlying type is fixed (`: int` / `enum class`) or the new value fits the old range — otherwise the implementation may pick a wider underlying type, changing `sizeof(E)` and the layout of everything containing it. Fix the underlying type explicitly, ideally from the start. |
 | Changed inline function or template | Its body is baked into consumers. Treat a semantic change as breaking unless the old behaviour is preserved for old callers. |
 | Narrowed visibility | Re-export, or accept the break and version the SONAME. |
-| Raised dependency floor | Not visible to `compare` — see `abicheck deps compare`; document the new floor. |
+| Raised runtime/symbol-version floor | **Visible to `compare`** as `runtime_floor_raised` (a risk on its own; promoted to a break against declared floors). Read it from the report — do not assume runtime is out of scope. Document the new floor, or lower it. The wider dependency graph is `abicheck deps compare`'s job. |
 
 ## Design patterns that avoid the problem
 

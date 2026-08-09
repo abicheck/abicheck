@@ -31,7 +31,7 @@ reason.message     the specific mismatch, in prose
 ```
 evidence_tier       elf_only | dwarf_aware | header_aware  — always present
 evidence_tiers      raw sources available                  — always present
-coverage_warnings   where coverage fell short              — always present
+coverage_warnings   where coverage fell short — present only when non-empty
 scope.resolved      false → fell back to the full export table
 contract_coverage   "partial" → only one side had a fingerprint
 ```
@@ -133,11 +133,12 @@ invoked:
 
 | Block | Present when |
 |---|---|
-| `severity` | a `--severity-*` flag was passed |
+| `severity` | severity-aware grading was resolved from *any* source — a `--severity-*` flag, a `.abicheck.yml` `severity:` map or `exit_code_scheme: severity`, a run profile, or a gate pack |
 | `scope` | `--scope-public-headers` was requested |
 | `contract_coverage_failures`, `contract_coverage_exit_contribution`, `contract_context` | `--contract-evaluation` was passed |
 | `root_causes`, `root_cause_count` | `--report-mode root-cause` |
 | `reason` | the comparison was refused (`verdict: null`) |
+| `coverage_warnings` | the run actually had coverage gaps — a clean run omits the key entirely, which is good news, not a malformed report |
 | `requested_depth`, `effective_depth`, `compatibility_verdict`, `policy_gate_decision` | never on a direct `compare` — Action `check-target` envelope only |
 
 If you need one of the conditional blocks, re-run with the flag that produces
