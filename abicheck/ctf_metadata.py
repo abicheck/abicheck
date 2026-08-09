@@ -249,9 +249,8 @@ def _decompress_if_needed(data: bytes, header: CtfHeader) -> bytes:
         decompressor = zlib.decompressobj()
         decompressed = decompressor.decompress(data[_CTF_PREAMBLE_SIZE:], _MAX_DECOMPRESS)
         if decompressor.unconsumed_tail:
-            raise ValueError(
-                f"CTF decompressed data exceeds {_MAX_DECOMPRESS // (1024 * 1024)} MiB limit"
-            )
+            limit_mib = _MAX_DECOMPRESS // (1024 * 1024)
+            raise ValueError(f"CTF decompressed data exceeds {limit_mib} MiB limit")
     except zlib.error as exc:
         raise ValueError(f"CTF decompression failed: {exc}") from exc
     # Reassemble: preamble + decompressed body

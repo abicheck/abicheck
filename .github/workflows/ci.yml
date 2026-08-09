@@ -203,6 +203,20 @@ jobs:
           fail_ci_if_error: false
 
   integration-tests:
+    # Path-gated through the existing heavy-parity-gate rather than a
+    # trigger-level `paths:` filter, for the same reason libabigail-parity and
+    # abicc-parity already are: the gate job itself always runs and reports, so
+    # branch protection keeps a stable check to require. This is the most
+    # expensive always-on job in the repo — three OS legs, each doing
+    # apt/brew/choco + castxml + a full editable install, with macOS billed at
+    # 10x and Windows at 2x runner minutes — and it was running in full on
+    # documentation-only PRs. The gate's filter set (abicheck/**, tests/**,
+    # examples/**, .github/workflows/**) is exactly the input set that can
+    # change what these tests observe. Note this is deliberately NOT the same
+    # call as cross-platform-e2e below, which stays always-on: that one is ~1
+    # minute, so its runner cost never justified the skipped-check friction.
+    needs: [heavy-parity-gate]
+    if: needs.heavy-parity-gate.outputs.run-heavy == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
