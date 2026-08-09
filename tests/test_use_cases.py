@@ -216,6 +216,27 @@ def test_load_use_case_manifest_wraps_a_yaml_syntax_error(tmp_path: Path) -> Non
         load_use_case_manifest(manifest)
 
 
+def test_load_use_case_manifest_wraps_a_utf8_decoding_error(tmp_path: Path) -> None:
+    """A manifest file that isn't valid UTF-8 must still surface through the
+    public UseCaseManifestError contract, not a bare UnicodeDecodeError --
+    the read used to happen outside this function's guarded block entirely
+    (Codex review, fresh evidence)."""
+    manifest = tmp_path / "impact-use-cases.yaml"
+    manifest.write_bytes(b"- use_case: \xff\xfe not valid utf-8\n")
+    with pytest.raises(UseCaseManifestError, match="not valid UTF-8"):
+        load_use_case_manifest(manifest)
+
+
+def test_load_use_case_manifest_missing_file_is_a_plain_oserror(
+    tmp_path: Path,
+) -> None:
+    """A missing/unreadable path is an ordinary filesystem error, left
+    as-is rather than wrapped -- distinct from 'the file exists but its
+    contents are malformed'."""
+    with pytest.raises(OSError):
+        load_use_case_manifest(tmp_path / "does-not-exist.yaml")
+
+
 def test_load_use_case_manifest_rejects_a_duplicate_key(tmp_path: Path) -> None:
     """A repeated mapping key (e.g. two 'entrypoints:' lines pasted into one
     entry) must be a hard error, not PyYAML's default of silently keeping

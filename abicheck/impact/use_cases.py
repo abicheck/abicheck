@@ -254,16 +254,29 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
 
     Raises :class:`~abicheck.errors.UseCaseManifestError` for a structurally
     malformed document (not a list, a non-mapping entry, a missing/blank
-    ``use_case`` name), a syntactically invalid one, or one that repeats a
-    mapping key (:class:`_DuplicateKeyCheckingLoader`) — the same
-    hard-load-error discipline ``policy_file.py``/``suppression.py`` already
-    use for user-supplied YAML, since silently skipping or overwriting a
-    malformed entry could make a use case's declared coverage quietly
-    disappear.
+    ``use_case`` name), a syntactically invalid one, one that repeats a
+    mapping key (:class:`_DuplicateKeyCheckingLoader`), or one that isn't
+    valid UTF-8 — the same hard-load-error discipline
+    ``policy_file.py``/``suppression.py`` already use for user-supplied
+    YAML, since silently skipping or overwriting a malformed entry could
+    make a use case's declared coverage quietly disappear.
+
+    A missing/unreadable *path* itself (``OSError`` — no such file, a
+    directory, a permissions error) is deliberately left as-is, not wrapped
+    — that is an ordinary filesystem error a caller already knows how to
+    handle, distinct from "the file exists but its contents are malformed"
+    (Codex review, fresh evidence: the read used to happen *outside* this
+    function's guarded block at all, so a real-world non-UTF-8 manifest
+    raised a bare ``UnicodeDecodeError`` instead of the documented
+    exception type).
     """
-    text = Path(path).read_text(encoding="utf-8")
     try:
+        text = Path(path).read_text(encoding="utf-8")
         raw = yaml.load(text, Loader=_DuplicateKeyCheckingLoader)
+    except UnicodeError as exc:
+        raise UseCaseManifestError(
+            f"impact-use-cases.yaml: {path}: not valid UTF-8: {exc}"
+        ) from exc
     except yaml.YAMLError as exc:
         raise UseCaseManifestError(
             f"impact-use-cases.yaml: {path}: invalid YAML syntax: {exc}"
