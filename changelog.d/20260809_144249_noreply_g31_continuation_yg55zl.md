@@ -20,4 +20,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   comparison for `deprecated`/`is_scoped` now correctly detects a real
   transition instead of being unconditionally skipped as a producer
   mismatch.
+- **Fixed two follow-on gaps in the same-named work above**: a declaration
+  present on both snapshot sides only via the clang leg of a
+  `--ast-frontend hybrid` merge now gets its `deprecated`/`is_scoped`
+  provenance recorded (previously it silently fell back to "unknown
+  producer" and the comparison was skipped even though the value was
+  genuinely known); and `RecordType`/`EnumType` matching in
+  `dumper_hybrid.merge_snapshots` and the class-layout descriptor detector
+  (`STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST`/`BASE_CLASS_OFFSET_CHANGED`/
+  `VPTR_INTRODUCED`/`TAIL_PADDING_REUSE_CHANGED`) now uses namespace-qualified
+  identity instead of the bare declaration name, so two distinct types
+  sharing only a bare leaf name in different namespaces (e.g. `a::Foo` /
+  `b::Foo`) no longer collide.
 

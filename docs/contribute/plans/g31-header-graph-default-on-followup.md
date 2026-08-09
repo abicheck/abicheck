@@ -277,6 +277,65 @@ building a second identity-resolution mechanism from scratch.
   secondary-vtable placement) and is not populated by the clang backend at
   all; `TypeField.default` (member initializer *value*, not the
   default-argument facts above) remains castxml-only.
+
+  **Two more real gaps found and fixed in the same pass** (Codex review,
+  fresh evidence, both confirmed against real code before fixing): (1) the
+  producer-gating fix above only stamps `fact_provenance` for a declaration
+  actually routed through `_merge_function`/`_merge_record_type`/
+  `_merge_enum_type`/`_merge_variable` — a declaration present on BOTH
+  snapshot sides but ONLY ever via the clang leg (absent from castxml
+  entirely) is appended to the merged result verbatim, without going
+  through those merge functions, so its `deprecated`/`is_scoped` fact keys
+  were never recorded at all; `fact_producer()` then returned `None` for a
+  fact that genuinely IS known (clang-sourced), and
+  `both_known_backed_fact` incorrectly declined to compare a real
+  transition on it. Fixed by stamping `provenance[...] = "clang"` for every
+  clang-only function/type/field/enum/variable appended in
+  `merge_snapshots()`, verified end-to-end (a clang-only function gaining
+  `[[deprecated]]` between old and new now correctly fires
+  `FUNC_DEPRECATED_ADDED` through the real `compare()` pipeline, not just
+  provenance-map inspection). (2) `merge_snapshots()` itself matched
+  castxml/clang record types and enums by bare `name` (`{t.name: t for t in
+  clang_snap.types}`), same collision class as `diff_layout._index()`
+  above — two distinct types/enums sharing only a bare leaf name in
+  different namespaces could merge against the wrong counterpart, or a
+  genuinely clang-only type get silently dropped as "already present."
+  Fixed by keying on `diff_helpers.type_map_key` (namespace-qualified
+  identity) for the MATCH, while keeping `fact_provenance`'s own keys
+  bare-name (unchanged — that's what the detectors themselves query by).
+  `diff_layout._index()` itself was rewritten to build a real
+  `diff_helpers.TypeMap` (via `build_type_map`/`lookup_matched_type`)
+  instead of a plain `{rec.name: rec}` dict, for the identical reason —
+  this pre-existing collision already affected `base_offsets`/
+  `vptr_offset_bits` (live via castxml for a while), it just had no visible
+  consequence until `is_standard_layout`/`is_trivially_copyable` started
+  being populated for real and made the collision reachable through a
+  realistic scenario a reviewer could construct.
+
+  **A narrower, related gap found while testing the fix above, deliberately
+  NOT fixed in this pass**: two *distinct*, correctly-matched records that
+  independently undergo the identical boolean-trait transition (e.g. both
+  `a::Foo` and `b::Foo` separately lose `is_trivially_copyable` between old
+  and new) can still have their findings collapse from two to one --
+  `_check_trivially_copyable_lost`/`_check_standard_layout_lost` build
+  `Change.symbol`/description from the bare `name` alone (matching every
+  other bare-name-keyed detector's own `symbol=` convention, e.g.
+  `diff_types.py`'s "Bare, not the qualified matching key" comment), so two
+  distinct records sharing a bare name produce byte-identical `(kind,
+  description)` pairs, and `diff_filtering._dedup_exact` correctly (by its
+  own existing rule) treats that as one duplicate finding. This is real —
+  confirmed with a same-transition test reproducing the collapse — but is a
+  different, narrower failure mode than the matching bug above (a genuinely
+  *mis-attributed* finding vs. a *legitimately-deduped-looking* one that
+  happens to be wrong here), it is not new in this pass (every existing
+  bare-name-keyed `Change.symbol` in the codebase has the identical
+  exposure whenever two distinct declarations share a bare name and
+  produce identical description text), and a real fix (threading
+  qualified identity into `Change.description`/a new disambiguating field,
+  or reworking `_dedup_exact`'s key) has a blast radius across every
+  bare-name-keyed detector in `diff_types.py`/`diff_symbols.py`/
+  `diff_layout.py` alike — its own scoped follow-up, not a drive-by
+  extension of the matching fix.
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

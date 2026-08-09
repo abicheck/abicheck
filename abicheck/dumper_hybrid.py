@@ -81,6 +81,7 @@ from typing import Any
 
 from .comparability import PROFILE_FIELD_KEYS, _sha256_of
 from .diff_cxx_rules import _skip_template_args, itanium_scope_components
+from .diff_helpers import type_map_key
 from .dumper_castxml import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
@@ -412,6 +413,13 @@ def _merge_functions(
     clang_only = [cf for cf in clang_funcs if cf.mangled not in merged_mangled]
     for cf in clang_only:
         provenance[func_fact_key(cf.mangled, "param_defaults")] = "clang"
+        # A clang-only function's own deprecated value IS genuinely
+        # clang-sourced -- without this, both_known_backed_fact(old, new,
+        # func_fact_key(mangled, "deprecated")) sees no recorded provenance
+        # for it at all and incorrectly declines to compare a real
+        # deprecation transition on a declaration that exists on both sides
+        # only via clang (Codex review, fresh evidence).
+        provenance[func_fact_key(cf.mangled, "deprecated")] = "clang"
     merged.extend(clang_only)
     return merged
 
@@ -569,8 +577,15 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
             for cv in clang_variables
         ]
 
-    clang_types_by_name = {t.name: t for t in clang_snap.types}
-    clang_enums_by_name = {e.name: e for e in clang_snap.enums}
+    # Keyed by type_map_key (namespace-qualified identity), not the bare
+    # RecordType.name/EnumType.name: two distinct types sharing only a bare
+    # leaf name in different namespaces (e.g. a::Foo/b::Foo) would otherwise
+    # silently collide here too -- one castxml record merging against the
+    # WRONG clang record, and/or a genuinely clang-only record (that merely
+    # shares its bare name with an unrelated castxml record) being dropped
+    # instead of appended (Codex review, fresh evidence).
+    clang_types_by_key = {type_map_key(t): t for t in clang_snap.types}
+    clang_enums_by_key = {type_map_key(e): e for e in clang_snap.enums}
     clang_vars_by_mangled = {v.mangled: v for v in clang_variables}
 
     merged_functions = _merge_functions(
@@ -578,27 +593,51 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     )
 
     merged_types = [
-        _merge_record_type(t, clang_types_by_name.get(t.name), provenance)
+        _merge_record_type(t, clang_types_by_key.get(type_map_key(t)), provenance)
         for t in castxml_snap.types
     ]
-    castxml_type_names = {t.name for t in castxml_snap.types}
-    merged_types.extend(t for t in clang_snap.types if t.name not in castxml_type_names)
+    castxml_type_keys = {type_map_key(t) for t in castxml_snap.types}
+    clang_only_types = [
+        t for t in clang_snap.types if type_map_key(t) not in castxml_type_keys
+    ]
+    for t in clang_only_types:
+        # A clang-only type's own deprecated value IS genuinely clang-
+        # sourced -- without this, both_known_backed_fact sees no recorded
+        # provenance at all for a declaration that exists on both snapshot
+        # sides only via clang, and incorrectly declines to compare a real
+        # transition (Codex review, fresh evidence). Provenance keys stay
+        # bare-name (type_fact_key/field_fact_key), matching what the
+        # detectors themselves query by -- only the MATCH above needs the
+        # qualified identity.
+        provenance[type_fact_key(t.name, "deprecated")] = "clang"
+        for f in t.fields:
+            provenance[field_fact_key(t.name, f.name, "deprecated")] = "clang"
+    merged_types.extend(clang_only_types)
 
     merged_enums = [
-        _merge_enum_type(e, clang_enums_by_name.get(e.name), provenance)
+        _merge_enum_type(e, clang_enums_by_key.get(type_map_key(e)), provenance)
         for e in castxml_snap.enums
     ]
-    castxml_enum_names = {e.name for e in castxml_snap.enums}
-    merged_enums.extend(e for e in clang_snap.enums if e.name not in castxml_enum_names)
+    castxml_enum_keys = {type_map_key(e) for e in castxml_snap.enums}
+    clang_only_enums = [
+        e for e in clang_snap.enums if type_map_key(e) not in castxml_enum_keys
+    ]
+    for e in clang_only_enums:
+        provenance[enum_fact_key(e.name, "deprecated")] = "clang"
+        provenance[enum_fact_key(e.name, "is_scoped")] = "clang"
+    merged_enums.extend(clang_only_enums)
 
     merged_variables = [
         _merge_variable(v, clang_vars_by_mangled.get(v.mangled), provenance)
         for v in castxml_snap.variables
     ]
     castxml_var_mangled = {v.mangled for v in castxml_snap.variables}
-    merged_variables.extend(
+    clang_only_variables = [
         v for v in clang_variables if v.mangled not in castxml_var_mangled
-    )
+    ]
+    for v in clang_only_variables:
+        provenance[var_fact_key(v.mangled, "deprecated")] = "clang"
+    merged_variables.extend(clang_only_variables)
 
     merged = replace(
         castxml_snap,

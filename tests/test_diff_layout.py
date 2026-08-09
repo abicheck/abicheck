@@ -301,3 +301,105 @@ class TestStdlibEmbeddingAttribution:
         assert present.description.count("embeds a standard-library type by value") == 1
         # The change whose type is absent from `new` is left untouched.
         assert "embeds a standard-library type by value" not in missing.description
+
+
+class TestNamespaceQualifiedTypeMatching:
+    """Codex review, fresh evidence: the layout-descriptor detector used to
+    index/match record types by BARE name -- two distinct records sharing
+    only a bare leaf name in different namespaces (e.g. a::Foo/b::Foo) would
+    silently collide (the later one in iteration order winning, the earlier
+    one's layout facts never actually compared), misattributing or entirely
+    missing STANDARD_LAYOUT_LOST/TRIVIALLY_COPYABLE_LOST/etc."""
+
+    def test_two_same_bare_name_types_do_not_collide(self) -> None:
+        a_foo_old = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_standard_layout=True,
+        )
+        b_foo_old = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_standard_layout=True,
+        )
+        # a::Foo loses standard-layout; b::Foo is unchanged.
+        a_foo_new = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_standard_layout=False,
+        )
+        b_foo_new = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_standard_layout=True,
+        )
+        old = _snap("1", types=[a_foo_old, b_foo_old])
+        new = _snap("2", types=[a_foo_new, b_foo_new])
+        changes = compare(old, new).changes
+        layout_lost = [c for c in changes if c.kind == ChangeKind.STANDARD_LAYOUT_LOST]
+        # Exactly one finding, and it must be attributable to a::Foo, not
+        # accidentally suppressed OR fired twice/against the wrong type
+        # (a bare-name dict collision could produce either failure mode).
+        assert len(layout_lost) == 1
+
+    def test_second_type_still_compared_when_first_shares_its_bare_name(self) -> None:
+        # A bare-name dict's last-write-wins collision in the MATCHING step
+        # would silently drop one of the two same-named types from the index
+        # entirely, or match it against the wrong counterpart -- confirm
+        # both are correctly matched to their own qualified counterpart and
+        # independently diffed. Uses two DIFFERENT transitions (one loses
+        # trivially-copyable, the other loses standard-layout) so the
+        # resulting Change kinds differ -- isolating the matching fix from
+        # the separate, pre-existing question of whether two Change objects
+        # with byte-identical bare-name-derived descriptions get deduplicated
+        # by _dedup_exact (a real but distinct concern this test isn't
+        # scoped to cover; description text doesn't carry qualified_name for
+        # ANY bare-name-keyed detector in this codebase today).
+        a_foo_old = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_trivially_copyable=True,
+            is_standard_layout=True,
+        )
+        b_foo_old = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_trivially_copyable=True,
+            is_standard_layout=True,
+        )
+        a_foo_new = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_trivially_copyable=False,
+            is_standard_layout=True,
+        )
+        b_foo_new = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_trivially_copyable=True,
+            is_standard_layout=False,
+        )
+        old = _snap("1", types=[a_foo_old, b_foo_old])
+        new = _snap("2", types=[a_foo_new, b_foo_new])
+        kinds = _kinds(old, new)
+        # If the two records were mismatched (a::Foo diffed against b::Foo's
+        # data or vice versa) neither correct kind -- or the wrong pair of
+        # kinds -- would appear.
+        assert ChangeKind.TRIVIALLY_COPYABLE_LOST in kinds
+        assert ChangeKind.STANDARD_LAYOUT_LOST in kinds
