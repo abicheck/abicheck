@@ -1882,3 +1882,98 @@ class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
             ],
         )
         assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+
+
+class TestExcludeExportOnlyRoots:
+    """Codex review, fresh evidence: a declaration whose ``origin`` is
+    ``ScopeOrigin.EXPORT_ONLY`` (exported by the binary, no header at all)
+    must not be able to stand in for public-header-domain contract evidence
+    -- that is precisely the boundary the separate ``exports`` contract
+    domain exists to evaluate. ``exclude_export_only_roots=True`` is what
+    ``contract_pipeline.py`` passes; the default ``False`` preserves this
+    module's pre-existing, evidence-tier-agnostic behaviour for
+    ``diff_types.py``'s unrelated caller."""
+
+    def _snapshot_with_export_only_reference(self) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="s", type="std::string")],
+                    origin=ScopeOrigin.EXPORT_ONLY,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+
+    def test_export_only_root_counts_by_default(self) -> None:
+        # Unchanged default behaviour: diff_types.py's evidence-tier-agnostic
+        # use of directly_referenced_stdlib_types must not regress.
+        snap = self._snapshot_with_export_only_reference()
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::string", "string"}
+        )
+
+    def test_export_only_root_is_excluded_when_requested(self) -> None:
+        snap = self._snapshot_with_export_only_reference()
+        assert (
+            directly_referenced_stdlib_types(snap, exclude_export_only_roots=True)
+            == frozenset()
+        )
+        assert (
+            directly_referenced_stdlib_type_spellings(
+                snap, exclude_export_only_roots=True
+            )
+            == frozenset()
+        )
+
+    def test_public_header_root_is_unaffected_by_the_flag(self) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    params=[Param(name="s", type="std::string")],
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+        assert directly_referenced_stdlib_types(
+            snap, exclude_export_only_roots=True
+        ) == frozenset({"std::string"})
+
+    def test_export_only_record_field_is_excluded_when_requested(self) -> None:
+        # A record reached from a public-header root, but whose own
+        # definition is export-only, must not leak its fields as
+        # public-header evidence either -- same reasoning, applied to the
+        # record-walk half of the scan rather than the root-seeding half.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "foo",
+                    return_type="MyPublicType",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="MyPublicType",
+                    kind="class",
+                    fields=[TypeField(name="s", type="std::string")],
+                    origin=ScopeOrigin.EXPORT_ONLY,
+                ),
+                RecordType(name="std::string", kind="class"),
+            ],
+        )
+        assert (
+            directly_referenced_stdlib_types(snap, exclude_export_only_roots=True)
+            == frozenset()
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})

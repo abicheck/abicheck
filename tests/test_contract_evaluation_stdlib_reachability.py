@@ -30,8 +30,16 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.contract_evaluation import evaluate_change_contract_relevance
 from abicheck.contract_relevance_types import ContractMode, ContractRelevance
-from abicheck.model import AbiSnapshot, Function, Param, ScopeOrigin, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    ScopeOrigin,
+    Visibility,
+)
 from abicheck.surface import compute_public_surface
+from abicheck.type_reachability import directly_referenced_stdlib_type_spellings
 
 
 def _fn(
@@ -156,3 +164,97 @@ class TestPublicModeDirectlyReferencedStdlib:
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
         assert decision.reason_code == "required_evidence_incomplete"
+
+
+class TestExportOnlyReferenceDoesNotConfirmThePublicContract:
+    """Codex review, fresh evidence (PR #677): a stdlib type reached only via
+    an ``EXPORT_ONLY``-origin declaration (exported by the binary, no header
+    at all) must not confirm a ``--contract public`` finding -- that
+    declaration is exactly the evidence the separate ``exports`` domain
+    exists to evaluate.
+
+    The evidence-source snapshot deliberately carries its own,
+    reachability-empty ``PublicSurface`` (``_evidence_snapshot()``'s
+    functions are the only public declarations, and none is used to build
+    ``s`` here) so this isolates ``_in_surface_result_is_confirmed``'s
+    *second* confirmation source (``directly_referenced_stdlib_old``/
+    ``_new``) from its first (``auth.public_types``, via
+    ``compute_public_surface``) -- mirroring how
+    ``TestPublicModeDirectlyReferencedStdlib`` above already decouples the
+    two so a synthetic evidence set alone drives the assertion. Feeding the
+    same snapshot into both ``compute_public_surface`` and
+    ``directly_referenced_stdlib_type_spellings`` would let
+    ``surface.py``'s own closure -- which, unlike this module, seeds a type
+    from a ``Visibility.PUBLIC`` declaration of *any* origin including
+    ``EXPORT_ONLY`` -- confirm the finding through the first source
+    regardless of this fix, masking whether the fix under test does
+    anything at all."""
+
+    def _evidence_snapshot(self) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[
+                _fn(
+                    "api",
+                    params=["std::string"],
+                    origin=ScopeOrigin.EXPORT_ONLY,
+                )
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+        )
+
+    def test_export_only_reference_leaves_the_finding_unresolved(self) -> None:
+        evidence_snap = self._evidence_snapshot()
+        # `functions=[_fn("api")]`, same as this module's other tests: a
+        # plain public function with no stdlib reference at all, just to
+        # make the surface resolvable (`has_public`) without itself
+        # contributing anything to `public_types`.
+        s = compute_public_surface(
+            AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        )
+        evidence = directly_referenced_stdlib_type_spellings(
+            evidence_snap, exclude_export_only_roots=True
+        )
+        assert evidence == frozenset()
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="std::string", description=""
+        )
+        decision = evaluate_change_contract_relevance(
+            c,
+            s,
+            s,
+            mode=ContractMode.PUBLIC,
+            directly_referenced_stdlib_old=evidence,
+            directly_referenced_stdlib_new=evidence,
+        )
+        assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert decision.reason_code == "required_evidence_incomplete"
+
+    def test_the_unscoped_evidence_would_have_wrongly_confirmed_it(self) -> None:
+        # Documents the bug this guards against: without
+        # exclude_export_only_roots, the same export-only reference *would*
+        # confirm the finding -- the fix is the flag, not a change to
+        # confirmation matching itself.
+        evidence_snap = self._evidence_snapshot()
+        # `functions=[_fn("api")]`, same as this module's other tests: a
+        # plain public function with no stdlib reference at all, just to
+        # make the surface resolvable (`has_public`) without itself
+        # contributing anything to `public_types`.
+        s = compute_public_surface(
+            AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        )
+        evidence = directly_referenced_stdlib_type_spellings(evidence_snap)
+        assert evidence == frozenset({"std::string", "string"})
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="std::string", description=""
+        )
+        decision = evaluate_change_contract_relevance(
+            c,
+            s,
+            s,
+            mode=ContractMode.PUBLIC,
+            directly_referenced_stdlib_old=evidence,
+            directly_referenced_stdlib_new=evidence,
+        )
+        assert decision.relevance is ContractRelevance.IN_CONTRACT

@@ -364,8 +364,21 @@ def build_contract_stage(
     # source evidence), and this is the only place both raw snapshots are
     # still in scope for `ContractEvaluationStage.classify` to eventually
     # use it.
-    directly_referenced_stdlib_old = directly_referenced_stdlib_type_spellings(old)
-    directly_referenced_stdlib_new = directly_referenced_stdlib_type_spellings(new)
+    # `exclude_export_only_roots=True`: this evidence confirms findings
+    # specifically under the `public` contract domain (`_in_surface_result_
+    # is_confirmed` only ever consults it while `mode is ContractMode.
+    # PUBLIC`), so a root whose only provenance is the binary's export table
+    # -- no header backing it at all -- must not stand in for public-header
+    # evidence. That is exactly the boundary the `exports` domain exists to
+    # evaluate separately; conflating the two let an export-only stdlib
+    # reference confirm a `--contract public` finding it has no bearing on
+    # (Codex review, fresh evidence).
+    directly_referenced_stdlib_old = directly_referenced_stdlib_type_spellings(
+        old, exclude_export_only_roots=True
+    )
+    directly_referenced_stdlib_new = directly_referenced_stdlib_type_spellings(
+        new, exclude_export_only_roots=True
+    )
 
     # ADR-049 Phase 3's observed provider ledger (plan Section 4.1).
     # Collected for *both* providers whenever the export surfaces were
