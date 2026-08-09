@@ -569,6 +569,31 @@ def join_use_case_graph(
     test check) is untouched, only the single summary ``provenance``/
     ``confidence`` fields are reset to what the library graph already
     resolved before this join ran.
+
+    **Known residual gap** (Codex review, fresh evidence): this restoration
+    only patches the *already-resolved* ``provenance``/``confidence``
+    fields on the graph this function returns — the risky
+    ``declared_use_case``/``CONF_UNKNOWN`` fact itself is still sitting in
+    ``node.facts`` (deliberately; that is the join's whole point). Nothing
+    in the current codebase re-runs ``ensure_facts_and_resolve`` on this
+    specific returned graph afterward (confirmed: :func:`join_use_case_graph`
+    has no other caller today — this module isn't wired into any real
+    ``compare``/report pipeline yet, per this file's own module docstring),
+    so this fix is correct for every real code path that exists right now.
+    But a *future* caller that merges this joined graph's nodes into another
+    graph via :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.add_node`
+    again, or round-trips it through ``to_dict()``/``from_dict()``, would
+    re-trigger the same tied-confidence provenance risk this function just
+    fixed, since both recompute ``provenance``/``confidence`` fresh from the
+    unchanged ``facts`` list. Closing that residual gap for real needs a
+    change to the shared merge precedence itself (a way to mark a
+    :class:`~abicheck.buildsource.graph_facts.GraphFact` as never eligible
+    to win the "top" pick in ``graph_facts._precedence_key``/
+    ``ensure_facts_and_resolve``) — every graph producer in the codebase
+    shares that one precedence function, so this is a scoped design
+    decision of its own, not a drive-by fix bundled into this module's join.
+    Whoever wires :func:`join_use_case_graph`'s result into a real pipeline
+    that might re-merge or re-serialize it must close this gap first.
     """
     original = {n.id: (n.provenance, n.confidence) for n in library_graph.nodes}
     joined = copy.deepcopy(library_graph)
