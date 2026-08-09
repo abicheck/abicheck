@@ -2280,3 +2280,50 @@ class TestHasImpactEvidence:
         change = self._change(reachability_proof_path="Foo -> Bar -> _Z9dispatchv")
         assert change.impact_assessment is None
         assert _has_impact_evidence(change) is True
+
+
+class TestEnrichCoveredChangesRefreshesCache:
+    """:func:`abicheck.appcompat._enrich_covered_changes` must refresh
+    ``change.impact_assessment`` after attaching consumer evidence, not just
+    the flat proof-path fields (Codex review, fresh evidence): a change
+    reaching this function with a cached-but-pathless ``ImpactAssessment``
+    (``MarkReachability``'s blanket Slice 10 cache) still has that stale
+    object sitting on ``change.impact_assessment`` after enrichment --
+    ``impact.engine.assess_change`` prefers any non-``None`` cached
+    assessment, so a later JSON/SARIF render would keep returning
+    ``proof_path=None`` and silently drop the newly attached explanation."""
+
+    def test_stale_pathless_cache_is_refreshed_after_enrichment(self):
+        from abicheck.appcompat import _enrich_covered_changes
+        from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+        from abicheck.impact.engine import assess_change
+
+        change = Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z9dispatchv",
+            description="Function removed: _Z9dispatchv",
+            reachability_state=ReachabilityState.UNKNOWN,
+        )
+        # Simulate MarkReachability's Slice 10 blanket cache: a real
+        # ImpactAssessment object with no proof path.
+        change.impact_assessment = assess_change(change)
+        assert change.impact_assessment.proof_path is None
+
+        graph = SourceGraphSummary()
+        graph.add_node(GraphNode(id="decl://run", kind="source_decl", label="run"))
+        explained = ConsumerImpactPath(
+            consumer="training-service",
+            symbol="_Z9dispatchv",
+            declarations=("_Z9dispatchv",),
+            public_entries=("run",),
+        )
+        assert explained.is_direct()
+
+        _enrich_covered_changes([change], {"_Z9dispatchv": explained}, graph)
+
+        assert change.affected_public_roots == ["run"]
+        assert change.impact_assessment.proof_path is not None
+        # The refreshed cache must agree with a fresh, uncached derivation.
+        fresh = assess_change(change)
+        assert change.impact_assessment.proof_path == fresh.proof_path

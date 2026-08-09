@@ -1072,6 +1072,25 @@ def _enrich_covered_changes(
     prose written here is deliberately consumer-neutral (see
     :func:`_format_consumer_impact`) and only findings with no evidence of
     their own are touched.
+
+    Refreshes ``change.impact_assessment`` after attaching (Codex review,
+    fresh evidence): a change reaching this point with a *cached but
+    pathless* assessment (``MarkReachability``'s blanket Slice 10 cache —
+    the case :func:`_has_impact_evidence` now lets through) still has that
+    stale, path-less object sitting on ``change.impact_assessment`` after
+    :func:`_attach_consumer_impact` sets the flat proof-path fields —
+    ``impact.engine.assess_change`` prefers any non-``None`` cached
+    assessment over re-deriving from those flat fields, so without this
+    refresh the newly attached consumer explanation would never actually
+    reach a JSON/SARIF render. Mirrors the overlay-change path a few lines
+    below (``overlay_change.impact_assessment = assess_change(overlay_change)``),
+    which already does this correctly for the *uncovered*-symbol case
+    because that ``Change`` is always freshly constructed with no
+    pre-existing cache to go stale — this shared-``Change`` counterpart
+    must clear the stale cache *first*: ``assess_change`` reads
+    ``change.impact_assessment`` as its own cache, so recomputing while the
+    old object is still assigned would just hand back that same stale
+    object unchanged.
     """
     for change in changes:
         if _has_impact_evidence(change):
@@ -1087,6 +1106,8 @@ def _enrich_covered_changes(
         if explained is None:
             continue
         _attach_consumer_impact(change, explained, graph, name_consumer=False)
+        change.impact_assessment = None
+        change.impact_assessment = assess_change(change)
 
 
 def _attach_consumer_impact(
