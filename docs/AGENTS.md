@@ -270,7 +270,12 @@ python scripts/gen_mcp_reference.py       # docs/reference/mcp-tools-reference.m
 python scripts/gen_python_api_reference.py  # docs/reference/python-api-reference.md
 python scripts/gen_config_reference.py    # docs/reference/config-keys-reference.md
 python scripts/gen_platform_matrix.py     # docs/reference/platforms.md's "Quick Reference" section
+python scripts/gen_agent_skills.py        # .agents/skills/, .claude/skills/, .gemini/skills/ (from skills-src/)
 ```
+
+`gen_agent_skills.py` is not a `docs/` generator, but it is under the same
+"generated, drift-gated, one canonical source" contract and is listed here so
+the regeneration commands live in one place.
 
 Commit the resulting files. `scripts/verify.py --profile pr` (via the
 `ai-readiness`/`fair-metadata` steps) fails if a generated file has drifted

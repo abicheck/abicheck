@@ -1,0 +1,82 @@
+---
+doc_type: how-to
+audience:
+  - library-maintainer
+  - ci-owner
+level: intermediate
+lifecycle: active
+generated: false
+---
+
+# Agent Skills
+
+abicheck publishes four [Agent Skills](https://agentskills.io) — portable,
+triggerable packages of native-compatibility expertise that a coding agent
+(Claude Code, GitHub Copilot, OpenAI Codex, Cursor, Gemini CLI) loads when a
+user asks a compatibility question in their own words.
+
+The skills are named after the **user's job**, not after abicheck commands.
+Someone who has never heard of abicheck can ask "will this change break
+existing consumers?" and get a workflow that reaches for abicheck as its
+deterministic verification engine. See
+[ADR-058](../contribute/adr/058-native-compatibility-agent-skills.md) for why
+the portfolio is shaped this way.
+
+## The catalogue
+
+| Skill | The question it answers |
+|---|---|
+| [`native-binary-compatibility-review`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-binary-compatibility-review/SKILL.md) | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
+| [`native-api-evolution`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-api-evolution/SKILL.md) | "How do I make this API change *without* breaking compatibility?" — design-time guidance (pImpl, reserved slots, versioned interfaces, deprecation lifecycles), ending by verifying the resulting change. |
+| [`native-release-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-release-compatibility/SKILL.md) | "Can we ship this as a minor version, or does it need a major bump?" — a release-level decision across every library, platform, and profile. |
+| [`native-consumer-compatibility`](https://github.com/abicheck/abicheck/blob/main/.agents/skills/native-consumer-compatibility/SKILL.md) | "Will *this specific* application, plugin, or host keep working?" — a per-consumer answer that can differ from the library's global verdict. |
+
+## Installing them
+
+The skills are committed to this repository in three trees, all generated
+from one source:
+
+| Tree | Read by |
+|---|---|
+| `.agents/skills/` | GitHub Copilot, OpenAI Codex, Cursor — the portable, cross-vendor convention |
+| `.claude/skills/` | Claude Code, which does not scan `.agents/skills` |
+| `.gemini/skills/` | Gemini CLI, which does not either |
+
+Each skill directory is fully self-contained: copy
+`.agents/skills/<skill-name>/` into your own project (or your personal skills
+directory) and every reference it needs comes with it. There are no symlinks
+and no cross-skill paths, so a single skill installs and works on its own.
+
+Skills are executable content. Anthropic's own guidance applies to these as
+to any others: install only from sources you trust, and read what you install.
+The rules these skills hold *themselves* to — never manufacture a green
+result, never widen a suppression, never mutate a project silently — are in
+[ADR-058's safety invariants](../contribute/adr/058-native-compatibility-agent-skills.md),
+with the operational copy shipped inside every skill as
+`references/shared/safety-invariants.md`.
+
+## Prerequisites
+
+The skills drive the abicheck CLI, so they need whatever the workflow they run
+needs — see [CLI usage](cli-usage.md) for installation and
+[evidence and build-context flags](dump-compare-flags.md) for what deeper
+`--depth` levels require. MCP is **not** required: local CLI invocation is the
+normative execution path for every skill, so a skill works in any agent with
+shell access. An agent that does have
+[MCP configured](mcp-integration.md) may use it, without behaving differently.
+
+Each skill declares the abicheck version range it was validated against and
+checks the installed version before doing anything else, rather than
+degrading silently on an installation outside that range.
+
+## Contributing
+
+Edit `skills-src/`, never the generated trees. `skills-src/CLAUDE.md` is the
+contributor contract — the three-layer model, the shared-fragment rules, and
+the admission bar a fifth public skill would have to clear. The phased plan is
+[G36](../contribute/plans/g36-native-compatibility-agent-skills.md).
+
+```bash
+python scripts/gen_agent_skills.py          # regenerate all three trees
+python scripts/gen_agent_skills.py --check  # what CI gates on
+```

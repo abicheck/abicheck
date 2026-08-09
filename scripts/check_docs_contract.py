@@ -308,6 +308,71 @@ def _is_file_under(base: Path, value: str) -> bool:
     return candidate is not None and candidate.is_file()
 
 
+def _is_registered_page(value: str) -> bool:
+    """True if a `task_pages`/`allowed_summaries` entry names a real file.
+
+    Accepts a repo-relative path *outside* `docs/` the same way `fact_sources`
+    already does (ADR-058 / G36 P0.6): `skills-src/shared/*.md` fragments are
+    genuine summary owners of a registered topic, but they live outside the
+    published tree by design -- they are the DRY source the `.agents/skills/`
+    trees are generated from, not doc pages. Everything else about the
+    `summarizes` round-trip below applies to them unchanged.
+    """
+    return _is_file_under(DOCS, value) or _is_file_under(ROOT, value)
+
+
+def _page_key(value: object) -> str:
+    """Normalized identity for a registry page entry or a scanned page:
+    docs/-relative when it lives under `docs/`, repo-relative otherwise.
+
+    One function for both sides of the `summarizes` round-trip, so a
+    registry entry and the page that claims it compare equal regardless of
+    which tree the page lives in."""
+    text = str(value)
+    docs_candidate = _resolves_under(DOCS, text)
+    if docs_candidate is not None and docs_candidate.is_file():
+        return docs_candidate.relative_to(DOCS.resolve()).as_posix()
+    root_candidate = _resolves_under(ROOT, text)
+    if root_candidate is not None and root_candidate.is_file():
+        return root_candidate.relative_to(ROOT.resolve()).as_posix()
+    return _docs_relative_key(text)
+
+
+def _scanned_page_key(path: Path) -> str:
+    """The identity of a page being scanned, matching `_page_key`'s output for
+    the registry entry that names it: docs/-relative under `docs/`,
+    repo-relative otherwise. Takes a real (absolute) Path, which
+    `_page_key`'s string-and-registry-relative resolution deliberately
+    rejects."""
+    resolved = path.resolve()
+    docs_root = DOCS.resolve()
+    if docs_root == resolved or docs_root in resolved.parents:
+        return resolved.relative_to(docs_root).as_posix()
+    return resolved.relative_to(ROOT.resolve()).as_posix()
+
+
+def _registered_external_pages(topics: dict[str, dict[str, object]]) -> list[Path]:
+    """Every registered `task_pages`/`allowed_summaries` entry that resolves
+    outside `docs/`. `_check_front_matter_schema` scans `DOCS.rglob("*.md")`,
+    so without this these pages' `summarizes` claims would sit in the registry
+    entirely unchecked."""
+    out: set[Path] = set()
+    for entry in topics.values():
+        if not isinstance(entry, dict):
+            continue
+        for key in ("task_pages", "allowed_summaries"):
+            values = entry.get(key, [])
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if _is_file_under(DOCS, str(value)):
+                    continue
+                candidate = _resolves_under(ROOT, str(value))
+                if candidate is not None and candidate.is_file():
+                    out.add(candidate)
+    return sorted(out)
+
+
 def _docs_relative_key(value: object) -> str:
     """Normalize a docs/-relative path value (e.g. a `canonical_page`
     entry) to its resolved, docs-relative POSIX form, so equivalent
@@ -354,12 +419,12 @@ def _check_referenced_paths_exist(
                 f.err("ownership", f"topic {topic_id!r}: {key} must be a list")
                 continue
             for value in values:
-                if not _is_file_under(DOCS, str(value)):
+                if not _is_registered_page(str(value)):
                     f.err(
                         "ownership",
                         f"topic {topic_id!r}: {key} entry {value!r} does not "
-                        "exist as a file under docs/ (or escapes it via "
-                        "'..'/an absolute path)",
+                        "exist as a file under docs/ or the repo root (or "
+                        "escapes it via '..'/an absolute path)",
                     )
         fact_sources = entry.get("fact_sources", [])
         if not isinstance(fact_sources, list):
@@ -408,11 +473,11 @@ def _permitted_summary_pages(entry: dict[str, object]) -> set[str]:
     for key in ("worked_example", "reference_page"):
         value = entry.get(key)
         if value is not None:
-            pages.add(_docs_relative_key(value))
+            pages.add(_page_key(value))
     for key in ("task_pages", "allowed_summaries"):
         values = entry.get(key, [])
         if isinstance(values, list):
-            pages.update(_docs_relative_key(v) for v in values)
+            pages.update(_page_key(v) for v in values)
     return pages
 
 
@@ -533,11 +598,16 @@ def _check_front_matter_schema(
     f: Findings, topics: dict[str, dict[str, object]]
 ) -> None:
     """Validate front matter on every manual page that has any, and
-    cross-check `canonical_for`/`summarizes` against the topic registry."""
-    for path in sorted(DOCS.rglob("*.md")):
+    cross-check `canonical_for`/`summarizes` against the topic registry.
+
+    Scans `docs/` plus every registered non-`docs/` summary page (ADR-058's
+    `skills-src/shared/*.md` fragments), so a `summarizes` claim outside the
+    published tree is enforced rather than merely recorded."""
+    scanned = sorted(DOCS.rglob("*.md")) + _registered_external_pages(topics)
+    for path in scanned:
         if path.name in _DUPLICATE_SCAN_EXCLUDE_NAMES:
             continue
-        rel_to_docs = path.relative_to(DOCS).as_posix()
+        rel_to_docs = _scanned_page_key(path)
         try:
             fm = load_front_matter(path)
         except (yaml.YAMLError, ValueError) as exc:
@@ -614,7 +684,7 @@ def _check_front_matter_schema(
                     f"{topic_id!r}, but its entry in {_rel(TOPICS_FILE)} is "
                     "not a mapping",
                 )
-            elif _docs_relative_key(entry.get("canonical_page")) != rel_to_docs:
+            elif _page_key(entry.get("canonical_page")) != rel_to_docs:
                 f.err(
                     "front-matter",
                     f"{_rel(path)}: claims canonical_for {topic_id!r}, but "
@@ -659,7 +729,7 @@ def _check_front_matter_schema(
                 )
             elif entry.get("canonical_page") and not _page_links_to(
                 path, _docs_relative_key(entry["canonical_page"])
-            ):
+            ):  # canonical_page is always docs/-relative (enforced above)
                 f.err(
                     "front-matter",
                     f"{_rel(path)}: claims summarizes {topic_id!r}, but "

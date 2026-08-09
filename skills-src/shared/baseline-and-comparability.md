@@ -1,0 +1,86 @@
+---
+doc_type: reference
+level: advanced
+lifecycle: active
+summarizes:
+  - baseline-lifecycle
+---
+
+# Baselines and comparability
+
+A compatibility question is always relative to something. Two separate
+decisions follow: **which baseline** answers the user's real question, and
+**whether the pair is even comparable**.
+
+## Choosing the baseline
+
+| The user's question | Baseline |
+|---|---|
+| "Does this PR break anything?" | the merge base / the branch this change targets |
+| "Can we ship this as a minor version?" | the **last released version users actually have**, not the previous commit |
+| "Will consumers of 1.2 survive an upgrade to 2.0?" | the oldest release still supported |
+| "Did our nightly drift?" | the previous nightly artifact |
+
+The most common mistake is comparing against `HEAD~1` when the user meant
+"since the last release" — that reports a compatible increment while the
+cumulative release delta is breaking.
+
+Ways to obtain a baseline side:
+
+- a stored snapshot: `abicheck dump old/libfoo.so -o baseline.abi.json`,
+  later `abicheck compare baseline.abi.json new/libfoo.so`
+- the released binary itself: `abicheck compare old/libfoo.so new/libfoo.so`
+- for a single artifact against a stored baseline:
+  `abicheck scan libfoo.so --against baseline.abi.json`
+
+Baseline storage, refresh cadence, and CI publication are owned by
+[the baseline management page](../../docs/use/baseline-management.md).
+
+**Never re-generate or re-point a baseline to clear a failing check** —
+[safety-invariants.md](safety-invariants.md) item 7.
+
+## Comparability: when the pair cannot be compared at all
+
+Two snapshots are only meaningfully comparable if they describe the same
+fact universe. abicheck records an extraction contract with each snapshot
+and refuses a comparison whose two sides disagree on it. When that happens
+the JSON report has:
+
+```json
+{
+  "verdict": null,
+  "reason": { "kind": "profile_mismatch", "message": "..." }
+}
+```
+
+`kind` is `profile_mismatch` (the toolchain/ABI profile differs — compiler
+family or version, ABI dialect, language standard, target triple, pointer
+width, endianness, macros, flags, include order) or `scope_mismatch` (the
+extraction scope differs — which headers, public header dirs, or translation
+units were in view). The specific mismatched field is currently recoverable
+only from `message`.
+
+`verdict: null` is **not** a pass. It is a third outcome with its own
+remediation: fix the inputs. Never route it into the compatible branch —
+[safety-invariants.md](safety-invariants.md) item 2.
+
+### Remediating a comparability failure
+
+1. Read `reason.message` for the mismatched field.
+2. Re-extract the offending side so both sides agree — same compiler family
+   and version, same `-std=`, same target, same headers in view. See
+   [compiler-and-build-profiles.md](compiler-and-build-profiles.md).
+3. If one side is an old stored snapshot produced before the profile was
+   recorded, `contract_coverage` will read `"partial"` on a comparison that
+   *did* succeed — one side carried a fingerprint and the other did not.
+   That is a weaker guarantee than a full match; say so rather than
+   reporting a clean result.
+4. Dependency scoping must also match: a snapshot dumped with
+   `--include-dependencies` and one dumped with the default scoping do not
+   describe the same surface. Prefer either both scoped or both
+   `--include-dependencies`, and prefer comparing two persisted snapshots
+   over mixing a persisted baseline with a live binary when the toolchain is
+   in question.
+
+Re-run the identical command after remediation and report the new result —
+never assert the fix worked.

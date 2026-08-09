@@ -1478,3 +1478,129 @@ def test_stale_process_language_reports_real_line_number(
     dc._check_stale_process_language(f)
     assert len(f.warnings) == 1
     assert "page.md:13:" in f.warnings[0][1]
+
+
+# --- ADR-058 / G36 P0.6: registered summary pages outside docs/ -----------
+
+
+def _external_registry(tmp_path: Path) -> tuple[dict, Path]:
+    """A docs/ tree with one canonical page, plus an out-of-tree fragment
+    registered as that topic's allowed summary — the real
+    `skills-src/shared/*.md` shape, in miniature."""
+    docs = tmp_path / "docs"
+    (docs / "learn").mkdir(parents=True)
+    (docs / "learn" / "owner.md").write_text(
+        "---\ndoc_type: explanation\ncanonical_for:\n  - a-topic\n---\n\n# Owner\n",
+        encoding="utf-8",
+    )
+    fragment = tmp_path / "skills-src" / "shared" / "frag.md"
+    fragment.parent.mkdir(parents=True)
+    fragment.write_text(
+        "---\ndoc_type: reference\nsummarizes:\n  - a-topic\n---\n\n"
+        "See [owner](../../docs/learn/owner.md).\n",
+        encoding="utf-8",
+    )
+    topics = {
+        "a-topic": {
+            "canonical_page": "learn/owner.md",
+            "allowed_summaries": ["skills-src/shared/frag.md"],
+        }
+    }
+    return topics, fragment
+
+
+def test_registered_summary_page_outside_docs_is_accepted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`task_pages`/`allowed_summaries` must tolerate a repo-relative path
+    outside docs/ the way `fact_sources` already does — otherwise registering
+    a `skills-src/shared/*.md` fragment fails the registry's own existence
+    check instead of passing it."""
+    topics, _ = _external_registry(tmp_path)
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert f.errors == []
+
+
+def test_registered_summary_page_outside_docs_is_actually_scanned(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The enforcement half, not just the plumbing: the fragment's own
+    `summarizes` front matter must be round-tripped against the registry.
+    Well-formed passes; an unknown topic id fails."""
+    topics, fragment = _external_registry(tmp_path)
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert f.errors == []
+
+    fragment.write_text(
+        fragment.read_text(encoding="utf-8").replace("a-topic", "no-such-topic", 1),
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    assert any("no-such-topic" in msg for _, msg in f.errors), (
+        "a registered out-of-docs fragment's summarizes claim went unchecked"
+    )
+
+
+def test_unregistered_summary_page_outside_docs_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A fragment cannot grant itself permission to summarize a topic just by
+    adding the front-matter claim — the same round-trip docs/ pages are under."""
+    topics, fragment = _external_registry(tmp_path)
+    topics["a-topic"].pop("allowed_summaries")
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_front_matter_schema(f, topics)
+    # Unregistered pages outside docs/ aren't scanned at all, so the claim
+    # must not be silently accepted from the registry side either.
+    dc._check_referenced_paths_exist(f, topics)
+    assert fragment.is_file()
+    assert not any(
+        "claims summarizes" in msg and "is registered" in msg for _, msg in f.errors
+    )
+
+
+def test_missing_registered_summary_page_outside_docs_is_flagged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    topics, fragment = _external_registry(tmp_path)
+    fragment.unlink()
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_referenced_paths_exist(f, topics)
+    assert any("frag.md" in msg for _, msg in f.errors)
+
+
+def test_every_shared_skill_fragment_is_registered_in_topics_yaml() -> None:
+    """The real tree: every `skills-src/shared/*.md` fragment that claims a
+    `summarizes` topic must be registered against it, and the whole gate must
+    stay error-free with those entries present."""
+    import yaml
+
+    root = Path(__file__).resolve().parent.parent
+    topics = yaml.safe_load(
+        (root / "docs" / "_meta" / "topics.yaml").read_text(encoding="utf-8")
+    )["topics"]
+    registered = {
+        value
+        for entry in topics.values()
+        if isinstance(entry, dict)
+        for key in ("task_pages", "allowed_summaries")
+        for value in (entry.get(key) or [])
+    }
+    for fragment in sorted((root / "skills-src" / "shared").glob("*.md")):
+        fm = dc.load_front_matter(fragment)
+        if not (fm or {}).get("summarizes"):
+            continue
+        rel = fragment.relative_to(root).as_posix()
+        assert rel in registered, f"{rel} claims summarizes but is unregistered"
