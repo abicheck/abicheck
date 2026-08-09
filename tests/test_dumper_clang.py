@@ -1049,6 +1049,76 @@ def test_normalize_qual_type_strips_anonymous_type_location() -> None:
     assert _normalize_qual_type("std::vector<int>") == "std::vector<int>"
 
 
+def test_normalize_qual_type_strips_lambda_location() -> None:
+    """Codex review, PR #687, fourth round, fresh evidence: a lambda's
+    closure type is spelled ``"(lambda at <file>:<line>:<col>)"`` -- also
+    location-bearing, but a DIFFERENT shape than the "(unnamed <kind> at
+    ...)" pattern the anonymous-tag fix above handles (no "unnamed" word).
+    Verified against real Clang 17 output that this spelling appears
+    repeatedly throughout a ``std::function<...>``-wrapped lambda's whole
+    template instantiation chain, so every occurrence must be normalized,
+    not just the first/outermost."""
+    from abicheck.dumper_clang import _normalize_qual_type
+
+    assert _normalize_qual_type("(lambda at t.hpp:2:38)") == "(lambda)"
+    assert _normalize_qual_type("S::(lambda at t.hpp:2:38)") == "S::(lambda)"
+    assert _normalize_qual_type("S::(lambda at t.hpp:2:38) &&") == "S::(lambda) &&"
+    # Repeated occurrences within one complex template spelling.
+    assert (
+        _normalize_qual_type(
+            "std::is_nothrow_constructible<(lambda at t.hpp:2:38), "
+            "(lambda at t.hpp:2:38)>"
+        )
+        == "std::is_nothrow_constructible<(lambda), (lambda)>"
+    )
+
+
+def test_field_default_fingerprint_stable_across_lambda_location() -> None:
+    """End-to-end version of the lambda-location test above: a field
+    initialized with ``std::function<void()> f = []{};`` must fingerprint
+    identically whether parsed from ``t.hpp:2:38`` or a completely
+    different checkout path/line."""
+
+    def _lambda_field(loc: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "f",
+            "type": {"qualType": "std::function<void ()>"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "CXXConstructExpr",
+                    "type": {"qualType": "std::function<void ()>"},
+                    "inner": [
+                        {
+                            "kind": "LambdaExpr",
+                            "type": {"qualType": f"(lambda at {loc})"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def _snap(loc: str):
+        root = _tu(
+            {
+                "kind": "CXXRecordDecl",
+                "name": "S",
+                "tagUsed": "struct",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "completeDefinition": True,
+                "inner": [_lambda_field(loc)],
+            },
+        )
+        (t,) = _ClangAstParser(root, set(), set()).parse_types()
+        return t.fields[0].default
+
+    same_checkout = _snap("t.hpp:2:38")
+    different_checkout = _snap("/different/tree/t.hpp:9:99")
+    assert same_checkout is not None
+    assert same_checkout == different_checkout
+
+
 def test_field_default_fingerprint_stable_across_anonymous_type_location() -> None:
     """Codex review, PR #687, fourth round, fresh evidence: clang spells an
     anonymous enum/struct/union's type as ``"(unnamed <kind> at <file>:

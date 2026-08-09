@@ -136,3 +136,28 @@ it should read in CHANGELOG.md. Delete the other sections.
   location is now normalized to a fixed placeholder before hashing (the
   "unnamed `<kind>`" portion itself is kept, still distinguishing an
   anonymous type from a named one).
+- **Extended the same location-normalization to lambda closure types**
+  (Codex review, fresh evidence, fourth round): a lambda's type is spelled
+  `"(lambda at <file>:<line>:<col>)"` — a different, non-"unnamed"-prefixed
+  shape than the anonymous-tag pattern above, so the earlier fix's regex
+  didn't match it. Verified against real Clang 17 output that this spelling
+  recurs throughout an entire `std::function<...>`-wrapped lambda's
+  template instantiation chain, so every occurrence is now normalized, not
+  just the first.
+- **Fixed a possible false `PARAM_DEFAULT_VALUE_CHANGED` when upgrading
+  past this PR** (Codex review, fresh evidence, P1): unlike a literal
+  default's plain value, a non-literal default's clang-side representation
+  is a structural fingerprint whose exact algorithm changed across this
+  PR's several fixes above (referenced-declaration identity/scope, `sizeof`
+  operand types, anonymous-type/lambda location normalization) — none of
+  which the already-shipped `Param.default` fact had ever needed before.
+  A persisted pre-v20 clang snapshot's fingerprint for an UNCHANGED
+  non-literal default argument could therefore differ from a freshly-dumped
+  one purely from that algorithm shift, not a real edit. The comparison now
+  declines specifically for fingerprint-shaped (`"expr:"`-prefixed) values
+  on a pre-v20 clang side — a literal default's value, and default
+  presence/absence detection (`PARAM_DEFAULT_VALUE_REMOVED`), are both
+  unaffected and continue comparing normally regardless of schema version.
+  The new gate lives in a new leaf module,
+  `abicheck/diff_symbols_param_defaults.py`, split out to keep
+  `diff_symbols.py` under its line-count cap.

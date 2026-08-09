@@ -1858,20 +1858,19 @@ def _specialization_scope_key(node: dict[str, Any]) -> str:
     ``ClassTemplateSpecializationDecl``, or ``""`` when none can be derived.
 
     An earlier version used whichever direct child happened to be FIRST with
-    a mangled name -- unstable to unrelated source edits (Codex review, fresh
-    evidence: real Clang 17 output confirmed inserting `static constexpr int
-    AAA` *before* an unchanged `VALUE` changed the disambiguator from
-    `VALUE`'s own mangled name to `AAA`'s, silently perturbing every OTHER
-    declaration referencing that `VALUE`, though nothing about it changed).
+    a mangled name -- unstable to unrelated edits (Codex review: inserting
+    `static constexpr int AAA` before an unchanged `VALUE` changed the
+    disambiguator from `VALUE`'s own mangled name to `AAA`'s, perturbing
+    every OTHER declaration referencing `VALUE` though nothing about it
+    changed).
 
     Fixed via the SCOPE portion of a representative member's mangled name
     (:func:`diff_cxx_rules.itanium_scope_components`), e.g.
     ``_ZN1AIiE5VALUEE`` -> ``["AIiE", "VALUE"]``: dropping the trailing leaf
-    leaves ``["AIiE"]``, identical regardless of which member of the SAME
-    specialization contributed it. Tries every child until one parses (not
-    just the first with a mangled name) -- a special member/operator's name
-    is not parseable this way (returns ``None``, by that function's own
-    contract), and stopping there would reopen the same instability.
+    leaves ``["AIiE"]``, identical regardless of which member contributed
+    it. Tries every child until one parses -- a special member/operator's
+    name isn't parseable this way, and stopping there would reopen the
+    same instability.
     """
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
@@ -1885,28 +1884,34 @@ def _specialization_scope_key(node: dict[str, Any]) -> str:
     return ""
 
 
-#: Matches clang's anonymous-tag-type spelling, e.g. ``"(unnamed enum at
-#: t.hpp:1:1)"`` or ``"union (unnamed union at t.hpp:2:5)"`` -- the location
-#: is the only volatile part; ``\1`` (the tag kind) is kept.
-_ANON_TYPE_LOCATION_RE = re.compile(r"\(unnamed (\w+) at [^)]*\)")
+#: Matches clang's location-bearing anonymous/lambda type spellings, e.g.
+#: ``"(unnamed enum at t.hpp:1:1)"`` or ``"S::(lambda at t.hpp:2:38)"`` --
+#: group 2 (the tag kind, absent for "lambda") is the only part kept.
+_ANON_TYPE_LOCATION_RE = re.compile(r"\((unnamed (\w+)|lambda) at [^)]*\)")
 
 
 def _normalize_qual_type(qual_type: str) -> str:
-    """Strip the source location out of an anonymous-tag ``qualType`` before
-    it's folded into a build-stable fingerprint.
+    """Strip the source location out of an anonymous-tag/lambda ``qualType``
+    before it's folded into a build-stable fingerprint.
 
     clang spells an anonymous enum/struct/union/class's type as ``"(unnamed
-    <kind> at <file>:<line>:<col>)"`` -- an absolute path and line embedded
-    right in the type string (Codex review, fresh evidence, verified against
-    real Clang 17 output: parsing identical source from two checkout paths,
-    or merely inserting a blank line before an anonymous `enum { VALUE = 3
-    };`, produced two DIFFERENT `TypeField.default` fingerprints for an
-    unrelated, unchanged initializer referencing it). The "unnamed <kind>"
-    portion is kept (still distinguishes anonymous from named); only the
-    location collapses to a fixed placeholder. A non-matching (the common,
-    named-type) qualType passes through unchanged.
+    <kind> at <file>:<line>:<col>)"``, and a lambda's closure type as
+    ``"(lambda at ...)"`` -- both embed an absolute path/line (Codex review:
+    two checkout paths, or a blank line before an anonymous type/lambda
+    default, produced different fingerprints for an unchanged initializer).
+    A lambda's spelling recurs throughout any type built on it (e.g. a
+    `std::function<...>`-wrapped lambda's instantiation chain), so every
+    occurrence is substituted, not just the outermost. The "unnamed
+    <kind>"/"lambda" portion is kept; only the location collapses to a
+    fixed placeholder. A named (the common case) qualType passes through
+    unchanged.
     """
-    return _ANON_TYPE_LOCATION_RE.sub(r"(unnamed \1)", qual_type)
+
+    def _repl(m: re.Match[str]) -> str:
+        kind = m.group(2)
+        return f"(unnamed {kind})" if kind else "(lambda)"
+
+    return _ANON_TYPE_LOCATION_RE.sub(_repl, qual_type)
 
 
 def _canonical_expr(node: Any, id_index: dict[str, str] | None = None) -> Any:
