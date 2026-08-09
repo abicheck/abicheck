@@ -653,7 +653,7 @@ the new result, never by asserting the fix worked without re-checking it.
 
 ## Testing and evaluation architecture (summary — full detail in the plan)
 
-Four layers, not just markdown linting, mirroring the repository's existing
+Five layers, not just markdown linting, mirroring the repository's existing
 multi-layer test-quality discipline (`AGENTS.md`'s FP-rate/tier-accuracy/
 mutation-testing precedent, generalized to a new artifact class):
 

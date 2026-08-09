@@ -96,7 +96,9 @@ paragraph only motivates).
 `scripts/check_ai_readiness.py`'s `claude-md-coverage` check once it's added
 to `REQUIRED_CLAUDE_MD_DIRS`, see P0.6).
 
-**Tests:** none yet (structural tests land in P0.5); a manual editorial pass
+**Tests:** none yet (structural tests land in P0.7, not P0.5 — P0.5 is the
+comparability-reason-code product change and defines no skill-structural
+tests of its own); a manual editorial pass
 confirming each fragment is self-contained prose (no unresolved
 cross-fragment references) before P0.2 starts consuming them.
 
@@ -447,10 +449,20 @@ both:**
   command table gets no new row — this design's only surface change is to
   `--version`'s own existing flag-level behavior/tests.
 
-**Tests:** `tests/test_cli_info.py` — JSON shape, schema-version values
-match `serialization.SCHEMA_VERSION`/the report-schema constant at import
-time (no hand-copied duplicate numbers), provider-detection reflects the
-actual test-environment tool availability.
+**Tests, conditional on the same design choice as the Files list above —
+don't apply both:**
+- **If path (a):** `tests/test_cli_info.py` — JSON shape, schema-version
+  values match `serialization.SCHEMA_VERSION`/the report-schema constant
+  at import time (no hand-copied duplicate numbers), provider-detection
+  reflects the actual test-environment tool availability.
+- **If path (b):** no `info` command exists, so `tests/test_cli_info.py`
+  is not created — following the path (a) test checklist here would test
+  a surface that was never built, or worse, prompt implementing `info`
+  anyway and silently reintroducing the root command path (b) exists to
+  avoid. The equivalent coverage (schema-version values, provider
+  detection) instead lives on `--version --format json`'s own test file,
+  asserting the same content the path (a) tests would have, against the
+  actual flag surface path (b) built.
 
 **Docs:** `README.md`, `docs/reference/cli-reference.md` (generated),
 changelog fragment (`changelog.d/`, `### Added`).
