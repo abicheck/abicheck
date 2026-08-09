@@ -241,7 +241,7 @@ Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
 
 ## `ScanResult`
 
-Typed result of an executed scan (ADR-035 D10) — the one object the CLI, the MCP server, and library callers consume.
+Typed result of an executed scan (ADR-035 D10) — the one object the CLI and library callers consume.
 
 *Dataclass.*
 

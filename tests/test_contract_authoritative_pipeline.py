@@ -435,36 +435,6 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
         assert len(seen) >= 2, report
         assert set(seen) == {0}, seen
 
-    def test_the_mcp_response_agrees_with_the_report_it_embeds(
-        self, tmp_path: Path
-    ) -> None:
-        """`abi_compare` publishes its own top-level `changes` array beside a
-        rendered CLI report. The array was serialized with full-library
-        contributions before the scoped gate replaced the primary verdict and
-        exit code, so one response said `4` at the top level and `0` in the
-        report it embedded (Codex review, reproduced)."""
-        from abicheck.mcp_server import abi_compare
-
-        old_p, new_p = self._uncovered_break_pair(tmp_path)
-        response = json.loads(
-            abi_compare(
-                str(old_p),
-                str(new_p),
-                required_symbols=["_Z4keepv"],
-                contract_evaluation=True,
-                output_format="json",
-            )
-        )
-        assert response["status"] == "ok", response
-        top = next(c for c in response["changes"] if c["kind"] == "func_removed")
-        embedded = next(
-            c for c in response["report"]["changes"] if c["kind"] == "func_removed"
-        )
-        assert top["gate_contribution"] == embedded["gate_contribution"] == 0
-        # The compatibility axis is untouched here too: still a real break,
-        # it just did not gate *this* run.
-        assert response["full_verdict"] == "BREAKING"
-
 
 class TestPromotionNeverLowersAVerdict:
     """The recomputation `appcompat`'s promotion triggers must combine with

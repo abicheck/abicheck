@@ -41,7 +41,6 @@ dependencies = [
 
 [project.scripts]
 abicheck = "abicheck.cli:main"
-abicheck-mcp = "abicheck.mcp_server:main"
 abicheck-cc = "abicheck.cc_wrapper:main"
 
 [project.urls]
@@ -51,17 +50,6 @@ Documentation = "https://abicheck.github.io/abicheck/"
 Changelog = "https://github.com/abicheck/abicheck/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-mcp = [
-    # <2.0.0: mcp 2.0.0 (released 2026-07-29) restructured the package and no
-    # longer ships mcp.server.fastmcp at all (confirmed: `from mcp.server.fastmcp
-    # import FastMCP` raises ModuleNotFoundError in a clean venv with 2.0.0
-    # installed) -- an unpinned upper bound let every CI job installing this
-    # extra silently start pulling a version that can't import mcp_server.py.
-    # pixi.lock already pins the unaffected 1.28.1 for pixi installs; this
-    # upper bound gives pip installs (`pip install -e ".[dev,mcp]"`, what CI's
-    # unit-tests job actually runs) the same protection.
-    "mcp[cli]>=1.2.0,<2.0.0",
-]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
@@ -197,15 +185,6 @@ disable_error_code = ["no-any-return", "misc", "import-untyped"]
 module = ["abicheck.cli_params"]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc", "type-arg"]
-
-[[tool.mypy.overrides]]
-# FastMCP decorators (@mcp.tool, etc.) are untyped.
-module = [
-    "abicheck.mcp_server",
-    "abicheck.mcp_server_project",
-    "abicheck.mcp_server_scan",
-]
-disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
 # types-PyYAML stubs may not be found in all environments;
@@ -431,12 +410,12 @@ twine = "*"
 # completes rather than skipping docs-build/distribution-build and failing
 # the incomplete-run gate on a fresh `pixi install` — see the two features
 # above.
-default = { features = ["dev", "mcp", "docs", "dist"], solve-group = "default" }
-integration = { features = ["dev", "mcp", "native-toolchain", "integration"], solve-group = "default" }
-parity = { features = ["dev", "mcp", "native-toolchain", "parity"], solve-group = "parity" }
+default = { features = ["dev", "docs", "dist"], solve-group = "default" }
+integration = { features = ["dev", "native-toolchain", "integration"], solve-group = "default" }
+parity = { features = ["dev", "native-toolchain", "parity"], solve-group = "parity" }
 docs = { features = ["docs"], solve-group = "docs" }
 # Used by action.yml's dependency-source=conda-forge (action/install-deps-conda-forge.sh)
-# — deliberately excludes "dev"/"mcp" (no test/lint/type tooling weight) and gets
+# — deliberately excludes "dev" (no test/lint/type tooling weight) and gets
 # its own bin/-shim treatment there rather than a raw PATH prepend, since a
 # Python interpreter still gets pulled in transitively by the workspace-level
 # pypi-dependencies section above (see that script's own docstring for why).

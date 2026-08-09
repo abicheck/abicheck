@@ -228,9 +228,8 @@ def test_reporter_handles_arbitrary_changes(
 # 6. Binary format detection fuzzing
 # ---------------------------------------------------------------------------
 
-# _detect_binary_format lives in cli.py (which has heavy deps) and
-# mcp_server.py (which requires the optional 'mcp' package).  We
-# replicate the core logic inline to avoid pulling in those modules.
+# _detect_binary_format lives in cli.py, which has heavy deps.  We
+# replicate the core logic inline to avoid pulling that module in.
 _MACHO_MAGICS = frozenset({
     b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
     b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",

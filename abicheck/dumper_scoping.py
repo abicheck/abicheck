@@ -924,7 +924,7 @@ def resolve_dependency_scope(
     header_roots: Sequence[Path | str] | None = None,
 ) -> AbiSnapshot:
     """The single choke point both ``dump``'s serialization step and
-    ``service.run_dump`` (compare's live-binary dumping, scan, MCP, ...) call:
+    ``service.run_dump`` (compare's live-binary dumping, scan, ...) call:
     apply :func:`scope_snapshot_excluding_dependencies` (``dependency_scope``
     ``"filtered"``) unless *include_dependencies* opts out, in which case
     just record the user's actual intent as ``"full"`` (a no-op when there
@@ -947,7 +947,7 @@ def apply_dependency_scope_to_run_dump_result(
 ) -> AbiSnapshot:
     """``service.run_dump``'s own choke point: *include_dependencies*
     defaults to ``True`` there (preserving every existing caller — scan,
-    MCP, ``dump``'s own inline calls — that doesn't pass it explicitly);
+    ``dump``'s own inline calls — that doesn't pass it explicitly);
     only ``compare`` opts into ``False`` to filter its live-binary dumping
     the same way ``dump`` filters by default. *bound_args* is
     ``inspect.Signature.bind_partial(*args, **kwargs)`` against the real

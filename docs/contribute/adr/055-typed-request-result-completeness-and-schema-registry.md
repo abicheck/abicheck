@@ -7,6 +7,14 @@ against `mcp_server.py` (see "Amendment" note below Gap 2)
 "As implemented" note recording where the implementation departed from it;
 "Implementation notes" at the end covers what is still open and how this
 line itself went stale.
+
+> **Partial retirement note (2026-08-09).** D1–D3 (typed request/result
+> completeness, the schema registry) remain in force and describe the
+> current codebase. D4 and every `mcp_server.py`/MCP-tool-specific claim
+> below are historical only: the MCP server was removed entirely — see
+> `docs/contribute/adr/021-mcp-security-model.md` (retired the same date).
+> "The MCP path"/"MCP dedup" language below should be read as "the removed
+> MCP server, at the time this ADR was written."
 Written up after an external API-layer review of `abicheck`
 (CLI/Python/MCP/Actions/schemas) turned out to be largely stale against
 current `main` — G22/ADR-037 already landed the CLI consolidation and the

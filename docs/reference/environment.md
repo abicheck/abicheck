@@ -3,8 +3,8 @@
 `abicheck` is configured primarily through CLI flags and the
 [`.abicheck.yml` config file](config-file.md). A small set of environment
 variables tune behaviour that is awkward to express as a per-run flag —
-parallelism, memory budgets, the build-injection wrapper, the MCP server, and
-debug-info resolution.
+parallelism, memory budgets, the build-injection wrapper, and debug-info
+resolution.
 
 Conventions used below:
 
@@ -80,21 +80,6 @@ therefore configured entirely by environment. See
 > Fact extraction is best-effort and never fails the build: a missing front-end
 > or a parse error degrades to a warning on stderr and preserves the compiler's
 > exit code.
-
----
-
-## MCP server
-
-Read at import time by the MCP server (`abicheck mcp`). An invalid integer here
-raises a clear error (these two are the exception to the "fall back to default"
-rule).
-
-| Variable | Values | Default | Effect | Module |
-|----------|--------|---------|--------|--------|
-| `ABICHECK_MCP_TIMEOUT` | integer (seconds) | `120` | Maximum seconds for a single MCP tool invocation. See [MCP integration](../use/mcp-integration.md#runtime-configuration) for the current list of bounded tools. | `mcp_shared.py` (`MCP_TIMEOUT`) |
-| `ABICHECK_MCP_MAX_FILE_SIZE` | integer (bytes) | `524288000` (500 MB) | Maximum accepted input file size for MCP tools. See [MCP integration](../use/mcp-integration.md#runtime-configuration) for the current list of covered inputs. | `mcp_shared.py` (`MCP_MAX_FILE_SIZE`) |
-
-See [MCP integration](../use/mcp-integration.md).
 
 ---
 

@@ -50,6 +50,7 @@ from abicheck.service_scan import (
     _descendant_pgids,
     _kill_process_tree,
     _layers_from_coverage,
+    _reject_comparison_only_fields,
     _scan_subprocess_worker,
     estimate_scan,
     expand_header_inputs,
@@ -243,6 +244,38 @@ def test_layers_from_coverage_coerces_and_skips_bad_values() -> None:
     assert layer.layer == "L4_source_abi"
     assert layer.facts == 0  # non-numeric facts fell back to 0
     assert layer.counters == {"matched_symbols": 3}  # bad counters dropped
+
+
+# ── _reject_comparison_only_fields: shared by run_scan / run_scan_set ─────────
+#
+# Ported from a former MCP `abi_scan` end-to-end test (the only place this
+# behaviour used to be exercised) when the MCP server was removed — the rule
+# itself is Tier-2 (`service_scan.py`) and belongs at this layer, not tied to
+# any one front end.
+
+
+class TestRejectComparisonOnlyFields:
+    def _audit_request(self, **overrides: object) -> ScanRequest:
+        return ScanRequest(binaries=[Path("lib.so")], mode="audit", **overrides)
+
+    @pytest.mark.parametrize(
+        ("overrides", "field"),
+        [
+            ({"policy": "sdk_vendor"}, "policy"),
+            ({"contract_evaluation": True}, "contract_evaluation"),
+            ({"policy_file": object()}, "policy_file"),
+            ({"suppression": object()}, "suppression"),
+        ],
+    )
+    def test_rejects_a_comparison_only_field_without_a_baseline(
+        self, overrides: dict, field: str
+    ) -> None:
+        req = self._audit_request(**overrides)
+        with pytest.raises(ValidationError, match=field):
+            _reject_comparison_only_fields(req)
+
+    def test_plain_audit_request_is_accepted(self) -> None:
+        assert _reject_comparison_only_fields(self._audit_request()) is None
 
 
 # ── _scan_subprocess_worker: run-in-child entry (lines 874-883) ───────────────

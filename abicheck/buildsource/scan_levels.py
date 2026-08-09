@@ -101,7 +101,7 @@ USER_DEPTHS: tuple[EvidenceDepth, ...] = (
 #: raises a plain "not one of ..." error for anything else (``symbols``/
 #: ``full``/``graph`` included) -- there is no CLI-visible alias/translation
 #: (ADR-043 D2). The internal Python service API (:func:`parse_user_depth`,
-#: used by ``ScanRequest``/MCP-adjacent programmatic callers, never by the
+#: used by ``ScanRequest``/other programmatic callers, never by the
 #: CLI's own ``--depth`` parsing) keeps the historical ``symbols`` alias and
 #: accepts the internal ``full``/``graph`` rungs verbatim -- those rungs still
 #: exist as real :class:`EvidenceDepth` values for mode-preset-driven internal

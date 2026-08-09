@@ -13,9 +13,11 @@ generated: false
 
 abicheck's functionality is available as a Python library through the
 `abicheck.service` module. This is the **supported public entry point** — the
-same Tier-2 service layer the CLI and the [MCP server](mcp-integration.md) call.
-Front-ends should route through `service` rather than importing the internal
-`abicheck.checker` core directly (ADR-037).
+same Tier-2 service layer the CLI calls. Front-ends should route through
+`service` rather than importing the internal `abicheck.checker` core
+directly (ADR-037). Agent and script integrations use this API (or the
+CLI's structured JSON/SARIF output) directly — there is no separate
+protocol server.
 
 > **Install.** `pip install abicheck`. Native-binary header analysis also needs
 > `castxml` and a C++ compiler; without them, binary-only mode still works. See
@@ -150,31 +152,26 @@ raises `ValidationError` for an unrecognised format.
 ## Typed request API
 
 `run_compare`/`run_dump` are convenience shims — keyword arguments in,
-typed result out. Underneath, this Python API and the MCP server both
-resolve through the **same typed request objects**: `DumpRequest`,
-`CompareRequest`, and `ScanRequest`. The native `compare` CLI resolves
-through `CompareRequest` too (`cli_resolve.py` assembles it from `compare`'s
-loose arguments and hands it to `resolve_compare_request`); the native `dump`
-CLI is the one exception — it still runs its own `dump_cmd` argument path
+typed result out. Underneath, this Python API resolves through the **same
+typed request objects** the native CLI does: `DumpRequest`, `CompareRequest`,
+and `ScanRequest`. The native `compare` CLI resolves through
+`CompareRequest` too (`cli_resolve.py` assembles it from `compare`'s loose
+arguments and hands it to `resolve_compare_request`); the native `dump` CLI
+is the one exception — it still runs its own `dump_cmd` argument path
 rather than building a `DumpRequest` (see G33 Phase 5's note in `AGENTS.md`
 for what that migration still needs). Reaching for the typed request
-directly buys you three things a keyword shim can't:
+directly buys you two things a keyword shim can't:
 
 - **The identical validation *rules*** every front end applies — a bad
   combination of fields is rejected the same way regardless of which
   front end built the request. How that rejection *surfaces* still differs
   per transport: calling the typed API directly raises `ValidationError`;
-  an MCP tool catches it internally and returns a structured
-  `{"status": "error", ...}` response; the CLI translates the equivalent
-  failure into its own usage-error/exit-code behavior. The **rule** is
-  shared, not the **exception type** — see the parity table below for how
-  each transport represents the same failure.
+  the CLI translates the equivalent failure into its own usage-error/exit-code
+  behavior. The **rule** is shared, not the **exception type** — see the
+  parity table below for how each transport represents the same failure.
 - **Repeatable configuration** — build one `CompareRequest` once (from a
   config file, a test fixture, a stored preset) and reuse it, rather than
   re-threading a dozen keyword arguments.
-- **API/MCP parity** — the MCP server builds these exact same dataclasses
-  from its own tool arguments, so a capability documented for one is
-  reachable, by the same field name, from the other.
 
 | Operation | Convenience API | Typed API | Result |
 |---|---|---|---|
@@ -272,33 +269,27 @@ result = run_scan(ScanRequest(
 ))
 ```
 
-## CLI / Python / MCP parity
+## CLI / Python parity
 
-The **rules** are shared across all three front ends; the **surface** isn't
-— an MCP tool exposes only the arguments it was given, not every field its
-underlying typed request dataclass has. `CompareRequest.depth`, for
-instance, is a real Python field with no `abi_compare` counterpart at all
-(only `abi_dump` exposes `depth`). Read this table as "where the capability
-is reachable today," not as a promise every dataclass field has an MCP
-twin:
+The **rules** are shared across both front ends; the **surface** doesn't
+always match field-for-field — `dump` still runs its own argument path
+rather than building a `DumpRequest` end to end (see above). Read this
+table as "where the capability is reachable today":
 
-| Capability | CLI | Python (typed) | MCP |
-|---|---|---|---|
-| Depth floor | `dump --depth` → `DumpDepthNotSatisfiedError` | `DumpRequest.depth`/`CompareRequest.depth` → `ValidationError` | `abi_dump(depth=...)` → `{"status": "error", ...}` on a floor miss. **`abi_compare` has no `depth` argument**, even though `CompareRequest.depth` exists in Python. |
-| Not comparable | exit code `16` | raises `ProfileMismatchError`/`ScopeMismatchError` | `abi_compare` → `{"status": "not_comparable", "reason": ...}` |
-| Contract evaluation | `--contract-evaluation` / `--contract {public,exports,all}` | `CompareRequest.contract_evaluation`/`.contract_mode` (same fields on `ScanRequest`) | `abi_compare(contract_evaluation=, contract_mode=)`, `abi_scan(...)` |
-| Consumer scoping | `compare --used-by` | `abicheck.appcompat.scope_diff_to_app(...)` — no `CompareRequest` field, a post-classification step | `abi_compare(used_by=[...])`; **not available on `abi_scan`** |
+| Capability | CLI | Python (typed) |
+|---|---|---|
+| Depth floor | `dump --depth` → `DumpDepthNotSatisfiedError` | `DumpRequest.depth`/`CompareRequest.depth` → `ValidationError` |
+| Not comparable | exit code `16` | raises `ProfileMismatchError`/`ScopeMismatchError` |
+| Contract evaluation | `--contract-evaluation` / `--contract {public,exports,all}` | `CompareRequest.contract_evaluation`/`.contract_mode` (same fields on `ScanRequest`) |
+| Consumer scoping | `compare --used-by` | `abicheck.appcompat.scope_diff_to_app(...)` — no `CompareRequest` field, a post-classification step |
 
-Two asymmetries worth knowing about, not bugs to work around:
+One asymmetry worth knowing about, not a bug to work around:
 
 - **Consumer scoping has no `CompareRequest` field.** `--used-by` is a
   *post-classification* scoping pass layered on top of an already-computed
   `CompareResult` (`appcompat.scope_diff_to_app`), not a resolution input —
-  the CLI, MCP `abi_compare`, and a direct Python caller all call the same
-  function afterward, rather than a field on the request itself.
-- **`abi_scan` has no `used_by` parameter at all.** Consumer scoping is
-  specific to `compare`'s pairwise old/new model; `scan`'s one-build
-  audit+optional-comparison shape has no equivalent concept.
+  the CLI and a direct Python caller both call the same function afterward,
+  rather than a field on the request itself.
 
 ## Result types
 

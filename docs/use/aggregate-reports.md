@@ -336,5 +336,4 @@ Recipes](github-action-recipes.md) for the full fan-out/fan-in CI workflow
 - [Exit Codes](../reference/exit-codes.md) — the canonical per-axis exit-code contract
 - [Project Targets Schema](../reference/project-targets-schema.md) — `profiles:`/`checks:`, the source of `target@profile#channel@depth` report ids
 - [GitHub Action: Recipes](github-action-recipes.md) — the worked matrix + gate workflow
-- [MCP Integration](mcp-integration.md#abi_aggregate-fold-per-target-reports-into-one-gate-decision) — the `abi_aggregate` tool
 - [Compatibility Evaluation Config](../reference/compatibility-evaluation-config.md) — what feeds a report's `contract_coverage_exit_contribution`

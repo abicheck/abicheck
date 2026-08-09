@@ -1,8 +1,19 @@
 # ADR-021b: MCP Security Model
 
 **Date:** 2026-03-24
-**Status:** Accepted — implemented
+**Status:** Deprecated — Retired: MCP interface removed
 **Decision maker:** Nikolay Petrov
+
+> **Retired 2026-08-09.** The MCP server (`abicheck-mcp`,
+> `abicheck/mcp_server.py` and its sibling modules) has been removed from
+> the shipped product. The security model this ADR describes — stdio
+> transport, `_safe_write_path`/`_sanitize_error`, the `MCP_TIMEOUT`/
+> `MCP_MAX_FILE_SIZE` knobs — no longer applies to anything in the codebase.
+> Agent/script integrations use the CLI (structured JSON/SARIF output) or
+> the typed Python API (`abicheck.service`) directly; see
+> [Python API](../../use/python-api.md). This document is kept as a
+> historical record of the removed interface's design, not as active
+> guidance.
 
 ---
 

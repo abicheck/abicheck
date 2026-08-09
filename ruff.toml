@@ -12,4 +12,3 @@ combine-as-imports = true
 [lint.per-file-ignores]
 "tests/*" = ["S101"]  # allow assert in tests
 "tests/test_platform_coverage_gaps.py" = ["E402"]  # sectioned imports by module
-"tests/test_mcp_server_coverage.py" = ["E402"]  # mcp mock must precede imports

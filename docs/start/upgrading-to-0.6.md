@@ -26,7 +26,6 @@ API](../use/python-api.md).
 | Contract-coverage exit `1` | A script that treats every exit `1` as "a severity error" will now also see `1` for incomplete contract evidence | Read `contract_coverage_exit_contribution` (or the severity block's own pre-fold `exit_code`) to tell the two apart — see [Exit Codes](../reference/exit-codes.md#contract-coverage-contribution-adr-049) |
 | Aggregate schema `1.2`/`1.3` | A JSON consumer with a fixed field list will silently ignore the new `finding_matrix`/`profile_matrix`/`contract_coverage` blocks (additive, not a breaking JSON change) — but a consumer asserting an *exact* key set will fail | Check `aggregate_schema_version` if you need to react to the new blocks; see [Aggregate Reports](../use/aggregate-reports.md) |
 | Scoped severity correction | A `compare --used-by`/`--required-symbol` script that assumed `--severity-*` flags were silently ignored on the scoped path now gets real severity-aware exit codes there too | Re-check any script relying on the old fixed legacy `0`/`2`/`4` mapping for a scoped run — see [Application Compatibility → Exit codes](../use/appcompat.md#exit-codes) |
-| MCP tool expansion | None — every new parameter is additive with a backward-compatible default | Nothing to change; new capabilities (e.g. `abi_dump`'s `depth`, `abi_compare`/`abi_scan`'s `contract_evaluation`/`contract_mode`) are opt-in |
 | Project profiles becoming load-bearing | A `.abicheck.yml` `profiles:` block written before recent phases used `os`/`dependency_source`/`compile.frontend` as inert documentation; they now actually schedule the runner, provision dependencies, and select the AST frontend for that profile's cell | Review your `profiles:` block against [Scenario S17](../integration/scenarios/multi-platform.md) if you rely on a specific runner/toolchain per profile — an already-correct declaration needs no changes, but a previously-inert one now takes effect |
 
 ## `CompareResult` instead of a tuple
@@ -71,7 +70,7 @@ incomplete evidence for the selected domain. It's folded with `max` against
 the ordinary severity gate, so it only ever raises a clean `0`, never lowers
 a `2`/`4`. A CI script that branches only on `exit_code == 1` meaning
 "severity error" should read `contract_coverage_exit_contribution` (or the
-MCP `abi_compare`'s `contract_coverage` block) to tell the two apart. See
+JSON report's `contract_coverage` block) to tell the two apart. See
 [Exit Codes](../reference/exit-codes.md#contract-coverage-contribution-adr-049).
 
 ## Aggregate schema `1.2`/`1.3`
@@ -96,16 +95,6 @@ explicit `--exit-code-scheme` still pins one regardless of severity flags).
 If a script depended on the old, silently-ignored behavior, re-check it
 against [Application Compatibility → Exit
 codes](../use/appcompat.md#exit-codes).
-
-## MCP expansion
-
-New, purely additive parameters — nothing to migrate, only new
-capabilities to opt into:
-
-- `abi_dump` now accepts `depth` (an enforced floor, matching `dump --depth`).
-- `abi_compare`/`abi_scan` accept `contract_evaluation`/`contract_mode`.
-
-See the [CLI/Python/MCP parity table](../use/python-api.md#cli-python-mcp-parity).
 
 ## Project profiles
 

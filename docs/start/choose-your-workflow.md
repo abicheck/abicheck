@@ -127,7 +127,7 @@ build, but they change *what you run* or *how you read the result*:
 |---|---|
 | One library supports GCC, Clang, and MSVC and I want them checked together | [Scenario S17: Multiple Build and Compiler Profiles](../integration/scenarios/multi-platform.md) |
 | I want to know whether a break is universal or profile-specific (reporting only — `finding_matrix` never changes the exit code) | [Aggregate Reports](../use/aggregate-reports.md) |
-| I want the same checks runnable from Python or an agent, not just the CLI | [Typed request API](../use/python-api.md#typed-request-api) / [MCP Integration](../use/mcp-integration.md) |
+| I want the same checks runnable from Python or an agent, not just the CLI | [Typed request API](../use/python-api.md#typed-request-api) |
 | I have several targets, profiles, and baseline channels to keep straight | [`project plan`](../reference/project-targets-schema.md) + [Reusable Workflows](../reference/reusable-workflows.md) + [Aggregate Reports](../use/aggregate-reports.md) |
 
 ---

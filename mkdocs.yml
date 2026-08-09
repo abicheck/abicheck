@@ -87,7 +87,6 @@ nav:
     - Integrations & Migration:
       - Tool Modes: use/tool-modes.md
       - Python API: use/python-api.md
-      - MCP Integration: use/mcp-integration.md
       - Migrating to the Current CLI: use/companion-commands.md
       - Migrating from ABICC: use/from-abicc.md
       - Migrating from libabigail: use/from-libabigail.md
@@ -149,7 +148,6 @@ nav:
     - Tool Comparison: reference/tool-comparison.md
     - ABICC Flag Reference: reference/abicc-flags.md
     - GitHub Action Inputs/Outputs: reference/github-action-inputs.md
-    - MCP Tools Reference: reference/mcp-tools-reference.md
     - Python API Reference: reference/python-api-reference.md
   # Track 1 (educational): what ABI/API compatibility is and how to manage it,
   # from first principles (series part 0) to expert-level design guidance.
@@ -581,7 +579,6 @@ plugins:
         user-guide/github-action-source-scans.md: use/github-action-source-scans.md
         user-guide/github-action.md: use/github-action.md
         user-guide/kernel-btf.md: use/kernel-btf.md
-        user-guide/mcp-integration.md: use/mcp-integration.md
         user-guide/migration-0.5.md: use/companion-commands.md
         use/migration-0.5.md: use/companion-commands.md
         user-guide/multi-binary.md: use/multi-binary.md
