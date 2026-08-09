@@ -498,13 +498,21 @@ optional extra), `abicheck/cli_compare_helpers.py`
 (`_report_not_comparable` emits `codes`), `abicheck/cli_compare_release.py`
 (its own `"reason": {...}` construction site, written under
 `--output-dir`, gets the same field), `abicheck/cli_compare_release_helpers.py`
-(`_compare_one_library`/`_format_release_json` — the *primary* release
-report path, distinct from the separate not-comparable document above:
-today a not-comparable library in a directory/package comparison returns
-only `"reason": str(exc)` into the entry `summary.json`/the release JSON
-actually expose, so without this file `native-release-compatibility` — the
-skill this field mainly exists for — would still see untyped text in the
-report it actually reads), `abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
+(`_compare_one_library`/`_format_release_json`/`_write_release_summary_file`
+— the *primary* release report path, distinct from the separate
+not-comparable document above: today a not-comparable library in a
+directory/package comparison returns only `"reason": str(exc)` into the
+entry `summary.json`/the release JSON actually expose, so without this
+file `native-release-compatibility` — the skill this field mainly exists
+for — would still see untyped text in the report it actually reads.
+**Neither of these two release-summary outputs carries a schema version
+marker or a registered JSON Schema today** — confirmed: no
+`abicheck/schemas/release_report.schema.json`/`release_summary.schema.json`
+exists, and neither function emits a version field — so, same as the
+`deps compare` case below, a bare `reason_codes` addition would be
+undiscoverable and unvalidatable; give the release JSON/summary its own
+minimal schema version constant, a registered JSON Schema file, and its
+published mirror as part of this same change, not deferred), `abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
 "reason": ..., "reason_codes": [...]}` — additive sibling field, `reason`
 unchanged), `abicheck/scan_engine.py` (`scan --against` catches the same
 two exceptions at its own comparability gate, line ~1039, and today emits
@@ -512,7 +520,17 @@ only `diff_summary = {"reason": str(exc)}` — free text, same gap as the
 CLI/MCP `compare` paths this item was originally scoped to; add the same
 `reason_codes` field here too, since `scan`'s CLI and MCP surfaces share
 this one engine and would otherwise still have to parse prose for exactly
-the causes this item exists to type), `abicheck/aggregate.py`
+the causes this item exists to type. **`SCAN_SCHEMA_VERSION` is a version
+marker with no schema behind it** — confirmed: no `abicheck/schemas/
+scan_report.schema.json` exists (only `aggregate_report`, `build_evidence`,
+`build_source_pack`, and `compare_report` do), and `ScanOutcome.
+diff_summary` is typed as plain `dict[str, Any]` — so P0.7's schema-based
+drift check has nothing to validate `diff.reason_codes` against for `scan`
+either, the identical gap as the `deps compare`/stack case below. Add the
+actual `scan_report.schema.json` and its published mirror as part of this
+change too, or narrow this item's schema-based-drift claim to exclude
+`scan` until that schema exists — don't let the claim outrun what's
+actually registered), `abicheck/aggregate.py`
 (`TargetReport.reason` is itself a bare `str | None` — `_load_report_file`
 reads a per-target report's structured `reason: {kind, message}` object
 and flattens it straight into that one string field, line ~1471 — so
