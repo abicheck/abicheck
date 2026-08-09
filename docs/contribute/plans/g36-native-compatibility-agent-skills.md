@@ -243,7 +243,17 @@ draft of this item proposed was an oversight, not a deliberate scoping —
 `native-release-compatibility`'s documented `project plan`/`aggregate`
 workflow needs `aggregate`/`build-output`/`run-plan` versions too, and
 without them the skill would have to fall back to probing or parsing
-output for exactly the thing this command exists to answer directly. Also:
+output for exactly the thing this command exists to answer directly.
+`_ARTIFACT_NAMES` (the catalog `current()` validates against) is a private
+module-level constant today — `cli_info.py` iterating it directly would
+mean importing a private symbol, and a later artifact family registered
+only in `current()`'s internals without a matching public export could
+silently fall out of `info`'s payload, contradicting the "all six" promise
+above. Add a small public accessor (e.g. `schemas.artifact_names()`
+returning the frozenset, or a `schemas.all_current()` returning the whole
+`{name: version}` map directly) that `cli_info.py` calls instead of
+touching `_ARTIFACT_NAMES`, and test `info`'s payload against that public
+accessor's output rather than a hand-copied list of six names. Also:
 the current root command list (so a skill can self-check "does my target
 support `project`"), available extraction providers (castxml/clang presence,
 detected on the host the same way existing dumper-provider auto-detection
@@ -735,19 +745,30 @@ describes what actually exists.
 **Problem:** Structural and trigger tests confirm a skill is well-formed
 and discoverable; they don't confirm it reaches the right *answer*.
 
-**Change:** Select a representative subset of the 195 `examples/` cases
-covering ADR-058's named behavioral categories (removed export, changed
-function signature, struct layout drift, enum value change, vtable change,
+**Change:** Select a representative subset of the `examples/` cases
+covering the categories `examples/ground_truth.json` can actually resolve
+against real per-case fixtures — removed export, changed function
+signature, struct layout drift, enum value change, vtable change,
 API-only break, different compile profiles, public/private scope false
-positive, incomplete evidence, non-comparable snapshots, consumer
-unaffected despite global break, consumer actually affected, plugin
-required-symbol loss, missing matrix target, profile-specific finding);
-for each, drive the relevant P0 skill end-to-end against the case's
-old/new fixture, and grade against ADR-058's five-point rubric (correct
-workflow choice, preserved uncertainty, deterministic evidence obtained
-where appropriate, root-cause explanation, appropriate remediation
-proposed, no compatibility claim without sufficient evidence) rather than
-only "did it invoke abicheck."
+positive, incomplete evidence, profile-specific finding — for each, drive
+the relevant P0 skill end-to-end against the case's old/new fixture, and
+grade against ADR-058's five-point rubric (correct workflow choice,
+preserved uncertainty, deterministic evidence obtained where appropriate,
+root-cause explanation, appropriate remediation proposed, no compatibility
+claim without sufficient evidence) rather than only "did it invoke
+abicheck." **Non-comparable snapshots, consumer-unaffected-despite-
+global-break, consumer-actually-affected, plugin required-symbol loss, and
+missing matrix target are a different, second category** — `ground_truth.json`'s
+per-case entries carry verdict/finding metadata for a single old/new
+snapshot pair, not the invocation parameters (`--used-by`, `--required-
+symbol(s)`, a multi-target `project`/`aggregate` matrix, a deliberately
+malformed comparability contract) these scenarios need; they cannot be
+resolved from that index as written. Cover them with a separate, explicit
+scenario manifest (`validation/data/skill_eval_scenarios.yaml` or similar)
+recording each scenario's invocation parameters and expected workflow
+outcome directly, plus whatever additional fixtures it needs beyond what
+`examples/` already provides — not folded into the case-index lookup
+above.
 
 **Files:** `validation/scripts/run_skill_evals.py` (new, alongside the
 existing `validation/scripts/run_example_owner_proofs.py`-style harness
@@ -758,7 +779,9 @@ is what the named categories above, e.g. "removed export," "vtable
 change," resolve against). `validation/data/manifest.json` is a different,
 unrelated index — 11 real-world *package pairs* keyed by `pair`, not
 `examples/` case IDs — and cannot serve this item's purpose; an earlier
-draft of this item named it in error); `validation/data/skill_eval_results.json`
+draft of this item named it in error); `validation/data/skill_eval_scenarios.yaml`
+(new — the second-category scenario manifest above, for cases
+`ground_truth.json` structurally can't index); `validation/data/skill_eval_results.json`
 (new results artifact, mirroring the existing `results.json` convention).
 
 **Tests:** the eval harness itself is the test; gate a minimum pass rate in
@@ -775,20 +798,25 @@ an arbitrary target chosen up front).
 
 ### P1.2 — Finding/root-cause query support (contingent) — **not started**
 
-**Problem:** `native-binary-compatibility-review`'s "group low-level
-findings into root causes" step and `native-consumer-compatibility`'s
-explanation step both currently do this grouping in skill-side prose logic
-over the existing JSON report. Whether that needs a *product* change (a new
-query surface) or is fully servable by report post-processing the skill
-already does itself is genuinely unknown until P0/P1.1 exercises it for
-real.
+**Problem:** Superseded framing, corrected here rather than left stale: an
+earlier draft of this item assumed `native-binary-compatibility-review`'s
+"group low-level findings into root causes" step does its own grouping in
+skill-side prose over the flat finding list. It doesn't, per P0.1's own
+`root-cause-grouping.md` fragment (above) — the skill consumes `compare
+--report-mode root-cause --format json`'s existing deterministic
+`root_causes`/`root_cause_count` fields first, precisely to avoid a
+skill-side reimplementation that could diverge from abicheck's own answer.
+The real open question this item tracks is narrower: whether that existing
+mode has a genuine **coverage gap** — some grouping information a skill
+needs that `root_causes` doesn't carry — not whether skills should group
+findings themselves (they shouldn't, and P0.1 already says so).
 
 **Change:** **Do not build this speculatively.** After P1.1's evaluation
-pass, if — and only if — the skills' own grouping logic proves inadequate
-(loses information the underlying report has, or requires re-deriving
-something abicheck's `root_cause_grouping`-equivalent internals already
-computed once), scope a minimal addition here. Until then this item stays
-a placeholder recording the *question*, not a committed feature.
+pass, if — and only if — a genuine, named coverage gap in `--report-mode
+root-cause`'s existing output is found (a real workflow need `root_causes`
+can't answer, not "the skill could theoretically want more"), scope a
+minimal addition here. Until then this item stays a placeholder recording
+the *question*, not a committed feature.
 
 **Dependencies:** P1.1's findings.
 
