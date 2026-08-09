@@ -825,6 +825,153 @@ def test_id_index_falls_back_to_bare_name_for_unresolved_reference() -> None:
     assert t.fields[0].default is not None
 
 
+def test_id_index_not_built_for_field_without_initializer() -> None:
+    """Codex review, PR #687, fresh evidence: ``self._id_index()`` used to be
+    a plain function-call ARGUMENT to ``_field_initializer_value(child,
+    self._id_index())`` in ``_make_field``, so Python evaluated it eagerly
+    regardless of whether ``child`` even has an initializer -- the first
+    field processed in nearly every direct-clang dump paid the one-time
+    whole-AST index-build walk for nothing. Gated on
+    ``hasInClassInitializer`` first, matching the sibling ``Param.default``
+    call site's own short-circuiting ternary."""
+    import abicheck.dumper_clang as dumper_clang_module
+
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {"kind": "FieldDecl", "name": "plain", "type": {"qualType": "int"}},
+            ],
+        },
+    )
+    parser = _ClangAstParser(root, set(), set())
+    calls: list[int] = []
+    orig = dumper_clang_module._index_decl_id_qualified_names
+
+    def _spy(*args: object, **kwargs: object) -> dict[str, str]:
+        calls.append(1)
+        return orig(*args, **kwargs)  # type: ignore[arg-type]
+
+    dumper_clang_module._index_decl_id_qualified_names = _spy  # type: ignore[assignment]
+    try:
+        (t,) = parser.parse_types()
+    finally:
+        dumper_clang_module._index_decl_id_qualified_names = orig
+
+    assert t.fields[0].default is None
+    assert calls == []
+
+
+def test_field_default_fingerprint_distinguishes_template_specializations() -> None:
+    """Codex review, PR #687, second round, fresh evidence: distinct
+    specializations of the same template (``A<int>`` vs. ``A<long>``) are
+    separate ``ClassTemplateSpecializationDecl`` nodes sharing the bare
+    primary-template name ``"A"`` -- verified against real Clang 17 output
+    that the node itself carries no template-argument spelling at all, and
+    that kind is absent from ``_SCOPE_NODE_KINDS``. Without the fix, both
+    specializations' ``VALUE`` members indexed to the identical bare
+    ``"VALUE"`` (not even qualified by ``"A"``), so ``int x = A<int>::VALUE;``
+    vs. ``int x = A<long>::VALUE;`` fingerprinted identically."""
+    root = _tu(
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x1",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIiE5VALUEE",
+                    "type": {"qualType": "const int"},
+                },
+            ],
+        },
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x2",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIlE5VALUEE",
+                    "type": {"qualType": "const int"},
+                },
+            ],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S1",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [_decl_ref_initializer_by_id("x", "0x1")],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S2",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "completeDefinition": True,
+            "inner": [_decl_ref_initializer_by_id("x", "0x2")],
+        },
+    )
+    types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
+
+    assert types["S1"].fields[0].default is not None
+    assert types["S1"].fields[0].default != types["S2"].fields[0].default
+
+
+def test_index_disambiguates_specializations_via_child_mangled_name() -> None:
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x1",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIiE5VALUEE",
+                }
+            ],
+        },
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0x2",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIlE5VALUEE",
+                }
+            ],
+        },
+        # No mangled child at all -- falls back to the bare (collision-
+        # prone) name rather than crashing or fabricating a value.
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "B",
+            "inner": [{"kind": "VarDecl", "id": "0x3", "name": "VALUE"}],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "A#_ZN1AIiE5VALUEE::VALUE"
+    assert index["0x2"] == "A#_ZN1AIlE5VALUEE::VALUE"
+    assert index["0x1"] != index["0x2"]
+    assert index["0x3"] == "B::VALUE"
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {

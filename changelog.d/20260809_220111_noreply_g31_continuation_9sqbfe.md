@@ -88,3 +88,21 @@ it should read in CHANGELOG.md. Delete the other sections.
   declaration's *scope* without ever hashing its unstable, per-build
   memory-address `id` directly. Falls back to the bare-identity behavior
   above when a reference's `id` isn't found (e.g. a builtin).
+- **Fixed the id-index above being built eagerly for every field, even one
+  with no initializer at all** (Codex review, fresh evidence): the index
+  build was a plain function-call argument, so Python evaluated it before
+  `_field_initializer_value` got a chance to reject the field via
+  `hasInClassInitializer` — the first field processed in nearly every
+  direct-clang dump paid the one-time whole-AST index walk for nothing. Now
+  gated on `hasInClassInitializer` first, short-circuiting the same way the
+  sibling `Param.default` call site already did.
+- **Fixed the id-index above colliding across distinct template
+  specializations** (Codex review, fresh evidence, second round): `A<int>`
+  and `A<long>` are separate `ClassTemplateSpecializationDecl` nodes that
+  both expose only the bare primary-template name `"A"` — verified against
+  real Clang 17 output that this node carries no template-argument spelling
+  at all, and that kind is absent from the existing namespace/class
+  scope-tracking rule. A representative member's own MANGLED name (which
+  does encode the arguments, e.g. `_ZN1AIiE5VALUEE` vs. `_ZN1AIlE5VALUEE`)
+  is now used to disambiguate — build-stable, unlike the specialization
+  node's own memory-address `id`.

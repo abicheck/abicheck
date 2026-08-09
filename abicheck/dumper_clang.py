@@ -1309,7 +1309,20 @@ class _ClangAstParser:
             is_volatile=bool(re.search(r"\bvolatile\b", cv_type)),
             is_mutable=bool(child.get("mutable")),
             access=self._access_level(access),
-            default=_field_initializer_value(child, self._id_index()),
+            # Gate the id-index build on hasInClassInitializer itself, not
+            # just leave it to _field_initializer_value's own internal check
+            # -- self._id_index() is a plain function-call ARGUMENT here, so
+            # Python evaluates it eagerly regardless of whether child has an
+            # initializer at all (Codex review, fresh evidence): the first
+            # field processed in nearly every direct-clang dump was paying
+            # the one-time whole-AST index walk even for an ordinary,
+            # initializer-less field. Short-circuits via the ternary the
+            # same way the sibling Param.default call site already does.
+            default=(
+                _field_initializer_value(child, self._id_index())
+                if child.get("hasInClassInitializer")
+                else None
+            ),
             deprecated=_clang_deprecated_message(child),
         )
 
@@ -1795,9 +1808,20 @@ def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
     directly.
 
     Same namespace/class scope-tracking rule as
-    ``_ClangAstParser._walk``/``_SCOPE_NODE_KINDS``. A redeclaration (e.g. a
-    function declared then defined) shares its real entity's name, so the
-    first sighting of a given ``id`` is kept rather than overwritten.
+    ``_ClangAstParser._walk``/``_SCOPE_NODE_KINDS``, EXCEPT for
+    ``ClassTemplateSpecializationDecl`` (Codex review, fresh evidence,
+    second round): distinct specializations of the same template (``A<int>``
+    vs. ``A<long>``) are separate nodes but both expose only the bare
+    primary-template name ``"A"`` — verified against real Clang 17 output
+    that the node itself carries no template-argument spelling at all (no
+    ``type``/``templateArgs`` key). ``_SCOPE_NODE_KINDS`` deliberately stays
+    untouched (it also drives ``_ClangAstParser._walk``'s own public-surface
+    qualified names, a much larger blast radius); this function instead
+    special-cases the kind locally via :func:`_first_mangled_name`.
+
+    A redeclaration (e.g. a function declared then defined) shares its real
+    entity's name, so the first sighting of a given ``id`` is kept rather
+    than overwritten.
     """
     index: dict[str, str] = {}
 
@@ -1809,12 +1833,45 @@ def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
         node_id = node.get("id")
         if isinstance(node_id, str) and name:
             index.setdefault(node_id, "::".join((*scope, name)) if scope else name)
-        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+        is_specialization = kind == "ClassTemplateSpecializationDecl"
+        if is_specialization and name:
+            # A representative member's own MANGLED name encodes the
+            # template arguments (`_ZN1AIiE5VALUEE` vs `_ZN1AIlE5VALUEE` for
+            # `VALUE`) and, unlike this node's own `id` (a compile-time
+            # memory address), is build-stable -- so it disambiguates
+            # without ever hashing an unstable value into the persisted
+            # fingerprint _canonical_expr ultimately produces. Falls back to
+            # the bare (collision-prone) name when no direct child carries
+            # one at all -- a rarer, accepted degradation, the same
+            # "conservative fallback over a wrong guess" convention this
+            # whole module already follows elsewhere.
+            disambiguator = _first_mangled_name(node)
+            scope_name = f"{name}#{disambiguator}" if disambiguator else name
+        else:
+            scope_name = name
+        scope_forming = kind in _SCOPE_NODE_KINDS or is_specialization
+        child_scope = (*scope, scope_name) if scope_forming and scope_name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
 
     walk(root, ())
     return index
+
+
+def _first_mangled_name(node: dict[str, Any]) -> str:
+    """The first direct child's non-empty ``mangledName``, or ``""``.
+
+    Shallow only (direct children, not recursive) — used by
+    :func:`_index_decl_id_qualified_names` to derive a build-stable
+    per-specialization disambiguator from ANY one of its linkage-bearing
+    members, not to resolve one specific declaration.
+    """
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict):
+            mangled = child.get("mangledName")
+            if isinstance(mangled, str) and mangled:
+                return mangled
+    return ""
 
 
 def _canonical_expr(node: Any, id_index: dict[str, str] | None = None) -> Any:
