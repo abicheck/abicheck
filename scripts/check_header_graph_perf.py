@@ -346,29 +346,31 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
 def _measure_size(
     n: int, repeat: int, backends: tuple[str, ...]
 ) -> list[dict[str, Any]]:
-    from abicheck.errors import SnapshotError
+    from abicheck.errors import SnapshotError, UnsupportedCastxmlVersionError
 
     points = []
     for backend in backends:
         try:
             result = _measure_one(n, backend, repeat)
         except SnapshotError as exc:
-            if backend != "castxml":
-                # clang is the one backend this script already required
-                # (main()'s own SKIP check, before measure() is ever
-                # called) -- a SnapshotError from it mid-sweep is a real
-                # extraction failure (a timeout, a crash, ...), not an
-                # expected/optional condition, and must not be silently
-                # dropped: main() only ever sees the points actually
-                # returned, so a missing size=400 clang point could still
-                # read as a clean "OK" if every *other* size happened to
-                # match the baseline (Codex review, fresh evidence).
+            # Only the one narrow, genuinely-optional condition self-skips:
+            # a castxml build present on PATH but rejected by abicheck's own
+            # version gate (measure()'s _have("castxml") filter already
+            # excludes a fully-absent castxml before this point is ever
+            # attempted, so reaching here with any *other* SnapshotError --
+            # a timeout, a crash, malformed output -- on an otherwise-
+            # supported castxml install is a real extraction regression, not
+            # an expected condition (Codex review, fresh evidence: the
+            # previous "any SnapshotError on castxml" catch was still too
+            # broad -- it also swallowed those). Same for clang, the backend
+            # main() already required before measure() was ever called:
+            # silently dropping either kind of real failure would let
+            # main() see only the points that did succeed and potentially
+            # still report a clean "OK".
+            if backend != "castxml" or not isinstance(
+                exc, UnsupportedCastxmlVersionError
+            ):
                 raise
-            # castxml is the one explicitly optional backend (present on
-            # PATH but rejected by abicheck itself -- e.g. an out-of-policy
-            # build, ADR-*'s UnsupportedCastxmlVersionError) -- skipping
-            # just its points is the same "self-skip, don't crash" contract
-            # the rest of this script applies to a missing tool.
             print(f"SKIP: size={n} backend={backend}: {exc}")
             continue
         points.append({"size": n, "backend": backend, **result})

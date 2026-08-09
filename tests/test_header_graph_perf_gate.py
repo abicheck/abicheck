@@ -328,18 +328,23 @@ class TestRequireRealAstAttach:
 
 
 class TestMeasureSizeErrorHandling:
-    """``_measure_size`` must only self-skip the explicitly optional castxml
-    backend on a SnapshotError -- a clang-backend failure mid-sweep is a real
-    extraction regression (timeout, crash, ...) and must propagate, not be
-    silently dropped from the returned points (Codex review, fresh
-    evidence)."""
+    """``_measure_size`` must only self-skip the one narrow, genuinely
+    optional condition -- an out-of-policy castxml build
+    (``UnsupportedCastxmlVersionError``) -- and must propagate every other
+    ``SnapshotError``, on either backend: a clang failure mid-sweep is
+    always a real regression, and so is a *non-version* castxml failure
+    (a timeout, a crash) on an otherwise-supported install. Silently
+    dropping either would let main() see only the points that did succeed
+    and potentially still report a clean "OK" (Codex review, fresh
+    evidence: an earlier version of this fix still caught every castxml
+    SnapshotError, not just the version-gate one)."""
 
-    def test_castxml_snapshot_error_is_skipped(self, monkeypatch):
-        from abicheck.errors import SnapshotError
+    def test_unsupported_castxml_version_is_skipped(self, monkeypatch):
+        from abicheck.errors import UnsupportedCastxmlVersionError
 
         def _fake_measure_one(n, backend, repeat):
             if backend == "castxml":
-                raise SnapshotError("out-of-policy castxml build")
+                raise UnsupportedCastxmlVersionError("out-of-policy castxml build")
             return {"baseline_ms": 1.0, "attach_ms": 1.0}
 
         monkeypatch.setattr(hg_gate, "_measure_one", _fake_measure_one)
@@ -355,6 +360,16 @@ class TestMeasureSizeErrorHandling:
         monkeypatch.setattr(hg_gate, "_measure_one", _fake_measure_one)
         with pytest.raises(SnapshotError, match="clang crashed"):
             hg_gate._measure_size(10, repeat=1, backends=("clang",))
+
+    def test_non_version_castxml_snapshot_error_propagates(self, monkeypatch):
+        from abicheck.errors import SnapshotError
+
+        def _fake_measure_one(n, backend, repeat):
+            raise SnapshotError("castxml timed out")
+
+        monkeypatch.setattr(hg_gate, "_measure_one", _fake_measure_one)
+        with pytest.raises(SnapshotError, match="castxml timed out"):
+            hg_gate._measure_size(10, repeat=1, backends=("castxml",))
 
 
 @pytest.mark.integration
