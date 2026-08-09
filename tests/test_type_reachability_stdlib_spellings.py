@@ -931,3 +931,63 @@ class TestTypedefCandidateSpellingsExactKeyCollision:
         candidates = _typedef_candidate_spellings(typedefs, non_stdlib_identities)
         assert "Alias" not in candidates
         assert "ns::Alias" in candidates
+
+
+class TestDeepTypedefChainDoesNotRecurse:
+    """Codex review, fresh evidence: a snapshot with a long chain of
+    typedef aliases (`A0 -> A1 -> A2 -> ... -> std::string`) previously
+    raised a real `RecursionError` on two independent paths -- `scan`'s own
+    recursive self-call following the chain to resolve a fresh alias, and
+    `_propagate_typedef_provenance`'s own recursive call re-deriving
+    provenance for an already-resolved alias reached a second time.
+    Confirmed empirically (both scenarios below reproduced `RecursionError`
+    on the pre-fix code with a several-thousand-alias chain, comfortably
+    inside what a generated/vendored header set can produce) and fixed by
+    converting both to an explicit worklist -- mirroring
+    `_finditer_allow_nested`'s own stack-based rewrite for the identical
+    class of unbounded-nesting risk."""
+
+    @staticmethod
+    def _chain(length: int) -> dict[str, str]:
+        typedefs = {f"A{i}": f"A{i + 1}" for i in range(length)}
+        typedefs[f"A{length}"] = "std::string"
+        return typedefs
+
+    def test_single_declaration_naming_the_outermost_alias_of_a_long_chain(
+        self,
+    ) -> None:
+        # Exercises `scan`'s own recursive alias-following for a *fresh*
+        # resolution -- a single declaration naming the chain's outermost
+        # alias must walk every intermediate link down to the stdlib target.
+        length = 1200
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_outer", params=[Param(name="a", type="A0")])],
+            types=[RecordType(name="std::string", kind="class")],
+            typedefs=self._chain(length),
+        )
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+    def test_deepest_first_declarations_exercise_provenance_propagation(self) -> None:
+        # Exercises `_propagate_typedef_provenance`'s own recursive call --
+        # declarations exposed deepest-first mean every alias but the very
+        # first one encountered is *already* resolved by the time its own
+        # declaration is scanned, routing through the propagation path for
+        # (almost) the entire chain.
+        length = 1200
+        typedefs = self._chain(length)
+        fns = [
+            _fn(f"use{i}", params=[Param(name="a", type=f"A{i}")])
+            for i in range(length - 1, -1, -1)
+        ]
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=fns,
+            types=[RecordType(name="std::string", kind="class")],
+            typedefs=typedefs,
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::string", "string"}
+        )

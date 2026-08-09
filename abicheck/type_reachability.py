@@ -848,9 +848,76 @@ class _StdlibReferenceScan:
         provenance recorded: see :meth:`_propagate_typedef_provenance`, the
         cheap fallback that records just that provenance without repeating
         the full walk.
+
+        Alias-chain expansion (both the fresh-resolution branch and the
+        already-resolved provenance-propagation branch) is driven by an
+        explicit worklist, not Python call-stack recursion (Codex review,
+        fresh evidence: a snapshot with ~1,000 chained typedef aliases,
+        exposed deepest-first by its own public declarations, reproduced a
+        real ``RecursionError`` on both the fresh-resolution path and
+        :meth:`_propagate_typedef_provenance`'s own recursive call --
+        confirmed empirically, and this method's own recursive
+        ``self.scan(target, via_typedef=True, ...)`` call had the identical
+        exposure even for a *single* declaration naming the outermost alias
+        of a long chain). Mirrors :func:`_finditer_allow_nested`'s own
+        stack-based rewrite for the same class of unbounded-nesting risk.
         """
         if not type_string:
             return
+        self._scan_stdlib_and_records(type_string, via_typedef, origin_alias)
+        if self._typedef_pattern is None:
+            return
+        # Each entry: (alias spelling, was this alias reached via a typedef
+        # target rather than the caller's own literal text, the top-level
+        # alias spelling to credit for it). Order is irrelevant for
+        # correctness -- every effect below is set-membership-based, so
+        # popping in any order reaches the same final state -- only for
+        # avoiding recursion.
+        worklist: list[tuple[str, bool, str | None]] = [
+            (m.group(0), via_typedef, origin_alias)
+            for m in _finditer_allow_nested(self._typedef_pattern, type_string)
+        ]
+        while worklist:
+            alias, via_td, origin = worklist.pop()
+            target = self._typedef_targets[alias]
+            this_origin = origin if via_td else alias
+            if alias not in self._resolved_typedefs:
+                self._resolved_typedefs.add(alias)
+                self._scan_stdlib_and_records(target, True, this_origin)
+                if self._typedef_pattern is not None:
+                    worklist.extend(
+                        (m.group(0), True, this_origin)
+                        for m in _finditer_allow_nested(self._typedef_pattern, target)
+                    )
+            else:
+                # Already fully walked (records reached, `_referenced`
+                # populated) via a *different* origin alias -- but this
+                # alias's own exact-match provenance was never recorded:
+                # `_resolved_typedefs` exists to stop the expensive
+                # record-walk/`_referenced` bookkeeping from repeating,
+                # not to gate provenance -- an earlier, ambiguous alias
+                # resolving through the same target first would
+                # otherwise silently swallow a later, genuinely
+                # unambiguous alias's own provenance purely because of
+                # declaration order. Cheaply re-derive just this
+                # alias's own exact-match provenance without repeating
+                # the full walk. `this_origin` is always a real alias
+                # spelling here in practice (only ``None`` when
+                # ``via_typedef`` is externally forced ``True`` with no
+                # ``origin_alias``, which no caller in this module ever
+                # does), but the type checker cannot see that.
+                if this_origin is not None:
+                    self._propagate_typedef_provenance(target, this_origin, {alias})
+
+    def _scan_stdlib_and_records(
+        self, type_string: str, via_typedef: bool, origin_alias: str | None
+    ) -> None:
+        """The stdlib-identity and non-stdlib-record halves of :meth:`scan`,
+        factored out so both the top-level call and each typedef-chain
+        worklist entry can reuse them without recursing back into
+        :meth:`scan` itself (see its own docstring for why). *via_typedef*/
+        *origin_alias* carry the exact same meaning as on :meth:`scan`.
+        """
         for match in _finditer_allow_nested(self._stdlib_pattern, type_string):
             spelling = match.group(0)
             for identity in self._stdlib_index.get(spelling, ()):
@@ -885,67 +952,50 @@ class _StdlibReferenceScan:
             for match in _finditer_allow_nested(self._record_pattern, type_string):
                 for identity in self._record_index.get(match.group(0), ()):
                     self.reach_record(identity)
-        if self._typedef_pattern is not None:
-            for match in _finditer_allow_nested(self._typedef_pattern, type_string):
-                alias = match.group(0)
-                target = self._typedef_targets[alias]
-                this_origin = origin_alias if via_typedef else alias
-                if alias not in self._resolved_typedefs:
-                    self._resolved_typedefs.add(alias)
-                    self.scan(target, via_typedef=True, origin_alias=this_origin)
-                else:
-                    # Already fully walked (records reached, `_referenced`
-                    # populated) via a *different* origin alias -- but this
-                    # alias's own exact-match provenance was never recorded:
-                    # `_resolved_typedefs` exists to stop the expensive
-                    # record-walk/`_referenced` bookkeeping from repeating,
-                    # not to gate provenance -- an earlier, ambiguous alias
-                    # resolving through the same target first would
-                    # otherwise silently swallow a later, genuinely
-                    # unambiguous alias's own provenance purely because of
-                    # declaration order. Cheaply re-derive just this
-                    # alias's own exact-match provenance without repeating
-                    # the full walk. `this_origin` is always a real alias
-                    # spelling here in practice (only ``None`` when
-                    # ``via_typedef`` is externally forced ``True`` with no
-                    # ``origin_alias``, which no caller in this module ever
-                    # does), but the type checker cannot see that.
-                    if this_origin is not None:
-                        self._propagate_typedef_provenance(target, this_origin, {alias})
 
     def _propagate_typedef_provenance(
         self, target: str, origin_alias: str, seen: set[str]
     ) -> None:
         """Record *origin_alias* as exact-match provenance for every stdlib
-        identity *target* names by its own self-key, and recurse into any
+        identity *target* names by its own self-key, and expand into any
         further typedef alias *target* itself contains -- without touching
         ``_referenced``/``_reached_records``/``_resolved_typedefs``, since
         the identities and records reachable from *target* were already
         fully walked once via whichever alias resolved it first (see the
         ``else`` branch in :meth:`scan` that calls this).
 
-        *seen* bounds recursion against a cyclic typedef chain within this
-        one propagation call (a typedef target naming an alias already
-        visited in this same call is not re-entered); shared with, but
-        never confused for, ``_resolved_typedefs`` since that set's purpose
-        is deliberately different, as this method exists to work around.
+        *seen* bounds this walk against a cyclic typedef chain (a typedef
+        target naming an alias already visited by this same call is not
+        re-entered); shared with, but never confused for,
+        ``_resolved_typedefs`` since that set's purpose is deliberately
+        different, as this method exists to work around. One mutable set is
+        threaded through every step of the walk below (matching this
+        method's own pre-existing recursive semantics, where every nested
+        call shared the same ``seen`` object by reference) -- not a
+        fresh copy per branch, so an alias visited down one branch is
+        correctly skipped if a sibling branch reaches it too.
+
+        Driven by an explicit worklist, not recursion (see :meth:`scan`'s
+        own docstring for the ``RecursionError`` this closes on a long
+        typedef chain).
         """
-        for match in _finditer_allow_nested(self._stdlib_pattern, target):
-            spelling = match.group(0)
-            for identity in self._stdlib_index.get(spelling, ()):
-                if spelling == identity:
-                    self._exact_typedef_aliases.setdefault(identity, set()).add(
-                        origin_alias
-                    )
-        if self._typedef_pattern is not None:
-            for match in _finditer_allow_nested(self._typedef_pattern, target):
-                alias = match.group(0)
-                if alias in seen:
-                    continue
-                seen.add(alias)
-                self._propagate_typedef_provenance(
-                    self._typedef_targets[alias], origin_alias, seen
-                )
+        worklist = [target]
+        while worklist:
+            current = worklist.pop()
+            for match in _finditer_allow_nested(self._stdlib_pattern, current):
+                spelling = match.group(0)
+                for identity in self._stdlib_index.get(spelling, ()):
+                    if spelling == identity:
+                        self._exact_typedef_aliases.setdefault(identity, set()).add(
+                            origin_alias
+                        )
+            if self._typedef_pattern is not None:
+                for match in _finditer_allow_nested(self._typedef_pattern, current):
+                    alias = match.group(0)
+                    if alias in seen:
+                        continue
+                    seen.add(alias)
+                    worklist.append(self._typedef_targets[alias])
 
     def reach_record(self, identity: str) -> None:
         """Queue a non-stdlib record's own fields/bases to be walked, once."""
