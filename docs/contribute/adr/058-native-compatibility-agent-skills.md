@@ -594,7 +594,16 @@ dependencies/surface without strong justification":
 
 Non-negotiable, and identical across all four P0 skills — encoded once in
 `skills-src/shared/safety-invariants.md` (Layer B) and linked, not restated,
-from every `SKILL.md`:
+from every `SKILL.md`. **The eleven items below are this decision's
+original text, frozen like the rest of this ADR once accepted (per this
+repository's own ADR convention — only the Status line changes
+thereafter); they are not the operational copy skills consume or that
+gets corrected over time.** `skills-src/shared/safety-invariants.md`,
+once G36 P0.1 creates it, is the living operational copy and the one
+place a future safety correction is actually made — if the two ever
+disagree, the fragment is authoritative for what a skill must currently
+do, and this list should be read as the historical decision record that
+motivated it, not a second source of current truth:
 
 1. **Missing evidence is not evidence of compatibility.** A finding
    category abicheck could not check with the evidence given (e.g. no DWARF

@@ -370,9 +370,17 @@ instead — `assert info_payload["schema_versions"] == schemas.all_current()`
 if only the narrower accessor exists) — never against a hand-copied name
 list, count, or per-family version literal of any size, so this test
 can't itself go stale the same way the "all six" framing would have.
-Also:
-the current root command list (so a skill can self-check "does my target
-support `project`"), available extraction providers (castxml/clang presence,
+**The same discipline applies to the root command list, not only to
+schema versions** — an earlier draft of this item left the command-list
+test unspecified, which would let it silently become a second,
+hand-maintained fact owner (a stale list that stops tracking a newly
+added or removed root command while every other part of this test stays
+green). The command list must be derived from the live CLI the same way
+`scripts/gen_cli_reference.py` already does (`click` introspection over
+`main`'s registered commands, the same mechanism P0.7's tool/API drift
+tests reuse), and the test must assert exact equality against that live
+introspection, not a hand-copied list. Also included in the payload:
+available extraction providers (castxml/clang presence,
 detected on the host the same way existing dumper-provider auto-detection
 already probes), and platform capabilities (ELF/PE/Mach-O support — all
 three ship unconditionally today, but this keeps the field meaningful if
