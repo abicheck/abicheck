@@ -134,7 +134,7 @@ topics:
     reference_page: reference/source-graph-schema.md
     task_pages:
       - contribute/detector-impact-contract.md
-      - use/use-case-impact.md
+      - contribute/use-case-impact.md
 
   policies:
     canonical_page: use/policies.md
