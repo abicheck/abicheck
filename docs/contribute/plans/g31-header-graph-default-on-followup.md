@@ -284,6 +284,31 @@ third pattern:
   day one. Falls back to report-only when the base branch predates this
   gate entirely (a PR introducing it, or one from before it existed).
 
+Both new jobs install the pinned CastXML build (`action/install-castxml.sh`,
+the same helper `ci.yml`'s `unit-tests` job already uses) so the default
+backend's genuine second-`clang`-invocation cost — the more common
+real-world case, since most `dump`/`compare` calls use the default castxml
+frontend, not `--ast-frontend clang` — is actually part of the comparison,
+not silently narrowed to clang-only by an absent/out-of-policy castxml
+(Codex review: the bare PyPI `castxml` package a stock runner would
+otherwise see is exactly the out-of-policy build the script's own version
+gate rejects). The workflow's PR path filter also covers the attach path's
+transitive dependencies, not just the two files the gate itself touches
+directly (`dumper_ast_config.py`'s AST cache-key computation,
+`dumper_sysinc.py`'s system-include-dir probing, `buildsource/include_graph.py`'s
+depfile parsing for the include-graph pass, `header_utils.py`'s inferred-root
+resolution the script itself also calls).
+
+`scripts/verify.py`'s `full` profile also gained a `header-graph-perf` step
+(report-only, `--sizes 25 100`, gated on `clang`/`clang++`/`g++` all being
+present via the new `_need_all_bins` precondition helper) — closing the gap
+where `python scripts/verify.py --profile full` could never even run this
+script at all (Codex review). Deliberately *not* the base-vs-head
+`header-graph-regression` half: that job spans two checkouts/venvs in one
+workflow run, which is not expressible as a single `verify.py` `Step` — the
+same structural reason `benchmark_scaling.py`'s own sibling `regression` job
+was never routed through `verify.py` either.
+
 **Synthetic-consumer compile-probe layer, or a deferring ADR.** If a
 compile-probe layer (actually compiling a synthetic consumer against
 old/new headers to observe real compiler diagnostics as corroborating

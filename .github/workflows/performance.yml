@@ -60,8 +60,11 @@ on:
       - "tests/test_perf_dump_scaling.py"
       - "tests/test_benchmark_scaling.py"
       - "abicheck/buildsource/header_graph.py"
+      - "abicheck/buildsource/include_graph.py"
       - "abicheck/dumper_cache.py"
-      - "abicheck/service.py"
+      - "abicheck/dumper_ast_config.py"
+      - "abicheck/dumper_sysinc.py"
+      - "abicheck/header_utils.py"
       - "scripts/check_header_graph_perf.py"
       - "tests/test_header_graph_perf_gate.py"
       - ".github/workflows/performance.yml"
@@ -221,9 +224,13 @@ jobs:
   # changes, the same class of drift check_mutation_score.py's own
   # SURVIVOR_BASELINE bootstrap avoids by starting unset); this job's own
   # artifact is how that trend data gets established over successive scheduled
-  # runs. castxml is not installed on this runner, so only the clang-backend
-  # points are measured here (the script self-skips castxml's points, not the
-  # whole run — see its own module docstring).
+  # runs. Installs the pinned CastXML build (action/install-castxml.sh, same as
+  # ci.yml's unit-tests job) so the default-backend points — the genuine second
+  # `clang` invocation every non-clang-frontend dump pays, the more common
+  # real-world case — are actually measured too, not just the clang-frontend
+  # in-process-memo path (Codex review: the bare PyPI castxml package this
+  # runner would otherwise see is an out-of-policy build the script's own
+  # version gate rejects, silently narrowing every run to clang-only).
   header-graph-perf:
     name: Header-graph attach-cost (trend)
     runs-on: ubuntu-latest
@@ -243,6 +250,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
           sudo apt-get update -qq && sudo apt-get install -y clang g++
+
+      - name: Set up pinned CastXML
+        run: bash action/install-castxml.sh
 
       - name: Run header-graph perf gate
         run: |
@@ -301,6 +311,17 @@ jobs:
 
       - name: Install toolchain
         run: sudo apt-get update -qq && sudo apt-get install -y clang g++
+
+      - name: Set up pinned CastXML
+        # A system binary, not a per-venv package -- installing it once
+        # (from either checkout's copy of the script; run from head/ since
+        # that's guaranteed to exist and be current) covers both the base
+        # and head measurement steps below. Without this, the runner's
+        # castxml would be entirely absent, so this job's comparison would
+        # never actually exercise the default backend's genuine second
+        # `clang` invocation on either side (Codex review, same gap as the
+        # header-graph-perf trend job above).
+        run: bash head/action/install-castxml.sh
 
       - name: Measure base branch
         run: |

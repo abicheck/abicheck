@@ -108,6 +108,24 @@ def _need_bins(*names: str) -> Callable[[], str | None]:
     return check
 
 
+def _need_all_bins(*names: str) -> Callable[[], str | None]:
+    """Like :func:`_need_bins`, but every name must be present, not just one.
+
+    ``_need_bins``'s "any of" semantics fit a single-tool-with-aliases check
+    (``abi-compliance-checker``/``.pl``); a step needing several genuinely
+    different tools together (e.g. ``clang``/``clang++``/``g++``) needs
+    "all of", not "at least one of".
+    """
+
+    def check() -> str | None:
+        missing = [n for n in names if shutil.which(n) is None]
+        if missing:
+            return f"not found on PATH: {', '.join(missing)}"
+        return None
+
+    return check
+
+
 def _need_modules(*names: str) -> Callable[[], str | None]:
     def check() -> str | None:
         missing = [n for n in names if not _module_available(n)]
@@ -327,6 +345,22 @@ STEPS: tuple[Step, ...] = (
         _py("pytest", "tests/", "-m", "slow", "--tb=short"),
         frozenset({FULL}),
         description="Hypothesis / perf-benchmark tests",
+    ),
+    Step(
+        # Report-only (no --baseline): a single-checkout, single-Step run has
+        # no PR-vs-base comparison to make (that half lives in
+        # performance.yml's own header-graph-regression job, which spans two
+        # checkouts/venvs in one workflow run — structurally not expressible
+        # as one verify.py Step, the same reason benchmark_scaling.py's own
+        # sibling `regression` job was never routed through here either).
+        # This step's job is closing the *other* gap: without it, `verify.py
+        # --profile full` could never even run check_header_graph_perf.py at
+        # all (Codex review, fresh evidence).
+        "header-graph-perf",
+        _pyscript("scripts/check_header_graph_perf.py", "--sizes", "25", "100"),
+        frozenset({FULL}),
+        precondition=_need_all_bins("clang", "clang++", "g++"),
+        description="Header-graph attach-cost trend measurement (G31 Phase D, report-only)",
     ),
     Step(
         "mutation",
