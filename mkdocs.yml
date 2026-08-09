@@ -579,6 +579,9 @@ plugins:
         user-guide/github-action-source-scans.md: use/github-action-source-scans.md
         user-guide/github-action.md: use/github-action.md
         user-guide/kernel-btf.md: use/kernel-btf.md
+        user-guide/mcp-integration.md: start/upgrading-to-0.6.md
+        use/mcp-integration.md: start/upgrading-to-0.6.md
+        reference/mcp-tools-reference.md: start/upgrading-to-0.6.md
         user-guide/migration-0.5.md: use/companion-commands.md
         use/migration-0.5.md: use/companion-commands.md
         user-guide/multi-binary.md: use/multi-binary.md

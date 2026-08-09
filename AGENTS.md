@@ -440,7 +440,8 @@ Core pipeline (in order of data flow):
      phases (`resolve_compare_request` / `classify_compare_pair`), split so
      the native `compare` CLI can run its Click-dependent ADR-049
      `resolve_and_apply` step between them and still share one resolution
-     with the typed API and MCP instead of keeping a second copy.
+     with the typed API instead of keeping a second copy (historically also
+     with the now-removed MCP server — see ADR-021).
      `resolve_sides_sequentially` owns the one rule about resolving both
      sides concurrently (a `dump_manifest` on either side, or
      `ABICHECK_PARALLEL_EXTRACTION=0`, forces sequential — a manifest dump
@@ -461,8 +462,9 @@ Core pipeline (in order of data flow):
      one way to turn a path into a snapshot, but the four steps a real `dump`
      does *around* it (collect-mode inference, inline L3-L5 embedding, the
      dependency walk, the depth floor) lived only in `cli.py`'s `dump_cmd` —
-     which is why the MCP `abi_dump` tool sat at a five-argument subset of
-     what `abicheck dump` accepts. Deliberately excludes the CLI's provenance/
+     which is why the now-removed MCP `abi_dump` tool historically sat at a
+     five-argument subset of what `abicheck dump` accepts. Deliberately
+     excludes the CLI's provenance/
      presentation layer (`--dry-run` rendering, git/build-id stamping,
      `fold_dump_provenance_into_json`); the native `dump` CLI does not build a
      `DumpRequest` yet — see G33's Phase 5 note for what that migration needs
@@ -706,9 +708,8 @@ Once a root command genuinely clears the bar above, pick the right home:
   compatibility decision or gate contribution. Without
   `--contract-evaluation` the contribution is always `0`, so every
   pre-existing invocation is unchanged. Every consumer that publishes an
-  exit status folds it and explains it — the two CLIs, the MCP
-  `abi_compare` tool (top-level `contract_coverage` block), and the
-  composite Action (`verdict: COVERAGE_INCOMPLETE`). A directory/package
+  exit status folds it and explains it — the two CLIs and the composite
+  Action (`verdict: COVERAGE_INCOMPLETE`). A directory/package
   `compare` (the per-library release fan-out) applies the same flag to
   each library and `max`s every library's own contribution into the
   release's exit code, stated in the release JSON summary under the same
