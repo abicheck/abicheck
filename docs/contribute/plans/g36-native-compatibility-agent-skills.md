@@ -438,9 +438,23 @@ itself is fixed to authenticate against the correct key set for a DPC++
 contract. Fix `_fingerprint_matches_fields`'s key-set selection at both
 authenticity call sites (mirroring the same
 `_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`-when-DPC++ branch
-`compute_extraction_contract` already uses) as part of this item, and
-assert the *actual* emitted code (not just that a code exists) in the
-DPC++ regression test.
+`compute_extraction_contract` already uses) as part of this item.
+
+**Fixing authentication alone is not sufficient — the downstream
+classification step has the identical narrow-key-set bug, one level
+further in.** Even once authentication correctly passes for a DPC++ pair,
+`unknown_differing` (`comparability.py`, the computation that decides
+which differing keys are "known, typed" vs. "unrecognized") still checks
+`k not in PROFILE_FIELD_KEYS` — never `_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`
+— so `frontend_context_kind` would still be classified as an unknown
+field and fall into the generic `other_profile_mismatch` fallback instead
+of getting its own dedicated code, exactly the outcome this whole item
+exists to avoid. Extend the same widened/per-side key-set selection
+through `unknown_differing`'s own computation, not just the
+`_fingerprint_matches_fields` authenticity calls — both are needed for
+the dedicated code to actually reach a caller. Assert the *actual*
+emitted code (not just that a code exists, and not just that
+authentication no longer raises) in the DPC++ regression test.
 
 **The identical bug pattern exists on the scope side too, one level
 lower — fix both, not just the profile/DPC++ instance.** The scope
@@ -467,12 +481,22 @@ Each of the two `_fingerprint_matches_fields` calls (old side, new side)
 must independently decide `_MANIFEST_SCOPE_FIELD_KEYS` vs.
 `SCOPE_FIELD_KEYS` from *that side's own* contract, mirroring how
 `compute_extraction_contract` itself decides the key set once per
-snapshot, never once per comparison. Add a manifest-scope-mismatch
-regression test asserting the actual emitted `translation_units`-related
-code, **plus a mixed-sides case** (one manifest-derived, one legacy) to
-catch exactly this per-side-vs-whole-check distinction — correcting only
-the DPC++/profile call sites and leaving these untouched would leave this
-one code equally unreachable. Derived from the same field-by-field
+snapshot, never once per comparison.
+
+**Same downstream-classification gap as the profile side, here too.**
+`scope_unknown_differing`'s own computation checks `k not in
+SCOPE_FIELD_KEYS`, never `_MANIFEST_SCOPE_FIELD_KEYS` — so even once
+authentication is fixed, a manifest pair's `translation_units` difference
+would still be classified as unknown and fall into
+`other_scope_mismatch`, not its own dedicated code. Extend the same
+per-side widened key selection through `scope_unknown_differing` too, not
+only the two authenticity calls. Add a manifest-scope-mismatch regression
+test asserting the actual emitted `translation_units`-related code, **plus
+a mixed-sides case** (one manifest-derived, one legacy) to catch exactly
+this per-side-vs-whole-check distinction — correcting only the
+DPC++/profile call sites (both authentication *and* classification) and
+leaving these scope-side ones untouched would leave this one code equally
+unreachable. Derived from the same field-by-field
 comparison `check_contracts_comparable`/`compute_extraction_contract`
 already perform when raising `ProfileMismatchError`/`ScopeMismatchError` —
 promotes existing internal evidence to a stable public field, adds no new
@@ -614,8 +638,15 @@ shape (modeled on `compare_report.schema.json`'s own structure) including
 step, plus a schema-validation test asserting real `stack_to_json()`
 output actually validates against it — not just that the version constant
 exists, `abicheck/schemas/__init__.py`
-(schema version bump + field registration, covering the compare, scan, and
-dependency-stack report schemas), `docs/reference/change-kinds.md` or a new
+(schema version bump + field registration, covering the compare, scan,
+release-report, and dependency-stack report schemas — **and registration
+in the public `_ARTIFACT_NAMES`/`current()` catalog for every new family
+added here**, release-report included: P0.4's `abicheck info` discovery
+payload is derived exclusively from that one registry, so a schema this
+item adds but doesn't also register there stays invisible to the exact
+capability-discovery surface this whole initiative exists to support —
+covered by the same live-catalog test P0.4 already commits to, not a
+separate hand-maintained list), `docs/reference/change-kinds.md` or a new
 `docs/reference/comparability-reason-codes.md` (document the closed enum —
 new page only if it doesn't fit as a section of an existing comparability
 doc; check `docs/use/contract-evaluation.md` and `docs/reference/
