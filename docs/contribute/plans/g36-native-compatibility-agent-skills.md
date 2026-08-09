@@ -453,18 +453,39 @@ both:**
   a root `--format` would make `abicheck --format json compare OLD NEW`
   silently consume the root value while `compare`'s own `--format` stays at
   its text default, a real correctness regression for every other command,
-  not just a `--version`-adjacent quirk. The right fix therefore isn't a
-  registered Click option at all: keep only `--version` as a real
-  (non-eager) parameter, and inside its own callback, parse `--format`
-  directly out of `ctx.args`/`sys.argv` (a narrow, manual check for the
-  literal `--format json` token) rather than declaring a second global
-  option — this scopes the format detection to version discovery alone
-  and leaves every subcommand's own `--format` untouched. Add a regression
+  not just a `--version`-adjacent quirk. **A follow-up correction to this
+  same item: an even earlier revision proposed avoiding a declared option
+  entirely — manually parsing `--format` out of `ctx.args`/`sys.argv`
+  inside `--version`'s own callback instead. That doesn't work either
+  (confirmed against real Click 8.3.3, both flag orders): Click's parser
+  rejects any *undeclared* option with "No such option: --format" during
+  argument parsing itself, before any callback runs at all — `ctx.args`
+  isn't even populated with the leftover token by that point, since Click
+  errors out first. `--format` must be a properly declared Click option,
+  not something recovered from raw argv.** The design that actually works
+  within Click's real constraints: declare `--format` as a normal, eager
+  root-level option (exposed value, no rejecting logic of its own), and
+  put the enforcement in `--version`'s own (non-eager) callback instead —
+  since eager parameters are always processed as a whole group before any
+  non-eager one, `ctx.params["format"]` is guaranteed populated by the
+  time `--version`'s callback runs, regardless of argv order (this part of
+  the mixed-eagerness reasoning above is still correct; only the "avoid a
+  declared option" idea was wrong). Inside `--version`'s callback: if
+  `--version` itself was not passed (`not value`) but `--format` was
+  (`ctx.params.get("format") is not None`), raise a `click.UsageError`
+  ("`--format` is only valid together with `--version`") instead of
+  silently continuing — this is what actually closes the original
+  shadowing gap: `abicheck --format json compare OLD NEW` now fails loudly
+  with a clear message pointing at the mistake, rather than either
+  erroring on an undeclared option or silently consuming the value with no
+  effect. When `--version` *is* passed, its callback renders using
+  `ctx.params["format"]` and exits, exactly as the mixed-eagerness section
+  above describes. Add a regression
   test asserting a non-`--version` invocation
-  (`abicheck --format json compare OLD NEW` or similar) behaves
-  identically with and without this change — i.e. that adding version
-  discovery introduces no new root `--format` option at all. Test the
-  documented `abicheck --version
+  (`abicheck --format json compare OLD NEW` or similar) raises this
+  `UsageError` rather than either erroring on an unknown option or
+  silently succeeding with the wrong format. Test the documented `abicheck
+  --version
   --format json` spelling itself (both flag orders — `--format json
   --version` too), not just each flag in isolation; no root-command
   surface changes at all, so
