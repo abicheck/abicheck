@@ -26,3 +26,15 @@
   quietly disappears" gap in `abicheck.impact.use_cases.load_use_case_manifest`,
   and a syntactically invalid manifest document is now also wrapped in
   `UseCaseManifestError` rather than letting a bare `yaml.YAMLError` escape.
+  A bare `ValueError` from PyYAML's implicit-timestamp scalar constructor
+  (e.g. `use_case: 2023-99-99`) is now wrapped the same way.
+- **`appcompat._merge_consumer_impact_paths`'s same-root alternative-path
+  filter now also applies to the single-match case** (review fixes):
+  `impact.consumer_graph.explain_required_symbols` can itself return one
+  `ConsumerImpactPath` whose own `alternative_entry_paths` already mixes
+  candidates from more than one consumer-compiled entry — not just a
+  multi-symbol merge — so the previous `len(matches) == 1: return
+  matches[0]` early return skipped the root filter for the *ordinary*
+  single-symbol case, letting a differently-rooted alternative be
+  serialized in JSON/SARIF under the primary's own root
+  (`impact.engine._build_proof_path`'s single `affected_public_roots[0]`).

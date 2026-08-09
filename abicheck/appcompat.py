@@ -1157,9 +1157,22 @@ def _merge_consumer_impact_paths(
     entry would misrepresent it in JSON/SARIF as a variant of the primary's
     own root; that entry is still reported via ``public_entries``, just not
     smuggled in as a same-rooted alternative.
+
+    Deliberately does **not** early-return ``matches[0]`` unchanged when
+    ``len(matches) == 1`` (Codex review, fresh evidence): the single-symbol
+    case is the *ordinary* one, not a degenerate special case that can skip
+    the root filter below.
+    :func:`~abicheck.impact.consumer_graph.explain_required_symbols` can
+    itself return one ``ConsumerImpactPath`` whose own
+    ``alternative_entry_paths`` already mixes candidates from more than one
+    consumer-compiled entry (every entry that reaches the target
+    declaration, not just the ``select_preferred_graph_path``-chosen one) —
+    so a lone match can carry a differently-rooted alternative exactly like
+    the primary-match case below, and skipping this function's filtering
+    for it would let ``impact.engine._build_proof_path``'s single
+    ``affected_public_roots[0]`` mislabel that alternative's root the same
+    way an unfiltered multi-match merge would.
     """
-    if len(matches) == 1:
-        return matches[0]
     primary = _choose_primary_match(matches)
     ordered = [primary, *(m for m in matches if m is not primary)]
     entries: list[str] = []

@@ -2393,14 +2393,52 @@ class TestMergeConsumerImpactPaths:
     removed functions), and _change_covers_symbol treats every one of them
     as covered."""
 
-    def test_single_match_is_returned_unchanged(self):
+    def test_single_match_with_no_alternatives_is_equivalent(self):
+        """A lone match with nothing to filter comes back with the same
+        content -- but not necessarily the same object (Codex review, fresh
+        evidence): the single-match case is no longer a special-cased
+        early return, since a lone match can itself carry a
+        differently-rooted alternative that needs the same filtering as
+        the multi-match case (see the class below)."""
         from abicheck.appcompat import _merge_consumer_impact_paths
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         only = ConsumerImpactPath(
             consumer="app", symbol="foo", public_entries=("run",)
         )
-        assert _merge_consumer_impact_paths([only]) is only
+        merged = _merge_consumer_impact_paths([only])
+        assert merged.consumer == only.consumer
+        assert merged.symbol == only.symbol
+        assert merged.public_entries == only.public_entries
+        assert merged.entry_path == only.entry_path
+        assert merged.alternative_entry_paths == only.alternative_entry_paths
+
+    def test_single_matchs_own_differently_rooted_alternative_is_excluded(self):
+        """The exact bug Codex flagged: explain_required_symbols can return
+        one ConsumerImpactPath (the ordinary single-symbol case) whose own
+        alternative_entry_paths already mixes candidates from more than one
+        consumer-compiled entry -- not just multi-match merges. Without
+        routing this through the same root filter, impact.engine's single
+        affected_public_roots[0] would mislabel a differently-rooted
+        alternative as though it started at the primary's own root."""
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        primary_edge = GraphEdge(src="entry_A", dst="foo", kind="DECL_CALLS_DECL")
+        same_root_alt = GraphEdge(src="entry_A", dst="foo2", kind="DECL_CALLS_DECL")
+        other_root_alt = GraphEdge(src="entry_C", dst="foo3", kind="DECL_CALLS_DECL")
+        only = ConsumerImpactPath(
+            consumer="app",
+            symbol="foo",
+            public_entries=("entry_A",),
+            entry_path=[primary_edge],
+            alternative_entry_paths=[[same_root_alt], [other_root_alt]],
+        )
+        merged = _merge_consumer_impact_paths([only])
+        assert merged.entry_path == [primary_edge]
+        assert [same_root_alt] in merged.alternative_entry_paths
+        assert [other_root_alt] not in merged.alternative_entry_paths
 
     def test_multiple_matches_union_public_entries_and_declarations(self):
         from abicheck.appcompat import _merge_consumer_impact_paths
