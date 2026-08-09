@@ -250,17 +250,39 @@ on every run, not just when a user explicitly asked for it.
 `check_fp_rate.py`/`check_tier_accuracy.py`/`benchmark_scaling.py`'s
 conventions) isolates `service._attach_header_graph`'s own marginal cost
 from the `dumper.dump()` call it's layered on top of, across a synthetic
-header-declaration-count sweep, and gates a later run against a committed
-baseline JSON (`--baseline`/`--regress-tolerance`; report-only, same as
-`check_mutation_score.py`'s `SURVIVOR_BASELINE`, until a baseline is
-supplied). Self-skips without a real `clang`/`clang++`/`g++` install or off
-Linux/ELF. Mirrored in `tests/test_header_graph_perf_gate.py` (pure-logic
-tests run unconditionally; the live-measurement tests self-skip the same
-way the script does). Not yet wired into a CI workflow — that (and
-establishing/committing a real baseline JSON, so `--regress-tolerance`
-actually gates rather than only reporting) is a follow-up, the same
-"first scheduled run establishes the number" step `check_mutation_score.py`
-itself still needs before its `SURVIVOR_BASELINE` is ever set.
+header-declaration-count sweep and both header backends (`clang`'s real
+Phase C in-process memo handoff, and `castxml`'s genuine second `clang`
+invocation), verifying each attach actually completed a real AST-backed
+pass (not a silent degraded fallback) rather than trusting a possibly-fast-
+because-broken sample. Self-skips without a real `clang`/`clang++`/`g++`
+install or off Linux/ELF; `castxml` is optional (its points are just
+omitted, never fatal, unless it's genuinely present and broken). Mirrored
+in `tests/test_header_graph_perf_gate.py` (pure-logic tests run
+unconditionally; the live-measurement tests self-skip the same way the
+script does, carrying the `integration` marker so the fast lane never
+compiles fixtures or invokes a compiler).
+
+**Wired into `.github/workflows/performance.yml`** (Codex review, P1 —
+declaring this done while no CI workflow ever ran it left every standard
+PR/scheduled run silently skipping the gate). Two jobs, mirroring the
+existing `scaling`/`regression` pair's own split rather than inventing a
+third pattern:
+- `header-graph-perf` — report-only trend data on schedule/dispatch/PR
+  (path-filtered to the graph-attach/perf-gate files themselves), uploading
+  a JSON+text artifact. Deliberately *not* gated against a committed
+  baseline number: a fixed value recorded on one runner/toolchain would go
+  stale the moment either changes, the same class of drift
+  `check_mutation_score.py`'s own `SURVIVOR_BASELINE` bootstrap (`None`
+  until a real run establishes it) avoids — this job's artifacts are how
+  that trend gets established across scheduled runs instead.
+- `header-graph-regression` — real, *gating* PR-vs-base regression
+  checking, following the existing `regression` job's own pattern exactly:
+  measures the base branch and the PR head on the identical runner/
+  toolchain in the same job (via the script's own `--json-out`/`--baseline`
+  flags, exactly as `benchmark_scaling.py` already does), so there is no
+  stale-baseline problem to bootstrap past in the first place — gates from
+  day one. Falls back to report-only when the base branch predates this
+  gate entirely (a PR introducing it, or one from before it existed).
 
 **Synthetic-consumer compile-probe layer, or a deferring ADR.** If a
 compile-probe layer (actually compiling a synthetic consumer against

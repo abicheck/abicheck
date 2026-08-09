@@ -59,6 +59,11 @@ on:
       - "tests/test_perf_binary_scan.py"
       - "tests/test_perf_dump_scaling.py"
       - "tests/test_benchmark_scaling.py"
+      - "abicheck/buildsource/header_graph.py"
+      - "abicheck/dumper_cache.py"
+      - "abicheck/service.py"
+      - "scripts/check_header_graph_perf.py"
+      - "tests/test_header_graph_perf_gate.py"
       - ".github/workflows/performance.yml"
 
 concurrency:
@@ -206,5 +211,134 @@ jobs:
             echo ""
             echo '```'
             cat regression.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # G31 Phase D: the header-only (L2) semantic graph's always-on attach cost
+  # (service._attach_header_graph, unconditional since G31 Phase A). Report-only
+  # on schedule/dispatch (there is no stable committed baseline yet — a fixed
+  # number recorded on one runner/toolchain would go stale the moment either
+  # changes, the same class of drift check_mutation_score.py's own
+  # SURVIVOR_BASELINE bootstrap avoids by starting unset); this job's own
+  # artifact is how that trend data gets established over successive scheduled
+  # runs. castxml is not installed on this runner, so only the clang-backend
+  # points are measured here (the script self-skips castxml's points, not the
+  # whole run — see its own module docstring).
+  header-graph-perf:
+    name: Header-graph attach-cost (trend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install package + toolchain
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          sudo apt-get update -qq && sudo apt-get install -y clang g++
+
+      - name: Run header-graph perf gate
+        run: |
+          mkdir -p reports/perf
+          python scripts/check_header_graph_perf.py \
+            --sizes 25 100 400 \
+            --repeat 3 \
+            --json-out reports/perf/header_graph.json \
+            --markdown | tee reports/perf/header_graph.txt
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Header-graph attach-cost (trend)"
+            echo ""
+            cat reports/perf/header_graph.txt 2>/dev/null || echo "(no output captured)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: performance-header-graph
+          path: reports/perf/header_graph.*
+
+  # PR-vs-base regression for the same gate — same base-vs-head pattern as the
+  # `regression` job above, avoiding a stale committed-baseline number
+  # entirely: base and head are measured on the identical runner/toolchain in
+  # the same job, so drift between runners can never masquerade as a
+  # regression (or hide one). Gating from day one (unlike header-graph-perf's
+  # own report-only trend job above) since a same-run base-vs-head comparison
+  # needs no bootstrap period the way a committed number would.
+  header-graph-regression:
+    name: Header-graph attach-cost regression (PR vs base)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Checkout head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          path: head
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+
+      - name: Install toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y clang g++
+
+      - name: Measure base branch
+        run: |
+          python -m venv base_env
+          ./base_env/bin/pip install -q --upgrade pip
+          ./base_env/bin/pip install -q -e "./base[dev]"
+          # The base script may predate this gate entirely (a PR introducing
+          # it, or one from before it existed) -- `|| true` keeps that robust,
+          # matching the existing `regression` job's own convention.
+          ./base_env/bin/python base/scripts/check_header_graph_perf.py \
+            --sizes 25 100 400 --repeat 2 \
+            --json-out base_header_graph.json || true
+
+      - name: Measure head and compare to base
+        run: |
+          set -euo pipefail
+          python -m venv head_env
+          ./head_env/bin/pip install -q --upgrade pip
+          ./head_env/bin/pip install -q -e "./head[dev]"
+          if [ -s base_header_graph.json ]; then
+            ./head_env/bin/python head/scripts/check_header_graph_perf.py \
+              --sizes 25 100 400 --repeat 2 \
+              --baseline base_header_graph.json --regress-tolerance 0.5 \
+              | tee header_graph_regression.txt
+          else
+            echo "No base measurement available (gate not present on base branch) -- report-only." \
+              | tee header_graph_regression.txt
+            ./head_env/bin/python head/scripts/check_header_graph_perf.py \
+              --sizes 25 100 400 --repeat 2 | tee -a header_graph_regression.txt
+          fi
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Header-graph attach-cost regression (PR vs base)"
+            echo ""
+            echo '```'
+            cat header_graph_regression.txt 2>/dev/null || echo "(no output captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
