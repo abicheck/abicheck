@@ -163,7 +163,7 @@ report's own `verdict`:
 
 | State | Verdict | Meaning |
 |---|---|---|
-| **pass** | `NO_CHANGE`, `COMPATIBLE` | a real comparison ran at the required depth and found nothing that threatens consumers |
+| **pass** | `NO_CHANGE`, `COMPATIBLE` | a real comparison ran at the required depth, found nothing that threatens consumers, **and** its gate and coverage are clear (see below) |
 | **risk** | `COMPATIBLE_WITH_RISK` | compiled consumers keep working, but a deployment risk needs manual review — see below |
 | **break** | `API_BREAK`, `BREAKING` | a real comparison ran and found a break |
 | **not comparable** | `null` | the pair could not be compared; **not** a pass |
@@ -171,6 +171,24 @@ report's own `verdict`:
 
 There is no sixth state, and none of the last four may be collapsed into
 **pass**.
+
+**A compatible verdict is necessary but not sufficient for pass.** The
+verdict answers the compatibility axis only; two other axes can fail
+independently on the very same report, and both are release-blocking:
+
+- `severity.blocking == true` — the project's configured gate rejects this
+  cell even though nothing broke ABI (a policy-blocked addition, say). The
+  run exits nonzero; recording it as pass contradicts the project's own gate.
+- `contract_coverage_exit_contribution == 1` — the contract this cell was
+  judged against was never fully established. Compatible *on the evidence
+  gathered* is not the same as compatible, and this signal is unsuppressible
+  precisely so it cannot be dropped here.
+
+A cell clearing the verdict but failing either of these is **not pass**.
+Record it as **risk** — same handling: name what failed, and make the version
+recommendation conditional on resolving it. Read all three axes from every
+report; keying the matrix off `verdict` alone is how a policy-blocked or
+evidence-incomplete cell becomes a silent minor release.
 
 **`COMPATIBLE_WITH_RISK` is the one that silently disappears if you let it.**
 It exits `0`, exactly like `COMPATIBLE`, so an exit-code-only reading of the
@@ -206,10 +224,11 @@ Given the matrix, the decision rule:
   what is missing and what would resolve it. Never default to the
   permissive answer.
 - Any **risk** cell → the version follows the rules below, but the
-  recommendation is **conditional on review of those findings**. Name them
-  and what has to be verified (typically: does every deployment target meet
-  the new floor?). A patch or minor issued without surfacing them is a
-  recommendation the evidence does not support.
+  recommendation is **conditional on resolving what that cell flagged**. Name
+  it and what has to be verified — a deployment risk (does every target meet
+  the new floor?), a blocking gate decision, or incomplete contract coverage.
+  A patch or minor issued without surfacing these is a recommendation the
+  evidence does not support.
 - Only compatible additions → **minor**.
 - No public surface change at all → **patch**.
 - Breaks that are source-only (`API_BREAK`) but not binary → allowed under

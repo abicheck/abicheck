@@ -35,6 +35,13 @@ see [evidence-and-depth.md](evidence-and-depth.md).
 
 ## Reading the result
 
+**Read the verdict the right way round.** In a scoped run the top-level
+`verdict` is the *scoped* answer — the CLI promotes it there because it is
+what the gate acts on — and `full_verdict` carries the library-wide result,
+present only when the two differ. Treating `verdict` as the global answer
+inverts the report contract and discards the very thing a consumer-scoped run
+exists to produce.
+
 Findings carry consumer-relevant fields when the run establishes them:
 
 - `changes[].affected_symbols` — the symbols the finding touches.

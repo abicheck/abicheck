@@ -41,6 +41,7 @@ import click
 import pytest
 
 import abicheck.schemas as schemas
+from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main as cli_main
 
 REPO = Path(__file__).resolve().parent.parent
@@ -359,6 +360,12 @@ def _all_enum_values(node: object, seen: set[int] | None = None) -> set[str]:
 SCHEMA_PROPERTY_NAMES = _all_property_names(_SCHEMA)
 SCHEMA_ENUM_VALUES = _all_enum_values(_SCHEMA)
 
+#: Every live `ChangeKind` value. A skill naming a change kind
+#: (`runtime_floor_raised`) is citing real product vocabulary, not a report
+#: field — but it rots exactly the same way when a kind is renamed, so it is
+#: checked against the live enum rather than waved through by an allowlist.
+CHANGE_KIND_VALUES = {kind.value for kind in ChangeKind}
+
 #: snake_case identifiers that belong to another vocabulary entirely — a
 #: platform's own binary-format fields — and so are not report-field
 #: references despite matching the candidate shape below. Kept explicit and
@@ -409,7 +416,9 @@ def test_every_cited_report_field_still_exists(path: Path):
     Enum values are checked deliberately, not incidentally: `profile_mismatch`,
     `scope_mismatch`, and the `evidence_tier` ladder are exactly the strings a
     skill's decision tree branches on, so a renamed enum member is the same
-    class of silent rot as a renamed field.
+    class of silent rot as a renamed field. `ChangeKind` values are accepted
+    the same way and for the same reason — a skill naming `runtime_floor_raised`
+    must fail here if that kind is ever renamed.
     """
     offenders: list[str] = []
     text = path.read_text(encoding="utf-8")
@@ -424,12 +433,17 @@ def test_every_cited_report_field_still_exists(path: Path):
         if "." in token or "[]" in token:
             ok = _resolve_path(token)
         else:
-            ok = token in SCHEMA_PROPERTY_NAMES or token in SCHEMA_ENUM_VALUES
+            ok = (
+                token in SCHEMA_PROPERTY_NAMES
+                or token in SCHEMA_ENUM_VALUES
+                or token in CHANGE_KIND_VALUES
+            )
         if not ok:
             line = text.count("\n", 0, match.start()) + 1
             offenders.append(
                 f"{path.relative_to(REPO)}:{line}: {token!r} is not a field or "
-                "enum value in the live compare-report schema"
+                "enum value in the live compare-report schema, nor a live "
+                "ChangeKind"
             )
     assert offenders == []
 
@@ -446,6 +460,11 @@ def test_the_drift_check_actually_has_teeth():
     # report field, or a genuine reference would go unchecked.
     assert NON_REPORT_IDENTIFIERS.isdisjoint(SCHEMA_PROPERTY_NAMES)
     assert "profile_mismatch" in SCHEMA_ENUM_VALUES
+    assert "runtime_floor_raised" in CHANGE_KIND_VALUES
+    # The three vocabularies must stay distinct sources, not one merged blob:
+    # a token accepted only because some *other* registry happens to contain
+    # it would defeat the point.
+    assert CHANGE_KIND_VALUES - SCHEMA_PROPERTY_NAMES
     assert "--used-by" in ALL_OPTIONS
     assert "--no-scope-public-headers" in ALL_OPTIONS  # a Click flag pair's other half
     assert ("project", "validate") in COMMAND_PATHS

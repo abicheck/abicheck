@@ -32,10 +32,18 @@ Key asymmetries worth stating explicitly to a user:
 exit codes follow the same split (`0` / `2` / `4`), plus `16` for a pair that
 could not be compared at all.
 
-Runtime/environment questions are **not** the `compare` verdict's job.
-`abicheck deps compare` and `abicheck deps tree` answer the dependency-floor
-side; a `compare` run that says `COMPATIBLE` says nothing about whether the
-new build raised its glibc requirement.
+Runtime questions are **partly** `compare`'s job, and it is worth knowing
+which part. A new build that requires a newer `GLIBC_*`/`GLIBCXX_*`/`CXXABI_*`
+symbol version *is* detected — `runtime_floor_raised`, reported as a risk
+because whether it breaks anyone depends on runtimes the tool cannot see. Give
+it declared floors (an environment matrix) and that risk becomes a checkable
+contract: a requirement above a declared floor is promoted to a real break.
+
+So do not discard a runtime finding on the grounds that "`compare` doesn't do
+runtime" — read it. What `compare` does *not* cover is the rest of the
+dependency graph: transitive SONAME drift, the full dependency stack across
+sysroots, missing runtime providers. That is `abicheck deps compare` and
+`abicheck deps tree`.
 
 Full semantics, including the verdict-to-exit-code chain, are owned by
 [the verdicts page](https://abicheck.github.io/abicheck/learn/verdicts/); the exhaustive per-command
