@@ -1,5 +1,21 @@
 # G33 — Typed API convergence: schema registry, Request/Result completeness, MCP dedup
 
+> **Historical note (2026-08-09).** The MCP server this plan tracks
+> convergence against has since been removed entirely (see
+> `docs/contribute/adr/021-mcp-security-model.md`, retired the same date).
+> Every MCP-specific reference below (the `abi_compare`/`abi_dump`/`abi_scan`
+> tools, `mcp_server.py` and its sibling modules, MCP↔CLI parity tests) is
+> stale and describes a removed interface. The architectural conclusions
+> that remain in force — `CompareRequest`/`DumpRequest`/`ScanRequest`/
+> `CompareResult` as the shared typed request/result models, the schema
+> registry, and `resolve_compare_request`/`classify_compare_pair` as the
+> canonical Tier-2 resolution/classification split the CLI and the typed
+> Python API both go through — are unaffected by the removal and are
+> documented in current form in `docs/use/python-api.md` and
+> `docs/reference/compatibility-evaluation-config.md`. This file is kept as
+> a historical record of how that convergence was designed and phased, not
+> as active guidance.
+
 **Status:** Phases 0-5 done (ADR-055 D1-D4 all implemented, including D1's
 deferred structural half — the CLI now shares one resolution with the typed
 and MCP paths; Phase 5 gave `dump` the typed request `compare` had, and with

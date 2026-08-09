@@ -87,20 +87,12 @@ let that test tell you what else needs updating.
 `docs-build` step needs `mkdocs` (`pip install -e ".[dev,docs]"`) and the
 `distribution-build` step needs `build`/`twine` (`pip install -e ".[dev,dist]"`)
 — neither is in bare `[dev]`, matching the CI `lint-and-types`/`fair-metadata`
-jobs' separate installs. Run `pip install -e ".[dev,docs,dist,mcp]"` for full
-parity — the `mcp` extra matches what the CI `unit-tests` job itself installs
-(`pip install -e ".[dev,mcp]"`), so the generated-doc mirror tests that need
-it (`tests/test_mcp_reference.py`) actually run instead of silently skipping.
-`verify.py` never silently claims success when *its own* step is skipped for
-a missing tool: a `pr`-profile run with any step-level skip prints an explicit
-`WARNING: this pr-profile run is INCOMPLETE` line and sets `"complete": false`
-in the `--json` receipt — don't treat a skip-containing run as equivalent to
-a clean CI pass. That completeness tracking is at the *step* level, though
-(`unit-pr` = "did `pytest tests/...` run"), not inside pytest itself — a test
-module that skips itself via `pytest.importorskip("mcp")` when the extra is
-missing still reports `unit-pr` as passed, with no separate warning for that
-one file. Installing `mcp` (as above) is what actually closes that gap
-locally; don't rely on `verify.py`'s completeness line alone to catch it.
+jobs' separate installs. Run `pip install -e ".[dev,docs,dist]"` for full
+parity. `verify.py` never silently claims success when *its own* step is
+skipped for a missing tool: a `pr`-profile run with any step-level skip
+prints an explicit `WARNING: this pr-profile run is INCOMPLETE` line and
+sets `"complete": false` in the `--json` receipt — don't treat a
+skip-containing run as equivalent to a clean CI pass.
 
 [pixi](https://pixi.sh) is also supported (`pixi install && pixi run test`,
 `pixi run check`) and additionally manages the `castxml`/compiler/`libabigail`/
@@ -130,13 +122,14 @@ isn't available in your environment (add `,docs,dist` for full parity).
 Entry points:
 - `abicheck/cli.py` — Click CLI (large file, at the 2000-line hard cap; be careful with edits)
 - `abicheck/compat/cli.py` — ABICC-compatible CLI wrapper
-- `abicheck/mcp_server.py` — MCP server for AI agent integration
-  (`mcp_server_inputs.py` holds its argument-translation layer — the public
-  depth ladder, write-path policy, and the argument families more than one
-  tool takes; `mcp_server_project.py`/`mcp_server_verdicts.py` are the other
-  size-split siblings, each imported back for side-effect registration or
-  re-export)
 - `abicheck/__main__.py` — `python -m abicheck` entry
+
+Agent/script integration is via the CLI's structured JSON/SARIF output or
+the typed Python API (`abicheck/service.py`, see "Python API" below) —
+there is no separate protocol server. An earlier MCP (Model Context
+Protocol) server shipped and was later removed; see
+`docs/contribute/adr/021-mcp-security-model.md` (retired) for the historical
+design.
 
 Core pipeline (in order of data flow):
 1. **Parsing** — extract metadata from binaries
@@ -260,27 +253,6 @@ Core pipeline (in order of data flow):
      the run), provenance from this resolver, with
      `tests/test_cli_compare_config_receipt.py` asserting the two agree.
      Reference: `docs/reference/compatibility-evaluation-config.md`
-   - `mcp_compare_receipt.py` — the same thing for the MCP `abi_compare`
-     tool (ADR-049 Phase 5), which previously patched its own gate rather
-     than resolving a config. `resolve_tool_config` hands the tool's real
-     arguments (`policy`/`policy_file`/`suppression_file`, the four
-     severity levels, and — since G33 Phase 5 gave the tool the argument —
-     `contract_mode`) to the canonical resolver at `FrontEnd.API`;
-     `record_resolved_config` installs the result through
-     `with_resolved_config` before the report renders, keeping the CLI's
-     "values from the run, provenance from the resolver" gate split. The
-     receipt states only what this tool *has*, and `contract_mode` is the
-     one entry that moved: while `abi_compare` had no `--contract`
-     equivalent, `contract.mode` honestly resolved as a built-in default,
-     but once a caller can select `exports`/`all` a receipt still naming the
-     default misreports the domain that produced the verdict and the
-     coverage gate (ADR-049 Phase 7 makes the domain authoritative) — which
-     is exactly what a replay/audit consumer reads it for. `abi_compare`
-     still takes no public-symbol or exit-code-scheme parameter, so those
-     resolve as built-in defaults — honest, since `compare_snapshots`'
-     own `scope_to_public_surface` default agrees with
-     `BUILT_IN_DEFAULT_CONTRACT_MODE` by construction when no mode is
-     stated. A leaf; nothing imports back into the server
    - `pack_application.py` — ADR-049 D8's *application* layer: what turns a
      selected `--pack` manifest into something the engine runs, rather than
      a line in the receipt (a first `--pack` was reverted before merge for
@@ -468,7 +440,8 @@ Core pipeline (in order of data flow):
      phases (`resolve_compare_request` / `classify_compare_pair`), split so
      the native `compare` CLI can run its Click-dependent ADR-049
      `resolve_and_apply` step between them and still share one resolution
-     with the typed API and MCP instead of keeping a second copy.
+     with the typed API instead of keeping a second copy (historically also
+     with the now-removed MCP server — see ADR-021).
      `resolve_sides_sequentially` owns the one rule about resolving both
      sides concurrently (a `dump_manifest` on either side, or
      `ABICHECK_PARALLEL_EXTRACTION=0`, forces sequential — a manifest dump
@@ -489,8 +462,9 @@ Core pipeline (in order of data flow):
      one way to turn a path into a snapshot, but the four steps a real `dump`
      does *around* it (collect-mode inference, inline L3-L5 embedding, the
      dependency walk, the depth floor) lived only in `cli.py`'s `dump_cmd` —
-     which is why the MCP `abi_dump` tool sat at a five-argument subset of
-     what `abicheck dump` accepts. Deliberately excludes the CLI's provenance/
+     which is why the now-removed MCP `abi_dump` tool historically sat at a
+     five-argument subset of what `abicheck dump` accepts. Deliberately
+     excludes the CLI's provenance/
      presentation layer (`--dry-run` rendering, git/build-id stamping,
      `fold_dump_provenance_into_json`); the native `dump` CLI does not build a
      `DumpRequest` yet — see G33's Phase 5 note for what that migration needs
@@ -734,9 +708,8 @@ Once a root command genuinely clears the bar above, pick the right home:
   compatibility decision or gate contribution. Without
   `--contract-evaluation` the contribution is always `0`, so every
   pre-existing invocation is unchanged. Every consumer that publishes an
-  exit status folds it and explains it — the two CLIs, the MCP
-  `abi_compare` tool (top-level `contract_coverage` block), and the
-  composite Action (`verdict: COVERAGE_INCOMPLETE`). A directory/package
+  exit status folds it and explains it — the two CLIs and the composite
+  Action (`verdict: COVERAGE_INCOMPLETE`). A directory/package
   `compare` (the per-library release fan-out) applies the same flag to
   each library and `max`s every library's own contribution into the
   release's exit code, stated in the release JSON summary under the same

@@ -30,7 +30,6 @@ This document answers three questions:
 | Probe (G2) | `probe run/compare` | ~9 | ✅ `--policy` | ❌ | n/a | 0/2/4 (+3 = incomplete matrix without `--allow-failures`) |
 | Debian | `debian-symbols generate/validate/diff` | ~4 | ❌ | ❌ | n/a | 0/1 (+2 = `validate` symbols mismatch) |
 | Suggest | `suggest-suppressions` | 2 | ❌ | ❌ | n/a | 0 |
-| MCP server | `abicheck-mcp` | 3 (env + 3 CLI) | ❌ | ❌ | inherits API | n/a |
 | Python API | `abicheck.service` | function kwargs | via args | n/a | ✅ **default ON** | n/a |
 
 Total unique flags across the tool: **~220** (counting per-side / alias variants
@@ -256,8 +255,6 @@ opaque `"old"`/`"new"` — more useful in reports for zero extra typing.
 | `compat -report-format` | **`html`** | A CLI invocation writes an HTML file by default | ABICC parity — keep, but document |
 | `suggest-suppressions --expiry-days` | **180** | Generated suppressions silently expire in ~6 months | Fine, but state it in the generated file header |
 | `baseline --registry` | **`.abicheck/baselines`** in cwd | Writes into the current directory tree | Document; consider `$XDG_DATA_HOME` option |
-| MCP `ABICHECK_MCP_TIMEOUT` | **120 s** | Large libs may exceed it | Fine; documented |
-| MCP `ABICHECK_MCP_MAX_FILE_SIZE` | **500 MB** | Silently rejects bigger inputs | Document the limit in the error |
 
 ---
 
@@ -272,12 +269,9 @@ opaque `"old"`/`"new"` — more useful in reports for zero extra typing.
 | `XDG_CACHE_HOME` | `~/.cache` | Snapshot/debug cache root |
 | `LOCALAPPDATA` | `~/AppData/Local` | Windows castxml cache root |
 | `SYCL_PI_PLUGINS_DIR`, `SYCL_UR_ADAPTERS_DIR` | unset | SYCL plugin discovery |
-| `ABICHECK_MCP_TIMEOUT` | `120` | MCP per-call timeout (s) |
-| `ABICHECK_MCP_MAX_FILE_SIZE` | `524288000` | MCP max input bytes |
 
 These are well-scoped and follow platform conventions (XDG / LOCALAPPDATA). No
-changes recommended beyond documenting the two `ABICHECK_MCP_*` knobs in the MCP
-guide.
+changes recommended.
 
 ---
 

@@ -50,24 +50,6 @@ scenarios:
     status: planned
     plan: docs/contribute/plans/g3-workflow-examples-and-reporting.md
 
-  - id: SC-AGENT-MCP
-    title: An AI agent inspects ABI changes through the MCP server
-    persona: AI agent / automation
-    narrative: >
-      An agent (Claude Code, Cursor, …) calls abicheck's MCP tools (abi_dump,
-      abi_compare, abi_explain_change) to analyse and explain changes
-      programmatically.
-    flow:
-      - python -m abicheck.mcp_server   # agent calls the exposed tools
-    expected:
-      tools: [abi_dump, abi_compare, abi_explain_change]
-    validates: UC-WF-mcp
-    automated: false
-    status: planned
-    note: >
-      The MCP tools are unit-tested (tests/test_mcp_server_unit.py); a live
-      client↔server end-to-end scenario is not yet automated.
-
   - id: SC-DEPS-LOADCHECK
     title: Confirm a binary's symbols all bind in its dependency stack
     persona: Platform / embedded engineer

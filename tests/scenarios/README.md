@@ -20,7 +20,7 @@ file. `tests/test_scenarios.py` merges every `tests/scenarios/*.yaml`:
 | `toolchain_coverage.yaml` | build/toolchain-driven shifts — dual-ABI flip, LP64↔ILP64, flag drift |
 | `reporting.yaml` | report formats — JSON contract, SARIF, JUnit, HTML, review digest |
 | `release_management.yaml` | release recommendation, offline snapshots, baseline registry |
-| `consumer_deployment.yaml` | compare-release, appcompat, stack-check/deps, ABICC, Debian, MCP (planned) |
+| `consumer_deployment.yaml` | compare-release, appcompat, stack-check/deps, ABICC, Debian (planned) |
 | `platform_coverage.yaml` | Linux ELF baseline (automated); native Windows PE/macOS Mach-O, plugin host↔plugin contract (planned) |
 | `archetype_coverage.yaml` | kernel-BTF, SYCL plugin, static library, header-only (planned) |
 

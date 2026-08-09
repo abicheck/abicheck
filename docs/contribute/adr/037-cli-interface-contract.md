@@ -1,5 +1,16 @@
 # ADR-037: CLI Interface Contract, Configuration Balance, and Extension Policy
 
+> **Historical note (2026-08-09).** The MCP server was removed entirely
+> (see `docs/contribute/adr/021-mcp-security-model.md`, retired the same
+> date). Every MCP-specific reference below — `mcp_server` as a Tier-3
+> frontend, the "MCP↔CLI name map complete" `MCP_CLI_NAME_MAP` requirement
+> in D10.3, Scenario S5's "AI agent over MCP" — is stale and describes a
+> removed interface; the `MCP_CLI_NAME_MAP` gate itself no longer exists.
+> The rest of this ADR's contract (tiers, `CompareRequest`/`DumpRequest`
+> validation living in Tier 2, one `--depth` dial, one exit-code scheme)
+> remains in force for the CLI and the typed Python API and is unaffected
+> by the removal.
+
 **Date:** 2026-06-16
 **Status:** Accepted — implemented. Tracked as G22 in
 `docs/contribute/usecase-registry.yaml` (entry `UC-WF-cli-contract`, now

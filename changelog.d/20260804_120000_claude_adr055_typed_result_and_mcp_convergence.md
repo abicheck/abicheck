@@ -9,13 +9,13 @@
 - **`InputSpec.follow_linker_scripts` (ADR-055 D4).** Lets a request decline
   to follow a GNU ld linker script's `INPUT()`/`GROUP()` target to the real
   library. Defaults to `True`, matching the previous behaviour of every
-  caller; the MCP server sets it `False`, which is what keeps its
-  `MCP_MAX_FILE_SIZE` guard authoritative now that it resolves through the
-  shared service layer.
+  caller; a caller that needs to keep a size guard authoritative over the
+  input it was handed (rather than whatever a followed script points at)
+  can set it `False`.
 
 - **`CompareRequest` reaches full parity with `compare`'s own input
   resolution (ADR-055 D1).** Four concepts the CLI could express and a
-  Python/MCP caller could not are now request fields: `dwarf_only`,
+  Python caller could not are now request fields: `dwarf_only`,
   `debug_format`, `include_labels` (ADR-050 D1's resolved `path -> label`
   map, carried as a tuple of pairs so the request stays hashable), and
   `--follow-deps` (`follow_dependencies` + `dependency_search_paths` +
@@ -79,18 +79,6 @@
   dropped and the run reported success having ignored it; the CLI has always
   rejected the combination up front.
 
-- **The MCP `abi_compare` tool now routes through the Tier-2 chokepoint
-  (ADR-055 D4).** It previously resolved its own inputs, loaded its own
-  policy/suppression files, and used `compare_snapshots` for the middle
-  diffing step only — a second compare engine that could drift from the CLI's
-  without anything failing. It now builds one `CompareRequest` and calls
-  `run_compare_request`. Output is unchanged: a new parity test asserts
-  `abi_compare`'s rendered report and exit code match the CLI `compare`
-  command's across policy-profile, policy-file, suppression, `--show-only`,
-  `--report-mode`, and severity-aware runs.
-- **`abi_compare` rejects an unsupported `language` instead of passing it
-  down.** A value outside `c`/`c++` (e.g. `"rust"`) is now a structured
-  validation error, matching what the CLI's `--lang` choice has always done.
 - **`CompareRequest.debug_format` is validated and case-normalized.** It
   accepts exactly what the CLI's case-insensitive `--debug-format` choice does
   (`auto`/`dwarf`/`btf`/`ctf`); anything else raises `ValidationError` up front

@@ -97,7 +97,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,mcp]"  # mypy is pinned in [dev]; no separate unpinned install
+          pip install -e ".[dev]"  # mypy is pinned in [dev]; no separate unpinned install
       - name: Install docs dependencies
         run: pip install mkdocs mkdocs-material pymdown-extensions mkdocs-redirects
       # lint / typecheck / docs-build routed through scripts/verify.py — see
@@ -140,7 +140,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,mcp]"
+          pip install -e ".[dev]"
       - name: Run tests with coverage (Linux 3.13 — canonical lane, enforces 95% floor)
         # Coverage + the 95% floor + the codecov upload run on ONE canonical
         # Linux/Python lane (3.13). The other Linux Pythons (3.12/3.14) run the

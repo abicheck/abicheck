@@ -107,12 +107,6 @@ topics:
     task_pages:
       - use/dump-compare-flags.md
 
-  mcp-tools:
-    canonical_page: use/mcp-integration.md
-    fact_sources:
-      - abicheck/mcp_server.py
-    reference_page: reference/mcp-tools-reference.md
-
   python-api:
     canonical_page: use/python-api.md
     fact_sources:
@@ -121,7 +115,6 @@ topics:
       - abicheck/service_dump_pipeline.py
       - abicheck/service_compare_pipeline.py
       - abicheck/service_scan.py
-      - abicheck/mcp_server.py
     reference_page: reference/python-api-reference.md
 
   config-keys:
@@ -201,8 +194,6 @@ topics:
     task_pages:
       - use/github-action-recipes.md
       - integration/scenarios/multi-platform.md
-    allowed_summaries:
-      - use/mcp-integration.md
 
   suppressions:
     canonical_page: use/suppressions.md

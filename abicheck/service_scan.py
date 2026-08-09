@@ -807,8 +807,8 @@ def estimate_scan(
 
 @dataclass(frozen=True)
 class ScanResult:
-    """Typed result of an executed scan (ADR-035 D10) — the one object the CLI,
-    the MCP server, and library callers consume.
+    """Typed result of an executed scan (ADR-035 D10) — the one object the CLI
+    and library callers consume.
 
     ``diff`` is the full report payload (``None``-free); ``findings`` are the raw
     cross-source :class:`Change` objects; ``layers`` is the per-layer coverage;

@@ -266,7 +266,6 @@ python scripts/gen_examples_docs.py       # docs/reference/examples/*.md
 python scripts/gen_detector_spec.py       # docs/reference/detector-spec.{md,json}
 python scripts/gen_action_reference.py    # docs/reference/github-action-inputs.md
 python scripts/gen_cli_reference.py       # docs/reference/cli-reference.md
-python scripts/gen_mcp_reference.py       # docs/reference/mcp-tools-reference.md (needs the `mcp` extra)
 python scripts/gen_python_api_reference.py  # docs/reference/python-api-reference.md
 python scripts/gen_config_reference.py    # docs/reference/config-keys-reference.md
 python scripts/gen_platform_matrix.py     # docs/reference/platforms.md's "Quick Reference" section

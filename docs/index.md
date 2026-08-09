@@ -25,7 +25,7 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 - **Policy profiles** — `strict_abi`, `sdk_vendor`, `plugin_abi`, or custom YAML overrides.
 - **ABICC drop-in** — full flag parity for migrating from `abi-compliance-checker`.
 - **CI-ready** — clear exit codes, SARIF upload, snapshot-based baselines, first-class GitHub Action.
-- **Agent-friendly** — structured JSON, Python API, and an [MCP server](use/mcp-integration.md) for AI-driven workflows.
+- **Agent-friendly** — structured JSON/SARIF output and a typed [Python API](use/python-api.md) for AI-driven workflows; agents use the CLI or the API directly, no separate protocol server.
 
 ## How the documentation is organized
 
@@ -91,8 +91,7 @@ The docs are two complementary tracks, each ordered from introductory to expert:
 
 **Automating through Python or an agent?**
 
-- [Python API](use/python-api.md) — typed requests, and a CLI/Python/MCP parity table.
-- [MCP Integration](use/mcp-integration.md) — the MCP server for AI-agent workflows.
+- [Python API](use/python-api.md) — typed requests, and a CLI/Python parity table.
 
 **Migrating from another tool?**
 

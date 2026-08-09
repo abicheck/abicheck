@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 #: ``contextvars.ContextVar`` propagation pattern). Default ``False``: a
 #: direct :func:`abicheck.dumper.dump` caller with no downstream
 #: ``service._attach_header_graph`` consumer (``appcompat.
-#: check_app_compatibility``, a direct Python-API/MCP caller selecting the
+#: check_app_compatibility``, a direct Python-API caller selecting the
 #: clang backend) would otherwise memoize an AST nothing will ever pop,
 #: holding a potentially multi-GB tree indefinitely for no benefit (Codex
 #: review). ``service.run_dump`` activates this around its own primary
