@@ -1255,18 +1255,28 @@ def directly_referenced_stdlib_type_spellings(
             continue
         if stripped in typedef_candidate_spellings:
             typedef_target = typedef_spelling_targets.get(stripped)
-            # A typedef target is never guaranteed to already be spelled in
-            # this identity's own stripped bare form -- e.g. a target
-            # spelled fully qualified (matching `identity` itself directly)
-            # or, symmetrically, in some other stdlib-stripped shape -- so
-            # compare against both the raw target and its own stripped form
-            # before concluding a collision.
-            normalized_target = (
-                None
-                if typedef_target is None
-                else (_stripped_signature_spelling(typedef_target) or typedef_target)
-            )
-            if typedef_target != identity and normalized_target != stripped:
+            # A typedef target naming this exact identity -- spelled fully
+            # qualified, or as one of its own *structural* namespace-suffix
+            # spellings (`_namespace_suffix_spellings`, which only ever
+            # drops a namespace/class-scope prefix `identity` itself
+            # already carries) -- genuinely refers to the same entity and
+            # is not a collision. An earlier revision instead compared via
+            # `_stripped_signature_spelling(typedef_target)` -- rejected
+            # (Codex review, fresh evidence): that normalization also
+            # strips inline ABI-tag namespaces (`__cxx11::`, `__1::`,
+            # `__ndk1::`), so a target naming a *different*, differently
+            # ABI-tagged stdlib sibling this snapshot never captured (e.g.
+            # a typedef targeting `std::__cxx11::basic_string<char>`
+            # against a captured pre-C++11-ABI `std::basic_string<char>`)
+            # stripped-collapses to the identical bare form as `identity`
+            # purely by coincidence, and was waved through here as "the
+            # same identity" when it actually names something else
+            # entirely -- confirmed empirically. `_namespace_suffix_
+            # spellings` cannot manufacture that coincidence, since it
+            # only derives suffixes from `identity`'s own scope chain.
+            if typedef_target != identity and typedef_target not in (
+                _namespace_suffix_spellings(identity)
+            ):
                 # A real, unrelated typedef alias whose key -- or one of
                 # its own derived namespace-suffix spellings -- happens to
                 # equal this identity's stripped spelling (bare key,

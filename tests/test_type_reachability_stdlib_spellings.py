@@ -1347,3 +1347,80 @@ class TestTypedefResolvingToTheSameRecordIsNotACollision:
         assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
             {"std::exception", "exception"}
         )
+
+
+class TestTypedefTargetMustMatchTheCapturedIdentityNotJustItsStrippedForm:
+    """Codex review, fresh evidence: comparing a colliding typedef's target
+    against `identity` via `_stripped_signature_spelling` on *both* sides
+    (an earlier revision of the collision-exception check) also strips
+    inline ABI-tag namespaces (`__cxx11::`, `__1::`, `__ndk1::`) -- so a
+    typedef whose real target names a *different*, differently-ABI-tagged
+    stdlib sibling this snapshot never captured (e.g. `std::__cxx11::
+    basic_string<char>`) stripped-collapses to the exact same bare form as
+    an unrelated, captured pre-C++11-ABI `std::basic_string<char>`, purely
+    by coincidence. The old check waved this through as "the same
+    identity" and exported the captured identity's derived bare spelling
+    anyway, even though the typedef actually names something else entirely
+    -- letting a bare `Change.symbol` that's really about the missing,
+    differently-ABI-tagged sibling be confirmed against the wrong,
+    captured record. The fix requires either an exact target match or a
+    genuine structural namespace-suffix spelling of `identity` itself
+    (`_namespace_suffix_spellings`, which can never manufacture this
+    ABI-tag coincidence)."""
+
+    def test_a_typedef_targeting_a_differently_abi_tagged_uncaptured_sibling_is_a_real_collision(
+        self,
+    ) -> None:
+        old_abi_string = RecordType(
+            name="basic_string<char>",
+            qualified_name="std::basic_string<char>",
+            kind="class",
+        )
+        # `api::basic_string<char>`'s own bare/derived spelling collides
+        # with `old_abi_string`'s stripped form, but its real target is the
+        # differently-ABI-tagged (and never captured in this snapshot)
+        # `std::__cxx11::basic_string<char>` -- a genuinely different
+        # identity, not `old_abi_string` spelled another way.
+        typedefs = {"api::basic_string<char>": "std::__cxx11::basic_string<char>"}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="s", type="basic_string<char>")])],
+            types=[old_abi_string],
+            typedefs=typedefs,
+        )
+        # `old_abi_string` is still genuinely, independently referenced (a
+        # public function names its bare spelling directly) --
+        # `directly_referenced_stdlib_types` is unaffected.
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::basic_string<char>"}
+        )
+        # But the derived bare spelling "basic_string<char>" is ambiguous
+        # with the unrelated typedef's real (different, uncaptured) target,
+        # so it -- and, per the same ambiguous-collision policy already
+        # applied elsewhere in this function, the identity's own qualified
+        # spelling too, since it was only ever matched via the ambiguous
+        # bare form rather than its own literal text -- must not be
+        # exported.
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+
+    def test_a_typedef_targeting_the_same_identity_via_a_structural_suffix_is_not_a_collision(
+        self,
+    ) -> None:
+        vec = RecordType(
+            name="vector<int>", qualified_name="std::vector<int>", kind="class"
+        )
+        # The typedef's target is exactly `identity`'s own bare structural
+        # suffix (no ABI-tag namespace involved) -- a genuine same-identity
+        # spelling, not a coincidental stripped-form collapse.
+        typedefs = {"api::vector<int>": "vector<int>"}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="s", type="vector<int>")])],
+            types=[vec],
+            typedefs=typedefs,
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::vector<int>", "vector<int>"}
+        )
