@@ -517,7 +517,10 @@ dependencies/surface without strong justification":
   `reason` as a bare string today, not an object, so its own counterpart
   is an additive sibling field (`reason_codes`) alongside the unchanged
   string `reason`, not a type migration. This is a report-schema addition
-  (a `SCHEMA_VERSION`-gated field), not a new command; see G36 P0.5 for the
+  (a `REPORT_SCHEMA_VERSION`-gated field — the compare-report JSON contract's
+  own version constant; distinct from `serialization.SCHEMA_VERSION`, which
+  versions persisted `AbiSnapshot` files, not reports), not a new command;
+  see G36 P0.5 for the
   exact field-by-field mapping and test matrix.
 - Every other candidate capability considered (finding/root-cause querying,
   project discovery, baseline-candidate discovery) is **P1, contingent on

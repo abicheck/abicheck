@@ -357,7 +357,16 @@ field `comparability.py`'s `PROFILE_FIELD_KEYS` (`compiler_family`,
 `include_sequence`, `header_sequence`), `_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`'s
 DPC++-only addition (`frontend_context_kind` — its own dedicated code, not
 folded into the generic fallback, since G32 Phase D already makes it a
-known, stable, independently-mismatching field), and `SCOPE_FIELD_KEYS`/
+known, stable, independently-mismatching field — **but see the fingerprint-
+gate bug noted below, which must be fixed for this code to ever actually
+fire**), `comparability.py`'s separate `dependency_scope` mismatch kind
+(`_check_dependency_scope_comparable`/`ComparabilityMismatch.kind ==
+"dependency_scope"` — a distinct category from `"scope"`/`"profile"`
+already modeled in code, raised when one snapshot was extracted with
+dependency filtering and the other with `--include-dependencies`; give it
+its own `dependency_scope_mismatch` code rather than folding it into
+`other_scope_mismatch`, since the underlying code already treats it as a
+first-class, separately-diagnosable case), and `SCOPE_FIELD_KEYS`/
 `_MANIFEST_SCOPE_FIELD_KEYS` (`headers`, `public_header_dirs`,
 `translation_units`) can each independently contribute, plus one explicit
 code per exception category already carved out in `comparability.py`
@@ -365,7 +374,28 @@ code per exception category already carved out in `comparability.py`
 `other_profile_mismatch`/`other_scope_mismatch` catch-all for any field not
 individually enumerated — so a future `PROFILE_FIELD_KEYS`/
 `SCOPE_FIELD_KEYS` addition degrades to a generic-but-still-typed code
-instead of silently emitting nothing. Derived from the same field-by-field
+instead of silently emitting nothing.
+
+**Pre-existing gate bug this item must fix, not just work around:**
+`check_contracts_comparable`'s fingerprint-authenticity re-verification
+(`_fingerprint_matches_fields(..., PROFILE_FIELD_KEYS)`) always checks
+against the 11-key `PROFILE_FIELD_KEYS`, even for a DPC++ contract whose
+`profile_fingerprint` was originally hashed over the 12-key
+`_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS` (the frontend-aware key set
+`compute_extraction_contract` selects for a DPC++-capable frontend). That
+mismatch means a DPC++ pair's fingerprint re-verification fails the
+authenticity check *before* the actual per-field `differing` computation
+(which does correctly use `_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`) ever
+runs, so today every DPC++ profile mismatch raises the generic "fields do
+not reproduce fingerprint... cannot be verified safe" path — the dedicated
+`frontend_context_kind_mismatch` code above is unreachable until this gate
+itself is fixed to authenticate against the correct key set for a DPC++
+contract. Fix `_fingerprint_matches_fields`'s key-set selection at both
+authenticity call sites (mirroring the same
+`_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`-when-DPC++ branch
+`compute_extraction_contract` already uses) as part of this item, and
+assert the *actual* emitted code (not just that a code exists) in the
+DPC++ regression test. Derived from the same field-by-field
 comparison `check_contracts_comparable`/`compute_extraction_contract`
 already perform when raising `ProfileMismatchError`/`ScopeMismatchError` —
 promotes existing internal evidence to a stable public field, adds no new
@@ -459,16 +489,24 @@ same sibling field) — `deps compare --format json` is another
 machine-readable comparability entry point this item's "a skill can branch
 on one field" goal applies to equally, and is the natural backend for a
 future dependency-floor/runtime-upgrade skill, so it shouldn't be left
-behind the other four producers. **Stack JSON output carries no schema
-version marker at all today** — confirmed: no `schema_version` field or
-constant anywhere in `stack_checker.py`/`stack_report.py` — so this item's
-"schema-based drift check" claim (P0.7) cannot cover it the way it covers
-the four producers that already have a real registered schema. Give
-`deps compare --format json` its own minimal `stack_schema_version`
-constant and top-level field as part of this same change (not deferred) —
-without one, a consumer has no way to discover when
-`not_comparable_reason_codes` became available, and P0.7's drift check has
-nothing versioned to check this output against, `abicheck/schemas/__init__.py`
+behind the other four producers. **Stack JSON output has neither a schema
+version marker nor a registered JSON Schema at all today** — confirmed: no
+`schema_version` field/constant and no `abicheck/schemas/
+stack_report.schema.json` anywhere in `stack_checker.py`/`stack_report.py`/
+`abicheck/schemas/` — so a version constant alone would not be sufficient:
+P0.7's schema-based drift check validates against an actual field
+contract, and a bare version number with nothing to check it against gives
+that check nothing to validate `not_comparable_reason_codes` against.
+Deliver the full triple for `deps compare --format json` as part of this
+same change (not deferred): (1) a `stack_schema_version` constant and
+top-level field in `stack_report.py`'s output, (2) a real
+`abicheck/schemas/stack_report.schema.json` defining the actual output
+shape (modeled on `compare_report.schema.json`'s own structure) including
+`not_comparable_reason_codes`, and (3) its published mirror under
+`docs/reference/schemas/` via the existing `scripts/publish_schemas.py`
+step, plus a schema-validation test asserting real `stack_to_json()`
+output actually validates against it — not just that the version constant
+exists, `abicheck/schemas/__init__.py`
 (schema version bump + field registration, covering the compare, scan, and
 dependency-stack report schemas), `docs/reference/change-kinds.md` or a new
 `docs/reference/comparability-reason-codes.md` (document the closed enum —
