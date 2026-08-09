@@ -63,7 +63,13 @@ terms), `public-surface-and-scoping.md`, `compiler-and-build-profiles.md`,
 `consumer-scoping.md` (ADR-057's consumer graph, `--used-by`/
 `--required-symbol(s)`), `policies-and-suppressions.md`,
 `report-interpretation.md` (how to read a JSON report's verdict/gate/
-contract-coverage/finding blocks), `root-cause-grouping.md`,
+contract-coverage/finding blocks), `root-cause-grouping.md` (the primary
+content here is: use `compare --report-mode root-cause --format json`'s
+existing deterministic `root_causes`/`root_cause_count` fields first —
+don't re-derive a grouping from the flat finding list in skill-side prose,
+which risks a lower-fidelity result that diverges from abicheck's own
+answer; this fragment documents that mode's shape and only then covers
+the residual cases it doesn't already handle),
 `remediation-catalog.md` (the pattern catalog ADR-058's
 `native-api-evolution` skill draws from: pImpl/opaque handles, compatibility
 wrappers, overloads over destructive signature changes, reserved
@@ -227,11 +233,19 @@ trial-and-error, which both `native-release-compatibility` and
 `native-binary-compatibility-review`'s tool-selection steps need to avoid.
 
 **Change:** Add `abicheck info` (small, read-only, no operands) emitting
-JSON: `abicheck_version`, `report_schema_version`, `snapshot_schema_version`,
-`scan_schema_version` (reading the same schema-registry lookup ADR-055 D3
-introduced, not re-deriving version numbers independently), the current
-root command list (so a skill can self-check "does my target support
-`project`"), available extraction providers (castxml/clang presence,
+JSON: `abicheck_version`, and a `schema_versions` map covering **all six**
+artifact families `abicheck/schemas/__init__.py`'s `current()` registry
+already exposes (`snapshot`, `compare`, `scan`, `aggregate`, `build-output`,
+`run-plan` — reading that same lookup, ADR-055 D3, not re-deriving version
+numbers independently or arbitrarily limiting the payload to three of the
+six). The three-field version limited to snapshot/compare/scan an earlier
+draft of this item proposed was an oversight, not a deliberate scoping —
+`native-release-compatibility`'s documented `project plan`/`aggregate`
+workflow needs `aggregate`/`build-output`/`run-plan` versions too, and
+without them the skill would have to fall back to probing or parsing
+output for exactly the thing this command exists to answer directly. Also:
+the current root command list (so a skill can self-check "does my target
+support `project`"), available extraction providers (castxml/clang presence,
 detected on the host the same way existing dumper-provider auto-detection
 already probes), and platform capabilities (ELF/PE/Mach-O support — all
 three ship unconditionally today, but this keeps the field meaningful if
@@ -737,8 +751,14 @@ only "did it invoke abicheck."
 
 **Files:** `validation/scripts/run_skill_evals.py` (new, alongside the
 existing `validation/scripts/run_example_owner_proofs.py`-style harness
-scripts — reuses `validation/data/manifest.json`'s case indexing rather
-than building a parallel index); `validation/data/skill_eval_results.json`
+scripts — indexes cases via **`examples/ground_truth.json`**, the
+repository's actual canonical per-case catalog (keyed by case directory
+name, carrying `expected`/`expected_kinds`/`min_evidence` per case — this
+is what the named categories above, e.g. "removed export," "vtable
+change," resolve against). `validation/data/manifest.json` is a different,
+unrelated index — 11 real-world *package pairs* keyed by `pair`, not
+`examples/` case IDs — and cannot serve this item's purpose; an earlier
+draft of this item named it in error); `validation/data/skill_eval_results.json`
 (new results artifact, mirroring the existing `results.json` convention).
 
 **Tests:** the eval harness itself is the test; gate a minimum pass rate in
