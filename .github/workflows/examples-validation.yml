@@ -410,7 +410,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [merge-validate-examples, artifact-modes, clang-header-fallback]
-    if: always()
+    # Same reasoning as merge-validate-examples above: still collect when an
+    # upstream job *failed* (the collector re-derives pass/fail from the
+    # recorded per-case statuses, which is the whole point of running anyway),
+    # but not when the run was cancelled. `always()` fires on cancellation too,
+    # so a run superseded by a newer push reached this job with no artifacts at
+    # all and turned an ordinary supersede into a red check. Pre-dates the
+    # sharding work, but it is the identical failure mode fixed one job up.
+    if: ${{ !cancelled() }}
 
     steps:
       - uses: actions/checkout@v6
