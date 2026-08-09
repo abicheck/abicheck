@@ -18,19 +18,18 @@ own initiative work).
 > and its sibling modules) entirely — see
 > [ADR-021b](../adr/021-mcp-security-model.md) and
 > [ADR-055's retirement note](../adr/055-typed-request-result-completeness-and-schema-registry.md).
-> None of this plan's items are still started against this backend, so
-> nothing here needed unwinding, only correcting: P0.5's `codes`/
-> `reason_codes` item below no longer has an `abicheck/mcp_server.py`
-> file or an MCP `abi_compare` envelope to extend — read every remaining
-> `abi_compare`/`mcp_server.py`/"MCP" reference in P0.5 as historical
-> context for why the field was originally scoped the way it was, not as
-> a live implementation target. The producer-surface count that item
-> gives is six (`compare`, `scan`, the release JSON, the release summary,
-> `aggregate`, `deps compare`/stack), not seven. No other phase in this
-> plan referenced MCP. This plan's actual scope — the four P0 skills,
-> `skills-src/` → `.agents/skills/`/`.claude/skills/`/`.gemini/skills/`
-> generation, the CLI-only execution backend — was never MCP-dependent and
-> is unaffected.
+> None of this plan's items were started against this backend, so nothing
+> here needed unwinding. P0.5's `codes`/`reason_codes` item below has been
+> updated in place: it no longer requires an `abicheck/mcp_server.py` edit
+> or an MCP `abi_compare` envelope test, and its producer-surface count is
+> six (`compare`, `scan`, the release JSON, the release summary,
+> `aggregate`, `deps compare`/stack), not seven. The two remaining MCP
+> mentions left in P0.5 are explicitly historical (why the field was
+> originally scoped that way), not implementation targets. No other phase
+> in this plan referenced MCP. This plan's actual scope — the four P0
+> skills, `skills-src/` → `.agents/skills/`/`.claude/skills/`/
+> `.gemini/skills/` generation, the CLI-only execution backend — was never
+> MCP-dependent and is unaffected.
 
 **Effort:** L/XL (phased P0/P1/P2) · **Risk:** medium — the two required
 product changes (`abicheck info`, a comparability reason-code field) are
@@ -576,8 +575,8 @@ comparability" workflow step and `native-release-compatibility`'s
 
 **One canonical owner for the enum itself, checked against every schema
 that republishes it — not just one of the several.** This item's `codes`
-values are reused, by name, across seven distinct producer surfaces
-(`compare`, MCP `abi_compare`, `scan`, the release JSON, the release
+values are reused, by name, across six distinct producer surfaces
+(`compare`, `scan`, the release JSON, the release
 summary, `aggregate`, and `deps compare`/stack — the CLI command and the
 report shape it emits (`stack_checker.py`/`stack_report.py`), counted here
 as one producer since they share a single new schema below) and — once
@@ -753,15 +752,10 @@ that is not what this item delivers. Report-schema version bump per the
 existing
 `REPORT_SCHEMA_VERSION` convention (ADR-047 §7 / ADR-055 D3's registry).
 
-MCP's `abi_compare` tool needs its own, separate treatment, not a
-copy-the-CLI-field assumption: its `not_comparable` envelope emits
-`"reason"` as a bare **string** (`str(exc)`, `mcp_server.py`), not an
-object — adding `codes` there cannot mean mutating `reason`'s type without
-breaking existing MCP consumers. Add a new sibling field,
-`reason_codes` (array, same enum, same derivation), alongside the existing
-string `reason`, and leave `reason` itself untouched — this is an additive,
-backward-compatible envelope change, not a type migration, and should be
-implemented and tested as such.
+(The MCP server's `abi_compare` tool once needed its own, separate
+treatment here, since its `not_comparable` envelope emitted `"reason"` as
+a bare string rather than an object — moot now that #684 removed the MCP
+server entirely; see this plan's Amendment note above.)
 
 **Files:** `abicheck/errors.py` (`ProfileMismatchError`/
 `ScopeMismatchError` are actually *defined* here, not in
@@ -812,13 +806,11 @@ shapes explicitly — either two distinct schema families, or one schema
 with explicit `oneOf` branches for the two envelopes — plus a published
 mirror and real-output validation tests for **both** `_format_release_json()`
 and `_write_release_summary_file()` output, not just one of the two, as
-part of this same change, not deferred), `abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
-"reason": ..., "reason_codes": [...]}` — additive sibling field, `reason`
-unchanged), `abicheck/scan_engine.py` (`scan --against` catches the same
+part of this same change, not deferred), `abicheck/scan_engine.py` (`scan --against` catches the same
 two exceptions at its own comparability gate, line ~1039, and today emits
 only `diff_summary = {"reason": str(exc)}` — free text, same gap as the
-CLI/MCP `compare` paths this item was originally scoped to; add the same
-`reason_codes` field here too, since `scan`'s CLI and MCP surfaces share
+`compare` path this item was originally scoped to; add the same
+`reason_codes` field here too, since `scan`'s CLI surface shares
 this one engine and would otherwise still have to parse prose for exactly
 the causes this item exists to type. **`SCAN_SCHEMA_VERSION` is a version
 marker with no schema behind it, and it marks three distinct shapes, not
@@ -827,7 +819,7 @@ one** — confirmed: no `abicheck/schemas/scan_report.schema.json` exists
 `compare_report` do); `ScanOutcome.diff_summary` (`scan_engine.py`) is
 typed as plain `dict[str, Any]`; and the same version constant is also
 stamped onto `ScanResult.to_dict()` and `ScanSetResult.to_dict()`
-(`service_scan.py`) — the service/MCP single-scan envelope and the
+(`service_scan.py`) — the service single-scan envelope and the
 multi-artifact scan-set envelope, both structurally different from
 `ScanOutcome`'s own shape and from each other. Testing only `scan
 --against`'s CLI output (as an earlier draft of this item implied) would
@@ -904,12 +896,7 @@ for an unrecognized field — one single-cause case each, **plus** at least
 one dedicated multi-field-mismatch case asserting `codes` contains every
 simultaneously-mismatched field, not just the two current coarse kinds and
 not just single-cause cases); `tests/test_report_schema_receipt.py`-style
-version-bump check if one exists for this schema family; a test asserting
-`abi_compare`'s MCP `not_comparable` path emits `reason_codes` matching the
-CLI's `codes` for the same mismatch (ADR-055 D4's "one shared
-implementation" invariant, applied to this new field) while leaving its
-existing string `reason` field's shape unchanged (an explicit
-backward-compatibility regression test, not just a new-field test); a
+version-bump check if one exists for this schema family; a
 `tests/test_cli_scan.py`/`tests/test_scan_compare_parity.py`-style test
 asserting `scan --against`'s own `diff_summary` gains the identical
 `reason_codes` for the identical mismatch `compare` reports, so `scan` and
