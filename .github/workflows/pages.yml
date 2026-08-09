@@ -78,7 +78,19 @@ jobs:
           echo "Polling $probe_url until live"
           deadline=$((SECONDS + 300))
           delay=5
-          until curl --fail --silent --show-error --location --output /dev/null "$probe_url"; do
+          while true; do
+            remaining=$((deadline - SECONDS))
+            if [ "$remaining" -le 0 ]; then
+              echo "::error::Pages deployment did not become live within the poll budget"
+              exit 1
+            fi
+            # Bound this attempt to whatever's left of the poll budget, so a
+            # stalled connection can't sit past the deadline check below —
+            # curl's own timeout is what actually returns control here.
+            if curl --fail --silent --show-error --location --output /dev/null \
+              --connect-timeout "$remaining" --max-time "$remaining" "$probe_url"; then
+              break
+            fi
             if [ "$SECONDS" -ge "$deadline" ]; then
               echo "::error::Pages deployment did not become live within the poll budget"
               exit 1
