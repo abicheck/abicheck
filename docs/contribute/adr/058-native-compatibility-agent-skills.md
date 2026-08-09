@@ -120,14 +120,25 @@ assumed:
   reference catalog (e.g. abicheck's full `ChangeKind` taxonomy —
   `checker_policy.py` is its fact owner, not this ADR) at zero standing
   context cost.
-- **Canonical portable location.** `.agents/skills/<skill-name>/SKILL.md` is
-  read natively — independent of any vendor-specific directory — by Claude
-  Code, GitHub Copilot (cloud agent, Copilot CLI, Copilot code review, VS
-  Code agent mode), OpenAI Codex (which walks `.agents/skills` at every
-  directory level from cwd to repo root), Cursor, and Gemini CLI. This is
-  the correct canonical publication target this document's Task 8 asked
-  about validating — it is not a guess, it is what five independent vendor
-  implementations already agree on.
+- **Canonical portable default, not a claim that vendor-specific
+  directories become unnecessary.** `.agents/skills/<skill-name>/SKILL.md`
+  is read by Claude Code, GitHub Copilot (cloud agent, Copilot CLI, Copilot
+  code review, VS Code agent mode — alongside its own primary `.github/
+  skills` location, which this decision does not deprecate), OpenAI Codex
+  (which walks `.agents/skills` at every directory level from cwd to repo
+  root), Cursor, and Gemini CLI — this is what independent vendor
+  implementations converge on as the shared cross-client path, and is this
+  document's answer to Task 8's "is `.agents/skills` the best canonical
+  publication target" question. It is the right *default* publication
+  target precisely because it needs no per-vendor configuration on clients
+  that honor it — not a claim that every cited client treats it as their
+  *only* or primary read location, or that a vendor-specific directory
+  (`.github/skills`, `.cursor/skills`, `.claude/skills`) stops mattering.
+  Source-of-truth model, below, keeps generating those vendor directories
+  as thin packaging targets for exactly this reason, and Testing and
+  evaluation architecture's cross-agent validation step is what confirms,
+  per client, whether a vendor-specific copy remains necessary rather than
+  assuming it doesn't.
 - **Self-containment is required by every vendor's own guidance**, not just
   a stylistic preference: a skill is read from the perspective of *one*
   installed directory, and nothing in the format lets an installed skill
@@ -357,7 +368,7 @@ that could legitimately flip).
 
 ### Source-of-truth and publication model
 
-```
+```text
 skills-src/                              # editable source (this repo, DRY)
   shared/                                # Layer B: domain knowledge fragments
     compatibility-contracts.md
@@ -476,7 +487,9 @@ dependencies/surface without strong justification":
   known, existing field: a `not_comparable` result (`ProfileMismatchError`/
   `ScopeMismatchError`, ADR-050 D1/D2) already renders as a top-level
   `"reason": {"kind": ..., "message": ...}` object in the `--format json`
-  document (schema 2.17, `compare_report.schema.json`;
+  document (per `REPORT_SCHEMA_VERSION` — `abicheck/schemas/__init__.py`'s
+  own fact-owned constant, not restated here as a literal since it moves
+  independently of this ADR; `compare_report.schema.json`;
   `cli_compare_helpers._report_not_comparable`) — today `kind` is one of
   exactly two coarse values, `profile_mismatch` or `scope_mismatch`, with
   the specific mismatched field only recoverable from the free-text

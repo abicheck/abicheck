@@ -182,16 +182,28 @@ symlinks, no hand-maintained copies — and requires each skill's
 actually cites.
 
 **Change:** `scripts/gen_agent_skills.py` — for each `skills-src/<name>/`
-directory: (1) parse its `SKILL.md` for a references-manifest comment or
-explicit link list identifying which `shared/*.md` fragments it uses; (2)
-copy the skill's own `SKILL.md` and `references/` verbatim into
-`.agents/skills/<name>/`; (3) copy (not symlink) each cited `shared/*.md`
-fragment into `.agents/skills/<name>/references/shared/`, rewriting the
-skill's own internal links to the copied path; (4) fail loudly if a
-`SKILL.md` references a `shared/` fragment that doesn't exist, or a
-`shared/` fragment that exists but is never cited by any skill (dead
-fragment — same "no orphaned content" discipline as
-`changekind-detector`'s WARN check for orphaned `ChangeKind`s). **A copied
+directory: (1) parse its `SKILL.md` **and every file under its own
+`references/`** (not `SKILL.md` alone — P0.2 explicitly allows
+skill-specific `references/*.md` files, e.g.
+`native-api-evolution/references/design-patterns.md`, and any of those can
+just as legitimately link to a `shared/*.md` fragment as `SKILL.md`
+itself; scanning only the top-level file would silently miss a fragment
+referenced solely from a `references/` file, copying an incomplete
+fragment set) for a references-manifest comment or explicit link list
+identifying which `shared/*.md` fragments are used, and resolve this
+**transitively** — a copied `shared/*.md` fragment can itself reference
+another `shared/*.md` fragment, so keep resolving until a fixed point,
+not just one pass; (2) copy the skill's own `SKILL.md` and `references/`
+verbatim into `.agents/skills/<name>/`; (3) copy (not symlink) each cited
+`shared/*.md` fragment (transitively resolved per above) into
+`.agents/skills/<name>/references/shared/`, rewriting every referencing
+file's internal link — `SKILL.md`'s, each `references/*.md` file's, and
+each other copied fragment's — to the copied path; (4) fail loudly if any
+scanned file references a `shared/` fragment that doesn't exist, or a
+`shared/` fragment that exists but is never cited (directly or
+transitively) by any skill (dead fragment — same "no orphaned content"
+discipline as `changekind-detector`'s WARN check for orphaned
+`ChangeKind`s). **A copied
 fragment's own outbound links need the same treatment, not just the
 skill's own — otherwise a self-containment gap survives the generator.**
 Step (3)'s link-rewriting only covers the skill's own `SKILL.md`
@@ -237,7 +249,13 @@ under `.agents/skills/**` (including copied `shared/*.md` fragments, not
 just each skill's own `SKILL.md`) contains a bare relative link outside
 its own installed directory — every such link must be either
 repo-relative-and-resolvable-inside-the-generated-tree, or already
-rewritten to the published `abicheck.github.io/abicheck` docs host.
+rewritten to the published `abicheck.github.io/abicheck` docs host; a
+dedicated fixture case for the indirect-reference gap above — a
+skill-specific `references/*.md` file (not `SKILL.md`) linking to a
+`shared/*.md` fragment that nothing else in that skill cites — asserting
+the generator still discovers, copies, and correctly rewrites that
+fragment; and a transitive-reference fixture (fragment A links to
+fragment B) asserting both get copied.
 
 **Dependencies:** P0.1, P0.2.
 
@@ -259,27 +277,34 @@ trial-and-error, which both `native-release-compatibility` and
 `native-binary-compatibility-review`'s tool-selection steps need to avoid.
 
 **Change:** Add `abicheck info` (small, read-only, no operands) emitting
-JSON: `abicheck_version`, and a `schema_versions` map covering **all six**
-artifact families `abicheck/schemas/__init__.py`'s `current()` registry
-already exposes (`snapshot`, `compare`, `scan`, `aggregate`, `build-output`,
-`run-plan` — reading that same lookup, ADR-055 D3, not re-deriving version
-numbers independently or arbitrarily limiting the payload to three of the
-six). The three-field version limited to snapshot/compare/scan an earlier
-draft of this item proposed was an oversight, not a deliberate scoping —
-`native-release-compatibility`'s documented `project plan`/`aggregate`
-workflow needs `aggregate`/`build-output`/`run-plan` versions too, and
-without them the skill would have to fall back to probing or parsing
-output for exactly the thing this command exists to answer directly.
-`_ARTIFACT_NAMES` (the catalog `current()` validates against) is a private
-module-level constant today — `cli_info.py` iterating it directly would
-mean importing a private symbol, and a later artifact family registered
-only in `current()`'s internals without a matching public export could
-silently fall out of `info`'s payload, contradicting the "all six" promise
-above. Add a small public accessor (e.g. `schemas.artifact_names()`
-returning the frozenset, or a `schemas.all_current()` returning the whole
-`{name: version}` map directly) that `cli_info.py` calls instead of
-touching `_ARTIFACT_NAMES`, and test `info`'s payload against that public
-accessor's output rather than a hand-copied list of six names. Also:
+JSON: `abicheck_version`, and a `schema_versions` map covering **every
+artifact family** `abicheck/schemas/__init__.py`'s `current()` registry
+exposes — currently `snapshot`, `compare`, `scan`, `aggregate`,
+`build-output`, `run-plan`, and (once P0.5's dependency-stack schema
+addition lands, independently landable in either order) `stack`. This
+plan deliberately does **not** pin a specific count (not "six," not
+"seven") anywhere in `info`'s described payload or tests, precisely
+because P0.5 is an independent P0 item that changes the true count — a
+hard-coded number here would contradict P0.5 the moment either item lands
+first. The three-field version limited to snapshot/compare/scan an
+earlier draft of this item proposed was an oversight, not a deliberate
+scoping — `native-release-compatibility`'s documented `project plan`/
+`aggregate` workflow needs `aggregate`/`build-output`/`run-plan` versions
+too, and without them the skill would have to fall back to probing or
+parsing output for exactly the thing this command exists to answer
+directly. `_ARTIFACT_NAMES` (the catalog `current()` validates against) is
+a private module-level constant today — `cli_info.py` iterating it
+directly would mean importing a private symbol, and a later artifact
+family registered only in `current()`'s internals without a matching
+public export could silently fall out of `info`'s payload. Add a small
+public accessor (e.g. `schemas.artifact_names()` returning the frozenset,
+or a `schemas.all_current()` returning the whole `{name: version}` map
+directly) that `cli_info.py` calls instead of touching `_ARTIFACT_NAMES`,
+and test `info`'s payload **solely** against that public accessor's
+live output (`assert info_payload["schema_versions"].keys() ==
+schemas.artifact_names()`, or equivalent) — never against a hand-copied
+name list or count of any size, so this test can't itself go stale the
+same way the "all six" framing would have. Also:
 the current root command list (so a skill can self-check "does my target
 support `project`"), available extraction providers (castxml/clang presence,
 detected on the host the same way existing dumper-provider auto-detection
@@ -332,7 +357,9 @@ Dependencies note.
 
 **Problem:** A `not_comparable` result already renders as a top-level
 `"reason": {"kind": ..., "message": ...}` object in the `--format json`
-document (schema 2.17, `cli_compare_helpers._report_not_comparable`), but
+document (per `abicheck/schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` —
+not restated as a literal here, since it's a volatile fact owned there,
+not in this plan; `cli_compare_helpers._report_not_comparable`), but
 `kind` today is only ever `"profile_mismatch"` or `"scope_mismatch"` — two
 coarse buckets. The *specific* mismatched field(s) (compiler family vs.
 compiler version vs. language standard vs. ...) are only recoverable from
@@ -722,18 +749,21 @@ real user language, not abicheck vocabulary, and that they do *not*
 false-trigger on adjacent-but-out-of-scope requests. This needs to be
 tested, not assumed from having written a plausible-sounding `description`.
 
-**Change:** A small labelled corpus of request strings — the positive set
-drawn directly from ADR-058's Product-positioning section ("Review this PR
-for binary compatibility," "Can I make this public C++ API change without
-breaking old consumers," "Can we release this as a minor version," "Will
-this old application work with the new library," "Why did this
-compatibility check suddenly report dozens of breaks," "Will this binary
-still work after moving to a new OS/container," "How do I keep ABI
-compatibility across compiler/client profiles") each labelled with its
-expected target skill (or, for the OS/container-upgrade and
-compiler/client-profile phrasings — P1 candidates per ADR-058 — labelled as
-"no P0 skill should exclusively claim this, but should not be silently
-mishandled either" until those skills exist); the negative set (REST/OpenAPI
+**Change:** A small labelled corpus of request strings. **The seven
+positive-set prompts themselves are not repeated here** — ADR-058's
+Product positioning section is their one canonical source (per `docs/
+AGENTS.md`'s "one fact, one place" rule, applied to this specific string
+list the same way it's applied to everything else in this plan); this
+item's own corpus file (below) pulls the exact strings from there at
+authoring time and adds only what's specific to this item: the
+expected-target-skill label per prompt (five of the seven map to a P0
+skill; the OS/container-upgrade and compiler/client-profile phrasings —
+P1 candidates per ADR-058 — are labelled "no P0 skill should exclusively
+claim this, but should not be silently mishandled either" until those
+skills exist). If ADR-058's phrasing for a prompt ever changes, this
+corpus is what needs a matching update — a manual sync point, not an
+automated one, since ADR text doesn't have a machine-readable export; the
+negative set (REST/OpenAPI
 compatibility, database migrations, Java API compatibility, arbitrary JSON
 schema compatibility) labelled "no `native-*` skill should trigger." Run
 against each target agent's actual skill-matching behavior where that's
