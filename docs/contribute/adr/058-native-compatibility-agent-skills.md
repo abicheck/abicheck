@@ -122,18 +122,21 @@ assumed:
   context cost.
 - **Canonical portable default, not a claim that vendor-specific
   directories become unnecessary.** `.agents/skills/<skill-name>/SKILL.md`
-  is read by Claude Code, GitHub Copilot (cloud agent, Copilot CLI, Copilot
-  code review, VS Code agent mode — alongside its own primary `.github/
-  skills` location, which this decision does not deprecate), OpenAI Codex
-  (which walks `.agents/skills` at every directory level from cwd to repo
-  root), Cursor, and Gemini CLI — this is what independent vendor
-  implementations converge on as the shared cross-client path, and is this
-  document's answer to Task 8's "is `.agents/skills` the best canonical
-  publication target" question. It is the right *default* publication
-  target precisely because it needs no per-vendor configuration on clients
-  that honor it — not a claim that every cited client treats it as their
-  *only* or primary read location, or that a vendor-specific directory
-  (`.github/skills`, `.cursor/skills`, `.claude/skills`) stops mattering.
+  is read by GitHub Copilot (cloud agent, Copilot CLI, Copilot code review,
+  VS Code agent mode — alongside its own primary `.github/skills` location,
+  which this decision does not deprecate), OpenAI Codex (which walks
+  `.agents/skills` at every directory level from cwd to repo root), Cursor,
+  and Gemini CLI — the clients that document `.agents/skills` as a read
+  location. Claude Code does not: its own documented convention is
+  `.claude/skills/<skill-name>/SKILL.md`, so the generation process (below)
+  produces that path as Claude Code's specific packaging target, the same
+  way it produces `.github/skills`/`.cursor/skills` for their respective
+  clients. `.agents/skills` is still this document's answer to Task 8's "is
+  `.agents/skills` the best canonical publication target" question — it is
+  the right *default* publication target precisely because it needs no
+  per-vendor configuration on the clients that do honor it, not a claim that
+  every vendor reads it, or that a vendor-specific directory (`.github/
+  skills`, `.cursor/skills`, `.claude/skills`) stops mattering.
   Source-of-truth model, below, keeps generating those vendor directories
   as thin packaging targets for exactly this reason, and Testing and
   evaluation architecture's cross-agent validation step is what confirms,

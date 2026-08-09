@@ -219,9 +219,13 @@ directory" is checked at generation time, against the repo, not against a
 standalone-install scenario), so this gap can pass every planned test and
 still ship dangling references in a real standalone install. Rewrite each
 copied fragment's outbound canonical-doc links to the real published docs
-site (`mkdocs.yml`'s own `site_url`, `https://abicheck.github.io/abicheck/`
-— the same host `README.md` already links to throughout) at generation
-time, the same class of fix already used elsewhere in this plan for a
+site at generation time — read the host from `mkdocs.yml`'s own `site_url`
+key rather than hardcoding the literal URL, so the generator (and its
+tests, which must derive their expected output from that same `mkdocs.yml`
+read, not a second hardcoded literal) don't go stale if the site ever
+moves; today that resolves to `https://abicheck.github.io/abicheck/`, the
+same host `README.md` already links to throughout — the same class of fix
+already used elsewhere in this plan for a
 non-`docs/` link (P0.9's full-GitHub-URL convention) — a generated skill
 file should never contain a bare relative link to something outside its
 own installed tree. Modeled
@@ -321,9 +325,9 @@ that ever changes).
 
 **Admission-bar status: does not clear criterion 2 as literally worded,
 and this plan does not pretend otherwise.** Checked against `AGENTS.md`'s
-"Adding a new top-level command" admission bar (ADR-054 D6): five of the
-six criteria are met; criterion 2 ("its operand is a domain object a user
-already thinks in terms of") is not — `info` takes no operand at all, and
+"Adding a new top-level command" admission bar (ADR-054 D6): criterion 2
+("its operand is a domain object a user already thinks in terms of") is
+not met — `info` takes no operand at all, and
 none of the domain objects the bar's own examples name (a binary, a set of
 reports, a project config) apply. The `--version` comparison an earlier
 draft of this item leaned on does not actually resolve this: `--version`
@@ -395,9 +399,12 @@ comparability" workflow step and `native-release-compatibility`'s
 
 **One canonical owner for the enum itself, checked against every schema
 that republishes it — not just one of the several.** This item's `codes`
-values are reused, by name, across six different producers (`compare`,
-MCP `abi_compare`, `scan`, the release JSON, the release summary,
-`aggregate`, and `deps compare`/stack) and — once this item's own schema
+values are reused, by name, across seven distinct producer surfaces
+(`compare`, MCP `abi_compare`, `scan`, the release JSON, the release
+summary, `aggregate`, and `deps compare`/stack — the CLI command and the
+report shape it emits (`stack_checker.py`/`stack_report.py`), counted here
+as one producer since they share a single new schema below) and — once
+this item's own schema
 work above lands — **multiple** JSON Schemas: `compare_report.schema.json`
 plus the new `scan_report.schema.json`, the release-report schema(s), and
 `stack_report.schema.json`, each independently republishing the same
@@ -875,7 +882,16 @@ marker).
 
 **Problem:** ADR-058's Testing architecture commits to more than markdown
 linting — a renamed CLI flag or removed report field referenced by a
-skill's prose must fail CI, not silently rot.
+skill's prose must fail CI, not silently rot. **Scope, stated precisely so
+this item isn't read as a broader promise than it delivers:** this closes
+*syntactic* drift only — a command, flag, or JSON field path a skill names
+that no longer exists. It cannot and does not catch *semantic* drift — a
+flag or field that still exists under the same name but whose behavior or
+meaning changed (a `--help` string reworded, a field's semantics changed
+without a name or schema-version bump) — since nothing here diffs prose
+meaning against implementation behavior. That gap is not closed by this
+plan; a skill author revisiting the affected help text/docs on the normal
+review cadence for that command is the only mitigation today.
 
 **Change:**
 - **Structural**: valid `SKILL.md` frontmatter (`name`/`description`
@@ -931,9 +947,13 @@ expected-target-skill label per prompt (five of the seven map to a P0
 skill; the OS/container-upgrade and compiler/client-profile phrasings —
 P1 candidates per ADR-058 — are labelled "no P0 skill should exclusively
 claim this, but should not be silently mishandled either" until those
-skills exist). If ADR-058's phrasing for a prompt ever changes, this
-corpus is what needs a matching update — a manual sync point, not an
-automated one, since ADR text doesn't have a machine-readable export; the
+skills exist). Kept in sync with an assertion, not a comment: the corpus
+test extracts the seven verbatim prompt strings from ADR-058's Product
+positioning section (a small, deliberately narrow Markdown parse — the
+section's prompts are each their own quoted line, not free-form prose) and
+fails if any corpus entry's prompt string doesn't match one extracted from
+the ADR, so an ADR wording change that isn't mirrored into the corpus is a
+failing test, not a silent staleness risk; the
 negative set (REST/OpenAPI
 compatibility, database migrations, Java API compatibility, arbitrary JSON
 schema compatibility) labelled "no `native-*` skill should trigger." Run
@@ -1062,7 +1082,7 @@ scripts — indexes cases via **`examples/ground_truth.json`**, the
 repository's actual canonical per-case catalog, but **not by iterating
 its top level directly**: the file's top-level keys are file-wide metadata
 (`version`, `description`, `verdicts`, `cross_references`,
-`test_crosscheck_catalog`), and the 195 case records themselves live
+`test_crosscheck_catalog`), and the case records themselves live
 nested one level down, under `ground_truth["verdicts"]`, keyed there by
 case directory name and carrying `expected`/`expected_kinds`/
 `min_evidence` per case — this is what the named categories above, e.g.
@@ -1155,7 +1175,15 @@ pack" bundling all four together) in this item's `Status` once done —
 speculative packaging steps are not pre-specified here since the real
 submission UX may differ from what's documented today.
 
-**Dependencies:** P1.1.
+**Dependencies:** P1.1, and — since ADR-058 requires cross-agent
+validation before a skill is presented to the public as ready, not just
+correct against abicheck's own output — at minimum a completed P1.5 pass
+on the two non-Claude targets ADR-058 names as required (Codex and
+Copilot; Gemini CLI/Cursor validation may still be in progress). Submitting
+before that minimum would let a skill go public with an unvalidated
+trigger, reference-resolution, or shell-access assumption on a target
+agent P1.5 exists specifically to catch — exactly the gap ADR-058's
+cross-agent validation requirement is meant to close.
 
 **PR boundary:** N/A — this is largely an external-service action, not a
 code PR; any repo changes it does require (a `skills.sh` manifest file, if
