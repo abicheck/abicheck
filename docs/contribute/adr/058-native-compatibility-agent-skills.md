@@ -127,22 +127,28 @@ assumed:
   mode — alongside its own primary `.github/skills` location, which this
   decision does not deprecate but also does not generate a copy into, since
   Copilot already reads `.agents/skills`), OpenAI Codex (which walks
-  `.agents/skills` at every directory level from cwd to repo root), Cursor
-  (same — no generated `.cursor/skills` copy either, for the same reason),
-  and Gemini CLI. Claude Code is the sole documented exception: it does not
-  scan `.agents/skills` at all, so it is the one client the generation
-  process (below) produces a real second output tree for —
-  `.claude/skills/<skill-name>/SKILL.md`. `.agents/skills` is still this
+  `.agents/skills` at every directory level from cwd to repo root), and
+  Cursor (same — no generated `.cursor/skills` copy either, for the same
+  reason). **Claude Code and Gemini CLI are both documented exceptions, not
+  Claude Code alone** — an earlier draft of this ADR asserted Gemini CLI
+  reads `.agents/skills` directly; confirmed against Gemini CLI's own
+  documentation (`docs/reference/tools.md`, `activate_skill`: "Loads
+  specialized procedural expertise from the `.gemini/skills` directory")
+  that this was wrong. Neither Claude Code (`.claude/skills`) nor Gemini
+  CLI (`.gemini/skills`) scans `.agents/skills` at all, so both are clients
+  the generation process (below) produces a real additional output tree
+  for — `.claude/skills/<skill-name>/SKILL.md` and
+  `.gemini/skills/<skill-name>/SKILL.md`. `.agents/skills` is still this
   document's answer to Task 8's "is `.agents/skills` the best canonical
   publication target" question — it is the right *default* publication
   target precisely because it needs no per-vendor configuration on the
   clients that do honor it, not a claim that every vendor reads it. Source-
   of-truth model, below, defines exactly which output trees are generated
-  today (`.agents/skills/`, `.claude/skills/`) versus which vendor-specific
-  paths remain a documented but not-yet-implemented option (`.github/
-  skills`, `.cursor/skills`) should Testing and evaluation architecture's
-  cross-agent validation step ever find one of those clients doesn't
-  actually read `.agents/skills` reliably in practice.
+  today (`.agents/skills/`, `.claude/skills/`, `.gemini/skills/`) versus
+  which vendor-specific paths remain a documented but not-yet-implemented
+  option (`.github/skills`, `.cursor/skills`) should Testing and evaluation
+  architecture's cross-agent validation step ever find one of those clients
+  doesn't actually read `.agents/skills` reliably in practice.
 - **Self-containment is required by every vendor's own guidance**, not just
   a stylistic preference: a skill is read from the perspective of *one*
   installed directory, and nothing in the format lets an installed skill
@@ -401,8 +407,9 @@ skills-src/                              # editable source (this repo, DRY)
 
 scripts/gen_agent_skills.py              # the sole generator (Layer C
                                           # tooling, not part of skills-src/
-                                          # itself) — builds .agents/skills/
-                                          # and .claude/skills/ from the above
+                                          # itself) — builds .agents/skills/,
+                                          # .claude/skills/, and
+                                          # .gemini/skills/ from the above
 
 .agents/skills/                          # GENERATED, canonical publication surface
   native-binary-compatibility-review/
@@ -418,12 +425,24 @@ scripts/gen_agent_skills.py              # the sole generator (Layer C
   native-consumer-compatibility/
     SKILL.md
     references/
+
+.claude/skills/                          # GENERATED, same content, Claude Code's own read path
+  native-binary-compatibility-review/
+    SKILL.md
+    references/
+  ...remaining three skills, same shape...
+
+.gemini/skills/                          # GENERATED, same content, Gemini CLI's own read path
+  native-binary-compatibility-review/
+    SKILL.md
+    references/
+  ...remaining three skills, same shape...
 ```
 
 - `.agents/skills/` is the **authoritative publication target** — see
   "Canonical portable default" above for which clients read it directly and
-  why Claude Code is the one documented exception. It is generated, not
-  hand-edited; a generator script (Layer C tooling,
+  why Claude Code and Gemini CLI are both documented exceptions. It is
+  generated, not hand-edited; a generator script (Layer C tooling,
   `scripts/gen_agent_skills.py` in the implementation plan) resolves each
   skill's `references:` manifest (which `shared/` fragments it actually
   uses) and copies/renders the result into this tree — **no symlinks**, per
@@ -433,11 +452,12 @@ scripts/gen_agent_skills.py              # the sole generator (Layer C
   installed skill genuinely self-contained (the requirement every vendor's
   own docs impose) while keeping `skills-src/shared/` as the one editable
   copy of any fact more than one skill needs (design principle 6).
-- **`.claude/skills/` is the one additional generated packaging target
-  today** — a thin **copy** (never a symlink, same invariant as above) of
-  the resolved `.agents/skills/<name>/` content, rendered by the same
-  generator into this second tree, because Claude Code needs its own
-  committed copy (see above), not because it is "dogfooded alongside" the
+- **`.claude/skills/` and `.gemini/skills/` are the two additional
+  generated packaging targets today** — each a thin **copy** (never a
+  symlink, same invariant as above) of the resolved `.agents/skills/<name>/`
+  content, rendered by the same generator into its own second (and third)
+  tree, because Claude Code and Gemini CLI both need their own committed
+  copy (see above), not because either is "dogfooded alongside" the
   portable target as an optional convenience. `.github/skills/` and
   `.cursor/skills/` are **not** generated: Copilot and Cursor both already
   read `.agents/skills/` directly, so a generated copy into their own
