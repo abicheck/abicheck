@@ -1572,3 +1572,88 @@ class TestDirectRecordProvenanceStopsAccumulatingRedundantTypedefAliases:
         directly_referenced_stdlib_type_spellings(snap)
         elapsed = time.monotonic() - start
         assert elapsed < 5.0, f"took {elapsed:.2f}s -- looks quadratic again"
+
+
+class TestAlreadyWalkedAliasOnlyRecordDoesNotDuplicateQueueEntries:
+    """Codex review, fresh evidence (P2, performance, follow-up to the
+    already-direct fix above): the same quadratic requeue shape still
+    occurred for a record that stays alias-only forever (never becomes
+    `_record_direct`, so that shortcut never applies) once it had already
+    been walked at least once -- a burst of distinct provenance upgrades
+    for it arriving before its first requeue was even popped previously
+    appended one worklist entry *per upgrade* regardless, so a record
+    reached via hundreds of distinct aliases (all discovered while walking
+    a *different*, already-popped record's own fields) queued that many
+    duplicate entries, each pop rescanning under every accumulated alias.
+    Constructed so the ambiguous-alias record is walked once first (a
+    single, separate ambiguous alias reach), then a second, already-walked
+    record's own hundreds of alias-typed fields all target it during the
+    walk phase itself -- not seeding."""
+
+    def test_hundreds_of_post_walk_alias_upgrades_still_confirm_correctly(
+        self,
+    ) -> None:
+        target = RecordType(
+            name="Target",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        typedefs = {"seed::Target": "Target"}
+        fields = []
+        for i in range(200):
+            alias = f"ns{i}::Target"
+            typedefs[alias] = "Target"
+            fields.append(TypeField(name=f"f{i}", type=alias))
+        holder2 = RecordType(name="Holder2", kind="struct", fields=fields)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                # Holder2 (direct) is seeded first so it's queued first --
+                # popped *after* Target's own single ambiguous-alias
+                # reach (LIFO worklist), so Target is walked once before
+                # Holder2's own hundreds of aliased fields are scanned.
+                _fn("use_holder2", params=[Param(name="h", type="Holder2")]),
+                _fn("use_seed", params=[Param(name="s", type="seed::Target")]),
+            ],
+            types=[target, holder2, RecordType(name="std::exception", kind="class")],
+            typedefs=typedefs,
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::exception", "exception"}
+        )
+
+    def test_hundreds_of_post_walk_alias_upgrades_complete_quickly(self) -> None:
+        """The reported repro used 800 aliases and took roughly 4.4s;
+        this fix keeps the same shape comfortably under a second, so a
+        generous 5s absolute ceiling (avoiding a noise-sensitive ratio
+        between two wall-clock measurements) leaves a wide margin without
+        weakening the check."""
+        import time
+
+        target = RecordType(
+            name="Target",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        typedefs = {"seed::Target": "Target"}
+        fields = []
+        for i in range(800):
+            alias = f"ns{i}::Target"
+            typedefs[alias] = "Target"
+            fields.append(TypeField(name=f"f{i}", type=alias))
+        holder2 = RecordType(name="Holder2", kind="struct", fields=fields)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_holder2", params=[Param(name="h", type="Holder2")]),
+                _fn("use_seed", params=[Param(name="s", type="seed::Target")]),
+            ],
+            types=[target, holder2, RecordType(name="std::exception", kind="class")],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        directly_referenced_stdlib_type_spellings(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"took {elapsed:.2f}s -- looks quadratic again"

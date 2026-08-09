@@ -213,6 +213,17 @@ class _StdlibReferenceScan:
         self._remaining = set(stdlib_identities)
         self._reached_records: set[str] = set()
         self._worklist: list[str] = []
+        # Identities currently sitting in `_worklist`, awaiting their next
+        # pop -- lets `reach_record` tell "already queued for a rescan, no
+        # need to add another entry" apart from "not queued, must append"
+        # (Codex review, fresh evidence: a burst of provenance upgrades for
+        # the same already-walked, alias-only record arriving before its
+        # first requeue is even popped previously appended one worklist
+        # entry per upgrade regardless, so a record reached via ~800
+        # distinct aliases queued ~800 duplicate entries, each pop
+        # rescanning under every accumulated alias -- quadratic). Discarded
+        # in :meth:`next_reached_record` the moment an identity is popped.
+        self._record_pending: set[str] = set()
         self._resolved_typedefs: set[str] = set()
         # Every reach of a record, accumulated -- not just the *first*
         # (Codex review, fresh evidence, two rounds). Reaching a record is
@@ -568,6 +579,22 @@ class _StdlibReferenceScan:
         this always terminates, and re-scanning the same field text again
         is idempotent -- it only ever adds more identities/credits, never
         removes any.
+
+        At most one pending worklist entry per record at a time (tracked in
+        ``_record_pending``, cleared on pop by :meth:`next_reached_record`):
+        a burst of distinct provenance upgrades for the same already-walked,
+        alias-only record arriving before its first requeue is even popped
+        previously appended one worklist entry *per upgrade* regardless
+        (Codex review, fresh evidence, following directly from the
+        already-direct fix above: this still occurs while the target stays
+        alias-only, so that shortcut never applies -- a record reached via
+        ~800 distinct aliases queued ~800 duplicate entries, each pop
+        rescanning under every accumulated alias, quadratic). One pending
+        entry is always enough regardless of how many upgrades landed in
+        between, since a pop always rescans with *all* provenance
+        accumulated up to that point (:func:`_walk_reached_records` reads
+        it fresh via :meth:`record_provenance` on every pop, not a snapshot
+        captured at queue time).
         """
         upgraded = False
         if not via_typedef:
@@ -598,8 +625,14 @@ class _StdlibReferenceScan:
         if identity not in self._reached_records:
             self._reached_records.add(identity)
             self._worklist.append(identity)
-        elif upgraded and identity in self._record_walked:
+            self._record_pending.add(identity)
+        elif (
+            upgraded
+            and identity in self._record_walked
+            and identity not in self._record_pending
+        ):
             self._worklist.append(identity)
+            self._record_pending.add(identity)
 
     def mark_record_walked(self, identity: str) -> None:
         """Record that *identity*'s own fields/bases were just scanned,
@@ -624,8 +657,14 @@ class _StdlibReferenceScan:
 
     def next_reached_record(self) -> str | None:
         """Pop the next queued record identity, or ``None`` when the queue
-        is empty."""
-        return self._worklist.pop() if self._worklist else None
+        is empty. Clears the popped identity's pending flag (see
+        ``_record_pending``'s own docstring on ``__init__``), so a further
+        provenance upgrade discovered afterward can requeue it again."""
+        if not self._worklist:
+            return None
+        identity = self._worklist.pop()
+        self._record_pending.discard(identity)
+        return identity
 
     def referenced(self) -> frozenset[str]:
         """The stdlib identities this walk proved directly referenced."""
