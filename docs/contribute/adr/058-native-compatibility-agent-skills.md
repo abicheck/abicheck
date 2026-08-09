@@ -507,7 +507,13 @@ dependencies/surface without strong justification":
   `SCOPE_FIELD_KEYS` addition degrades to a generic-but-still-typed code
   instead of silently emitting nothing) — never collapsed to the two
   coarse existing `kind` values a skill would otherwise have to re-derive
-  the real cause from free text. MCP's `abi_compare` envelope emits
+  the real cause from free text. This completeness promise is explicitly
+  scoped to *within* whichever single exception the comparability gate
+  raises — `check_contracts_comparable`'s checks early-return, so a pair
+  differing on both scope and profile fields still surfaces only the first
+  domain's codes on one run; closing that would mean restructuring the
+  gate's control flow, a separate change out of scope here (see G36 P0.5
+  for the exact boundary). MCP's `abi_compare` envelope emits
   `reason` as a bare string today, not an object, so its own counterpart
   is an additive sibling field (`reason_codes`) alongside the unchanged
   string `reason`, not a type migration. This is a report-schema addition

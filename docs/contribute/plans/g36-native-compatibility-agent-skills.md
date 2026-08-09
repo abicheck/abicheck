@@ -319,7 +319,29 @@ instead of silently emitting nothing. Derived from the same field-by-field
 comparison `check_contracts_comparable`/`compute_extraction_contract`
 already perform when raising `ProfileMismatchError`/`ScopeMismatchError` —
 promotes existing internal evidence to a stable public field, adds no new
-detection logic. Report-schema version bump per the existing
+detection logic.
+
+**Explicit scope boundary, not silently overclaimed:** the "every
+simultaneous cause" completeness promise above holds *within* whichever
+single exception the gate actually raises — every differing field the
+raised `ProfileMismatchError`/`ScopeMismatchError` itself carries, all of
+them, never truncated to one. It does **not** span both exception domains
+at once: `check_contracts_comparable`'s gate is a sequence of checks with
+early-return control flow (a dependency-scope/scope-fingerprint mismatch
+is raised and returns before the later profile-fingerprint check ever
+runs), so a pair that differs on *both* scope and profile fields still
+surfaces only the scope-domain `codes` on the first run — a caller fixing
+that and re-running can still hit a profile-domain mismatch the first
+`codes` array never mentioned. Closing that residual gap would mean
+restructuring the gate to collect every domain's mismatches before
+raising, which is a real, separate design change to `comparability.py`'s
+control flow, not a report-field addition — out of scope for this item.
+Document this boundary explicitly wherever the enum is documented (not
+just in this plan), and scope P0.5's tests to match: single-domain
+multi-field cases assert full completeness within that domain; do not add
+a cross-domain (scope-and-profile-simultaneously) completeness test, since
+that is not what this item delivers. Report-schema version bump per the
+existing
 `REPORT_SCHEMA_VERSION` convention (ADR-047 §7 / ADR-055 D3's registry).
 
 MCP's `abi_compare` tool needs its own, separate treatment, not a
@@ -368,9 +390,18 @@ and flattens it straight into that one string field, line ~1471 — so
 producer above emits `codes`; add a `reason_codes: list[str] | None` field
 to `TargetReport` alongside `reason`, carried through from the per-target
 report's `codes`, and expose it from `TargetReport.to_dict()` /
-`abicheck/schemas/aggregate_report.schema.json`), `abicheck/schemas/__init__.py`
-(schema version bump + field registration, covering both the compare and
-scan report schemas), `docs/reference/change-kinds.md` or a new
+`abicheck/schemas/aggregate_report.schema.json`), `abicheck/stack_checker.py`
+(`StackChange.not_comparable_reason` is likewise a bare `str | None` —
+`deps compare`'s own comparability gate; add a sibling
+`not_comparable_reason_codes` field) and `abicheck/stack_report.py`
+(`stack_to_json()`'s `sc_dict["not_comparable_reason"]` emission gets the
+same sibling field) — `deps compare --format json` is another
+machine-readable comparability entry point this item's "a skill can branch
+on one field" goal applies to equally, and is the natural backend for a
+future dependency-floor/runtime-upgrade skill, so it shouldn't be left
+behind the other four producers, `abicheck/schemas/__init__.py`
+(schema version bump + field registration, covering the compare, scan, and
+dependency-stack report schemas), `docs/reference/change-kinds.md` or a new
 `docs/reference/comparability-reason-codes.md` (document the closed enum —
 new page only if it doesn't fit as a section of an existing comparability
 doc; check `docs/use/contract-evaluation.md` and `docs/reference/
@@ -404,7 +435,9 @@ not be left with only untyped text; a `tests/test_aggregate.py`-style test
 asserting `TargetReport.reason_codes` round-trips a not-comparable
 per-target report's `codes` through `_load_report_file` into
 `TargetReport.to_dict()`'s output — the multi-profile/multi-target path,
-not just the single-comparison one.
+not just the single-comparison one; a `tests/test_deps_compare.py`-style
+test asserting `stack_to_json()`'s not-comparable output carries
+`not_comparable_reason_codes` alongside the existing prose field.
 
 **Docs:** whichever comparability doc the field lands in, plus a
 changelog fragment (`### Added`).
@@ -460,16 +493,39 @@ failing the same gate every other doc page already goes through — the
 realistic bar this repo already holds itself to, not a stronger one
 invented just for this new tree.
 
+**This needs one small, scoped extension to `check_docs_contract.py`
+itself, not just a registry entry — call this out explicitly rather than
+assume it "just works".** Today `task_pages`/`allowed_summaries` entries
+are checked with `_is_file_under(DOCS, ...)`, which hard-requires the path
+to resolve inside `docs/`; `skills-src/shared/*.md` lives outside that
+tree by design (it's the DRY source `.agents/skills/` is generated from,
+not a published doc page), so registering it there as written would fail
+the registry's own existence check, not pass it. `fact_sources` already
+tolerates a non-`docs/` repo-relative path (code files are a normal
+`fact_sources` entry today), so the fix is narrow: extend
+`task_pages`/`allowed_summaries` validation to accept a repo-relative path
+outside `docs/` the same way `fact_sources` already does, rather than
+inventing a fourth path-resolution rule. Land this as its own small commit
+in `scripts/check_docs_contract.py` before registering any
+`skills-src/shared/*.md` entry, so the registration is provably checked
+from the day it's added, not merely asserted to be.
+
 **Files:** `skills-src/CLAUDE.md` (new); `scripts/check_ai_readiness.py`
 (`REQUIRED_CLAUDE_MD_DIRS`, `GENERATED_FILE_MARKERS`); `scripts/
 gen_agent_skills.py` (emit the marker — depends on P0.3);
-`docs/_meta/topics.yaml` (one new/extended entry per topic a
-`skills-src/shared/*.md` fragment summarizes); `skills-src/shared/*.md`
-(add `summarizes:` front matter to each, from P0.1).
+`scripts/check_docs_contract.py` (extend `task_pages`/`allowed_summaries`
+path validation to accept a repo-relative non-`docs/` path, mirroring
+`fact_sources`'s existing tolerance); `docs/_meta/topics.yaml` (one
+new/extended entry per topic a `skills-src/shared/*.md` fragment
+summarizes); `skills-src/shared/*.md` (add `summarizes:` front matter to
+each, from P0.1).
 
 **Tests:** `python scripts/check_ai_readiness.py` passes with no new
 errors; a regression test asserting `skills-src` is in the required-dirs
-tuple; `python scripts/check_docs_contract.py` passes with every
+tuple; a `tests/test_docs_contract.py`-style unit test asserting a
+`task_pages`/`allowed_summaries` entry outside `docs/` is now accepted
+(the extended-checker behavior itself, not just its downstream effect);
+`python scripts/check_docs_contract.py` passes with every
 `skills-src/shared/*.md` fragment's `summarizes` claim round-tripping
 against its registered topic.
 
