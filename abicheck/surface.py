@@ -454,6 +454,21 @@ def _index_surface_types(
             tail = rec.name.rsplit("::", 1)[1]
             record_by_name.setdefault(tail, []).append(rec)
             keys.add(tail)
+        # castxml/clang convention: `.name` is deliberately bare (the
+        # record's own leaf), with the qualified spelling recorded
+        # separately in `.qualified_name` -- index that too, so a queued
+        # spelling that IS the qualified form (a genuinely exact reference,
+        # from whichever producer supplies one) resolves here the same way
+        # DWARF's `.name` -- which already *is* the qualified string --
+        # always could (Codex review; mirrors export_surface.py's own local
+        # augmentation of this same index). Guarded against the value
+        # already being a registered key for this record (DWARF leaves
+        # `qualified_name` unset; an unnamespaced castxml/clang record's
+        # `qualified_name` often equals its own bare `.name`) so a genuinely
+        # unique record is never double-counted into `combined_counts`
+        # below and wrongly marked ambiguous.
+        if rec.qualified_name and rec.qualified_name not in keys:
+            record_by_name.setdefault(rec.qualified_name, []).append(rec)
         origin = getattr(rec, "origin", ScopeOrigin.UNKNOWN)
         _record_origin(surface, keys, origin)
         if rec.qualified_name:
@@ -469,6 +484,10 @@ def _index_surface_types(
             tail = en.name.rsplit("::", 1)[1]
             enum_by_name.setdefault(tail, []).append(en)
             keys.add(tail)
+        # Same qualified-spelling indexing as records above, for the same
+        # reason.
+        if en.qualified_name and en.qualified_name not in keys:
+            enum_by_name.setdefault(en.qualified_name, []).append(en)
         origin = getattr(en, "origin", ScopeOrigin.UNKNOWN)
         _record_origin(surface, keys, origin)
         if en.qualified_name:
@@ -585,6 +604,16 @@ def _walk_type_closure(
         is_exact = (len(en_nodes) + len(rec_nodes)) == 1
         for en_node in en_nodes:
             surface.public_types.add(en_node.name)
+            # Also record the qualified spelling itself (castxml/clang
+            # convention: `.name` is deliberately bare, so a qualified
+            # candidate would otherwise never appear in `public_types` at
+            # all, regardless of `exact_type_identities` -- unconditional,
+            # matching the existing anti-hiding "mark every match public"
+            # rule for `.name` above; ambiguity-safety is still enforced
+            # separately via `ambiguous_type_names`/`exact_type_identities`,
+            # not by omission from this set (Codex review).
+            if en_node.qualified_name:
+                surface.public_types.add(en_node.qualified_name)
             if is_exact:
                 surface.exact_type_identities.add(
                     en_node.qualified_name or en_node.name
@@ -599,6 +628,9 @@ def _walk_type_closure(
         # tail shared by two namespaces resolves to several records — walk each.
         for rec_node in rec_nodes:
             surface.public_types.add(rec_node.name)
+            # See the equivalent enum comment above.
+            if rec_node.qualified_name:
+                surface.public_types.add(rec_node.qualified_name)
             if is_exact:
                 surface.exact_type_identities.add(
                     rec_node.qualified_name or rec_node.name
