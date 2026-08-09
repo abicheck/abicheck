@@ -386,6 +386,27 @@ cause has to parse prose. `native-binary-compatibility-review`'s "establish
 comparability" workflow step and `native-release-compatibility`'s
 "baseline comparability" step both need a typed reason instead.
 
+**One canonical owner for the enum itself, checked against every consumer
+of it — not six independent copies.** This item's `codes` values are
+reused, by name, across six different producers (`compare`, MCP
+`abi_compare`, `scan`, the release JSON, the release summary, `aggregate`,
+and `deps compare`/stack) and at least one JSON Schema
+(`compare_report.schema.json`). Define the enum **once**, at the Python
+level — a single `ComparabilityReasonCode` enum (or equivalent frozen
+mapping) in `abicheck/comparability.py`, since that's where the values are
+actually derived — and have every producer above import and emit from
+that one definition, never a hand-copied string. The JSON Schema's own
+`enum:` list is a second, independently-maintained representation of the
+same values by necessity (JSON Schema can't import a Python enum), so add
+a schema-sync test (`tests/test_comparability_gate.py` or
+`tests/test_report_schema_receipt.py`) that walks the Python enum's
+members and asserts each one is present in the schema's `enum:` list, and
+vice versa — the same "one fact, one place, checked automatically" pattern
+this repo already applies to other registries (e.g. `ChangeKind` vs. its
+JSON Schema representation), so adding or renaming a reason code fails
+loudly in this one test instead of silently producing schema-invalid tool
+output or letting one producer drift from another.
+
 **Change:** Add a `codes` field — an **array**, not a singular `code` — on
 that same `reason` object (no new top-level block — `comparability` does
 not exist in the current schema and this does not invent one). An array is
@@ -562,13 +583,22 @@ entry `summary.json`/the release JSON actually expose, so without this
 file `native-release-compatibility` — the skill this field mainly exists
 for — would still see untyped text in the report it actually reads.
 **Neither of these two release-summary outputs carries a schema version
-marker or a registered JSON Schema today** — confirmed: no
-`abicheck/schemas/release_report.schema.json`/`release_summary.schema.json`
-exists, and neither function emits a version field — so, same as the
-`deps compare` case below, a bare `reason_codes` addition would be
-undiscoverable and unvalidatable; give the release JSON/summary its own
-minimal schema version constant, a registered JSON Schema file, and its
-published mirror as part of this same change, not deferred), `abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
+marker or a registered JSON Schema today, and they are two genuinely
+different shapes, not one** — confirmed: no `abicheck/schemas/
+release_report.schema.json`/`release_summary.schema.json` exists, neither
+function emits a version field, and `_format_release_json()`'s payload
+(`old_dir`/`new_dir`/`changed_libraries`/`warnings`, optional severity/
+matrix blocks) is structurally distinct from `_write_release_summary_file()`'s
+compact `verdict`/`libraries`/`unmatched_old`/`unmatched_new` envelope —
+so, same as the `scan`/`deps compare` cases, a bare `reason_codes`
+addition described as "one vague schema" would leave one of the two
+shapes unvalidated. Give the release JSON/summary their own schema
+version constant(s) and a registered JSON Schema covering **both**
+shapes explicitly — either two distinct schema families, or one schema
+with explicit `oneOf` branches for the two envelopes — plus a published
+mirror and real-output validation tests for **both** `_format_release_json()`
+and `_write_release_summary_file()` output, not just one of the two, as
+part of this same change, not deferred), `abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
 "reason": ..., "reason_codes": [...]}` — additive sibling field, `reason`
 unchanged), `abicheck/scan_engine.py` (`scan --against` catches the same
 two exceptions at its own comparability gate, line ~1039, and today emits
