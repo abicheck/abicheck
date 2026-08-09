@@ -1098,7 +1098,22 @@ review cadence for that command is the only mitigation today.
   version because it depends on a command or report field introduced in
   that release would otherwise pass against an older installation that
   predates the feature entirely, simply because an "exceeds" check only
-  looks in the upper direction.
+  looks in the upper direction. **This CI-time check alone doesn't reach a
+  real user's own installation, though — it's scoped to comparing this
+  repository's own dev/CI environment's abicheck version against the
+  committed `SKILL.md` files, not the abicheck version installed alongside
+  a skill someone later installed standalone from `skills.sh`.** A user on
+  an installation outside a skill's declared range would get no warning
+  from this test at all — it only protects the repository's own commit
+  history from silently going stale, not a deployed skill from being run
+  against an incompatible installation. Close that separately: each skill's
+  own workflow (`SKILL.md`'s tool-selection step) must perform the same
+  containment check at the start of a real session — read the installed
+  `abicheck_version` via the capability-discovery surface (P0.4's `info` or
+  `--version --format json`), compare it against the skill's own declared
+  range, and stop with a clear message rather than proceeding on an
+  unvalidated version, mirroring ADR-058's "fail loudly, not silently
+  degrade" requirement at runtime, not only in CI.
 - **Tool/API drift**: extract the current CLI command/option tree via the
   same `click`-introspection mechanism `scripts/gen_cli_reference.py`
   already uses, and every CLI invocation example inside a skill's
