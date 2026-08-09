@@ -114,6 +114,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -550,6 +551,27 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _finite_nonnegative_float(value: str) -> float:
+    """``argparse`` ``type=`` for ``--regress-tolerance``: reject non-finite/negative.
+
+    ``check_regressions()`` computes ``allowed = base * (1.0 + tolerance)`` and
+    fails only when ``current > allowed`` -- a ``nan`` tolerance makes that
+    comparison always ``False`` (``float`` comparisons against ``nan`` are
+    never true), and an ``inf`` tolerance makes ``allowed`` infinite, so both
+    let an arbitrarily regressed measurement print ``OK`` instead of failing
+    (Codex review, fresh evidence). A negative tolerance is also meaningless
+    here (it would demand *faster* than baseline just to pass). Rejecting all
+    three at parse time gives a clear ``argparse`` usage error instead of a
+    silently-neutered gate.
+    """
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite, non-negative number, got {value!r}"
+        )
+    return parsed
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -575,7 +597,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--regress-tolerance",
-        type=float,
+        type=_finite_nonnegative_float,
         default=DEFAULT_REGRESS_TOLERANCE,
         help="Fractional attach_ms growth allowed vs. baseline before failing "
         "(default: %(default)s = 50%%)",

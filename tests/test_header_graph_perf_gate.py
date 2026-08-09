@@ -348,6 +348,49 @@ class TestPositiveInt:
                 hg_gate.parse_args(bad_args)
 
 
+class TestFiniteNonnegativeFloat:
+    # A `nan`/`inf` --regress-tolerance neuters check_regressions() silently:
+    # `current > base * (1 + nan)` is always False, and an infinite allowance
+    # accepts everything -- both would print OK despite an arbitrarily
+    # regressed measurement (Codex review, fresh evidence).
+    def test_accepts_a_finite_nonnegative_value(self):
+        assert hg_gate._finite_nonnegative_float("0.5") == 0.5
+
+    def test_accepts_zero(self):
+        assert hg_gate._finite_nonnegative_float("0") == 0.0
+
+    def test_rejects_nan(self):
+        with pytest.raises(hg_gate.argparse.ArgumentTypeError):
+            hg_gate._finite_nonnegative_float("nan")
+
+    def test_rejects_positive_infinity(self):
+        with pytest.raises(hg_gate.argparse.ArgumentTypeError):
+            hg_gate._finite_nonnegative_float("inf")
+
+    def test_rejects_negative_infinity(self):
+        with pytest.raises(hg_gate.argparse.ArgumentTypeError):
+            hg_gate._finite_nonnegative_float("-inf")
+
+    def test_rejects_negative(self):
+        with pytest.raises(hg_gate.argparse.ArgumentTypeError):
+            hg_gate._finite_nonnegative_float("-0.1")
+
+    def test_regress_tolerance_flag_rejects_nan_and_inf(self):
+        for bad_value in ("nan", "inf", "-inf", "-1"):
+            with pytest.raises(SystemExit):
+                hg_gate.parse_args(["--regress-tolerance", bad_value])
+
+    def test_a_nan_tolerance_would_have_masked_a_real_regression(self):
+        # Direct proof of the failure mode this type= guard closes: without
+        # it, check_regressions() itself silently accepts an arbitrarily
+        # regressed measurement under a nan/inf tolerance.
+        points = [{"size": 10, "backend": "clang", "attach_ms": 1000.0}]
+        baseline = {(10, "clang"): 10.0}
+        assert hg_gate.check_regressions(points, baseline, float("nan")) == []
+        assert hg_gate.check_regressions(points, baseline, float("inf")) == []
+        assert hg_gate.check_regressions(points, baseline, 0.5) != []
+
+
 class TestRequireRealAstAttach:
     class _FakeGraph:
         def __init__(self, passes):
