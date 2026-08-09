@@ -1306,13 +1306,19 @@ class TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow:
 class TestScheduleCheckProjectFailurePathDispatcher:
     """`schedule-check-project-failure-path.yml` is the automated-trigger
     half of test-check-project-failure-path.yml: it runs on `main` on a
-    schedule, but its own job must never itself perform the assertions that
-    are expected to fail -- it only stages a disjoint fixture ref and
-    dispatches the real fixture workflow against it, so this scheduler's own
-    conclusion reports its own (real) health, not the fixture's (expected)
-    failure."""
+    schedule, but its own job's pass/fail must never be the dispatched run's
+    own overall conclusion (expected to be "failure" every time, by design)
+    -- `gh workflow run` is fire-and-forget and does not block on the run it
+    creates, so a job that only dispatches and stops would report green
+    both when the fixture behaves correctly AND when it regresses (Codex
+    review). This job must instead poll for that specific run, wait for it
+    to complete, and gate its own exit code on the dispatched run's
+    `test-check-project-verify` job conclusion alone."""
 
-    def test_dispatcher_workflow_has_no_assertions_of_its_own(self) -> None:
+    def test_dispatcher_workflow_has_no_python_assertions_of_its_own(self) -> None:
+        """This job doesn't re-implement test-check-project-verify's own
+        JSON-parsing assertions -- it only reads back that job's already-
+        computed conclusion."""
         data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
         job = data["jobs"]["dispatch"]
         run_steps = " ".join(s.get("run", "") for s in _steps(job))
@@ -1324,14 +1330,46 @@ class TestScheduleCheckProjectFailurePathDispatcher:
         job = data["jobs"]["dispatch"]
         run_steps = " ".join(s.get("run", "") for s in _steps(job))
         assert "ci-fixture/check-project-failure-path" in run_steps
-        assert "--ref ci-fixture/check-project-failure-path" in run_steps
+        assert 'REF="ci-fixture/check-project-failure-path"' in run_steps
         assert "git commit --allow-empty" in run_steps
 
     def test_dispatcher_dispatches_the_failure_path_workflow(self) -> None:
         data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
         job = data["jobs"]["dispatch"]
         run_steps = " ".join(s.get("run", "") for s in _steps(job))
-        assert "gh workflow run test-check-project-failure-path.yml" in run_steps
+        assert 'WORKFLOW="test-check-project-failure-path.yml"' in run_steps
+        assert 'gh workflow run "$WORKFLOW" --repo "$REPO" --ref "$REF"' in run_steps
+
+    def test_dispatcher_waits_for_the_dispatched_run_to_complete(self) -> None:
+        """`gh workflow run` alone doesn't block on the run it creates --
+        this job must separately poll `gh run list`/`gh run view` for the
+        specific run it just dispatched (correlated by the fixture commit's
+        own SHA) and wait for `status == completed` before drawing any
+        conclusion from it (Codex review)."""
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert "gh run list --repo" in run_steps
+        assert "FIXTURE_SHA" in run_steps
+        assert "gh run view" in run_steps
+        assert '--json status --jq .status' in run_steps
+        assert 'status = "completed"' in run_steps or '"$status" = "completed"' in run_steps
+
+    def test_dispatcher_gates_on_the_verify_job_conclusion_not_the_run_conclusion(
+        self,
+    ) -> None:
+        """The dispatched run's own overall conclusion is expected to be
+        "failure" on every correct run -- the only signal this job may act
+        on is test-check-project-verify's own job conclusion (Codex
+        review)."""
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert 'select(.name | test("verify"))' in run_steps
+        assert "verify_conclusion" in run_steps
+        assert '"$verify_conclusion" != "success"' in run_steps
+        # Must not gate on the run's own top-level conclusion field.
+        assert "--json conclusion" not in run_steps
 
     def test_dispatcher_has_write_permissions_for_its_job(self) -> None:
         data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
