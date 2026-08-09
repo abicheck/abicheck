@@ -19,33 +19,44 @@ name: 'Test check-project.yml: deferred operational failure survives to aggregat
 # path through the real check-project.yml file, short of reimplementing its
 # steps by hand (which would stop testing the actual reusable workflow).
 #
-# **`push: branches: [main]` only, deliberately NOT `pull_request`.** A
+# **Deliberately NOT `pull_request`, and (see below) not `push` either.** A
 # called reusable workflow's own jobs get separate check-runs attached to
 # the SAME commit SHA as the calling workflow -- "not required" doesn't
-# make them invisible, they still show up red in a PR's checks list, and a
-# human reviewing that list has no way to tell "expected, by design" apart
-# from a real failure without reading this comment. Running this only on
-# `push` to `main` (i.e. only after a PR has already merged) means the
-# fixture still catches a real regression before it reaches users, without
-# ever posting a red check against an open PR. The cost: a PR that itself
-# changes check-project.yml (like the one that introduced this file) is
-# not re-validated against this exact fixture before merging -- mitigated
-# by hand-verifying the mechanism locally/via manual runs before merging
-# such a PR, as this file's own G30 plan-doc history documents.
+# make them invisible, they still show up red in a checks list, and a human
+# reviewing that list has no way to tell "expected, by design" apart from a
+# real failure without reading this comment. Posting that against an open
+# PR's checks list, or against every merge commit on `main`, is exactly the
+# operational-health cost this file now avoids -- see the `on:` block below.
+# The cost of not running per-push: a PR that itself changes
+# check-project.yml (like the one that introduced this file) is not
+# re-validated against this exact fixture before merging -- mitigated by
+# hand-verifying the mechanism locally, or via a manual `workflow_dispatch`
+# run, before merging such a PR, as this file's own G30 plan-doc history
+# documents.
 permissions:
   contents: read
 
+# **Deliberately NOT `push: branches: [main]`.** This workflow's own run
+# conclusion is EXPECTED to be "failure" on every successful test run (see
+# below), so tying it to every push on `main` means every merge commit's
+# check-run list on the default branch carries a permanently-red entry that
+# never distinguishes "expected, by design" from "the mechanism actually
+# broke" -- and makes "main is green" useless as an aggregate health signal
+# or as a candidate required check. Running it instead on a schedule and via
+# manual dispatch still exercises the real end-to-end failure path through
+# the real check-project.yml on a regular cadence and on demand (e.g. right
+# before merging a PR that touches check-project.yml), without attaching an
+# always-red conclusion to any merge SHA on `main`.
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/check-project.yml'
-      - '.github/workflows/test-check-project-failure-path.yml'
-      - 'abicheck/**'
-      - 'tests/fixtures/action/**'
+  schedule:
+    # Weekly, decoupled from any specific commit -- catches a regression in
+    # the failure-survival contract without polluting per-push/per-merge
+    # commit status on main.
+    - cron: '17 6 * * 1'
+  workflow_dispatch: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
