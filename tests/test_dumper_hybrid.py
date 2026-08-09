@@ -7,6 +7,7 @@ fact_provenance.py reader-side helpers every migrated detector now uses.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import patch
 
 from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
@@ -1090,6 +1091,68 @@ class TestNamespaceQualifiedMerging:
         clang = _snap(ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
         assert len(merged.enums) == 2
+
+    def test_deprecated_provenance_keyed_qualified_not_bare(self):
+        """A third review round found the matching fix above didn't reach
+        the shared fact_provenance dict itself: two bare-name-colliding
+        types (one matched via both backends, one clang-only) wrote their
+        `deprecated` provenance to the SAME bare key, one overwriting the
+        other (Codex review, fresh evidence). The write side must key by
+        namespace-qualified identity."""
+        a_foo_castxml = RecordType(
+            name="Foo", qualified_name="a::Foo", kind="class", deprecated="castxml msg"
+        )
+        a_foo_clang = RecordType(
+            name="Foo", qualified_name="a::Foo", kind="class", deprecated="clang msg"
+        )
+        b_foo_clang_only = RecordType(
+            name="Foo", qualified_name="b::Foo", kind="class", deprecated="msg"
+        )
+        castxml = _snap(types=[a_foo_castxml], ast_producer="castxml")
+        clang = _snap(
+            types=[a_foo_clang, b_foo_clang_only], ast_producer="clang"
+        )
+        merged = merge_snapshots(castxml, clang)
+
+        assert (
+            merged.fact_provenance[type_fact_key("a::Foo", "deprecated")] == "castxml"
+        )
+        assert (
+            merged.fact_provenance[type_fact_key("b::Foo", "deprecated")] == "clang"
+        )
+        # The stale-collision shape this fix closes: both used to share the
+        # single bare key below.
+        assert type_fact_key("Foo", "deprecated") not in merged.fact_provenance
+
+    def test_legacy_bare_keyed_hybrid_baseline_still_detects_transition(self):
+        """End-to-end regression for the exact scenario Codex flagged: a
+        `--ast-frontend hybrid` baseline persisted BEFORE the provenance-key
+        qualification fix has real provenance recorded under the former
+        bare key. Comparing it against a freshly-merged snapshot must still
+        detect a genuine deprecated transition, not silently suppress it."""
+        from abicheck.checker import ChangeKind, compare
+
+        old_foo = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        # Simulates a snapshot persisted by the pre-fix merge code: real
+        # castxml-sourced provenance, but under the bare key.
+        old_legacy_hybrid = replace(
+            merge_snapshots(
+                _snap(types=[old_foo], ast_producer="castxml"),
+                _snap(ast_producer="clang"),
+            ),
+            fact_provenance={type_fact_key("Foo", "deprecated"): "castxml"},
+        )
+
+        new_foo = RecordType(
+            name="Foo", qualified_name="ns::Foo", kind="class", deprecated="use Bar"
+        )
+        new_merged = merge_snapshots(
+            _snap(types=[new_foo], ast_producer="castxml"),
+            _snap(ast_producer="clang"),
+        )
+
+        result = compare(old_legacy_hybrid, new_merged)
+        assert ChangeKind.TYPE_DEPRECATED_ADDED in {c.kind for c in result.changes}
 
 
 class TestFactProvenanceHelpers:

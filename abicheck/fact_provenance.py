@@ -178,3 +178,38 @@ def both_known_backed_fact(old: AbiSnapshot, new: AbiSnapshot, key: str) -> bool
     SOME known backend actually populated it on each side.
     """
     return fact_producer(old, key) is not None and fact_producer(new, key) is not None
+
+
+def both_known_backed_fact_qualified(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    qualified_key: str,
+    bare_key: str,
+    *,
+    old_bare_unambiguous: bool,
+    new_bare_unambiguous: bool,
+) -> bool:
+    """Like :func:`both_known_backed_fact`, but for a fact whose provenance
+    key was namespace-qualified after a hybrid snapshot may already have
+    been persisted with the former bare key (Codex review, fresh evidence:
+    a ``--ast-frontend hybrid`` baseline written before G31 Phase C's
+    qualification fix has real ``"castxml"``/``"clang"`` provenance recorded
+    under the bare key alone, since every matched declaration already got a
+    provenance entry via ``_backfill_fact`` regardless of that fact's actual
+    value — qualifying only the *lookup* key would silently treat all of
+    that real data as unknown and suppress genuine transitions).
+
+    Tries *qualified_key* first on each side; falls back to *bare_key* only
+    when the caller confirms (``old_bare_unambiguous``/``new_bare_unambiguous``
+    — typically ``TypeMap.bare_name_is_unambiguous``) that no OTHER distinct
+    qualified identity on that side shares the same bare name. Without that
+    check, the fallback would reopen the exact bare-name collision the
+    qualification was introduced to close.
+    """
+    old_producer = fact_producer(old, qualified_key)
+    if old_producer is None and old_bare_unambiguous:
+        old_producer = fact_producer(old, bare_key)
+    new_producer = fact_producer(new, qualified_key)
+    if new_producer is None and new_bare_unambiguous:
+        new_producer = fact_producer(new, bare_key)
+    return old_producer is not None and new_producer is not None

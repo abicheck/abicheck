@@ -416,6 +416,37 @@ building a second identity-resolution mechanism from scratch.
   would be an unrelated, unverified change outside this finding's scope.
   `Change.symbol`/description stay bare throughout — only the internal
   provenance-dict key changed.
+
+  **A fourth review round found the qualification fix itself created a
+  backward-compatibility regression.** A `--ast-frontend hybrid` baseline
+  persisted *before* this qualification landed has real
+  `deprecated`/`is_scoped` provenance recorded under the *former* bare
+  key — `_backfill_fact` always records provenance for a matched
+  declaration regardless of the fact's actual value, and castxml has
+  populated `deprecated`/`is_scoped` since long before G31 Phase C, so
+  this isn't a hypothetical: any existing hybrid baseline with a
+  namespaced type has real `type:Foo:deprecated -> "castxml"`-shaped
+  entries (Codex review, fresh evidence). Once `diff_types.py`'s readers
+  started requesting the qualified key, that legacy data stopped
+  matching — `fact_producer()` returns `None` for it, silently
+  suppressing a genuine transition (a conservative false negative, not a
+  false positive, but a real regression in comparison coverage for any
+  existing persisted hybrid baseline). Fixed with the same shape
+  `lookup_matched_type`'s own bare-name retry already uses for old/new
+  type matching (PR #608): a new `diff_helpers.fact_known_qualified()`
+  tries the qualified key first, falling back to the bare key only when
+  the caller's own `TypeMap.bare_name_is_unambiguous(name)` confirms no
+  *other* distinct qualified identity in that side's snapshot shares the
+  bare name — otherwise the fallback would reopen the exact collision the
+  qualification was introduced to close. `fact_provenance.
+  both_known_backed_fact_qualified()` is the underlying old/new pair
+  check; `fact_known_qualified()` (home: `diff_helpers.py`, alongside
+  `lookup_matched_type` — the identical bare-name-retry pattern applied to
+  a fact-provenance key instead of an old/new type match, and outside
+  `diff_types.py`'s own 2000-line hard cap) derives the two
+  `TypeMap`-backed ambiguity flags so the four call sites in
+  `diff_types.py` (type/field/enum `deprecated`, enum `is_scoped`) stay a
+  single line each.
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

@@ -48,4 +48,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   (e.g. `a::Foo` / `b::Foo`) no longer silently overwrite each other's
   provenance entry in the shared dict — independent of, and one layer
   below, the old/new matching fix above.
+- **Fixed a backward-compatibility regression the qualification fix above
+  introduced**: a `--ast-frontend hybrid` baseline persisted before that
+  fix has real `deprecated`/`is_scoped` provenance recorded under the
+  former bare key, and qualifying only the lookup key silently suppressed
+  every genuine transition on such a baseline. `diff_types.py`'s four
+  affected detectors now fall back to the bare key when it's unambiguous
+  (`diff_helpers.fact_known_qualified`, mirroring `lookup_matched_type`'s
+  own bare-name-retry pattern), so a real transition on an existing
+  hybrid baseline is detected again without reopening the bare-name
+  collision the qualification fix closed.
 
