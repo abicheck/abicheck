@@ -92,16 +92,37 @@ def _index(snap: AbiSnapshot, *, exclude_stdlib: bool) -> TypeMap[RecordType]:
 
 
 def _has_layout_descriptor(rec: RecordType) -> bool:
-    """Return True if any v7 layout-descriptor field is populated on ``rec``.
+    """Return True if any v7 REAL-LAYOUT descriptor field is populated on
+    ``rec`` (size/offset evidence only — see below for why
+    ``is_standard_layout``/``is_trivially_copyable`` are deliberately
+    excluded).
 
     Used to gate ``LAYOUT_UNVERIFIABLE`` so it only activates once a dump
     actually carries the richer descriptor — keeping the detector inert on
     snapshots that predate it.
+
+    ``is_standard_layout``/``is_trivially_copyable`` do NOT count as layout
+    evidence here (Codex review, fresh evidence): since G31 Phase C the
+    direct-clang backend populates these two SEMANTIC traits independent of
+    any real layout pass (`dumper_clang.py` never sets `size_bits`/
+    `data_size_bits`/`vptr_offset_bits`/`base_offsets` without the optional
+    `ABICHECK_CLANG_LAYOUT_TOOL` companion), so a persisted pre-v19
+    direct-clang snapshot compared against a freshly-dumped one of
+    UNCHANGED headers has these two traits appear from `None` to a real
+    value on the new side alone — with this function counting them,
+    that flip alone made `descriptor_in_play`/`old_has != new_has` true
+    and fired a phantom `LAYOUT_UNVERIFIABLE` on every record, purely from
+    a tool/schema upgrade. `STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST`
+    (`_check_standard_layout_lost`/`_check_trivially_copyable_lost`) already
+    self-gate correctly on this exact asymmetry (`old_rec.is_X is True`
+    requires a real old value, so `None` on the old side stays silent) —
+    only this cruder "did any layout evidence appear/disappear" heuristic
+    was affected, since it conflated "we now know a semantic trait" with
+    "we now know the type's actual size/offsets," two different kinds of
+    evidence.
     """
     return (
         rec.data_size_bits is not None
-        or rec.is_standard_layout is not None
-        or rec.is_trivially_copyable is not None
         or rec.vptr_offset_bits is not None
         or bool(rec.base_offsets)
     )

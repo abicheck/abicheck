@@ -467,6 +467,41 @@ building a second identity-resolution mechanism from scratch.
   fallback stays a single value, since a matched pair's bare declaration
   name is the same on both sides by construction (that's how the pair
   matched in the first place).
+
+  **A sixth review round found a real, wide-blast-radius false positive
+  independent of the fact_provenance qualification chain above — this one
+  in `diff_layout.py`'s `LAYOUT_UNVERIFIABLE` heuristic.** Since G31 Phase
+  C the direct-clang backend populates `is_standard_layout`/
+  `is_trivially_copyable` (semantic traits) independent of any real
+  layout pass — `dumper_clang.py` never sets `size_bits`/`data_size_bits`/
+  `vptr_offset_bits`/`base_offsets` without the optional
+  `ABICHECK_CLANG_LAYOUT_TOOL` companion (confirmed:
+  `dumper_clang.py`'s own module docstring states this explicitly, and
+  its `RecordType` construction hardcodes `size_bits=None`). But
+  `diff_layout._has_layout_descriptor()` counted these two semantic
+  traits as "layout descriptor evidence," so a persisted pre-v19
+  direct-clang snapshot compared against a fresh dump of UNCHANGED
+  headers had the traits flip from `None` to a real value on the new
+  side alone — that flip alone made `_check_layout_unverifiable()`'s
+  `descriptor_in_play`/`old_has != new_has` gate trip and fire a phantom
+  `LAYOUT_UNVERIFIABLE` RISK finding for *every record*, purely from a
+  tool/schema upgrade, not a real change (Codex review, fresh evidence).
+  Confirmed `STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST` themselves
+  were NOT affected — they already self-gate correctly on this exact
+  asymmetry (`old_rec.is_X is True` requires a real old value, so `None`
+  on the old side stays silent); only the cruder "did any layout evidence
+  appear/disappear" heuristic was affected, since it conflated "we now
+  know a semantic trait" with "we now know the type's actual
+  size/offsets" — two different kinds of evidence. Fixed by excluding
+  `is_standard_layout`/`is_trivially_copyable` from
+  `_has_layout_descriptor()`'s definition entirely — it now answers only
+  "does `rec` carry real size/offset layout evidence," which is what
+  `LAYOUT_UNVERIFIABLE` is actually about. One existing test
+  (`test_layout_unverifiable_on_asymmetric_evidence`) had accidentally
+  relied on the now-corrected coupling (using `is_standard_layout=True`
+  as its stand-in for "a layout descriptor is present"); updated to use
+  `data_size_bits` (genuine layout-pass evidence) instead, preserving the
+  scenario it was actually testing.
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

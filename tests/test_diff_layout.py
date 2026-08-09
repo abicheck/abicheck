@@ -153,12 +153,36 @@ class TestLayoutDescriptorDiff:
         assert ChangeKind.TAIL_PADDING_REUSE_CHANGED not in _kinds(old, new)
 
     def test_layout_unverifiable_on_asymmetric_evidence(self) -> None:
-        # New side carries a layout descriptor; old side has no size at all.
+        # New side carries a real layout descriptor (data_size_bits, from an
+        # actual layout pass); old side has no size at all. Deliberately NOT
+        # is_standard_layout/is_trivially_copyable here -- those are semantic
+        # traits, not layout evidence (see test below and _has_layout_descriptor's
+        # own docstring).
         old = _snap("1", types=[_rec(name="A", size_bits=None)])
-        new = _snap("2", types=[_rec(name="A", size_bits=128, is_standard_layout=True)])
+        new = _snap("2", types=[_rec(name="A", size_bits=128, data_size_bits=120)])
         kinds = _kinds(old, new)
         assert ChangeKind.LAYOUT_UNVERIFIABLE in kinds
         assert ChangeKind.LAYOUT_UNVERIFIABLE in RISK_KINDS
+
+    def test_layout_unverifiable_not_flagged_from_semantic_traits_alone(self) -> None:
+        """Codex review, fresh evidence: since G31 Phase C the direct-clang
+        backend populates is_standard_layout/is_trivially_copyable
+        independent of any real layout pass (dumper_clang.py never sets
+        size_bits/data_size_bits/vptr_offset_bits/base_offsets without the
+        optional companion tool). A persisted pre-v19 direct-clang snapshot
+        compared against a fresh dump of UNCHANGED headers has these two
+        traits go from None to a real value on the new side alone -- that
+        flip alone must NOT be treated as "layout evidence appeared" and
+        must not fire a phantom LAYOUT_UNVERIFIABLE."""
+        old = _snap(
+            "1",
+            types=[_rec(name="A", size_bits=None, is_standard_layout=None, is_trivially_copyable=None)],
+        )
+        new = _snap(
+            "2",
+            types=[_rec(name="A", size_bits=None, is_standard_layout=True, is_trivially_copyable=True)],
+        )
+        assert ChangeKind.LAYOUT_UNVERIFIABLE not in _kinds(old, new)
 
     def test_opaque_type_skipped(self) -> None:
         # An opaque/forward-declared side is owned by the incomplete-type

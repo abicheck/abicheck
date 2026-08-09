@@ -65,4 +65,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   probing both sides with only `old`'s qualified key could never find
   `new`'s real, qualified-keyed provenance entry. `fact_known_qualified`
   now derives and probes each side's own qualified key independently.
+- **Fixed a phantom `LAYOUT_UNVERIFIABLE` finding on every record when
+  comparing a persisted pre-v19 direct-clang snapshot against a fresh
+  dump of unchanged headers**: `diff_layout._has_layout_descriptor()`
+  no longer counts `RecordType.is_standard_layout`/`is_trivially_copyable`
+  as layout-descriptor evidence — those are semantic traits the
+  direct-clang backend now populates independent of any real layout pass
+  (G31 Phase C), not the size/offset evidence `LAYOUT_UNVERIFIABLE` is
+  actually about, and a `None`→real-value flip on those two facts alone
+  was tripping the detector's asymmetric-evidence gate on every record.
+  `STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST` themselves were
+  unaffected — they already correctly stay silent when the old side's
+  trait is unknown.
 
