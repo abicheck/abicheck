@@ -266,6 +266,46 @@ class TestMainSkipsWithoutToolchain:
         assert rc == 1
         assert "FAIL" in out
         assert "regression" in out
+        # The historical baseline on disk must survive completely untouched
+        # -- not just correctly read once -- so a later run can still catch
+        # the same regression (Codex review, fresh evidence: this is a
+        # separate guarantee from the read-before-write ordering alone).
+        assert "NOTE" in out
+        assert json.loads(shared.read_text()) == {
+            "points": [{"size": 10, "backend": "clang", "attach_ms": 1.0}]
+        }
+
+
+class TestRequireRealAstAttach:
+    class _FakeGraph:
+        def __init__(self, passes):
+            self.extractor_passes = passes
+
+    class _FakeBuildSource:
+        def __init__(self, graph):
+            self.source_graph = graph
+
+    class _FakeSnap:
+        def __init__(self, build_source):
+            self.build_source = build_source
+
+    def test_passes_when_call_graph_pass_stamped(self):
+        from abicheck.buildsource.header_graph import HEADER_CALL_GRAPH_PASS
+
+        snap = self._FakeSnap(
+            self._FakeBuildSource(self._FakeGraph({HEADER_CALL_GRAPH_PASS: True}))
+        )
+        assert hg_gate._require_real_ast_attach(snap, 5, "clang") is None
+
+    def test_raises_when_call_graph_pass_missing(self):
+        snap = self._FakeSnap(self._FakeBuildSource(self._FakeGraph({})))
+        with pytest.raises(RuntimeError, match="degraded"):
+            hg_gate._require_real_ast_attach(snap, 5, "castxml")
+
+    def test_raises_when_no_build_source_at_all(self):
+        snap = self._FakeSnap(None)
+        with pytest.raises(RuntimeError, match="degraded"):
+            hg_gate._require_real_ast_attach(snap, 5, "clang")
 
 
 @pytest.mark.integration

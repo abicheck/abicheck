@@ -51,20 +51,32 @@ genuine cold-invocation cost this gate exists to catch. Then time:
   way it would be in production (a direct, unscoped ``dumper.dump()`` call
   never populates it — see ``dumper_cache.py``'s own
   ``_ast_memoize_scope`` docstring).
-* ``attach_ms`` — ``service._attach_header_graph(snap, True, False, ...)``
+* ``attach_ms`` — ``service._attach_header_graph(snap, True, True, ...)``
   applied to the snapshot ``baseline_ms`` already produced, *outside* that
   scope (again matching ``_run_dump_uncached``'s own call ordering), in
-  isolation.
+  isolation. Both flags are ``True``, matching production's
+  ``_HEADER_GRAPH_ENABLED``/``_HEADER_GRAPH_INCLUDES_ENABLED`` (both
+  unconditionally on since G31 Phase A) — the second flag drives
+  ``ClangHeaderIncludeExtractor``'s own extra ``clang -M`` subprocess per
+  top-level header, a real, always-on part of the attach cost this gate
+  would otherwise silently exclude.
 
 For the ``clang`` backend this measures the real Phase C in-process memo
 handoff (should be cheap: a dict lookup + graph construction, no second
-subprocess). For the ``castxml`` backend — the default L2 backend, and the
-one most `dump`/`compare` invocations actually use — the primary pass never
-writes to the memo (only ``dumper_clang.py``'s ``_clang_header_dump`` does),
-so ``attach_ms`` there is the genuine second ``clang -ast-dump=json``
-subprocess every default-backend dump now pays. Reports both backends'
-points; the ``castxml`` backend's points are simply omitted (not an error)
-when ``castxml`` isn't installed.
+subprocess) plus the include-graph pass. For the ``castxml`` backend — the
+default L2 backend, and the one most `dump`/`compare` invocations actually
+use — the primary pass never writes to the memo (only ``dumper_clang.py``'s
+``_clang_header_dump`` does), so ``attach_ms`` there is the genuine second
+``clang -ast-dump=json`` subprocess every default-backend dump now pays,
+plus the same include-graph pass. Reports both backends' points; the
+``castxml`` backend's points are simply omitted (not an error) when
+``castxml`` isn't installed. Every attach is verified
+(``_require_real_ast_attach``) to have actually stamped a real clang-AST
+pass rather than silently degrading to a declaration-only fallback graph
+(``service._attach_header_graph`` never raises on a failed clang invocation
+— it degrades instead, which would otherwise read as a *fast* measurement
+for what is really a broken one) — a degraded attach aborts the run loudly
+instead of recording a misleading data point.
 
 Requires ``clang``/``clang++`` and ``g++`` on ``PATH`` (Linux/ELF only,
 matching ``tests/test_clang_header_backend_integration.py``'s own scope);
@@ -206,6 +218,39 @@ def _resolve_includes(
     return inc_extra, tuple(deferred), tuple(deferred_token_dirs(deferred))
 
 
+def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
+    """Raise unless *snap*'s attached graph reflects a genuine clang AST parse.
+
+    ``service._attach_header_graph`` never raises on a failed/unavailable
+    clang invocation — it silently degrades to a declaration-only graph
+    (ADR-028 D3 "never abort collection"), which is the right call for a real
+    dump, but wrong for *this* benchmark: a regression that outright breaks
+    the second clang invocation would make that call return almost
+    instantly, reading as a performance *improvement* rather than the
+    functional break it actually is (Codex review). ``header_graph.py``'s
+    own comment is explicit that a real AST-backed pass always stamps both
+    ``HEADER_CALL_GRAPH_PASS``/``HEADER_TYPE_GRAPH_PASS`` together
+    ("reaching this line means the whole pass ran cleanly"); the degraded
+    fallback branch never stamps ``HEADER_CALL_GRAPH_PASS`` at all. Checking
+    for it is therefore a precise, already-load-bearing signal — not a new
+    parallel bookkeeping mechanism — that this measurement's ``attach_ms``
+    reflects the real second clang invocation, for either backend.
+    """
+    from abicheck.buildsource.header_graph import HEADER_CALL_GRAPH_PASS
+
+    graph = getattr(getattr(snap, "build_source", None), "source_graph", None)
+    passes = getattr(graph, "extractor_passes", {}) if graph is not None else {}
+    if not passes.get(HEADER_CALL_GRAPH_PASS):
+        raise RuntimeError(
+            f"size={n} backend={backend}: _attach_header_graph degraded to a "
+            "declaration-only graph (HEADER_CALL_GRAPH_PASS not stamped) instead "
+            "of a genuine clang AST attach -- this measurement's attach_ms would "
+            "understate the real cost (or mask a regression that broke the "
+            "second clang invocation entirely). Aborting rather than recording "
+            "a misleading data point."
+        )
+
+
 def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
     """Time *repeat* (dump, attach) pairs, one freshly-built fixture apiece.
 
@@ -245,10 +290,19 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
             baseline_samples.append((t1 - t0) * 1000.0)
 
             t2 = time.perf_counter()
-            _attach_header_graph(
+            attached = _attach_header_graph(
                 snap,
                 True,
-                False,
+                # Production (service._run_dump_uncached) always passes
+                # _HEADER_GRAPH_INCLUDES_ENABLED (a module constant, True
+                # since G31 Phase A) alongside header_graph, not just the
+                # bare AST-attach flag -- that second flag drives
+                # ClangHeaderIncludeExtractor's own extra `clang -M`
+                # subprocess per top-level header, a real, always-on part of
+                # the production attach cost this benchmark must include too
+                # (Codex review: passing False here silently excluded it
+                # from every measurement).
+                True,
                 [header],
                 [],
                 "c++",
@@ -257,6 +311,7 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
                 None,
             )
             t3 = time.perf_counter()
+            _require_real_ast_attach(attached, n, backend)
             attach_samples.append((t3 - t2) * 1000.0)
 
     return {
@@ -470,10 +525,29 @@ def main(argv: list[str] | None = None) -> int:
     # (Codex review).
     baseline = _load_baseline(args.baseline) if args.baseline is not None else None
 
-    if args.json_out is not None:
+    # Never overwrite the file --baseline was just read from, regression or
+    # not: even with the read-before-write ordering above, writing this run's
+    # own (possibly regressed) numbers over the historical baseline destroys
+    # the one reference a *later* run needs to catch the same regression
+    # again -- the next invocation would just compare the regressed numbers
+    # against themselves (Codex review, fresh evidence: this survives even
+    # though the read-before-write fix makes THIS run's own verdict correct).
+    same_path = (
+        args.json_out is not None
+        and args.baseline is not None
+        and args.json_out.resolve() == args.baseline.resolve()
+    )
+    if args.json_out is not None and not same_path:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(json.dumps({"points": points}, indent=2) + "\n")
         print(f"\nWrote {args.json_out}")
+    elif same_path:
+        print(
+            f"\nNOTE: --json-out and --baseline both name {args.json_out} — not "
+            "overwriting the baseline this run was gated against. Write the "
+            "report to a different path (or omit --json-out) when refreshing "
+            "the committed baseline."
+        )
 
     if baseline is None:
         print(
