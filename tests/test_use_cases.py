@@ -349,6 +349,54 @@ def test_build_use_case_graph_coalesces_a_mapped_decl_and_symbol_pair() -> None:
     assert edges == {"binary_symbol://train"}
 
 
+def test_build_use_case_graph_does_not_coalesce_a_decl_mapped_to_two_symbols() -> None:
+    """A decl mapped to more than one public symbol (versioned exports,
+    aliases, or facts merged from multiple graph producers) must not
+    coalesce onto whichever destination happens to iterate last -- an
+    order-dependent, wrong-but-confident pick instead of the 'degrade to
+    no answer' this module otherwise guarantees for a genuine ambiguity
+    (Codex review, fresh evidence).
+
+    Resolved by the decl's own LABEL ("train"), not its exact id -- an
+    exact-id lookup would trivially resolve to itself regardless of
+    coalescing and never exercise the buggy code path at all (own review
+    finding, caught before landing: the id always resolves via `index`,
+    built before coalescing ever runs). The label is unique among this
+    fixture's public nodes, so it is coalescing -- not label-ambiguity --
+    that decides the outcome here: the buggy last-write-wins dict
+    comprehension resolved it to whichever symbol was registered last
+    (an ``in {binary_symbol://train@v1, binary_symbol://train@v2}``
+    silent, order-dependent pick); the fix must resolve it to the decl's
+    own id instead, uncoalesced."""
+    library = _library_graph()
+    library.add_node(
+        GraphNode(id="binary_symbol://train@v1", kind="binary_symbol", label="train_v1")
+    )
+    library.add_node(
+        GraphNode(id="binary_symbol://train@v2", kind="binary_symbol", label="train_v2")
+    )
+    library.add_edge(
+        GraphEdge(
+            src="decl://train",
+            dst="binary_symbol://train@v1",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    library.add_edge(
+        GraphEdge(
+            src="decl://train",
+            dst="binary_symbol://train@v2",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
+    graph = build_use_case_graph(
+        [UseCaseDefinition(use_case="training-workflow", entrypoints=("train",))],
+        library,
+    )
+    edges = {e.dst for e in graph.edges if e.kind == "USE_CASE_USES_ENTRY"}
+    assert edges == {"decl://train"}
+
+
 def test_build_use_case_graph_an_exact_id_wins_over_a_colliding_label() -> None:
     """A manifest naming a node's exact id must resolve to that node even
     when some *other* public node's own label happens to collide with that

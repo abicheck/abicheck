@@ -337,20 +337,36 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
 
     index: dict[str, str] = {n.id: n.id for n in public_nodes}
 
-    # A public decl's mapped-to public symbol id, when one exists — the
-    # coalescing key. Restricted to edges between two *public* nodes so a
-    # mapping onto an internal/unresolved target can't smuggle a non-public
-    # id into the label index.
-    mapped_symbol: dict[str, str] = {
-        e.src: e.dst
-        for e in library_graph.edges
-        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
-        and e.src in public_ids
-        and e.dst in public_ids
-    }
+    # A public decl's mapped-to public symbol id, when *exactly one* exists
+    # — the coalescing key. Restricted to edges between two *public* nodes
+    # so a mapping onto an internal/unresolved target can't smuggle a
+    # non-public id into the label index.
+    #
+    # Collected as a set per src, not a plain {src: dst} dict comprehension
+    # (Codex review, fresh evidence): a decl legitimately mapped to more
+    # than one symbol (versioned exports, aliases, or facts merged from more
+    # than one graph producer under ADR-046 D2's evidence-preserving merge —
+    # add_edge dedups only on the full (src, dst, kind, role) relation key,
+    # so two such edges coexist rather than collapsing) would otherwise have
+    # a plain dict comprehension silently keep whichever destination came
+    # last in ``library_graph.edges`` iteration order — an
+    # order-dependent, wrong-but-confident coalescing target instead of the
+    # "degrade to no answer" this whole function otherwise guarantees for a
+    # genuine ambiguity.
+    mapped_symbols: dict[str, set[str]] = {}
+    for e in library_graph.edges:
+        if (
+            e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+            and e.src in public_ids
+            and e.dst in public_ids
+        ):
+            mapped_symbols.setdefault(e.src, set()).add(e.dst)
 
     def coalesced(node_id: str) -> str:
-        return mapped_symbol.get(node_id, node_id)
+        targets = mapped_symbols.get(node_id)
+        if targets is not None and len(targets) == 1:
+            return next(iter(targets))
+        return node_id
 
     label_targets: dict[str, set[str]] = {}
     for node in public_nodes:
