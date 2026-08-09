@@ -28,29 +28,46 @@ pays a genuine second ``clang`` invocation on every dump, on top of whatever
 memoized/graph-construction overhead remains on the clang-frontend path.
 
 This script isolates and measures that attach cost directly, sweeping a
-synthetic header-size axis, and gates on regression against a documented
-baseline — the same discipline ``check_fp_rate.py``/``check_tier_accuracy.py``
-apply to correctness and ``benchmark_scaling.py`` applies to comparison
-scaling.
+synthetic header-size axis across **both** header backends, and gates on
+regression against a documented baseline — the same discipline
+``check_fp_rate.py``/``check_tier_accuracy.py`` apply to correctness and
+``benchmark_scaling.py`` applies to comparison scaling.
 
 Method: build one tiny real ELF ``.so`` + a synthetic public header of size
 *N* declarations (reused across every repeat — the binary/header pair is
 fixed per size, only the dump/attach calls are repeated), then time, per
-repeat:
+backend (``clang``, and ``castxml`` when installed) and per repeat:
 
-* ``baseline_ms`` — ``dumper.dump(so, [header], header_backend="clang")``,
-  which does **not** itself attach the header graph (see
+* ``baseline_ms`` — ``dumper.dump(so, [header], header_backend=...)``, which
+  does **not** itself attach the header graph (see
   ``abicheck/buildsource/CLAUDE.md``'s ``header_graph.py`` row: the attach
-  step lives in ``service.py``, not ``dumper.py``).
+  step lives in ``service.py``, not ``dumper.py``), run inside
+  ``dumper_cache.ast_memoize_scope()`` — the exact scope
+  ``service._run_dump_uncached`` wraps its own primary dump call in, so a
+  ``clang``-backend run's in-process AST memo is actually written the same
+  way it would be in production (a direct, unscoped ``dumper.dump()`` call
+  never populates it — see ``dumper_cache.py``'s own
+  ``_ast_memoize_scope`` docstring).
 * ``attach_ms`` — ``service._attach_header_graph(snap, True, False, ...)``
-  applied to the snapshot ``baseline_ms`` already produced, in isolation.
+  applied to the snapshot ``baseline_ms`` already produced, *outside* that
+  scope (again matching ``_run_dump_uncached``'s own call ordering), in
+  isolation.
 
-``attach_ms`` is the number this gate cares about: the marginal, always-on
-cost G31 Phase A introduced. Requires ``clang``/``clang++`` and ``g++`` on
-``PATH`` (Linux/ELF only, matching
-``tests/test_clang_header_backend_integration.py``'s own scope); self-skips
-(exit 0) when unavailable so this never blocks a host without a C++
-toolchain.
+For the ``clang`` backend this measures the real Phase C in-process memo
+handoff (should be cheap: a dict lookup + graph construction, no second
+subprocess). For the ``castxml`` backend — the default L2 backend, and the
+one most `dump`/`compare` invocations actually use — the primary pass never
+writes to the memo (only ``dumper_clang.py``'s ``_clang_header_dump`` does),
+so ``attach_ms`` there is the genuine second ``clang -ast-dump=json``
+subprocess every default-backend dump now pays. Reports both backends'
+points; the ``castxml`` backend's points are simply omitted (not an error)
+when ``castxml`` isn't installed.
+
+Requires ``clang``/``clang++`` and ``g++`` on ``PATH`` (Linux/ELF only,
+matching ``tests/test_clang_header_backend_integration.py``'s own scope);
+self-skips (exit 0) when unavailable so this never blocks a host without a
+C++ toolchain. ``castxml`` is optional — its points are just skipped when
+absent, the whole run isn't.
 
 Usage::
 
@@ -139,96 +156,153 @@ def _build_fixture(tmp_dir: Path, n: int) -> tuple[Path, Path]:
     return so, header
 
 
-def _measure_size(n: int, repeat: int) -> dict[str, Any]:
+#: Backends this gate can measure, in the order reported. ``castxml`` is
+#: dropped from the sweep (not the whole run) when the tool isn't installed.
+BACKENDS: tuple[str, ...] = ("clang", "castxml")
+
+
+def _measure_one(so: Path, header: Path, backend: str, repeat: int) -> dict[str, Any]:
+    """Time *repeat* (dump, attach) pairs for one already-built fixture.
+
+    Mirrors ``service._run_dump_uncached``'s own call shape exactly: the
+    primary dump runs inside ``dumper_cache.ast_memoize_scope()``, and
+    ``_attach_header_graph`` runs after that scope exits — the in-process AST
+    memo (G31 Phase C) is a per-thread slot that outlives the scope until a
+    reader pops it, so this ordering is what actually lets a ``clang``-backend
+    attach hit the memo instead of a disk-cache reload (Codex review: calling
+    ``dumper.dump()`` with no surrounding scope, as an earlier version of this
+    script did, never writes the memo at all).
+    """
+    from abicheck import dumper_cache
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
     from abicheck.service import _attach_header_graph
 
+    baseline_samples: list[float] = []
+    attach_samples: list[float] = []
+    for _ in range(repeat):
+        t0 = time.perf_counter()
+        with dumper_cache.ast_memoize_scope():
+            snap = dump(so, [header], header_backend=backend, lang="c++")
+        t1 = time.perf_counter()
+        baseline_samples.append((t1 - t0) * 1000.0)
+
+        t2 = time.perf_counter()
+        _attach_header_graph(
+            snap,
+            True,
+            False,
+            [header],
+            [],
+            "c++",
+            CompileContext(),
+            None,
+            None,
+        )
+        t3 = time.perf_counter()
+        attach_samples.append((t3 - t2) * 1000.0)
+
+    return {
+        "baseline_ms": min(baseline_samples),
+        "attach_ms": min(attach_samples),
+        "baseline_ms_samples": baseline_samples,
+        "attach_ms_samples": attach_samples,
+    }
+
+
+def _measure_size(
+    n: int, repeat: int, backends: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    from abicheck.errors import SnapshotError
+
     with tempfile.TemporaryDirectory(prefix="hgperf_") as tmp:
         tmp_dir = Path(tmp)
         so, header = _build_fixture(tmp_dir, n)
-
-        baseline_samples: list[float] = []
-        attach_samples: list[float] = []
-        for _ in range(repeat):
-            t0 = time.perf_counter()
-            snap = dump(so, [header], header_backend="clang")
-            t1 = time.perf_counter()
-            baseline_samples.append((t1 - t0) * 1000.0)
-
-            t2 = time.perf_counter()
-            _attach_header_graph(
-                snap,
-                True,
-                False,
-                [header],
-                [],
-                "c++",
-                CompileContext(),
-                None,
-                None,
-            )
-            t3 = time.perf_counter()
-            attach_samples.append((t3 - t2) * 1000.0)
-
-        return {
-            "size": n,
-            "baseline_ms": min(baseline_samples),
-            "attach_ms": min(attach_samples),
-            "baseline_ms_samples": baseline_samples,
-            "attach_ms_samples": attach_samples,
-        }
+        points = []
+        for backend in backends:
+            try:
+                result = _measure_one(so, header, backend, repeat)
+            except SnapshotError as exc:
+                # A backend present on PATH but rejected by abicheck itself
+                # (e.g. an out-of-policy castxml build, ADR-*'s
+                # UnsupportedCastxmlVersionError) skips just that backend's
+                # points rather than aborting the whole sweep — the same
+                # "self-skip, don't crash" contract the rest of this script
+                # applies to a missing tool.
+                print(f"SKIP: size={n} backend={backend}: {exc}")
+                continue
+            points.append({"size": n, "backend": backend, **result})
+        return points
 
 
-def measure(sizes: tuple[int, ...], repeat: int) -> list[dict[str, Any]]:
-    return [_measure_size(n, repeat) for n in sizes]
+def measure(
+    sizes: tuple[int, ...], repeat: int, backends: tuple[str, ...] = BACKENDS
+) -> list[dict[str, Any]]:
+    active = tuple(b for b in backends if b == "clang" or _have("castxml"))
+    points: list[dict[str, Any]] = []
+    for n in sizes:
+        points.extend(_measure_size(n, repeat, active))
+    return points
 
 
-def _load_baseline(path: Path) -> dict[int, float]:
+def _point_key(p: dict[str, Any]) -> tuple[int, str]:
+    return int(p["size"]), str(p.get("backend", "clang"))
+
+
+def _load_baseline(path: Path) -> dict[tuple[int, str], float]:
     data = json.loads(path.read_text())
     points = data if isinstance(data, list) else data.get("points", [])
-    return {int(p["size"]): float(p["attach_ms"]) for p in points}
+    return {_point_key(p): float(p["attach_ms"]) for p in points}
 
 
 def check_regressions(
     points: list[dict[str, Any]],
-    baseline: dict[int, float],
+    baseline: dict[tuple[int, str], float],
     tolerance: float,
 ) -> list[str]:
-    """Return one message per size that regressed beyond *tolerance*."""
+    """Return one message per (size, backend) that regressed beyond *tolerance*."""
     failures = []
     for p in points:
-        base = baseline.get(int(p["size"]))
+        base = baseline.get(_point_key(p))
         if base is None or base <= 0:
             continue
         current = float(p["attach_ms"])
         allowed = base * (1.0 + tolerance)
         if current > allowed:
             pct = (current / base - 1.0) * 100.0
+            size, backend = _point_key(p)
             failures.append(
-                f"size={p['size']}: attach_ms {current:.1f} > baseline {base:.1f} "
-                f"x{1 + tolerance:.2f} ({pct:+.0f}%)"
+                f"size={size} backend={backend}: attach_ms {current:.1f} > "
+                f"baseline {base:.1f} x{1 + tolerance:.2f} ({pct:+.0f}%)"
             )
     return failures
 
 
 def _print_table(points: list[dict[str, Any]]) -> None:
-    print(f"{'size':>8} {'baseline_ms':>12} {'attach_ms':>12} {'attach_%':>10}")
+    print(
+        f"{'size':>8} {'backend':>9} {'baseline_ms':>12} {'attach_ms':>12} {'attach_%':>10}"
+    )
     for p in points:
         baseline_ms = p["baseline_ms"]
         attach_ms = p["attach_ms"]
         pct = (attach_ms / baseline_ms * 100.0) if baseline_ms else float("nan")
-        print(f"{p['size']:>8} {baseline_ms:>12.1f} {attach_ms:>12.1f} {pct:>9.1f}%")
+        print(
+            f"{p['size']:>8} {p.get('backend', 'clang'):>9} {baseline_ms:>12.1f} "
+            f"{attach_ms:>12.1f} {pct:>9.1f}%"
+        )
 
 
 def _print_markdown(points: list[dict[str, Any]]) -> None:
-    print("| size | baseline_ms | attach_ms | attach_% |")
-    print("|---:|---:|---:|---:|")
+    print("| size | backend | baseline_ms | attach_ms | attach_% |")
+    print("|---:|---|---:|---:|---:|")
     for p in points:
         baseline_ms = p["baseline_ms"]
         attach_ms = p["attach_ms"]
         pct = (attach_ms / baseline_ms * 100.0) if baseline_ms else float("nan")
-        print(f"| {p['size']} | {baseline_ms:.1f} | {attach_ms:.1f} | {pct:.1f}% |")
+        print(
+            f"| {p['size']} | {p.get('backend', 'clang')} | {baseline_ms:.1f} | "
+            f"{attach_ms:.1f} | {pct:.1f}% |"
+        )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -285,6 +359,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if not _have("castxml"):
+        print(
+            "NOTE: castxml not found on PATH — measuring the clang backend only "
+            "(the default castxml backend's genuine second-clang-invocation cost "
+            "is not covered by this run)."
+        )
     points = measure(tuple(args.sizes), args.repeat)
 
     if args.markdown:

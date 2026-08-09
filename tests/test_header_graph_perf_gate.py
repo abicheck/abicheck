@@ -68,47 +68,73 @@ class TestSyntheticFixtureGeneration:
 
 
 class TestCheckRegressions:
-    def _point(self, size: int, attach_ms: float) -> dict:
-        return {"size": size, "baseline_ms": 100.0, "attach_ms": attach_ms}
+    def _point(self, size: int, attach_ms: float, backend: str = "clang") -> dict:
+        return {
+            "size": size,
+            "backend": backend,
+            "baseline_ms": 100.0,
+            "attach_ms": attach_ms,
+        }
 
     def test_no_regression_within_tolerance(self):
         points = [self._point(10, 15.0)]
-        baseline = {10: 14.0}
+        baseline = {(10, "clang"): 14.0}
         assert hg_gate.check_regressions(points, baseline, 0.5) == []
 
     def test_regression_beyond_tolerance_reported(self):
         points = [self._point(10, 30.0)]
-        baseline = {10: 10.0}
+        baseline = {(10, "clang"): 10.0}
         failures = hg_gate.check_regressions(points, baseline, 0.5)
         assert len(failures) == 1
         assert "size=10" in failures[0]
+        assert "backend=clang" in failures[0]
 
     def test_missing_baseline_entry_is_not_a_failure(self):
         points = [self._point(999, 30.0)]
-        baseline = {10: 10.0}
+        baseline = {(10, "clang"): 10.0}
         assert hg_gate.check_regressions(points, baseline, 0.5) == []
 
     def test_exactly_at_tolerance_boundary_passes(self):
         points = [self._point(10, 15.0)]
-        baseline = {10: 10.0}  # 15.0 == 10.0 * 1.5, not strictly greater
+        baseline = {(10, "clang"): 10.0}  # 15.0 == 10.0 * 1.5, not strictly greater
         assert hg_gate.check_regressions(points, baseline, 0.5) == []
 
     def test_zero_baseline_is_skipped_not_a_false_regression(self):
         points = [self._point(10, 5.0)]
-        baseline = {10: 0.0}
+        baseline = {(10, "clang"): 0.0}
+        assert hg_gate.check_regressions(points, baseline, 0.5) == []
+
+    def test_backends_are_distinct_baseline_keys(self):
+        # A castxml-backend point must never be gated against a clang-backend
+        # baseline entry for the same size (their costs are structurally
+        # different — see the module docstring).
+        points = [self._point(10, 30.0, backend="castxml")]
+        baseline = {(10, "clang"): 10.0}
         assert hg_gate.check_regressions(points, baseline, 0.5) == []
 
 
 class TestLoadBaseline:
     def test_round_trips_points_shape(self, tmp_path):
         report = tmp_path / "report.json"
-        report.write_text(json.dumps({"points": [{"size": 10, "attach_ms": 12.3}]}))
-        assert hg_gate._load_baseline(report) == {10: 12.3}
+        report.write_text(
+            json.dumps(
+                {"points": [{"size": 10, "backend": "clang", "attach_ms": 12.3}]}
+            )
+        )
+        assert hg_gate._load_baseline(report) == {(10, "clang"): 12.3}
 
     def test_accepts_bare_list_shape(self, tmp_path):
         report = tmp_path / "report.json"
+        report.write_text(
+            json.dumps([{"size": 10, "backend": "clang", "attach_ms": 12.3}])
+        )
+        assert hg_gate._load_baseline(report) == {(10, "clang"): 12.3}
+
+    def test_missing_backend_field_defaults_to_clang(self, tmp_path):
+        # Back-compat with the earlier single-backend report shape.
+        report = tmp_path / "report.json"
         report.write_text(json.dumps([{"size": 10, "attach_ms": 12.3}]))
-        assert hg_gate._load_baseline(report) == {10: 12.3}
+        assert hg_gate._load_baseline(report) == {(10, "clang"): 12.3}
 
 
 class TestMainSkipsWithoutToolchain:
@@ -119,15 +145,25 @@ class TestMainSkipsWithoutToolchain:
         assert "SKIP" in capsys.readouterr().out
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not (_have("clang") and _have("clang++") and _have("g++"))
     or not sys.platform.startswith("linux"),
     reason="header-graph perf gate needs clang/clang++/g++ on a Linux/ELF host",
 )
 class TestLiveMeasurement:
+    """Compiles real fixtures and invokes clang/g++ — excluded from the fast
+    lane by the ``integration`` marker (in addition to its own tool-based
+    skipif, since ``integration``'s Linux gate checks castxml/gcc/g++, not
+    clang specifically — see ``tests/conftest.py``'s
+    ``_integration_skip_reason``)."""
+
     def test_measure_size_returns_positive_timings(self):
-        result = hg_gate._measure_size(5, repeat=1)
+        results = hg_gate._measure_size(5, repeat=1, backends=("clang",))
+        assert len(results) == 1
+        result = results[0]
         assert result["size"] == 5
+        assert result["backend"] == "clang"
         assert result["baseline_ms"] > 0
         assert result["attach_ms"] > 0
 
