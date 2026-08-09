@@ -183,7 +183,8 @@ def both_known_backed_fact(old: AbiSnapshot, new: AbiSnapshot, key: str) -> bool
 def both_known_backed_fact_qualified(
     old: AbiSnapshot,
     new: AbiSnapshot,
-    qualified_key: str,
+    old_qualified_key: str,
+    new_qualified_key: str,
     bare_key: str,
     *,
     old_bare_unambiguous: bool,
@@ -199,17 +200,23 @@ def both_known_backed_fact_qualified(
     value — qualifying only the *lookup* key would silently treat all of
     that real data as unknown and suppress genuine transitions).
 
-    Tries *qualified_key* first on each side; falls back to *bare_key* only
+    Takes *old_qualified_key*/*new_qualified_key* SEPARATELY, not one shared
+    key — a matched old/new pair can legitimately have different qualified
+    identities (e.g. *old* predates ``qualified_name`` entirely, so its own
+    ``type_map_key()`` is bare, while *new* carries the real namespaced
+    spelling); probing both sides with only one side's key would miss the
+    other side's real, qualified-keyed entry (Codex review, fresh evidence,
+    second round). Falls back to the shared *bare_key* on either side only
     when the caller confirms (``old_bare_unambiguous``/``new_bare_unambiguous``
     — typically ``TypeMap.bare_name_is_unambiguous``) that no OTHER distinct
     qualified identity on that side shares the same bare name. Without that
     check, the fallback would reopen the exact bare-name collision the
     qualification was introduced to close.
     """
-    old_producer = fact_producer(old, qualified_key)
+    old_producer = fact_producer(old, old_qualified_key)
     if old_producer is None and old_bare_unambiguous:
         old_producer = fact_producer(old, bare_key)
-    new_producer = fact_producer(new, qualified_key)
+    new_producer = fact_producer(new, new_qualified_key)
     if new_producer is None and new_bare_unambiguous:
         new_producer = fact_producer(new, bare_key)
     return old_producer is not None and new_producer is not None

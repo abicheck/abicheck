@@ -1038,7 +1038,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         # Per-enum key, not a whole-snapshot gate: supports --ast-frontend
         # hybrid (G28 Phase 3); both backends populate is_scoped (G31 Phase C).
-        if fact_known_qualified(old, new, old_map, new_map, name, enum_fact_key(type_map_key(e_old), "is_scoped"), enum_fact_key(name, "is_scoped")):
+        if fact_known_qualified(old, new, old_map, new_map, name, enum_fact_key(type_map_key(e_old), "is_scoped"), enum_fact_key(type_map_key(e_new), "is_scoped"), enum_fact_key(name, "is_scoped")):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
@@ -1657,7 +1657,7 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             f_new = new_fields.get(fname)
             if f_new is None:
                 continue
-            if not fact_known_qualified(old, new, old_map, new_map, name, field_fact_key(type_map_key(t_old), fname, "deprecated"), field_fact_key(name, fname, "deprecated")):
+            if not fact_known_qualified(old, new, old_map, new_map, name, field_fact_key(type_map_key(t_old), fname, "deprecated"), field_fact_key(type_map_key(t_new), fname, "deprecated"), field_fact_key(name, fname, "deprecated")):
                 continue
             if f_old.deprecated is None and f_new.deprecated is not None:
                 changes.append(make_change(
@@ -1701,7 +1701,7 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         # Bare for Change.symbol; fact_known_qualified handles the key below.
         name = t_old.name
-        if not fact_known_qualified(old, new, old_map, new_map, name, type_fact_key(type_map_key(t_old), "deprecated"), type_fact_key(name, "deprecated")):
+        if not fact_known_qualified(old, new, old_map, new_map, name, type_fact_key(type_map_key(t_old), "deprecated"), type_fact_key(type_map_key(t_new), "deprecated"), type_fact_key(name, "deprecated")):
             continue
         if t_old.deprecated is None and t_new.deprecated is not None:
             changes.append(make_change(
@@ -1744,7 +1744,7 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         e_new = _lookup_matched_type(old_map, new_map, e_old)
         if e_new is None:
             continue
-        if not fact_known_qualified(old, new, old_map, new_map, name, enum_fact_key(type_map_key(e_old), "deprecated"), enum_fact_key(name, "deprecated")):
+        if not fact_known_qualified(old, new, old_map, new_map, name, enum_fact_key(type_map_key(e_old), "deprecated"), enum_fact_key(type_map_key(e_new), "deprecated"), enum_fact_key(name, "deprecated")):
             continue
         if e_old.deprecated is None and e_new.deprecated is not None:
             changes.append(make_change(

@@ -447,6 +447,26 @@ building a second identity-resolution mechanism from scratch.
   `TypeMap`-backed ambiguity flags so the four call sites in
   `diff_types.py` (type/field/enum `deprecated`, enum `is_scoped`) stay a
   single line each.
+
+  **A fifth review round found the bare-key-fallback fix itself was
+  probing both sides with only ONE side's qualified key.** The fallback
+  fix's first cut built a single `qualified_key` from `t_old`/`e_old`
+  alone and reused it for the NEW-side lookup too — correct only when
+  both sides happen to share the same qualified identity, which isn't
+  guaranteed for a matched pair: a genuinely legacy `old` snapshot that
+  predates `qualified_name` entirely has `type_map_key(t_old) ==
+  t_old.name` (bare), while a freshly-merged `new` snapshot for the same
+  namespaced declaration has a real qualified `type_map_key(t_new)` —
+  probing `new`'s provenance dict with `old`'s bare-shaped key can never
+  find `new`'s real, qualified-keyed entry (Codex review, fresh evidence,
+  third round). Fixed by threading `old_qualified_key`/`new_qualified_key`
+  through separately (`fact_provenance.both_known_backed_fact_qualified`,
+  `diff_helpers.fact_known_qualified`), each side's own `type_map_key()`
+  derived from its own matched declaration (`t_old`/`t_new`,
+  `e_old`/`e_new`) rather than one shared string — the shared `bare_key`
+  fallback stays a single value, since a matched pair's bare declaration
+  name is the same on both sides by construction (that's how the pair
+  matched in the first place).
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

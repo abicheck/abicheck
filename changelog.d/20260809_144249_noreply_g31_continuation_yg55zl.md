@@ -58,4 +58,11 @@ it should read in CHANGELOG.md. Delete the other sections.
   own bare-name-retry pattern), so a real transition on an existing
   hybrid baseline is detected again without reopening the bare-name
   collision the qualification fix closed.
+- **Fixed the bare-key fallback above only checking one side's qualified
+  identity**: a matched old/new pair can have different qualified
+  identities (e.g. a legacy `old` snapshot predating `qualified_name`
+  entirely vs. a freshly-merged, real-namespaced `new` snapshot), so
+  probing both sides with only `old`'s qualified key could never find
+  `new`'s real, qualified-keyed provenance entry. `fact_known_qualified`
+  now derives and probes each side's own qualified key independently.
 

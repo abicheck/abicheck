@@ -314,7 +314,7 @@ class TestFactKnownQualified:
         new_map = build_type_map([t])
         assert fact_known_qualified(
             old, new, old_map, new_map, "Foo",
-            "type:ns::Foo:deprecated", "type:Foo:deprecated",
+            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
         )
 
     def test_legacy_bare_key_falls_back_when_unambiguous(self) -> None:
@@ -326,7 +326,7 @@ class TestFactKnownQualified:
         new_map = build_type_map([t])
         assert fact_known_qualified(
             old, new, old_map, new_map, "Foo",
-            "type:ns::Foo:deprecated", "type:Foo:deprecated",
+            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
         )
 
     def test_ambiguous_bare_name_does_not_fall_back(self) -> None:
@@ -341,7 +341,7 @@ class TestFactKnownQualified:
         new_map = build_type_map([a_foo])
         assert not fact_known_qualified(
             old, new, old_map, new_map, "Foo",
-            "type:a::Foo:deprecated", "type:Foo:deprecated",
+            "type:a::Foo:deprecated", "type:a::Foo:deprecated", "type:Foo:deprecated",
         )
 
     def test_genuinely_unknown_stays_unknown(self) -> None:
@@ -352,5 +352,24 @@ class TestFactKnownQualified:
         new_map = build_type_map([t])
         assert not fact_known_qualified(
             old, new, old_map, new_map, "Foo",
-            "type:ns::Foo:deprecated", "type:Foo:deprecated",
+            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
+        )
+
+    def test_asymmetric_qualified_identity_probes_each_side_independently(self) -> None:
+        """Codex review, second round: old predates ``qualified_name``
+        entirely (its own ``type_map_key()`` is bare), while new carries the
+        real namespaced spelling -- probing new's side with OLD's
+        (bare-shaped) qualified key must not be what makes this fail; each
+        side's OWN qualified key must be tried."""
+        old = _hybrid_snap({"type:Color:deprecated": "castxml"})
+        new = _hybrid_snap({"type:ns::Color:deprecated": "clang"})
+        old_color = RecordType(name="Color", qualified_name=None, kind="class")
+        new_color = RecordType(name="Color", qualified_name="ns::Color", kind="class")
+        old_map = build_type_map([old_color])
+        new_map = build_type_map([new_color])
+        assert fact_known_qualified(
+            old, new, old_map, new_map, "Color",
+            "type:Color:deprecated",  # old's own type_map_key() -- bare
+            "type:ns::Color:deprecated",  # new's own type_map_key() -- qualified
+            "type:Color:deprecated",
         )
