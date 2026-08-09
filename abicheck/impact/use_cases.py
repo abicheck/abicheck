@@ -181,7 +181,12 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
     declared coverage quietly disappear.
     """
     text = Path(path).read_text(encoding="utf-8")
-    raw = yaml.safe_load(text)
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise UseCaseManifestError(
+            f"impact-use-cases.yaml: {path}: invalid YAML syntax: {exc}"
+        ) from exc
     return parse_use_case_manifest(raw)
 
 
@@ -195,26 +200,38 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     header-only graph) or a ``source_decl``/other node whose own declared
     ``visibility`` is public (``PUBLIC_VISIBILITIES`` — the same set
     :mod:`abicheck.impact.consumer_graph`'s direct-requirement check reads).
-    Both a node's own id and its ``label`` (when set) are registered, so a
-    manifest can name either the graph's internal id spelling or the
-    human-readable label.
 
-    Later registrations never overwrite an earlier one for the same string
-    (``setdefault``) — an ambiguous label two different nodes share resolves
-    to whichever public entry was iterated first, deterministically (graph
-    node order), rather than flipping between runs.
+    A node's own id is always registered (exact-id lookups can never be
+    ambiguous — two distinct nodes never share one id). A node's ``label``
+    (when set) is registered only when it resolves *uniquely* across every
+    public node in the graph: overloaded C++ entry points routinely share
+    one display label, and silently picking an arbitrary one of them would
+    hand a manifest's ``entrypoints: [foo]`` a wrong-but-confident answer
+    instead of the "degrade to no answer" this module otherwise guarantees
+    (:func:`build_use_case_graph`). An id also always wins over a label —
+    built as a separate pass, an ambiguous or colliding label can never
+    shadow an exact id already registered.
     """
     from ..buildsource.source_graph import PUBLIC_VISIBILITIES
 
-    index: dict[str, str] = {}
-    for node in library_graph.nodes:
+    def is_public(node: GraphNode) -> bool:
         visibility = str((node.resolved or node.attrs).get("visibility", ""))
-        is_public = node.kind == "binary_symbol" or visibility in PUBLIC_VISIBILITIES
-        if not is_public:
-            continue
-        index.setdefault(node.id, node.id)
+        return node.kind == "binary_symbol" or visibility in PUBLIC_VISIBILITIES
+
+    public_nodes = [n for n in library_graph.nodes if is_public(n)]
+
+    index: dict[str, str] = {n.id: n.id for n in public_nodes}
+
+    label_targets: dict[str, set[str]] = {}
+    for node in public_nodes:
         if node.label:
-            index.setdefault(node.label, node.id)
+            label_targets.setdefault(node.label, set()).add(node.id)
+    for label, targets in label_targets.items():
+        if label in index:
+            continue  # an exact id already claims this string; it wins
+        if len(targets) == 1:
+            index[label] = next(iter(targets))
+        # else: label is ambiguous across >1 public node — left unresolved
     return index
 
 

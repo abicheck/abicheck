@@ -178,6 +178,17 @@ def test_load_use_case_manifest_rejects_a_malformed_file(tmp_path: Path) -> None
         load_use_case_manifest(manifest)
 
 
+def test_load_use_case_manifest_wraps_a_yaml_syntax_error(tmp_path: Path) -> None:
+    """A syntactically invalid document (not merely a structurally wrong
+    one) must still surface through the public UseCaseManifestError
+    contract, not a bare yaml.YAMLError -- so every caller can catch one
+    exception type for any invalid manifest."""
+    manifest = tmp_path / "impact-use-cases.yaml"
+    manifest.write_text("- use_case: [unterminated flow sequence\n")
+    with pytest.raises(UseCaseManifestError, match="invalid YAML syntax"):
+        load_use_case_manifest(manifest)
+
+
 def test_load_use_case_manifest_of_an_empty_file_is_empty(tmp_path: Path) -> None:
     manifest = tmp_path / "impact-use-cases.yaml"
     manifest.write_text("")
@@ -235,6 +246,53 @@ def test_build_use_case_graph_skips_an_unresolvable_entrypoint_silently() -> Non
     assert [e for e in graph.edges if e.kind == "USE_CASE_USES_ENTRY"] == []
     # The use_case node itself is still emitted.
     assert graph.has_node(use_case_node_id("training-workflow"))
+
+
+def test_build_use_case_graph_skips_an_ambiguous_label_silently() -> None:
+    """Two public entries sharing one label (a common shape for C++
+    overloads) must never resolve a bare-label entrypoint to an arbitrary
+    one of them -- ambiguous is exactly the 'no answer' case, not a
+    coin-flip pick."""
+    library = _library_graph()
+    library.add_node(
+        GraphNode(
+            id="decl://train_overload_2",
+            kind="source_decl",
+            label="train",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    graph = build_use_case_graph(
+        [UseCaseDefinition(use_case="training-workflow", entrypoints=("train",))],
+        library,
+    )
+    assert [e for e in graph.edges if e.kind == "USE_CASE_USES_ENTRY"] == []
+
+
+def test_build_use_case_graph_an_exact_id_wins_over_a_colliding_label() -> None:
+    """A manifest naming a node's exact id must resolve to that node even
+    when some *other* public node's own label happens to collide with that
+    id string -- an id lookup is never shadowed by an ambiguous or
+    unrelated label registration."""
+    library = _library_graph()
+    library.add_node(
+        GraphNode(
+            id="decl://other",
+            kind="source_decl",
+            label="decl://train",  # collides with train's own id
+            attrs={"visibility": "public_header"},
+        )
+    )
+    graph = build_use_case_graph(
+        [
+            UseCaseDefinition(
+                use_case="training-workflow", entrypoints=("decl://train",)
+            )
+        ],
+        library,
+    )
+    edges = {e.dst for e in graph.edges if e.kind == "USE_CASE_USES_ENTRY"}
+    assert edges == {"decl://train"}
 
 
 def test_build_use_case_graph_does_not_resolve_an_internal_declaration() -> None:
