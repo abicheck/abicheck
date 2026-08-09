@@ -148,6 +148,15 @@ def test_parse_rejects_an_unknown_field(raw_entry: dict) -> None:
         parse_use_case_manifest([raw_entry])
 
 
+def test_parse_rejects_unknown_fields_with_heterogeneous_key_types() -> None:
+    """A syntactically valid entry may mix key types (e.g. an integer key
+    alongside a string one) -- the unknown-field check must not raise a
+    bare TypeError comparing incomparable types while sorting them for the
+    error message."""
+    with pytest.raises(UseCaseManifestError, match="unknown field"):
+        parse_use_case_manifest([{"use_case": "x", 1: "a", "z": "b"}])
+
+
 @pytest.mark.parametrize(
     "raw_entry", [{}, {"use_case": ""}, {"use_case": "   "}, {"use_case": 5}]
 )
@@ -415,6 +424,44 @@ def test_join_folds_the_use_case_node_onto_the_shared_entry_node() -> None:
     assert len(joined.nodes) == before_nodes + 1
     entry = next(n for n in joined.nodes if n.id == "decl://train")
     assert {f.producer for f in entry.facts} >= {USE_CASE_PROVENANCE}
+
+
+def test_join_never_flips_an_unproven_node_to_consumer_compiled() -> None:
+    """A public entry that is only an unproven call-graph fallback node
+    (no ``consumer_compiled_body`` attr, ``provenance="call_graph"``,
+    ``CONF_REDUCED``) must still read as NOT consumer-compiled
+    (``is_consumer_compiled_node`` False) after a use case references it --
+    the use-case placeholder registration must never outrank real
+    reachability-provenance evidence and let a later call-graph traversal
+    wrongly walk through an unproven body (Codex review, fresh evidence)."""
+    from abicheck.buildsource.graph_facts import CONF_REDUCED
+    from abicheck.buildsource.source_graph import is_consumer_compiled_node
+
+    library = SourceGraphSummary()
+    library.add_node(
+        GraphNode(
+            id="decl://dispatch",
+            kind="source_decl",
+            label="dispatch",
+            attrs={"visibility": "public_header"},
+            provenance="call_graph",
+            confidence=CONF_REDUCED,
+        )
+    )
+    node_by_id = {n.id: n for n in library.nodes}
+    assert is_consumer_compiled_node("decl://dispatch", node_by_id) is False
+
+    use_cases = build_use_case_graph(
+        [UseCaseDefinition(use_case="training-workflow", entrypoints=("dispatch",))],
+        library,
+    )
+    joined = join_use_case_graph(library, use_cases)
+    joined_node_by_id = {n.id: n for n in joined.nodes}
+    entry = joined_node_by_id["decl://dispatch"]
+    assert {f.producer for f in entry.facts} >= {USE_CASE_PROVENANCE, "call_graph"}
+    assert (
+        is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False
+    ), "a use-case reference must never make an unproven node look consumer-compiled"
 
 
 def test_join_does_not_mutate_the_library_graph() -> None:

@@ -56,6 +56,7 @@ import yaml
 
 from ..buildsource.graph_facts import (
     CONF_HIGH,
+    CONF_UNKNOWN,
     USE_CASE_EDGE_KINDS as USE_CASE_EDGE_KINDS,
     USE_CASE_NODE_KINDS as USE_CASE_NODE_KINDS,
     GraphEdge,
@@ -178,11 +179,18 @@ def _require_mapping(entry: Any, index: int) -> dict[str, Any]:
             f"impact-use-cases.yaml: entry {index} must be a mapping, got "
             f"{type(entry).__name__}"
         )
-    unknown = sorted(set(entry) - _MANIFEST_ENTRY_KEYS)
+    # Sorted by repr, not the bare keys (Codex review, fresh evidence): a
+    # syntactically valid YAML mapping may use heterogeneous key types (an
+    # integer key alongside a string one, e.g. `1: foo`) -- sorted() on the
+    # raw values would raise a bare TypeError comparing int to str *before*
+    # UseCaseManifestError could even be constructed, breaking this
+    # function's own single-exception contract for exactly the malformed
+    # input it exists to reject cleanly.
+    unknown = sorted((set(entry) - _MANIFEST_ENTRY_KEYS), key=repr)
     if unknown:
         raise UseCaseManifestError(
             f"impact-use-cases.yaml: entry {index} has unknown field(s) "
-            f"{unknown} — expected only {sorted(_MANIFEST_ENTRY_KEYS)}"
+            f"{unknown!r} — expected only {sorted(_MANIFEST_ENTRY_KEYS)}"
         )
     return entry
 
@@ -324,15 +332,39 @@ def build_use_case_graph(
     resolution) — only the ``USE_CASE_USES_ENTRY`` edges are conditional.
 
     A resolved entrypoint also gets a same-id placeholder node registered
-    alongside its edge (kind copied from the real library node, so
-    ``add_node``'s "first registration wins" rule never overrides it) —
-    mirroring :func:`abicheck.impact.consumer_graph.build_consumer_graph`'s
-    identical pattern for its ``binary_symbol`` targets. Without it, only an
-    *edge* would point at the library node and the join
-    (:func:`join_use_case_graph`) would never actually deposit a
-    ``USE_CASE_PROVENANCE`` fact onto the shared node — the merge (ADR-046
-    D2) only happens on a node/edge registration, not implicitly because an
-    edge names an id.
+    alongside its edge (kind copied from the real library node) — mirroring
+    :func:`abicheck.impact.consumer_graph.build_consumer_graph`'s identical
+    pattern for its ``binary_symbol`` targets. Without it, only an *edge*
+    would point at the library node and the join (:func:`join_use_case_graph`)
+    would never actually deposit a ``USE_CASE_PROVENANCE`` fact onto the
+    shared node — the merge (ADR-046 D2) only happens on a node/edge
+    registration, not implicitly because an edge names an id.
+
+    Deliberately registered at ``CONF_UNKNOWN``, not ``CONF_HIGH`` (Codex
+    review, fresh evidence): ``SourceGraphSummary.add_node``'s ADR-046 D2
+    merge doesn't keep ``attrs``/``provenance``/``confidence`` per-producer —
+    ``provenance``/``confidence`` are each set from the single
+    highest-*precedence* fact across every producer that ever registered the
+    node (``ensure_facts_and_resolve``'s ``top = min(entity.facts, key=
+    _precedence_key)``), and precedence ranks confidence first. A
+    ``kythe``/``codeql``-sourced or indirectly-resolved ``call_graph``
+    fallback node carries no ``consumer_compiled_body`` attr and is exactly
+    ``CONF_REDUCED`` — lower than this module's placeholder would be at
+    ``CONF_HIGH`` — which would let a use-case reference *win* that node's
+    ``provenance`` outright. `source_graph.is_consumer_compiled_node`` falls
+    back to reading ``provenance`` exactly when no ``consumer_compiled_body``
+    attr is present, so a provenance flip from a real "unproven body" signal
+    to ``declared_use_case`` (not itself one of the three provenances that
+    signal excludes) would flip that predicate from correctly conservative
+    (``False``) to wrongly permissive (``True``) — letting a later
+    consumer-impact call-graph traversal walk straight through an out-of-line
+    body it was never proven to reach, and report a false impact path.
+    ``CONF_UNKNOWN`` is the lowest rank (:data:`~abicheck.buildsource.
+    graph_facts._CONFIDENCE_RANK`), so this placeholder can never outrank
+    *any* real evidence the target node already carries — it only ever wins
+    when the target has no competing fact at all, which cannot happen here
+    (:func:`_public_entry_index` only ever resolves an id/label already
+    present in *library_graph*).
 
     Every ``test_case`` named in ``tests`` gets its own node and a
     ``TEST_COVERS_USE_CASE`` edge onto its use case, unconditionally: unlike
@@ -366,7 +398,7 @@ def build_use_case_graph(
                     id=target,
                     kind=target_kind,
                     provenance=USE_CASE_PROVENANCE,
-                    confidence=CONF_HIGH,
+                    confidence=CONF_UNKNOWN,
                 )
             )
             graph.add_edge(
