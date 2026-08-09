@@ -27,6 +27,7 @@ from .diff_helpers import (
     build_type_map as _build_type_map,
     lookup_matched_type as _lookup_matched_type,
     make_change,
+    type_map_key,
 )
 from .diff_symbols import (
     _PUBLIC_VIS,
@@ -1038,7 +1039,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # Per-enum key, not a whole-snapshot gate: supports --ast-frontend
         # hybrid (G28 Phase 3). both_known_backed_fact: both backends
         # populate is_scoped today (G31 Phase C), directly cross-comparable.
-        if both_known_backed_fact(old, new, enum_fact_key(name, "is_scoped")):
+        if both_known_backed_fact(old, new, enum_fact_key(type_map_key(e_old), "is_scoped")):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
@@ -1657,9 +1658,7 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             f_new = new_fields.get(fname)
             if f_new is None:
                 continue
-            if not both_known_backed_fact(
-                old, new, field_fact_key(name, fname, "deprecated")
-            ):
+            if not both_known_backed_fact(old, new, field_fact_key(type_map_key(t_old), fname, "deprecated")):
                 continue
             if f_old.deprecated is None and f_new.deprecated is not None:
                 changes.append(make_change(
@@ -1701,9 +1700,10 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         t_new = _lookup_matched_type(old_map, new_map, t_old)
         if t_new is None:
             continue
-        # Bare, not the qualified matching key — see _diff_types's comment.
+        # Bare for Change.symbol, but the provenance lookup below needs the
+        # qualified key (dumper_hybrid.py keys it the same way; Codex review).
         name = t_old.name
-        if not both_known_backed_fact(old, new, type_fact_key(name, "deprecated")):
+        if not both_known_backed_fact(old, new, type_fact_key(type_map_key(t_old), "deprecated")):
             continue
         if t_old.deprecated is None and t_new.deprecated is not None:
             changes.append(make_change(
@@ -1746,7 +1746,7 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         e_new = _lookup_matched_type(old_map, new_map, e_old)
         if e_new is None:
             continue
-        if not both_known_backed_fact(old, new, enum_fact_key(name, "deprecated")):
+        if not both_known_backed_fact(old, new, enum_fact_key(type_map_key(e_old), "deprecated")):
             continue
         if e_old.deprecated is None and e_new.deprecated is not None:
             changes.append(make_change(

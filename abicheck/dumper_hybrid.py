@@ -454,14 +454,22 @@ _LAYOUT_SCALAR_ATTRS = (
 
 
 def _merge_field(
-    type_name: str,
+    t: RecordType,
     f: TypeField,
     clang_f: TypeField | None,
     provenance: dict[str, str],
 ) -> TypeField:
     updates: dict[str, Any] = {}
     for attr in ("default", "deprecated"):
-        key = field_fact_key(type_name, f.name, attr)
+        # "default" stays castxml-only (both_castxml_backed_fact) and keeps
+        # the bare owning-type-name key every other castxml-only fact
+        # already uses. "deprecated" is genuinely cross-producer since G31
+        # Phase C, and a clang-only sibling type sharing t's bare name can
+        # independently write to this same provenance dict (see
+        # merge_snapshots' clang-only-type append loop below) -- qualify
+        # the key so the two don't collide (Codex review, fresh evidence).
+        type_key = type_map_key(t) if attr == "deprecated" else t.name
+        key = field_fact_key(type_key, f.name, attr)
         value = _backfill_fact(
             getattr(f, attr), getattr(clang_f, attr, None), key, provenance
         )
@@ -483,7 +491,11 @@ def _merge_record_type(
 ) -> RecordType:
     updates: dict[str, Any] = {}
     for attr in ("is_abstract", "deprecated"):
-        key = type_fact_key(t.name, attr)
+        # Same bare-vs-qualified split as _merge_field above: is_abstract
+        # stays bare (pre-existing castxml-only fact, no clang-only append
+        # writes to it), deprecated is qualified (G31 Phase C).
+        type_key = type_map_key(t) if attr == "deprecated" else t.name
+        key = type_fact_key(type_key, attr)
         value = _backfill_fact(
             getattr(t, attr), getattr(clang_t, attr, None), key, provenance
         )
@@ -507,7 +519,7 @@ def _merge_record_type(
 
     clang_fields_by_name = {cf.name: cf for cf in clang_t.fields} if clang_t else {}
     merged_fields = [
-        _merge_field(t.name, f, clang_fields_by_name.get(f.name), provenance)
+        _merge_field(t, f, clang_fields_by_name.get(f.name), provenance)
         for f in t.fields
     ]
     if merged_fields != t.fields:
@@ -520,8 +532,13 @@ def _merge_enum_type(
     e: EnumType, clang_e: EnumType | None, provenance: dict[str, str]
 ) -> EnumType:
     updates: dict[str, Any] = {}
+    # Both facts get clang-only-append writes (merge_snapshots' clang-only
+    # enum loop below), so both need the qualified key uniformly -- unlike
+    # RecordType's is_abstract/deprecated split above, there's no bare-only
+    # fact here to preserve compatibility with.
+    type_key = type_map_key(e)
     for attr in ("is_scoped", "deprecated"):
-        key = enum_fact_key(e.name, attr)
+        key = enum_fact_key(type_key, attr)
         value = _backfill_fact(
             getattr(e, attr), getattr(clang_e, attr, None), key, provenance
         )
@@ -605,13 +622,18 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         # sourced -- without this, both_known_backed_fact sees no recorded
         # provenance at all for a declaration that exists on both snapshot
         # sides only via clang, and incorrectly declines to compare a real
-        # transition (Codex review, fresh evidence). Provenance keys stay
-        # bare-name (type_fact_key/field_fact_key), matching what the
-        # detectors themselves query by -- only the MATCH above needs the
-        # qualified identity.
-        provenance[type_fact_key(t.name, "deprecated")] = "clang"
+        # transition (Codex review, fresh evidence). Qualified key (not
+        # bare t.name): two distinct types sharing only a bare leaf name in
+        # different namespaces (e.g. a genuinely clang-only b::Foo and a
+        # castxml+clang-matched a::Foo) would otherwise silently collide in
+        # this shared provenance dict too -- one writer's entry
+        # overwriting the other's (Codex review, fresh evidence, second
+        # round) -- matching _merge_record_type/_merge_field's identical
+        # qualification for this same fact above.
+        type_key = type_map_key(t)
+        provenance[type_fact_key(type_key, "deprecated")] = "clang"
         for f in t.fields:
-            provenance[field_fact_key(t.name, f.name, "deprecated")] = "clang"
+            provenance[field_fact_key(type_key, f.name, "deprecated")] = "clang"
     merged_types.extend(clang_only_types)
 
     merged_enums = [
@@ -623,8 +645,10 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         e for e in clang_snap.enums if type_map_key(e) not in castxml_enum_keys
     ]
     for e in clang_only_enums:
-        provenance[enum_fact_key(e.name, "deprecated")] = "clang"
-        provenance[enum_fact_key(e.name, "is_scoped")] = "clang"
+        # Qualified key -- same reasoning as clang_only_types above.
+        type_key = type_map_key(e)
+        provenance[enum_fact_key(type_key, "deprecated")] = "clang"
+        provenance[enum_fact_key(type_key, "is_scoped")] = "clang"
     merged_enums.extend(clang_only_enums)
 
     merged_variables = [

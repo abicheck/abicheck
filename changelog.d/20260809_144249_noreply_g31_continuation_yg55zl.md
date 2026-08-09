@@ -40,4 +40,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   mirroring `header_cv_facts_reliable`'s existing v9 pattern) instead of
   treating a stale `None` as a trustworthy "not deprecated"/"not scoped"
   answer.
+- **Fixed a follow-on collision in the same-named provenance-recording fix
+  above**: `dumper_hybrid.merge_snapshots`'s per-fact provenance dict now
+  keys `type`/`field`/`enum` `deprecated` and `enum` `is_scoped` by
+  namespace-qualified identity rather than bare declaration name, so two
+  distinct types sharing only a bare leaf name in different namespaces
+  (e.g. `a::Foo` / `b::Foo`) no longer silently overwrite each other's
+  provenance entry in the shared dict — independent of, and one layer
+  below, the old/new matching fix above.
 

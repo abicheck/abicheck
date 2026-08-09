@@ -384,6 +384,38 @@ building a second identity-resolution mechanism from scratch.
   `Function.deprecated` in its "clang structurally cannot populate this"
   example list) to note the capability gap closed and callers should no
   longer pass the flag for this fact.
+
+  **A third review round found the qualification fix (finding 2 of this
+  round's follow-ups) was one layer too shallow.** The `type_map_key`-based
+  matching fix makes old/new MATCHING namespace-aware, but
+  `dumper_hybrid.py`'s `fact_provenance` dict — a single flat
+  `dict[str, str]` shared across every merged/appended declaration — still
+  keyed its `deprecated`/`is_scoped` entries by bare declaration name
+  (Codex review, fresh evidence). Two distinct types sharing only a bare
+  leaf name in different namespaces (e.g. a castxml+clang-matched `a::Foo`
+  and a genuinely clang-only `b::Foo`) write to the exact same provenance
+  dict key, so one writer's entry silently overwrites the other's —
+  independent of the matching fix, since this collision is in the shared
+  write-side dict, not in old/new lookup. Confirmed real: this class of
+  write only became reachable once the clang-only-declaration
+  provenance-stamping fix (finding 2 above) started writing "clang"
+  entries for facts a bare-name-colliding, castxml+clang-matched sibling
+  might also be writing "castxml" entries for — before that fix, a
+  clang-only declaration wrote no provenance entry for these facts at
+  all, so there was nothing to collide with. Fixed by qualifying exactly
+  the affected keys (`type`/`field`/`enum` `deprecated`, and `enum`
+  `is_scoped` — the four facts Phase C's `both_known_backed_fact` gate and
+  clang-only-append writes actually touch) with
+  `diff_helpers.type_map_key()` in both `dumper_hybrid.py`'s writers
+  (`_merge_record_type`/`_merge_field`/`_merge_enum_type`, and the three
+  clang-only append loops) and `diff_types.py`'s four reader call sites —
+  while deliberately leaving `RecordType.is_abstract` and
+  `TypeField.default` (the two pre-existing, castxml-only facts
+  `_merge_record_type`/`_merge_field` also handle) on their original bare
+  keys, since neither gets a clang-only-append write and qualifying them
+  would be an unrelated, unverified change outside this finding's scope.
+  `Change.symbol`/description stay bare throughout — only the internal
+  provenance-dict key changed.
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through
