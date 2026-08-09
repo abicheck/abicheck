@@ -117,8 +117,6 @@ def _get_cache_dir() -> Path:
         try:
             base = Path.home() / ".cache"
         except RuntimeError:
-            import tempfile
-
             base = Path(tempfile.gettempdir())
     return base / "abi_check" / "snapshots"
 

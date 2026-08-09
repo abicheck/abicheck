@@ -375,11 +375,10 @@ def _extra_data_size(kind: int, vlen: int, version: int, size_or_type: int) -> i
             if size_or_type >= 0x2000:  # large struct
                 return vlen * 12
             return vlen * 8
-        else:
-            # v2: small = name(2) + offset(2), large = name(2) + pad(2) + offset_hi(2) + offset_lo(2)
-            if size_or_type >= _CTF_V2_LSTRUCT_THRESH:
-                return vlen * 8
-            return vlen * 4
+        # v2: small = name(2) + offset(2), large = name(2) + pad(2) + offset_hi(2) + offset_lo(2)
+        if size_or_type >= _CTF_V2_LSTRUCT_THRESH:
+            return vlen * 8
+        return vlen * 4
     if kind == CTF_K_ENUM:
         return vlen * 8  # name(4) + value(4) per enumerator
     if kind == CTF_K_FUNCTION:

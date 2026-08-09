@@ -591,9 +591,7 @@ def compute_exit_code(
             change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
         )
         if config.level_for(cat) == SeverityLevel.ERROR:
-            code = _CATEGORY_EXIT_CODES[cat]
-            if code > worst:
-                worst = code
+            worst = max(worst, _CATEGORY_EXIT_CODES[cat])
     return worst
 
 

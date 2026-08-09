@@ -26,6 +26,7 @@ from .diff_cxx_rules import itanium_qualified_name, vtable_slot_is_override_reus
 from .diff_helpers import (
     build_type_map as _build_type_map,
     fact_known_qualified,
+    is_sentinel_enum_member,
     lookup_matched_type as _lookup_matched_type,
     make_change,
     type_map_key,
@@ -1042,15 +1043,6 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
-        # Sentinel detection is name-pattern based to avoid accidental
-        # downgrades of ordinary enum members with the maximum numeric value.
-        # Recognized patterns: *_last, *_max, *_count (case-insensitive).
-        _SENTINEL_SUFFIXES = ("_last", "_max", "_count")
-
-        def _is_sentinel_member(member_name: str) -> bool:
-            n = member_name.lower()
-            return n.endswith(_SENTINEL_SUFFIXES) or n in {"last", "max", "count"}
-
         # Build inverse map: new_value → new_name for values that are "new" (not in old names).
         # Only keep entries where the value maps to exactly one new name —
         # aliases (multiple names with same value) must not suppress true removals.
@@ -1078,7 +1070,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             elif new_members[mname] != mval:
                 kind = (
                     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
-                    if _is_sentinel_member(mname)
+                    if is_sentinel_enum_member(mname)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
                 changes.append(make_change(

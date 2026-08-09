@@ -225,9 +225,7 @@ def _rewrite_links(body: str) -> str:
         # MkDocs link.
         if target.startswith("../") or ("/" not in target and "." in target):
             return f"`{text.strip('`')}`"
-        else:
-            url = target
-        return f"[{text}]({url})"
+        return f"[{text}]({target})"
 
     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", repl, body)
 

@@ -165,7 +165,12 @@ def _load_yaml_strict(text: str, *, source: str) -> Any:
         # flags every `Loader=` it cannot name-match against
         # `SafeLoader`/`CSafeLoader`, subclasses included.
         return yaml.load(text, Loader=_StrictLoader)  # nosec B506
-    except ManifestValidationError:
+    # `_construct_mapping`'s own duplicate-key error must reach the caller as
+    # itself, never re-wrapped as "invalid YAML" by the handler below. Today
+    # that is already true by inheritance (`AbicheckError`/`ValueError`, not
+    # `yaml.YAMLError`); this arm pins it so widening the handler below cannot
+    # silently reclassify a schema violation.
+    except ManifestValidationError:  # pylint: disable=try-except-raise
         raise
     except yaml.YAMLError as exc:
         raise ManifestValidationError(f"{source}: invalid YAML: {exc}") from exc

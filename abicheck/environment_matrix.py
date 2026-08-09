@@ -305,7 +305,7 @@ class EnvironmentMatrix:
         """
         import yaml
 
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             try:
                 data = yaml.safe_load(f) or {}
             except yaml.YAMLError as exc:

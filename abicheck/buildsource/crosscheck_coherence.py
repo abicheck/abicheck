@@ -293,5 +293,3 @@ def _check_source_surface_dso_mismatch(
         facts=len(exported),
         counters={"exported": len(exported), "matched": 0, "declarations": n_decls},
     )
-
-
