@@ -312,11 +312,18 @@ the first one hit), `abicheck/cli_compare_helpers.py`
 (its own `"reason": {...}` construction site gets the same field),
 `abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
 "reason": ..., "reason_codes": [...]}` — additive sibling field, `reason`
-unchanged), `abicheck/schemas/__init__.py` (schema version bump + field
-registration), `docs/reference/change-kinds.md` or a new `docs/reference/
-comparability-reason-codes.md` (document the closed enum — new page only
-if it doesn't fit as a section of an existing comparability doc; check
-`docs/use/contract-evaluation.md` and `docs/reference/
+unchanged), `abicheck/scan_engine.py` (`scan --against` catches the same
+two exceptions at its own comparability gate, line ~1039, and today emits
+only `diff_summary = {"reason": str(exc)}` — free text, same gap as the
+CLI/MCP `compare` paths this item was originally scoped to; add the same
+`reason_codes` field here too, since `scan`'s CLI and MCP surfaces share
+this one engine and would otherwise still have to parse prose for exactly
+the causes this item exists to type), `abicheck/schemas/__init__.py`
+(schema version bump + field registration, covering both the compare and
+scan report schemas), `docs/reference/change-kinds.md` or a new
+`docs/reference/comparability-reason-codes.md` (document the closed enum —
+new page only if it doesn't fit as a section of an existing comparability
+doc; check `docs/use/contract-evaluation.md` and `docs/reference/
 compatibility-evaluation-config.md` first per `docs/AGENTS.md`'s "extend an
 existing canonical owner" rule before creating one).
 
@@ -332,7 +339,12 @@ version-bump check if one exists for this schema family; a test asserting
 CLI's `codes` for the same mismatch (ADR-055 D4's "one shared
 implementation" invariant, applied to this new field) while leaving its
 existing string `reason` field's shape unchanged (an explicit
-backward-compatibility regression test, not just a new-field test).
+backward-compatibility regression test, not just a new-field test); a
+`tests/test_cli_scan.py`/`tests/test_scan_compare_parity.py`-style test
+asserting `scan --against`'s own `diff_summary` gains the identical
+`reason_codes` for the identical mismatch `compare` reports, so `scan` and
+`compare` stay in parity on this field the way ADR-055 already requires
+them to for everything else routed through the shared engine.
 
 **Docs:** whichever comparability doc the field lands in, plus a
 changelog fragment (`### Added`).
@@ -472,8 +484,15 @@ before any external publication step.
 per `docs/AGENTS.md`'s front-matter schema — `use` is not one of the eight
 valid `doc_type` values; this is a task-oriented page, matching every
 other `docs/use/` page's convention) covering: the skill catalog
-(four P0 skills, one line each, linking to their generated `.agents/skills/
-<name>/SKILL.md`), installation (what `.agents/skills/` means, which agents
+(four P0 skills, one line each, each linking to its generated skill with a
+full `https://github.com/abicheck/abicheck/blob/main/.agents/skills/<name>/
+SKILL.md`-style URL, not a relative mkdocs link — `.agents/skills/` lives
+outside the `docs/` source tree mkdocs builds from, so a relative link
+would be unresolved/dangling under `mkdocs build --strict`; this repo's
+existing convention for linking a non-`docs/` repo path, e.g.
+`docs/use/security-hardening.md`'s link to `abicheck/policies/security.yaml`,
+is exactly this full-URL pattern, not a relative one), installation (what
+`.agents/skills/` means, which agents
 read it natively per ADR-058's ecosystem research, no per-vendor
 re-explanation needed since that's a fact owned by this one page), CLI/tool
 prerequisites (same prerequisites `docs/use/cli-usage.md` already states —
