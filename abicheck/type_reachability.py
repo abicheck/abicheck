@@ -1274,9 +1274,24 @@ def directly_referenced_stdlib_type_spellings(
             # entirely -- confirmed empirically. `_namespace_suffix_
             # spellings` cannot manufacture that coincidence, since it
             # only derives suffixes from `identity`'s own scope chain.
-            if typedef_target != identity and typedef_target not in (
-                _namespace_suffix_spellings(identity)
-            ):
+            # A suffix match is itself not safe unqualified: the target
+            # string can equal one of `identity`'s own structural suffixes
+            # while *also* being the real, distinct identity of an
+            # unrelated non-stdlib record/enum captured in this same
+            # snapshot (Codex review, fresh evidence -- e.g. a DWARF
+            # `std::chrono::duration` alongside an unrelated global
+            # `duration` record, with a typedef `chrono::duration ->
+            # duration`: the target textually matches `identity`'s own bare
+            # suffix, but a real, captured `duration` record is exactly
+            # what it actually names). Rejecting whenever the target is
+            # itself a captured non-stdlib identity closes this without
+            # reopening the ABI-tag coincidence above, since an *exact*
+            # match against `identity` is still accepted unconditionally.
+            suffix_match = (
+                typedef_target in _namespace_suffix_spellings(identity)
+                and typedef_target not in non_stdlib_identities
+            )
+            if typedef_target != identity and not suffix_match:
                 # A real, unrelated typedef alias whose key -- or one of
                 # its own derived namespace-suffix spellings -- happens to
                 # equal this identity's stripped spelling (bare key,

@@ -1424,3 +1424,65 @@ class TestTypedefTargetMustMatchTheCapturedIdentityNotJustItsStrippedForm:
         assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
             {"std::vector<int>", "vector<int>"}
         )
+
+
+class TestTypedefTargetSuffixMustNotBeARealCapturedIdentityElsewhere:
+    """Codex review, fresh evidence: the structural namespace-suffix
+    exception above (`_namespace_suffix_spellings`) is itself not safe
+    unqualified -- a typedef target string can equal one of `identity`'s
+    own structural suffixes while *also* being the real, distinct identity
+    of an unrelated non-stdlib record/enum captured in this same snapshot.
+    E.g. a DWARF `std::chrono::duration` alongside an unrelated global
+    `duration` record, with a typedef `chrono::duration -> duration`: the
+    target textually matches `identity`'s own bare suffix, but a real,
+    captured `duration` record is exactly what it actually names. Only an
+    *exact* target match against `identity` is accepted unconditionally;
+    a suffix match is rejected whenever the target is itself a captured
+    non-stdlib identity."""
+
+    def test_a_typedef_target_matching_a_suffix_but_naming_a_real_other_record_is_a_collision(
+        self,
+    ) -> None:
+        chrono_duration = RecordType(
+            name="duration", qualified_name="std::chrono::duration", kind="class"
+        )
+        unrelated_duration = RecordType(name="duration", kind="class")
+        typedefs = {"chrono::duration": "duration"}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="d", type="chrono::duration")])],
+            types=[chrono_duration, unrelated_duration],
+            typedefs=typedefs,
+        )
+        # `std::chrono::duration` is still genuinely, independently
+        # referenced (a public function names its own alias directly) --
+        # `directly_referenced_stdlib_types` is unaffected.
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::chrono::duration"}
+        )
+        # But the derived bare spelling is ambiguous with the unrelated,
+        # captured `duration` record the typedef target actually names, so
+        # nothing is exported.
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+
+    def test_an_exact_target_match_is_still_accepted_even_when_a_same_named_suffix_exists_elsewhere(
+        self,
+    ) -> None:
+        vec = RecordType(
+            name="vector<int>", qualified_name="std::vector<int>", kind="class"
+        )
+        # The typedef target here is the identity's own *exact*, fully
+        # qualified spelling -- not merely a bare suffix -- so it is
+        # accepted unconditionally regardless of the collision guard above.
+        typedefs = {"api::vector<int>": "std::vector<int>"}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="s", type="vector<int>")])],
+            types=[vec],
+            typedefs=typedefs,
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::vector<int>", "vector<int>"}
+        )
