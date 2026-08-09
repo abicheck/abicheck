@@ -1119,9 +1119,15 @@ review cadence for that command is the only mitigation today.
   already uses, and every CLI invocation example inside a skill's
   `SKILL.md`/`references/` is checked against that live tree — a flag or
   command a skill's prose names but the CLI no longer has fails the test
-  with the offending file:line. Same treatment for report-JSON field paths
-  a skill's `report-interpretation.md` fragment names, checked against the
-  live JSON-schema/dataclass definitions (`abicheck/schemas/__init__.py`,
+  with the offending file:line. Same treatment for report-JSON field
+  paths — **scanned across every generated `SKILL.md` and reference
+  fragment, not only `report-interpretation.md`**: P0.1's own
+  `root-cause-grouping.md` fragment names `root_causes`/`root_cause_count`,
+  and P0.5 adds `reason_codes` references to comparability workflow
+  content elsewhere — restricting this check to one fragment would leave
+  those other real field references unprotected, so a rename/removal
+  there would stay green through the promised drift gate. Checked against
+  the live JSON-schema/dataclass definitions (`abicheck/schemas/__init__.py`,
   `checker_types.py`).
 
 **Files:** `tests/test_agent_skills_structural.py` (new),
@@ -1264,8 +1270,19 @@ script-friendly" paragraph, not a rewrite of that paragraph).
 check_docs_contract.py` (front-matter schema), `scripts/
 check_ai_readiness.py`'s `mkdocs-nav-coverage` check.
 
-**Dependencies:** P0.1–P0.3 (the catalog must describe real, generated
-skills, not aspirational ones).
+**Dependencies:** P0.1–P0.3 for the catalog itself (it must describe real,
+generated skills, not aspirational ones) — but, **same freshness caveat as
+P1.1/P1.5's own "Dependencies" notes, the dogfooding pass P1.4 relies on
+for publication must postdate P0.4/P0.5's required skill-content
+follow-ups and P1.6's CI-wiring commit.** A dogfooding pass completed
+against P0.1–P0.3's output alone, before those later commits change the
+generated skills' actual content, exercises a materially different tree
+than the one P1.4 would publish — P1.4 accepting a stale dogfooding
+record while publishing changed content is exactly the same gap the
+P1.1/P1.5 freshness requirements already close for the other two
+publication-relied-on artifacts. Re-run (or initially defer) the
+publication-relied-on dogfooding pass until after P0.4, P0.5, and P1.6
+land.
 
 **PR boundary:** own PR, lands after P0.2/P0.3 are merged so the catalog
 describes what actually exists.
