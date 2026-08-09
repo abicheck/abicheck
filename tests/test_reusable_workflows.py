@@ -1371,6 +1371,54 @@ class TestScheduleCheckProjectFailurePathDispatcher:
         # Must not gate on the run's own top-level conclusion field.
         assert "--json conclusion" not in run_steps
 
+    def test_dispatcher_poll_budget_exceeds_the_child_workflow_worst_case(
+        self,
+    ) -> None:
+        """The completion-wait poll loop's own total budget (iterations *
+        sleep seconds) -- and the job's own timeout-minutes, the real
+        backstop -- must both exceed the dispatched workflow's worst-case
+        sequential duration: test-check-project-stage, then
+        check-project.yml's plan -> check -> aggregate (sequential, not
+        parallel -- check needs: plan, aggregate needs: [plan, check]), then
+        test-check-project-verify. A fixed poll bound that undersold this
+        real worst case would report a scheduler failure on an in-progress,
+        entirely healthy run (Codex review)."""
+        schedule_data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = schedule_data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+
+        fixture_data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
+        stage_timeout = fixture_data["jobs"]["test-check-project-stage"]["timeout-minutes"]
+        verify_timeout = fixture_data["jobs"]["test-check-project-verify"]["timeout-minutes"]
+
+        check_project_data = _load(CHECK_PROJECT)
+        sequential_timeout = sum(
+            check_project_data["jobs"][name]["timeout-minutes"]
+            for name in ("plan", "check", "aggregate")
+        )
+
+        worst_case_minutes = stage_timeout + sequential_timeout + verify_timeout
+
+        # Parse the completion-wait loop's own `for _ in $(seq 1 N); do ...
+        # sleep S; done` shape directly out of the script, rather than
+        # hand-copying the numbers here, so this test can't itself drift
+        # out of sync with the workflow the way the workflow drifted from
+        # check-project.yml's real timeouts.
+        match = re.search(
+            r"Waiting for run.*?seq 1 (\d+).*?sleep (\d+)\n\s*done",
+            run_steps,
+            re.DOTALL,
+        )
+        assert match, "could not find the completion-wait poll loop"
+        iterations, sleep_seconds = int(match.group(1)), int(match.group(2))
+        poll_budget_minutes = iterations * sleep_seconds / 60
+
+        assert poll_budget_minutes > worst_case_minutes, (
+            poll_budget_minutes,
+            worst_case_minutes,
+        )
+        assert job["timeout-minutes"] > worst_case_minutes
+
     def test_dispatcher_has_write_permissions_for_its_job(self) -> None:
         data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
         job = data["jobs"]["dispatch"]

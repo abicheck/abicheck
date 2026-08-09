@@ -61,9 +61,17 @@ jobs:
   dispatch:
     name: 'Stage fixture ref, dispatch, and verify the failure-path fixture'
     runs-on: ubuntu-latest
-    # Generous: this job now waits out the full dispatched run (its own
-    # three jobs each carry a 20-minute timeout) on top of its own polling.
-    timeout-minutes: 45
+    # Generous: this job now waits out the full dispatched run. Worst case,
+    # sequentially: test-check-project-stage (20 min) -> check-project.yml's
+    # plan -> check -> aggregate (45 min each, and they run sequentially --
+    # check needs: plan, aggregate needs: [plan, check]) -> test-check-
+    # project-verify (20 min) = 20 + 45*3 + 20 = 175 minutes, before any
+    # runner queue time (Codex review -- the previous 45-minute budget here,
+    # and the fixed poll-loop bound below, both undersold the child
+    # workflow's own real worst case). 240 minutes leaves headroom above
+    # that on top of this job's own polling overhead, comfortably inside
+    # GitHub-hosted runners' 360-minute per-job cap.
+    timeout-minutes: 240
     permissions:
       contents: write
       actions: write
@@ -123,13 +131,19 @@ jobs:
           fi
 
           echo "Waiting for run ${run_id} to complete..."
+          # 400 * 30s = 200 minutes -- comfortably above the child
+          # workflow's own realistic worst-case (see the job-level
+          # timeout-minutes comment above for the arithmetic). This is a
+          # generous ceiling to fail gracefully with a clear message on a
+          # genuinely stuck run; the job's own timeout-minutes above is the
+          # actual backstop (Codex review).
           status=""
-          for _ in $(seq 1 120); do
+          for _ in $(seq 1 400); do
             status=$(gh run view "$run_id" --repo "$REPO" --json status --jq .status)
             if [ "$status" = "completed" ]; then
               break
             fi
-            sleep 15
+            sleep 30
           done
           if [ "$status" != "completed" ]; then
             echo "::error::Run ${run_id} did not complete within the wait window (last status: ${status})."
