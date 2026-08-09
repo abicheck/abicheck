@@ -612,7 +612,7 @@ def join_use_case_graph(
     evidence): unlike :func:`~abicheck.impact.consumer_graph.join_consumer_graph`
     — whose result never leaves ``appcompat.py``'s own in-memory analysis —
     this function is the module's *documented public Python API* (see
-    ``docs/use/use-case-impact.md``), so a caller following that doc and
+    ``docs/contribute/use-case-impact.md``), so a caller following that doc and
     calling ``joined.to_dict()`` on the result is a real, reachable path,
     not a hypothetical future pipeline. ``library_graph`` may already carry
     a non-empty ``graph_id`` from its own :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`;

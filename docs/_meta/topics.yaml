@@ -31,16 +31,10 @@
 # explicit ownership split documented in docs/CLAUDE.md before this file
 # existed (the evidence-model trio, the verdict/exit-code split, the
 # curated-vs-generated change-kinds split). It has since grown to 20+
-# registered topics covering most major product surfaces, so it is no
-# longer treated as pilot-only for *new* work: every new public-facing
-# feature or surface (a new CLI command/flag family, a new report field,
-# a new config namespace, a new Action input) should register a topic
-# here — canonical_page, a reference_page/task_pages if applicable, and
-# fact_sources pointing at its code — in the same PR that adds it, rather
-# than deferring registration to a later cleanup. Registering an
-# *existing*, already-documented page that predates this file remains
-# incremental and opportunistic — see docs/AGENTS.md's rollout note for
-# the front-matter side of the same incremental-migration policy.
+# registered topics covering most major product surfaces -- see
+# docs/AGENTS.md's "Topic ownership registry" section for the current,
+# normative registration policy (not restated here; this file is the
+# schema/data, not the canonical instruction source).
 
 schema_version: 1
 

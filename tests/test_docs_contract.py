@@ -1432,6 +1432,63 @@ def test_stale_process_language_exempts_migration_lifecycle(
     assert f.warnings == []
 
 
+def test_retired_surfaces_flags_dead_path_outside_allowed_pages(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "use").mkdir()
+    (tmp_path / "use" / "page.md").write_text(
+        "# Page\n\nSet `--source-abi-cache` to reuse the L4 cache.\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1
+    assert "use/page.md" in f.warnings[0][1]
+    assert "--source-abi-cache" in f.warnings[0][1]
+
+
+def test_retired_surfaces_allows_its_own_allowlisted_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "use").mkdir()
+    (tmp_path / "use" / "build-evidence-setup.md").write_text(
+        "# Page\n\n`--source-abi-cache` (removed, historical framing).\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert f.warnings == []
+
+
+def test_retired_surfaces_exempts_adr_and_plans_trees(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "contribute" / "adr").mkdir(parents=True)
+    (tmp_path / "contribute" / "adr" / "001-x.md").write_text(
+        "# ADR\n\nSee `mcp_server.py` (removed).\n", encoding="utf-8"
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert f.warnings == []
+
+
+def test_retired_surfaces_ignores_unrelated_pages(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "use").mkdir()
+    (tmp_path / "use" / "page.md").write_text(
+        "# Page\n\nOrdinary content with no retired surface names.\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert f.warnings == []
+
+
 def test_stale_process_language_tolerates_non_string_lifecycle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

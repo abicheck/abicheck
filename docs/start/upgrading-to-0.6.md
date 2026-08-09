@@ -10,11 +10,12 @@ generated: false
 
 # Upgrading to 0.6
 
-> **This page describes unreleased changes on `main`.** The latest published
-> release is still `0.5.0` (`pyproject.toml`'s `version`) — none of this has
-> shipped yet. If you installed abicheck from PyPI/conda-forge rather than
-> from a `main` checkout, this migration doesn't apply to you yet; watch
-> `CHANGELOG.md` for the `0.6.0` release notes.
+> **This page describes unreleased changes on `main`.** The version installed
+> from PyPI/conda-forge (`pip show abicheck`, or `pyproject.toml`'s `version`
+> on the tag you're building from) is the latest *published* release — this
+> migration doesn't apply until that version reaches `0.6.0`. If you're not
+> on a `main` checkout, check `CHANGELOG.md` for whether `0.6.0` has actually
+> shipped before following this page.
 
 Several behavioral and API changes accumulated across recent releases,
 tracked individually in `changelog.d/` fragments (see `CHANGELOG.md`).

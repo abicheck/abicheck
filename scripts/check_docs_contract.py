@@ -34,7 +34,9 @@ Two kinds of checks:
     - an identical, long (40+ word) paragraph/table/list block appearing
       verbatim in two or more manual (non-generated) pages — usually a sign
       one of the two should be a short summary-with-link instead of a second
-      full explanation.
+      full explanation;
+    - a manual page naming a retired CLI flag/command/file by its exact dead
+      spelling outside its allowlist (see _RETIRED_SURFACES below).
 
 Run locally with:
 
@@ -951,6 +953,83 @@ def _check_duplicate_paragraphs(f: Findings) -> None:
         )
 
 
+# Retired-surface registry: a literal identifier (file path, CLI/API name)
+# that names something genuinely removed from the shipped product. Unlike
+# a general topic word (e.g. "MCP" alone, which legitimately appears in
+# historical framing all over contribute/adr and contribute/plans), each
+# string below only ever makes sense today in a "this used to exist"
+# sentence -- there is no live code, doc, or command it could otherwise be
+# referring to. Deliberately narrower than a full "no present-tense claim
+# about a retired capability" detector (which would need per-document
+# semantic judgment this pure-text scan can't do) -- this catches exactly
+# the class of bug found in a documentation review: a manual page in
+# start/, learn/, use/, or reference/ still pointing at a since-deleted
+# file or command as if it were live (docs/reference/mcp-tools-reference.md,
+# scripts/gen_mcp_reference.py, --source-abi, and similar were all found
+# and fixed this way before this check existed). contribute/adr,
+# contribute/plans, and contribute/archive are skipped for the same reason
+# _STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES skips them: they are allowed to
+# discuss retired surfaces in their own historical-record capacity. Add an
+# entry here whenever a PR deletes a CLI flag/command, a file, or a public
+# API name that any doc might still reference by that exact spelling.
+_RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
+    (
+        "abicheck-mcp (MCP server, removed by #684)",
+        (
+            "abicheck-mcp",
+            "mcp_server.py",
+            "gen_mcp_reference.py",
+            "mcp-tools-reference.md",
+            "abicheck[mcp]",
+        ),
+        frozenset({"start/upgrading-to-0.6.md", "AGENTS.md"}),
+    ),
+    (
+        "--source-abi / --source-graph (pre-ADR-043 `collect` command flags)",
+        (
+            "--source-abi-cache-dir",
+            "--source-abi-cache",
+            "--source-abi-scope",
+            "--source-abi-extractor",
+        ),
+        frozenset(
+            {"use/build-evidence-setup.md", "reference/environment.md", "AGENTS.md"}
+        ),
+    ),
+)
+
+
+def _check_retired_surfaces(f: Findings) -> None:
+    """Flag a manual, non-historical page that still names a retired CLI
+    flag/command/file by its exact dead spelling, as if it were live surface.
+    WARN-only: a hit needs a human read to add historical framing or an
+    allowlist entry, not an automatic rewrite."""
+    for path in sorted(DOCS.rglob("*.md")):
+        rel = path.relative_to(DOCS).as_posix()
+        if rel.startswith(_STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES):
+            continue
+        if _has_generated_marker(path):
+            continue
+        text = None
+        for surface_name, patterns, allowed_paths in _RETIRED_SURFACES:
+            if rel in allowed_paths:
+                continue
+            if text is None:
+                text = _blank_fenced_code(path.read_text(encoding="utf-8"))
+            for pattern in patterns:
+                idx = text.find(pattern)
+                if idx == -1:
+                    continue
+                line_no = text.count("\n", 0, idx) + 1
+                f.warn(
+                    "retired-surfaces",
+                    f"{_rel(path)}:{line_no}: {pattern!r} names a retired "
+                    f"surface ({surface_name}) outside its allowed pages -- "
+                    "add historical framing or an allowlist entry in "
+                    "_RETIRED_SURFACES if this mention is intentional",
+                )
+
+
 # Trees that are inherently historical/planning records rather than current
 # user-facing narrative -- an ADR or a plan file legitimately says "this was
 # temporary" or "not yet implemented as of this writing" about its own past
@@ -1050,6 +1129,7 @@ def main() -> int:
         _check_duplicate_term_definitions(f, terms)
     _check_duplicate_paragraphs(f)
     _check_stale_process_language(f)
+    _check_retired_surfaces(f)
     return f.report()
 
 
