@@ -20,6 +20,7 @@ jobs:
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
@@ -27,6 +28,7 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - name: Set up Python
@@ -45,6 +47,7 @@ jobs:
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       security-events: write
       actions: read

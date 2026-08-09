@@ -33,6 +33,7 @@ jobs:
   validate-examples:
     name: Validate examples (${{ matrix.toolchain }}, debug-headers)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -56,8 +57,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ clang cmake curl ca-certificates
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
@@ -131,6 +131,7 @@ jobs:
   clang-header-fallback:
     name: Clang header fallback regressions
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v6
@@ -146,8 +147,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ clang cmake curl ca-certificates
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
@@ -211,6 +211,7 @@ jobs:
   artifact-modes:
     name: Artifact modes (${{ matrix.mode }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -230,8 +231,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ clang cmake binutils curl ca-certificates
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
@@ -295,6 +295,7 @@ jobs:
   full-example-matrix:
     name: Full example matrix
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     needs: [validate-examples, artifact-modes, clang-header-fallback]
     if: always()
 
@@ -318,8 +319,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y gcc g++ clang cmake binutils curl ca-certificates
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       # The owner-proofs/bundle/special-cli validators below also dump
       # bundle/G20/special-shape example headers through the same castxml/

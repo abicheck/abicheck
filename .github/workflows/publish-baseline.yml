@@ -76,6 +76,7 @@ jobs:
   discover:
     name: 'Discover contract profiles'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
       has-profiles: ${{ steps.discover.outputs.has-profiles }}
@@ -119,6 +120,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.has-profiles != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Fail
         env:
@@ -133,6 +135,7 @@ jobs:
     needs: discover
     if: needs.discover.outputs.has-profiles == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     strategy:

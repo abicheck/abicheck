@@ -18,6 +18,7 @@ jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -59,6 +60,7 @@ jobs:
     # read-only artifact so the README accuracy numbers are auditable evidence.
     if: github.event_name == 'release'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -73,8 +75,7 @@ jobs:
           sudo apt-get install -y abigail-tools || sudo apt-get install -y libabigail-tools
           sudo apt-get install -y abi-compliance-checker || true
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
@@ -101,6 +102,7 @@ jobs:
     needs: benchmark
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -119,6 +121,7 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Publish on Release event OR manual dispatch without dry_run flag
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
     environment:

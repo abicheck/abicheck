@@ -1,0 +1,42 @@
+name: Set up pinned CastXML
+description: >-
+  Installs the pinned CastXML Superbuild via action/install-castxml.sh, with an
+  actions/cache wrapped around the install root so the ~100 MB release tarball
+  is downloaded and extracted once per (runner, pin) instead of once per job.
+
+runs:
+  using: composite
+  steps:
+    # install-castxml.sh installs into
+    # ${ABICHECK_CASTXML_INSTALL_ROOT:-$RUNNER_TEMP/abicheck-castxml} and
+    # short-circuits its whole download/verify/extract block when the resolved
+    # castxml binary is already executable (`if [ ! -x "$castxml_bin" ]`). The
+    # default root is RUNNER_TEMP, which is wiped between jobs, so that guard
+    # could never fire in CI and every job re-fetched the tarball from GitHub
+    # releases. Pinning the root to a stable, cacheable path is what lets the
+    # guard do its job.
+    - name: Pin the CastXML install root to a cacheable path
+      shell: bash
+      run: echo "ABICHECK_CASTXML_INSTALL_ROOT=${HOME}/.cache/abicheck-castxml" >> "$GITHUB_ENV"
+
+    # Unlike the AST-dump cache next door, this content is immutable for a given
+    # pin, so it needs no run_id/restore-keys "growing cache" idiom: a hit is
+    # complete and a miss repopulates. Hashing the installer script itself is
+    # what versions the key — CASTXML_TAG, the per-distro asset names, their
+    # SHA256s and the expected castxml/Clang versions all live in that one file,
+    # so any re-pin changes the hash and invalidates the cache automatically.
+    # runner.arch is in the key because the script selects a different asset for
+    # x86_64 vs aarch64 and runner.os alone does not distinguish them.
+    - name: Cache pinned CastXML
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/abicheck-castxml
+        key: castxml-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('action/install-castxml.sh') }}
+
+    # Still always run the installer: on a cache hit it skips straight to the
+    # version probe and the PATH/GITHUB_PATH export (which the cache cannot
+    # restore), so the job is set up identically either way and a corrupted or
+    # partial cache entry is re-downloaded rather than silently used.
+    - name: Set up pinned CastXML
+      shell: bash
+      run: bash action/install-castxml.sh

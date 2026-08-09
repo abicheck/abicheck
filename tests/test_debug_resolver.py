@@ -923,11 +923,18 @@ class TestDebuginfodNetwork:
         ):
             assert resolver._fetch_data("https://x/y") is None
 
-    def test_fetch_data_oversize(self) -> None:
-        from abicheck.debug_resolver import _MAX_DEBUGINFOD_SIZE
+    def test_fetch_data_oversize(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # What is under test is the `len(data) > limit` guard, not the specific
+        # value of the limit. Allocating a real 512 MiB buffer to cross the
+        # production ceiling cost ~2.3s and half a gigabyte of RSS, making this
+        # one of the slowest tests in the suite. `_fetch_data` reads the module
+        # global at call time, so lowering the ceiling exercises the identical
+        # branch for a few bytes.
+        from abicheck import debug_resolver as dr
 
+        monkeypatch.setattr(dr, "_MAX_DEBUGINFOD_SIZE", 1024)
         resolver = DebuginfodResolver(server_urls=["https://x"])
-        big = b"\x00" * (_MAX_DEBUGINFOD_SIZE + 1)
+        big = b"\x00" * (1024 + 1)
         with patch.object(resolver, "_safe_urlopen", return_value=self._resp(data=big)):
             assert resolver._fetch_data("https://x/y") is None
 

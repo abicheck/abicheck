@@ -263,8 +263,7 @@ jobs:
           pip install -e ".[dev]"
           sudo apt-get update -qq && sudo apt-get install -y clang g++
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       - name: Run header-graph perf gate
         run: |

@@ -16,6 +16,7 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Requires Dependency Graph enabled in repo Settings → Security → Code security.
     # continue-on-error: true keeps the check informational when the feature is unavailable.
     continue-on-error: true
