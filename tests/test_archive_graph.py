@@ -240,11 +240,15 @@ def test_large_legitimate_symbol_count_does_not_hit_the_member_cap() -> None:
     rejected outright, discarding all of its provenance).
     """
     count = 150_000
-    index_body = struct.pack(">I", count) + (b"\x00\x00\x00\x00" * count)
+    # A minimal but *complete* name table -- `count` one-byte NUL-terminated
+    # names -- so this test exercises only the count cap this fix targets,
+    # not the separate truncated-name-table guard.
+    names_blob = b"a\x00" * count
+    index_body = struct.pack(">I", count) + (b"\x00\x00\x00\x00" * count) + names_blob
     data = ARCHIVE_MAGIC + _header("/", len(index_body)) + _pad(index_body)
     contents = parse_ar_archive(BytesReader(data))
     assert contents.has_symbol_index
-    assert contents.symbols == ()  # no member/name blob to resolve against
+    assert contents.symbols == ()  # every offset points at no walked member
 
 
 def test_gnu_symbol_index_body_too_short_for_count_field_raises() -> None:
@@ -260,6 +264,18 @@ def test_gnu_symbol_index_body_too_short_for_count_field_raises() -> None:
 def test_bsd_symdef_body_too_short_for_table_length_raises() -> None:
     data = ARCHIVE_MAGIC + _header("__.SYMDEF", 2) + _pad(b"\x00\x00")
     with pytest.raises(ArchiveFormatError, match="too short"):
+        parse_ar_archive(BytesReader(data))
+
+
+def test_gnu_symbol_index_truncated_name_table_raises() -> None:
+    """A declared count of 2 with a complete 2-entry offset array but only
+    one NUL-terminated name in the trailing blob (Codex review, fresh
+    evidence: an earlier revision silently returned however many names
+    ``str.split`` happened to find, reading as a smaller-but-complete
+    result instead of the offset table outrunning the name table)."""
+    index_body = struct.pack(">I", 2) + struct.pack(">II", 8, 8) + b"onlyone"
+    data = ARCHIVE_MAGIC + _header("/", len(index_body)) + _pad(index_body)
+    with pytest.raises(ArchiveFormatError, match="name table"):
         parse_ar_archive(BytesReader(data))
 
 
@@ -588,7 +604,11 @@ def test_augment_graph_expands_redacted_home_placeholder(tmp_path, monkeypatch) 
     fake_home = tmp_path / "home"
     build_dir = fake_home / "build"
     build_dir.mkdir(parents=True)
+    # Both HOME (POSIX) and USERPROFILE (Windows) -- os.path.expanduser("~")
+    # reads a different env var depending on platform, the same cross-platform
+    # pattern test_include_graph.py already uses for the identical situation.
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
     data = build_gnu_archive([("a.o", b"SYM:alpha\n")])
     (build_dir / "libtest.a").write_bytes(data)
 
@@ -675,6 +695,74 @@ def test_augment_graph_ambiguous_diagnostic_is_redacted(tmp_path, monkeypatch) -
     assert diag.count("~project-root~") == 2
 
 
+def test_augment_graph_unreadable_archive_diagnostic_is_redacted(
+    tmp_path, monkeypatch
+) -> None:
+    """``OSError.__str__`` typically embeds the real, resolved filename
+    (``"[Errno 13] Permission denied: '/home/user/...'"``) — the same
+    redaction gap as the ambiguous-archive diagnostic, triggered by a
+    permissions/TOCTOU failure instead of a multi-root collision (Codex
+    review, fresh evidence)."""
+    from abicheck.buildsource import archive_graph as ag, redaction as redaction_mod
+
+    monkeypatch.setattr(
+        redaction_mod,
+        "DEFAULT_REDACTION",
+        redaction_mod.RedactionPolicy(
+            home_replacements={str(tmp_path): "~project-root~"}
+        ),
+    )
+    data = build_gnu_archive([("a.o", b"SYM:foo\n")])
+    (tmp_path / "libtest.a").write_bytes(data)
+
+    def _boom(path):
+        raise OSError(f"[Errno 13] Permission denied: '{path}'")
+
+    monkeypatch.setattr(ag, "read_archive", _boom)
+    g = _graph_with_archive("libtest.a", ["foo"])
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.archives_read == 0
+    assert result.diagnostics
+    assert str(tmp_path) not in result.diagnostics[0]
+    assert "~project-root~" in result.diagnostics[0]
+
+
+def test_augment_graph_macho_underscore_prefixed_symbol_joins_via_fallback(
+    tmp_path,
+) -> None:
+    """A Mach-O/BSD ranlib index keeps the platform's leading underscore
+    (``_foo``), while ``macho_metadata.py`` strips exactly one before a
+    ``binary_symbol`` node is minted from it — the exact-name join alone
+    (an earlier revision) missed every Mach-O archive symbol (Codex review,
+    fresh evidence)."""
+    data = build_gnu_archive([("a.o", b"SYM:_foo\n")])
+    (tmp_path / "libtest.a").write_bytes(data)
+    g = _graph_with_archive("libtest.a", ["foo"])  # node has no leading underscore
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.symbol_edges == 1
+    assert result.unjoined_symbols == 0
+    assert defining_members(g, "foo") == [("libtest.a", "a.o")]
+
+
+def test_augment_graph_underscore_symbol_prefers_exact_match(tmp_path) -> None:
+    """When both the underscore-prefixed and stripped forms already have
+    their own ``binary_symbol`` node, the exact match wins — the fallback
+    is a last resort, not a preference."""
+    data = build_gnu_archive([("a.o", b"SYM:_foo\n")])
+    (tmp_path / "libtest.a").write_bytes(data)
+    g = _graph_with_archive("libtest.a", ["_foo", "foo"])
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path,))
+
+    assert result.symbol_edges == 1
+    assert defining_members(g, "_foo") == [("libtest.a", "a.o")]
+    assert defining_members(g, "foo") == []
+
+
 def test_augment_graph_same_archive_via_two_roots_is_not_ambiguous(tmp_path) -> None:
     """Two search roots that resolve to the *same* file (a duplicate root, or
     a symlinked/overlapping build directory) are the identical file, not a
@@ -691,6 +779,26 @@ def test_augment_graph_same_archive_via_two_roots_is_not_ambiguous(tmp_path) -> 
 
 
 # ── real-toolchain regression (integration marker: needs gcc + ar) ──────────
+
+
+def _platform_symbol_names(names: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Strip Darwin's C-ABI leading underscore from each ``(symbol, member)``
+    pair's symbol half, on Darwin only.
+
+    A real Mach-O/BSD ``ar``'s ranlib index — like every compiled symbol
+    table on that platform — carries the platform's own leading underscore
+    (``_alpha``, not ``alpha``); this is the archive's genuine on-disk
+    content, correctly extracted by the parser, not something to special-
+    case in production code (this module's own join step already handles
+    it separately, via a fallback, per its own review notes). Only this
+    test's fixed expected-symbol-set literal needs to account for the
+    platform difference.
+    """
+    import sys
+
+    if sys.platform != "darwin":
+        return names
+    return {(sym[1:] if sym.startswith("_") else sym, member) for sym, member in names}
 
 
 @pytest.mark.integration
@@ -718,7 +826,7 @@ def test_real_gnu_ar_archive_parses(tmp_path) -> None:
     assert contents.flavor == "gnu"
     assert {m.name for m in contents.members} == {"a.o", "b.o"}
     assert contents.has_symbol_index
-    got = {(s.symbol, s.member) for s in contents.symbols}
+    got = _platform_symbol_names({(s.symbol, s.member) for s in contents.symbols})
     # `hidden` is file-local (static) — a real ar index never lists it.
     assert got == {("alpha", "a.o"), ("beta", "b.o"), ("gamma_sym", "b.o")}
 
@@ -748,7 +856,8 @@ def test_real_gnu_ar_thin_archive_parses(tmp_path) -> None:
     contents = read_archive(archive_path)
     assert contents.flavor == "thin"
     assert [m.name for m in contents.members] == ["a.o"]
-    assert {(s.symbol, s.member) for s in contents.symbols} == {("alpha", "a.o")}
+    got = _platform_symbol_names({(s.symbol, s.member) for s in contents.symbols})
+    assert got == {("alpha", "a.o")}
 
 
 @pytest.mark.integration

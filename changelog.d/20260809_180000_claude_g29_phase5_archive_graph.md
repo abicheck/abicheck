@@ -49,3 +49,23 @@
   "ambiguous archive" diagnostic's candidate paths are re-redacted before
   being embedded in `ExtractorRecord.detail`, since the un-redacted absolute
   path is otherwise persisted straight into build evidence.
+
+  A third review round found three more real gaps: a GNU index whose offset
+  array is complete but whose trailing name table has fewer than the
+  declared count of NUL-terminated names now raises instead of silently
+  returning however many names `str.split` happened to find; a Mach-O/BSD
+  archive's own ranlib index keeps the platform's C-ABI leading underscore
+  (`_foo`), while `macho_metadata.py` strips exactly one before a
+  `binary_symbol` node is minted, so the exact-name join now falls back to
+  the stripped form (exact match still tried first) instead of missing
+  every Mach-O archive symbol; and an "unreadable archive" `OSError`
+  diagnostic (permissions, a TOCTOU race) is now re-redacted the same way
+  the ambiguous-archive one already was, since `OSError.__str__` typically
+  embeds the real, resolved filename. Also fixes two real-toolchain
+  integration tests that only surfaced on non-Linux CI runners: a redacted-
+  home-placeholder test now sets both `HOME` and `USERPROFILE` (Windows'
+  `os.path.expanduser` doesn't read `HOME`), and the real-`ar` round-trip
+  tests account for Darwin's own leading-underscore symbol convention in
+  their expected symbol sets (the archive's raw index correctly carries the
+  underscore on that platform; only the test's fixed expectation needed to
+  know that).

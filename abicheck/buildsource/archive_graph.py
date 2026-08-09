@@ -358,7 +358,14 @@ def _gnu_symbol_index(
     earlier revision) was indistinguishable downstream from "confirmed,
     zero symbols", letting :func:`~abicheck.buildsource.
     inline_graph_fold.fold_archive_graph` mark the whole pass complete over
-    evidence that was actually corrupt.
+    evidence that was actually corrupt. The same applies to the trailing
+    name blob (Codex review, fresh evidence, a separate gap from the body-
+    length one above): the offset-array boundary (``end``) only proves the
+    *offsets* aren't truncated — a name blob with fewer than ``count``
+    NUL-terminated entries (the offset table complete, the name list cut
+    short) previously just silently returned however many names ``str.split``
+    happened to find, the same "looks like a smaller but complete result"
+    failure shape.
     """
     width = 8 if wide else 4
     fmt = ">Q" if wide else ">I"
@@ -378,6 +385,15 @@ def _gnu_symbol_index(
         for i in range(count)
     ]
     names = body[end:].split(b"\x00")
+    # Each of the `count` names is NUL-terminated, so a well-formed blob
+    # splits into at least `count` names plus one trailing remainder
+    # (possibly empty) after the last terminator — `len(names) < count + 1`
+    # means the blob ran out before the declared count did.
+    if len(names) < count + 1:
+        raise ArchiveFormatError(
+            f"symbol index declares {count} names but its name table only "
+            f"has {max(len(names) - 1, 0)}"
+        )
     refs: list[ArSymbolRef] = []
     for i, offset in enumerate(offsets):
         if i >= len(names):
@@ -853,7 +869,17 @@ def augment_graph_with_archives(
             result.diagnostics.append(f"{label}: {exc}")
             continue
         except OSError as exc:
-            result.diagnostics.append(f"{label}: unreadable: {exc}")
+            # OSError.__str__ typically embeds the real, resolved (i.e.
+            # un-redacted) filename ("[Errno 13] Permission denied:
+            # '/home/user/...'") — re-redact it before persisting, the same
+            # leak class as the ambiguous-archive diagnostic above, just
+            # triggered by a permissions/TOCTOU failure instead of a
+            # multi-root collision (Codex review, fresh evidence).
+            from .redaction import DEFAULT_REDACTION
+
+            result.diagnostics.append(
+                f"{label}: unreadable: {DEFAULT_REDACTION.path(str(exc))}"
+            )
             continue
         result.archives_read += 1
         if not contents.has_symbol_index:
@@ -890,6 +916,20 @@ def augment_graph_with_archives(
             if member_id is None:
                 continue
             sid = _symbol_node_id(ref.symbol)
+            if sid not in known_symbols and ref.symbol.startswith("_"):
+                # A Mach-O/BSD ranlib index keeps the platform's C-symbol
+                # leading underscore (`_foo`), but `macho_metadata.py`'s own
+                # export-trie walk strips exactly one before a `binary_symbol`
+                # node is minted from it (Codex review, fresh evidence: the
+                # exact-name join above therefore missed every Mach-O archive
+                # symbol, counting each as unjoined and emitting no
+                # OBJECT_DEFINES_SYMBOL edges at all on that platform).
+                # Exact match is still tried first — a GNU/ELF archive's
+                # symbol names never carry this prefix, so this fallback is
+                # a no-op there.
+                stripped_sid = _symbol_node_id(ref.symbol[1:])
+                if stripped_sid in known_symbols:
+                    sid = stripped_sid
             if sid not in known_symbols:
                 result.unjoined_symbols += 1
                 continue
