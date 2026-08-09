@@ -502,9 +502,14 @@ dependencies/surface without strong justification":
   abicheck new enough for `--contract`," or "which extraction providers are
   available on this host," has no machine-readable way to ask — it would
   otherwise have to parse `--version`'s human-oriented string or probe by
-  trial-and-error. This is a small, additive, read-only command that clears
-  AGENTS.md's CLI-command admission bar (ADR-054 D6) — see G36 P0.4 for the
-  full six-criterion check.
+  trial-and-error. This capability is needed; its exact surface is not yet
+  settled. It does **not** cleanly clear `AGENTS.md`'s CLI-command
+  admission bar (ADR-054 D6) as a new root command — its operand-free
+  shape fails criterion 2 — so G36 P0.4 records this as blocked on an
+  explicit, upfront maintainer decision between an approved bar exception
+  and a redesign (e.g. extending `--version` with `--format json` instead
+  of adding a new verb) before implementation starts, not as a foregone
+  `info` command.
 - **A finer-grained `reason.codes` array on the existing `not_comparable`
   object.** Rather than inventing a new top-level block, extend the
   existing `reason` object with a `codes` field — an array, since

@@ -310,21 +310,36 @@ support `project`"), available extraction providers (castxml/clang presence,
 detected on the host the same way existing dumper-provider auto-detection
 already probes), and platform capabilities (ELF/PE/Mach-O support — all
 three ship unconditionally today, but this keeps the field meaningful if
-that ever changes). Checked against `AGENTS.md`'s "Adding a new top-level
-command" admission bar (ADR-054 D6) — see that section for the exact
-wording. Five of the six criteria are unambiguous; criterion 2 ("its
-operand is a domain object a user already thinks in terms of") is the one
-genuinely debatable call, since `info` takes no operand at all. The
-precedent this leans on is `--version` — already an existing zero-operand
-top-level surface, whose "operand" is likewise the installation itself, not
-a binary/report/config. `info` is that same case promoted from a flag to a
-proper structured-output command because a skill needs to parse it
-reliably. This reading should be treated as needing explicit maintainer
-sign-off when P0.4 actually lands, not as a foregone conclusion — flag it
-for discussion in that PR rather than asserting the bar is mechanically
-cleared. Lands with `tests/test_cli_root_surface.py` + `AGENTS.md` +
-`README.md` + generated CLI reference updated in the same PR per the bar's
-own sixth criterion.
+that ever changes).
+
+**Admission-bar status: does not clear criterion 2 as literally worded,
+and this plan does not pretend otherwise.** Checked against `AGENTS.md`'s
+"Adding a new top-level command" admission bar (ADR-054 D6): five of the
+six criteria are met; criterion 2 ("its operand is a domain object a user
+already thinks in terms of") is not — `info` takes no operand at all, and
+none of the domain objects the bar's own examples name (a binary, a set of
+reports, a project config) apply. The `--version` comparison an earlier
+draft of this item leaned on does not actually resolve this: `--version`
+is an eager `click.version_option` **flag** on the `main` group, not a
+root **command**, so it was never subject to this bar in the first place
+and is not a valid precedent for clearing it. **This item is therefore
+blocked on an explicit, upfront maintainer decision before implementation
+starts** — not "flag it for discussion in the PR that adds it," which
+treats a real gap as a formality to be waved through post hoc. Two
+legitimate paths, either acceptable, neither assumed here: (a) the
+maintainer grants `info` an explicit, documented exception to criterion 2
+(recorded in `AGENTS.md` itself, alongside the bar, so it doesn't
+re-surface as an apparent contradiction for the next command that tries
+the same argument); or (b) `info` is redesigned to avoid the conflict
+entirely — e.g. as a genuine extension of `--version` (replacing the
+built-in `click.version_option` with a custom eager callback that supports
+`--format json`, keeping it a flag rather than a new command) rather than
+a new root verb. This plan does not pick between them; that choice needs
+the maintainer, not an implementer's judgment call at merge time. Once
+resolved, whichever design ships lands with `tests/test_cli_root_surface.py`
++ `AGENTS.md` + `README.md` + generated CLI reference updated in the same
+PR per the bar's own sixth criterion (if path (a) is chosen) or the
+equivalent flag-level tests (if path (b) is chosen).
 
 **Files:** `abicheck/cli.py` — `info` is a small, one-function, no-operand
 command with no significant helpers, so `AGENTS.md`'s "Adding a new
@@ -439,14 +454,25 @@ either side's contract came from a manifest-driven dump, whose
 authenticity before the real per-field diff ever runs, for the same
 reason the DPC++ profile case does — meaning the `translation_units`
 mismatch code above is equally unreachable until this scope-side
-authenticity check is fixed too. Extend the same key-set-selection fix to
-both scope authenticity call sites (select `_MANIFEST_SCOPE_FIELD_KEYS`
-when either side's contract is manifest-derived, mirroring
-`compute_extraction_contract`'s own selection logic), and add a
-manifest-scope-mismatch regression test asserting the actual emitted
-`translation_units`-related code — correcting only the DPC++/profile call
-sites and leaving these untouched would leave this one code equally
-unreachable. Derived from the same field-by-field
+authenticity check is fixed too. **Select the key set independently per
+side, not once for the whole check** — each `_fingerprint_matches_fields`
+call authenticates one side's own fingerprint against that same side's
+own fields, so a "use `_MANIFEST_SCOPE_FIELD_KEYS` when *either* side is
+manifest-derived" rule (an earlier draft of this note's own wording) is
+itself wrong: when only one side is manifest-derived, applying the wider
+key set to the *other*, legacy-hashed side would re-hash it with a field
+(`translation_units`) its own fingerprint was never computed over, so
+that side's authenticity check would newly fail instead of newly pass.
+Each of the two `_fingerprint_matches_fields` calls (old side, new side)
+must independently decide `_MANIFEST_SCOPE_FIELD_KEYS` vs.
+`SCOPE_FIELD_KEYS` from *that side's own* contract, mirroring how
+`compute_extraction_contract` itself decides the key set once per
+snapshot, never once per comparison. Add a manifest-scope-mismatch
+regression test asserting the actual emitted `translation_units`-related
+code, **plus a mixed-sides case** (one manifest-derived, one legacy) to
+catch exactly this per-side-vs-whole-check distinction — correcting only
+the DPC++/profile call sites and leaving these untouched would leave this
+one code equally unreachable. Derived from the same field-by-field
 comparison `check_contracts_comparable`/`compute_extraction_contract`
 already perform when raising `ProfileMismatchError`/`ScopeMismatchError` —
 promotes existing internal evidence to a stable public field, adds no new
@@ -485,11 +511,17 @@ string `reason`, and leave `reason` itself untouched — this is an additive,
 backward-compatible envelope change, not a type migration, and should be
 implemented and tested as such.
 
-**Files:** `abicheck/comparability.py` (`ProfileMismatchError`/
-`ScopeMismatchError` carry the specific mismatched field(s) as structured
-data, not just a rendered message, so `codes` can be derived without
-re-parsing text — and so a multi-field mismatch keeps every field, not just
-the first one hit), `abicheck/schemas/compare_report.schema.json` (the
+**Files:** `abicheck/errors.py` (`ProfileMismatchError`/
+`ScopeMismatchError` are actually *defined* here, not in
+`comparability.py` — that module only imports and raises them; their
+constructors/data contract need to gain the structured mismatched-field(s)
+attribute here, so `codes` can be derived without re-parsing the message,
+and so a multi-field mismatch keeps every field, not just the first one
+hit), `abicheck/comparability.py` (the raising logic — `check_contracts_
+comparable`'s call sites pass the structured fields into the now-extended
+exception constructors, and derive `codes` from them for
+`_report_not_comparable`, etc. — stays here, unchanged in location),
+`abicheck/schemas/compare_report.schema.json` (the
 `reason` object's fields are defined in the JSON Schema file itself, not in
 `abicheck/schemas/__init__.py` — that module only holds version constants
 and registry lookups; registering `codes`' closed enum here is what lets
