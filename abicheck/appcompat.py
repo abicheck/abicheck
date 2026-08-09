@@ -1125,26 +1125,41 @@ def _merge_consumer_impact_paths(
     instead of silently keeping only the first and discarding the rest
     (Codex review, fresh evidence).
 
-    ``consumer``/``symbol`` keep the first match's values — display-only
-    fields a single merged explanation can only ever name one of.
-    ``public_entries``/``declarations`` are the order-preserving deduped
-    union across every match, so a finding covering several requirements
-    reports every public root/declaration that explains it, not just the
-    first. ``entry_path`` stays the first non-empty (indirect) match's own
-    path; every *other* match's ``entry_path``/``alternative_entry_paths``
+    All of ``consumer``/``symbol``/``entry_path``/the primary (first)
+    ``public_entries`` entry come from the **same** match — the one
+    :func:`_choose_primary_match` picks — never from independently-chosen
+    fields (Codex review, fresh evidence): an earlier version picked
+    ``symbol``/``public_entries`` from ``matches[0]`` but ``entry_path``
+    from the first match that happened to carry a non-empty (indirect)
+    path, which are not necessarily the same match when the first match is
+    itself *direct* (``entry_path == []``) and a later one is indirect.
+    ``_format_consumer_impact`` reads ``explained.symbol``/
+    ``explained.public_entries[0]`` together with ``explained.entry_path``
+    as one coherent story ("*symbol* is reachable from public entry
+    *entry*: *chain*"); mixing fields from two different matches produced
+    an internally contradictory sentence — symbol A "reachable from" A's
+    own entry, followed by a chain that actually starts at (and explains)
+    a completely different symbol B's entry and target.
+
+    ``public_entries``/``declarations`` are still the order-preserving
+    deduped union across every match (so a finding covering several
+    requirements reports every public root/declaration that explains it,
+    not just the primary's), just with the primary's own values ordered
+    first. Every *other* match's ``entry_path``/``alternative_entry_paths``
     is folded into the merged ``alternative_entry_paths`` instead of
-    dropped outright, so no explanation is lost even though only one path
+    dropped outright, so no explanation is lost even though only one match
     can be primary (``attach_impact_metadata`` caps how many of these are
     actually kept).
     """
     if len(matches) == 1:
         return matches[0]
-    primary = matches[0]
+    primary = _choose_primary_match(matches)
+    ordered = [primary, *(m for m in matches if m is not primary)]
     entries: list[str] = []
     seen_entries: set[str] = set()
     declarations: list[str] = []
     seen_decls: set[str] = set()
-    for m in matches:
+    for m in ordered:
         for e in m.public_entries:
             if e not in seen_entries:
                 seen_entries.add(e)
@@ -1153,12 +1168,14 @@ def _merge_consumer_impact_paths(
             if d not in seen_decls:
                 seen_decls.add(d)
                 declarations.append(d)
-    entry_path = next((m.entry_path for m in matches if m.entry_path), [])
     alternatives = []
     for m in matches:
-        if m.entry_path and m.entry_path != entry_path:
+        if m is primary:
+            continue
+        if m.entry_path:
             alternatives.append(m.entry_path)
         alternatives.extend(m.alternative_entry_paths)
+    alternatives.extend(primary.alternative_entry_paths)
     from .impact.consumer_graph import ConsumerImpactPath as _ConsumerImpactPath
 
     return _ConsumerImpactPath(
@@ -1166,9 +1183,27 @@ def _merge_consumer_impact_paths(
         symbol=primary.symbol,
         declarations=tuple(declarations),
         public_entries=tuple(entries),
-        entry_path=entry_path,
+        entry_path=primary.entry_path,
         alternative_entry_paths=alternatives,
     )
+
+
+def _choose_primary_match(
+    matches: list[ConsumerImpactPath],
+) -> ConsumerImpactPath:
+    """The one match :func:`_merge_consumer_impact_paths` derives
+    ``consumer``/``symbol``/``entry_path``/the primary public entry from.
+
+    Prefers the first match that carries an actual walked ``entry_path``
+    (an indirect, graph-proven chain) over a direct one — a direct match's
+    own ``entry_path`` is ``[]`` by construction (its "path" is the trivial
+    zero-hop declaration-is-the-entry case), so preferring it as primary
+    when a genuinely indirect match also exists would silently discard the
+    only real path this merged explanation could have shown. Falls back to
+    the first match when every match is direct — there is no path to
+    prefer among them, so display order is the only remaining tiebreaker.
+    """
+    return next((m for m in matches if m.entry_path), matches[0])
 
 
 def _attach_consumer_impact(

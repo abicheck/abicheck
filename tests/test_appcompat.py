@@ -2454,6 +2454,40 @@ class TestMergeConsumerImpactPaths:
         assert merged.entry_path == [edge_a]
         assert [edge_b] in merged.alternative_entry_paths
 
+    def test_symbol_entry_and_path_come_from_the_same_match(self):
+        """The exact contradiction Codex flagged: the first match is
+        direct (entry_path=[]) and the second is indirect. symbol,
+        entry_path, and the primary public entry must all come from the
+        SAME match (the indirect one, since only it has a real path to
+        show) -- not symbol/entries from the first match glued onto a
+        path from a different one, which would read as 'A is reachable
+        from entry A' followed by a chain that actually starts at and
+        explains B."""
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        direct_first = ConsumerImpactPath(
+            consumer="app",
+            symbol="A",
+            public_entries=("entry_A",),
+            entry_path=[],  # direct: declaration IS the public entry
+        )
+        indirect_second = ConsumerImpactPath(
+            consumer="app",
+            symbol="B",
+            public_entries=("entry_B",),
+            entry_path=[GraphEdge(src="entry_B", dst="B", kind="DECL_CALLS_DECL")],
+        )
+        merged = _merge_consumer_impact_paths([direct_first, indirect_second])
+        # entry_path came from indirect_second -- symbol and the primary
+        # public entry must agree with it, not with direct_first.
+        assert merged.entry_path == indirect_second.entry_path
+        assert merged.symbol == "B"
+        assert merged.public_entries[0] == "entry_B"
+        # The direct match's own entry is still reported, just not first.
+        assert "entry_A" in merged.public_entries
+
     def test_enrichment_uses_the_merged_explanation_end_to_end(self):
         """_enrich_covered_changes' own next(...)-vs-merge regression: a
         single shared Change whose affected_symbols names two missing
