@@ -390,7 +390,17 @@ and flattens it straight into that one string field, line ~1471 — so
 producer above emits `codes`; add a `reason_codes: list[str] | None` field
 to `TargetReport` alongside `reason`, carried through from the per-target
 report's `codes`, and expose it from `TargetReport.to_dict()` /
-`abicheck/schemas/aggregate_report.schema.json`), `abicheck/stack_checker.py`
+`abicheck/schemas/aggregate_report.schema.json`. `_load_report_file`
+today only recognizes the compare-shaped top-level `verdict: null` +
+`reason: {...}` object — a `scan --against` not-comparable report is
+shaped differently (`verdict: "NOT_COMPARABLE"`, reason nested under
+`diff`), so this extraction needs its own scan-specific branch reading
+`diff.reason_codes`, not just the compare-shaped path, or a `project`
+matrix backed by `scan` targets would still silently lose the field;
+bump `AGGREGATE_SCHEMA_VERSION` in `abicheck/aggregate.py` for this
+additive key, independently of the compare/scan report schema bumps —
+it's its own versioned contract, not implicitly covered by bumping
+theirs), `abicheck/stack_checker.py`
 (`StackChange.not_comparable_reason` is likewise a bare `str | None` —
 `deps compare`'s own comparability gate; add a sibling
 `not_comparable_reason_codes` field) and `abicheck/stack_report.py`
@@ -431,13 +441,17 @@ library's entry in the directory/package release JSON/`summary.json`
 (`_compare_one_library`/`_format_release_json`) carries `reason_codes` too,
 not just the separate not-comparable document — this is the report path
 `native-release-compatibility` actually reads, so it's the one that must
-not be left with only untyped text; a `tests/test_aggregate.py`-style test
-asserting `TargetReport.reason_codes` round-trips a not-comparable
+not be left with only untyped text; two `tests/test_aggregate.py`-style
+tests asserting `TargetReport.reason_codes` round-trips a not-comparable
 per-target report's `codes` through `_load_report_file` into
-`TargetReport.to_dict()`'s output — the multi-profile/multi-target path,
-not just the single-comparison one; a `tests/test_deps_compare.py`-style
-test asserting `stack_to_json()`'s not-comparable output carries
-`not_comparable_reason_codes` alongside the existing prose field.
+`TargetReport.to_dict()`'s output — one for a compare-shaped per-target
+report (`verdict: null` + `reason: {...}`) and one for a scan-shaped one
+(`verdict: "NOT_COMPARABLE"`, reason nested under `diff`), since the two
+are extracted by different code paths and only covering one would leave a
+`scan`-backed project matrix silently losing the field; a
+`tests/test_deps_compare.py`-style test asserting `stack_to_json()`'s
+not-comparable output carries `not_comparable_reason_codes` alongside the
+existing prose field.
 
 **Docs:** whichever comparability doc the field lands in, plus a
 changelog fragment (`### Added`).
@@ -505,8 +519,17 @@ tolerates a non-`docs/` repo-relative path (code files are a normal
 `fact_sources` entry today), so the fix is narrow: extend
 `task_pages`/`allowed_summaries` validation to accept a repo-relative path
 outside `docs/` the same way `fact_sources` already does, rather than
-inventing a fourth path-resolution rule. Land this as its own small commit
-in `scripts/check_docs_contract.py` before registering any
+inventing a fourth path-resolution rule. That alone is not sufficient,
+though: `_check_front_matter_schema()` — the function that actually reads a
+page's `summarizes:` front matter and round-trips it against its
+registered topic — iterates exclusively over `DOCS.rglob("*.md")` and
+computes docs-relative identities from that; a `skills-src/shared/*.md`
+fragment is invisible to it regardless of how permissive the registry
+validation above becomes, so its `summarizes` claim would sit in
+`topics.yaml` unchecked. Extend this function's scan (and its path-identity
+computation) to also walk the registered non-`docs/` fragment paths, not
+just `DOCS.rglob`. Land both extensions as their own small commit in
+`scripts/check_docs_contract.py` before registering any
 `skills-src/shared/*.md` entry, so the registration is provably checked
 from the day it's added, not merely asserted to be.
 
@@ -524,8 +547,13 @@ each, from P0.1).
 errors; a regression test asserting `skills-src` is in the required-dirs
 tuple; a `tests/test_docs_contract.py`-style unit test asserting a
 `task_pages`/`allowed_summaries` entry outside `docs/` is now accepted
-(the extended-checker behavior itself, not just its downstream effect);
-`python scripts/check_docs_contract.py` passes with every
+(the extended-checker behavior itself, not just its downstream effect); a
+second such test asserting `_check_front_matter_schema()` actually
+*scans* a registered non-`docs/` fragment — change a fixture fragment's
+`summarizes` value to an unregistered/unknown topic id and assert the
+checker fails, not just that a well-formed one passes, so the negative
+case (this is the enforcement mechanism, not just plumbing) is proven, not
+assumed; `python scripts/check_docs_contract.py` passes with every
 `skills-src/shared/*.md` fragment's `summarizes` claim round-tripping
 against its registered topic.
 
