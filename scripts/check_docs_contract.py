@@ -1002,8 +1002,12 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
 def _check_retired_surfaces(f: Findings) -> None:
     """Flag a manual, non-historical page that still names a retired CLI
     flag/command/file by its exact dead spelling, as if it were live surface.
-    WARN-only: a hit needs a human read to add historical framing or an
-    allowlist entry, not an automatic rewrite."""
+    Deliberately scans fenced code blocks too (unlike
+    _check_stale_process_language, which blanks them) -- a stale command
+    inside a ```bash example is exactly the worst place to miss one, since a
+    reader is likely to copy-paste it verbatim. WARN-only: a hit needs a
+    human read to add historical framing or an allowlist entry, not an
+    automatic rewrite."""
     for path in sorted(DOCS.rglob("*.md")):
         rel = path.relative_to(DOCS).as_posix()
         if rel.startswith(_STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES):
@@ -1015,7 +1019,7 @@ def _check_retired_surfaces(f: Findings) -> None:
             if rel in allowed_paths:
                 continue
             if text is None:
-                text = _blank_fenced_code(path.read_text(encoding="utf-8"))
+                text = path.read_text(encoding="utf-8")
             for pattern in patterns:
                 idx = text.find(pattern)
                 if idx == -1:

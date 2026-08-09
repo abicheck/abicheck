@@ -245,9 +245,16 @@ jobs:
 - Tracked: abicc upstream issues #116, #119
 
 ### All platforms (no headers — applies whether or not debug info is present)
-- `int → long` parameter change: mangled name changes → detected as `func_removed + func_added`
-  (not `func_params_changed`) when headers are absent — mangled-name churn, so
-  L1 debug info doesn't recover it either
+- `int → long` parameter change **on a C++ export whose Itanium/MSVC mangled
+  name embeds the parameter type**: the mangled name itself changes, so old
+  and new are matched as two distinct symbols and detected as
+  `func_removed + func_added`, not `func_params_changed` — L1 debug info
+  doesn't recover this either, since the mismatch is in symbol identity, not
+  missing type information. This does **not** apply to a plain C function or
+  an `extern "C"` export, whose exported name never encodes its parameter
+  types — those are correctly detected as `func_params_changed` from L1 debug
+  info alone (see [case02](../reference/examples/case02_param_type_change.md),
+  a headerless `-g` comparison)
 - Template inner-type changes (`std::vector<T>` with changed `T`) — not detected (tracked: #38)
 
 ---

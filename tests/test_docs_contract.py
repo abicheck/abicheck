@@ -1489,6 +1489,26 @@ def test_retired_surfaces_ignores_unrelated_pages(
     assert f.warnings == []
 
 
+def test_retired_surfaces_flags_dead_path_inside_a_fenced_command_example(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Unlike _check_stale_process_language, this check must NOT blank
+    fenced code before scanning -- a stale command inside a ```bash example
+    is exactly the worst place to miss one, since a reader is likely to
+    copy-paste it verbatim."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "use").mkdir()
+    (tmp_path / "use" / "page.md").write_text(
+        "# Page\n\n```bash\nabicheck-mcp --version\n```\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1
+    assert "use/page.md" in f.warnings[0][1]
+    assert "abicheck-mcp" in f.warnings[0][1]
+
+
 def test_stale_process_language_tolerates_non_string_lifecycle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
