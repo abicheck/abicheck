@@ -2432,6 +2432,8 @@ class TestMergeConsumerImpactPaths:
         assert merged.declarations == ("foo", "bar")
 
     def test_non_primary_entry_paths_become_alternatives(self):
+        """Two matches that share the SAME root: the non-primary's own
+        path is a valid alternative for that root, so it is folded in."""
         from abicheck.appcompat import _merge_consumer_impact_paths
         from abicheck.buildsource.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
@@ -2447,12 +2449,45 @@ class TestMergeConsumerImpactPaths:
         second = ConsumerImpactPath(
             consumer="app",
             symbol="bar",
-            public_entries=("train",),
+            public_entries=("run",),
             entry_path=[edge_b],
         )
         merged = _merge_consumer_impact_paths([first, second])
         assert merged.entry_path == [edge_a]
         assert [edge_b] in merged.alternative_entry_paths
+
+    def test_differently_rooted_paths_are_not_folded_into_alternatives(self):
+        """A non-primary match whose own root differs from the primary's
+        must NOT be folded into alternative_entry_paths (Codex review,
+        fresh evidence): impact.engine._build_alternative_path stamps
+        every merged alternative with the SAME single primary root, so
+        including a differently-rooted path would serialize it in
+        JSON/SARIF as though it started at the primary's own entry, when
+        it actually starts at (and explains) an entirely different one."""
+        from abicheck.appcompat import _merge_consumer_impact_paths
+        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.impact.consumer_graph import ConsumerImpactPath
+
+        edge_a = GraphEdge(src="a", dst="foo", kind="DECL_CALLS_DECL")
+        edge_b = GraphEdge(src="b", dst="bar", kind="DECL_CALLS_DECL")
+        first = ConsumerImpactPath(
+            consumer="app",
+            symbol="foo",
+            public_entries=("run",),
+            entry_path=[edge_a],
+        )
+        second = ConsumerImpactPath(
+            consumer="app",
+            symbol="bar",
+            public_entries=("train",),  # a different root than "run"
+            entry_path=[edge_b],
+        )
+        merged = _merge_consumer_impact_paths([first, second])
+        assert merged.entry_path == [edge_a]
+        assert [edge_b] not in merged.alternative_entry_paths
+        # The differently-rooted entry is still reported in public_entries
+        # (the union), just not smuggled in as a same-rooted alternative.
+        assert "train" in merged.public_entries
 
     def test_symbol_entry_and_path_come_from_the_same_match(self):
         """The exact contradiction Codex flagged: the first match is

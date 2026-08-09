@@ -595,6 +595,46 @@ def test_join_never_flips_an_unproven_node_to_consumer_compiled() -> None:
     ), "a use-case reference must never make an unproven node look consumer-compiled"
 
 
+def test_join_never_flips_a_tied_unknown_confidence_node_either() -> None:
+    """The residual gap the earlier CONF_UNKNOWN placeholder fix didn't
+    close (Codex review, fresh evidence): when the *real* fact backing a
+    public entry is ALSO CONF_UNKNOWN (e.g. a loaded/hand-built graph node
+    with no confidence recorded), the placeholder's confidence rank ties
+    rather than loses, and the producer-name tiebreak alone
+    ("declared_use_case" < "kythe") would let it win provenance anyway.
+    join_use_case_graph's provenance/confidence restoration must close
+    this regardless of the tiebreak outcome."""
+    from abicheck.buildsource.graph_facts import CONF_UNKNOWN
+    from abicheck.buildsource.source_graph import is_consumer_compiled_node
+
+    library = SourceGraphSummary()
+    library.add_node(
+        GraphNode(
+            id="decl://dispatch",
+            kind="source_decl",
+            label="dispatch",
+            attrs={"visibility": "public_header"},
+            provenance="kythe",
+            confidence=CONF_UNKNOWN,
+        )
+    )
+    node_by_id = {n.id: n for n in library.nodes}
+    assert is_consumer_compiled_node("decl://dispatch", node_by_id) is False
+
+    use_cases = build_use_case_graph(
+        [UseCaseDefinition(use_case="training-workflow", entrypoints=("dispatch",))],
+        library,
+    )
+    joined = join_use_case_graph(library, use_cases)
+    joined_node_by_id = {n.id: n for n in joined.nodes}
+    entry = joined_node_by_id["decl://dispatch"]
+    assert {f.producer for f in entry.facts} >= {USE_CASE_PROVENANCE, "kythe"}
+    assert entry.provenance == "kythe"
+    assert (
+        is_consumer_compiled_node("decl://dispatch", joined_node_by_id) is False
+    ), "a tied-confidence use-case placeholder must never win the provenance tiebreak"
+
+
 def test_join_does_not_mutate_the_library_graph() -> None:
     library = _library_graph()
     nodes, edges = len(library.nodes), len(library.edges)

@@ -1145,11 +1145,18 @@ def _merge_consumer_impact_paths(
     deduped union across every match (so a finding covering several
     requirements reports every public root/declaration that explains it,
     not just the primary's), just with the primary's own values ordered
-    first. Every *other* match's ``entry_path``/``alternative_entry_paths``
-    is folded into the merged ``alternative_entry_paths`` instead of
-    dropped outright, so no explanation is lost even though only one match
-    can be primary (``attach_impact_metadata`` caps how many of these are
-    actually kept).
+    first. A *same-rooted* other match's ``entry_path``/
+    ``alternative_entry_paths`` is folded into the merged
+    ``alternative_entry_paths`` instead of dropped outright, so no
+    explanation is lost even though only one match can be primary
+    (``attach_impact_metadata`` caps how many of these are actually kept).
+    A *differently-rooted* other match's own path is deliberately left out
+    (Codex review, fresh evidence) — ``impact.engine._build_alternative_path``
+    stamps every merged ``GraphProofPath`` with the SAME single primary
+    root, so including a path that actually starts at a different public
+    entry would misrepresent it in JSON/SARIF as a variant of the primary's
+    own root; that entry is still reported via ``public_entries``, just not
+    smuggled in as a same-rooted alternative.
     """
     if len(matches) == 1:
         return matches[0]
@@ -1168,13 +1175,28 @@ def _merge_consumer_impact_paths(
             if d not in seen_decls:
                 seen_decls.add(d)
                 declarations.append(d)
+    # A non-primary match's own entry_path/alternative_entry_paths is only
+    # folded in when it shares the primary's own root (Codex review, fresh
+    # evidence): impact.engine._build_alternative_path stamps every merged
+    # GraphProofPath.root from the SAME single primary root
+    # (impact.engine._build_proof_path's affected_roots[0]) -- it has no
+    # per-alternative root field at all. Including a differently-rooted
+    # match's own path here would have it serialized in JSON/SARIF as
+    # though it started at the primary's entry, when it actually starts at
+    # (and explains) a different public entry entirely -- the exact
+    # "confident but wrong" shape this module otherwise never allows, so a
+    # differently-rooted match's own path is left out of the merged
+    # alternatives rather than mislabeled.
+    primary_root = primary.public_entries[0] if primary.public_entries else None
     alternatives = []
     for m in matches:
         if m is primary:
             continue
-        if m.entry_path:
+        same_root = bool(m.public_entries) and m.public_entries[0] == primary_root
+        if m.entry_path and same_root:
             alternatives.append(m.entry_path)
-        alternatives.extend(m.alternative_entry_paths)
+        if same_root:
+            alternatives.extend(m.alternative_entry_paths)
     alternatives.extend(primary.alternative_entry_paths)
     from .impact.consumer_graph import ConsumerImpactPath as _ConsumerImpactPath
 
@@ -1244,6 +1266,20 @@ def _attach_consumer_impact(
     )
     change.public_reachable = True
     change.reachability_kind = "consumer_proven"
+    # Unconditionally overrides whatever reachability_state MarkReachability
+    # (or nothing) already left here, including a prior PROVEN_UNREACHABLE
+    # from its own layout/type-graph closure walk (CodeRabbit review): that
+    # walk reasons about *potential* reachability from the public API
+    # surface as the library's own source declares it, while this evidence
+    # is a real --used-by consumer binary's own undefined-symbol resolution
+    # -- an empirically stronger, more direct signal than a structural
+    # closure inference, and this function only ever runs when that real
+    # requirement was found. Deliberately not treated as a recorded
+    # conflict between two disagreeing verdicts: an actual observed
+    # dependency is not "in tension" with an inference about the surface
+    # that dependency turned out to route around (an alias, a compiler
+    # intrinsic call, or any other path the closure walk doesn't model) --
+    # it settles the question the walk could only approximate.
     change.reachability_state = ReachabilityState.PROVEN_REACHABLE
 
 

@@ -544,10 +544,40 @@ def join_use_case_graph(
     the library's own coverage honesty describe a pass that never ran.
     Deliberately not :meth:`~abicheck.buildsource.source_graph.SourceGraphSummary.finalize`\\ d
     either, for the same transient-graph reason.
+
+    Restores every already-existing node's own ``provenance``/``confidence``
+    to their pre-join value afterward (Codex review, fresh evidence — a
+    residual gap in the earlier ``CONF_UNKNOWN`` placeholder-confidence fix):
+    ``ensure_facts_and_resolve``'s ADR-046 D2 merge picks **one** globally
+    winning fact for a node's ``provenance``/``confidence`` via a full
+    precedence order (confidence rank first, then producer name as a
+    tiebreak) — there is no way to mark a fact as "never eligible to win",
+    so no confidence level :func:`build_use_case_graph`'s coalescing
+    placeholder could choose is safe against *every* real producer's own
+    confidence/name combination. ``CONF_UNKNOWN`` (the lowest rank) stops a
+    higher-confidence real fact from ever losing to it, but a real fact that
+    is *also* ``CONF_UNKNOWN`` (e.g. a loaded or hand-built graph whose node
+    omitted a confidence) ties on rank, and the producer-name tiebreak alone
+    can still pick ``"declared_use_case"`` over a real producer whose name
+    sorts later (``"kythe"``, ``"codeql"``, …) — the same
+    ``is_consumer_compiled_node()`` provenance-fallback risk the earlier fix
+    closed for the confidence-ordering case, reopened for the tied case.
+    Restoring the pre-join value afterward is correct regardless of
+    ordering, rather than attempting to out-rank every possible producer
+    name — this module's own ``facts`` contribution (what
+    :func:`join_use_case_graph`'s own docstring above and its regression
+    test check) is untouched, only the single summary ``provenance``/
+    ``confidence`` fields are reset to what the library graph already
+    resolved before this join ran.
     """
+    original = {n.id: (n.provenance, n.confidence) for n in library_graph.nodes}
     joined = copy.deepcopy(library_graph)
     for node in use_cases.nodes:
         joined.add_node(copy.deepcopy(node))
     for edge in use_cases.edges:
         joined.add_edge(copy.deepcopy(edge))
+    for node in joined.nodes:
+        restore = original.get(node.id)
+        if restore is not None:
+            node.provenance, node.confidence = restore
     return joined
