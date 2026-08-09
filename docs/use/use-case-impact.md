@@ -63,7 +63,10 @@ sketches, nothing more:
 - **`entrypoints`** (optional list of strings) — public-entry symbol or
   declaration names/labels this use case exercises. Each name is matched
   against the library's own graph: an exported `binary_symbol` node, or a
-  `source_decl` (or other) node whose own declared visibility is public. A
+  `source_decl` node whose own declared visibility is public. Deliberately
+  restricted to these two kinds — a public type (`record_type`/`enum_type`/
+  `typedef`) is never a valid entrypoint target, since it has no outgoing
+  call-graph edge for a consumer-impact walk to follow. A
   name can be spelled either as the graph's internal node id
   (`binary_symbol://_ZN6detail4evalEv`) or as the node's plain label
   (`_ZN6detail4evalEv`, `train`). An exact node id always resolves and

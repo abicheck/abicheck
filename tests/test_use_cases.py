@@ -390,6 +390,39 @@ def test_build_use_case_graph_does_not_resolve_an_internal_declaration() -> None
     assert [e for e in graph.edges if e.kind == "USE_CASE_USES_ENTRY"] == []
 
 
+def test_build_use_case_graph_does_not_resolve_a_public_type() -> None:
+    """A public record_type/enum_type/typedef is never a valid entrypoint
+    target, even though it can share PUBLIC_VISIBILITIES with a real decl --
+    a type is never something a use case 'exercises', and has no outgoing
+    call-graph edge for a consumer-impact walk to follow (Codex review,
+    fresh evidence)."""
+    library = _library_graph()
+    library.add_node(
+        GraphNode(
+            id="record_type://Config",
+            kind="record_type",
+            label="Config",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    graph = build_use_case_graph(
+        [UseCaseDefinition(use_case="training-workflow", entrypoints=("Config",))],
+        library,
+    )
+    assert [e for e in graph.edges if e.kind == "USE_CASE_USES_ENTRY"] == []
+    # The exact node id is rejected the same way -- a type is never public
+    # in this module's sense, regardless of how it's spelled.
+    graph2 = build_use_case_graph(
+        [
+            UseCaseDefinition(
+                use_case="training-workflow", entrypoints=("record_type://Config",)
+            )
+        ],
+        library,
+    )
+    assert [e for e in graph2.edges if e.kind == "USE_CASE_USES_ENTRY"] == []
+
+
 def test_build_use_case_graph_emits_test_case_nodes_and_edges() -> None:
     library = _library_graph()
     graph = build_use_case_graph(

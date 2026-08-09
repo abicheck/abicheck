@@ -278,9 +278,20 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     A "public entry" here is either an exported ``binary_symbol`` node (a
     library's export table names a real, consumer-visible entry point even
     when no source graph exists to walk from it — e.g. a binary-only or
-    header-only graph) or a ``source_decl``/other node whose own declared
+    header-only graph) or a ``source_decl`` node whose own declared
     ``visibility`` is public (``PUBLIC_VISIBILITIES`` — the same set
     :mod:`abicheck.impact.consumer_graph`'s direct-requirement check reads).
+
+    Deliberately restricted to these two kinds, not any public-visibility
+    node (Codex review, fresh evidence): a public ``record_type``/
+    ``enum_type``/``typedef`` can share ``PUBLIC_VISIBILITIES`` too, but a
+    type is never something a use case "exercises" — it has no outgoing
+    ``DECL_CALLS_DECL`` edge for a consumer-impact walk to follow, and a
+    manifest entry naming one by label is far more likely to be an author's
+    mistake than a genuine business/runtime entrypoint. Accepting it would
+    emit a ``USE_CASE_USES_ENTRY`` edge to a node the graph's own
+    entry-domain predicates (``is_consumer_compiled_public_entry`` and
+    friends) never treat as a real call-graph starting point.
 
     A node's own id is always registered (exact-id lookups can never be
     ambiguous — two distinct nodes never share one id). A node's ``label``
@@ -314,8 +325,12 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     from ..buildsource.source_graph import PUBLIC_VISIBILITIES
 
     def is_public(node: GraphNode) -> bool:
+        if node.kind == "binary_symbol":
+            return True
+        if node.kind != "source_decl":
+            return False
         visibility = str((node.resolved or node.attrs).get("visibility", ""))
-        return node.kind == "binary_symbol" or visibility in PUBLIC_VISIBILITIES
+        return visibility in PUBLIC_VISIBILITIES
 
     public_nodes = [n for n in library_graph.nodes if is_public(n)]
     public_ids = {n.id for n in public_nodes}
