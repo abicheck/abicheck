@@ -69,8 +69,9 @@ A **new**, independent reason for exit `1` under `--contract-evaluation`:
 incomplete evidence for the selected domain. It's folded with `max` against
 the ordinary severity gate, so it only ever raises a clean `0`, never lowers
 a `2`/`4`. A CI script that branches only on `exit_code == 1` meaning
-"severity error" should read `contract_coverage_exit_contribution` (or the
-JSON report's `contract_coverage` block) to tell the two apart. See
+"severity error" should read the `compare` report's
+`contract_coverage_exit_contribution` field (or inspect
+`contract_coverage_failures`) to tell the two apart. See
 [Exit Codes](../reference/exit-codes.md#contract-coverage-contribution-adr-049).
 
 ## Aggregate schema `1.2`/`1.3`
