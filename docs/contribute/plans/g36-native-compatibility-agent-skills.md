@@ -194,10 +194,14 @@ identifying which `shared/*.md` fragments are used, and resolve this
 **transitively** — a copied `shared/*.md` fragment can itself reference
 another `shared/*.md` fragment, so keep resolving until a fixed point,
 not just one pass; (2) copy the skill's own `SKILL.md` and `references/`
-verbatim into `.agents/skills/<name>/`, then produce the same tree again at
-`.claude/skills/<name>/` (a second output root from the same resolved
-content, not a second hand-authored copy — per ADR-058's "packaging
-targets, not separate source" rule) so this repository's own Claude Code
+into `.agents/skills/<name>/` — "copy," not "verbatim": step (3) below
+rewrites internal links in these same copied files, so treat this step as
+"stage the source files at the output path," with link-rewriting a
+required follow-on, not an unrelated later pass a naive implementation
+could skip — then produce the same tree again at `.claude/skills/<name>/`
+(a second output root from the same resolved and already-rewritten
+content, not a second hand-authored copy — per ADR-058's "one additional
+generated packaging target" rule) so this repository's own Claude Code
 sessions have something to scan; (3) copy (not symlink) each cited
 `shared/*.md` fragment (transitively resolved per above) into
 `.agents/skills/<name>/references/shared/`, rewriting every referencing
@@ -227,7 +231,20 @@ site at generation time — read the host from `mkdocs.yml`'s own `site_url`
 key rather than hardcoding the literal URL, so the generator (and its
 tests, which must derive their expected output from that same `mkdocs.yml`
 read, not a second hardcoded literal) don't go stale if the site ever
-moves; today that resolves to `https://abicheck.github.io/abicheck/`, the
+moves. `site_url` alone only supplies the host/path prefix, though — it
+doesn't say how a repo-relative `docs/foo.md` maps to its published path,
+so state that mapping explicitly rather than leaving it implied:
+`mkdocs.yml` sets no `use_directory_urls` key, so mkdocs's own default
+(`true`, "directory URLs") applies — `docs/learn/foo.md` publishes as
+`<site_url>/learn/foo/` (the `.md` extension dropped, a trailing slash
+added, no `index`/`.html` in the visible path), and a page-relative anchor
+(`docs/learn/foo.md#some-heading`) carries straight through as
+`<site_url>/learn/foo/#some-heading` — mkdocs doesn't rewrite anchor text.
+The generator's rewrite logic and its tests must apply exactly this rule,
+and a test fixture should assert the produced URL for at least one real
+multi-segment path (confirming both the extension-to-trailing-slash
+mapping and anchor pass-through), not just that the host prefix matches.
+Today `site_url` resolves to `https://abicheck.github.io/abicheck/`, the
 same host `README.md` already links to throughout — the same class of fix
 already used elsewhere in this plan for a
 non-`docs/` link (P0.9's full-GitHub-URL convention) — a generated skill
@@ -383,21 +400,22 @@ both:**
   one more row); `docs/reference/cli-reference.md` (regenerated).
 - **If path (b), extending `--version --format json`:** `abicheck/cli.py`
   — a naive "replace `click.version_option` with a custom eager callback
-  that also reads `--format`" does not work as stated: Click evaluates
-  eager parameters before non-eager ones regardless of argv order (an
-  eager `--version` callback fires and can exit before `--format`'s own
-  non-eager parsing has populated `ctx.params`, per Click's documented
-  callback evaluation order), so `--version --format json` would render
-  before the format is known no matter which flag is typed first. Two
-  correct shapes, either is fine: make `--format` itself eager too (both
-  flags eager, ordered so `--version`'s callback runs last and can read
-  `ctx.params["format"]`), or drop `is_eager` from the version callback
-  entirely and render+exit from a normal (non-eager) callback once regular
-  parsing completes — Click's standard "eager only when you must exit
-  before other parsing matters" trade-off applies here, and a plain
-  version print has no such requirement. Test the documented `abicheck
-  --version --format json` spelling itself, not just each flag in
-  isolation; no root-command surface changes at all, so
+  that also reads `--format`" does not work, and neither does making both
+  flags eager or both non-eager: per Click's documented callback evaluation
+  order, parameters within the *same* eagerness group are still processed
+  in command-line order, so `abicheck --version --format json` (`--version`
+  typed first) fires the version callback first regardless of whether both
+  flags are eager or both are non-eager — `ctx.params["format"]` still
+  isn't populated yet either way. The one ordering that actually works
+  regardless of argv order is **mixed eagerness**: make `--format` eager
+  and leave `--version` non-eager. Click always processes the whole eager
+  group before the whole non-eager group, independent of command-line
+  position, so `--format` is guaranteed to have populated `ctx.params`
+  by the time `--version`'s (non-eager) callback runs and reads it — no
+  argv-order dependence left. Test the documented `abicheck --version
+  --format json` spelling itself (both flag orders — `--format json
+  --version` too), not just each flag in isolation; no root-command
+  surface changes at all, so
   `tests/test_cli_root_surface.py`'s pinned set is untouched (adding `info`
   there would assert a command that was never created) and `README.md`'s
   command table gets no new row — this design's only surface change is to

@@ -122,26 +122,27 @@ assumed:
   context cost.
 - **Canonical portable default, not a claim that vendor-specific
   directories become unnecessary.** `.agents/skills/<skill-name>/SKILL.md`
-  is read by GitHub Copilot (cloud agent, Copilot CLI, Copilot code review,
-  VS Code agent mode — alongside its own primary `.github/skills` location,
-  which this decision does not deprecate), OpenAI Codex (which walks
-  `.agents/skills` at every directory level from cwd to repo root), Cursor,
-  and Gemini CLI — the clients that document `.agents/skills` as a read
-  location. Claude Code does not: its own documented convention is
-  `.claude/skills/<skill-name>/SKILL.md`, so the generation process (below)
-  produces that path as Claude Code's specific packaging target, the same
-  way it produces `.github/skills`/`.cursor/skills` for their respective
-  clients. `.agents/skills` is still this document's answer to Task 8's "is
-  `.agents/skills` the best canonical publication target" question — it is
-  the right *default* publication target precisely because it needs no
-  per-vendor configuration on the clients that do honor it, not a claim that
-  every vendor reads it, or that a vendor-specific directory (`.github/
-  skills`, `.cursor/skills`, `.claude/skills`) stops mattering.
-  Source-of-truth model, below, keeps generating those vendor directories
-  as thin packaging targets for exactly this reason, and Testing and
-  evaluation architecture's cross-agent validation step is what confirms,
-  per client, whether a vendor-specific copy remains necessary rather than
-  assuming it doesn't.
+  is read directly, with no per-vendor generated copy needed, by GitHub
+  Copilot (cloud agent, Copilot CLI, Copilot code review, VS Code agent
+  mode — alongside its own primary `.github/skills` location, which this
+  decision does not deprecate but also does not generate a copy into, since
+  Copilot already reads `.agents/skills`), OpenAI Codex (which walks
+  `.agents/skills` at every directory level from cwd to repo root), Cursor
+  (same — no generated `.cursor/skills` copy either, for the same reason),
+  and Gemini CLI. Claude Code is the sole documented exception: it does not
+  scan `.agents/skills` at all, so it is the one client the generation
+  process (below) produces a real second output tree for —
+  `.claude/skills/<skill-name>/SKILL.md`. `.agents/skills` is still this
+  document's answer to Task 8's "is `.agents/skills` the best canonical
+  publication target" question — it is the right *default* publication
+  target precisely because it needs no per-vendor configuration on the
+  clients that do honor it, not a claim that every vendor reads it. Source-
+  of-truth model, below, defines exactly which output trees are generated
+  today (`.agents/skills/`, `.claude/skills/`) versus which vendor-specific
+  paths remain a documented but not-yet-implemented option (`.github/
+  skills`, `.cursor/skills`) should Testing and evaluation architecture's
+  cross-agent validation step ever find one of those clients doesn't
+  actually read `.agents/skills` reliably in practice.
 - **Self-containment is required by every vendor's own guidance**, not just
   a stylistic preference: a skill is read from the perspective of *one*
   installed directory, and nothing in the format lets an installed skill
@@ -415,35 +416,41 @@ skills-src/                              # editable source (this repo, DRY)
     references/
 ```
 
-- `.agents/skills/` is the **authoritative publication target for the
-  clients that document it** — validated by the ecosystem research as the
-  one location Copilot, Codex, Cursor, and Gemini CLI each read without
-  vendor-specific configuration. Claude Code is the documented exception,
-  per "Canonical portable default" above: it does not scan `.agents/skills`
-  at all, so it depends on the generated `.claude/skills/` packaging target
-  below, not on this directory. It is generated, not hand-edited;
-  a generator script (Layer C tooling, `scripts/gen_agent_skills.py` in the
-  implementation plan) resolves each skill's `references:` manifest (which
-  `shared/` fragments it actually uses) and copies/renders the result —
-  **no symlinks**, per the ecosystem research finding that a marketplace
-  zip, a `skills.sh` skill-pack subset install, or a Windows checkout of a
-  symlinked tree each break a live cross-skill link differently. Generation
-  keeps every installed skill genuinely self-contained (the requirement
-  every vendor's own docs impose) while keeping `skills-src/shared/` as the
-  one editable copy of any fact more than one skill needs (design principle
-  6).
-- **`.claude/skills/`, `.github/skills/`, `.cursor/skills/`, a future
-  Claude Code plugin bundle, and any `skills.sh` listing are packaging
-  targets, not separate source** — each is either (a) unnecessary, because
-  the vendor already reads `.agents/skills/` directly (Copilot, Codex,
-  Cursor, Gemini CLI, per the ecosystem research), or (b) a thin **copy**
-  (never a symlink — the same self-containment invariant above applies to
-  every generated tree, not just `.agents/skills/`) of the generated
-  `.agents/skills/<name>/` tree, rendered by the same generator, for a
-  vendor directory that is scanned but not identical — `.claude/skills/` is
-  case (b), not case (a): Claude Code needs its own committed copy (see
-  above), it is not merely "dogfooded alongside" the portable target as an
-  optional convenience. None of these hand-maintains its own prose.
+- `.agents/skills/` is the **authoritative publication target** — see
+  "Canonical portable default" above for which clients read it directly and
+  why Claude Code is the one documented exception. It is generated, not
+  hand-edited; a generator script (Layer C tooling,
+  `scripts/gen_agent_skills.py` in the implementation plan) resolves each
+  skill's `references:` manifest (which `shared/` fragments it actually
+  uses) and copies/renders the result into this tree — **no symlinks**, per
+  the ecosystem research finding that a marketplace zip, a `skills.sh`
+  skill-pack subset install, or a Windows checkout of a symlinked tree each
+  break a live cross-skill link differently. Generation keeps every
+  installed skill genuinely self-contained (the requirement every vendor's
+  own docs impose) while keeping `skills-src/shared/` as the one editable
+  copy of any fact more than one skill needs (design principle 6).
+- **`.claude/skills/` is the one additional generated packaging target
+  today** — a thin **copy** (never a symlink, same invariant as above) of
+  the resolved `.agents/skills/<name>/` content, rendered by the same
+  generator into this second tree, because Claude Code needs its own
+  committed copy (see above), not because it is "dogfooded alongside" the
+  portable target as an optional convenience. `.github/skills/` and
+  `.cursor/skills/` are **not** generated: Copilot and Cursor both already
+  read `.agents/skills/` directly, so a generated copy into their own
+  vendor-specific paths would be redundant output with nothing reading it.
+  A future Claude Code plugin bundle remains a possible additional
+  packaging target but is not part of this decision's committed scope.
+  None of these hand-maintains its own prose.
+- **`skills.sh` is a separate, external distribution channel, not a
+  generated filesystem tree** — a `skills.sh` skill-pack listing is P1.4's
+  concern (a submission with its own manifest, potentially bundling a
+  *subset* of the four skills rather than a 1:1 copy of a generated
+  directory), not a third output of `scripts/gen_agent_skills.py` alongside
+  `.agents/skills/`/`.claude/skills/`. The self-containment invariant above
+  still applies to whatever a `skills.sh` submission bundles — an installed
+  subset must never depend on a path outside its own package — but that
+  submission's shape is a distribution-time decision, not part of this
+  generator's own committed output trees.
 - **abicheck/abicheck stays the single authoritative repository.** Nothing
   in this model requires a second repository; `skills-src/` and
   `.agents/skills/` are ordinary tracked directories in this repo, gated by
