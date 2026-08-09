@@ -129,11 +129,15 @@ A headerless scan of a Mach-O dylib is **always L0 only**, even if it carries
 DWARF/dSYM debug info — abicheck has no Mach-O debug-map reader today, so
 `-H`/castxml is the only way to get past exports-only on this platform.
 
-Only a genuinely stripped binary with no debug info (L0 only) is limited to:
+A genuinely stripped binary with no debug info (L0 only) still detects, from
+export-table/load-command metadata alone (see
+[`tests/test_binary_only_pe_macho.py`](https://github.com/abicheck/abicheck/blob/main/tests/test_binary_only_pe_macho.py)):
 - Function added / removed (`func_added`, `func_removed`)
 - SONAME changed (`soname_changed`)
 - Symbol visibility changed (`func_visibility_changed`)
 - Variable added / removed
+- PE: ordinal reassignment, forwarder-target repoint, machine/architecture drift
+- Mach-O: CPU type / architecture drift
 
 ❌ **Neither L0 nor L1 alone detects on any platform** (needs L2 headers — a
 declaration-only qualifier or a default-argument value that leaves no
@@ -250,12 +254,19 @@ jobs:
   and new are matched as two distinct symbols and detected as
   `func_removed + func_added`, not `func_params_changed` — L1 debug info
   doesn't recover this either, since the mismatch is in symbol identity, not
-  missing type information. This does **not** apply to a plain C function or
-  an `extern "C"` export, whose exported name never encodes its parameter
-  types — those are correctly detected as `func_params_changed` from L1 debug
-  info alone (see [case02](../reference/examples/case02_param_type_change.md),
-  a headerless `-g` comparison)
+  missing type information.
 - Template inner-type changes (`std::vector<T>` with changed `T`) — not detected (tracked: #38)
+
+### ELF with DWARF, no headers (the one platform this reaches from L1 alone)
+- A plain C function or an `extern "C"` export, whose exported name never
+  encodes its parameter types, **is** correctly detected as
+  `func_params_changed` from L1 debug info alone (see
+  [case02](../reference/examples/case02_param_type_change.md), a headerless
+  `-g` comparison) — this is the one exception to the "All platforms" bullet
+  above. It does **not** extend to PE (PDB reconstructs no free-function
+  signatures at all, per the PDB row above) or Mach-O (no debug-info path at
+  all without headers, per the Mach-O row above): on those two, a plain-C
+  parameter change still needs `-H`/castxml.
 
 ---
 

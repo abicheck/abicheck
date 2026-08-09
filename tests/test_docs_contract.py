@@ -1527,6 +1527,26 @@ def test_retired_surfaces_flags_bare_top_level_flag_spelling(
     assert "--source-abi" in f.warnings[0][1]
 
 
+def test_retired_surfaces_flags_a_second_independent_occurrence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A later, independent bare `--source-abi` mention must still be
+    flagged even when an earlier `--source-abi-cache-dir` occurrence already
+    consumed the first `.find()` hit for the shorter pattern -- overlap
+    suppression should only swallow a match nested inside another match's
+    span, never a distinct, later occurrence."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "use").mkdir()
+    (tmp_path / "use" / "page.md").write_text(
+        "# Page\n\nSet `--source-abi-cache-dir` for caching.\n\n"
+        "Elsewhere, pass `--source-abi` on its own.\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 2
+
+
 def test_retired_surfaces_exempts_historical_lifecycle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -632,9 +632,8 @@ dependencies/surface without strong justification":
   range is exceeded.
 - **Generated reference material can never go stale silently** the way a
   hand-copied CLI cheat-sheet would: because Layer A/B reference content is
-  generated from the same canonical source `docs/reference/cli-reference.md`
-  already regenerates from
-  (`scripts/gen_cli_reference.py`), a
+  generated from the same canonical source `docs/reference/cli-reference.md`,
+  which already regenerates from `scripts/gen_cli_reference.py`, a
   renamed or removed CLI flag a skill's workflow depends on is caught by
   the identical CI gate (`scripts/verify.py --profile pr`'s doc-drift
   checks) already enforced for every other generated doc — see the

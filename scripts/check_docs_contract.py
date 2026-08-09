@@ -1046,21 +1046,24 @@ def _check_retired_surfaces(f: Findings) -> None:
             # registry entry that happens to match the same text.
             reported_spans: list[tuple[int, int]] = []
             for pattern in sorted(patterns, key=len, reverse=True):
-                idx = text.find(pattern)
-                if idx == -1:
-                    continue
-                end = idx + len(pattern)
-                if any(idx >= s and end <= e for s, e in reported_spans):
-                    continue
-                reported_spans.append((idx, end))
-                line_no = text.count("\n", 0, idx) + 1
-                f.warn(
-                    "retired-surfaces",
-                    f"{_rel(path)}:{line_no}: {pattern!r} names a retired "
-                    f"surface ({surface_name}) outside its allowed pages -- "
-                    "add historical framing or an allowlist entry in "
-                    "_RETIRED_SURFACES if this mention is intentional",
-                )
+                search_from = 0
+                while True:
+                    idx = text.find(pattern, search_from)
+                    if idx == -1:
+                        break
+                    end = idx + len(pattern)
+                    search_from = end
+                    if any(idx >= s and end <= e for s, e in reported_spans):
+                        continue
+                    reported_spans.append((idx, end))
+                    line_no = text.count("\n", 0, idx) + 1
+                    f.warn(
+                        "retired-surfaces",
+                        f"{_rel(path)}:{line_no}: {pattern!r} names a retired "
+                        f"surface ({surface_name}) outside its allowed pages -- "
+                        "add historical framing or an allowlist entry in "
+                        "_RETIRED_SURFACES if this mention is intentional",
+                    )
 
 
 # Trees that are inherently historical/planning records rather than current
