@@ -775,6 +775,11 @@ class _ClangAstParser:
         self._records: list[_Decl] = []
         self._enums: list[_Decl] = []
         self._typedefs: list[_Decl] = []
+        # Built lazily (on first param-default/field-default extraction that
+        # needs it, via _id_index()) -- a full extra tree walk isn't worth
+        # paying on every dump when nothing in this TU has a referenced-decl
+        # initializer to fingerprint.
+        self._decl_id_qualified_names: dict[str, str] | None = None
         self._walk(
             root,
             scope=(),
@@ -975,6 +980,13 @@ class _ClangAstParser:
         name = entry.node.get("name", "")
         return "::".join([*entry.scope, name]) if entry.scope else name
 
+    def _id_index(self) -> dict[str, str]:
+        """Lazily-built, memoized :func:`_index_decl_id_qualified_names`
+        over this parser's own AST root — computed at most once per parse."""
+        if self._decl_id_qualified_names is None:
+            self._decl_id_qualified_names = _index_decl_id_qualified_names(self._root)
+        return self._decl_id_qualified_names
+
     # ── parse_* (mirror _CastxmlParser's public surface) ─────────────────────
 
     def parse_functions(self) -> list[Function]:
@@ -998,7 +1010,7 @@ class _ClangAstParser:
                     # Preserve the actual default-argument value (so a changed
                     # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
                     # bare presence marker when the value can't be evaluated.
-                    default=(_initializer_value(p) or "default")
+                    default=(_initializer_value(p, self._id_index()) or "default")
                     if _param_has_default(p)
                     else None,
                 )
@@ -1297,7 +1309,7 @@ class _ClangAstParser:
             is_volatile=bool(re.search(r"\bvolatile\b", cv_type)),
             is_mutable=bool(child.get("mutable")),
             access=self._access_level(access),
-            default=_field_initializer_value(child),
+            default=_field_initializer_value(child, self._id_index()),
             deprecated=_clang_deprecated_message(child),
         )
 
@@ -1571,7 +1583,9 @@ def _param_has_default(param: dict[str, Any]) -> bool:
     )
 
 
-def _field_initializer_value(field: dict[str, Any]) -> str | None:
+def _field_initializer_value(
+    field: dict[str, Any], id_index: dict[str, str] | None = None
+) -> str | None:
     """A ``TypeField.default`` value for a ``FieldDecl``, or ``None``.
 
     G31 Phase C: the last of that phase's fact-completeness list that the
@@ -1609,7 +1623,7 @@ def _field_initializer_value(field: dict[str, Any]) -> str | None:
     """
     if not field.get("hasInClassInitializer"):
         return None
-    return _initializer_value(field)
+    return _initializer_value(field, id_index)
 
 
 def _evaluated_int_value(node: dict[str, Any]) -> int | None:
@@ -1715,7 +1729,9 @@ def _unwrap_expr(node: dict[str, Any]) -> dict[str, Any]:
     return cur
 
 
-def _initializer_value(node: dict[str, Any]) -> str | None:
+def _initializer_value(
+    node: dict[str, Any], id_index: dict[str, str] | None = None
+) -> str | None:
     """A stable value string for a variable's initializer, or ``None`` if absent.
 
     A lone literal (after stripping wrapper casts) keeps its human-readable value
@@ -1725,6 +1741,10 @@ def _initializer_value(node: dict[str, Any]) -> str | None:
     same-backend comparison key (cross-backend constant *values* are not
     expected to match — the snapshots are still per-backend parity oracles for
     presence/scope).
+
+    *id_index* (typically :func:`_index_decl_id_qualified_names` over the
+    whole AST root) resolves a referenced declaration's scope, so ``a::VALUE``
+    and ``b::VALUE`` fingerprint distinctly — see :func:`_canonical_expr`.
     """
     init = _init_expr(node)
     if init is None:
@@ -1732,7 +1752,7 @@ def _initializer_value(node: dict[str, Any]) -> str | None:
     core = _unwrap_expr(init)
     if core.get("kind") in _LITERAL_NODE_KINDS and "value" in core:
         return str(core["value"])
-    return _expr_fingerprint(init)
+    return _expr_fingerprint(init, id_index)
 
 
 def _init_expr(node: dict[str, Any]) -> dict[str, Any] | None:
@@ -1746,13 +1766,58 @@ def _init_expr(node: dict[str, Any]) -> dict[str, Any] | None:
     return candidates[-1] if candidates else None
 
 
-def _expr_fingerprint(node: dict[str, Any]) -> str:
+def _expr_fingerprint(
+    node: dict[str, Any], id_index: dict[str, str] | None = None
+) -> str:
     """A short, build-stable structural fingerprint of an expression subtree."""
-    blob = json.dumps(_canonical_expr(node), sort_keys=True).encode("utf-8")
+    blob = json.dumps(_canonical_expr(node, id_index), sort_keys=True).encode("utf-8")
     return "expr:" + hashlib.sha256(blob).hexdigest()[:16]
 
 
-def _canonical_expr(node: Any) -> Any:
+def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
+    """Map every named declaration's clang ``id`` to its scope-qualified name.
+
+    A single, dedicated pass over the WHOLE AST root (independent of
+    :class:`_ClangAstParser`'s own categorizing walk, which only tracks the
+    ABI-surface kinds it collects): a ``DeclRefExpr``'s ``referencedDecl``
+    can name any declaration in the TU (a namespace-scope ``VarDecl``, an
+    ``EnumConstantDecl``, a class's static member, ...), so this needs to see
+    everything.
+
+    Feeds :func:`_canonical_expr`'s referenced-declaration fingerprinting: a
+    ``referencedDecl`` stub is compact and carries only a bare, unqualified
+    ``name`` (Codex review, fresh evidence, verified against real Clang 17/18
+    output: `a::VALUE` and `b::VALUE` share the byte-identical stub `{"kind":
+    "VarDecl", "name": "VALUE", "type": {...}}` — nothing in the stub itself
+    distinguishes them). Its own ``id`` IS unique per declaration, but is a
+    compile-time-only memory address, never stable across builds, so it is
+    exchanged for this index's qualified-name string rather than hashed
+    directly.
+
+    Same namespace/class scope-tracking rule as
+    ``_ClangAstParser._walk``/``_SCOPE_NODE_KINDS``. A redeclaration (e.g. a
+    function declared then defined) shares its real entity's name, so the
+    first sighting of a given ``id`` is kept rather than overwritten.
+    """
+    index: dict[str, str] = {}
+
+    def walk(node: Any, scope: tuple[str, ...]) -> None:
+        if not isinstance(node, dict):
+            return
+        kind = node.get("kind")
+        name = node.get("name") or ""
+        node_id = node.get("id")
+        if isinstance(node_id, str) and name:
+            index.setdefault(node_id, "::".join((*scope, name)) if scope else name)
+        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+        for child in node.get("inner", []) or []:
+            walk(child, child_scope)
+
+    walk(root, ())
+    return index
+
+
+def _canonical_expr(node: Any, id_index: dict[str, str] | None = None) -> Any:
     """Reduce an expression node to a structural form (drop ids/locations)."""
     if not isinstance(node, dict):
         return node
@@ -1786,11 +1851,24 @@ def _canonical_expr(node: Any) -> Any:
         ref_type = referenced.get("type")
         if isinstance(ref_type, dict) and "qualType" in ref_type:
             ref_out["type"] = ref_type["qualType"]
+        # The bare "name" above collides across scopes (Codex review, fresh
+        # evidence, second round): `a::VALUE` vs `b::VALUE` share it, so a
+        # real initializer CHANGE between two same-named declarations in
+        # different namespaces/classes still fingerprinted identically
+        # without this. Resolve via id_index when available -- falls back
+        # to the bare-name-only behavior above (still better than nothing)
+        # when the id isn't found, e.g. a builtin or a declaration outside
+        # this AST root.
+        ref_id = referenced.get("id")
+        if id_index and isinstance(ref_id, str):
+            qualified = id_index.get(ref_id)
+            if qualified is not None:
+                ref_out["qualified_name"] = qualified
         if ref_out:
             out["referencedDecl"] = ref_out
     inner = node.get("inner")
     if isinstance(inner, list):
-        out["inner"] = [_canonical_expr(c) for c in inner]
+        out["inner"] = [_canonical_expr(c, id_index) for c in inner]
     return out
 
 

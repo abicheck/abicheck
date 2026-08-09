@@ -718,6 +718,113 @@ def test_field_default_fingerprint_distinguishes_referenced_declarations() -> No
     assert fields["a"].default == fields["a_again"].default
 
 
+def _namespaced_var_decl(namespace: str, var_name: str, decl_id: str) -> dict:
+    return {
+        "kind": "NamespaceDecl",
+        "name": namespace,
+        "inner": [
+            {
+                "kind": "VarDecl",
+                "id": decl_id,
+                "name": var_name,
+                "type": {"qualType": "const int"},
+            }
+        ],
+    }
+
+
+def _decl_ref_initializer_by_id(field_name: str, referenced_id: str) -> dict:
+    """Same shape as ``_decl_ref_initializer``, but the ``referencedDecl``
+    stub's ``id`` is caller-supplied (so it can be made to resolve, via
+    ``_index_decl_id_qualified_names``, to a real namespaced declaration
+    planted elsewhere in the same synthetic AST) rather than sharing
+    ``referenced_name`` as both the bare stub name AND the lookup key --
+    two DIFFERENT namespaced declarations sharing the same bare leaf name
+    is exactly the case this test targets."""
+    return {
+        "kind": "FieldDecl",
+        "name": field_name,
+        "type": {"qualType": "int"},
+        "hasInClassInitializer": True,
+        "inner": [
+            {
+                "kind": "ImplicitCastExpr",
+                "type": {"qualType": "int"},
+                "castKind": "LValueToRValue",
+                "inner": [
+                    {
+                        "kind": "DeclRefExpr",
+                        "type": {"qualType": "const int"},
+                        "referencedDecl": {
+                            "kind": "VarDecl",
+                            "name": "VALUE",
+                            "type": {"qualType": "const int"},
+                            "id": referenced_id,
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def test_field_default_fingerprint_distinguishes_namespaced_same_name_referents() -> (
+    None
+):
+    """Codex review, PR #687, second round, fresh evidence: a
+    ``referencedDecl`` stub carries only a BARE, unqualified name -- real
+    Clang 17/18 output confirmed ``a::VALUE`` and ``b::VALUE`` share the
+    byte-identical stub ``{"kind": "VarDecl", "name": "VALUE", ...}``, so
+    ``int x = a::VALUE;`` vs ``int x = b::VALUE;`` still fingerprinted
+    identically after the first round's fix (which only distinguished
+    referenced declarations by bare name/kind/type, not by scope). The
+    fix resolves each reference's ``id`` through
+    ``_index_decl_id_qualified_names``'s namespace-qualified index instead."""
+    root = _tu(
+        _namespaced_var_decl("a", "VALUE", "0x1"),
+        _namespaced_var_decl("b", "VALUE", "0x2"),
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                _decl_ref_initializer_by_id("x", "0x1"),
+                _decl_ref_initializer_by_id("y", "0x2"),
+                _decl_ref_initializer_by_id("x_again", "0x1"),
+            ],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    fields = {f.name: f for f in t.fields}
+
+    assert fields["x"].default is not None
+    assert fields["x"].default != fields["y"].default
+    # The SAME referenced declaration (by id) still fingerprints
+    # identically, even though this fix resolves scope through it.
+    assert fields["x"].default == fields["x_again"].default
+
+
+def test_id_index_falls_back_to_bare_name_for_unresolved_reference() -> None:
+    """A referencedDecl id absent from the index (e.g. a builtin, or a
+    declaration genuinely outside this AST root) must not crash or drop
+    the fingerprint entirely -- it falls back to the bare-name/kind/type
+    identity the first round's fix already established."""
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [_decl_ref_initializer_by_id("x", "0xDEADBEEF")],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    assert t.fields[0].default is not None
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {
@@ -3629,6 +3736,42 @@ def test_canonical_expr_and_typedef_underlying_edges() -> None:
     assert out == {"kind": "X", "type": "int", "inner": ["y"]}
     # Typedef with a non-dict type → empty underlying.
     assert _typedef_underlying({"type": None}) == ""
+
+
+def test_index_decl_id_qualified_names() -> None:
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        _namespaced_var_decl("a", "VALUE", "0x1"),
+        _namespaced_var_decl("b", "VALUE", "0x2"),
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Outer",
+            "inner": [
+                {"kind": "VarDecl", "id": "0x3", "name": "member"},
+                {
+                    "kind": "CXXRecordDecl",
+                    "name": "Inner",
+                    "inner": [{"kind": "VarDecl", "id": "0x4", "name": "member"}],
+                },
+            ],
+        },
+        # An anonymous scope (no name) contributes no scope segment, but its
+        # own children are still indexed.
+        {
+            "kind": "LinkageSpecDecl",
+            "inner": [{"kind": "VarDecl", "id": "0x5", "name": "global"}],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0x1"] == "a::VALUE"
+    assert index["0x2"] == "b::VALUE"
+    assert index["0x3"] == "Outer::member"
+    assert index["0x4"] == "Outer::Inner::member"
+    assert index["0x5"] == "global"
+    # A non-dict node anywhere in the tree is skipped, not a crash.
+    assert _index_decl_id_qualified_names({"inner": ["not-a-dict", None]}) == {}
 
 
 def test_owned_tag_id_nested_and_non_dict() -> None:

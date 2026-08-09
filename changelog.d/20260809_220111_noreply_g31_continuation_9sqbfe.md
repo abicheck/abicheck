@@ -77,3 +77,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   memory-address `id`, which stays excluded per this function's existing
   build-stability contract); the same declaration referenced twice still
   fingerprints identically.
+- **Extended that fix to distinguish same-named declarations in different
+  scopes** (Codex review, fresh evidence, second round): a `referencedDecl`
+  stub's `kind`/`name`/`type` alone still collide for `a::VALUE` vs.
+  `b::VALUE` (or `a::same()` vs. `b::same()`) — a `DeclRefExpr`'s compact
+  stub carries only the bare, unqualified name, verified against real Clang
+  17/18 output. A new `dumper_clang._index_decl_id_qualified_names()` maps
+  every declaration's clang `id` to its scope-qualified name in one pass
+  over the AST root, letting the fingerprint resolve a referenced
+  declaration's *scope* without ever hashing its unstable, per-build
+  memory-address `id` directly. Falls back to the bare-identity behavior
+  above when a reference's `id` isn't found (e.g. a builtin).
