@@ -96,9 +96,26 @@ class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
 def _construct_mapping_rejecting_duplicates(
     loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False
 ) -> dict[Any, Any]:
+    """PyYAML's own ``SafeConstructor.construct_mapping`` already rejects an
+    unhashable key (e.g. ``- {[a, b]: x}``, a YAML sequence used as a
+    mapping key) with a ``ConstructorError`` — a check this override must
+    keep, not just the duplicate-key check it adds, or a syntactically
+    valid-but-unhashable-keyed document raises a bare ``TypeError`` that
+    escapes ``load_use_case_manifest``'s ``except yaml.YAMLError`` and the
+    documented :class:`~abicheck.errors.UseCaseManifestError` contract
+    entirely (Codex review, fresh evidence)."""
     mapping: dict[Any, Any] = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=deep)
+        try:
+            hash(key)
+        except TypeError as exc:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found unhashable key: {key!r}",
+                key_node.start_mark,
+            ) from exc
         if key in mapping:
             raise yaml.constructor.ConstructorError(
                 "while constructing a mapping",

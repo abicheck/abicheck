@@ -2205,3 +2205,78 @@ class TestCheckPeOrdinalImportsWithSnapshots:
                 old_snap, new_snap, app_reqs,
             )
         assert (resolved, retargeted, names) == (set(), [], set())
+
+
+class TestHasImpactEvidence:
+    """``_has_impact_evidence`` must key off a *meaningful* proof path, not
+    merely "an ``impact_assessment`` object exists on the change" (Codex
+    review, fresh evidence). Since ADR-052 Slice 10,
+    ``post_processing.MarkReachability`` caches an ``ImpactAssessment`` on
+    *every* change it tags — including a change it leaves ``UNKNOWN`` with
+    no proof path and one it tags ``PROVEN_REACHABLE`` via a direct-symbol/
+    public-source-ABI match with no walked path either. Treating either as
+    "evidence of its own" would wrongly block
+    :func:`abicheck.appcompat._enrich_covered_changes` from attaching the
+    consumer-graph explanation for the ordinary, common case this join
+    exists to serve."""
+
+    def _change(self, **kwargs):
+        return Change(
+            kind=ChangeKind.FUNC_REMOVED,
+            symbol="_Z9dispatchv",
+            description="Function removed: _Z9dispatchv",
+            **kwargs,
+        )
+
+    def test_no_evidence_at_all_is_false(self):
+        from abicheck.appcompat import _has_impact_evidence
+
+        assert _has_impact_evidence(self._change()) is False
+
+    def test_a_cached_assessment_with_no_proof_path_is_false(self):
+        """The exact regression shape: MarkReachability's blanket cache on
+        an UNKNOWN, unproven change must not read as evidence."""
+        from abicheck.appcompat import _has_impact_evidence
+        from abicheck.impact.engine import assess_change
+
+        change = self._change(reachability_state=ReachabilityState.UNKNOWN)
+        change.impact_assessment = assess_change(change)
+        assert change.impact_assessment.proof_path is None
+        assert _has_impact_evidence(change) is False
+
+    def test_a_cached_assessment_tagged_reachable_with_no_path_is_false(self):
+        """The direct-symbol/public-source-ABI-surface tag branches set
+        ``public_reachable``/``reachability_state`` but no proof path —
+        still not "evidence of its own" for this check's purpose."""
+        from abicheck.appcompat import _has_impact_evidence
+        from abicheck.impact.engine import assess_change
+
+        change = self._change(
+            public_reachable=True,
+            reachability_kind="direct_public_symbol",
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
+        )
+        change.impact_assessment = assess_change(change)
+        assert change.impact_assessment.proof_path is None
+        assert _has_impact_evidence(change) is False
+
+    def test_a_cached_assessment_with_a_real_proof_path_is_true(self):
+        from abicheck.appcompat import _has_impact_evidence
+        from abicheck.impact.engine import assess_change
+
+        change = self._change(
+            public_reachable=True,
+            reachability_kind="value_embedding",
+            reachability_state=ReachabilityState.PROVEN_REACHABLE,
+            reachability_proof_path="Foo -> Bar -> _Z9dispatchv",
+        )
+        change.impact_assessment = assess_change(change)
+        assert change.impact_assessment.proof_path is not None
+        assert _has_impact_evidence(change) is True
+
+    def test_a_flat_reachability_proof_path_with_no_cached_assessment_is_true(self):
+        from abicheck.appcompat import _has_impact_evidence
+
+        change = self._change(reachability_proof_path="Foo -> Bar -> _Z9dispatchv")
+        assert change.impact_assessment is None
+        assert _has_impact_evidence(change) is True

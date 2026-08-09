@@ -202,6 +202,18 @@ def test_load_use_case_manifest_rejects_a_duplicate_key(tmp_path: Path) -> None:
         load_use_case_manifest(manifest)
 
 
+def test_load_use_case_manifest_wraps_an_unhashable_key(tmp_path: Path) -> None:
+    """A syntactically valid document with an unhashable mapping key (a YAML
+    sequence used as a key) must still surface through the public
+    UseCaseManifestError contract, not a bare TypeError -- the duplicate-key
+    override must keep the hashability check PyYAML's own default
+    constructor already performs."""
+    manifest = tmp_path / "impact-use-cases.yaml"
+    manifest.write_text("- {[a, b]: x}\n")
+    with pytest.raises(UseCaseManifestError, match="unhashable key"):
+        load_use_case_manifest(manifest)
+
+
 def test_load_use_case_manifest_of_an_empty_file_is_empty(tmp_path: Path) -> None:
     manifest = tmp_path / "impact-use-cases.yaml"
     manifest.write_text("")

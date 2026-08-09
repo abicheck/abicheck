@@ -1028,9 +1028,27 @@ def _has_impact_evidence(change: Change) -> bool:
     unconditionally (``None`` included). It also makes the multi-``--used-by``
     case first-writer-wins and therefore deterministic in app order, rather
     than silently last-writer-wins.
+
+    ``impact_assessment.proof_path is not None`` (a *cached assessment that
+    actually carries a proof path*), not merely "a cached assessment
+    exists" (Codex review, fresh evidence): since ADR-052 Slice 10,
+    ``post_processing.MarkReachability`` caches an ``ImpactAssessment`` on
+    *every* change it tags -- including a change it leaves
+    ``ReachabilityState.UNKNOWN`` with no proof path at all (an ordinary,
+    otherwise-unexplained ``FUNC_REMOVED``), and one it tags
+    ``PROVEN_REACHABLE`` via a direct-symbol/public-source-ABI-surface match
+    with no walked path either (see that step's own two early-continue
+    branches). Treating either of those as "evidence of its own" would skip
+    :func:`_enrich_covered_changes` for the exact common case this join
+    exists to explain, silently dropping ``affected_public_roots``/
+    ``impact_proof_path``/the consumer-neutral prose for a covered removed
+    export. Reading ``.proof_path`` instead makes this check equivalent to
+    the two flat-field checks below regardless of whether the evidence
+    reached this change via the cache or directly.
     """
+    assessment = getattr(change, "impact_assessment", None)
     return (
-        getattr(change, "impact_assessment", None) is not None
+        (assessment is not None and assessment.proof_path is not None)
         or getattr(change, "impact_proof_path", None) is not None
         or getattr(change, "reachability_proof_path", None) is not None
     )
