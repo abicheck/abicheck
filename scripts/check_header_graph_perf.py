@@ -235,8 +235,21 @@ def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
     for it is therefore a precise, already-load-bearing signal — not a new
     parallel bookkeeping mechanism — that this measurement's ``attach_ms``
     reflects the real second clang invocation, for either backend.
+
+    Also requires ``HEADER_INCLUDE_GRAPH_PASS`` to have landed in
+    ``extractor_passes`` (a clean pass), not merely ``degraded_passes`` (a
+    partial one) — since the attach call always requests the include-graph
+    pass too (its own ``clang -M`` subprocess per top-level header), a
+    regression that breaks *only* that pass while the main AST parse still
+    succeeds would otherwise return a shorter, silently-degraded sample that
+    reads as a performance win (Codex review, fresh evidence: this is a
+    distinct failure mode from the AST-parse one above, not covered by
+    checking ``HEADER_CALL_GRAPH_PASS`` alone).
     """
-    from abicheck.buildsource.header_graph import HEADER_CALL_GRAPH_PASS
+    from abicheck.buildsource.header_graph import (
+        HEADER_CALL_GRAPH_PASS,
+        HEADER_INCLUDE_GRAPH_PASS,
+    )
 
     graph = getattr(getattr(snap, "build_source", None), "source_graph", None)
     passes = getattr(graph, "extractor_passes", {}) if graph is not None else {}
@@ -248,6 +261,14 @@ def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
             "understate the real cost (or mask a regression that broke the "
             "second clang invocation entirely). Aborting rather than recording "
             "a misleading data point."
+        )
+    if not passes.get(HEADER_INCLUDE_GRAPH_PASS):
+        raise RuntimeError(
+            f"size={n} backend={backend}: the include-graph pass "
+            "(HEADER_INCLUDE_GRAPH_PASS) did not complete cleanly -- either it "
+            "degraded (a partial `clang -M` failure) or never ran at all. This "
+            "measurement's attach_ms would understate the real always-on include-"
+            "graph cost. Aborting rather than recording a misleading data point."
         )
 
 
@@ -332,12 +353,22 @@ def _measure_size(
         try:
             result = _measure_one(n, backend, repeat)
         except SnapshotError as exc:
-            # A backend present on PATH but rejected by abicheck itself
-            # (e.g. an out-of-policy castxml build, ADR-*'s
-            # UnsupportedCastxmlVersionError) skips just that backend's
-            # points rather than aborting the whole sweep — the same
-            # "self-skip, don't crash" contract the rest of this script
-            # applies to a missing tool.
+            if backend != "castxml":
+                # clang is the one backend this script already required
+                # (main()'s own SKIP check, before measure() is ever
+                # called) -- a SnapshotError from it mid-sweep is a real
+                # extraction failure (a timeout, a crash, ...), not an
+                # expected/optional condition, and must not be silently
+                # dropped: main() only ever sees the points actually
+                # returned, so a missing size=400 clang point could still
+                # read as a clean "OK" if every *other* size happened to
+                # match the baseline (Codex review, fresh evidence).
+                raise
+            # castxml is the one explicitly optional backend (present on
+            # PATH but rejected by abicheck itself -- e.g. an out-of-policy
+            # build, ADR-*'s UnsupportedCastxmlVersionError) -- skipping
+            # just its points is the same "self-skip, don't crash" contract
+            # the rest of this script applies to a missing tool.
             print(f"SKIP: size={n} backend={backend}: {exc}")
             continue
         points.append({"size": n, "backend": backend, **result})

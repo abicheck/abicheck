@@ -289,11 +289,18 @@ class TestRequireRealAstAttach:
         def __init__(self, build_source):
             self.build_source = build_source
 
-    def test_passes_when_call_graph_pass_stamped(self):
-        from abicheck.buildsource.header_graph import HEADER_CALL_GRAPH_PASS
+    def test_passes_when_both_passes_stamped(self):
+        from abicheck.buildsource.header_graph import (
+            HEADER_CALL_GRAPH_PASS,
+            HEADER_INCLUDE_GRAPH_PASS,
+        )
 
         snap = self._FakeSnap(
-            self._FakeBuildSource(self._FakeGraph({HEADER_CALL_GRAPH_PASS: True}))
+            self._FakeBuildSource(
+                self._FakeGraph(
+                    {HEADER_CALL_GRAPH_PASS: True, HEADER_INCLUDE_GRAPH_PASS: True}
+                )
+            )
         )
         assert hg_gate._require_real_ast_attach(snap, 5, "clang") is None
 
@@ -302,10 +309,52 @@ class TestRequireRealAstAttach:
         with pytest.raises(RuntimeError, match="degraded"):
             hg_gate._require_real_ast_attach(snap, 5, "castxml")
 
+    def test_raises_when_include_graph_pass_missing(self):
+        # Regression guard: the main AST parse can succeed while the
+        # separate include-graph (`clang -M`) pass degrades or never runs
+        # -- checking HEADER_CALL_GRAPH_PASS alone would miss this.
+        from abicheck.buildsource.header_graph import HEADER_CALL_GRAPH_PASS
+
+        snap = self._FakeSnap(
+            self._FakeBuildSource(self._FakeGraph({HEADER_CALL_GRAPH_PASS: True}))
+        )
+        with pytest.raises(RuntimeError, match="include-graph"):
+            hg_gate._require_real_ast_attach(snap, 5, "clang")
+
     def test_raises_when_no_build_source_at_all(self):
         snap = self._FakeSnap(None)
         with pytest.raises(RuntimeError, match="degraded"):
             hg_gate._require_real_ast_attach(snap, 5, "clang")
+
+
+class TestMeasureSizeErrorHandling:
+    """``_measure_size`` must only self-skip the explicitly optional castxml
+    backend on a SnapshotError -- a clang-backend failure mid-sweep is a real
+    extraction regression (timeout, crash, ...) and must propagate, not be
+    silently dropped from the returned points (Codex review, fresh
+    evidence)."""
+
+    def test_castxml_snapshot_error_is_skipped(self, monkeypatch):
+        from abicheck.errors import SnapshotError
+
+        def _fake_measure_one(n, backend, repeat):
+            if backend == "castxml":
+                raise SnapshotError("out-of-policy castxml build")
+            return {"baseline_ms": 1.0, "attach_ms": 1.0}
+
+        monkeypatch.setattr(hg_gate, "_measure_one", _fake_measure_one)
+        points = hg_gate._measure_size(10, repeat=1, backends=("clang", "castxml"))
+        assert [p["backend"] for p in points] == ["clang"]
+
+    def test_clang_snapshot_error_propagates(self, monkeypatch):
+        from abicheck.errors import SnapshotError
+
+        def _fake_measure_one(n, backend, repeat):
+            raise SnapshotError("clang crashed parsing this header")
+
+        monkeypatch.setattr(hg_gate, "_measure_one", _fake_measure_one)
+        with pytest.raises(SnapshotError, match="clang crashed"):
+            hg_gate._measure_size(10, repeat=1, backends=("clang",))
 
 
 @pytest.mark.integration
