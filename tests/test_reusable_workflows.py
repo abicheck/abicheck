@@ -44,6 +44,9 @@ CHECK_SINGLE = WORKFLOWS_DIR / "check-single.yml"
 CHECK_PROJECT = WORKFLOWS_DIR / "check-project.yml"
 TEST_ACTION = WORKFLOWS_DIR / "test-action.yml"
 TEST_CHECK_PROJECT_FAILURE_PATH = WORKFLOWS_DIR / "test-check-project-failure-path.yml"
+SCHEDULE_CHECK_PROJECT_FAILURE_PATH = (
+    WORKFLOWS_DIR / "schedule-check-project-failure-path.yml"
+)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -1269,19 +1272,75 @@ class TestCheckProjectFixtureDoesNotFailTheRequiredWorkflow:
         assert ".github/workflows/check-project.yml" not in pr_paths
         assert ".github/workflows/check-project.yml" not in push_paths
 
-    def test_failure_path_workflow_does_not_trigger_on_pull_request(self) -> None:
+    def test_failure_path_workflow_does_not_trigger_on_pull_request_or_push(
+        self,
+    ) -> None:
         """Even in its own non-required workflow file, this fixture's
         expected failure still posts a real, visible red check-run against
         whatever commit SHA triggered it -- 'not required' doesn't mean
-        'invisible' on a PR's checks list, and a human skimming that list
-        has no way to tell 'expected, by design' apart from a genuine
-        failure without reading this file's own header comment. Restricting
-        the trigger to `push: branches: [main]` (i.e. only after a PR has
-        already merged) means no open PR ever shows this fixture's
-        deliberate failure as one of its own checks."""
+        'invisible' on a checks list, and a human (or an automated health
+        signal) has no way to tell 'expected, by design' apart from a
+        genuine failure without reading this file's own header comment.
+        Neither `pull_request` nor `push` (which would attach the run to a
+        commit SHA that is part of `main`'s own history) may trigger this
+        workflow -- only `workflow_dispatch`, which the sibling
+        `schedule-check-project-failure-path.yml` uses against a dedicated,
+        disposable fixture ref, never against `main` directly."""
         data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
         assert "pull_request" not in data[True]
-        assert data[True]["push"]["branches"] == ["main"]
+        assert "push" not in data[True]
+        assert "schedule" not in data[True]
+        assert data[True]["workflow_dispatch"] == {}
+
+    def test_failure_path_workflow_has_no_schedule_of_its_own(self) -> None:
+        """A `schedule:` trigger declared directly on this file would still
+        run against `main`'s own tip commit (schedule always resolves the
+        workflow file from the default branch) -- exactly the SHA-pollution
+        problem this file exists to avoid. Automated scheduling must live in
+        the sibling dispatcher workflow instead, which targets a disjoint
+        fixture ref."""
+        data = _load(TEST_CHECK_PROJECT_FAILURE_PATH)
+        assert "schedule" not in data[True]
+
+
+class TestScheduleCheckProjectFailurePathDispatcher:
+    """`schedule-check-project-failure-path.yml` is the automated-trigger
+    half of test-check-project-failure-path.yml: it runs on `main` on a
+    schedule, but its own job must never itself perform the assertions that
+    are expected to fail -- it only stages a disjoint fixture ref and
+    dispatches the real fixture workflow against it, so this scheduler's own
+    conclusion reports its own (real) health, not the fixture's (expected)
+    failure."""
+
+    def test_dispatcher_workflow_has_no_assertions_of_its_own(self) -> None:
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert "assert" not in run_steps
+        assert "uses: ./.github/workflows/check-project.yml" not in str(data)
+
+    def test_dispatcher_targets_a_fixture_ref_not_main(self) -> None:
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert "ci-fixture/check-project-failure-path" in run_steps
+        assert "--ref ci-fixture/check-project-failure-path" in run_steps
+        assert "git commit --allow-empty" in run_steps
+
+    def test_dispatcher_dispatches_the_failure_path_workflow(self) -> None:
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        run_steps = " ".join(s.get("run", "") for s in _steps(job))
+        assert "gh workflow run test-check-project-failure-path.yml" in run_steps
+
+    def test_dispatcher_has_write_permissions_for_its_job(self) -> None:
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        assert job["permissions"]["contents"] == "write"
+        assert job["permissions"]["actions"] == "write"
+        # Read-only at the workflow level -- the elevated permissions are
+        # scoped to just this one job, not inherited as a workflow default.
+        assert data["permissions"]["contents"] == "read"
 
 
 class TestEveryCheckProjectJobInstallsAbicheckFromItsOwnSource:
