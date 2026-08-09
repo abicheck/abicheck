@@ -1362,9 +1362,23 @@ there is no equivalent "should this be automatic" question for them.
 1. Virtual-dispatch/class-hierarchy graph with possible-override edges (the
    call graph already labels a virtual call `CALL_KIND_VIRTUAL` /
    `RESOLUTION_OVERAPPROX`; this closes the loop to the actual override set).
-2. Template pattern ↔ instantiation ↔ exported-symbol graph (partially
-   present via `source_link.py`'s `template_instantiation_symbol_to_decl`
-   attribution; not yet a graph edge).
+2. ~~Template pattern ↔ instantiation ↔ exported-symbol graph~~ — **done
+   (G29 Phase 5 item 1)**. `source_link.py`'s `template_instantiation_symbol_to_decl`
+   attribution predates this and stays as-is (a different layer, L4's own
+   linking step); the graph edge this item asked for is
+   `abicheck/buildsource/template_graph.py`: a third, independent
+   `clang -ast-dump=json` pass minting `template_decl`/
+   `template_instantiation` nodes and `DECL_INSTANTIATES_TEMPLATE`/
+   `TEMPLATE_USES_TYPE`/`INSTANTIATION_EMITS_SYMBOL` edges, driven by
+   `inline_graph_fold.fold_template_graph` alongside the call/type graph
+   passes. `TEMPLATE_USES_DECL`/`INSTANTIATION_MAPS_TO_EXPORT`/
+   `DECL_USES_DEFAULT_TEMPLATE_ARG`/`CONSTRAINT_DEPENDS_ON_DECL` remain
+   reserved, unpopulated vocabulary — see the module's own docstring for
+   why each is deferred (a non-type/function-pointer argument needing its
+   own AST verification, redundancy with `BINARY_EXPORTS_SYMBOL` on the
+   already-joined symbol node, explicit-vs-defaulted argument detection,
+   and C++20 concepts needing a separate AST subsystem, respectively). See
+   `docs/reference/source-graph-schema.md` for the field-level detail.
 3. Macro expansion/reference graph for public headers (`DECL_USES_MACRO`) —
    `preprocessor_scan.py` (ADR-035 D2) already captures macro facts at the S2
    tier; this would connect them into the same graph instead of a separate

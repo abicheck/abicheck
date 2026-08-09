@@ -327,6 +327,81 @@ def fold_type_graph(
     )
 
 
+def fold_template_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    clang_bin: str,
+    extractors: list[ExtractorRecord] | None,
+    changed_paths: tuple[str, ...] = (),
+    scoped_units: list[Any] | None = None,
+) -> None:
+    """Best-effort Clang template-instantiation augmentation of *graph*
+    (G29 Phase 5 item 1).
+
+    Mirrors :func:`fold_type_graph` exactly (same scoping precedence, same
+    graceful degradation on a missing ``clang++``) but folds
+    ``DECL_INSTANTIATES_TEMPLATE``/``TEMPLATE_USES_TYPE``/
+    ``INSTANTIATION_EMITS_SYMBOL`` edges — see
+    ``template_graph.py``'s own module docstring for the empirically-
+    verified AST shapes this closes over. Run only when the caller also
+    runs the call/type graph (``with_call_graph``), sharing the same
+    scoping decision and clang-availability diagnostic story.
+    """
+    from .call_graph import (
+        extractor_pass_fully_covered,
+        narrowed_pass_confirmed,
+        project_source_files,
+    )
+    from .template_graph import (
+        ClangTemplateGraphExtractor,
+        augment_graph_with_templates,
+    )
+
+    rows = extractors if extractors is not None else []
+    extractor = ClangTemplateGraphExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        rows.append(
+            ExtractorRecord(
+                name="template_graph:clang",
+                status="failed",
+                detail=f"{extractor.clang_bin} not found; graph has no template edges",
+            )
+        )
+        return
+    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
+        merged, changed_paths, scoped_units
+    )
+    instantiations = extractor.extract_from_build(target)
+    project_files = project_source_files(merged)
+    added = augment_graph_with_templates(graph, instantiations, project_files or None)
+    if extractor_pass_fully_covered(target, extractor, narrowed):
+        graph.extractor_passes["template_graph"] = True
+    elif narrowed and narrowed_pass_confirmed(target, extractor):
+        graph.narrowed_passes["template_graph"] = True
+        graph.narrowed_scope["template_graph"] = scope_key
+    elif extractor.diagnostics:
+        graph.degraded_passes["template_graph"] = True
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"template_graph: {diag}")
+    timing = (
+        f", {extractor.last_elapsed_s:.2f}s, jobs={extractor.last_jobs}"
+        if getattr(extractor, "last_jobs", 0)
+        else ""
+    )
+    rows.append(
+        ExtractorRecord(
+            name="template_graph:clang",
+            status="ok" if added else "partial",
+            detail=(
+                f"{len(instantiations)} instantiation(s), {added} edges from "
+                f"{len(target.compile_units)} compile unit(s){scoped_note}{timing}"
+            ),
+        )
+    )
+
+
 def fold_include_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,

@@ -59,6 +59,10 @@ from .graph_facts import (
     CONF_UNKNOWN as CONF_UNKNOWN,
     CONSUMER_EDGE_KINDS,  # G29 Phase 4 (ADR-057)
     CONSUMER_NODE_KINDS,
+    LINK_PROVENANCE_EDGE_KINDS,  # ADR-041 P1 #2
+    LINK_PROVENANCE_NODE_KINDS,
+    TEMPLATE_EDGE_KINDS,  # G29 Phase 5 item 1
+    TEMPLATE_NODE_KINDS,
     USE_CASE_EDGE_KINDS,  # G29 Phase 4 slice 2 (ADR-057 amendment)
     USE_CASE_NODE_KINDS,
     FactConflict as FactConflict,
@@ -114,19 +118,11 @@ NODE_KINDS: frozenset[str] = frozenset(
         "toolchain",
         "generated_file",
         "external_dependency",
-        # ADR-041 P1 #2: object/link provenance (a symbol change attributed to "which object/archive member/link step", not only "which target"). object_file/static_library/version_script are populated
-        # from BuildEvidence.compile_units/link_units below; archive_member is populated by archive_graph.augment_graph_with_archives (G29 Phase 5 item 6, via inline_graph_fold.fold_archive_graph) — a
-        # real `ar`-index introspection pass, not build-evidence alone. linker_script/export_map/comdat_group remain reserved (no normalized data source yet) for a future linker-artifact extractor.
-        "object_file",
-        "archive_member",
-        "static_library",
-        "linker_script",
-        "version_script",
-        "export_map",
-        "comdat_group",
     }
     | CONSUMER_NODE_KINDS
     | USE_CASE_NODE_KINDS
+    | TEMPLATE_NODE_KINDS
+    | LINK_PROVENANCE_NODE_KINDS
 )
 
 #: Edge kinds the graph schema understands (ADR-031 D2).
@@ -153,20 +149,11 @@ EDGE_KINDS: frozenset[str] = frozenset(
         "BUILD_OPTION_AFFECTS_SYMBOL",
         "FINDING_LOCALIZES_TO_DECL",
         "FINDING_CAUSED_BY_OPTION",
-        # ADR-041 P1 #2 (object/link provenance graph).
-        "TARGET_HAS_LINK_UNIT",
-        "COMPILE_UNIT_EMITS_OBJECT",
-        "LINK_UNIT_HAS_INPUT",
-        "LINK_UNIT_USES_VERSION_SCRIPT",
-        "LINK_UNIT_EXPORTS_SYMBOL",
-        # Populated by archive_graph.augment_graph_with_archives (G29 Phase 5
-        # item 6) over the object_file/static_library nodes above — see the
-        # NODE_KINDS note.
-        "ARCHIVE_CONTAINS_OBJECT",
-        "OBJECT_DEFINES_SYMBOL",
     }
     | CONSUMER_EDGE_KINDS
     | USE_CASE_EDGE_KINDS
+    | TEMPLATE_EDGE_KINDS
+    | LINK_PROVENANCE_EDGE_KINDS
 )
 
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a

@@ -119,6 +119,90 @@ USE_CASE_EDGE_KINDS: frozenset[str] = frozenset(
     }
 )
 
+#: The template-instantiation half of the graph vocabulary (G29 Phase 5 item
+#: 1, G29.6's first-priority open graph family) — ``source_graph.NODE_KINDS``/
+#: ``EDGE_KINDS`` union these in the same way ``CONSUMER_NODE_KINDS``/
+#: ``USE_CASE_NODE_KINDS`` above are, and ``abicheck.buildsource.
+#: template_graph`` (which populates them) re-exports them. Same two reasons
+#: for living in this leaf module: ``source_graph.py`` is at its 2000-line
+#: hard cap, and the producer would need to import ``source_graph`` back.
+#:
+#: Closes the "public template → concrete instantiation → internal
+#: specialization → emitted exported symbol" chain: a template's own
+#: declaration is often internal-type-free, but a specific instantiation can
+#: both depend on an internal type through its arguments and emit a real,
+#: linkable symbol — neither of which the pre-existing ``type_graph``/
+#: ``call_graph`` passes capture (they only see the template *pattern*).
+#:
+#: Only ``DECL_INSTANTIATES_TEMPLATE``, ``TEMPLATE_USES_TYPE``, and
+#: ``INSTANTIATION_EMITS_SYMBOL`` are populated this slice — see
+#: ``template_graph.py``'s own module docstring for the full, empirically-
+#: grounded reasoning. The rest are **reserved**, same "registered so a
+#: hand-built or newer graph naming one is never rejected, but no normalized
+#: data source yet" pattern as ``CONSUMER_INSTANTIATES_DECL``/
+#: ``TRACE_OBSERVED_ENTRY`` above: ``TEMPLATE_USES_DECL`` needs its own AST
+#: verification for a non-type (e.g. function-pointer) argument,
+#: ``INSTANTIATION_MAPS_TO_EXPORT`` is redundant with reading
+#: ``BINARY_EXPORTS_SYMBOL`` off the same joined ``binary_symbol`` node (the
+#: identical ADR-057 D1 reasoning), ``DECL_USES_DEFAULT_TEMPLATE_ARG`` needs
+#: to distinguish an explicit argument from a clang-filled default, and
+#: ``CONSTRAINT_DEPENDS_ON_DECL`` (C++20 concepts) is a separate AST
+#: subsystem needing its own empirical pass.
+TEMPLATE_NODE_KINDS: frozenset[str] = frozenset(
+    {"template_decl", "template_instantiation"}
+)
+TEMPLATE_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "DECL_INSTANTIATES_TEMPLATE",
+        "TEMPLATE_USES_DECL",
+        "TEMPLATE_USES_TYPE",
+        "INSTANTIATION_EMITS_SYMBOL",
+        "INSTANTIATION_MAPS_TO_EXPORT",
+        "DECL_USES_DEFAULT_TEMPLATE_ARG",
+        "CONSTRAINT_DEPENDS_ON_DECL",
+    }
+)
+
+#: Object/link provenance (ADR-041 P1 #2) — ``source_graph.NODE_KINDS``/
+#: ``EDGE_KINDS`` union these in the same way the vocabulary above is;
+#: relocated here from inline additions in ``source_graph.py`` itself once
+#: that file reached its 2000-line hard cap (this leaf module has plenty of
+#: room). A symbol change attributed to "which object/archive member/link
+#: step", not only "which target". ``object_file``/``static_library``/
+#: ``version_script`` and ``TARGET_HAS_LINK_UNIT``/``COMPILE_UNIT_EMITS_OBJECT``/
+#: ``LINK_UNIT_HAS_INPUT``/``LINK_UNIT_USES_VERSION_SCRIPT``/
+#: ``LINK_UNIT_EXPORTS_SYMBOL`` are populated from
+#: ``BuildEvidence.compile_units``/``link_units`` (``source_graph.
+#: _fold_link_provenance``); ``archive_member``/``ARCHIVE_CONTAINS_OBJECT``/
+#: ``OBJECT_DEFINES_SYMBOL`` are populated by ``archive_graph.
+#: augment_graph_with_archives`` (G29 Phase 5 item 6, via
+#: ``inline_graph_fold.fold_archive_graph``) — a real ``ar``-index
+#: introspection pass, not build-evidence alone. ``linker_script``/
+#: ``export_map``/``comdat_group`` remain reserved (no normalized data
+#: source yet) for a future linker-artifact extractor.
+LINK_PROVENANCE_NODE_KINDS: frozenset[str] = frozenset(
+    {
+        "object_file",
+        "archive_member",
+        "static_library",
+        "linker_script",
+        "version_script",
+        "export_map",
+        "comdat_group",
+    }
+)
+LINK_PROVENANCE_EDGE_KINDS: frozenset[str] = frozenset(
+    {
+        "TARGET_HAS_LINK_UNIT",
+        "COMPILE_UNIT_EMITS_OBJECT",
+        "LINK_UNIT_HAS_INPUT",
+        "LINK_UNIT_USES_VERSION_SCRIPT",
+        "LINK_UNIT_EXPORTS_SYMBOL",
+        "ARCHIVE_CONTAINS_OBJECT",
+        "OBJECT_DEFINES_SYMBOL",
+    }
+)
+
 
 def _precedence_key(fact: GraphFact) -> tuple[int, str, str]:
     """Deterministic total order over facts: highest confidence first, tie

@@ -1772,6 +1772,7 @@ def _build_inline_graph(
         from .inline_graph_fold import (
             fold_call_graph,
             fold_include_graph,
+            fold_template_graph,
             fold_type_graph,
         )
 
@@ -1787,30 +1788,24 @@ def _build_inline_graph(
         # public-to-internal dependency addition would silently go
         # undetected (Codex review). The replay stays unconditional until
         # source_edges carries equivalent provenance end-to-end.
-        fold_call_graph(
-            graph,
-            merged,
-            clang_bin,
-            extractors,
-            changed_paths,
-            scoped_units=call_graph_units,
-        )
-        fold_type_graph(
-            graph,
-            merged,
-            clang_bin,
-            extractors,
-            changed_paths,
-            scoped_units=call_graph_units,
-        )
-        fold_include_graph(
-            graph,
-            merged,
-            clang_bin,
-            extractors,
-            changed_paths,
-            scoped_units=call_graph_units,
-        )
+        # All four share one (graph, merged, clang_bin, extractors,
+        # changed_paths, scoped_units) signature -- looped rather than
+        # four near-identical calls (this file sits at its 2000-line hard
+        # cap; fold_template_graph, G29 Phase 5 item 1, needed the room).
+        for fold in (
+            fold_call_graph,
+            fold_type_graph,
+            fold_include_graph,
+            fold_template_graph,
+        ):
+            fold(
+                graph,
+                merged,
+                clang_bin,
+                extractors,
+                changed_paths,
+                scoped_units=call_graph_units,
+            )
     fold_archive_graph(graph, merged, extractors)
     graph.finalize()
     return graph
