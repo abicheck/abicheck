@@ -911,6 +911,50 @@ class TestCommittedRootsScoping:
             == frozenset()
         )
 
+    def test_committed_roots_matches_a_namespaced_demangled_forced_symbol(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence, follow-up to the forced-public
+        widening fix: `--public-symbol`/`force_public_symbols` explicitly
+        accepts a "mangled or demangled name", so a namespaced value like
+        `ns::api` must seed a root even though it matches neither the
+        function's bare, unqualified `name` (castxml/direct-clang's own
+        convention) nor its raw linker `mangled` string -- only its
+        mangled-*recovered qualified* name does."""
+        vec = RecordType(
+            name="vector<int, std::allocator<int> >",
+            kind="class",
+            qualified_name="std::vector<int, std::allocator<int> >",
+        )
+        fn = Function(
+            name="api",
+            mangled="_ZN2ns3apiEv",
+            return_type="void",
+            params=[Param(name="a", type="vector<int, std::allocator<int> >")],
+            visibility=Visibility.PUBLIC,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[fn],
+            types=[vec],
+        )
+        # Sanity: the mangled name really does recover `ns::api`, distinct
+        # from the bare `name` -- otherwise this test would not distinguish
+        # the fix from the pre-existing bare/mangled-only membership check.
+        from abicheck.diff_cxx_rules import itanium_qualified_name
+
+        assert itanium_qualified_name(fn.mangled) == "ns::api"
+        assert directly_referenced_stdlib_type_spellings(
+            snap, committed_roots=frozenset({"ns::api"})
+        ) == frozenset(
+            {
+                "std::vector<int, std::allocator<int> >",
+                "vector<int, std::allocator<int> >",
+            }
+        )
+
 
 class TestTypedefCandidateSpellingsExactKeyCollision:
     """`_typedef_candidate_spellings`'s exact-key registration is guarded by

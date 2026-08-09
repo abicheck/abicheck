@@ -781,12 +781,16 @@ def _is_public_non_stdlib_declaration(
     could still seed a stdlib direct-reference root and confirm an
     unrelated dependency-layout finding as ``IN_CONTRACT``/``COMPLETE``,
     even though no committed export references that type. When set, a
-    declaration seeds the scan only if either its ``mangled`` or its
-    display ``name`` is a member — matching
+    declaration seeds the scan if its ``mangled``, its display ``name``, or
+    its mangled-recovered *qualified* name is a member — matching
     :func:`abicheck.post_manifest.contract_scope_allowlist`'s own two-key
-    membership convention (its ``_add`` helper records both), since a
-    manifest or export-table entry may name either spelling depending on
-    producer/platform.
+    membership convention (its ``_add`` helper records both) plus a third:
+    ``--public-symbol``/``force_public_symbols`` explicitly accepts a
+    "mangled or demangled name" (Codex review, fresh evidence), and a
+    namespaced demangled value (``ns::api``) matches neither the linker
+    ``mangled`` name nor a bare, unqualified backend spelling of ``name``
+    (castxml/direct-clang's own convention) — only the recovered qualified
+    name does.
     """
     if decl.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
         return False
@@ -796,13 +800,27 @@ def _is_public_non_stdlib_declaration(
         return False
     if exclude_export_only and decl.origin is ScopeOrigin.EXPORT_ONLY:
         return False
-    if committed_roots is not None and not (
-        decl.mangled in committed_roots or decl.name in committed_roots
-    ):
-        return False
     qualified = itanium_qualified_name(decl.mangled) or msvc_qualified_name(
         decl.mangled
     )
+    if committed_roots is not None and not (
+        decl.mangled in committed_roots
+        or decl.name in committed_roots
+        or (qualified is not None and qualified in committed_roots)
+    ):
+        # `--public-symbol`/`force_public_symbols` explicitly accepts a
+        # "mangled or demangled name" (Codex review, fresh evidence, follow-
+        # up to the forced-public widening fix above): a user forcing a
+        # namespaced symbol spells it `ns::api`, which never appears as
+        # either `decl.mangled` (the linker name) or `decl.name` (a bare,
+        # unqualified backend spelling for castxml/direct-clang -- see this
+        # module's own spelling-convention docs elsewhere) -- so a forced
+        # namespaced root silently failed to seed here even though the
+        # identical bare-name case (`--public-symbol api`) already worked.
+        # `qualified` (the same mangled-recovered qualified name the stdlib-
+        # prefix check below already computes) is exactly the spelling a
+        # demangled `--public-symbol` value matches against.
+        return False
     return not (
         qualified is not None and qualified.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)
     )
