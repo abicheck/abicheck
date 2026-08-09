@@ -50,6 +50,41 @@ individually verified against the FP-rate/mutation-score gates (this
 codebase's test-quality guards exist specifically to catch exactly this
 kind of change going wrong), a scoped follow-up rather than a drive-by
 extension here.
+
+**Known gap, deliberately not attempted here (Codex review, fresh
+evidence): this module has no notion of "the library under comparison IS
+the C++ runtime itself" the way :func:`abicheck.model.
+stdlib_namespaces_excluded` does.** That function flips OFF the blanket
+``std::``-filtering elsewhere in the pipeline when either side's
+``library``/ELF SONAME names libstdc++/libc++ (via
+:func:`abicheck.name_classification.is_cxx_runtime_library`), since for
+those libraries ``std::`` is the actual surface under test, not a
+dependency. This module's every declaration-seeding check
+(:func:`_is_public_non_stdlib_declaration`) and its whole stdlib/non-stdlib
+partition (:func:`_partition_snapshot_types`) instead hard-code the
+opposite premise throughout — a ``std::``-namespaced declaration can never
+seed the scan, and every ``std::``-namespaced ``RecordType`` is
+unconditionally a *target* to search for, never a candidate *root*. For a
+real libstdc++/libc++ comparison this inverts: confirmed empirically that a
+public ``std::api(vector<int>)``-shaped declaration is rejected as a seed
+by :func:`_is_public_non_stdlib_declaration`'s first check
+(``decl.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES)``) regardless of
+which library is being compared, so this module's direct-reference proof
+never fires for that pairing. A real fix is not a one-line threshold
+change at that single check site: it needs a `library`-aware notion of
+"root" flowing through both the seeding check *and* the stdlib/non-stdlib
+partition consistently (a `std::`-owned declaration would need to become a
+valid *root*, and reasoning about "direct reference to a stdlib
+dependency" stops meaning anything once the dependency and the library are
+the same thing) — its own scoped design matching
+``stdlib_namespaces_excluded``'s existing library-detection convention,
+not a drive-by extension of one check. Until then, a libstdc++/libc++
+self-comparison under ``contract=public`` degrades exactly like every
+other unresolvable case this module documents throughout: a genuine
+template-layout finding on such a comparison falls back to
+``UNKNOWN_UNRESOLVED`` rather than confirming ``IN_CONTRACT`` — a
+false-negative under this module's own already-stated conservative
+default, never a false positive.
 """
 
 from __future__ import annotations
@@ -479,6 +514,47 @@ def _typedef_spelling_targets(
     return index
 
 
+def _typedef_candidate_spellings(
+    typedefs: dict[str, str], non_stdlib_identities: frozenset[str]
+) -> frozenset[str]:
+    """Every spelling *some* typedef in *typedefs* could be reached by --
+    its own key or a derived namespace-suffix/stdlib-stripped form -- with
+    no regard to whether :func:`_typedef_spelling_targets` can resolve it
+    to one unambiguous target.
+
+    A caller wanting to know "does the typedef vocabulary reach this
+    spelling at all" cannot use :func:`_typedef_spelling_targets`'s own
+    resolved index for that: an ambiguous spelling (two typedefs
+    disagreeing on the target, or a derived suffix disagreeing with its own
+    exact key) is deliberately *dropped* from that index rather than
+    resolved to either candidate, since neither one is safe to act on. But
+    "dropped because ambiguous" and "never reached by any typedef at all"
+    are different facts a consumer needs to tell apart -- a stripped stdlib
+    spelling colliding with an ambiguous typedef spelling is exactly as
+    untrustworthy as colliding with a resolved, disagreeing one; treating
+    the former as "no collision" (e.g.
+    ``typedefs={"exception": "mine::Thing", "mine::exception": "mine::Other"}``
+    makes ``"exception"`` ambiguous and therefore absent from the resolved
+    index, silently letting an unrelated ``std::exception`` through) is the
+    gap this function closes. Mirrors the same key/candidate-derivation
+    logic :func:`_typedef_spelling_targets` uses (kept as a parallel
+    derivation rather than a shared generator, to minimize churn against
+    that function's own already-verified body).
+    """
+    non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
+    candidates: set[str] = set()
+    for key in typedefs:
+        if key not in non_stdlib_spellings:
+            candidates.add(key)
+        for form in (
+            _stripped_signature_spelling(key),
+            *_namespace_suffix_spellings(key),
+        ):
+            if form is not None and form != key and form not in non_stdlib_spellings:
+                candidates.add(form)
+    return frozenset(candidates)
+
+
 def _compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | None:
     """One compiled alternation matching any of *spellings* as a whole type
     token — the same boundary semantics as :func:`type_string_references_name`
@@ -583,7 +659,10 @@ def _partition_snapshot_types(
 
 
 def _is_public_non_stdlib_declaration(
-    decl: Function | Variable, *, exclude_export_only: bool = False
+    decl: Function | Variable,
+    *,
+    exclude_export_only: bool = False,
+    committed_roots: frozenset[str] | None = None,
 ) -> bool:
     """True when *decl* may seed the scan as a public reachability root.
 
@@ -592,7 +671,17 @@ def _is_public_non_stdlib_declaration(
     :func:`directly_referenced_stdlib_types`'s own docstring for why each one
     matters:
 
-    * its display name is stdlib-namespaced;
+    * its display name is stdlib-namespaced (unconditionally -- this module
+      has no ``library``-aware exception the way
+      :func:`abicheck.model.stdlib_namespaces_excluded` does for a real
+      libstdc++/libc++ self-comparison, where ``std::`` is the actual
+      surface under test rather than a dependency. A real fix needs a
+      ``library``-aware notion of "root" flowing consistently through both
+      this check and :func:`_partition_snapshot_types`'s whole
+      stdlib/non-stdlib partition -- its own scoped design, not a
+      drive-by extension of this check. A genuine finding on such a
+      comparison degrades to this module's own already-conservative
+      default: ``UNKNOWN_UNRESOLVED``, never a false positive);
     * its ``visibility`` is not ``PUBLIC`` (``HIDDEN``/``ELF_ONLY``);
     * its ``origin`` is a confidently-non-public header
       (``PRIVATE_HEADER``/``SYSTEM_HEADER``/``GENERATED``) — linkage and origin
@@ -614,6 +703,23 @@ def _is_public_non_stdlib_declaration(
     boundary the ``exports`` domain exists to evaluate separately, and
     conflating the two let an export-only stdlib reference confirm a
     ``--contract public`` finding it has no bearing on.
+
+    ``committed_roots`` (default ``None``, meaning "no manifest active")
+    mirrors ``PipelineContext.public_surface_allowlist`` (Codex review,
+    fresh evidence): a ``compare --post-manifest`` run scopes the public
+    contract down to an *explicit* committed-symbol allowlist, demoting any
+    export finding whose symbol isn't in it — but this scan's own seeding
+    never consulted that allowlist at all, so a still-``PUBLIC``,
+    header-committed but *uncommitted-by-manifest* function's signature
+    could still seed a stdlib direct-reference root and confirm an
+    unrelated dependency-layout finding as ``IN_CONTRACT``/``COMPLETE``,
+    even though no committed export references that type. When set, a
+    declaration seeds the scan only if either its ``mangled`` or its
+    display ``name`` is a member — matching
+    :func:`abicheck.post_manifest.contract_scope_allowlist`'s own two-key
+    membership convention (its ``_add`` helper records both), since a
+    manifest or export-table entry may name either spelling depending on
+    producer/platform.
     """
     if decl.name.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
         return False
@@ -622,6 +728,10 @@ def _is_public_non_stdlib_declaration(
     if decl.origin in _NON_PUBLIC_ORIGINS:
         return False
     if exclude_export_only and decl.origin is ScopeOrigin.EXPORT_ONLY:
+        return False
+    if committed_roots is not None and not (
+        decl.mangled in committed_roots or decl.name in committed_roots
+    ):
         return False
     qualified = itanium_qualified_name(decl.mangled) or msvc_qualified_name(
         decl.mangled
@@ -666,6 +776,25 @@ class _StdlibReferenceScan:
             else None
         )
         self._referenced: set[str] = set()
+        # An identity matched via its own literal, un-derived spelling
+        # (``stdlib_index[identity] == {identity}``, its unconditional
+        # self-key -- see :func:`_spelling_index`) -- as opposed to only
+        # ever matched via a *derived* spelling (a stripped/bare form) that
+        # may be shared with another stdlib identity or an unrelated
+        # non-stdlib record/enum. Tracked separately from ``_referenced``
+        # because a derived-spelling match's own ambiguity can only be
+        # resolved by a consumer that knows *which* route actually proved
+        # an identity -- this class is the only place that information
+        # exists, since :func:`directly_referenced_stdlib_types`'s own
+        # return value is a flat, routeless set.
+        self._referenced_exact: set[str] = set()
+        # An identity matched exactly, but only while recursively scanning a
+        # typedef's *target* string (never in the declaration's own literal
+        # text) -- keyed by identity, valued by every top-level alias
+        # spelling that led to such a match. See :meth:`scan`'s own
+        # ``via_typedef``/``origin_alias`` docstring for why this needs its
+        # own bucket rather than folding straight into ``_referenced_exact``.
+        self._exact_typedef_aliases: dict[str, set[str]] = {}
         self._remaining = set(stdlib_identities)
         self._reached_records: set[str] = set()
         self._worklist: list[str] = []
@@ -679,21 +808,79 @@ class _StdlibReferenceScan:
         """
         return not self._remaining
 
-    def scan(self, type_string: str) -> None:
+    def scan(
+        self,
+        type_string: str,
+        *,
+        via_typedef: bool = False,
+        origin_alias: str | None = None,
+    ) -> None:
         """Record every stdlib/non-stdlib identity *type_string* names;
         newly-reached non-stdlib records are queued for their own fields to
         be walked in turn. Also follows a typedef alias to its own target
         (Codex review, fresh evidence: ``surface.py``'s own reachability
         closure does the same), so a public signature spelled with a
         user-defined alias name still reaches the record it actually
-        names."""
+        names.
+
+        *via_typedef* and *origin_alias* (both default to "not scanning a
+        typedef target" -- never set by an external caller, only by this
+        method's own typedef branch below) together answer "is this call
+        scanning the declaration's own literal text, or a typedef *target*
+        string reached by resolving an alias, and if the latter, which
+        top-level alias spelling did the real declaration actually write?"
+        A genuinely *unambiguous* typedef alias -- one
+        :func:`_typedef_spelling_targets` already resolved to exactly one
+        target -- is real proof the declaration named that identity, even
+        when the *target's* own bare form happens to collide with an
+        unrelated stdlib sibling elsewhere in the snapshot; only an
+        *alias* that is itself ambiguous, e.g. with an unrelated enum's
+        bare spelling, must not confer exactness. A nested typedef
+        resolution (a target string that itself contains another alias)
+        propagates the *original* top-level alias unchanged, since that is
+        the only spelling the real declaration ever actually wrote.
+
+        The typedef branch below only ever fully re-walks a given alias's
+        target *once*, guarded by ``_resolved_typedefs`` (records reached
+        and ``_referenced`` populated) -- but a *second*, independent
+        declaration reaching the same already-walked target through a
+        *different*, this-time-unambiguous alias still needs its own
+        provenance recorded: see :meth:`_propagate_typedef_provenance`, the
+        cheap fallback that records just that provenance without repeating
+        the full walk.
+        """
         if not type_string:
             return
         for match in _finditer_allow_nested(self._stdlib_pattern, type_string):
-            for identity in self._stdlib_index.get(match.group(0), ()):
+            spelling = match.group(0)
+            for identity in self._stdlib_index.get(spelling, ()):
                 if identity in self._remaining:
                     self._referenced.add(identity)
                     self._remaining.discard(identity)
+                if spelling != identity:
+                    continue
+                # The matched key is the identity's own self-key, never a
+                # derived/stripped spelling (a stripped form is always
+                # strictly shorter than the identity it derives from, since
+                # it drops a non-empty namespace prefix) -- so this
+                # occurrence alone proves the identity unambiguously,
+                # independent of whatever else that identity's own derived
+                # spelling might collide with -- **provided the text that
+                # produced it is trustworthy**: a direct match in the
+                # declaration's own literal text (``via_typedef=False``)
+                # always is. A match found only while recursively scanning
+                # a typedef's *target* string is trustworthy only when the
+                # *alias* that led there is itself unambiguous -- recorded
+                # here, not decided here, since only the caller (which
+                # knows the full, enum-aware non-stdlib collision
+                # vocabulary) can judge that; see
+                # :meth:`referenced_exact_typedef_aliases`.
+                if not via_typedef:
+                    self._referenced_exact.add(identity)
+                elif origin_alias is not None:
+                    self._exact_typedef_aliases.setdefault(identity, set()).add(
+                        origin_alias
+                    )
         if self._record_pattern is not None:
             for match in _finditer_allow_nested(self._record_pattern, type_string):
                 for identity in self._record_index.get(match.group(0), ()):
@@ -701,9 +888,64 @@ class _StdlibReferenceScan:
         if self._typedef_pattern is not None:
             for match in _finditer_allow_nested(self._typedef_pattern, type_string):
                 alias = match.group(0)
+                target = self._typedef_targets[alias]
+                this_origin = origin_alias if via_typedef else alias
                 if alias not in self._resolved_typedefs:
                     self._resolved_typedefs.add(alias)
-                    self.scan(self._typedef_targets[alias])
+                    self.scan(target, via_typedef=True, origin_alias=this_origin)
+                else:
+                    # Already fully walked (records reached, `_referenced`
+                    # populated) via a *different* origin alias -- but this
+                    # alias's own exact-match provenance was never recorded:
+                    # `_resolved_typedefs` exists to stop the expensive
+                    # record-walk/`_referenced` bookkeeping from repeating,
+                    # not to gate provenance -- an earlier, ambiguous alias
+                    # resolving through the same target first would
+                    # otherwise silently swallow a later, genuinely
+                    # unambiguous alias's own provenance purely because of
+                    # declaration order. Cheaply re-derive just this
+                    # alias's own exact-match provenance without repeating
+                    # the full walk. `this_origin` is always a real alias
+                    # spelling here in practice (only ``None`` when
+                    # ``via_typedef`` is externally forced ``True`` with no
+                    # ``origin_alias``, which no caller in this module ever
+                    # does), but the type checker cannot see that.
+                    if this_origin is not None:
+                        self._propagate_typedef_provenance(target, this_origin, {alias})
+
+    def _propagate_typedef_provenance(
+        self, target: str, origin_alias: str, seen: set[str]
+    ) -> None:
+        """Record *origin_alias* as exact-match provenance for every stdlib
+        identity *target* names by its own self-key, and recurse into any
+        further typedef alias *target* itself contains -- without touching
+        ``_referenced``/``_reached_records``/``_resolved_typedefs``, since
+        the identities and records reachable from *target* were already
+        fully walked once via whichever alias resolved it first (see the
+        ``else`` branch in :meth:`scan` that calls this).
+
+        *seen* bounds recursion against a cyclic typedef chain within this
+        one propagation call (a typedef target naming an alias already
+        visited in this same call is not re-entered); shared with, but
+        never confused for, ``_resolved_typedefs`` since that set's purpose
+        is deliberately different, as this method exists to work around.
+        """
+        for match in _finditer_allow_nested(self._stdlib_pattern, target):
+            spelling = match.group(0)
+            for identity in self._stdlib_index.get(spelling, ()):
+                if spelling == identity:
+                    self._exact_typedef_aliases.setdefault(identity, set()).add(
+                        origin_alias
+                    )
+        if self._typedef_pattern is not None:
+            for match in _finditer_allow_nested(self._typedef_pattern, target):
+                alias = match.group(0)
+                if alias in seen:
+                    continue
+                seen.add(alias)
+                self._propagate_typedef_provenance(
+                    self._typedef_targets[alias], origin_alias, seen
+                )
 
     def reach_record(self, identity: str) -> None:
         """Queue a non-stdlib record's own fields/bases to be walked, once."""
@@ -720,6 +962,36 @@ class _StdlibReferenceScan:
         """The stdlib identities this walk proved directly referenced."""
         return frozenset(self._referenced)
 
+    def referenced_exact(self) -> frozenset[str]:
+        """Which of :meth:`referenced`'s identities were matched at least
+        once via their own literal, un-derived spelling **in a real
+        declaration's own text** -- i.e. proven unambiguously, independent
+        of any collision a *derived* (stripped/bare) spelling might have
+        with a sibling stdlib identity or an unrelated non-stdlib
+        record/enum. A subset of :meth:`referenced`. Does **not** include
+        an identity matched only while recursively scanning a typedef's
+        target string -- see :meth:`referenced_exact_typedef_aliases` for
+        that route's own, alias-conditional provenance."""
+        return frozenset(self._referenced_exact)
+
+    def referenced_exact_typedef_aliases(self) -> dict[str, frozenset[str]]:
+        """For each identity matched exactly only while recursively
+        scanning a typedef's *target* string (never in a real declaration's
+        own literal text): every top-level alias spelling that led there.
+
+        The scan itself cannot decide whether such a match is trustworthy --
+        that depends on whether the alias collides with an unrelated
+        non-stdlib record/enum spelling, and only the caller (specifically
+        :func:`directly_referenced_stdlib_type_spellings`, which already
+        computes that enum-aware collision vocabulary for its own separate
+        guard) has that information. An identity is safe to treat as exact
+        here as soon as *any* alias that produced it is absent from the
+        caller's own non-stdlib collision set -- one genuinely unambiguous
+        route is real proof regardless of how many other, separately
+        ambiguous aliases also happened to reach the same identity.
+        """
+        return {k: frozenset(v) for k, v in self._exact_typedef_aliases.items()}
+
 
 def _seed_scan_from_public_declarations(
     snapshot: AbiSnapshot,
@@ -727,6 +999,8 @@ def _seed_scan_from_public_declarations(
     non_stdlib_identities: frozenset[str],
     *,
     exclude_export_only: bool = False,
+    committed_roots: frozenset[str] | None = None,
+    stop_when_exhausted: bool = True,
 ) -> None:
     """Scan every public, non-stdlib function signature and variable type.
 
@@ -739,15 +1013,31 @@ def _seed_scan_from_public_declarations(
     unrelated internal record's bare suffix (see the public function's
     docstring).
 
-    ``exclude_export_only`` is forwarded to
+    ``exclude_export_only``/``committed_roots`` are forwarded to
     :func:`_is_public_non_stdlib_declaration` unchanged — see its own
     docstring.
+
+    ``stop_when_exhausted`` (default ``True``, :func:`directly_referenced_stdlib_types`'s
+    own performance-motivated early exit -- "found via any route" is all that
+    function needs, so scanning further declarations once every candidate is
+    accounted for is pure waste) must be ``False`` for a caller that also
+    needs per-identity *exact-match* provenance: an identity first found via
+    an ambiguous derived spelling in one declaration, with its own
+    unambiguous exact spelling appearing only in a *later* declaration,
+    would never have that later occurrence scanned once ``_remaining`` is
+    already empty -- silently making
+    :func:`directly_referenced_stdlib_type_spellings`'s result depend on
+    declaration order (confirmed empirically by reversing two function
+    declarations). Set ``False`` there; the ordinary
+    :func:`directly_referenced_stdlib_types` path is unaffected.
     """
     for fn in snapshot.functions:
-        if scan.exhausted:
+        if stop_when_exhausted and scan.exhausted:
             break
         if not _is_public_non_stdlib_declaration(
-            fn, exclude_export_only=exclude_export_only
+            fn,
+            exclude_export_only=exclude_export_only,
+            committed_roots=committed_roots,
         ):
             continue
         scan.scan(fn.return_type)
@@ -758,10 +1048,12 @@ def _seed_scan_from_public_declarations(
             scan.reach_record(owner)
 
     for var in snapshot.variables:
-        if scan.exhausted:
+        if stop_when_exhausted and scan.exhausted:
             break
         if not _is_public_non_stdlib_declaration(
-            var, exclude_export_only=exclude_export_only
+            var,
+            exclude_export_only=exclude_export_only,
+            committed_roots=committed_roots,
         ):
             continue
         scan.scan(var.type)
@@ -772,6 +1064,7 @@ def _walk_reached_records(
     non_stdlib_records: dict[str, list[RecordType]],
     *,
     exclude_export_only: bool = False,
+    stop_when_exhausted: bool = True,
 ) -> None:
     """Walk each reached non-stdlib record's own fields and bases, transitively.
 
@@ -784,8 +1077,14 @@ def _walk_reached_records(
     defined only via the binary's export table (no header at all) must not
     contribute its fields as public-header-domain evidence either, for the
     same reason a bare export-only function/variable root must not.
+
+    ``stop_when_exhausted`` mirrors
+    :func:`_seed_scan_from_public_declarations`'s own parameter -- see its
+    docstring.
     """
-    while not scan.exhausted:
+    while True:
+        if stop_when_exhausted and scan.exhausted:
+            return
         identity = scan.next_reached_record()
         if identity is None:
             return
@@ -804,6 +1103,69 @@ def _walk_reached_records(
             # otherwise never reached, since only rec.fields was followed.
             for base in (*rec.bases, *rec.virtual_bases):
                 scan.scan(base)
+
+
+def _run_stdlib_reference_scan(
+    snapshot: AbiSnapshot,
+    *,
+    exclude_export_only: bool = False,
+    committed_roots: frozenset[str] | None = None,
+    full_scan: bool = False,
+) -> _StdlibReferenceScan | None:
+    """Run the walk :func:`directly_referenced_stdlib_types` performs and
+    return the completed :class:`_StdlibReferenceScan` itself, or ``None``
+    when *snapshot* carries no stdlib-namespaced types at all (mirroring
+    that function's own early return).
+
+    Factored out so a caller needing more than the flat ``referenced()``
+    set -- specifically :func:`directly_referenced_stdlib_type_spellings`,
+    which also needs :meth:`_StdlibReferenceScan.referenced_exact` and
+    :meth:`_StdlibReferenceScan.referenced_exact_typedef_aliases` -- can run
+    the identical walk once rather than either re-deriving it or being
+    limited to :func:`directly_referenced_stdlib_types`'s own routeless
+    return value.
+
+    ``exclude_export_only``/``committed_roots`` are passed straight through
+    to :func:`_seed_scan_from_public_declarations`/
+    :func:`_walk_reached_records`/:func:`_is_public_non_stdlib_declaration`
+    -- see their own docstrings. ``committed_roots`` is not threaded into
+    :func:`_walk_reached_records` -- that function walks a non-stdlib
+    record's own fields/bases once the record is already reached from a
+    committed seed, so the record's own commitment status is moot; only the
+    seed declarations that can *initiate* reachability need the check.
+
+    *full_scan* (default ``False``, matching :func:`directly_referenced_stdlib_types`'s
+    own early-exit behavior) disables the "stop once every candidate is
+    accounted for" optimization -- pass ``True`` for exact-match provenance
+    to be complete regardless of declaration order (see
+    :func:`_seed_scan_from_public_declarations`'s own ``stop_when_exhausted``
+    docstring for the failure mode this closes).
+    """
+    stdlib_identities, non_stdlib_identities, non_stdlib_records = (
+        _partition_snapshot_types(snapshot)
+    )
+    if not stdlib_identities:
+        return None
+
+    scan = _StdlibReferenceScan(
+        stdlib_identities, non_stdlib_identities, dict(snapshot.typedefs)
+    )
+    stop_when_exhausted = not full_scan
+    _seed_scan_from_public_declarations(
+        snapshot,
+        scan,
+        non_stdlib_identities,
+        exclude_export_only=exclude_export_only,
+        committed_roots=committed_roots,
+        stop_when_exhausted=stop_when_exhausted,
+    )
+    _walk_reached_records(
+        scan,
+        non_stdlib_records,
+        exclude_export_only=exclude_export_only,
+        stop_when_exhausted=stop_when_exhausted,
+    )
+    return scan
 
 
 def directly_referenced_stdlib_types(
@@ -959,29 +1321,17 @@ def directly_referenced_stdlib_types(
     evidence-tier-agnostic caller (``diff_types.py``) leaves it at the
     default ``False``.
     """
-    stdlib_identities, non_stdlib_identities, non_stdlib_records = (
-        _partition_snapshot_types(snapshot)
+    scan = _run_stdlib_reference_scan(
+        snapshot, exclude_export_only=exclude_export_only_roots
     )
-    if not stdlib_identities:
-        return frozenset()
-
-    scan = _StdlibReferenceScan(
-        stdlib_identities, non_stdlib_identities, dict(snapshot.typedefs)
-    )
-    _seed_scan_from_public_declarations(
-        snapshot,
-        scan,
-        non_stdlib_identities,
-        exclude_export_only=exclude_export_only_roots,
-    )
-    _walk_reached_records(
-        scan, non_stdlib_records, exclude_export_only=exclude_export_only_roots
-    )
-    return scan.referenced()
+    return scan.referenced() if scan is not None else frozenset()
 
 
 def directly_referenced_stdlib_type_spellings(
-    snapshot: AbiSnapshot, *, exclude_export_only_roots: bool = False
+    snapshot: AbiSnapshot,
+    *,
+    exclude_export_only_roots: bool = False,
+    committed_roots: frozenset[str] | None = None,
 ) -> frozenset[str]:
     """:func:`directly_referenced_stdlib_types`, re-expressed in the spelling
     a finding's own ``symbol``/``caused_by_type`` actually carries, for a
@@ -1056,46 +1406,171 @@ def directly_referenced_stdlib_type_spellings(
     resolved among identities this function itself already has in hand, so
     it is computed locally rather than reusing a module-level helper.
 
-    **Known conservative gap, deliberately not attempted here:** grouping
-    is keyed purely on whether an identity's stripped spelling collides
-    with another *referenced* identity's -- it cannot distinguish "reached
-    only via the ambiguous shared spelling" from "also independently
-    reached via its own unique full spelling elsewhere in the same
-    snapshot". A whole ambiguous group is excluded even when one member is
-    separately, unambiguously confirmable another way, which is a real but
-    rare false negative. Recovering that distinction needs per-match-route
-    provenance from the underlying scan (:class:`_StdlibReferenceScan`),
-    which today only returns a flat set of referenced identities with no
-    record of *which* match(es) produced each one -- a deeper change than
-    this collision-guard fix. Same false-negative-over-false-positive
-    direction this whole module already commits to throughout.
+    **Per-match-route provenance closes what an earlier revision left as a
+    known conservative gap:** grouping identities purely by whether their
+    stripped spelling collides with another *referenced* identity's cannot
+    distinguish "reached only via the ambiguous shared spelling" from "also
+    independently reached via its own unique full spelling elsewhere in the
+    same snapshot" -- a whole ambiguous group would otherwise be excluded
+    even when one member is separately, unambiguously confirmable another
+    way. Closed with real per-identity match provenance:
+    :class:`_StdlibReferenceScan` tracks, alongside its flat ``referenced()``
+    set, which identities were matched at least once via their own literal,
+    un-derived spelling in a real declaration's own text
+    (:meth:`_StdlibReferenceScan.referenced_exact`), plus -- separately --
+    which were matched only while recursively resolving a typedef's target,
+    keyed by which top-level alias led there
+    (:meth:`_StdlibReferenceScan.referenced_exact_typedef_aliases`). An
+    identity in ``referenced_exact()`` is always kept regardless of any
+    collision its *derived* spelling has, since the occurrence that proved
+    it is independent of that collision. An identity reached only through a
+    typedef alias is trusted the same way as soon as *any* alias that
+    produced it is itself free of a collision against this function's own
+    enum-aware, typedef-aware non-stdlib vocabulary -- one genuinely
+    unambiguous route is real proof regardless of how many other, separately
+    ambiguous routes also happened to reach the same identity. Collision
+    counting spans every stdlib identity the *snapshot* carries (via
+    :func:`_partition_snapshot_types`), not only the referenced subset: an
+    unreferenced sibling sharing a referenced identity's bare spelling still
+    makes that spelling untrustworthy for an unrelated finding's own
+    ``Change.symbol`` to match against. The non-stdlib collision vocabulary
+    itself spans both ``snapshot.types`` and ``snapshot.enums`` (a
+    non-stdlib record and enum can share a bare backend spelling just as
+    easily as two records can), and separately spans every spelling
+    ``snapshot.typedefs`` could produce -- exact key or derived suffix,
+    resolved or ambiguous alike (:func:`_typedef_candidate_spellings`) --
+    since an unrelated typedef's own key can equally collide with a stdlib
+    identity's stripped bare form. A typedef whose *resolved* target
+    genuinely names the very identity being evaluated (spelled fully
+    qualified, or in some other stdlib-namespaced shape reducing to the same
+    bare form) is not treated as a collision at all.
 
     ``exclude_export_only_roots`` is forwarded to
-    ``directly_referenced_stdlib_types`` unchanged (Codex review, fresh
+    :func:`_run_stdlib_reference_scan` unchanged (Codex review, fresh
     evidence): contract evaluation's own public-header-domain use must set
     this, since an export-only declaration is exactly the evidence the
     separate ``exports`` domain exists to evaluate, not ``public``'s.
+
+    ``committed_roots`` (default ``None``) mirrors
+    ``compare --post-manifest``'s own scoping and is forwarded straight
+    through to :func:`_run_stdlib_reference_scan` -- see
+    :func:`_is_public_non_stdlib_declaration`'s own docstring for the exact
+    membership rule and the gap it closes.
+
+    Exact-match provenance must not depend on declaration order (Codex
+    review, fresh evidence: reversing the order of two otherwise-unrelated
+    function declarations changed this function's result for the same
+    identity between "confirmed" and empty before this fix) -- closed by
+    running :func:`_run_stdlib_reference_scan` with ``full_scan=True`` here,
+    never for :func:`directly_referenced_stdlib_types` itself, which keeps
+    the early exit ("found via any route" is all it needs).
     """
-    _, non_stdlib_identities, _ = _partition_snapshot_types(snapshot)
-    non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
-    referenced = directly_referenced_stdlib_types(
-        snapshot, exclude_export_only_roots=exclude_export_only_roots
+    scan = _run_stdlib_reference_scan(
+        snapshot,
+        full_scan=True,
+        exclude_export_only=exclude_export_only_roots,
+        committed_roots=committed_roots,
     )
-    stripped_owners: dict[str, set[str]] = {}
-    for identity in referenced:
+    if scan is None:
+        return frozenset()
+    identities = scan.referenced()
+    if not identities:
+        return frozenset()
+    all_stdlib_identities, non_stdlib_record_identities, _ = _partition_snapshot_types(
+        snapshot
+    )
+    non_stdlib_enum_identities = frozenset(
+        _record_identity(en.name, en.qualified_name) for en in snapshot.enums
+    )
+    non_stdlib_identities = non_stdlib_record_identities | non_stdlib_enum_identities
+    non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
+    # A match found via a real declaration's own literal text is always
+    # trustworthy. A match found only while recursively scanning a typedef's
+    # *target* string is trustworthy too, but only when at least one alias
+    # that produced it is itself absent from this function's own
+    # enum-aware `non_stdlib_spellings` collision set -- the scan itself
+    # cannot judge that, since only this function computes that vocabulary.
+    exact_mut = set(scan.referenced_exact())
+    for identity, aliases in scan.referenced_exact_typedef_aliases().items():
+        if aliases - non_stdlib_spellings:
+            exact_mut.add(identity)
+    exact = frozenset(exact_mut)
+    # Every spelling a typedef could be reached by -- not just its literal
+    # dict key -- via the same suffix-expansion _StdlibReferenceScan itself
+    # already uses to resolve a typedef alias to its target: a raw
+    # `snapshot.typedefs.get(stripped)` lookup misses a namespace-qualified
+    # key like `"mine::vector<int>"` whose *derived* suffix `"vector<int>"`
+    # is what actually collides with a stdlib identity's own stripped
+    # spelling, since the dict key itself is never equal to that suffix.
+    typedef_spelling_targets = _typedef_spelling_targets(
+        dict(snapshot.typedefs), non_stdlib_identities
+    )
+    # The raw candidate vocabulary, separate from the resolved index above:
+    # an ambiguous spelling (two typedefs disagreeing) is dropped from
+    # `typedef_spelling_targets` rather than resolved, but it is exactly as
+    # untrustworthy as a resolved, disagreeing one for this collision check.
+    typedef_candidate_spellings = _typedef_candidate_spellings(
+        dict(snapshot.typedefs), non_stdlib_identities
+    )
+    # Collision counts are computed over EVERY stdlib identity the snapshot
+    # carries, not just the referenced subset -- an unreferenced sibling
+    # sharing a referenced identity's bare spelling still makes that
+    # spelling ambiguous for any other finding's bare Change.symbol to
+    # match against. `set(...)` dedupes physical RecordType entries sharing
+    # one identity (an ODR-duplicate/incomplete-declaration pair,
+    # `_partition_snapshot_types`'s own list-per-identity reason) so a
+    # duplicate doesn't inflate a count against itself.
+    stripped_by_identity: dict[str, str] = {}
+    stripped_counts: dict[str, int] = {}
+    for identity in set(all_stdlib_identities):
         stripped = _stripped_signature_spelling(identity)
-        if stripped is not None:
-            stripped_owners.setdefault(stripped, set()).add(identity)
-    spellings: set[str] = set()
-    for identity in referenced:
-        stripped = _stripped_signature_spelling(identity)
-        if stripped is not None and len(stripped_owners[stripped]) > 1:
-            # This identity's own presence in `referenced` is exactly as
-            # unproven as its stripped spelling's ambiguity -- exporting
-            # neither form avoids treating that shared, unconfirmed
-            # evidence as proof about any one specific identity.
+        if not stripped or stripped in non_stdlib_spellings:
             continue
+        if stripped in typedef_candidate_spellings:
+            typedef_target = typedef_spelling_targets.get(stripped)
+            # A typedef target is never guaranteed to already be spelled in
+            # this identity's own stripped bare form -- e.g. a target
+            # spelled fully qualified (matching `identity` itself directly)
+            # or, symmetrically, in some other stdlib-stripped shape -- so
+            # compare against both the raw target and its own stripped form
+            # before concluding a collision.
+            normalized_target = (
+                None
+                if typedef_target is None
+                else (_stripped_signature_spelling(typedef_target) or typedef_target)
+            )
+            if typedef_target != identity and normalized_target != stripped:
+                # A real, unrelated typedef alias whose key -- or one of
+                # its own derived namespace-suffix spellings -- happens to
+                # equal this identity's stripped spelling (bare key,
+                # namespace-qualified key, or an ambiguous one where
+                # `typedef_spelling_targets` itself drops the spelling
+                # rather than resolving it, leaving `typedef_target` as
+                # `None`, still correctly rejected here) -- the stripped
+                # spelling isn't this stdlib identity's own bare backend
+                # form at all, it's someone else's (possibly ambiguous)
+                # alias, so it can never safely stand in for the identity
+                # in a bare Change.symbol match.
+                continue
+        stripped_by_identity[identity] = stripped
+        stripped_counts[stripped] = stripped_counts.get(stripped, 0) + 1
+    spellings: set[str] = set()
+    for identity in identities:
+        stripped = stripped_by_identity.get(identity)
+        if stripped is None or stripped_counts[stripped] > 1:
+            # The derived spelling either collides with an unrelated
+            # non-stdlib record/enum (`stripped is None`, filtered out
+            # above) or with another stdlib identity in the snapshot --
+            # referenced or not (`stripped_counts[stripped] > 1`) -- either
+            # way, only an identity independently proven via its own
+            # literal spelling survives; the derived form itself is never
+            # added here.
+            if identity in exact:
+                spellings.add(identity)
+            continue
+        # Unambiguous against every stdlib identity in the snapshot *and*
+        # against every non-stdlib spelling in it: keep both the identity
+        # and its derived bare form, regardless of route.
         spellings.add(identity)
-        if stripped is not None and stripped not in non_stdlib_spellings:
-            spellings.add(stripped)
+        spellings.add(stripped)
     return frozenset(spellings)

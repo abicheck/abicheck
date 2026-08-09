@@ -1843,23 +1843,21 @@ class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
         # either, since that "referenced" answer is exactly as unproven.
         assert spellings == frozenset()
 
-    def test_known_conservative_gap_group_excluded_even_if_one_member_is_also_confirmed_elsewhere(
+    def test_exact_match_survives_even_when_its_stripped_form_is_ambiguous(
         self,
     ) -> None:
-        # Documents a deliberate limitation rather than asserting an ideal:
-        # even when a *different* public signature separately names one
-        # ambiguous candidate's full qualified spelling directly (a
-        # genuine, independent confirmation for that one identity), this
-        # function still excludes the whole group -- it groups by "does
-        # this identity's stripped spelling collide with another
-        # referenced identity's", which doesn't distinguish "reached only
-        # via the ambiguous route" from "also reached via an unambiguous
-        # one". Recovering that distinction needs per-match-route
-        # provenance from the underlying scan (_StdlibReferenceScan), which
-        # today only returns a flat set of referenced identities -- a
-        # deeper change than this collision-guard fix, not attempted here.
-        # Same false-negative-over-false-positive direction this whole
-        # module already commits to throughout.
+        # Per-identity match provenance (_StdlibReferenceScan.referenced_exact)
+        # distinguishes "reached only via the ambiguous shared bare
+        # spelling" from "also independently reached via its own unique,
+        # fully-qualified spelling elsewhere in the same snapshot": a
+        # different public signature separately naming
+        # `__gnu_debug::vector<int>` outright is a genuine, independent
+        # confirmation for that one identity, unaffected by the fact that
+        # `std::vector<int>` shares the same bare "vector<int>" spelling
+        # with it. `std::vector<int>` itself is reached only through that
+        # ambiguous bare spelling (never via its own exact qualified form),
+        # so it is correctly excluded, and the shared bare form itself is
+        # never exported for either identity.
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
@@ -1881,7 +1879,9 @@ class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
                 ),
             ],
         )
-        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"__gnu_debug::vector<int>"}
+        )
 
 
 class TestExcludeExportOnlyRoots:
