@@ -326,12 +326,15 @@ cleared. Lands with `tests/test_cli_root_surface.py` + `AGENTS.md` +
 `README.md` + generated CLI reference updated in the same PR per the bar's
 own sixth criterion.
 
-**Files:** `abicheck/cli_info.py` (new, sibling module per the "Adding a
-new top-level command" convention in `AGENTS.md`); `abicheck/cli.py` (side
-effect import registration); `tests/test_cli_root_surface.py` (extend the
-pinned root-command-set assertion to include `info`); `README.md`
-("Which command do I need?" table gets one more row);
-`docs/reference/cli-reference.md` (regenerated).
+**Files:** `abicheck/cli.py` — `info` is a small, one-function, no-operand
+command with no significant helpers, so `AGENTS.md`'s "Adding a new
+top-level command" convention places it directly in `cli.py` with
+`@main.command(...)`, not in a sibling `cli_<name>.py` module (that split
+is reserved for a larger command or command group, which `info` is
+neither); `tests/test_cli_root_surface.py` (extend the pinned
+root-command-set assertion to include `info`); `README.md` ("Which command
+do I need?" table gets one more row); `docs/reference/cli-reference.md`
+(regenerated).
 
 **Tests:** `tests/test_cli_info.py` — JSON shape, schema-version values
 match `serialization.SCHEMA_VERSION`/the report-schema constant at import
@@ -422,7 +425,28 @@ authenticity call sites (mirroring the same
 `_FRONTEND_CONTEXT_PROFILE_FIELD_KEYS`-when-DPC++ branch
 `compute_extraction_contract` already uses) as part of this item, and
 assert the *actual* emitted code (not just that a code exists) in the
-DPC++ regression test. Derived from the same field-by-field
+DPC++ regression test.
+
+**The identical bug pattern exists on the scope side too, one level
+lower — fix both, not just the profile/DPC++ instance.** The scope
+fingerprint's own authenticity re-verification (`_fingerprint_matches_
+fields(..., SCOPE_FIELD_KEYS)`, `check_contracts_comparable`'s scope-side
+check) always re-hashes against the plain `SCOPE_FIELD_KEYS`, even when
+either side's contract came from a manifest-driven dump, whose
+`scope_fingerprint` `compute_extraction_contract` hashes over the wider
+`_MANIFEST_SCOPE_FIELD_KEYS` (`SCOPE_FIELD_KEYS` plus
+`translation_units`). A manifest-sourced scope mismatch therefore fails
+authenticity before the real per-field diff ever runs, for the same
+reason the DPC++ profile case does — meaning the `translation_units`
+mismatch code above is equally unreachable until this scope-side
+authenticity check is fixed too. Extend the same key-set-selection fix to
+both scope authenticity call sites (select `_MANIFEST_SCOPE_FIELD_KEYS`
+when either side's contract is manifest-derived, mirroring
+`compute_extraction_contract`'s own selection logic), and add a
+manifest-scope-mismatch regression test asserting the actual emitted
+`translation_units`-related code — correcting only the DPC++/profile call
+sites and leaving these untouched would leave this one code equally
+unreachable. Derived from the same field-by-field
 comparison `check_contracts_comparable`/`compute_extraction_contract`
 already perform when raising `ProfileMismatchError`/`ScopeMismatchError` —
 promotes existing internal evidence to a stable public field, adds no new
