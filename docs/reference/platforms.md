@@ -157,9 +157,12 @@ parameter/return types all need `-H`/castxml on this platform; there is no
 debug-info-only middle ground the way ELF/PE have.
 
 **Recommendation:** for complete ABI analysis, provide `-H <header_dir>` and run on the
-native platform (Linux for ELF, macOS for Mach-O, Windows for PE) — but if you
-can't, a debug build (`-g`/`/Zi`) alone already recovers layout-level breaks
-that a fully stripped binary would miss.
+native platform (Linux for ELF, macOS for Mach-O, Windows for PE). If you
+can't, a debug build (`-g` on ELF, `/Zi` on PE) alone already recovers
+layout-level breaks that a fully stripped binary would miss — but this
+fallback does **not** extend to Mach-O, which stays L0-only without headers
+regardless of debug info; `-H`/castxml is the only way past exports-only
+there.
 
 ---
 
