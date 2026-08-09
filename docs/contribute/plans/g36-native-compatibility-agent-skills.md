@@ -243,12 +243,22 @@ read, not a second hardcoded literal) don't go stale if the site ever
 moves. `site_url` alone only supplies the host/path prefix, though — it
 doesn't say how a repo-relative `docs/foo.md` maps to its published path,
 so state that mapping explicitly rather than leaving it implied:
-`mkdocs.yml` sets no `use_directory_urls` key, so mkdocs's own default
-(`true`, "directory URLs") applies — `docs/learn/foo.md` publishes as
-`<site_url>/learn/foo/` (the `.md` extension dropped, a trailing slash
+`mkdocs.yml` sets no `use_directory_urls` key today, so mkdocs's own
+default (`true`, "directory URLs") applies — `docs/learn/foo.md` publishes
+as `<site_url>/learn/foo/` (the `.md` extension dropped, a trailing slash
 added, no `index`/`.html` in the visible path), and a page-relative anchor
 (`docs/learn/foo.md#some-heading`) carries straight through as
 `<site_url>/learn/foo/#some-heading` — mkdocs doesn't rewrite anchor text.
+**Read `use_directory_urls` from `mkdocs.yml` itself (defaulting to `true`
+only when the key is absent, exactly mirroring mkdocs's own default
+resolution), not a hardcoded assumption that today's absence is
+permanent** — freezing "no key means directory URLs" as a second,
+un-synced fact owner would let the generator and its tests silently stay
+green while emitting broken `/learn/foo/`-style links the day
+`use_directory_urls: false` is ever set (which would publish
+`docs/learn/foo.md` as `<site_url>/learn/foo.html` instead). The URL
+construction must branch on the real, currently-configured value, not
+assume the directory-URL shape unconditionally.
 The generator's rewrite logic and its tests must apply exactly this rule,
 and a test fixture should assert the produced URL for at least one real
 multi-segment path (confirming both the extension-to-trailing-slash
@@ -518,8 +528,12 @@ in parallel with P0.1–P0.3.
 
 **PR boundary:** one PR, product-surface only — no skill-content changes
 bundled in. A small separate follow-up PR (whenever P0.2's skills already
-exist) updates the relevant `SKILL.md`s to use `info` — see P0.2's
-Dependencies note.
+exist) updates the relevant `SKILL.md`s to consume whichever
+capability-discovery surface the maintainer decision above actually
+selected — `info` under path (a), or `--version --format json` under path
+(b); path (b) has no `info` command at all, so a follow-up written against
+path (a)'s spelling unconditionally would reference a command that was
+never built — see P0.2's Dependencies note.
 
 ---
 
@@ -1022,7 +1036,9 @@ and `.gemini/skills/**` — not
 only each skill's top-level `SKILL.md` in either tree — by planting a
 marker-less fixture file at each of the three levels (a skill's own
 `SKILL.md`, a skill-specific `references/*.md`, a copied `shared/*.md`
-fragment), in both trees, and confirming each of the six is flagged; a
+fragment), in all three trees (`.agents/skills/`, `.claude/skills/`,
+`.gemini/skills/`), and confirming each of the resulting nine
+(3 levels × 3 trees) is flagged; a
 `tests/test_docs_contract.py`-style unit test asserting a
 `task_pages`/`allowed_summaries` entry outside `docs/` is now accepted
 (the extended-checker behavior itself, not just its downstream effect); a
@@ -1319,8 +1335,9 @@ remaining four dimensions with the baseline/non-regression model.
 caveat as P1.5's below, **the run P1.4 relies on for publication must
 postdate P0.4/P0.5's own required follow-up commits, and P1.6's CI-wiring
 commit too** (P0.2's "Dependencies" note: P0.4/P0.5 each require a small
-follow-up commit updating the skills to actually consume `info`'s
-capability discovery and typed `reason_codes`; P1.6 separately adds the
+follow-up commit updating the skills to actually consume the selected
+capability-discovery surface (`info` under path (a), `--version --format
+json` under path (b)) and typed `reason_codes`; P1.6 separately adds the
 CI-wiring workflow step and its documentation links to two of the four
 `SKILL.md` files). A P1.1 pass completed before any of these land never
 exercised the capability-discovery/non-comparability branches or the
