@@ -169,11 +169,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: [validate-examples]
-    # Merge whatever the legs produced even if one failed — the collector
-    # re-derives pass/fail from the recorded per-case statuses, so a partial
-    # merge still surfaces the real failure rather than an empty artifact.
-    # A genuinely missing shard fails the merge loudly (missing case ids).
-    if: always()
+    # Merge whatever the legs produced even if one *failed* — a failed leg
+    # still uploads its artifact, the collector re-derives pass/fail from the
+    # recorded per-case statuses, and a genuinely missing shard fails the merge
+    # loudly (missing case ids). Deliberately `!cancelled()` and not
+    # `always()`: always() also fires when the whole run is superseded by a
+    # newer push (concurrency cancel-in-progress), where every shard is
+    # cancelled and no artifact exists at all — that turned an ordinary
+    # superseded run into two spurious red checks.
+    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -208,8 +212,17 @@ jobs:
           # every shard and is superseded by the merged file written below.
           cp shards/*/examples-autodiscovery-*.xml results/ 2>/dev/null || true
           cp shards/*/example-runtime-smoke.json results/ 2>/dev/null || true
-          python tests/example_shards.py merge \
-            shards/*/validate_examples-${{ matrix.toolchain }}-shard*.json \
+          # nullglob + an explicit count: without it a non-matching glob is
+          # passed through literally and surfaces as a FileNotFoundError naming
+          # a path with a '*' in it, which says nothing about what went wrong.
+          shopt -s nullglob
+          shard_files=(shards/*/validate_examples-${{ matrix.toolchain }}-shard*.json)
+          if [ ${#shard_files[@]} -eq 0 ]; then
+            echo "::error::no ${{ matrix.toolchain }} shard artifacts were downloaded — every shard leg must upload one"
+            exit 1
+          fi
+          echo "merging ${#shard_files[@]} shard artifact(s): ${shard_files[*]}"
+          python tests/example_shards.py merge "${shard_files[@]}" \
             --out results/validate_examples-${{ matrix.toolchain }}.json
           cp results/validate_examples-${{ matrix.toolchain }}.json results/validate_examples.json
 
