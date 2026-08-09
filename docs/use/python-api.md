@@ -162,13 +162,17 @@ rather than building a `DumpRequest` (see G33 Phase 5's note in `AGENTS.md`
 for what that migration still needs). Reaching for the typed request
 directly buys you two things a keyword shim can't:
 
-- **The identical validation *rules*** every front end applies — a bad
-  combination of fields is rejected the same way regardless of which
-  front end built the request. How that rejection *surfaces* still differs
-  per transport: calling the typed API directly raises `ValidationError`;
-  the CLI translates the equivalent failure into its own usage-error/exit-code
-  behavior. The **rule** is shared, not the **exception type** — see the
-  parity table below for how each transport represents the same failure.
+- **The identical validation *rules*** across every front end that
+  actually builds the typed request — `compare`/`scan` (both CLI and typed
+  API) and the typed API's `run_dump_request` — reject a bad combination of
+  fields the same way regardless of which one built the request. (The
+  native `dump` CLI is the exception noted above: since it doesn't build a
+  `DumpRequest`, this shared-validation guarantee doesn't cover it.) How a
+  rejection *surfaces* still differs per transport: calling the typed API
+  directly raises `ValidationError`; the CLI translates the equivalent
+  failure into its own usage-error/exit-code behavior. The **rule** is
+  shared, not the **exception type** — see the parity table below for how
+  each transport represents the same failure.
 - **Repeatable configuration** — build one `CompareRequest` once (from a
   config file, a test fixture, a stored preset) and reuse it, rather than
   re-threading a dozen keyword arguments.
