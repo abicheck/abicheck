@@ -168,6 +168,16 @@ class TestDwarfLowMemoryMode:
         assert dwarf_low_memory_mode(huge) is False
         assert dwarf_low_memory_mode(_FakeDwarfInfo(0)) is False
 
+    def test_non_numeric_debug_info_size_treated_as_unknown(self, monkeypatch) -> None:
+        # A test double (or any pyelftools object whose .size isn't a plain
+        # number) must degrade to "unknown/small" rather than raise --
+        # exercises the int()-cast except branch directly. A plain
+        # ``str`` .size is used rather than MagicMock: MagicMock defines
+        # ``__int__`` itself (returning 1), so ``int(MagicMock())``
+        # succeeds and would never reach the except clause.
+        monkeypatch.delenv("ABICHECK_DWARF_LOW_MEMORY_MB", raising=False)
+        assert dwarf_low_memory_mode(_FakeDwarfInfo("not-a-size")) is False  # type: ignore[arg-type]
+
     def test_invalid_env_override_falls_back_to_default(self, monkeypatch) -> None:
         monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "not-a-number")
         small = _FakeDwarfInfo(1024 * 1024)  # 1 MiB, below default threshold
