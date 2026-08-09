@@ -1152,3 +1152,115 @@ class TestReachableStdlibCacheHandlesADiamondAliasGraph:
         assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
             {"std::string", "string"}
         )
+
+
+class TestRecordProvenanceUpgradeDuringTheRecordWalkItself:
+    """Codex review, fresh evidence, third round: a record reached first
+    through an ambiguous typedef alias during *seeding*, and only *later*
+    also directly through *another already-reached record's own field*
+    discovered *during the record walk itself* -- not during seeding, so
+    the "seeding completes before the walk starts" argument doesn't cover
+    it -- must still confirm, regardless of worklist pop order."""
+
+    def test_upgrade_discovered_via_another_records_field_is_not_lost(
+        self,
+    ) -> None:
+        enum = EnumType(name="Alias", qualified_name="mine::Alias")
+        x = RecordType(
+            name="X", kind="struct", fields=[TypeField(name="e", type="std::exception")]
+        )
+        y = RecordType(name="Y", kind="struct", fields=[TypeField(name="x", type="X")])
+        typedefs = {"other::Alias": "X"}
+        fn_alias = _fn("use_alias", params=[Param(name="a", type="Alias")])
+        fn_y = _fn("use_y", params=[Param(name="y", type="Y")])
+        exc = RecordType(name="std::exception", kind="class")
+        expected = frozenset({"std::exception", "exception"})
+
+        alias_first = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[fn_alias, fn_y],
+            types=[x, y, exc],
+            enums=[enum],
+            typedefs=dict(typedefs),
+        )
+        y_first = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[fn_y, fn_alias],
+            types=[x, y, exc],
+            enums=[enum],
+            typedefs=dict(typedefs),
+        )
+        assert directly_referenced_stdlib_type_spellings(alias_first) == expected
+        assert directly_referenced_stdlib_type_spellings(y_first) == expected
+
+
+class TestRecordIndexEnumCollisionGuard:
+    """Codex review, fresh evidence: a bare spelling shared by a record and
+    an unrelated enum (not just two records) must not resolve
+    unambiguously to the record inside the scan's own `record_index` --
+    that would treat the record as reached by literal, direct declaration
+    text (unconditionally trusted) regardless of the enum collision, which
+    every *other* ambiguity check in this module would have caught."""
+
+    def test_record_reached_via_a_bare_spelling_colliding_with_an_enum_is_not_trusted(
+        self,
+    ) -> None:
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            qualified_name="mine::Wrapper",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        enum = EnumType(name="Wrapper", qualified_name="other::Wrapper")
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="w", type="Wrapper")])],
+            types=[wrapper, RecordType(name="std::exception", kind="class")],
+            enums=[enum],
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+
+
+class TestCachedAliasProvenancePropagatesToReachedRecords:
+    """Codex review, fresh evidence: an already-resolved typedef alias
+    whose own chain terminates at a *record* (not directly at a stdlib
+    identity) must still credit a later, independently-unambiguous alias
+    reaching the same record -- not just stdlib identities found directly
+    in the chain text."""
+
+    def test_a_later_unambiguous_alias_reaching_the_same_record_confirms_it(
+        self,
+    ) -> None:
+        enum = EnumType(name="bad", qualified_name="mine::bad")
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        typedefs = {"ns::bad": "Good", "Good": "Wrapper"}
+        fn_bad = _fn("use_bad", params=[Param(name="a", type="bad")])
+        fn_good = _fn("use_good", params=[Param(name="g", type="Good")])
+        exc = RecordType(name="std::exception", kind="class")
+        expected = frozenset({"std::exception", "exception"})
+
+        bad_first = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[fn_bad, fn_good],
+            types=[wrapper, exc],
+            enums=[enum],
+            typedefs=dict(typedefs),
+        )
+        good_first = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[fn_good, fn_bad],
+            types=[wrapper, exc],
+            enums=[enum],
+            typedefs=dict(typedefs),
+        )
+        assert directly_referenced_stdlib_type_spellings(bad_first) == expected
+        assert directly_referenced_stdlib_type_spellings(good_first) == expected

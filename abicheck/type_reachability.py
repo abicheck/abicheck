@@ -323,7 +323,9 @@ def _non_stdlib_signature_spellings(
 
 
 def _spelling_index(
-    stdlib_identities: list[str], non_stdlib_identities: frozenset[str]
+    stdlib_identities: list[str],
+    non_stdlib_identities: frozenset[str],
+    enum_identities: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, frozenset[str]], dict[str, frozenset[str]]]:
     """Returns ``(stdlib_index, record_index)`` — separate spelling ->
     {identity, ...} maps for stdlib candidates (the ultimate targets) and
@@ -371,6 +373,25 @@ def _spelling_index(
     unrelated internal record's fields too, misattributing its own
     implementation-only churn as publicly reachable. Each record's own
     full identity is never ambiguous this way and is always kept.
+
+    *enum_identities* (default empty) is the same kind of collision guard,
+    but against ``snapshot.enums`` rather than another record (Codex
+    review, fresh evidence): a bare spelling shared by a record and an
+    unrelated enum (e.g. ``mine::Wrapper`` and ``other::Wrapper``, both
+    spelled bare ``"Wrapper"``) previously resolved unambiguously to the
+    record here, since this index never knew enums existed at all --
+    letting a signature that could just as well have meant the enum walk
+    the record's own fields with full, *direct* (``via_typedef=False``)
+    trust, bypassing every enum-aware ambiguity check this module applies
+    everywhere else (those all live *outside* the scan, in
+    :func:`directly_referenced_stdlib_type_spellings`, which cannot rescue
+    a record whose reachability itself -- not just its stripped spelling --
+    was never proven). Never adds an enum as a matchable ``record_index``
+    entry itself (an enum has no fields to walk, and
+    :func:`_walk_reached_records`'s ``non_stdlib_records[identity]`` lookup
+    would raise ``KeyError`` for one) -- purely a *collision* input,
+    mirroring how :func:`_non_stdlib_signature_spellings` is reused for the
+    identical purpose everywhere else in this module.
     """
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     stdlib_index: dict[str, set[str]] = {}
@@ -380,6 +401,11 @@ def _spelling_index(
         if stripped is not None and stripped not in non_stdlib_spellings:
             stdlib_index.setdefault(stripped, set()).add(identity)
 
+    enum_bare_spellings = (
+        _non_stdlib_signature_spellings(enum_identities)
+        if enum_identities
+        else frozenset()
+    )
     record_index: dict[str, set[str]] = {}
     generic_bare: dict[str, set[str]] = {}
     for identity in non_stdlib_identities:
@@ -387,11 +413,13 @@ def _spelling_index(
         for suffix in _namespace_suffix_spellings(identity)[1:]:
             generic_bare.setdefault(suffix, set()).add(identity)
     for bare, ids in generic_bare.items():
-        if bare in non_stdlib_identities:
+        if bare in non_stdlib_identities or bare in enum_bare_spellings:
             # A derived suffix that collides with a *different* record's own
             # full identity (Codex review, fresh evidence: identities "Inner"
-            # and "api::Inner" both present) is ambiguous the same way two
-            # colliding derived suffixes are. Removing the spelling entirely
+            # and "api::Inner" both present), or with an unrelated enum's own
+            # spelling (a record and an enum both reducing to bare
+            # "Wrapper"), is ambiguous the same way two colliding derived
+            # suffixes are. Removing the spelling entirely
             # (not just refusing to add the *other* record's candidates) is
             # required, not merely safe (Codex review, fresh evidence):
             # direct-clang's own "drop the enclosing namespace" convention
@@ -756,9 +784,10 @@ class _StdlibReferenceScan:
         stdlib_identities: list[str],
         non_stdlib_identities: frozenset[str],
         typedefs: dict[str, str],
+        enum_identities: frozenset[str] = frozenset(),
     ) -> None:
         self._stdlib_index, self._record_index = _spelling_index(
-            stdlib_identities, non_stdlib_identities
+            stdlib_identities, non_stdlib_identities, enum_identities
         )
         stdlib_pattern = _compile_spelling_pattern(self._stdlib_index)
         # stdlib_index always has at least one entry here (every stdlib
@@ -844,6 +873,12 @@ class _StdlibReferenceScan:
         # ``_record_direct``/``_record_typedef_origins`` below.
         self._record_direct: set[str] = set()
         self._record_typedef_origins: dict[str, set[str]] = {}
+        # Which reached records have already had their own fields/bases
+        # scanned at least once -- lets a later provenance upgrade
+        # discovered *during the record walk itself* (not just during
+        # seeding) requeue an already-walked record for a rescan (Codex
+        # review, fresh evidence: see :meth:`reach_record`'s own docstring).
+        self._record_walked: set[str] = set()
         # Per-alias cache of exact/any-spelling stdlib identities reachable
         # from that alias's own target chain, memoized once per alias
         # (Codex review, fresh evidence): the previous version re-walked an
@@ -853,7 +888,9 @@ class _StdlibReferenceScan:
         # (deepest-first) quadratic overall -- confirmed empirically (a
         # 1,200-alias chain took several seconds). See
         # :meth:`_reachable_stdlib`.
-        self._alias_reachable: dict[str, tuple[frozenset[str], frozenset[str]]] = {}
+        self._alias_reachable: dict[
+            str, tuple[frozenset[str], frozenset[str], frozenset[str]]
+        ] = {}
 
     @property
     def exhausted(self) -> bool:
@@ -962,7 +999,7 @@ class _StdlibReferenceScan:
                 # ``origin_alias``, which no caller in this module ever
                 # does), but the type checker cannot see that.
                 if this_origin is not None:
-                    exact_ids, any_ids = self._reachable_stdlib(alias)
+                    exact_ids, any_ids, records = self._reachable_stdlib(alias)
                     for identity in any_ids:
                         self._trusted_via_alias.setdefault(identity, set()).add(
                             this_origin
@@ -970,6 +1007,16 @@ class _StdlibReferenceScan:
                     for identity in exact_ids:
                         self._exact_typedef_aliases.setdefault(identity, set()).add(
                             this_origin
+                        )
+                    # A typedef chain can terminate at a record rather than
+                    # directly at a stdlib identity (Codex review, fresh
+                    # evidence) -- credit this alias as an additional origin
+                    # for reaching it, the same way a fresh resolution
+                    # already does via `_scan_stdlib_and_records`'s own
+                    # record_pattern loop.
+                    for record_identity in records:
+                        self.reach_record(
+                            record_identity, via_typedef=True, origin_alias=this_origin
                         )
 
     def _scan_stdlib_and_records(
@@ -1029,13 +1076,38 @@ class _StdlibReferenceScan:
                         identity, via_typedef=via_typedef, origin_alias=origin_alias
                     )
 
-    def _reachable_stdlib(self, start: str) -> tuple[frozenset[str], frozenset[str]]:
-        """``(exact, any)`` -- the stdlib identities reachable from *start*
-        alias's own target, exact self-key matches and any-spelling matches
-        respectively, transitively through further nested typedef aliases
-        (never through a reached record's own fields -- record provenance
-        is a separate, independently-threaded mechanism, see
-        :meth:`reach_record`/:func:`_walk_reached_records`).
+    def _reachable_stdlib(
+        self, start: str
+    ) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+        """``(exact, any, records)`` -- the stdlib identities reachable from
+        *start* alias's own target (exact self-key matches and any-spelling
+        matches respectively), plus every non-stdlib record identity
+        directly named anywhere in that same chain, transitively through
+        further nested typedef aliases.
+
+        ``records`` (Codex review, fresh evidence, closing a gap the
+        previous revision left open) matters because a typedef chain can
+        terminate at a *record*, not directly at a stdlib identity --
+        ``ns::bad -> Good -> Wrapper`` (``Wrapper`` a record with its own
+        stdlib field), with ``bad`` colliding with an unrelated enum's bare
+        spelling. A first declaration spelling ``bad`` resolves the whole
+        chain fresh, reaching ``Wrapper`` with ``bad`` as its only
+        (ambiguous) origin. A *second* declaration spelling the
+        already-resolved, genuinely unambiguous ``Good`` directly used to
+        credit nothing at all for ``Wrapper``, since the cache tracked only
+        stdlib identities -- silently leaving a real layout break
+        unconfirmed even though ``Good`` is real, independent proof.
+        :meth:`scan`'s own "already resolved" branch now also calls
+        :meth:`reach_record` for every identity in ``records`` here, the
+        same way it already credits ``exact``/``any`` for stdlib
+        identities. Never expands *into* a reached record's own fields --
+        that stays the separate, independently-threaded mechanism
+        :meth:`reach_record`/:func:`_walk_reached_records` already own; a
+        record found here is a *terminal* node for this structural walk,
+        matching how the fresh-resolution path (:meth:`scan`'s own typedef
+        branch calling :meth:`_scan_stdlib_and_records`) already stops
+        similarly -- it queues a reached record for :func:`_walk_reached_records`
+        to walk later, rather than walking it inline.
 
         Memoized per alias in ``_alias_reachable`` via an explicit,
         iterative post-order stack walk -- not recursion, and not a plain
@@ -1069,20 +1141,29 @@ class _StdlibReferenceScan:
             target = self._typedef_targets[alias]
             exact: set[str] = set()
             any_ids: set[str] = set()
+            records: set[str] = set()
             for m in _finditer_allow_nested(self._stdlib_pattern, target):
                 spelling = m.group(0)
                 for identity in self._stdlib_index.get(spelling, ()):
                     any_ids.add(identity)
                     if spelling == identity:
                         exact.add(identity)
+            if self._record_pattern is not None:
+                for m in _finditer_allow_nested(self._record_pattern, target):
+                    records.update(self._record_index.get(m.group(0), ()))
             if self._typedef_pattern is not None:
                 for m in _finditer_allow_nested(self._typedef_pattern, target):
-                    child_exact, child_any = self._alias_reachable.get(
-                        m.group(0), (frozenset(), frozenset())
+                    child_exact, child_any, child_records = self._alias_reachable.get(
+                        m.group(0), (frozenset(), frozenset(), frozenset())
                     )
                     exact |= child_exact
                     any_ids |= child_any
-            self._alias_reachable[alias] = (frozenset(exact), frozenset(any_ids))
+                    records |= child_records
+            self._alias_reachable[alias] = (
+                frozenset(exact),
+                frozenset(any_ids),
+                frozenset(records),
+            )
             grey.discard(alias)
         return self._alias_reachable[start]
 
@@ -1093,26 +1174,57 @@ class _StdlibReferenceScan:
         via_typedef: bool = False,
         origin_alias: str | None = None,
     ) -> None:
-        """Queue a non-stdlib record's own fields/bases to be walked (the
-        worklist itself still dedupes -- a record is only ever queued
-        once), and accumulate *via_typedef*/*origin_alias* provenance for
-        *every* reach, not only the first (Codex review, fresh evidence,
-        two rounds -- see ``_record_direct``/``_record_typedef_origins``'s
-        own docstring on ``__init__`` for why accumulating instead of
-        "first reach wins" is required for order-independence).
+        """Queue a non-stdlib record's own fields/bases to be walked, and
+        accumulate *via_typedef*/*origin_alias* provenance for *every*
+        reach, not only the first (Codex review, fresh evidence, three
+        rounds -- see ``_record_direct``/``_record_typedef_origins``'s own
+        docstring on ``__init__`` for why accumulating instead of "first
+        reach wins" is required for order-independence).
         :func:`_walk_reached_records` reads this accumulated state via
         :meth:`record_provenance` so a record's own fields are scanned with
         every trust level it was ever reached under, instead of
         unconditionally trusting them regardless of how ambiguously the
         record itself was reached.
+
+        A record already walked once (its fields already scanned, tracked
+        in ``_record_walked`` via :meth:`mark_record_walked`) is *requeued*
+        when this reach genuinely upgrades its provenance -- adds it to
+        ``_record_direct`` for the first time, or adds a typedef origin it
+        didn't already have (Codex review, fresh evidence: a record reached
+        first through an ambiguous typedef alias during seeding, and only
+        *later* also directly through another already-reached record's own
+        field discovered *during the record walk itself* -- not during
+        seeding, so accumulation-before-the-walk-starts doesn't cover it --
+        stayed stuck with its stale, ambiguous-only provenance forever,
+        since the worklist's own "queue once" dedup meant it was never
+        walked again to pick up the upgrade). Requeuing is safe to repeat:
+        each record can only be upgraded a bounded number of times (once
+        for the direct flag, once per distinct alias in the snapshot), so
+        this always terminates, and re-scanning the same field text again
+        is idempotent -- it only ever adds more identities/credits, never
+        removes any.
         """
+        upgraded = False
         if not via_typedef:
-            self._record_direct.add(identity)
+            if identity not in self._record_direct:
+                self._record_direct.add(identity)
+                upgraded = True
         elif origin_alias is not None:
-            self._record_typedef_origins.setdefault(identity, set()).add(origin_alias)
+            origins = self._record_typedef_origins.setdefault(identity, set())
+            if origin_alias not in origins:
+                origins.add(origin_alias)
+                upgraded = True
         if identity not in self._reached_records:
             self._reached_records.add(identity)
             self._worklist.append(identity)
+        elif upgraded and identity in self._record_walked:
+            self._worklist.append(identity)
+
+    def mark_record_walked(self, identity: str) -> None:
+        """Record that *identity*'s own fields/bases were just scanned,
+        so a later provenance upgrade (see :meth:`reach_record`) knows to
+        requeue it for a rescan instead of assuming it's still pending."""
+        self._record_walked.add(identity)
 
     def record_provenance(self, identity: str) -> tuple[bool, frozenset[str]]:
         """``(is_direct, typedef_origins)`` -- every trust level *identity*
@@ -1281,14 +1393,20 @@ def _walk_reached_records(
 
     Each record's own fields/bases are scanned with *every* trust level the
     record itself has ever been reached under, accumulated across every
-    declaration seeding it (Codex review, fresh evidence, two rounds: see
-    ``_StdlibReferenceScan.reach_record``'s own docstring) -- a record
-    reached only through an ambiguous typedef alias must not have a stdlib
-    type named directly in one of its own fields treated as unconditionally
-    exact/trusted just because the field's own text is "direct", but a
-    record reached via *any* trustworthy route (direct, or an alias later
-    found unambiguous) must not have that route's confirmation depend on
-    which declaration happened to be processed first.
+    declaration seeding it and every other record's own field/base that
+    also reaches it during this same walk (Codex review, fresh evidence,
+    three rounds: see ``_StdlibReferenceScan.reach_record``'s own
+    docstring) -- a record reached only through an ambiguous typedef alias
+    must not have a stdlib type named directly in one of its own fields
+    treated as unconditionally exact/trusted just because the field's own
+    text is "direct", but a record reached via *any* trustworthy route
+    (direct, or an alias later found unambiguous) must not have that
+    route's confirmation depend on which declaration -- or which other
+    record's own field, discovered only *during* this walk -- happened to
+    be processed first. ``scan.mark_record_walked`` after scanning a
+    record's own fields/bases lets a later provenance upgrade (a route
+    discovered only once this record's own popped-and-scanned already)
+    requeue it for a rescan instead of silently keeping the stale state.
     """
     while True:
         if stop_when_exhausted and scan.exhausted:
@@ -1321,6 +1439,7 @@ def _walk_reached_records(
                 # to a plain stdlib identity's own multi-alias provenance.
                 for alias in typedef_origins:
                     scan.scan(text, via_typedef=True, origin_alias=alias)
+        scan.mark_record_walked(identity)
 
 
 def _run_stdlib_reference_scan(
@@ -1365,8 +1484,18 @@ def _run_stdlib_reference_scan(
     if not stdlib_identities:
         return None
 
+    # Threaded into the scan's own record_index construction (Codex review,
+    # fresh evidence) so a record reached only via a bare spelling that
+    # collides with an unrelated enum is never treated as an unconditionally
+    # trustworthy direct match -- see _spelling_index's own docstring.
+    enum_identities = frozenset(
+        _record_identity(en.name, en.qualified_name) for en in snapshot.enums
+    )
     scan = _StdlibReferenceScan(
-        stdlib_identities, non_stdlib_identities, dict(snapshot.typedefs)
+        stdlib_identities,
+        non_stdlib_identities,
+        dict(snapshot.typedefs),
+        enum_identities,
     )
     stop_when_exhausted = not full_scan
     _seed_scan_from_public_declarations(
