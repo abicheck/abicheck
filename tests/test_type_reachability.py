@@ -1797,3 +1797,47 @@ class TestDirectlyReferencedStdlibTypeSpellingsCollisionGuard:
         spellings = directly_referenced_stdlib_type_spellings(snap)
         assert "vector<int, std::allocator<int> >" in spellings
         assert "std::vector<int, std::allocator<int> >" in spellings
+
+
+class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
+    """Codex review, fresh evidence: a stripped spelling shared by two or
+    more *distinct referenced stdlib identities* (e.g. a signature naming
+    bare ``vector<int>``, which cannot distinguish ``std::vector<int>``
+    from ``__gnu_debug::vector<int>``) must not be exported as confirmation
+    evidence -- ``directly_referenced_stdlib_types`` itself correctly marks
+    both referenced (its own over-inclusive default), but exporting the
+    shared stripped spelling would let a finding about only one of them be
+    wrongly confirmed via the other's presence."""
+
+    def test_stripped_spelling_ambiguous_among_stdlib_identities_is_dropped(
+        self,
+    ) -> None:
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_vec", params=[Param(name="v", type="vector<int>")])],
+            types=[
+                RecordType(
+                    name="vector<int>", kind="class", qualified_name="std::vector<int>"
+                ),
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="__gnu_debug::vector<int>",
+                ),
+            ],
+        )
+        # Both are legitimately "referenced" -- the scan can't tell which
+        # one the bare signature spelling means, so it keeps both rather
+        # than silently dropping either (diff_types.py's own conservative
+        # default).
+        assert directly_referenced_stdlib_types(snap) == frozenset(
+            {"std::vector<int>", "__gnu_debug::vector<int>"}
+        )
+        spellings = directly_referenced_stdlib_type_spellings(snap)
+        # Each identity's own unambiguous full spelling is still exported...
+        assert "std::vector<int>" in spellings
+        assert "__gnu_debug::vector<int>" in spellings
+        # ...but the ambiguous shared bare spelling -- which a finding about
+        # only one of them would carry as its own symbol -- is not.
+        assert "vector<int>" not in spellings

@@ -970,13 +970,39 @@ def directly_referenced_stdlib_type_spellings(snapshot: AbiSnapshot) -> frozense
     that type to live in a namespace literally named a stdlib prefix
     (``std::``, ...), which is reserved and not something a real snapshot
     encodes as a legitimate user declaration.
+
+    A stripped spelling shared by **two or more distinct referenced stdlib
+    identities** is also dropped (Codex review, fresh evidence): e.g. a
+    signature naming bare ``vector<int>`` cannot distinguish
+    ``std::vector<int>`` from ``__gnu_debug::vector<int>``, so
+    :func:`directly_referenced_stdlib_types`'s own scan correctly marks
+    *both* referenced (never missing a real reference is the safe direction
+    for its purpose -- deciding whether to keep a layout finding at all).
+    Exporting the shared stripped spelling here would misuse that
+    intentionally over-inclusive answer as unambiguous confirmation
+    evidence: a finding about only one of the two identities (its size
+    changed, the other's didn't) would be wrongly confirmed via the
+    other's presence. Unlike the non-stdlib collision above, this
+    ambiguity can only be resolved among identities this function itself
+    already has in hand, so it is computed locally rather than reusing a
+    module-level helper.
     """
     _, non_stdlib_identities, _ = _partition_snapshot_types(snapshot)
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
+    referenced = directly_referenced_stdlib_types(snapshot)
+    stripped_owners: dict[str, set[str]] = {}
+    for identity in referenced:
+        stripped = _stripped_signature_spelling(identity)
+        if stripped is not None:
+            stripped_owners.setdefault(stripped, set()).add(identity)
     spellings: set[str] = set()
-    for identity in directly_referenced_stdlib_types(snapshot):
+    for identity in referenced:
         spellings.add(identity)
         stripped = _stripped_signature_spelling(identity)
-        if stripped is not None and stripped not in non_stdlib_spellings:
+        if (
+            stripped is not None
+            and stripped not in non_stdlib_spellings
+            and len(stripped_owners[stripped]) == 1
+        ):
             spellings.add(stripped)
     return frozenset(spellings)
