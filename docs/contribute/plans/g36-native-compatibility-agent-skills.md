@@ -300,11 +300,18 @@ public export could silently fall out of `info`'s payload. Add a small
 public accessor (e.g. `schemas.artifact_names()` returning the frozenset,
 or a `schemas.all_current()` returning the whole `{name: version}` map
 directly) that `cli_info.py` calls instead of touching `_ARTIFACT_NAMES`,
-and test `info`'s payload **solely** against that public accessor's
-live output (`assert info_payload["schema_versions"].keys() ==
-schemas.artifact_names()`, or equivalent) — never against a hand-copied
-name list or count of any size, so this test can't itself go stale the
-same way the "all six" framing would have. Also:
+and test `info`'s payload **solely** against that public accessor's live
+output — and assert the **values**, not only the key set: a key-only
+assertion (`info_payload["schema_versions"].keys() ==
+schemas.artifact_names()`) still passes if `info` returns a stale or
+hard-coded version string for a real key, which is exactly the failure
+mode a discovery command exists to prevent. Assert the full mapping
+instead — `assert info_payload["schema_versions"] == schemas.all_current()`
+(or `{name: schemas.current(name) for name in schemas.artifact_names()}`
+if only the narrower accessor exists) — never against a hand-copied name
+list, count, or per-family version literal of any size, so this test
+can't itself go stale the same way the "all six" framing would have.
+Also:
 the current root command list (so a skill can self-check "does my target
 support `project`"), available extraction providers (castxml/clang presence,
 detected on the host the same way existing dumper-provider auto-detection
@@ -386,24 +393,40 @@ cause has to parse prose. `native-binary-compatibility-review`'s "establish
 comparability" workflow step and `native-release-compatibility`'s
 "baseline comparability" step both need a typed reason instead.
 
-**One canonical owner for the enum itself, checked against every consumer
-of it — not six independent copies.** This item's `codes` values are
-reused, by name, across six different producers (`compare`, MCP
-`abi_compare`, `scan`, the release JSON, the release summary, `aggregate`,
-and `deps compare`/stack) and at least one JSON Schema
-(`compare_report.schema.json`). Define the enum **once**, at the Python
-level — a single `ComparabilityReasonCode` enum (or equivalent frozen
-mapping) in `abicheck/comparability.py`, since that's where the values are
-actually derived — and have every producer above import and emit from
-that one definition, never a hand-copied string. The JSON Schema's own
-`enum:` list is a second, independently-maintained representation of the
-same values by necessity (JSON Schema can't import a Python enum), so add
-a schema-sync test (`tests/test_comparability_gate.py` or
+**One canonical owner for the enum itself, checked against every schema
+that republishes it — not just one of the several.** This item's `codes`
+values are reused, by name, across six different producers (`compare`,
+MCP `abi_compare`, `scan`, the release JSON, the release summary,
+`aggregate`, and `deps compare`/stack) and — once this item's own schema
+work above lands — **multiple** JSON Schemas: `compare_report.schema.json`
+plus the new `scan_report.schema.json`, the release-report schema(s), and
+`stack_report.schema.json`, each independently republishing the same
+closed enum in its own `reason.codes`/`reason_codes` field definition. A
+sync test scoped to `compare_report.schema.json` alone (an earlier draft
+of this note's own scope) would stay green while any of those other
+schemas silently drifted from the Python source of truth — a new enum
+member added there would make `scan`/`release`/`stack` output the schema
+itself claims to reject, undetected. Two ways to close this, either
+acceptable: (a) have every one of those JSON Schema files `$ref` **one**
+shared schema fragment for the enum (e.g. `abicheck/schemas/
+_reason_code_enum.schema.json`) instead of each repeating the `enum:`
+list inline, so there is only one JSON-side copy to keep in sync with the
+Python enum in the first place; or (b) if a shared `$ref` isn't practical
+for a given schema's structure, the schema-sync test below must
+explicitly enumerate and check **every** report schema that republishes
+the enum, not just `compare_report.schema.json`. Define the enum
+**once**, at the Python level — a single `ComparabilityReasonCode` enum
+(or equivalent frozen mapping) in `abicheck/comparability.py`, since
+that's where the values are actually derived — and have every producer
+above import and emit from that one definition, never a hand-copied
+string. Add a schema-sync test (`tests/test_comparability_gate.py` or
 `tests/test_report_schema_receipt.py`) that walks the Python enum's
-members and asserts each one is present in the schema's `enum:` list, and
-vice versa — the same "one fact, one place, checked automatically" pattern
-this repo already applies to other registries (e.g. `ChangeKind` vs. its
-JSON Schema representation), so adding or renaming a reason code fails
+members and asserts each one is present in **every** applicable schema's
+`enum:` list (or the shared `$ref` fragment, under option (a)), and vice
+versa for each — the same "one fact, one place, checked automatically"
+pattern this repo already applies to other registries (e.g. `ChangeKind`
+vs. its JSON Schema representation), so adding or renaming a reason code
+fails
 loudly in this one test instead of silently producing schema-invalid tool
 output or letting one producer drift from another.
 
