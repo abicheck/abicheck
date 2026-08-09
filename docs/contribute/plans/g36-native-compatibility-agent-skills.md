@@ -281,8 +281,18 @@ generator twice produces identical output), dead-fragment detection,
 missing-fragment-reference detection, no-symlinks-in-output assertion,
 every generated `SKILL.md`'s internal links resolve inside its own
 installed directory (the self-containment invariant, checked mechanically,
-not just by design intent); a separate assertion that no generated file
-under `.agents/skills/**` (including copied `shared/*.md` fragments, not
+not just by design intent) — **run in both committed output trees,
+`.agents/skills/**` and `.claude/skills/**`, not only the former: P0.3
+commits two publication trees from one generator, and a broken relative
+link or unrewritten doc reference introduced only by the Claude-specific
+emission path would otherwise pass every planned test indefinitely (drift
+tests re-check the same faulty output each time, and regeneration staying
+idempotent doesn't mean the output is correct) — either run this same
+assertion set a second time over `.claude/skills/**`, or assert
+`.claude/skills/**`'s generated content is byte-for-byte identical to
+`.agents/skills/**`'s per-skill content and rely on the single check** ;
+a separate assertion that no generated file
+under either tree (including copied `shared/*.md` fragments, not
 just each skill's own `SKILL.md`) contains a bare relative link outside
 its own installed directory — every such link must be either
 repo-relative-and-resolvable-inside-the-generated-tree, or already
@@ -308,10 +318,20 @@ land together, since an ungenerated generator has no reviewable output.
 **Problem:** No machine-readable way for a skill (or any agent) to ask
 "what can this installed abicheck do" — confirmed absent from
 `abicheck/cli*.py` in this plan's grounding pass. A skill deciding whether
-`--contract` is available, or which extraction providers exist on this
-host, otherwise has to parse `--version`'s human string or probe by
-trial-and-error, which both `native-release-compatibility` and
-`native-binary-compatibility-review`'s tool-selection steps need to avoid.
+a given root command (e.g. `project`, `scan`) exists on this installation
+at all, or which extraction providers exist on this host, otherwise has to
+parse `--version`'s human string or probe by trial-and-error, which both
+`native-release-compatibility` and `native-binary-compatibility-review`'s
+tool-selection steps need to avoid. **Scope, stated precisely so this
+item isn't read as covering more than it does:** the payload below is a
+command-*presence* inventory (which root commands and schema families
+exist), not a per-command *option* inventory — it answers "does this
+installation have `compare` at all," not "does this installation's
+`compare` support `--contract`." A skill checking for a specific flag's
+availability (e.g. `compare --contract`) still needs to probe or parse
+`--help` for that narrower question; closing that gap would need a real
+per-command option inventory in the payload, which is out of scope for
+this item as specified.
 
 **Change:** Add `abicheck info` (small, read-only, no operands) emitting
 JSON: `abicheck_version`, and a `schema_versions` map covering **every
@@ -993,8 +1013,15 @@ review cadence for that command is the only mitigation today.
   also (a) fails if a `SKILL.md`'s `metadata` is missing the version-range
   field, and (b) compares the installed abicheck package version
   (`importlib.metadata.version("abicheck")`, the same source `--version`
-  itself reads) against every skill's declared range, failing loudly (not
-  silently degrading) once the running package version exceeds it.
+  itself reads) against every skill's declared range as a real containment
+  constraint (parsed min/max, not a bare "exceeds" check), failing loudly
+  (not silently degrading) whenever the running version falls **either**
+  above the declared maximum **or below the declared minimum**. The lower
+  bound matters just as much as the upper one: a skill declaring a minimum
+  version because it depends on a command or report field introduced in
+  that release would otherwise pass against an older installation that
+  predates the feature entirely, simply because an "exceeds" check only
+  looks in the upper direction.
 - **Tool/API drift**: extract the current CLI command/option tree via the
   same `click`-introspection mechanism `scripts/gen_cli_reference.py`
   already uses, and every CLI invocation example inside a skill's
