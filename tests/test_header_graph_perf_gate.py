@@ -137,12 +137,66 @@ class TestLoadBaseline:
         assert hg_gate._load_baseline(report) == {(10, "clang"): 12.3}
 
 
+class TestMatchedPoints:
+    def _point(self, size: int, backend: str = "clang") -> dict:
+        return {
+            "size": size,
+            "backend": backend,
+            "baseline_ms": 100.0,
+            "attach_ms": 5.0,
+        }
+
+    def test_matches_when_key_present_in_baseline(self):
+        points = [self._point(10)]
+        baseline = {(10, "clang"): 4.0}
+        assert hg_gate.matched_points(points, baseline) == points
+
+    def test_no_match_when_baseline_covers_different_sizes(self):
+        # Regression guard: a baseline generated for size 999 must not
+        # silently "pass" a run measuring the default 25/100/400 sweep.
+        points = [self._point(10), self._point(20)]
+        baseline = {(999, "clang"): 4.0}
+        assert hg_gate.matched_points(points, baseline) == []
+
+    def test_partial_match_returns_only_matched_subset(self):
+        points = [self._point(10), self._point(20)]
+        baseline = {(10, "clang"): 4.0}
+        assert hg_gate.matched_points(points, baseline) == [points[0]]
+
+
 class TestMainSkipsWithoutToolchain:
     def test_skip_message_when_toolchain_missing(self, monkeypatch, capsys):
         monkeypatch.setattr(hg_gate, "_have", lambda tool: False)
         rc = hg_gate.main(["--sizes", "5"])
         assert rc == 0
         assert "SKIP" in capsys.readouterr().out
+
+    def test_baseline_with_no_matching_points_fails_loudly(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        # Same regression guard as TestMatchedPoints, through the real main()
+        # entry point: a stale/mistargeted --baseline must never print OK.
+        monkeypatch.setattr(hg_gate, "_have", lambda tool: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(
+            hg_gate,
+            "measure",
+            lambda sizes, repeat, backends=hg_gate.BACKENDS: [
+                {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 5.0}
+                for s in sizes
+            ],
+        )
+        baseline_file = tmp_path / "baseline.json"
+        baseline_file.write_text(
+            json.dumps(
+                {"points": [{"size": 999, "backend": "clang", "attach_ms": 1.0}]}
+            )
+        )
+        rc = hg_gate.main(["--sizes", "10", "--baseline", str(baseline_file)])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "FAIL" in out
+        assert "no entry matching" in out
 
 
 @pytest.mark.integration

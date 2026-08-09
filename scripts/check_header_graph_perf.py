@@ -308,6 +308,22 @@ def _load_baseline(path: Path) -> dict[tuple[int, str], float]:
     return {_point_key(p): float(p["attach_ms"]) for p in points}
 
 
+def matched_points(
+    points: list[dict[str, Any]], baseline: dict[tuple[int, str], float]
+) -> list[dict[str, Any]]:
+    """The subset of *points* that have a corresponding *baseline* entry.
+
+    Used to distinguish "every point checked out fine" from "the baseline
+    covered nothing this run measured" — a size/backend axis change (or a
+    stale/mistargeted ``--baseline`` file) makes ``check_regressions``
+    return an empty failure list either way, and printing ``OK`` for that
+    case would be a false-confidence silent pass (Codex review): a
+    baseline containing only size 999 would let a completely unchecked
+    default 25/100/400 run report success.
+    """
+    return [p for p in points if _point_key(p) in baseline]
+
+
 def check_regressions(
     points: list[dict[str, Any]],
     baseline: dict[tuple[int, str], float],
@@ -438,13 +454,30 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     baseline = _load_baseline(args.baseline)
+    matched = matched_points(points, baseline)
+    if not matched:
+        print(
+            f"\nFAIL: --baseline {args.baseline} has no entry matching any of this "
+            f"run's {len(points)} (size, backend) point(s) — nothing was actually "
+            "gated. Check that --sizes/the backends measured match what the "
+            "baseline was generated with, or regenerate it via --json-out."
+        )
+        return 1
     failures = check_regressions(points, baseline, args.regress_tolerance)
     if failures:
         print("\nFAIL: header-graph attach-cost regression:")
         for f in failures:
             print(f"  - {f}")
         return 1
-    print("\nOK: no header-graph attach-cost regression vs. baseline.")
+    unmatched = len(points) - len(matched)
+    if unmatched:
+        print(
+            f"\nNOTE: {unmatched} point(s) had no matching baseline entry and were "
+            "not gated (new size/backend not yet in the baseline)."
+        )
+    print(
+        f"\nOK: no header-graph attach-cost regression vs. baseline ({len(matched)} checked)."
+    )
     return 0
 
 
