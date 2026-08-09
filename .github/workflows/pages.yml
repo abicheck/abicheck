@@ -56,7 +56,6 @@ jobs:
     name: Verify published schema IDs
     needs: deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     # actions/deploy-pages reporting success only means the artifact was handed
     # to the Pages backend, not that it's live on the CDN yet — propagation is
     # eventually consistent and has been observed to take over a minute after
