@@ -26,6 +26,7 @@ from __future__ import annotations
 import shutil
 import struct
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -278,6 +279,89 @@ def test_bsd_symdef_index() -> None:
     ]
 
 
+def test_bsd_symdef_via_extended_name_is_recognized_as_index_not_a_member() -> None:
+    """A real macOS ``ar``/``ranlib`` writes its ``__.SYMDEF SORTED`` index
+    member's name via the BSD ``#1/<len>`` self-referential extended-name
+    form (the member's own data starts with its name), not the raw 16-byte
+    header field — confirmed by a macOS CI integration-lane failure: an
+    earlier revision classified special-vs-regular from the *raw* field
+    alone, so this member was silently folded into ``members`` (a fake
+    object file named ``__.SYMDEF SORTED``) instead of being decoded as the
+    symbol index (Codex/CI review).
+    """
+    a_data, b_data = b"OBJA", b"OBJB"
+    a_offset = len(ARCHIVE_MAGIC)
+    b_offset = a_offset + 60 + len(_pad(a_data))
+
+    strtab = b"alpha\x00beta\x00"
+    entries = struct.pack("<II", 0, a_offset) + struct.pack(
+        "<II", len(b"alpha\x00"), b_offset
+    )
+    ranlib_body = (
+        struct.pack("<I", len(entries))
+        + entries
+        + struct.pack("<I", len(strtab))
+        + strtab
+    )
+    name = "__.SYMDEF SORTED"
+    member_data = name.encode("ascii") + ranlib_body
+
+    data = (
+        ARCHIVE_MAGIC
+        + _header("a.o", len(a_data))
+        + _pad(a_data)
+        + _header("b.o", len(b_data))
+        + _pad(b_data)
+        + _header(f"#1/{len(name)}", len(member_data))
+        + _pad(member_data)
+    )
+
+    contents = parse_ar_archive(BytesReader(data))
+    assert {m.name for m in contents.members} == {"a.o", "b.o"}
+    assert contents.has_symbol_index
+    assert sorted((s.symbol, s.member) for s in contents.symbols) == [
+        ("alpha", "a.o"),
+        ("beta", "b.o"),
+    ]
+
+
+def test_coff_second_linker_member_is_skipped_not_misparsed() -> None:
+    """A standard COFF ``.lib`` writes *two* members named ``/`` — the GNU-
+    compatible "first linker member" this parser already decodes, and a
+    "second linker member" with an incompatible little-endian layout
+    (Codex review, verified against a real ``llvm-ar``-produced COFF
+    archive). Feeding the second member's leading little-endian byte
+    ``\\x01\\x00\\x00\\x00`` through the GNU big-endian decoder corrupts the
+    symbol count into 16,777,216 and used to raise ``ArchiveFormatError``,
+    degrading the whole archive. Only the first ``/`` occurrence is decoded
+    now; the second is skipped, not mis-parsed.
+    """
+    a_data = b"OBJDATA"
+    a_offset = len(ARCHIVE_MAGIC)  # placed first, so its header offset is fixed
+    a_full = _header("a.o/", len(a_data)) + _pad(a_data)
+
+    first_index_body = struct.pack(">I", 1) + struct.pack(">I", a_offset) + b"alpha\x00"
+    first_index_full = _header("/", len(first_index_body)) + _pad(first_index_body)
+
+    # A COFF second-linker-member-shaped payload: little-endian member count
+    # (1) that a big-endian read would corrupt into a huge, unusable count.
+    second_body = (
+        struct.pack("<I", 1)  # member count
+        + struct.pack("<I", a_offset)  # member offset table
+        + struct.pack("<I", 1)  # symbol count
+        + struct.pack("<H", 1)  # 1-based member-table index per symbol
+        + b"alpha\x00"
+    )
+    second_index_full = _header("/", len(second_body)) + _pad(second_body)
+
+    data = ARCHIVE_MAGIC + a_full + first_index_full + second_index_full
+
+    contents = parse_ar_archive(BytesReader(data))
+    assert contents.has_symbol_index
+    assert {m.name for m in contents.members} == {"a.o"}
+    assert {(s.symbol, s.member) for s in contents.symbols} == {("alpha", "a.o")}
+
+
 def test_read_archive_missing_file_raises_oserror(tmp_path) -> None:
     with pytest.raises(OSError):
         read_archive(tmp_path / "does_not_exist.a")
@@ -462,6 +546,81 @@ def test_two_archives_same_member_name_do_not_collide(tmp_path) -> None:
     assert defining_members(g, "bar_impl") == [("libb.a", "util.o")]
 
 
+def test_augment_graph_expands_redacted_home_placeholder(tmp_path, monkeypatch) -> None:
+    """Build evidence is redacted before persisting (ADR-032 D7): a link
+    input's home-directory prefix becomes a literal ``~``.
+    ``Path("~/...").is_absolute()`` is ``False``, so both an absolute
+    redacted label and a redacted default search root must be unredacted
+    before resolution or the archive is never found (Codex review).
+    """
+    fake_home = tmp_path / "home"
+    build_dir = fake_home / "build"
+    build_dir.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(fake_home))
+    data = build_gnu_archive([("a.o", b"SYM:alpha\n")])
+    (build_dir / "libtest.a").write_bytes(data)
+
+    # A redacted *absolute* label.
+    g_abs = _graph_with_archive("~/build/libtest.a", ["alpha"])
+    result_abs = augment_graph_with_archives(g_abs)
+    assert result_abs.archives_read == 1
+    assert result_abs.symbol_edges == 1
+
+    # A redacted *search root* (e.g. a redacted compile-unit directory) with
+    # a relative label.
+    g_rel = _graph_with_archive("libtest.a", ["alpha"])
+    result_rel = augment_graph_with_archives(g_rel, search_roots=(Path("~/build"),))
+    assert result_rel.archives_read == 1
+    assert result_rel.symbol_edges == 1
+
+
+def test_augment_graph_ambiguous_relative_archive_is_a_diagnostic_not_a_guess(
+    tmp_path,
+) -> None:
+    """Two distinct subprojects each linking their own, unrelated
+    ``libcommon.a`` by a relative path coalesce onto **one**
+    ``static_library://libcommon.a`` graph node
+    (``source_graph._fold_link_provenance``). Picking whichever search root
+    happens to match first would attach one target's real archive data to a
+    node that also represents the other target's different archive —
+    "incorrect localization... rather than degraded evidence" (Codex
+    review). Resolution must refuse to guess.
+    """
+    root_a, root_b = tmp_path / "a", tmp_path / "b"
+    root_a.mkdir()
+    root_b.mkdir()
+    data_a = build_gnu_archive([("x.o", b"SYM:foo_a\n")])
+    data_b = build_gnu_archive([("x.o", b"SYM:foo_b\n")])
+    (root_a / "libcommon.a").write_bytes(data_a)
+    (root_b / "libcommon.a").write_bytes(data_b)
+    g = _graph_with_archive("libcommon.a", ["foo_a", "foo_b"])
+
+    result = augment_graph_with_archives(g, search_roots=(root_a, root_b))
+
+    assert result.archives_seen == 1
+    assert result.archives_read == 0  # neither candidate was opened
+    assert any("ambiguous" in d for d in result.diagnostics)
+    assert not result.complete
+    assert not any(n.kind == "archive_member" for n in g.nodes)
+    assert defining_members(g, "foo_a") == []
+    assert defining_members(g, "foo_b") == []
+
+
+def test_augment_graph_same_archive_via_two_roots_is_not_ambiguous(tmp_path) -> None:
+    """Two search roots that resolve to the *same* file (a duplicate root, or
+    a symlinked/overlapping build directory) are the identical file, not a
+    collision — ambiguity is about distinct files, not distinct paths."""
+    data = build_gnu_archive([("x.o", b"SYM:foo\n")])
+    (tmp_path / "libcommon.a").write_bytes(data)
+    g = _graph_with_archive("libcommon.a", ["foo"])
+
+    result = augment_graph_with_archives(g, search_roots=(tmp_path, tmp_path))
+
+    assert result.archives_read == 1
+    assert result.symbol_edges == 1
+    assert not result.diagnostics
+
+
 # ── real-toolchain regression (integration marker: needs gcc + ar) ──────────
 
 
@@ -507,7 +666,17 @@ def test_real_gnu_ar_thin_archive_parses(tmp_path) -> None:
         check=True,
         capture_output=True,
     )
-    contents = read_archive(tmp_path / "libthin.a")
+    archive_path = tmp_path / "libthin.a"
+    # GNU's `-T` (thin archive) modifier is a binutils extension; macOS's
+    # cctools `ar` (and other non-GNU implementations) silently ignore it
+    # and write an ordinary archive instead of erroring (real macOS CI
+    # evidence — Codex/CI review). Detect that up front and skip rather than
+    # asserting GNU-only semantics against whatever `ar` the host actually
+    # has, the same "feature-detect, don't assume" approach `shutil.which`
+    # already uses just above for `ar`'s presence at all.
+    if archive_path.read_bytes()[: len(THIN_ARCHIVE_MAGIC)] != THIN_ARCHIVE_MAGIC:
+        pytest.skip("this ar does not produce GNU thin archives (non-GNU ar)")
+    contents = read_archive(archive_path)
     assert contents.flavor == "thin"
     assert [m.name for m in contents.members] == ["a.o"]
     assert {(s.symbol, s.member) for s in contents.symbols} == {("alpha", "a.o")}

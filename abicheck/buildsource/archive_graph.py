@@ -79,12 +79,42 @@ _HEADER_SIZE = 60
 _HEADER_MAGIC = b"`\n"
 
 #: Special member names. ``/`` and ``/SYM64/`` are the GNU symbol indices,
-#: ``//`` the GNU long-name string table, and the ``__.SYMDEF`` spellings the
-#: BSD/Mach-O symbol index (``__.SYMDEF SORTED`` is what Apple's ``libtool``/
-#: ``ranlib`` writes; ``__.SYMDEF_64`` is the 64-bit-offset variant).
+#: ``//`` the GNU long-name string table.
 _GNU_INDEX_NAMES = frozenset({"/", "/SYM64/"})
 _GNU_LONG_NAME_TABLE = "//"
-_BSD_INDEX_NAMES = frozenset({"__.SYMDEF", "__.SYMDEF SORTED", "__.SYMDEF_64"})
+
+#: The BSD/Mach-O symbol index is matched **by prefix**, not an exact-name
+#: set (real macOS CI evidence, Codex/CI review): Apple's ``libtool``/
+#: ``ranlib`` writes ``__.SYMDEF`` (unsorted) or ``__.SYMDEF SORTED``
+#: (sorted) for a 32-bit index and the ``_64`` spellings for 64-bit, and the
+#: 16-byte ``ar`` name field silently truncates a longer one
+#: (``__.SYMDEF_64 SORTED`` is 19 bytes and truncates to
+#: ``__.SYMDEF_64 SOR``) — an exact-string allowlist an earlier revision
+#: used missed that case, and a real macOS ``ar`` run in CI additionally
+#: produced a plain ``__.SYMDEF SORTED`` this parser failed to recognize as
+#: special at all (folding it into ``members`` instead of the symbol index —
+#: confirmed by the macOS integration lane, root cause not otherwise
+#: reproducible without a real BSD ``ar``). Prefix matching on the fixed
+#: ``__.SYMDEF`` magic name — which every one of these variants shares and
+#: which a truncated-to-16-bytes name still contains — covers the exact,
+#: sorted, 64-bit, and truncated-64-bit-sorted spellings uniformly instead
+#: of chasing individual suffixes.
+_BSD_INDEX_PREFIX = "__.SYMDEF"
+_BSD_INDEX_WIDE_PREFIX = "__.SYMDEF_64"
+
+
+def _is_bsd_index_name(stripped: str) -> bool:
+    """Whether *stripped* (an ``ar`` header name field, right-padding
+    already removed) is a BSD/Mach-O symbol-index member — see
+    :data:`_BSD_INDEX_PREFIX`."""
+    return stripped.startswith(_BSD_INDEX_PREFIX)
+
+
+def _is_bsd_index_wide(stripped: str) -> bool:
+    """Whether a BSD index member (see :func:`_is_bsd_index_name`) is the
+    64-bit-offset ``__.SYMDEF_64`` variant rather than the 32-bit one."""
+    return stripped.startswith(_BSD_INDEX_WIDE_PREFIX)
+
 
 #: Cap on how much of one archive this module will read. Only member
 #: *headers* and the two small special members are ever read (see
@@ -383,6 +413,28 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
     ``offset -> name`` and defers every index member; the second decodes
     them.
 
+    **A standard COFF ``.lib`` (MSVC ``lib.exe``, or ``llvm-ar`` in COFF
+    mode) writes *two* members both named ``/``** — the "First Linker
+    Member" (the traditional big-endian count/offsets/names layout, exactly
+    what :func:`_gnu_symbol_index` already decodes — COFF's first linker
+    member and GNU's own ``/`` index share this layout by lineage, not
+    coincidence) and a "Second Linker Member" with an incompatible,
+    little-endian ``(all member offsets, then a symbol count, then one
+    2-byte member-table index per symbol)`` layout (Codex review, verified
+    against a real ``llvm-ar``-produced COFF archive: parsing the second
+    member's leading little-endian count as the GNU big-endian format
+    corrupts a small count like 1 into 16,777,216 and raises
+    :class:`ArchiveFormatError`, degrading the whole archive). Only the
+    *first* occurrence of each special name is decoded — a repeat is the
+    COFF second linker member's redundant, differently-shaped index over the
+    same member set the first occurrence already resolved (nothing this
+    module needs is only in the second member: it adds full-member coverage
+    a GNU/COFF archive's own header chain already gives this parser for
+    free, not new symbol/member pairs), so it is skipped rather than
+    mis-parsed. A genuine second index in the wild that isn't the COFF
+    second linker member would degrade the same way any other malformed
+    entry does elsewhere in this parser: skipped, not fatal.
+
     Raises :class:`ArchiveFormatError` for a bad magic, a truncated or
     non-conforming member header, or an index whose declared size doesn't
     fit its member. Individually unresolvable *entries* — a dangling long
@@ -405,6 +457,11 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
     members: list[ArMember] = []
     long_names = b""
     pending_index: list[tuple[str, bytes]] = []
+    # Which special index names have already been queued for decoding — a
+    # COFF archive's second linker member repeats the name "/" with an
+    # incompatible layout (see parse_ar_archive's docstring); only the first
+    # occurrence of any given special name is ever decoded.
+    seen_index_names: set[str] = set()
     offset = len(ARCHIVE_MAGIC)
     walked = 0
     while offset + _HEADER_SIZE <= total:
@@ -415,31 +472,58 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
         name_field, size = _parse_header(reader.read(offset, _HEADER_SIZE), offset)
         data_offset = offset + _HEADER_SIZE
         stripped = name_field.rstrip(" ")
-        # A special member's data is always stored inline, thin archive or
-        # not; only a *regular* member is bodiless in a thin archive.
-        special = (
-            stripped in _GNU_INDEX_NAMES
-            or stripped == _GNU_LONG_NAME_TABLE
-            or stripped in _BSD_INDEX_NAMES
-        )
+
         if stripped == _GNU_LONG_NAME_TABLE:
+            # A special member's data is always stored inline, thin archive
+            # or not; only a *regular* member is bodiless in a thin archive.
             long_names = reader.read(data_offset, size)
-        elif stripped in _GNU_INDEX_NAMES or stripped in _BSD_INDEX_NAMES:
-            pending_index.append((stripped, reader.read(data_offset, size)))
+            stored = size
+        elif stripped in _GNU_INDEX_NAMES:
+            # GNU never extended-encodes its own index name — it is always
+            # the literal "/" or "/SYM64/", so the raw field is authoritative
+            # here (unlike the BSD case below).
+            if stripped not in seen_index_names:
+                seen_index_names.add(stripped)
+                pending_index.append((stripped, reader.read(data_offset, size)))
+            # else: a repeat of an already-seen GNU index name (the COFF
+            # second linker member repeats "/" with an incompatible layout)
+            # — bytes still consumed via `stored` so the walk stays in sync,
+            # just not queued for decode.
+            stored = size
         else:
+            # Not a GNU special member by its raw field. Resolve the actual
+            # name — via the BSD `#1/<len>` self-referential extended-name
+            # form or a GNU `/<index>` long-name-table reference — *before*
+            # deciding whether this is a regular member or the BSD symbol
+            # index (Codex/CI review, real macOS evidence): a real macOS
+            # `ar`/`ranlib` writes its ``__.SYMDEF SORTED`` index member's
+            # name via the BSD extended-name form rather than the raw
+            # 16-byte field, so classifying on the raw field alone (an
+            # earlier revision) silently folded it into `members` instead of
+            # the symbol index — root-caused by reproducing the mismatch
+            # from the CI failure output, not otherwise observable without a
+            # real BSD `ar`.
             name, name_bytes = _resolve_member_name(
                 name_field, reader, data_offset, size, long_names
             )
-            if name:
-                members.append(
-                    ArMember(
-                        name=name,
-                        header_offset=header_offset,
-                        data_offset=data_offset + name_bytes,
-                        size=size - name_bytes,
+            if name and _is_bsd_index_name(name):
+                if _BSD_INDEX_PREFIX not in seen_index_names:
+                    seen_index_names.add(_BSD_INDEX_PREFIX)
+                    pending_index.append(
+                        (name, reader.read(data_offset + name_bytes, size - name_bytes))
                     )
-                )
-        stored = size if (special or not thin) else 0
+                stored = size  # a BSD index member's data is always inline
+            else:
+                if name:
+                    members.append(
+                        ArMember(
+                            name=name,
+                            header_offset=header_offset,
+                            data_offset=data_offset + name_bytes,
+                            size=size - name_bytes,
+                        )
+                    )
+                stored = size if not thin else 0
         offset = data_offset + stored + (stored % 2)
 
     if offset != total:
@@ -481,7 +565,7 @@ def parse_ar_archive(reader: ByteReader) -> ArchiveContents:
         else:
             symbols.extend(
                 _bsd_symbol_index(
-                    body, offsets_by_member, wide=index_name == "__.SYMDEF_64"
+                    body, offsets_by_member, wide=_is_bsd_index_wide(index_name)
                 )
             )
     return ArchiveContents(
@@ -521,8 +605,36 @@ def _symbol_node_ids(graph: SourceGraphSummary) -> frozenset[str]:
     return frozenset(n.id for n in graph.nodes if n.kind == "binary_symbol")
 
 
-def _resolve_archive_path(label: str, search_roots: tuple[Path, ...]) -> Path | None:
-    """The on-disk archive a ``static_library`` node's label names, or ``None``.
+@dataclass(frozen=True)
+class _ArchiveLookup:
+    """The result of resolving a ``static_library`` node's label to disk.
+
+    ``path`` is ``None`` for both "not found anywhere" and "found in more
+    than one distinct location" (:attr:`ambiguous`) — the two cases share
+    the same downstream handling (no data attached to the node) but earn
+    different diagnostics, so they stay distinguishable here rather than
+    collapsing to a bare ``Path | None`` the way an earlier revision did.
+    """
+
+    path: Path | None
+    ambiguous: bool = False
+    candidates: tuple[Path, ...] = ()
+
+
+def _file_identity(path: Path) -> tuple[int, int] | None:
+    """``(st_dev, st_ino)`` for *path*, or ``None`` on a stat failure (a TOCTOU
+    race — the file existed for ``is_file()`` above but is gone now). Two
+    paths sharing an identity are the same file (a hardlink, or two search
+    roots that overlap), never a genuine collision."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def _resolve_archive_path(label: str, search_roots: tuple[Path, ...]) -> _ArchiveLookup:
+    """The on-disk archive a ``static_library`` node's label names.
 
     Link-input paths in build evidence are as the build system wrote them —
     absolute from a CMake/Ninja link line, relative to the build directory
@@ -530,15 +642,73 @@ def _resolve_archive_path(label: str, search_roots: tuple[Path, ...]) -> Path | 
     tried under each search root in order. Only an existing regular file is
     accepted; a symlink to one is fine (a build tree's ``lib*.a`` is often
     one), since this module only ever *reads*.
+
+    Both *label* and each *search_roots* entry are passed through
+    :func:`~abicheck.buildsource.source_extractors._argv.unredact_home`
+    first (Codex review, fresh evidence): build evidence is redacted before
+    persisting (ADR-032 D7) — every adapter's ``CompileUnit.directory`` and
+    a link unit's own input paths pass through
+    :class:`~abicheck.buildsource.redaction.RedactionPolicy`, which rewrites
+    the caller's home-directory prefix to a literal ``~`` — and
+    ``Path("~/build/libfoo.a").is_absolute()`` is ``False`` (``~`` is not
+    ``/``), so an absolute redacted label would silently fall through to the
+    relative branch and never resolve against any root, and a redacted
+    default search root (``_default_archive_search_roots`` reads the same
+    redacted ``cu.directory``) would never contain a literal ``~``
+    subdirectory either way. The same reversal every other replay path in
+    this package already applies (``source_replay.py``,
+    ``include_graph.py``, ``preprocessor_scan.py``) before touching disk.
+
+    **Ambiguity is a "no answer", not a coin flip** (Codex review, fresh
+    evidence): a *relative* archive label is resolved against every search
+    root in *search_roots* — normally one compile unit's directory per
+    distinct build target/subdirectory (:func:`~abicheck.buildsource.
+    inline_graph_fold._default_archive_search_roots`) — and
+    ``source_graph._fold_link_provenance`` coalesces every link unit's
+    same-labeled input onto **one** ``static_library://<label>`` graph node
+    regardless of which directory it actually came from. In a multi-target
+    build where two different subdirectories each produce their own,
+    unrelated ``libcommon.a``, every root before this fix was tried in
+    registration order and the *first* match silently won — attaching one
+    target's real member/symbol data to a node that (via the coalesced id)
+    also represents the other target's completely different archive, which
+    is exactly the "incorrect localization... rather than degraded
+    evidence" failure ADR-028 D3's authority rule exists to rule out. When
+    more than one *distinct* file (different ``(st_dev, st_ino)`` — a
+    hardlink or an overlapping root naming the same file is not a
+    collision) matches across the roots, resolution now refuses to guess:
+    the node gets no archive data at all, with a diagnostic naming every
+    candidate, rather than a wrong-but-confident answer. Closing this for
+    real needs the archive/object node identity itself to be scoped by the
+    owning link unit's directory, not only by label — a change to
+    ``source_graph.py``'s existing (pre-dating this module) coalescing
+    behavior that reaches every consumer of a ``static_library`` node, not
+    a fix local to this lookup; deferred as its own scoped follow-up, the
+    same way this file already defers the deeper COFF/thin-archive gaps it
+    documents elsewhere.
     """
-    candidate = Path(label)
+    from .source_extractors._argv import unredact_home
+
+    candidate = Path(unredact_home(label))
     if candidate.is_absolute():
-        return candidate if candidate.is_file() else None
+        return _ArchiveLookup(candidate if candidate.is_file() else None)
+    found: list[Path] = []
+    seen: set[tuple[int, int]] = set()
     for root in search_roots:
-        resolved = root / candidate
-        if resolved.is_file():
-            return resolved
-    return None
+        resolved = Path(unredact_home(str(root))) / candidate
+        if not resolved.is_file():
+            continue
+        identity = _file_identity(resolved)
+        if identity is not None and identity in seen:
+            continue  # same file via another root — not a second candidate
+        found.append(resolved)
+        if identity is not None:
+            seen.add(identity)
+    if not found:
+        return _ArchiveLookup(None)
+    if len(found) > 1:
+        return _ArchiveLookup(None, ambiguous=True, candidates=tuple(found))
+    return _ArchiveLookup(found[0])
 
 
 @dataclass
@@ -614,10 +784,20 @@ def augment_graph_with_archives(
     for node in archives:
         result.archives_seen += 1
         label = node.label or node.id.split("://", 1)[-1]
-        path = _resolve_archive_path(label, search_roots)
-        if path is None:
-            result.diagnostics.append(f"{label}: not found under any search root")
+        lookup = _resolve_archive_path(label, search_roots)
+        if lookup.path is None:
+            if lookup.ambiguous:
+                names = ", ".join(str(c) for c in lookup.candidates)
+                result.diagnostics.append(
+                    f"{label}: ambiguous — {len(lookup.candidates)} distinct files "
+                    f"match across the search roots ({names}); skipped rather than "
+                    "guessing which link unit's archive this node's coalesced "
+                    "label refers to"
+                )
+            else:
+                result.diagnostics.append(f"{label}: not found under any search root")
             continue
+        path = lookup.path
         try:
             contents = read_archive(path)
         except ArchiveFormatError as exc:

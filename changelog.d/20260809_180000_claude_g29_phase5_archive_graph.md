@@ -22,3 +22,18 @@
   four (template instantiation, virtual dispatch, macro/config,
   callback/function-pointer) remain open. No new `ChangeKind`, no report
   schema change, no verdict/exit-code effect.
+
+  Hardened against four real-world parsing/resolution gaps found in review
+  (real macOS CI evidence for two of them): a standard COFF `.lib`'s second
+  linker member (a little-endian layout distinct from its first, GNU-
+  compatible one, both sharing the name `/`) is now recognized and skipped
+  instead of mis-parsed as GNU format; a real macOS `ar`/`ranlib` writes its
+  `__.SYMDEF SORTED` index member's name via the BSD `#1/<len>`
+  self-referential extended-name form rather than the raw header field,
+  which is now resolved before classification instead of silently folding
+  the index into `archive_member` nodes as a fake object file; a redacted
+  (`~`-prefixed) archive label or search root (ADR-032 D7) is now expanded
+  before disk lookup; and a relative archive label that resolves to more
+  than one distinct file across the search roots (two subprojects each
+  linking their own same-named archive) is now a diagnostic, never a
+  guessed match.
