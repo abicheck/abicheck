@@ -477,6 +477,120 @@ class TestRunScanSetBundleAuditDeadline:
         assert result.exit_code == 5
 
 
+class TestRunScanSetExportUnionDeadline:
+    """G35: the export-union pass (`artifact_set_member_exports`) added ahead
+    of the per-member loop must honor `--budget` the same way the soname
+    check and `audit_bundle` already do -- both a budget already exhausted
+    by the time it would run, and a `DeadlineExceeded` raised *during* the
+    call itself, must report `BUDGET_OVERFLOW` rather than silently
+    proceeding to scan every member past the deadline.
+    """
+
+    def test_exhausted_budget_before_export_pass_reports_overflow(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import time as time_mod
+
+        import abicheck.bundle as bundle_mod
+        from abicheck.service import Budget, ScanRequest, run_scan_set
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(time_mod, "monotonic", lambda: clock["t"])
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        def _fake_soname_check(libraries):
+            # Simulate the soname check itself consuming the whole budget,
+            # so the export-union pass right after it starts with none left.
+            clock["t"] += 1000.0
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(
+            bundle_mod, "check_artifact_set_soname_collisions", _fake_soname_check
+        )
+
+        result = run_scan_set(
+            ScanRequest(
+                binaries=[snap_a, snap_b],
+                mode="audit",
+                budget=Budget(total_timeout=5.0),
+            )
+        )
+        assert result.verdict == "BUDGET_OVERFLOW"
+        assert result.exit_code == 5
+
+    def test_slow_export_pass_completing_over_budget_reports_overflow(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # P2 regression (Codex review): artifact_set_member_exports() has no
+        # checkpoint *after* its last member's parse -- a pathologically
+        # slow final parse that completes without itself tripping
+        # deadline_scope must still be caught by an elapsed-time recheck
+        # right after the export pass returns, before the (potentially
+        # expensive) per-member scan loop starts.
+        import time as time_mod
+
+        import abicheck.bundle as bundle_mod
+        from abicheck.service import Budget, ScanRequest, run_scan_set
+
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(time_mod, "monotonic", lambda: clock["t"])
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        def _fake_member_exports(libraries):
+            # Simulate a slow final parse that returns normally (no
+            # DeadlineExceeded) but has already blown through the budget.
+            clock["t"] += 1000.0
+            return {name: frozenset() for name in libraries}
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(
+            bundle_mod, "artifact_set_member_exports", _fake_member_exports
+        )
+
+        result = run_scan_set(
+            ScanRequest(
+                binaries=[snap_a, snap_b],
+                mode="audit",
+                budget=Budget(total_timeout=5.0),
+            )
+        )
+        assert result.verdict == "BUDGET_OVERFLOW"
+        assert result.exit_code == 5
+
+    def test_deadline_exceeded_inside_export_pass_reports_overflow(
+        self, snap_a: Path, snap_b: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.bundle as bundle_mod
+        from abicheck import deadline
+        from abicheck.service import Budget, ScanRequest, ScanSetResult, run_scan_set
+
+        def _fake_discover(paths, *, explicit):
+            return {"liba.so": snap_a, "libb.so": snap_b}
+
+        def _fake_member_exports(libraries):
+            raise deadline.DeadlineExceeded(-1.0)
+
+        monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
+        monkeypatch.setattr(
+            bundle_mod, "artifact_set_member_exports", _fake_member_exports
+        )
+
+        result = run_scan_set(
+            ScanRequest(
+                binaries=[snap_a, snap_b],
+                mode="audit",
+                budget=Budget(total_timeout=5.0),
+            )
+        )
+        assert isinstance(result, ScanSetResult)
+        assert result.verdict == "BUDGET_OVERFLOW"
+        assert result.exit_code == 5
+
+
 class TestRunScanSetAmbiguousSoname:
     """P2 regression (Codex review, x2): audit_bundle() rejects an
     ambiguous duplicate-SONAME set (ArtifactSetError). Originally degraded

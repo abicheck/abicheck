@@ -372,6 +372,16 @@ def artifact_set_member_exports(
     than reusing its result: that call still happens after every member's
     own scan in ``run_scan_set``, and this export union is needed *before*
     that loop so each member's scan can consult it while running, not after.
+
+    **Known gap (Codex review, not fixed here — see the G35 plan doc):** a
+    raw export name only, with no L4 reconciliation applied. A sibling that
+    exports a declaration only under a variant spelling (a ctor's base-object
+    clone, a Mach-O/demangle drift — the same class
+    ``crosscheck._l4_reconciled_symbols`` already exempts for the *current*
+    member) still false-positives here, since that reconciliation mapping
+    lives on a member's own built snapshot, which doesn't exist yet at this
+    point — fixing it would mean building every member's full snapshot before
+    scanning any of them, a heavier change than this ELF-only pass.
     """
     from . import deadline
 

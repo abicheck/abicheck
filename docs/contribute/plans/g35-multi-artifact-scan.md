@@ -80,12 +80,24 @@ case. **Still open, not silently dropped:**
   member's own scan the union of what its *siblings* export via a new
   `CrosscheckConfig.sibling_exported_symbols` field, consulted by
   `_check_public_not_exported` alongside this member's own export table and
-  the existing L4 reconciliation set. **Still open:** per-declaration
+  the existing L4 reconciliation set. **Still open (two gaps, both flagged
+  in review rather than shipped silently broken):** (1) per-declaration
   ownership attribution (so a symbol that moved to the *wrong* sibling, with
   no genuinely missing export anywhere in the set, could still be flagged
   as a mis-attribution rather than silently accepted) — this fix accepts
   "some sibling exports it" as sufficient, matching the minimum bar this
-  entry originally set, not the more precise future model.
+  entry originally set, not the more precise future model; (2) a sibling's
+  own L4 reconciliation (ctor clone / Mach-O / demangle-drift variant
+  spellings, the same class `_l4_reconciled_symbols` already exempts for
+  the *current* member) is not applied to `sibling_exported_symbols` —
+  `artifact_set_member_exports()` is a deliberately cheap, ELF-only pass
+  with no L4/build-source data at all, run before any member's own
+  snapshot (which is what carries that reconciliation mapping) has even
+  been built, so a declaration a sibling exports only under such a variant
+  spelling still false-positives. Fixing that would mean building every
+  member's full snapshot (for its own L4 mapping) before scanning any
+  member, the same class of heavier plumbing change as (1) — not attempted
+  in the same pass as the raw-export union fix.
 
 ---
 
