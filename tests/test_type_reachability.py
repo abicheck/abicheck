@@ -1800,16 +1800,19 @@ class TestDirectlyReferencedStdlibTypeSpellingsCollisionGuard:
 
 
 class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
-    """Codex review, fresh evidence: a stripped spelling shared by two or
-    more *distinct referenced stdlib identities* (e.g. a signature naming
-    bare ``vector<int>``, which cannot distinguish ``std::vector<int>``
-    from ``__gnu_debug::vector<int>``) must not be exported as confirmation
-    evidence -- ``directly_referenced_stdlib_types`` itself correctly marks
-    both referenced (its own over-inclusive default), but exporting the
-    shared stripped spelling would let a finding about only one of them be
-    wrongly confirmed via the other's presence."""
+    """Codex review, fresh evidence, two rounds: a stripped spelling shared
+    by two or more *distinct referenced stdlib identities* (e.g. a
+    signature naming bare ``vector<int>``, which cannot distinguish
+    ``std::vector<int>`` from ``__gnu_debug::vector<int>``) means neither
+    identity's presence in ``directly_referenced_stdlib_types`` is
+    independently confirmed -- both the shared stripped spelling *and*
+    each identity's own full qualified spelling must be excluded, not only
+    the shared spelling (a first-round fix left the full spellings
+    exported, reproduced wrong: a finding whose own ``symbol`` happens to
+    be spelled as one candidate's full qualified form was confirmed
+    anyway)."""
 
-    def test_stripped_spelling_ambiguous_among_stdlib_identities_is_dropped(
+    def test_ambiguous_group_exports_neither_stripped_nor_full_spellings(
         self,
     ) -> None:
         snap = AbiSnapshot(
@@ -1835,9 +1838,47 @@ class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
             {"std::vector<int>", "__gnu_debug::vector<int>"}
         )
         spellings = directly_referenced_stdlib_type_spellings(snap)
-        # Each identity's own unambiguous full spelling is still exported...
-        assert "std::vector<int>" in spellings
-        assert "__gnu_debug::vector<int>" in spellings
-        # ...but the ambiguous shared bare spelling -- which a finding about
-        # only one of them would carry as its own symbol -- is not.
-        assert "vector<int>" not in spellings
+        # Neither identity's presence was independently confirmed -- not
+        # the shared bare spelling, and not either one's own full spelling
+        # either, since that "referenced" answer is exactly as unproven.
+        assert spellings == frozenset()
+
+    def test_known_conservative_gap_group_excluded_even_if_one_member_is_also_confirmed_elsewhere(
+        self,
+    ) -> None:
+        # Documents a deliberate limitation rather than asserting an ideal:
+        # even when a *different* public signature separately names one
+        # ambiguous candidate's full qualified spelling directly (a
+        # genuine, independent confirmation for that one identity), this
+        # function still excludes the whole group -- it groups by "does
+        # this identity's stripped spelling collide with another
+        # referenced identity's", which doesn't distinguish "reached only
+        # via the ambiguous route" from "also reached via an unambiguous
+        # one". Recovering that distinction needs per-match-route
+        # provenance from the underlying scan (_StdlibReferenceScan), which
+        # today only returns a flat set of referenced identities -- a
+        # deeper change than this collision-guard fix, not attempted here.
+        # Same false-negative-over-false-positive direction this whole
+        # module already commits to throughout.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_vec", params=[Param(name="v", type="vector<int>")]),
+                _fn(
+                    "use_debug_vec",
+                    params=[Param(name="v", type="__gnu_debug::vector<int>")],
+                ),
+            ],
+            types=[
+                RecordType(
+                    name="vector<int>", kind="class", qualified_name="std::vector<int>"
+                ),
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="__gnu_debug::vector<int>",
+                ),
+            ],
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()

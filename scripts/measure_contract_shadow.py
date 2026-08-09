@@ -175,9 +175,9 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 #: (the only point still holding both raw snapshots) and threads it through
 #: `evaluate_snapshot_pair_contract_relevance` ->
 #: `evaluate_change_contract_relevance` -> `_in_surface_result_is_confirmed`,
-#: which now confirms a finding whose `symbol`/`caused_by_type` names one of
-#: those spellings directly (`type_reachability.type_string_references_name`),
-#: independent of `public_types`' own stdlib-excluding closure.
+#: which now confirms a finding whose `symbol`/`caused_by_type` matches one
+#: of those spellings by exact equality, independent of `public_types`' own
+#: stdlib-excluding closure.
 #: Full finding keys (`case:mode:kind:symbol:finding_id`), not case names.
 #: A case can emit several findings, so pinning only the case let one
 #: accepted gap be fixed while a *different* finding in the same case

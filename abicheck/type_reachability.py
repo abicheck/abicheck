@@ -972,20 +972,44 @@ def directly_referenced_stdlib_type_spellings(snapshot: AbiSnapshot) -> frozense
     encodes as a legitimate user declaration.
 
     A stripped spelling shared by **two or more distinct referenced stdlib
-    identities** is also dropped (Codex review, fresh evidence): e.g. a
-    signature naming bare ``vector<int>`` cannot distinguish
-    ``std::vector<int>`` from ``__gnu_debug::vector<int>``, so
-    :func:`directly_referenced_stdlib_types`'s own scan correctly marks
-    *both* referenced (never missing a real reference is the safe direction
-    for its purpose -- deciding whether to keep a layout finding at all).
-    Exporting the shared stripped spelling here would misuse that
-    intentionally over-inclusive answer as unambiguous confirmation
-    evidence: a finding about only one of the two identities (its size
-    changed, the other's didn't) would be wrongly confirmed via the
-    other's presence. Unlike the non-stdlib collision above, this
-    ambiguity can only be resolved among identities this function itself
-    already has in hand, so it is computed locally rather than reusing a
-    module-level helper.
+    identities** means neither identity's own presence in
+    :func:`directly_referenced_stdlib_types`'s return value is independently
+    confirmed (Codex review, fresh evidence, two rounds): e.g. a signature
+    naming bare ``vector<int>`` cannot distinguish ``std::vector<int>`` from
+    ``__gnu_debug::vector<int>``, so that scan correctly marks *both*
+    referenced (never missing a real reference is the safe direction for
+    its purpose -- deciding whether to keep a layout finding at all) purely
+    because each shares the one spelling the signature actually contains,
+    not because either was independently matched. A first fix dropped only
+    the shared *stripped* spelling itself, reasoning each identity's own
+    full qualified spelling was still safe to export -- reproduced wrong:
+    a finding whose own ``symbol``/``caused_by_type`` happens to be spelled
+    as the *full* qualified form of either ambiguous candidate (e.g. a
+    DWARF-derived snapshot, which bakes the qualified spelling directly
+    into ``name``) was then confirmed via that unconditionally-exported
+    full identity, even though neither identity's reachability was ever
+    independently established -- only one of the two, at most, is real, and
+    the evidence cannot say which. Closed by excluding **every** spelling
+    (stripped and full alike) for every identity in an ambiguous group, not
+    only the shared stripped one: this function's own answer for that
+    identity is exactly as unproven as the shared spelling that produced
+    it. Unlike the non-stdlib collision above, this ambiguity can only be
+    resolved among identities this function itself already has in hand, so
+    it is computed locally rather than reusing a module-level helper.
+
+    **Known conservative gap, deliberately not attempted here:** grouping
+    is keyed purely on whether an identity's stripped spelling collides
+    with another *referenced* identity's -- it cannot distinguish "reached
+    only via the ambiguous shared spelling" from "also independently
+    reached via its own unique full spelling elsewhere in the same
+    snapshot". A whole ambiguous group is excluded even when one member is
+    separately, unambiguously confirmable another way, which is a real but
+    rare false negative. Recovering that distinction needs per-match-route
+    provenance from the underlying scan (:class:`_StdlibReferenceScan`),
+    which today only returns a flat set of referenced identities with no
+    record of *which* match(es) produced each one -- a deeper change than
+    this collision-guard fix. Same false-negative-over-false-positive
+    direction this whole module already commits to throughout.
     """
     _, non_stdlib_identities, _ = _partition_snapshot_types(snapshot)
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
@@ -997,12 +1021,14 @@ def directly_referenced_stdlib_type_spellings(snapshot: AbiSnapshot) -> frozense
             stripped_owners.setdefault(stripped, set()).add(identity)
     spellings: set[str] = set()
     for identity in referenced:
-        spellings.add(identity)
         stripped = _stripped_signature_spelling(identity)
-        if (
-            stripped is not None
-            and stripped not in non_stdlib_spellings
-            and len(stripped_owners[stripped]) == 1
-        ):
+        if stripped is not None and len(stripped_owners[stripped]) > 1:
+            # This identity's own presence in `referenced` is exactly as
+            # unproven as its stripped spelling's ambiguity -- exporting
+            # neither form avoids treating that shared, unconfirmed
+            # evidence as proof about any one specific identity.
+            continue
+        spellings.add(identity)
+        if stripped is not None and stripped not in non_stdlib_spellings:
             spellings.add(stripped)
     return frozenset(spellings)

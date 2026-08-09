@@ -115,8 +115,10 @@ jobs:
               echo "::error::Pages deployment did not serve current schema bytes within the poll budget"
               exit 1
             fi
-            echo "Not fully propagated yet, retrying in ${delay}s..."
-            sleep "$delay"
+            remaining=$((deadline - SECONDS))
+            wait="$((delay < remaining ? delay : remaining))"
+            echo "Not fully propagated yet, retrying in ${wait}s..."
+            sleep "$wait"
             delay=$((delay * 2 > 30 ? 30 : delay * 2))
           done
           echo "All canonical schema URLs are live and byte-identical to the checked-out copies"
