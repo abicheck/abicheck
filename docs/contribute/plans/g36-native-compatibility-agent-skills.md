@@ -136,7 +136,21 @@ native-consumer-compatibility/SKILL.md` (+
 **Docs:** none directly — the skill catalog page (P0.9) links to these
 once generated.
 
-**Dependencies:** P0.1 (shared fragments must exist to reference).
+**Dependencies:** P0.1 (shared fragments must exist to reference). P0.2 is
+intentionally *not* blocked on P0.4 (`abicheck info`) or P0.5 (comparability
+`reason_codes`) — those are independent product-surface PRs that can land
+in parallel, and P0.2's own rule above ("no skill may reference a flag,
+command, or report field that doesn't exist today") means the first version
+of each `SKILL.md` correctly omits them. That leaves a real gap, though:
+nothing in the plan as originally written integrated `info`/`reason_codes`
+into the already-authored skills once P0.4/P0.5 landed. Closing it: each of
+P0.4 and P0.5 carries its own small follow-up commit (not a new phase item)
+updating whichever of the four `SKILL.md`/`references/` files benefit —
+`native-release-compatibility` and `native-binary-compatibility-review`'s
+tool-selection steps for `info`, the same two skills' comparability/
+baseline-comparability steps for `reason_codes` — verified by P0.7's drift
+tests actually exercising the new field/command once referenced, not left
+implicit.
 
 **PR boundary:** one PR per skill (four PRs) — each is independently
 reviewable for its own decision-tree correctness, and a reviewer for
@@ -243,7 +257,9 @@ changelog fragment (`changelog.d/`, `### Added`).
 in parallel with P0.1–P0.3.
 
 **PR boundary:** one PR, product-surface only — no skill-content changes
-bundled in.
+bundled in. A small separate follow-up PR (whenever P0.2's skills already
+exist) updates the relevant `SKILL.md`s to use `info` — see P0.2's
+Dependencies note.
 
 ---
 
@@ -351,7 +367,11 @@ changelog fragment (`### Added`).
 
 **Dependencies:** none — independent of P0.1–P0.4, can land in parallel.
 
-**PR boundary:** one PR, product-surface only.
+**PR boundary:** one PR, product-surface only. A small separate follow-up
+PR (whenever P0.2's skills already exist) updates
+`native-release-compatibility`/`native-binary-compatibility-review`'s
+comparability-related workflow steps to use `reason_codes` — see P0.2's
+Dependencies note.
 
 ---
 
@@ -464,8 +484,20 @@ request/expected-skill pairs), `tests/test_agent_skills_triggers.py` (drives
 whichever agents are scriptable in CI, e.g. Claude Code via its own
 harness).
 
-**Tests:** the corpus-driven test itself; CI-scriptable subset gated in
-`pr` profile, the rest tracked as a manual checklist in P1.5.
+**Tests:** the corpus-driven test itself, split by what it actually needs.
+The deterministic half — does the trigger corpus parse, does every
+`SKILL.md` `description` contain the phrasings its own entry claims to
+cover, static description-vs-corpus matching with no model in the loop —
+is what gates the `pr` profile. Driving a real scripted agent session
+(Claude Code, Codex, or any other vendor binary) to confirm it actually
+activates the intended skill is a fundamentally different kind of test:
+it needs a vendor binary, credentials, network access, and tolerates
+nondeterministic model routing, none of which an ordinary or forked PR job
+can reliably provide as a *required* check. That subset runs in its own
+opt-in/scheduled lane (mirroring how `integration`/`libabigail`/`abicc`
+external-tool markers are kept out of the default fast test command today),
+not gated in `pr`; the rest of the cross-agent list stays the manual
+checklist in P1.5.
 
 **Dependencies:** P0.2, P0.3.
 
@@ -736,6 +768,7 @@ P0.5, publication minimality in P1.4, evaluation targets in P1.1, the
 "generic prompt + abidiff/ABICC" comparison is exactly what P1.1's rubric
 — correct workflow choice, preserved uncertainty, deterministic evidence,
 root cause, appropriate remediation, no over-claiming — is designed to
-measure against, since a generic prompt has no access to abicheck's 396
-detected `ChangeKind`s or its contract-coverage/evidence-tier machinery and
-cannot preserve uncertainty the way invariant 1–5 require by construction).
+measure against, since a generic prompt has no access to abicheck's full
+detected `ChangeKind` taxonomy or its contract-coverage/evidence-tier
+machinery and cannot preserve uncertainty the way invariant 1–5 require by
+construction).

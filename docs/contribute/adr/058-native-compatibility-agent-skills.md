@@ -117,8 +117,9 @@ assumed:
   progressive disclosure: name+description always loaded (~100 tokens),
   full body loaded only once triggered, bundled files loaded only when
   actually read/executed — the mechanism that lets a skill bundle a large
-  reference catalog (e.g. abicheck's 396-entry `ChangeKind` taxonomy) at
-  zero standing context cost.
+  reference catalog (e.g. abicheck's full `ChangeKind` taxonomy —
+  `checker_policy.py` is its fact owner, not this ADR) at zero standing
+  context cost.
 - **Canonical portable location.** `.agents/skills/<skill-name>/SKILL.md` is
   read natively — independent of any vendor-specific directory — by Claude
   Code, GitHub Copilot (cloud agent, Copilot CLI, Copilot code review, VS
@@ -447,7 +448,7 @@ ABI design pattern catalogs, the full CLI recipe list, comparability-failure
 reason codes, the remediation catalog, report-schema field meanings — lives
 under `references/`, most of it in the shared Layer-B fragments referenced
 above rather than duplicated per skill. **Do not hand-copy** the CLI
-reference, the MCP tools reference, or the 396-entry `ChangeKind` catalog
+reference, the MCP tools reference, or the `ChangeKind` catalog
 into a skill's `references/` — link/generate from the canonical
 `docs/reference/` sources the same generator step already touches, so a
 CLI flag rename or a new `ChangeKind` cannot silently leave a skill
@@ -624,7 +625,7 @@ mutation-testing precedent, generalized to a new artifact class):
    negative examples (REST/OpenAPI compatibility, database migrations, Java
    API compatibility, arbitrary JSON-schema compatibility) must not
    false-trigger any native-* skill.
-4. **Behavioral/e2e evaluation**, reusing the existing 195-case
+4. **Behavioral/e2e evaluation**, reusing the existing
    `examples/`/`ground_truth.json` corpus and `validation/` harness rather
    than building a parallel one — a skill is graded on workflow choice,
    preserved uncertainty, evidence obtained, root-cause explanation,
