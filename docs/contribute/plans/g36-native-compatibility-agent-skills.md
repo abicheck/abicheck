@@ -382,8 +382,22 @@ both:**
   to include `info`); `README.md` ("Which command do I need?" table gets
   one more row); `docs/reference/cli-reference.md` (regenerated).
 - **If path (b), extending `--version --format json`:** `abicheck/cli.py`
-  — replace the built-in `click.version_option` with a custom eager
-  callback; no root-command surface changes at all, so
+  — a naive "replace `click.version_option` with a custom eager callback
+  that also reads `--format`" does not work as stated: Click evaluates
+  eager parameters before non-eager ones regardless of argv order (an
+  eager `--version` callback fires and can exit before `--format`'s own
+  non-eager parsing has populated `ctx.params`, per Click's documented
+  callback evaluation order), so `--version --format json` would render
+  before the format is known no matter which flag is typed first. Two
+  correct shapes, either is fine: make `--format` itself eager too (both
+  flags eager, ordered so `--version`'s callback runs last and can read
+  `ctx.params["format"]`), or drop `is_eager` from the version callback
+  entirely and render+exit from a normal (non-eager) callback once regular
+  parsing completes — Click's standard "eager only when you must exit
+  before other parsing matters" trade-off applies here, and a plain
+  version print has no such requirement. Test the documented `abicheck
+  --version --format json` spelling itself, not just each flag in
+  isolation; no root-command surface changes at all, so
   `tests/test_cli_root_surface.py`'s pinned set is untouched (adding `info`
   there would assert a command that was never created) and `README.md`'s
   command table gets no new row — this design's only surface change is to
@@ -980,7 +994,20 @@ introspection a second time).
 **Dependencies:** P0.2 (skill content must exist to test against), P0.3
 (generated output is what structural tests validate), P0.4 (the `info`
 command's own surface should be drift-tested once it exists, though not a
-hard blocker).
+hard blocker), **and P0.5, as a hard blocker for the report-JSON-field-path
+half of this item specifically (not the CLI-flag half, which has no such
+dependency).** The scan, release, release-summary, and stack report shapes
+this item promises to validate skill-cited field paths against don't have a
+schema/dataclass fact owner to check against until P0.5 lands
+`scan_report.schema.json`/`stack_report.schema.json` and the release
+schema(s) — landing P0.7 first would let it validate only the paths
+`compare_report.schema.json` already covers today, while silently passing
+(not failing) on every field path a skill cites from one of those other
+four surfaces, since there's nothing yet to check them against. Either
+sequence P0.7 after P0.5, or land P0.7's CLI-flag drift checks first and
+explicitly follow up with the report-JSON-field checks once P0.5's schemas
+exist — not a single test suite that quietly covers less than its own
+Change section describes.
 
 **PR boundary:** one PR per test file is fine, or combined — low risk
 either way since both are additive test infrastructure.
