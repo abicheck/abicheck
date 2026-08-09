@@ -574,9 +574,16 @@ P0.7's schema-based drift check recognize the new field at all, not an
 optional extra), `abicheck/cli_compare_helpers.py`
 (`_report_not_comparable` emits `codes`), `abicheck/cli_compare_release.py`
 (its own `"reason": {...}` construction site, written under
-`--output-dir`, gets the same field), `abicheck/cli_compare_release_helpers.py`
-(`_compare_one_library`/`_format_release_json`/`_write_release_summary_file`
-— the *primary* release report path, distinct from the separate
+`--output-dir`, gets the same field — **and** this module, not
+`cli_compare_release_helpers.py`, is where `_compare_one_library` and
+`_write_release_summary_file` are actually defined; only
+`_format_release_json` lives in the helpers module. Both real owners need
+the change: `_compare_one_library`/`_write_release_summary_file` here in
+`cli_compare_release.py`, `_format_release_json` in
+`cli_compare_release_helpers.py` — get this split wrong and the compact
+`summary.json` writer's schema-version marker/`reason_codes` field is
+exactly the piece left unimplemented), `abicheck/cli_compare_release_helpers.py`
+(`_format_release_json` — the *primary* release report path, distinct from the separate
 not-comparable document above: today a not-comparable library in a
 directory/package comparison returns only `"reason": str(exc)` into the
 entry `summary.json`/the release JSON actually expose, so without this
