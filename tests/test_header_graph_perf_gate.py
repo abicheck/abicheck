@@ -167,6 +167,32 @@ class TestLiveMeasurement:
         assert result["baseline_ms"] > 0
         assert result["attach_ms"] > 0
 
+    def test_resolve_includes_infers_the_headers_own_directory(self, tmp_path):
+        header = tmp_path / "api.h"
+        header.write_text("#pragma once\n")
+        inc_extra, deferred_tokens, extra_hash_dirs = hg_gate._resolve_includes(header)
+        # No build context (default CompileContext) -> the plain -I bucket,
+        # not the deferred/-isystem one (see resolve_inferred_header_roots).
+        assert inc_extra == [tmp_path]
+        assert deferred_tokens == ()
+        assert extra_hash_dirs == ()
+
+    def test_repeats_never_share_a_fixture_directory(self, monkeypatch):
+        # Regression guard for the cross-repeat/cross-backend disk-cache
+        # contamination finding: every _build_fixture call during one
+        # _measure_one run must see a distinct temp directory.
+        seen_dirs = []
+        real_build_fixture = hg_gate._build_fixture
+
+        def _spy(tmp_dir, n):
+            seen_dirs.append(tmp_dir)
+            return real_build_fixture(tmp_dir, n)
+
+        monkeypatch.setattr(hg_gate, "_build_fixture", _spy)
+        hg_gate._measure_one(3, "clang", repeat=3)
+        assert len(seen_dirs) == 3
+        assert len(set(seen_dirs)) == 3
+
     def test_main_report_only_run_exits_zero(self, capsys):
         rc = hg_gate.main(["--sizes", "5", "--repeat", "1"])
         assert rc == 0

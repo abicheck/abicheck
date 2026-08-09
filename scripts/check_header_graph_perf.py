@@ -33,10 +33,13 @@ regression against a documented baseline — the same discipline
 ``check_fp_rate.py``/``check_tier_accuracy.py`` apply to correctness and
 ``benchmark_scaling.py`` applies to comparison scaling.
 
-Method: build one tiny real ELF ``.so`` + a synthetic public header of size
-*N* declarations (reused across every repeat — the binary/header pair is
-fixed per size, only the dump/attach calls are repeated), then time, per
-backend (``clang``, and ``castxml`` when installed) and per repeat:
+Method: for every (size, backend, repeat) combination, build a *fresh* tiny
+real ELF ``.so`` + synthetic public header of size *N* declarations in its
+own temp directory — never reused across repeats or backends, since the AST
+disk-cache key is keyed on each header's resolved path (not its content), so
+a shared fixture would let a later measurement silently hit a disk-cache
+entry an earlier one already wrote for the identical path, understating the
+genuine cold-invocation cost this gate exists to catch. Then time:
 
 * ``baseline_ms`` — ``dumper.dump(so, [header], header_backend=...)``, which
   does **not** itself attach the header graph (see
@@ -142,7 +145,19 @@ def _synthesize_source(n: int) -> str:
 
 def _build_fixture(tmp_dir: Path, n: int) -> tuple[Path, Path]:
     """Compile a real ELF ``.so`` + write its header for size *n*. Returns
-    ``(so_path, header_path)``."""
+    ``(so_path, header_path)``.
+
+    Called once per (size, backend, repeat) inside a fresh temp directory
+    (see ``_measure_one``) — the resolved header *path* is part of the AST
+    disk-cache key (``dumper_ast_config._cache_key`` hashes each header's
+    resolved path + mtime, not its content), so a fresh directory alone is
+    enough to guarantee a cold cache on every call, with no need to vary the
+    header content itself (Codex review: a shared fixture reused across
+    repeats/backends let the *second* backend's/repeat's measurement hit a
+    disk-cache entry the *first* one's attach step had already written for
+    the identical header path, understating the genuine cold-invocation
+    cost this gate exists to catch).
+    """
     header = tmp_dir / "api.h"
     header.write_text(_synthesize_header(n))
     src = tmp_dir / "api.cpp"
@@ -161,11 +176,40 @@ def _build_fixture(tmp_dir: Path, n: int) -> tuple[Path, Path]:
 BACKENDS: tuple[str, ...] = ("clang", "castxml")
 
 
-def _measure_one(so: Path, header: Path, backend: str, repeat: int) -> dict[str, Any]:
-    """Time *repeat* (dump, attach) pairs for one already-built fixture.
+def _resolve_includes(
+    header: Path,
+) -> tuple[list[Path], tuple[str, ...], tuple[Path, ...]]:
+    """Replicate ``service._dump_elf``'s own inferred-include-root resolution.
 
-    Mirrors ``service._run_dump_uncached``'s own call shape exactly: the
-    primary dump runs inside ``dumper_cache.ast_memoize_scope()``, and
+    Both the primary dump and ``service._attach_header_graph`` must resolve
+    to the *identical* ``extra_includes``/``gcc_option_tokens`` for their
+    respective ``_clang_header_dump`` calls to land on the same AST
+    disk-cache key (and, on the ``clang`` backend, the same in-process memo
+    slot) — ``resolve_inferred_header_roots`` is a pure function of
+    ``headers``/``user_includes``/``gcc_options``/``gcc_option_tokens``, so
+    calling it once here with the same arguments both the real ``dump()``
+    call below and ``_attach_header_graph``'s own internal call use (empty
+    user includes, default ``CompileContext``) gives both call sites the
+    same answer without threading a shared value between them (Codex
+    review: passing no ``extra_includes`` to ``dump()`` at all — the
+    previous shape of this function — left the primary pass's cache key
+    diverged from the attach step's own internally-resolved one, so a
+    ``clang``-backend attach could never actually hit the memo the primary
+    pass wrote).
+    """
+    from abicheck.header_utils import deferred_token_dirs, resolve_inferred_header_roots
+
+    inc_extra, deferred = resolve_inferred_header_roots(
+        [header], [], gcc_options=None, gcc_option_tokens=()
+    )
+    return inc_extra, tuple(deferred), tuple(deferred_token_dirs(deferred))
+
+
+def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
+    """Time *repeat* (dump, attach) pairs, one freshly-built fixture apiece.
+
+    Mirrors ``service._run_dump_uncached``'s own call shape: the primary
+    dump runs inside ``dumper_cache.ast_memoize_scope()``, and
     ``_attach_header_graph`` runs after that scope exits — the in-process AST
     memo (G31 Phase C) is a per-thread slot that outlives the scope until a
     reader pops it, so this ordering is what actually lets a ``clang``-backend
@@ -181,26 +225,38 @@ def _measure_one(so: Path, header: Path, backend: str, repeat: int) -> dict[str,
     baseline_samples: list[float] = []
     attach_samples: list[float] = []
     for _ in range(repeat):
-        t0 = time.perf_counter()
-        with dumper_cache.ast_memoize_scope():
-            snap = dump(so, [header], header_backend=backend, lang="c++")
-        t1 = time.perf_counter()
-        baseline_samples.append((t1 - t0) * 1000.0)
+        with tempfile.TemporaryDirectory(prefix="hgperf_") as tmp:
+            so, header = _build_fixture(Path(tmp), n)
+            inc_extra, deferred_tokens, extra_hash_dirs = _resolve_includes(header)
 
-        t2 = time.perf_counter()
-        _attach_header_graph(
-            snap,
-            True,
-            False,
-            [header],
-            [],
-            "c++",
-            CompileContext(),
-            None,
-            None,
-        )
-        t3 = time.perf_counter()
-        attach_samples.append((t3 - t2) * 1000.0)
+            t0 = time.perf_counter()
+            with dumper_cache.ast_memoize_scope():
+                snap = dump(
+                    so,
+                    [header],
+                    extra_includes=inc_extra,
+                    header_backend=backend,
+                    lang="c++",
+                    gcc_option_tokens=deferred_tokens,
+                    extra_hash_dirs=extra_hash_dirs,
+                )
+            t1 = time.perf_counter()
+            baseline_samples.append((t1 - t0) * 1000.0)
+
+            t2 = time.perf_counter()
+            _attach_header_graph(
+                snap,
+                True,
+                False,
+                [header],
+                [],
+                "c++",
+                CompileContext(),
+                None,
+                None,
+            )
+            t3 = time.perf_counter()
+            attach_samples.append((t3 - t2) * 1000.0)
 
     return {
         "baseline_ms": min(baseline_samples),
@@ -215,24 +271,21 @@ def _measure_size(
 ) -> list[dict[str, Any]]:
     from abicheck.errors import SnapshotError
 
-    with tempfile.TemporaryDirectory(prefix="hgperf_") as tmp:
-        tmp_dir = Path(tmp)
-        so, header = _build_fixture(tmp_dir, n)
-        points = []
-        for backend in backends:
-            try:
-                result = _measure_one(so, header, backend, repeat)
-            except SnapshotError as exc:
-                # A backend present on PATH but rejected by abicheck itself
-                # (e.g. an out-of-policy castxml build, ADR-*'s
-                # UnsupportedCastxmlVersionError) skips just that backend's
-                # points rather than aborting the whole sweep — the same
-                # "self-skip, don't crash" contract the rest of this script
-                # applies to a missing tool.
-                print(f"SKIP: size={n} backend={backend}: {exc}")
-                continue
-            points.append({"size": n, "backend": backend, **result})
-        return points
+    points = []
+    for backend in backends:
+        try:
+            result = _measure_one(n, backend, repeat)
+        except SnapshotError as exc:
+            # A backend present on PATH but rejected by abicheck itself
+            # (e.g. an out-of-policy castxml build, ADR-*'s
+            # UnsupportedCastxmlVersionError) skips just that backend's
+            # points rather than aborting the whole sweep — the same
+            # "self-skip, don't crash" contract the rest of this script
+            # applies to a missing tool.
+            print(f"SKIP: size={n} backend={backend}: {exc}")
+            continue
+        points.append({"size": n, "backend": backend, **result})
+    return points
 
 
 def measure(
