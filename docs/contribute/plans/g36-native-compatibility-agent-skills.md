@@ -1272,15 +1272,23 @@ check_ai_readiness.py`'s `mkdocs-nav-coverage` check.
 
 **Dependencies:** P0.1–P0.3 for the catalog itself (it must describe real,
 generated skills, not aspirational ones) — but, **same freshness caveat as
-P1.1/P1.5's own "Dependencies" notes, the dogfooding pass P1.4 relies on
-for publication must postdate P0.4/P0.5's required skill-content
-follow-ups and P1.6's CI-wiring commit.** A dogfooding pass completed
-against P0.1–P0.3's output alone, before those later commits change the
-generated skills' actual content, exercises a materially different tree
-than the one P1.4 would publish — P1.4 accepting a stale dogfooding
-record while publishing changed content is exactly the same gap the
-P1.1/P1.5 freshness requirements already close for the other two
-publication-relied-on artifacts. Re-run (or initially defer) the
+P1.1/P1.5's own "Dependencies" notes below, generalized: the dogfooding
+pass P1.4 relies on for publication must postdate every later commit that
+changes the generated skill trees' actual content — at minimum P0.4/P0.5's
+required skill-content follow-ups, P0.6's marker/front-matter additions to
+every generated file, and P1.6's CI-wiring commit, and any other item this
+plan defines whose own text says it modifies `SKILL.md` or `references/*.md`
+content.** Stating a fixed, closed list here (as earlier drafts of this and
+the sibling P1.1/P1.5 notes did) has repeatedly needed a new item added
+each time a reviewer found one this plan touches the generated tree that
+wasn't yet named — treat "postdates every content-changing commit," not
+"postdates these three named ones," as the actual requirement. A
+dogfooding pass completed against P0.1–P0.3's output alone, before those
+later commits change the generated skills' actual content, exercises a
+materially different tree than the one P1.4 would publish — P1.4 accepting
+a stale dogfooding record while publishing changed content is exactly the
+same gap the P1.1/P1.5 freshness requirements already close for the other
+two publication-relied-on artifacts. Re-run (or initially defer) the
 publication-relied-on dogfooding pass until after P0.4, P0.5, and P1.6
 land.
 
@@ -1364,18 +1372,19 @@ publication outright, not just lowers an aggregate rate — and gate the
 remaining four dimensions with the baseline/non-regression model.
 
 **Dependencies:** P0.1–P0.3, P0.8 for a *first* pass — but, same freshness
-caveat as P1.5's below, **the run P1.4 relies on for publication must
-postdate P0.4/P0.5's own required follow-up commits, and P1.6's CI-wiring
-commit too** (P0.2's "Dependencies" note: P0.4/P0.5 each require a small
-follow-up commit updating the skills to actually consume the selected
-capability-discovery surface (`info` under path (a), `--version --format
-json` under path (b)) and typed `reason_codes`; P1.6 separately adds the
-CI-wiring workflow step and its documentation links to two of the four
-`SKILL.md` files). A P1.1 pass completed before any of these land never
-exercised the capability-discovery/non-comparability branches or the
-CI-wiring content those commits add, so it can't stand in as evidence
-those branches or that content work — re-run (or initially defer) the
-publication-relied-on pass until after all three (P0.4, P0.5, P1.6) land.
+caveat as P1.5's below and P0.9's above, generalized: **the run P1.4
+relies on for publication must postdate every later commit that changes
+the generated skill trees' content — at minimum P0.4/P0.5's required
+follow-up commits (P0.2's "Dependencies" note: updating the skills to
+actually consume the selected capability-discovery surface, `info` under
+path (a) or `--version --format json` under path (b), and typed
+`reason_codes`), P0.6's marker/front-matter additions, and P1.6's
+CI-wiring commit — not a fixed, closed list of exactly these three, since
+that shape of list has needed a new item added each review round.** A
+P1.1 pass completed before any content-changing commit lands never
+exercised the branches or content that commit adds, so it can't stand in
+as evidence they work — re-run (or initially defer) the
+publication-relied-on pass until after every content-changing item lands.
 
 **PR boundary:** own PR per skill is reasonable given the evaluation volume
 (four PRs), or one combined PR if reviewed together — team's call.
@@ -1527,18 +1536,24 @@ exemption, confirmed against how its own model page is actually navigated).
 scriptable subset already lives in P0.8).
 
 **Dependencies:** P0.1–P0.3 for a *first* pass, but **the pass P1.4 relies
-on for publication must additionally postdate P0.4/P0.5's own required
-follow-up commits, and P1.6's CI-wiring commit too** — P0.4/P0.5 each
+on for publication must additionally postdate every later commit that
+changes the generated skill trees' content — at minimum P0.4/P0.5's
+required follow-up commits, P0.6's marker/front-matter additions to every
+generated file, and P1.6's CI-wiring commit, not a fixed, closed list of
+exactly those, since a closed list here has needed a new item added on
+each of several review rounds (P1.6 was missing, then P0.6 was missing
+after P1.6 was added).** P0.4/P0.5 each
 explicitly require a small follow-up commit updating the four `SKILL.md`
 files to actually consume capability discovery and typed comparability
-reasons once those land (see P0.2's own "Dependencies" note), and P1.6
+reasons once those land (see P0.2's own "Dependencies" note); P0.6 adds
+ownership markers/front matter across all three generated trees; P1.6
 separately adds the CI-wiring workflow step and its documentation links to
 `native-binary-compatibility-review`/`native-release-compatibility`'s
 `SKILL.md` files — every one of these changes the generated tree's content
-after an early P1.5 run could have already validated it (P1.6's own
-dependency is only P0.2, so nothing else already forces it to land before
-a P1.5 pass). Re-run (or initially defer) this item's validation pass
-until after all three (P0.4, P0.5, P1.6) land, so
+after an early P1.5 run could have already validated it (none of P0.6's or
+P1.6's own dependencies already force it to land before a P1.5 pass).
+Re-run (or initially defer) this item's validation pass
+until after every content-changing item lands, so
 the recorded log reflects the artifact P1.4 actually publishes rather than
 an earlier one — a P1.5 entry that predates any of them is stale for
 publication purposes even though it is marked complete.
