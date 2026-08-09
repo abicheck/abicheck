@@ -35,7 +35,8 @@ Key asymmetries worth stating explicitly to a user:
 `abicheck compare` reports a single ordinal `verdict` — `NO_CHANGE`,
 `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `API_BREAK`, `BREAKING` — where
 `API_BREAK` is the source-only break and `BREAKING` is the binary break. Its
-exit codes follow the same split (`0` / `2` / `4`).
+exit codes follow the same split (`0` / `2` / `4`), plus `16` for a pair that
+could not be compared at all.
 
 Runtime/environment questions are **not** the `compare` verdict's job.
 `abicheck deps compare` and `abicheck deps tree` answer the dependency-floor

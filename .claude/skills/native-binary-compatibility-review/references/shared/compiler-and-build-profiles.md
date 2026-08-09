@@ -40,15 +40,34 @@ command line; the exhaustive key reference is
 
 ## Two distinct failure modes, do not conflate them
 
-**Profile mismatch between the two sides.** The comparison is refused:
-`verdict: null`, `reason.kind == "profile_mismatch"`. Remediation is to
-re-extract one side under the other's profile. See
+**Profile mismatch between the two sides.** The comparison is refused —
+exit `16`, `verdict: null`, `reason.kind == "profile_mismatch"`. Remediation
+is to re-extract one side under the other's profile. See
 [baseline-and-comparability.md](baseline-and-comparability.md).
 
 **Profile change as the change under review.** The user upgraded their
 compiler or standard library and wants to know what it cost. Here the
-mismatch is the subject, not an obstacle — extract both sides deliberately
-under their real profiles and read the findings as toolchain-attributable.
+mismatch is the subject rather than an obstacle — but the gate does not know
+that, so the ordinary comparison is still refused (exit `16`, `verdict:
+null`). You must opt in explicitly:
+
+```bash
+abicheck compare OLD NEW --diagnostic-comparison --format json
+```
+
+That is ADR-050's sanctioned escape hatch: it downgrades the hard failure to
+a **tentative** diff and stamps `assurance: "none"` throughout the report.
+Two obligations come with it, and neither is optional:
+
+- **Report the tentative status.** Say the run was diagnostic, carry
+  `assurance: "none"` and the comparability warning into your summary, and
+  never present the result as a compatibility verdict. A diagnostic run may
+  not back a release decision
+  ([safety-invariants.md](safety-invariants.md) item 3).
+- **Do not use it to get past a mismatch you did not intend.** If the profile
+  difference is accidental, the fix is to re-extract under one profile, not
+  to force the diff.
+
 Expect large, mechanical finding sets dominated by mangling and template
 instantiation churn; group them
 ([root-cause-grouping.md](root-cause-grouping.md)) before summarizing, and

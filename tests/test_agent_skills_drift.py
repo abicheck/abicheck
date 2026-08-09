@@ -349,6 +349,21 @@ def _all_enum_values(node: object, seen: set[int] | None = None) -> set[str]:
 SCHEMA_PROPERTY_NAMES = _all_property_names(_SCHEMA)
 SCHEMA_ENUM_VALUES = _all_enum_values(_SCHEMA)
 
+#: snake_case identifiers that belong to another vocabulary entirely — a
+#: platform's own binary-format fields — and so are not report-field
+#: references despite matching the candidate shape below. Kept explicit and
+#: minimal, the same way FOREIGN_LONG_OPTIONS is: the cost of a wrong entry
+#: here is a real field reference going unchecked.
+NON_REPORT_IDENTIFIERS = frozenset(
+    {
+        # Mach-O LC_ID_DYLIB load-command fields, discussed by the
+        # SONAME/versioning reference because they are the macOS counterpart
+        # of an ELF SONAME.
+        "compatibility_version",
+        "current_version",
+    }
+)
+
 #: A candidate field-reference token: snake_case, optionally dotted, with an
 #: optional `[]` marking an array hop (`changes[].kind`). Only tokens carrying
 #: a `_`, a `.`, or `[]` are considered — a bare English word in inline code
@@ -394,6 +409,8 @@ def test_every_cited_report_field_still_exists(path: Path):
             continue
         if "_" not in token and "." not in token and "[]" not in token:
             continue
+        if token in NON_REPORT_IDENTIFIERS:
+            continue
         if "." in token or "[]" in token:
             ok = _resolve_path(token)
         else:
@@ -415,6 +432,9 @@ def test_the_drift_check_actually_has_teeth():
     assert _resolve_path("changes[].kind")
     assert not _resolve_path("changes[].no_such_field")
     assert "evidence_tier" in SCHEMA_PROPERTY_NAMES
+    # The escape hatch must stay narrow: nothing in it may shadow a real
+    # report field, or a genuine reference would go unchecked.
+    assert NON_REPORT_IDENTIFIERS.isdisjoint(SCHEMA_PROPERTY_NAMES)
     assert "profile_mismatch" in SCHEMA_ENUM_VALUES
     assert "--used-by" in ALL_OPTIONS
     assert "--no-scope-public-headers" in ALL_OPTIONS  # a Click flag pair's other half

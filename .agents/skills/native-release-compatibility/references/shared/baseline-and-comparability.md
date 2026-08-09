@@ -12,12 +12,19 @@ decisions follow: **which baseline** answers the user's real question, and
 |---|---|
 | "Does this PR break anything?" | the merge base / the branch this change targets |
 | "Can we ship this as a minor version?" | the **last released version users actually have**, not the previous commit |
-| "Will consumers of 1.2 survive an upgrade to 2.0?" | the oldest release still supported |
+| "Will consumers of 1.2 survive an upgrade to 2.0?" | **1.2** — the version those consumers were built against |
 | "Did our nightly drift?" | the previous nightly artifact |
 
 The most common mistake is comparing against `HEAD~1` when the user meant
 "since the last release" — that reports a compatible increment while the
 cumulative release delta is breaking.
+
+The second most common is substituting the *oldest* supported release for the
+one actually named. They are not interchangeable: a symbol introduced in 1.2
+and removed by 2.0 is invisible against 1.0 (which never had it), so a 1.0
+baseline reports a clean pass while every 1.2 consumer breaks. When the
+question names a version, that version is the old side; when it covers a
+range, compare against **each** supported release rather than picking one.
 
 Ways to obtain a baseline side:
 
@@ -55,8 +62,9 @@ units were in view). The specific mismatched field is currently recoverable
 only from `message`.
 
 `verdict: null` is **not** a pass. It is a third outcome with its own
-remediation: fix the inputs. Never route it into the compatible branch —
-[safety-invariants.md](safety-invariants.md) item 2.
+remediation: fix the inputs, and its own exit code — `16`, distinct from both
+the compatible `0` and the breaking `2`/`4`. Never route it into the
+compatible branch — [safety-invariants.md](safety-invariants.md) item 2.
 
 ### Remediating a comparability failure
 

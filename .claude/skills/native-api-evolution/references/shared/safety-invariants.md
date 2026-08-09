@@ -25,8 +25,9 @@ it, never that it was clean.
 
 ## 2. A not-comparable result is not a pass
 
-A comparability failure (`verdict: null` with a top-level `reason` object)
-means the two sides could not be meaningfully compared at all. It has its
+A comparability failure (exit `16`, `verdict: null` with a top-level
+`reason` object) means the two sides could not be meaningfully compared at
+all. It has its
 own remediation — fix the comparison inputs — and must never be presented as
 "no breaking changes found" or routed into the compatible branch of any
 decision tree. See

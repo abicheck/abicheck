@@ -9,12 +9,23 @@ dynamic loader**. Getting one right does not get the other right.
 | Platform | Identity | Effect of changing it |
 |---|---|---|
 | ELF (Linux, BSD) | `SONAME` — conventionally `libfoo.so.MAJOR` | old consumers keep resolving the old file; both can coexist |
-| Mach-O (macOS) | install name + compatibility/current version | a raised compatibility version refuses old consumers at load |
+| Mach-O (macOS) | install name (the ABI epoch) + compatibility/current version | a new install name lets both coexist; see the note below on which direction `compatibility_version` actually guards |
 | PE (Windows) | the DLL file name itself | old consumers keep loading the old DLL name |
 
 The rule: **an incompatible change must change the loader-facing identity.**
 Otherwise a consumer that linked against the old library silently picks up
 the new, incompatible one and fails at load time or, worse, at runtime.
+
+**Mach-O's `compatibility_version` does not do this, and assuming it does is
+a real way to ship a break.** dyld records, in each client, the compatibility
+version of the dylib it linked against, and at load time refuses a dylib
+whose compatibility version is **lower** than that recorded number. So the
+check guards against *downgrades*; raising the compatibility version does
+**not** turn away older clients — they recorded a lower number and load
+happily against the new, possibly incompatible, dylib. On macOS the ABI epoch
+is therefore the **install name**: change it (`libfoo.2.dylib`,
+`@rpath/libfoo.2.dylib`) for an incompatible generation, and reserve
+compatibility-version bumps for backward-compatible evolution.
 
 Bumping the package version without bumping the SONAME does not protect
 anyone. Bumping the SONAME without a version bump confuses humans but is at

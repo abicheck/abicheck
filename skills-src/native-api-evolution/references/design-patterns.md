@@ -24,8 +24,11 @@ C flavour: consumers hold `session_t*`, the struct is defined only in the
 implementation TU.
 
 - **Buys:** unlimited freedom to add, remove, and reorder state.
-- **Costs:** an allocation and an indirection per object; the class can no
-  longer be trivially copied or stack-allocated by value with a known size.
+- **Costs:** an allocation and an indirection per object, and the special
+  members stop being trivial — copy/move must be written by hand (or
+  deleted), and the destructor must be defined out of line where `Impl` is
+  complete. Stack allocation is *not* lost: `Session` stays a complete,
+  pointer-sized type, which is exactly what keeps its size stable.
 - **When:** at a major bump, or from day one. Introducing pImpl into an
   already-shipped type is itself the ABI break it prevents in future.
 
