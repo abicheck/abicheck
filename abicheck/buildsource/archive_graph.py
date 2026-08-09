@@ -123,6 +123,22 @@ def _is_bsd_index_wide(stripped: str) -> bool:
 #: a 500 MiB static library with a thousand members costs ~60 KiB of reads.
 _MAX_MEMBERS = 100_000
 
+#: A separate, much more generous sanity cap for the *symbol* count declared
+#: in a GNU ``/``/``/SYM64/`` index body — deliberately not
+#: :data:`_MAX_MEMBERS` (Codex review, fresh evidence): a real C++ static
+#: library routinely indexes far more global symbols (templates, inline
+#: functions, every exported specialization) than it has object-file
+#: members, so reusing the member cap rejected — and discarded all
+#: provenance for — a large but entirely legitimate archive's symbol index.
+#: The actual corruption guard is ``len(body) < end`` just below (an ``end``
+#: computed from a corrupt/COFF-misread count is `O(1)` to compute and
+#: reliably exceeds any real body before the expensive per-entry loop
+#: runs), so this cap only needs to stop a pathologically large *declared*
+#: count from building an oversized Python list when the body genuinely is
+#: that large — a scenario already bounded by real file size, not an
+#: amplification attack.
+_MAX_INDEXED_SYMBOLS = 50_000_000
+
 #: ``provenance`` tag on every node/edge this module creates, so an
 #: archive-introspection fact is distinguishable from the ``build_evidence``
 #: facts ``_fold_link_provenance`` deposits on the *same* ``static_library``
@@ -334,14 +350,26 @@ def _gnu_symbol_index(
 
     Layout: a big-endian count, that many big-endian member-*header* offsets,
     then the same number of NUL-terminated symbol names, in order.
+
+    A body too short to even hold the count field is malformed, not empty
+    (Codex review, fresh evidence): a real ``ar``/``ranlib`` always writes
+    the count field, as ``0``, for a genuinely symbol-free index — a body
+    shorter than that is truncation. Silently returning ``[]`` here (an
+    earlier revision) was indistinguishable downstream from "confirmed,
+    zero symbols", letting :func:`~abicheck.buildsource.
+    inline_graph_fold.fold_archive_graph` mark the whole pass complete over
+    evidence that was actually corrupt.
     """
     width = 8 if wide else 4
     fmt = ">Q" if wide else ">I"
     if len(body) < width:
-        return []
+        raise ArchiveFormatError(
+            f"symbol index body ({len(body)} bytes) is too short to hold its "
+            f"own {width}-byte symbol count"
+        )
     count = struct.unpack(fmt, body[:width])[0]
     end = width + width * count
-    if count > _MAX_MEMBERS or len(body) < end:
+    if count > _MAX_INDEXED_SYMBOLS or len(body) < end:
         raise ArchiveFormatError(
             f"symbol index declares {count} symbols but carries {len(body)} bytes"
         )
@@ -373,11 +401,17 @@ def _bsd_symbol_index(
     table's byte length, then the NUL-terminated names. All little-endian —
     the one structural difference from the GNU index above, besides names
     being referenced by offset instead of listed in order.
+
+    A body too short to hold its own table-length field is malformed, not
+    empty — same reasoning as :func:`_gnu_symbol_index`'s identical guard.
     """
     width = 8 if wide else 4
     fmt = "<Q" if wide else "<I"
     if len(body) < width:
-        return []
+        raise ArchiveFormatError(
+            f"__.SYMDEF body ({len(body)} bytes) is too short to hold its own "
+            f"{width}-byte ranlib table length"
+        )
     table_bytes = struct.unpack(fmt, body[:width])[0]
     entry_size = width * 2
     start = width
@@ -787,7 +821,22 @@ def augment_graph_with_archives(
         lookup = _resolve_archive_path(label, search_roots)
         if lookup.path is None:
             if lookup.ambiguous:
-                names = ", ".join(str(c) for c in lookup.candidates)
+                # Re-redact each resolved candidate before it goes anywhere
+                # persisted (Codex review, fresh evidence): `_resolve_archive_path`
+                # deliberately un-redacts a "~"-placeholder path to find the
+                # real file on disk, but that real, absolute path must never
+                # reach `ExtractorRecord.detail` — this diagnostic is
+                # embedded straight into build evidence / a persisted
+                # snapshot's `build_source` payload, so an un-redacted
+                # candidate here would reintroduce the exact home-directory
+                # leak ADR-032 D7's redaction exists to prevent. Mirrors
+                # `inline.py`'s identical "resolve for the operation, redact
+                # for the record" pattern for a compile-DB path.
+                from .redaction import DEFAULT_REDACTION
+
+                names = ", ".join(
+                    DEFAULT_REDACTION.path(str(c)) for c in lookup.candidates
+                )
                 result.diagnostics.append(
                     f"{label}: ambiguous — {len(lookup.candidates)} distinct files "
                     f"match across the search roots ({names}); skipped rather than "

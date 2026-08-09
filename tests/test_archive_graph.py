@@ -231,6 +231,38 @@ def test_parse_index_declaring_more_symbols_than_bytes_raises() -> None:
         parse_ar_archive(BytesReader(data))
 
 
+def test_large_legitimate_symbol_count_does_not_hit_the_member_cap() -> None:
+    """A real C++ static library routinely indexes far more global symbols
+    (templates, inline functions, every exported specialization) than it has
+    object-file members — the symbol-count sanity check must not reuse
+    ``_MAX_MEMBERS`` (Codex review, fresh evidence: a legitimate archive with
+    >100,000 indexed symbols and a correctly-sized body was previously
+    rejected outright, discarding all of its provenance).
+    """
+    count = 150_000
+    index_body = struct.pack(">I", count) + (b"\x00\x00\x00\x00" * count)
+    data = ARCHIVE_MAGIC + _header("/", len(index_body)) + _pad(index_body)
+    contents = parse_ar_archive(BytesReader(data))
+    assert contents.has_symbol_index
+    assert contents.symbols == ()  # no member/name blob to resolve against
+
+
+def test_gnu_symbol_index_body_too_short_for_count_field_raises() -> None:
+    """A ``/`` member whose declared size can't even hold the 4-byte count
+    field is truncated/malformed, not a confirmed-empty index (Codex review,
+    fresh evidence: an earlier revision silently returned no symbols here,
+    which read identically to "confirmed, zero symbols" downstream)."""
+    data = ARCHIVE_MAGIC + _header("/", 2) + _pad(b"\x00\x00")
+    with pytest.raises(ArchiveFormatError, match="too short"):
+        parse_ar_archive(BytesReader(data))
+
+
+def test_bsd_symdef_body_too_short_for_table_length_raises() -> None:
+    data = ARCHIVE_MAGIC + _header("__.SYMDEF", 2) + _pad(b"\x00\x00")
+    with pytest.raises(ArchiveFormatError, match="too short"):
+        parse_ar_archive(BytesReader(data))
+
+
 def test_parse_index_offset_naming_no_member_is_skipped_not_raised() -> None:
     # A well-formed index whose one entry's offset resolves to nothing (e.g.
     # a stale index after member reordering) — the symbol is dropped, not an
@@ -604,6 +636,43 @@ def test_augment_graph_ambiguous_relative_archive_is_a_diagnostic_not_a_guess(
     assert not any(n.kind == "archive_member" for n in g.nodes)
     assert defining_members(g, "foo_a") == []
     assert defining_members(g, "foo_b") == []
+
+
+def test_augment_graph_ambiguous_diagnostic_is_redacted(tmp_path, monkeypatch) -> None:
+    """The resolved candidate paths embedded in an "ambiguous" diagnostic
+    must be re-redacted before reaching ``ExtractorRecord.detail`` (Codex
+    review, fresh evidence): `_resolve_archive_path` deliberately un-redacts
+    a "~"-placeholder path to find the real file on disk, but that real,
+    absolute path must never reach persisted build evidence — this
+    diagnostic is embedded straight into build evidence / a persisted
+    snapshot's ``build_source`` payload, so leaving it un-redacted here would
+    reintroduce the exact home-directory leak ADR-032 D7's redaction exists
+    to prevent.
+    """
+    from abicheck.buildsource import redaction as redaction_mod
+
+    root_a, root_b = tmp_path / "proja", tmp_path / "projb"
+    root_a.mkdir()
+    root_b.mkdir()
+    monkeypatch.setattr(
+        redaction_mod,
+        "DEFAULT_REDACTION",
+        redaction_mod.RedactionPolicy(
+            home_replacements={str(tmp_path): "~project-root~"}
+        ),
+    )
+    data_a = build_gnu_archive([("x.o", b"SYM:foo_a\n")])
+    data_b = build_gnu_archive([("x.o", b"SYM:foo_b\n")])
+    (root_a / "libcommon.a").write_bytes(data_a)
+    (root_b / "libcommon.a").write_bytes(data_b)
+    g = _graph_with_archive("libcommon.a", ["foo_a", "foo_b"])
+
+    result = augment_graph_with_archives(g, search_roots=(root_a, root_b))
+
+    assert result.diagnostics
+    diag = result.diagnostics[0]
+    assert str(tmp_path) not in diag
+    assert diag.count("~project-root~") == 2
 
 
 def test_augment_graph_same_archive_via_two_roots_is_not_ambiguous(tmp_path) -> None:

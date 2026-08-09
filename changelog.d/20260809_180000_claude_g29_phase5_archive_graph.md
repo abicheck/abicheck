@@ -37,3 +37,15 @@
   than one distinct file across the search roots (two subprojects each
   linking their own same-named archive) is now a diagnostic, never a
   guessed match.
+
+  Three more fixes from a second review round: the symbol-count sanity
+  check on a GNU `/`/`/SYM64/` index no longer reuses the member-count cap —
+  a real C++ archive can legitimately index far more global symbols
+  (templates, inline functions) than it has object-file members, and the
+  reused cap discarded a large legitimate archive's provenance outright; a
+  symbol-index member whose body is too short to even hold its own count
+  field now raises instead of silently returning zero symbols (which read
+  identically to "confirmed, genuinely empty" downstream); and an
+  "ambiguous archive" diagnostic's candidate paths are re-redacted before
+  being embedded in `ExtractorRecord.detail`, since the un-redacted absolute
+  path is otherwise persisted straight into build evidence.
