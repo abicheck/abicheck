@@ -243,16 +243,24 @@ case exercising the reconciliation path end-to-end.
   own LibTooling companion-tool experience (`tools/clang-layout-tool/`) as
   a worked example of the LibTooling option's cost/benefit.
 
-**Performance benchmarks + regression gate.** Now that the header-only
-graph is always-on rather than opt-in, its per-dump cost is paid on every
-run, not just when a user explicitly asked for it. Extend
-`scripts/check_tier_accuracy.py`/`scripts/check_fp_rate.py`-style gating —
-or add a new dedicated script — to track dump-time wall-clock cost with the
-graph on, gating on regression the same way those scripts gate on
-correctness. This is most meaningful *after* Phase C's AST-reuse work lands
-(see the sequencing note below); before that, the gate would just be
-re-measuring the known "second AST pass" cost Phase A's TODO already
-identifies, not catching a new regression.
+**Performance benchmarks + regression gate — done.** Now that the
+header-only graph is always-on rather than opt-in, its per-dump cost is paid
+on every run, not just when a user explicitly asked for it.
+`scripts/check_header_graph_perf.py` (new dedicated script, following
+`check_fp_rate.py`/`check_tier_accuracy.py`/`benchmark_scaling.py`'s
+conventions) isolates `service._attach_header_graph`'s own marginal cost
+from the `dumper.dump()` call it's layered on top of, across a synthetic
+header-declaration-count sweep, and gates a later run against a committed
+baseline JSON (`--baseline`/`--regress-tolerance`; report-only, same as
+`check_mutation_score.py`'s `SURVIVOR_BASELINE`, until a baseline is
+supplied). Self-skips without a real `clang`/`clang++`/`g++` install or off
+Linux/ELF. Mirrored in `tests/test_header_graph_perf_gate.py` (pure-logic
+tests run unconditionally; the live-measurement tests self-skip the same
+way the script does). Not yet wired into a CI workflow — that (and
+establishing/committing a real baseline JSON, so `--regress-tolerance`
+actually gates rather than only reporting) is a follow-up, the same
+"first scheduled run establishes the number" step `check_mutation_score.py`
+itself still needs before its `SURVIVOR_BASELINE` is ever set.
 
 **Synthetic-consumer compile-probe layer, or a deferring ADR.** If a
 compile-probe layer (actually compiling a synthetic consumer against
