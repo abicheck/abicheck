@@ -50,6 +50,18 @@ typedef struct {
 A `version`/`size` field consumers must set is the same idea for structs
 passed *into* the library: the callee branches on the size it was given.
 
+**Fix your enums' underlying type from day one** for the same reason:
+
+```cpp
+enum class Mode : int { fast, safe };   // or  enum Mode : int { ... };
+```
+
+Without an explicit underlying type, the implementation picks one wide enough
+for the enumerators it can see. Appending a value outside that range can then
+widen it, changing `sizeof(Mode)` and the layout of every struct containing
+it — an ABI break from what looks like a purely additive change. Pinning the
+type costs nothing and makes appending genuinely additive.
+
 ## Versioned interfaces
 
 Two mechanisms, different scopes:

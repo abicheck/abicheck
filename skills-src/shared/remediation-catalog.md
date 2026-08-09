@@ -23,12 +23,12 @@ problem and report the new result
 |---|---|
 | Removed export | Keep the old symbol as a thin forwarding shim; deprecate rather than delete. On ELF, a versioned symbol lets old and new coexist. |
 | Changed function signature | Add a new, differently-named entry point and keep the old one delegating to it. Never mutate a shipped signature in place. An *overload* of the existing name also preserves the ABI, but can make an existing call ambiguous on rebuild (implicit conversions, `&f`), so prefer a new name when source compatibility matters. |
-| Added parameter | Same — a defaulted parameter is source-compatible but ABI-breaking, because the mangled name changes. |
+| Added parameter | Same — and a default does not rescue it. The mangled name changes, so it is ABI-breaking regardless; it is source-compatible only for ordinary calls that omit the new argument, and still breaks source that takes the function's address, uses the old function-pointer type, or overrides it as a virtual. |
 | Struct/class size or layout change | Do not change a public aggregate. Move state behind an opaque pointer (pImpl), or spend a previously reserved field. |
 | New data member | Only safe in a type consumers never allocate, embed, or derive from. Otherwise, pImpl or a new versioned type. |
 | New virtual function | Appending to the vtable breaks any consumer that derives from the class or was compiled against the old vtable size. Prefer a non-virtual API plus internal dispatch, or a new interface version. |
 | Reordered virtual functions | Never. Append-only at best; usually a new interface. |
-| Changed enum value | Enum values reaching a public signature or a struct field are ABI. Append new enumerators; never renumber. |
+| Changed enum value | Enum values reaching a public signature or a struct field are ABI. Never renumber. Appending is safe only when the underlying type is fixed (`: int` / `enum class`) or the new value fits the old range — otherwise the implementation may pick a wider underlying type, changing `sizeof(E)` and the layout of everything containing it. Fix the underlying type explicitly, ideally from the start. |
 | Changed inline function or template | Its body is baked into consumers. Treat a semantic change as breaking unless the old behaviour is preserved for old callers. |
 | Narrowed visibility | Re-export, or accept the break and version the SONAME. |
 | Raised dependency floor | Not visible to `compare` — see `abicheck deps compare`; document the new floor. |

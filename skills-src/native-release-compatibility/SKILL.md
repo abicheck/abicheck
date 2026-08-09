@@ -145,17 +145,28 @@ Gate configuration — `--policy`/`--policy-file`, `--severity-*`,
 
 ## Step 4 — Assemble the matrix result
 
-For every enumerated cell record one of exactly four states:
+For every enumerated cell record one of exactly five states, taken from the
+report's own `verdict`:
 
-| State | Meaning |
-|---|---|
-| **pass** | a real comparison ran and returned a compatible verdict at the required depth |
-| **break** | a real comparison ran and returned `API_BREAK` or `BREAKING` |
-| **not comparable** | `verdict: null` — the pair could not be compared; **not** a pass |
-| **not run** | no result — **unknown**, and it blocks |
+| State | Verdict | Meaning |
+|---|---|---|
+| **pass** | `NO_CHANGE`, `COMPATIBLE` | a real comparison ran at the required depth and found nothing that threatens consumers |
+| **risk** | `COMPATIBLE_WITH_RISK` | compiled consumers keep working, but a deployment risk needs manual review — see below |
+| **break** | `API_BREAK`, `BREAKING` | a real comparison ran and found a break |
+| **not comparable** | `null` | the pair could not be compared; **not** a pass |
+| **not run** | — | no result — **unknown**, and it blocks |
 
-There is no fifth state. Do not collapse "not comparable" or "not run" into
-either pass or break.
+There is no sixth state, and none of the last four may be collapsed into
+**pass**.
+
+**`COMPATIBLE_WITH_RISK` is the one that silently disappears if you let it.**
+It exits `0`, exactly like `COMPATIBLE`, so an exit-code-only reading of the
+matrix cannot see it — you must read the `verdict` field. It means the change
+does not break already-linked consumers but carries a deployment risk that has
+to be verified by a human: a raised dependency floor that some target
+environments lack, or a change that links fine yet is semantically unsafe for
+binaries built under the old contract. Record the cell as **risk**, carry its
+findings into the report, and never fold it into pass.
 
 Then check the axes that are not per-finding, reading each report per
 [report interpretation](../shared/report-interpretation.md):
@@ -181,6 +192,11 @@ Given the matrix, the decision rule:
 - Any **not comparable** or **not run** cell → **cannot decide yet**. Say
   what is missing and what would resolve it. Never default to the
   permissive answer.
+- Any **risk** cell → the version follows the rules below, but the
+  recommendation is **conditional on review of those findings**. Name them
+  and what has to be verified (typically: does every deployment target meet
+  the new floor?). A patch or minor issued without surfacing them is a
+  recommendation the evidence does not support.
 - Only compatible additions → **minor**.
 - No public surface change at all → **patch**.
 - Breaks that are source-only (`API_BREAK`) but not binary → allowed under
@@ -198,7 +214,7 @@ whole matrix afterwards.
 ## Step 6 — Report
 
 - **The recommendation**: patch / minor / major+SONAME / cannot decide yet.
-- **The matrix**, cell by cell, with its four-state result. Unrun and
+- **The matrix**, cell by cell, with its five-state result. Risk, unrun, and
   non-comparable cells listed explicitly, never omitted.
 - **The breaks**, grouped by root cause
   ([root-cause grouping](../shared/root-cause-grouping.md)), each traced to
@@ -213,7 +229,8 @@ Once a decision exists, offer to enforce it from CI:
 
 ## Termination criteria
 
-Done when every enumerated matrix cell has one of the four states, the
-version recommendation follows from them by the rule above, and every
-unknown is reported as an unknown. A recommendation issued with unrun cells
+Done when every enumerated matrix cell has one of the five states, the
+version recommendation follows from them by the rule above, every unknown is
+reported as an unknown, and every **risk** cell's findings are surfaced with
+what has to be verified. A recommendation issued with unrun cells
 silently treated as passing is a false green, not a finished job.

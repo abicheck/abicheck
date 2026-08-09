@@ -57,7 +57,9 @@ never encode ABI.
 | Change | Version | SONAME |
 |---|---|---|
 | implementation-only | patch | unchanged |
-| new export / new type / appended enumerator | minor | unchanged |
+| new export / new type | minor | unchanged |
+| appended enumerator, underlying type fixed or value in range | minor | unchanged |
+| appended enumerator that widens an unfixed underlying type | major | bump |
 | new virtual on a class consumers derive from | major | bump |
 | changed layout of a public aggregate | major | bump |
 | removed or renamed export | major | bump |

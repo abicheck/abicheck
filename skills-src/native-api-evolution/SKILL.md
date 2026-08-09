@@ -39,7 +39,8 @@ Which promise must survive the change: binary (installed consumers, no
 rebuild), source API (their code still compiles), or both? See
 [compatibility contracts](../shared/compatibility-contracts.md). A change
 that is fine for one is routinely fatal for the other — adding a defaulted
-parameter is the canonical example: source-compatible, ABI-breaking.
+parameter is the canonical example: it keeps *ordinary calls* compiling while
+breaking the ABI outright, and it is not fully source-safe either (see step 1).
 
 Also establish the consumer shape, because it changes which patterns are
 available:
@@ -63,11 +64,11 @@ cases and their verdicts before any mitigation:
 | add a field to a public struct/class | ABI-breaking |
 | add a virtual function | ABI-breaking for derived/embedding consumers |
 | reorder virtuals or members | ABI-breaking, always |
-| add a parameter (even defaulted) | ABI-breaking — the mangled name changes |
+| add a parameter (even defaulted) | ABI-breaking — the mangled name changes. Source-compatible **only** for ordinary calls that omit the argument: taking the function's address, storing it in the old function-pointer type, or overriding it as a virtual all stop compiling. Keep the old signature and add a new entry point when source compatibility is in the contract. |
 | change a return type | ABI-breaking |
 | add a new free function (new name) | compatible |
 | add an **overload** of an existing function | ABI-compatible; **not** unconditionally source-compatible |
-| add an enumerator at the end | usually compatible |
+| add an enumerator at the end | compatible **only** if the underlying type is fixed (`enum class E : int`, or an explicit `: T`) or the new value fits the old representation — otherwise the compiler may widen the underlying type, changing `sizeof` and every containing layout |
 | renumber an enumerator | ABI-breaking if it reaches a signature or field |
 | remove or rename anything public | breaking |
 | change an inline function or template body | breaking in effect — the old body is baked into consumers |
