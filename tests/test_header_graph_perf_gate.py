@@ -191,7 +191,7 @@ class TestMainEntryPoint:
         monkeypatch.setattr(
             hg_gate,
             "measure",
-            lambda sizes, repeat, backends=hg_gate.BACKENDS: [
+            lambda sizes, repeat, backends=hg_gate.BACKENDS, require_castxml=False: [
                 {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 5.0}
                 for s in sizes
             ],
@@ -218,7 +218,9 @@ class TestMainEntryPoint:
         monkeypatch.setattr(sys, "platform", "linux")
         seen_during_measure = {}
 
-        def _fake_measure(sizes, repeat, backends=hg_gate.BACKENDS):
+        def _fake_measure(
+            sizes, repeat, backends=hg_gate.BACKENDS, require_castxml=False
+        ):
             seen_during_measure["xdg"] = os.environ.get("XDG_CACHE_HOME")
             return [
                 {"size": s, "backend": "clang", "baseline_ms": 1.0, "attach_ms": 1.0}
@@ -248,7 +250,7 @@ class TestMainEntryPoint:
         monkeypatch.setattr(
             hg_gate,
             "measure",
-            lambda sizes, repeat, backends=hg_gate.BACKENDS: [
+            lambda sizes, repeat, backends=hg_gate.BACKENDS, require_castxml=False: [
                 {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 100.0}
                 for s in sizes
             ],
@@ -295,7 +297,7 @@ class TestMainEntryPoint:
         monkeypatch.setattr(
             hg_gate,
             "measure",
-            lambda sizes, repeat, backends=hg_gate.BACKENDS: [
+            lambda sizes, repeat, backends=hg_gate.BACKENDS, require_castxml=False: [
                 {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 5.0}
                 for s in sizes
             ],
@@ -315,7 +317,7 @@ class TestMainEntryPoint:
         monkeypatch.setattr(
             hg_gate,
             "measure",
-            lambda sizes, repeat, backends=hg_gate.BACKENDS: [
+            lambda sizes, repeat, backends=hg_gate.BACKENDS, require_castxml=False: [
                 {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 5.0}
                 for s in sizes
             ],
@@ -440,6 +442,40 @@ class TestMeasureSizeErrorHandling:
         monkeypatch.setattr(hg_gate, "_measure_one", _fake_measure_one)
         with pytest.raises(SnapshotError, match="castxml timed out"):
             hg_gate._measure_size(10, repeat=1, backends=("castxml",))
+
+    def test_require_castxml_propagates_even_a_version_error(self, monkeypatch):
+        # --require-castxml (callers that explicitly installed a pinned
+        # castxml, e.g. the CI jobs) must not treat even the normally-
+        # optional UnsupportedCastxmlVersionError as a skip -- there, a
+        # version rejection means the pinned install/policy regressed
+        # (Codex review, fresh evidence).
+        from abicheck.errors import UnsupportedCastxmlVersionError
+
+        def _fake_measure_one(n, backend, repeat):
+            raise UnsupportedCastxmlVersionError("out-of-policy castxml build")
+
+        monkeypatch.setattr(hg_gate, "_measure_one", _fake_measure_one)
+        with pytest.raises(UnsupportedCastxmlVersionError):
+            hg_gate._measure_size(
+                10, repeat=1, backends=("castxml",), require_castxml=True
+            )
+
+    def test_require_castxml_bypasses_measures_own_presence_filter(self, monkeypatch):
+        # measure()'s `active` filter normally drops "castxml" from the
+        # sweep entirely when it's absent from PATH -- with
+        # require_castxml=True that filter must NOT silently narrow the
+        # sweep; a genuinely-absent castxml should instead surface as a
+        # hard failure from _measure_size/_measure_one itself.
+        monkeypatch.setattr(hg_gate, "_have", lambda tool: tool != "castxml")
+        seen_backends = []
+
+        def _fake_measure_size(n, repeat, backends, *, require_castxml=False):
+            seen_backends.append(backends)
+            return []
+
+        monkeypatch.setattr(hg_gate, "_measure_size", _fake_measure_size)
+        hg_gate.measure((10,), 1, require_castxml=True)
+        assert "castxml" in seen_backends[0]
 
 
 @pytest.mark.integration

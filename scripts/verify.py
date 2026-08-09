@@ -379,9 +379,22 @@ STEPS: tuple[Step, ...] = (
         # --profile full` could never even run check_header_graph_perf.py at
         # all (Codex review, fresh evidence).
         "header-graph-perf",
-        _pyscript("scripts/check_header_graph_perf.py", "--sizes", "25", "100"),
+        _pyscript(
+            "scripts/check_header_graph_perf.py",
+            "--sizes",
+            "25",
+            "100",
+            "--require-castxml",
+        ),
         frozenset({FULL}),
-        precondition=_need_linux_and_all_bins("clang", "clang++", "g++"),
+        # castxml must actually be present here: without it in the
+        # precondition, a clang-only host would silently "pass" having
+        # measured only a subset of the real always-on attach cost, rather
+        # than genuinely skipping this step -- and --require-castxml above
+        # then turns a *present-but-out-of-policy* castxml into a hard
+        # failure instead of a silent skip, the same distinction the CI
+        # jobs draw (Codex review, fresh evidence).
+        precondition=_need_linux_and_all_bins("clang", "clang++", "g++", "castxml"),
         description="Header-graph attach-cost trend measurement (G31 Phase D, report-only)",
     ),
     Step(

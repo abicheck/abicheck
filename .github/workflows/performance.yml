@@ -263,9 +263,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports/perf
+          # --require-castxml: this job just installed a pinned castxml above,
+          # so a version-gate rejection here means that install/policy
+          # regressed, not that castxml is merely an optional local
+          # convenience to skip past (Codex review, fresh evidence).
           python scripts/check_header_graph_perf.py \
             --sizes 25 100 400 \
             --repeat 3 \
+            --require-castxml \
             --json-out reports/perf/header_graph.json \
             --markdown | tee reports/perf/header_graph.txt
 
@@ -331,15 +336,24 @@ jobs:
 
       - name: Measure base branch
         run: |
+          set -euo pipefail
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base[dev]"
           # The base script may predate this gate entirely (a PR introducing
-          # it, or one from before it existed) -- `|| true` keeps that robust,
-          # matching the existing `regression` job's own convention.
-          ./base_env/bin/python base/scripts/check_header_graph_perf.py \
-            --sizes 25 100 400 --repeat 2 \
-            --json-out base_header_graph.json || true
+          # it, or one from before it existed) -- that specific "script not
+          # present on base" case is the only one allowed to fall through to
+          # the report-only path below. Any other failure (a fixture-compile
+          # crash, a clang crash, the AST-attach verification catching a
+          # degraded pass) must fail this job rather than be silently
+          # swallowed by a blanket `|| true` (Codex review, fresh evidence).
+          if [ -f base/scripts/check_header_graph_perf.py ]; then
+            ./base_env/bin/python base/scripts/check_header_graph_perf.py \
+              --sizes 25 100 400 --repeat 2 --require-castxml \
+              --json-out base_header_graph.json
+          else
+            echo "Gate not present on base branch -- report-only." >&2
+          fi
 
       - name: Measure head and compare to base
         run: |
@@ -349,14 +363,15 @@ jobs:
           ./head_env/bin/pip install -q -e "./head[dev]"
           if [ -s base_header_graph.json ]; then
             ./head_env/bin/python head/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 2 \
+              --sizes 25 100 400 --repeat 2 --require-castxml \
               --baseline base_header_graph.json --regress-tolerance 0.5 \
               | tee header_graph_regression.txt
           else
             echo "No base measurement available (gate not present on base branch) -- report-only." \
               | tee header_graph_regression.txt
             ./head_env/bin/python head/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 2 | tee -a header_graph_regression.txt
+              --sizes 25 100 400 --repeat 2 --require-castxml \
+              | tee -a header_graph_regression.txt
           fi
 
       - name: Write job summary

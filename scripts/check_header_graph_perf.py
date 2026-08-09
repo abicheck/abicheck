@@ -82,8 +82,16 @@ instead of recording a misleading data point.
 Requires ``clang``/``clang++`` and ``g++`` on ``PATH`` (Linux/ELF only,
 matching ``tests/test_clang_header_backend_integration.py``'s own scope);
 self-skips (exit 0) when unavailable so this never blocks a host without a
-C++ toolchain. ``castxml`` is optional — its points are just skipped when
-absent, the whole run isn't.
+C++ toolchain. ``castxml`` is optional by default — its points are just
+skipped (with a printed ``SKIP:``/``NOTE:``) when it's absent or rejected by
+abicheck's own version gate (``UnsupportedCastxmlVersionError``), the whole
+run isn't. Pass ``--require-castxml`` to turn that off for a caller that
+knows it *should* have a working pinned castxml (e.g. a CI job that just
+installed one via ``action/install-castxml.sh``): there, a missing or
+out-of-policy castxml means the install/policy regressed, not that the tool
+is merely an optional local convenience, so the run fails loudly
+(``FAIL: castxml required but unusable: ...``, exit 1) instead of silently
+narrowing the sweep to the ``clang`` backend alone.
 
 Usage::
 
@@ -96,6 +104,10 @@ Usage::
     # Gate a PR run against the committed baseline:
     python scripts/check_header_graph_perf.py --baseline reports/perf/header_graph.json \\
         --regress-tolerance 0.5
+
+    # CI callers that installed a pinned castxml: fail rather than skip if
+    # it's missing or out-of-policy:
+    python scripts/check_header_graph_perf.py --require-castxml
 """
 
 from __future__ import annotations
@@ -368,7 +380,11 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
 
 
 def _measure_size(
-    n: int, repeat: int, backends: tuple[str, ...]
+    n: int,
+    repeat: int,
+    backends: tuple[str, ...],
+    *,
+    require_castxml: bool = False,
 ) -> list[dict[str, Any]]:
     from abicheck.errors import SnapshotError, UnsupportedCastxmlVersionError
 
@@ -391,8 +407,20 @@ def _measure_size(
             # silently dropping either kind of real failure would let
             # main() see only the points that did succeed and potentially
             # still report a clean "OK".
-            if backend != "castxml" or not isinstance(
-                exc, UnsupportedCastxmlVersionError
+            #
+            # --require-castxml (set by callers that explicitly installed a
+            # pinned castxml, e.g. the header-graph-perf/-regression CI jobs
+            # via action/install-castxml.sh) additionally forbids even the
+            # narrow UnsupportedCastxmlVersionError skip: there, a version
+            # rejection means the pinned installer or the version gate
+            # itself regressed, not "castxml is an optional local tool" --
+            # silently dropping the whole default-backend axis would let a
+            # gating run report OK having compared nothing on it (Codex
+            # review, fresh evidence).
+            if (
+                backend != "castxml"
+                or not isinstance(exc, UnsupportedCastxmlVersionError)
+                or require_castxml
             ):
                 raise
             print(f"SKIP: size={n} backend={backend}: {exc}")
@@ -402,18 +430,26 @@ def _measure_size(
 
 
 def measure(
-    sizes: tuple[int, ...], repeat: int, backends: tuple[str, ...] = BACKENDS
+    sizes: tuple[int, ...],
+    repeat: int,
+    backends: tuple[str, ...] = BACKENDS,
+    *,
+    require_castxml: bool = False,
 ) -> list[dict[str, Any]]:
     # "clang" needs no external optional tool (already required by main()'s
     # own SKIP check before measure() is ever called); every other backend
     # is gated on its own name being on PATH, not hardcoded to "castxml" --
     # BACKENDS only ever holds these two today, but keying the check on the
     # actual backend name rather than a specific one keeps this correct if
-    # a third backend is ever added (CodeRabbit review).
-    active = tuple(b for b in backends if b == "clang" or _have(b))
+    # a third backend is ever added (CodeRabbit review). require_castxml
+    # bypasses this presence filter entirely for "castxml" -- if it's
+    # required, a missing tool must surface as a hard failure (main()'s own
+    # SKIP path only ever checks clang/clang++/g++), not a silently
+    # narrowed sweep.
+    active = tuple(b for b in backends if b == "clang" or require_castxml or _have(b))
     points: list[dict[str, Any]] = []
     for n in sizes:
-        points.extend(_measure_size(n, repeat, active))
+        points.extend(_measure_size(n, repeat, active, require_castxml=require_castxml))
     return points
 
 
@@ -550,6 +586,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print a Markdown table instead of a plain one",
     )
+    p.add_argument(
+        "--require-castxml",
+        action="store_true",
+        help="Fail (instead of silently skipping) if castxml is missing or "
+        "rejected by abicheck's version gate -- for callers (e.g. CI jobs) "
+        "that explicitly installed a pinned castxml, where that condition "
+        "means the install/policy regressed, not that the tool is merely "
+        "an optional local convenience",
+    )
     return p.parse_args(argv)
 
 
@@ -568,7 +613,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    if not _have("castxml"):
+    if not _have("castxml") and not args.require_castxml:
         print(
             "NOTE: castxml not found on PATH — measuring the clang backend only "
             "(the default castxml backend's genuine second-clang-invocation cost "
@@ -584,11 +629,22 @@ def main(argv: list[str] | None = None) -> int:
     # already honors) to a throwaway directory for the run's lifetime instead.
     # Windows has no equivalent env-var override in _cache_path, so this is a
     # best-effort mitigation there, matching the module's Linux/ELF scope.
+    from abicheck.errors import SnapshotError
+
     with tempfile.TemporaryDirectory(prefix="hgperf_cache_") as cache_dir:
         old_xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
         os.environ["XDG_CACHE_HOME"] = cache_dir
         try:
-            points = measure(tuple(args.sizes), args.repeat)
+            points = measure(
+                tuple(args.sizes), args.repeat, require_castxml=args.require_castxml
+            )
+        except SnapshotError as exc:
+            # Only reachable with --require-castxml (without it, _measure_size
+            # already turns a castxml-only SnapshotError into a SKIP+continue)
+            # -- a clean FAIL here, not an unhandled traceback, matching this
+            # script's existing --baseline-read-error convention.
+            print(f"\nFAIL: castxml required but unusable: {exc}")
+            return 1
         finally:
             if old_xdg_cache_home is None:
                 os.environ.pop("XDG_CACHE_HOME", None)
