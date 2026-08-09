@@ -39,6 +39,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.type_reachability import (
+    _typedef_candidate_spellings,
     directly_referenced_stdlib_type_spellings,
     directly_referenced_stdlib_types,
 )
@@ -790,6 +791,78 @@ class TestDirectlyReferencedStdlibTypeSpellings:
         assert directly_referenced_stdlib_type_spellings(forward) == expected
         assert directly_referenced_stdlib_type_spellings(reverse) == expected
 
+    def test_typedef_provenance_propagation_recurses_through_a_further_alias(
+        self,
+    ) -> None:
+        """`_StdlibReferenceScan._propagate_typedef_provenance`'s own
+        recursive branch -- reached only when a *second* declaration
+        spells an already-resolved typedef alias whose target itself names
+        a *further*, distinct typedef alias not yet visited in that
+        propagation call. `First -> Second -> Third -> std::string`: the
+        first declaration (spelling `First`) resolves the whole chain via
+        `scan`'s own recursive typedef branch, marking `Second`/`Third`
+        resolved along the way. A second declaration spelling `Second`
+        directly then hits `scan`'s "already resolved" branch, which
+        propagates `Second`'s own provenance through `_propagate_typedef_
+        provenance` -- and that propagation must itself recurse through
+        `Third` to reach `std::string`, not stop at the first hop."""
+        typedefs = {"First": "Second", "Second": "Third", "Third": "std::string"}
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_first", params=[Param(name="a", type="First")]),
+                _fn("use_second", params=[Param(name="b", type="Second")]),
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+            typedefs=dict(typedefs),
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::string", "string"}
+        )
+
+    def test_propagate_typedef_provenance_skips_an_already_seen_alias(self) -> None:
+        """`_propagate_typedef_provenance`'s own cycle/diamond guard --
+        ``if alias in seen: continue`` -- fires only when *one* propagation
+        call's own target text names the same alias twice. Built so a
+        single top-level declaration reaches it without a second
+        declaration: `A -> B -> "C C"` (`B`'s target repeats `C`) means the
+        *second* `C` occurrence is handled by `scan`'s own "already
+        resolved" branch, calling `_propagate_typedef_provenance` with
+        `C`'s target `"D D"` -- which itself repeats `D`, so that single
+        propagation call's own loop meets `D` a second time after already
+        adding it to `seen` on the first. `D`'s own target is deliberately
+        spelled in its namespace-stripped *bare* form, not the identity's
+        own self-key, so the deepest propagation call's stdlib-pattern match
+        also exercises the ``spelling != identity`` (derived-spelling, not
+        exact) branch -- correctly recording nothing for that route, since a
+        derived spelling is never trustworthy exact-match provenance."""
+        typedefs = {
+            "A": "B",
+            "B": "C C",
+            "C": "D D",
+            "D": "vector<int, std::allocator<int> >",
+        }
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("use_a", params=[Param(name="a", type="A")])],
+            types=[
+                RecordType(
+                    name="vector<int, std::allocator<int> >",
+                    kind="class",
+                    qualified_name="std::vector<int, std::allocator<int> >",
+                )
+            ],
+            typedefs=dict(typedefs),
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {
+                "std::vector<int, std::allocator<int> >",
+                "vector<int, std::allocator<int> >",
+            }
+        )
+
 
 class TestCommittedRootsScoping:
     """`compare --post-manifest` scopes the committed public contract down
@@ -837,3 +910,24 @@ class TestCommittedRootsScoping:
             )
             == frozenset()
         )
+
+
+class TestTypedefCandidateSpellingsExactKeyCollision:
+    """`_typedef_candidate_spellings`'s exact-key registration is guarded by
+    the same non-stdlib collision check every derived candidate already
+    goes through: a typedef key that collides with a real, unrelated
+    non-stdlib record's own signature spelling must not be registered as a
+    reachable typedef candidate at all, mirroring
+    `_typedef_spelling_targets`'s identical guard on its own exact key."""
+
+    def test_colliding_exact_key_is_excluded_but_a_non_colliding_derived_form_survives(
+        self,
+    ) -> None:
+        non_stdlib_identities = frozenset({"api::Alias"})
+        # "Alias" itself collides with the unrelated "api::Alias" record's
+        # own bare signature spelling -- excluded. "ns::Alias"'s own derived
+        # suffix "Alias" collides too, but its *full* key does not.
+        typedefs = {"Alias": "mine::Thing", "ns::Alias": "mine::OtherThing"}
+        candidates = _typedef_candidate_spellings(typedefs, non_stdlib_identities)
+        assert "Alias" not in candidates
+        assert "ns::Alias" in candidates
