@@ -155,7 +155,7 @@ model:
   `impact_group_id` is currently always an alias of `root_cause_id`;
   making it independently meaningful still needs Phase 6's
   `RootCauseCorrelator`.
-- **G29.5** (Phase 4, **slice 1 done, ADR-057**) — A consumer graph
+- **G29.5** (Phase 4, **slices 1-2 done, ADR-057**) — A consumer graph
   (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_REQUIRES_VERSION`, …) that joins
   with the source graph so a `CONSUMER_REQUIRED_SYMBOL_REMOVED` finding can
   name the public entry point that produced the dependency — **done**
@@ -163,12 +163,18 @@ model:
   `binary_symbol://` node id, not a parallel node kind, and the walk reuses
   ADR-046 D5's `CALL_GRAPH_TRAVERSAL_POLICY` rather than a fresh BFS). This
   also closed ADR-046 D6's tier 1 ("consumer-proven"), which had been
-  unreachable since it was written. Still open: the optional
+  unreachable since it was written. **Slice 2 also done**: the optional
   `impact-use-cases.yaml` manifest (declared entrypoints/tests, explicitly
-  **not** a reuse of `usecase-registry.yaml`) and best-effort runtime-trace
-  ingestion — the three reserved edge kinds ADR-057 registers
+  **not** a reuse of `usecase-registry.yaml`) — `abicheck/impact/use_cases.py`
+  parses the manifest and builds/joins `use_case`/`test_case` nodes and
+  `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` edges onto the library graph,
+  mirroring slice 1's build/join API and mutation-safety discipline. Still
+  open: best-effort runtime-trace ingestion, and any report-level
+  `affected_use_cases`/`USE_CASE_IMPACT_CONFIRMED` surface reading the joined
+  use-case graph (G29 Phase 6) — the reserved edge kinds ADR-057 registers
   (`CONSUMER_INSTANTIATES_DECL`/`CONSUMER_COMPILED_FROM_HEADER`/
-  `RUNTIME_FAILED_TO_RESOLVE_SYMBOL`) mark where that work attaches.
+  `RUNTIME_FAILED_TO_RESOLVE_SYMBOL`/`TRACE_OBSERVED_ENTRY`/
+  `TRACE_OBSERVED_EDGE`) mark where that work attaches.
 - **G29.6** — The five open graph families (template instantiation, virtual
   dispatch, macro/config, callback/function-pointer, object/archive link
   provenance) implemented behind the same coverage-honesty discipline as the
@@ -512,7 +518,7 @@ section describes, most of it still open:
   `attach_impact_metadata`) for the contract to point at working code rather
   than aspirational surface.
 
-### Phase 4 — Consumer / use-case join — **slice 1 implemented (ADR-057)**
+### Phase 4 — Consumer / use-case join — **slices 1-2 implemented (ADR-057)**
 
 [ADR-057](../adr/057-consumer-graph-and-impact-join.md) records the slice 1
 decisions.
@@ -558,11 +564,21 @@ decisions.
   `docs/contribute/usecase-registry.yaml` (that registry tracks abicheck's
   *own* feature coverage — reusing it for a project's business use cases would
   conflate "abicheck supports header-only analysis" with "the DAL training
-  workflow uses `train()`", per the review's own caution).
-- `docs/use/use-case-impact.md` (new): manifest format, entrypoint
-  mapping, test association, trace ingestion, declared-vs-observed use,
-  full-library-vs-consumer-scoped verdict semantics (absence of a trace must
-  never read as "not used").
+  workflow uses `train()`", per the review's own caution). **Done** (slice
+  2): `load_use_case_manifest`/`parse_use_case_manifest` (hard-error on a
+  malformed document via `UseCaseManifestError`, silent skip on one
+  unresolvable entrypoint), `build_use_case_graph`/`join_use_case_graph`
+  (deep-copy join, mirroring `consumer_graph`'s slice 1 API/discipline
+  exactly). Only `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` are populated;
+  `TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE` stay reserved — **runtime-trace
+  ingestion itself is still not implemented**, and neither is any CLI flag
+  reading the manifest or report-level field/finding consuming the joined
+  graph (that's G29 Phase 6's `USE_CASE_IMPACT_CONFIRMED`).
+- `docs/use/use-case-impact.md` (new, **done**): manifest format, entrypoint
+  mapping, test association, declared-vs-observed use (**trace ingestion
+  itself remains unimplemented** — documented honestly as not-yet-built, not
+  described as working), full-library-vs-consumer-scoped verdict semantics
+  (absence of a trace must never read as "not used").
 
 ### Phase 5 — New semantic graph families
 
@@ -654,11 +670,11 @@ abicheck/impact/
     correlation.py       # RootCauseCorrelator (Phase 6, not started)
     root_causes.py
     consumer_graph.py    # Phase 4 slice 1, DONE — ADR-057 (consumer graph + the source join)
-    use_cases.py         # Phase 4, not started
+    use_cases.py         # Phase 4 slice 2, DONE — ADR-057 amendment (manifest + use_case/test_case graph join; trace ingestion still not started)
 docs/learn/impact-analysis.md          # Phase 3 slices 1/6/7 + Phase 4's consumer join (ADR-057), DONE
 docs/reference/source-graph-schema.md     # Phase 2 D1-D6 identity/merge/traversal-policy schema, DONE
 docs/learn/graph-coverage.md           # Phase 1, DONE
-docs/use/use-case-impact.md        # Phase 4, not started (needs the manifest design first)
+docs/use/use-case-impact.md        # Phase 4 slice 2, DONE (manifest format, entrypoint mapping, test association, declared-vs-observed; trace ingestion documented as not-yet-built)
 docs/contribute/detector-impact-contract.md  # DONE, ahead of Phase 5/6 themselves — see Phase 3 section above
 examples/case194.../case205.../           # Phase 6
 ```
@@ -704,9 +720,17 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   overapprox-still-wins rule, and an end-to-end `scope_diff_to_app` class
   covering both the enriched overlay and the byte-for-byte-unchanged
   no-graph run.
-- New per remaining phase: `tests/test_use_cases.py` (Phase 4), one
-  `test_diff_<family>.py` per
-  Phase 5 graph family, `tests/test_root_cause_correlator.py` (Phase 6).
+- `tests/test_use_cases.py` — Phase 4 slice 2 (ADR-057 amendment), done:
+  schema registration, manifest parsing (valid, empty, and each malformed
+  shape), `build_use_case_graph`'s entrypoint resolution by id and by label,
+  the unresolvable-entrypoint silent-skip path, `test_case` node/edge
+  emission independent of entrypoint resolution, `join_use_case_graph`'s
+  fold-onto-one-shared-node and its deep-copy/no-mutation guarantee
+  (asserted on object identity and fact membership, mirroring
+  `test_consumer_graph.py`'s own pattern), and an end-to-end scenario joining
+  a `use_case` node onto a library graph's public entry node.
+- New per remaining phase: one `test_diff_<family>.py` per Phase 5 graph
+  family, `tests/test_root_cause_correlator.py` (Phase 6).
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once
   `ground_truth.json` is updated (existing harness, no new test file needed).
 

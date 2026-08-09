@@ -135,11 +135,13 @@ topics:
     fact_sources:
       - abicheck/impact/model.py
       - abicheck/impact/engine.py
+      - abicheck/impact/use_cases.py
       - abicheck/buildsource/graph_impact.py
       - abicheck/junit_report.py
     reference_page: reference/source-graph-schema.md
     task_pages:
       - contribute/detector-impact-contract.md
+      - use/use-case-impact.md
 
   policies:
     canonical_page: use/policies.md

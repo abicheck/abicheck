@@ -222,6 +222,7 @@ module = [
     "abicheck.buildsource.inline",
     "abicheck.buildsource.project_targets",
     "abicheck.buildsource.toolchain_bindings",
+    "abicheck.impact.use_cases",
 ]
 disable_error_code = ["import-untyped"]
 
