@@ -952,11 +952,31 @@ def directly_referenced_stdlib_type_spellings(snapshot: AbiSnapshot) -> frozense
     spelling normalizations (the one this module's own signature-matching
     index already performs internally, and the one a caller outside this
     module needs) from silently drifting apart.
+
+    A stripped spelling that collides with an unrelated non-stdlib record's
+    own signature spelling is dropped, mirroring :func:`_spelling_index`'s
+    identical guard (Codex review, fresh evidence): a snapshot can carry its
+    own, unrelated ``api::vector<int>`` whose bare signature spelling is the
+    same ``"vector<int>"`` a real ``std::vector<int>`` strips to, and a
+    ``Change`` on that unrelated user type carries that identical bare
+    ``RecordType.name`` as its own ``symbol`` -- so exporting the collided
+    spelling here would let contract evaluation confirm a finding about the
+    user type using evidence about the unrelated stdlib type. Reuses
+    :func:`_non_stdlib_signature_spellings` rather than re-deriving the
+    collision set, the same reasoning :func:`_spelling_index` documents for
+    its own use of it. The unstripped, fully-qualified ``identity`` is never
+    guarded this way (matching :func:`_spelling_index`'s own asymmetry): a
+    qualified stdlib spelling colliding with an unrelated type would require
+    that type to live in a namespace literally named a stdlib prefix
+    (``std::``, ...), which is reserved and not something a real snapshot
+    encodes as a legitimate user declaration.
     """
+    _, non_stdlib_identities, _ = _partition_snapshot_types(snapshot)
+    non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)
     spellings: set[str] = set()
     for identity in directly_referenced_stdlib_types(snapshot):
         spellings.add(identity)
         stripped = _stripped_signature_spelling(identity)
-        if stripped is not None:
+        if stripped is not None and stripped not in non_stdlib_spellings:
             spellings.add(stripped)
     return frozenset(spellings)

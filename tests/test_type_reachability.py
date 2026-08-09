@@ -40,6 +40,7 @@ from abicheck.type_reachability import (
     _non_stdlib_signature_spellings,
     _stripped_signature_spelling,
     _typedef_spelling_targets,
+    directly_referenced_stdlib_type_spellings,
     directly_referenced_stdlib_types,
     type_string_references_name,
 )
@@ -1725,3 +1726,74 @@ class TestStdlibOwnerNotSeededAsReferenced:
             ],
         )
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
+
+
+class TestDirectlyReferencedStdlibTypeSpellingsCollisionGuard:
+    """Codex review, fresh evidence: an earlier revision of
+    ``directly_referenced_stdlib_type_spellings`` unconditionally exported a
+    stdlib identity's stripped spelling, without the same
+    non-stdlib-collision guard :func:`_spelling_index` applies internally --
+    letting a real ``std::vector<int>`` root's stripped ``"vector<int>"``
+    collide with an unrelated, non-stdlib ``api::vector<int>``'s own bare
+    signature spelling, which is exactly the ``symbol`` a ``Change`` on that
+    unrelated type would carry."""
+
+    def test_stripped_spelling_colliding_with_a_non_stdlib_bare_alias_is_dropped(
+        self,
+    ) -> None:
+        # The public signature spells the root by its full, unambiguous
+        # qualified identity (e.g. a DWARF-derived snapshot, which bakes the
+        # namespace directly into a signature type string) -- proving
+        # std::vector<int> is directly referenced regardless of any
+        # collision. The unrelated api::vector<int>'s own bare alias
+        # collides only with the *stripped* form this function derives,
+        # which is exactly the shape the fix guards.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_vec", params=[Param(name="v", type="std::vector<int>")])
+            ],
+            types=[
+                RecordType(
+                    name="vector<int>", kind="class", qualified_name="std::vector<int>"
+                ),
+                RecordType(
+                    name="vector<int>",
+                    kind="class",
+                    qualified_name="api::vector<int>",
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                ),
+            ],
+        )
+        spellings = directly_referenced_stdlib_type_spellings(snap)
+        # The real root is still reported by its unambiguous full identity...
+        assert "std::vector<int>" in spellings
+        # ...but the collision-prone stripped form -- which a Change on the
+        # unrelated api::vector<int> would carry as its own bare symbol --
+        # must not be exported.
+        assert "vector<int>" not in spellings
+
+    def test_non_colliding_stripped_spelling_is_still_exported(self) -> None:
+        # Sanity check alongside the guard above: a stripped spelling with no
+        # non-stdlib collision at all is unaffected.
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn(
+                    "use_vec",
+                    params=[Param(name="v", type="vector<int, std::allocator<int> >")],
+                )
+            ],
+            types=[
+                RecordType(
+                    name="vector<int, std::allocator<int> >",
+                    kind="class",
+                    qualified_name="std::vector<int, std::allocator<int> >",
+                ),
+            ],
+        )
+        spellings = directly_referenced_stdlib_type_spellings(snap)
+        assert "vector<int, std::allocator<int> >" in spellings
+        assert "std::vector<int, std::allocator<int> >" in spellings
