@@ -55,7 +55,11 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: actions/checkout@v6
+      # Pinned to a full commit SHA, not the floating `v6` tag -- this job
+      # carries contents:write + actions:write (AGENTS.md's Action-pinning
+      # convention for a write-permission job), matching the pin already
+      # used by ci.yml/pages.yml/agentready.yml/dependency-review.yml.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
           fetch-depth: 1
 

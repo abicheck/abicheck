@@ -1342,6 +1342,22 @@ class TestScheduleCheckProjectFailurePathDispatcher:
         # scoped to just this one job, not inherited as a workflow default.
         assert data["permissions"]["contents"] == "read"
 
+    def test_dispatcher_pins_checkout_to_a_commit_sha(self) -> None:
+        """This job carries contents:write + actions:write, so AGENTS.md's
+        Action-pinning convention for a write-permission job applies: pin
+        `actions/checkout` to a full commit SHA rather than the floating
+        `v6` tag (Codex review)."""
+        data = _load(SCHEDULE_CHECK_PROJECT_FAILURE_PATH)
+        job = data["jobs"]["dispatch"]
+        checkout_step = next(
+            s for s in _steps(job) if str(s.get("uses", "")).startswith("actions/checkout@")
+        )
+        assert checkout_step["uses"] != "actions/checkout@v6"
+        # Full commit SHA, not a floating tag -- matches the pin already
+        # used by ci.yml/pages.yml/agentready.yml/dependency-review.yml.
+        sha = checkout_step["uses"].split("@", 1)[1]
+        assert re.fullmatch(r"[0-9a-f]{40}", sha), checkout_step["uses"]
+
 
 class TestEveryCheckProjectJobInstallsAbicheckFromItsOwnSource:
     """`pip install .` on the preceding `actions/checkout@v6` step installs
