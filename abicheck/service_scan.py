@@ -1557,12 +1557,13 @@ def _run_scan_one_member(
     start: float,
     budget_s: float | None,
     changed_src: str,
+    sibling_exported_symbols: frozenset[str] = frozenset(),
 ) -> ScanResult:
     """One member's scan, for :func:`run_scan_set` (ADR-056).
 
     Mirrors :func:`run_scan`'s body (kept as a separate function rather than
     a refactor of `run_scan` itself, so `run_scan`'s existing behavior/tests
-    stay byte-for-byte unchanged) with two differences:
+    stay byte-for-byte unchanged) with three differences:
 
     - Accepts an externally-supplied ``start``/``budget_s`` instead of
       calling ``_time.monotonic()`` itself. `run_scan_set` passes the *same*
@@ -1578,6 +1579,9 @@ def _run_scan_one_member(
       CLI path (`cli_scan.py`) already passes directly to `run_scan_core` —
       an `--artifact-set` scan must not silently drop them relative to an
       equivalent single-binary `scan` invocation with the same flags.
+    - Accepts ``sibling_exported_symbols`` (G35, other members' own exports)
+      and forwards it so a sibling's export also satisfies this member's own
+      `public_not_exported` check.
     """
     (
         RiskRules,
@@ -1673,6 +1677,7 @@ def _run_scan_one_member(
             compile_context=None if req.compile.is_default else req.compile,
             defer_cleanup=build_dir_cleanups,
             abi3_floor=req.abi3_floor,
+            sibling_exported_symbols=sibling_exported_symbols,
         )
     except _BudgetOverflow:
         return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
@@ -1713,6 +1718,7 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
 
     from . import deadline as _deadline
     from .bundle import (
+        artifact_set_member_exports,
         audit_bundle,
         check_artifact_set_soname_collisions,
         discover_artifact_set,
@@ -1811,10 +1817,31 @@ def run_scan_set(req: ScanRequest) -> ScanSetResult:
     except _deadline.DeadlineExceeded:
         return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
 
+    # G35: cheap export-table pass per member, feeding each member's own
+    # `public_not_exported` check what a *sibling* exports (see
+    # `artifact_set_member_exports`). Same budget pattern as the soname check.
+    remaining_for_exports = (
+        None if budget_s is None else budget_s - (_time.monotonic() - start)
+    )
+    if remaining_for_exports is not None and remaining_for_exports <= 0:
+        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
+    try:
+        with _deadline.deadline_scope(remaining_for_exports):
+            member_exports = artifact_set_member_exports(libraries)
+    except _deadline.DeadlineExceeded:
+        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
+
+    all_exports = frozenset[str]().union(*member_exports.values())
     per_artifact: list[ScanArtifactResult] = []
-    for binary in libraries.values():
+    for name, binary in libraries.items():
+        siblings = all_exports - member_exports.get(name, frozenset())
         result = _run_scan_one_member(
-            req, binary, start=start, budget_s=budget_s, changed_src=req.changed_src
+            req,
+            binary,
+            start=start,
+            budget_s=budget_s,
+            changed_src=req.changed_src,
+            sibling_exported_symbols=siblings,
         )
         per_artifact.append(ScanArtifactResult(artifact=binary, result=result))
         if result.verdict == "BUDGET_OVERFLOW":

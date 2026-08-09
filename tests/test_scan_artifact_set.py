@@ -685,7 +685,15 @@ class TestRunScanSetBundleSnapshotCompleteness:
         def _fake_audit_bundle(libraries, *, bundle_system_providers=()):
             return _FakeAudit()
 
-        def _fake_run_one_member(req, binary, *, start, budget_s, changed_src):
+        def _fake_run_one_member(
+            req,
+            binary,
+            *,
+            start,
+            budget_s,
+            changed_src,
+            sibling_exported_symbols=frozenset(),
+        ):
             return ScanResult(verdict="COMPATIBLE", exit_code=0)
 
         monkeypatch.setattr(bundle_mod, "discover_artifact_set", _fake_discover)
@@ -919,6 +927,62 @@ def _build_tiny_so(out_dir: Path, name: str, src: str, *, extra_ldflags: list[st
     cmd.extend(extra_ldflags or [])
     subprocess.run(cmd, check=True, capture_output=True)
     return out
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="Uses GNU ld flags (-Wl,-soname); Mach-O ld and link.exe don't accept them.",
+)
+@pytest.mark.integration
+class TestArtifactSetSiblingExports:
+    """G35: ``run_scan_set`` must tell each member's own crosscheck about
+    what *sibling* members export, so a shared umbrella header naming more
+    than one member's own public API doesn't false-positive on
+    ``public_not_exported`` (previously an acknowledged limitation, see
+    AGENTS.md's "multi-artifact scan" entry).
+    """
+
+    def test_member_exports_are_read_per_member(self, tmp_path: Path) -> None:
+        from abicheck.bundle import artifact_set_member_exports
+
+        libdir = tmp_path / "libs"
+        libdir.mkdir()
+        core = _build_tiny_so(libdir, "libcore.so", "int core_fn(void){return 1;}\n")
+        algo = _build_tiny_so(libdir, "libalgo.so", "int algo_fn(void){return 2;}\n")
+        exports = artifact_set_member_exports({"libcore.so": core, "libalgo.so": algo})
+        assert exports["libcore.so"] == {"core_fn"}
+        assert exports["libalgo.so"] == {"algo_fn"}
+
+    def test_run_scan_set_forwards_sibling_exports_to_each_member(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A shared umbrella header declares both core_fn (exported only by
+        # libcore.so) and algo_fn (exported only by libalgo.so) -- each
+        # member's own scan must see the *other* member's export(s) as
+        # sibling-satisfied, and never its own (that's already covered by
+        # its own export table).
+        import abicheck.service_scan as service_scan
+
+        libdir = tmp_path / "libs"
+        libdir.mkdir()
+        core = _build_tiny_so(libdir, "libcore.so", "int core_fn(void){return 1;}\n")
+        algo = _build_tiny_so(libdir, "libalgo.so", "int algo_fn(void){return 2;}\n")
+
+        seen: dict[str, frozenset] = {}
+        real_run_one_member = service_scan._run_scan_one_member
+
+        def _spy(req, binary, **kwargs):
+            seen[str(binary)] = kwargs.get("sibling_exported_symbols", frozenset())
+            return real_run_one_member(req, binary, **kwargs)
+
+        monkeypatch.setattr(service_scan, "_run_scan_one_member", _spy)
+
+        from abicheck.service import ScanRequest
+
+        service_scan.run_scan_set(ScanRequest(binaries=[core, algo]))
+
+        assert seen[str(core)] == {"algo_fn"}
+        assert seen[str(algo)] == {"core_fn"}
 
 
 @pytest.mark.skipif(

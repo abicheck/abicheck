@@ -57,30 +57,35 @@ case. **Still open, not silently dropped:**
   3's estimator bullet) — `--dry-run` is currently rejected outright for
   `--artifact-set` rather than shipped with an approximate estimate (now
   also enforced at the Action's preflight step, not just the CLI).
-- **Cross-member header-obligation attribution — investigated, not fixed
-  this pass (Codex review, real finding).** `_run_artifact_set` passes the
-  *same* declared header set to every member's scan
-  (`_run_scan_one_member` → `run_scan_core`'s per-member crosscheck pass);
-  when a shared umbrella header partitions its declared API across
-  sibling DSOs (the motivating oneDAL-style layout — `core_fn` declared in
-  a common header but only implemented/exported by `libcore.so`, not
-  `libalgo.so`), the `public_not_exported` crosscheck runs independently
-  per member and has no notion of "this symbol is satisfied by a sibling,
-  not this binary" — `abicheck/buildsource/crosscheck.py`'s
+- **Cross-member header-obligation attribution — fixed (2026-08-09), via the
+  minimum-viable half of the two options this entry originally named.**
+  `_run_artifact_set` passes the *same* declared header set to every
+  member's scan (`_run_scan_one_member` → `run_scan_core`'s per-member
+  crosscheck pass); when a shared umbrella header partitions its declared
+  API across sibling DSOs (the motivating oneDAL-style layout — `core_fn`
+  declared in a common header but only implemented/exported by
+  `libcore.so`, not `libalgo.so`), the `public_not_exported` crosscheck ran
+  independently per member and had no notion of "this symbol is satisfied
+  by a sibling, not this binary" — `abicheck/buildsource/crosscheck.py`'s
   `_check_public_not_exported` takes a single `AbiSnapshot` with no
   cross-snapshot context at all. With the check at its default advisory
-  severity this is silent (RISK-only, doesn't change the verdict/exit
+  severity this was silent (RISK-only, doesn't change the verdict/exit
   code), but `--crosscheck public_not_exported=error` — the documented way
-  to gate CI on it — turns a legitimate, correctly-partitioned set into a
-  false `API_BREAK` for every member. A real fix needs either attributing
-  each header declaration to the specific member(s) that should export it,
-  or computing the union of every member's exports before running each
-  member's crosscheck pass and treating a sibling-satisfied symbol as
-  resolved — both are genuine plumbing changes to a crosscheck engine
-  shared with the single-binary path (which has no such false-positive
-  risk, since there is only ever one binary), not a same-pass patch.
-  Deliberately not attempted here; flagged as a known limitation rather
-  than shipped silently broken.
+  to gate CI on it — turned a legitimate, correctly-partitioned set into a
+  false `API_BREAK` for every member. Fixed the "union of every member's
+  exports" way (not by attributing each header declaration to a specific
+  owning member — that stays open, see below): `bundle.py`'s new
+  `artifact_set_member_exports()` runs a cheap, ELF-header/dynsym-only pass
+  over every set member up front; `service_scan.run_scan_set()` hands each
+  member's own scan the union of what its *siblings* export via a new
+  `CrosscheckConfig.sibling_exported_symbols` field, consulted by
+  `_check_public_not_exported` alongside this member's own export table and
+  the existing L4 reconciliation set. **Still open:** per-declaration
+  ownership attribution (so a symbol that moved to the *wrong* sibling, with
+  no genuinely missing export anywhere in the set, could still be flagged
+  as a mis-attribution rather than silently accepted) — this fix accepts
+  "some sibling exports it" as sufficient, matching the minimum bar this
+  entry originally set, not the more precise future model.
 
 ---
 
