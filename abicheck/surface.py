@@ -370,6 +370,21 @@ class PublicSurface:
     # within their own kind, but still collide in the single ``origin_by_key``
     # both kinds share (Codex review, thirteenth round).
     ambiguous_type_names: set[str] = field(default_factory=set)
+    # Qualified (or, when a type carries no ``qualified_name``, bare) identity
+    # of every record/enum ``_walk_type_closure`` reached via a queued
+    # spelling that resolved to *exactly one* record/enum (across both maps
+    # combined — see ``_index_surface_types``'s cross-kind ``combined_counts``
+    # rationale). Distinguishes "this qualified identity was itself directly,
+    # unambiguously referenced" from "this qualified identity was only swept
+    # in because an unrelated sibling shares its bare tail" — the anti-hiding
+    # rule means both routes leave an *identical* footprint in ``public_types``/
+    # ``ambiguous_type_names`` alone, which is exactly the missing provenance
+    # ``_confirmed_type_matches``'s docstring (contract_evaluation.py) named as
+    # needed for a real fix (Codex review, fifteenth round's known gap; ADR-049).
+    # Monotonic: once a spelling resolves an identity exactly, it stays here
+    # even if that same identity is *also* later swept in ambiguously via a
+    # different, colliding spelling.
+    exact_type_identities: set[str] = field(default_factory=set)
     # True when *any* declaration carried a non-UNKNOWN origin — i.e. the
     # snapshot was dumped with a public-header set so provenance is available.
     # Lets the classifier distinguish a confident reachability demotion from one
@@ -534,7 +549,10 @@ def _walk_type_closure(
     Follows typedef targets, record fields, and base classes from each seed
     type, marking every reachable known type as part of the public surface.
     A name may resolve to *several* types (an ambiguous ``::`` tail shared by
-    two namespaces); every match is marked public and walked.
+    two namespaces); every match is marked public and walked -- but also
+    fills ``exact_type_identities`` with the identity of any record/enum
+    resolved via a queued spelling that matched *exactly one* candidate, so a
+    caller can tell that route apart from the ambiguous one.
     """
     queue = list(seed_types)
     seen: set[str] = set()
@@ -557,9 +575,20 @@ def _walk_type_closure(
         # so a scoped enum-member finding is not hidden (mirrors the record alias
         # handling below). Enums have no fields or bases, so nothing is queued.
         # An ambiguous tail may match enums in several namespaces — mark them all.
-        for en_node in enum_by_name.get(name, ()):
+        en_nodes = enum_by_name.get(name, ())
+        rec_nodes = record_by_name.get(name, [])
+        # Exact iff *this queued spelling* resolves to precisely one
+        # record/enum across both maps combined — the same combined-count
+        # rationale ``_index_surface_types`` uses for ``ambiguous_type_names``
+        # (a record and an enum can each look unique within their own map
+        # while still colliding once combined).
+        is_exact = (len(en_nodes) + len(rec_nodes)) == 1
+        for en_node in en_nodes:
             surface.public_types.add(en_node.name)
-        rec_nodes = record_by_name.get(name)
+            if is_exact:
+                surface.exact_type_identities.add(
+                    en_node.qualified_name or en_node.name
+                )
         if not rec_nodes:
             continue
         # A short alias (``A``) reached inside its namespace resolves here to the
@@ -570,6 +599,10 @@ def _walk_type_closure(
         # tail shared by two namespaces resolves to several records — walk each.
         for rec_node in rec_nodes:
             surface.public_types.add(rec_node.name)
+            if is_exact:
+                surface.exact_type_identities.add(
+                    rec_node.qualified_name or rec_node.name
+                )
             for f in rec_node.fields:
                 for ident in _type_identifiers(f.type):
                     if ident not in seen:

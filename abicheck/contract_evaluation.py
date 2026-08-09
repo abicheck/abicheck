@@ -58,6 +58,7 @@ its :doc:`implementation plan </contribute/plans/public-contract-default>`.
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -736,48 +737,36 @@ def _in_surface_result_is_confirmed(
     docstrings; the ``exports`` domain asks the identical questions against
     its own root/closure sets.
 
-    **Known over-rejection, investigated and deliberately not fixed this
-    pass (Codex review, fifteenth round):** :func:`_confirmed_type_matches`'s
-    qualified-tail rejection is intentionally blunt and can reject a
-    genuinely exact match.
-    When a public signature names ``ns1::Point`` *explicitly* (fully
+    **Formerly-known over-rejection, now fixed (originally Codex review,
+    fifteenth round; closed by adding ``PublicSurface.exact_type_identities``):**
+    when a public signature names ``ns1::Point`` *explicitly* (fully
     qualified) and the snapshot separately contains an unrelated
     ``ns2::Point``, ``_type_identifiers`` still derives the bare tail
     ``"Point"`` from that qualified reference (by design, so a short alias
     referenced from inside its own namespace still resolves) -- which is
-    *also* how the ambiguous-bare-tail path itself reaches both siblings --
-    so ``ns1::Point``'s membership in ``public_types`` and ``ns2::Point``'s
-    membership are structurally indistinguishable from this function's
-    inputs alone: both a genuinely exact qualified reference and a purely
-    conservative ambiguous-tail guess leave the *identical* final
-    ``public_types``/``ambiguous_type_names`` state, since
-    ``_walk_type_closure`` queues the bare tail unconditionally alongside
-    the qualified form for every ``"::"``-bearing token, not only when the
-    original reference truly was bare. Confirmed empirically: constructing
-    a public function taking ``ns1::Point`` by exact qualified name plus an
-    unrelated ``ns2::Point`` record reproduces the wrong
-    ``UNKNOWN_UNRESOLVED`` this docstring's own twelfth-round fix was
-    designed to produce only for a *bare* ``"Mode"``-style reference (see
-    the twelfth-round test using ``params=["Mode"]``, never
-    ``params=["ns1::Mode"]``). Distinguishing the two needs new provenance
-    data this function doesn't have access to: whether a *specific* route
-    into ``public_types`` for a given qualified name came from
-    ``_walk_type_closure`` matching a token's own full-name key directly
-    (exact) or only from matching a *different*, bare token against
-    ``record_by_name``/``enum_by_name``'s ambiguous tail-keyed entry
-    (conservative guess) -- ``PublicSurface`` records neither route
-    separately today, only the merged final sets. A real fix means adding
-    that per-type provenance to ``surface.py``'s own closure walk -- the
-    public-surface-scoping gate every other detector in the codebase
-    depends on, not a boundary specific to this still-unwired shadow
-    module -- which needs its own careful, independently-verified design
-    (mirroring this file's already-documented deferral of the analogous
-    ``surface.py``-vs-``type_reachability.py`` owner-seeding gap), not a
-    same-PR drive-by extension of this narrower confirmation check. Left as
-    a known false-negative-producing conservatism (never a false
-    ``IN_CONTRACT``, only an occasional wrongly-``UNKNOWN_UNRESOLVED``) --
-    the same direction every other unresolvable case in this function
-    already defaults to.
+    *also* how the ambiguous-bare-tail path itself reaches both siblings.
+    That used to make ``ns1::Point``'s membership in ``public_types`` and
+    ``ns2::Point``'s membership structurally indistinguishable from this
+    function's inputs, because ``_walk_type_closure`` queued the bare tail
+    unconditionally alongside the qualified form for every ``"::"``-bearing
+    token, and only recorded the *merged* final ``public_types``/
+    ``ambiguous_type_names`` state -- not which route got there.
+    ``_walk_type_closure`` now also records, in ``exact_type_identities``,
+    the identity of any record/enum resolved via a queued spelling that
+    matched *precisely one* candidate -- so a public signature spelling the
+    qualified form directly resolves ``ns1::Point`` via its own,
+    independently-unambiguous queue entry, distinct from the separately-
+    queued, genuinely-ambiguous bare tail ``"Point"`` that also (correctly)
+    sweeps in the unrelated ``ns2::Point``. See
+    :func:`_confirmed_type_matches`'s docstring for the mechanism and why it
+    is not a re-derivation of the reverted "indecisive ambiguity" shortcut.
+    A signature that *only* ever spells the bare tail (never the qualified
+    form) still leaves both siblings equally, ambiguously reached -- that
+    scenario correctly remains ``UNKNOWN_UNRESOLVED``
+    (``test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed``,
+    and the ``ambiguous_namespaced_leaf`` fp-rate-corpus case, whose public
+    function only ever names the bare, colliding spelling and so has no
+    exact route to disambiguate from either).
 
     **Checks only the authoritative side (ADR-049 D4), not the old-union-new
     universe:** "Removal and modification of an existing obligation use
@@ -848,7 +837,10 @@ def _in_surface_result_is_confirmed(
     if _symbol_matches(change, auth.public_symbols):
         return True
     if _confirmed_type_matches(
-        _type_candidates(change), auth.public_types, auth.ambiguous_type_names
+        _type_candidates(change),
+        auth.public_types,
+        auth.ambiguous_type_names,
+        auth.exact_type_identities,
     ):
         return True
     directly_referenced_stdlib = (
@@ -1024,7 +1016,10 @@ def _type_candidates(change: Change) -> set[str]:
 
 
 def _confirmed_type_matches(
-    candidates: set[str], types: set[str], ambiguous: set[str]
+    candidates: set[str],
+    types: set[str],
+    ambiguous: set[str],
+    exact: AbstractSet[str] = frozenset(),
 ) -> set[str]:
     """*candidates* present in *types* whose identity is not ambiguous.
 
@@ -1040,7 +1035,8 @@ def _confirmed_type_matches(
     so a qualified candidate's presence does not by itself prove *that*
     candidate, rather than its ambiguous sibling, is what the signature
     actually reaches. Neither case establishes which record -- or whether
-    either -- this finding's root actually resolves to.
+    either -- this finding's root actually resolves to *unless* ``exact``
+    (``PublicSurface.exact_type_identities``) says otherwise -- see below.
 
     **An "indecisive ambiguity" shortcut was tried here and reverted; do not
     re-derive it.** The idea was that when every colliding entry is
@@ -1060,17 +1056,34 @@ def _confirmed_type_matches(
     unreachable ``two::Point`` also declared in a public header, the origin
     count equals the arity, so a layout finding on ``two::Point`` was
     confirmed ``IN_CONTRACT`` and gated the run -- turning a withheld
-    finding into a false positive. Counting reachable siblings instead is
-    not available either: the closure adds *both* under the shared bare key
-    (that is the anti-hiding rule above), so ``public_types`` cannot say
-    which qualified identity was independently reached. Proving
-    indecisiveness needs per-identity reachability that ``surface.py`` does
-    not record today.
+    finding into a false positive. **``exact`` is not a resurrection of that
+    shortcut** -- origin is never consulted here, and a candidate reached
+    only via the shared ambiguous bare key (``one::api(Point *)`` alone,
+    with no other reference) is *not* added to ``exact_type_identities`` for
+    either sibling, so this rejected scenario stays rejected (see
+    ``test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed``).
+
+    ``exact`` closes a narrower, later-found gap instead (Codex review,
+    fifteenth round): a public signature that names ``ns1::Point``
+    *explicitly* (fully qualified) is a genuinely exact, unambiguous
+    reference, even though an unrelated ``ns2::Point`` also exists and
+    shares the bare tail ``Point`` -- ``_walk_type_closure`` now records
+    that ``ns1::Point`` was reached via a queued spelling
+    (``"ns1::Point"`` itself) that resolved to precisely one record,
+    independent of whatever the *separately*-derived, genuinely ambiguous
+    bare-tail spelling (``"Point"``) also swept in. A candidate present in
+    ``exact`` is confirmed even when its bare tail is ambiguous elsewhere;
+    a candidate reached *only* through the ambiguous bare key (never
+    through its own exact spelling) never enters ``exact`` in the first
+    place, so the rejection above still applies to it.
     """
     return {
         m
         for m in candidates & types
-        if m not in ambiguous and not ("::" in m and m.rsplit("::", 1)[1] in ambiguous)
+        if (
+            m not in ambiguous and not ("::" in m and m.rsplit("::", 1)[1] in ambiguous)
+        )
+        or m in exact
     }
 
 

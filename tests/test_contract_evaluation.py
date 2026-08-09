@@ -1102,7 +1102,17 @@ class TestPublicModeAmbiguousTypeRoot:
     below for the counter-example that sank it. The rejection does cost real
     gate coverage (``measure_contract_shadow.py``'s ``unresolved_losses``
     counts it), so the temptation to relax it is real; the cases below exist
-    to make the two failed relaxations fail loudly instead."""
+    to make that failed relaxation fail loudly instead.
+
+    A second, narrower gap *was* since closed:
+    ``PublicSurface.exact_type_identities`` now lets a public signature that
+    spells the qualified form directly (``ns1::Point``, not just bare
+    ``Point``) confirm even while an unrelated sibling shares the same bare
+    tail -- see ``test_exact_qualified_reference_now_confirms`` below and
+    ``_confirmed_type_matches``'s docstring for why that is not the same
+    relaxation as the reverted one. A reference that only ever spells the
+    bare, colliding tail (no side ever names the qualified form) still has
+    no exact route to lean on and correctly stays rejected."""
 
     @staticmethod
     def _two_siblings(second_origin: ScopeOrigin) -> AbiSnapshot:
@@ -1308,31 +1318,35 @@ class TestPublicModeAmbiguousTypeRoot:
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "public_root_membership"
 
-    def test_exact_qualified_reference_still_over_rejected_known_gap(self) -> None:
-        # Known, deliberately-deferred limitation (Codex review, fifteenth
-        # round): a public signature naming ``ns1::Point`` *explicitly*
-        # (fully qualified) is a genuinely exact, unambiguous reference --
-        # but `_type_identifiers` derives the bare tail "Point" from that
-        # same qualified string (by design, to also match a short in-
-        # namespace alias), and that bare tail also drives the *ambiguous*
-        # widening path that adds the unrelated `ns2::Point` to
-        # `public_types` too. The two routes are indistinguishable from
-        # `public_types`/`ambiguous_type_names` alone, so this exact match
-        # is currently (over-)rejected the same as a genuinely ambiguous
-        # bare reference would be. This test locks in today's conservative
-        # (never wrongly IN_CONTRACT) behavior -- see
-        # `_in_surface_result_is_confirmed`'s docstring for why a precise
-        # fix needs new provenance data in `surface.py` itself, out of
-        # scope for a drive-by fix here. If `surface.py` ever gains that
-        # provenance and this starts resolving to IN_CONTRACT instead, that
-        # is progress, not a regression -- update this test then.
+    def test_exact_qualified_reference_now_confirms(self) -> None:
+        # Formerly a known, deliberately-deferred limitation (Codex review,
+        # fifteenth round), now fixed: a public signature naming
+        # ``ns1::Point`` *explicitly* (fully qualified) is a genuinely
+        # exact, unambiguous reference -- even though `_type_identifiers`
+        # also derives the bare tail "Point" from that same qualified
+        # string (by design, to also match a short in-namespace alias), and
+        # that bare tail *separately* drives the ambiguous widening path
+        # that adds the unrelated `ns2::Point` to `public_types` too.
+        # `_walk_type_closure` now records that "ns1::Point" was itself
+        # queued and resolved to exactly one record
+        # (`exact_type_identities`), independent of whatever the
+        # separately-queued, genuinely-ambiguous bare tail "Point" also
+        # swept in -- so this exact reference confirms even though its bare
+        # tail remains ambiguous. See `_confirmed_type_matches`'s docstring
+        # for the mechanism and why it does not resurrect the reverted
+        # "indecisive ambiguity" shortcut (a bare-only reference, with no
+        # exact qualified route at all, is unaffected and still rejected --
+        # see `test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed`).
         # Mirrors the twelfth-round test's DWARF-style convention (the
         # namespace is baked directly into `.name`, not a separate
         # `qualified_name`) -- with the bare-name + `qualified_name`
-        # convention (castxml/clang), `record_by_name` never even keys the
-        # qualified spelling at all (only the bare tail), so the qualified
-        # candidate wouldn't reach `public_types` either way and this
-        # scenario couldn't be reproduced through that convention.
+        # convention (castxml/clang), `_index_surface_types` never keys
+        # `record_by_name` by the qualified spelling itself (only the bare
+        # tail), so a public signature would need to spell the qualifier
+        # for this exact route to exist at all; a castxml/clang signature
+        # that only ever spells the bare tail (e.g. the fp-rate corpus's
+        # `ambiguous_namespaced_leaf` case) has no such route and correctly
+        # remains `UNKNOWN_UNRESOLVED`.
         snap = AbiSnapshot(
             library="l",
             version="1",
@@ -1355,12 +1369,30 @@ class TestPublicModeAmbiguousTypeRoot:
         s = compute_public_surface(snap)
         assert "Point" in s.ambiguous_type_names
         assert {"ns1::Point", "ns2::Point"} <= s.public_types
+        assert s.exact_type_identities == {"ns1::Point"}
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="ns1::Point", description=""
         )
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
+        assert decision.relevance is ContractRelevance.IN_CONTRACT
+        assert decision.reason_code == "public_root_membership"
+
+    def test_qualified_reference_reached_only_ambiguously_has_no_exact_identity(
+        self,
+    ) -> None:
+        # Counterpart to the previous test: when *neither* side ever spells
+        # the qualified form (both siblings only ever reached via the
+        # shared ambiguous bare tail), `exact_type_identities` stays empty
+        # for both -- there is no exact route to distinguish, so this must
+        # still be rejected exactly like
+        # `test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed`.
+        s = compute_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
+        assert s.exact_type_identities == set()
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="one::Point", description=""
+        )
+        decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
-        assert decision.reason_code == "required_evidence_incomplete"
 
 
 class TestPublicModeHiddenFriendConfirmation:
