@@ -77,4 +77,22 @@ it should read in CHANGELOG.md. Delete the other sections.
   `STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST` themselves were
   unaffected — they already correctly stay silent when the old side's
   trait is unknown.
+- **Bumped the whole-snapshot disk cache version** (`snapshot_cache.py`,
+  v6 → v7): an upgrading user's warm `--ast-frontend clang`/`hybrid`
+  cache entry would otherwise keep replaying the pre-upgrade snapshot
+  (missing the newly-extracted `deprecated`/`is_scoped`/
+  `is_standard_layout`/`is_trivially_copyable` facts, or stale bare-keyed
+  `fact_provenance` for a hybrid entry) until the entry expired or was
+  manually cleared, silently suppressing every detector this release
+  wires up.
+- **Fixed `diff_layout.py`'s stdlib exclusion filtering on the bare
+  declaration name instead of the qualified identity**: castxml/clang
+  keep `RecordType.name` bare (e.g. `"vector"`) and carry the real
+  namespace in `qualified_name` (e.g. `"std::vector"`), so the filter
+  never actually matched a `std::`/`__gnu_cxx::`/etc. record. A retained
+  dependency-header stdlib type could leak into the layout detector's
+  public surface and fire `STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST`
+  against a toolchain-owned type. Now matches
+  `diff_types._is_abi_surface_type`'s identical `qualified_name or name`
+  split.
 

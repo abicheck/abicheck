@@ -53,6 +53,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import build_type_map, lookup_matched_type, make_change
+from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
     from .diff_helpers import TypeMap
@@ -79,16 +80,26 @@ def _index(snap: AbiSnapshot, *, exclude_stdlib: bool) -> TypeMap[RecordType]:
     surfaced once ``RecordType.is_standard_layout``/``is_trivially_copyable``
     started being populated for real, G31 Phase C, but the same collision
     already existed for ``base_offsets``/``vptr_offset_bits`` too).
+
+    The stdlib check itself needs the QUALIFIED identity, not the bare one
+    (Codex review, fresh evidence, second round): castxml/clang keep
+    ``rec.name`` bare (e.g. ``"vector"``) and carry the real namespace in
+    ``rec.qualified_name`` (e.g. ``"std::vector"``) -- filtering on the bare
+    name never matches the ``std::``/``__gnu_cxx::``/etc. prefix, so a
+    retained dependency-header stdlib record leaked into this detector's
+    surface once ``is_standard_layout``/``is_trivially_copyable`` gave it
+    something to fire on. Same ``identity = qualified_name or name`` split
+    ``diff_types._is_abi_surface_type`` already uses.
     """
     from .model import is_non_abi_surface_type
 
-    return build_type_map(
-        rec
-        for rec in snap.types
-        if not is_non_abi_surface_type(
-            rec.name, exclude_stdlib_namespaces=exclude_stdlib
-        )
-    )
+    def _keep(rec: RecordType) -> bool:
+        identity = rec.qualified_name or rec.name
+        if exclude_stdlib and identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
+            return False
+        return not is_non_abi_surface_type(rec.name, exclude_stdlib_namespaces=False)
+
+    return build_type_map(rec for rec in snap.types if _keep(rec))
 
 
 def _has_layout_descriptor(rec: RecordType) -> bool:

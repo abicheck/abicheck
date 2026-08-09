@@ -502,6 +502,33 @@ building a second identity-resolution mechanism from scratch.
   as its stand-in for "a layout descriptor is present"); updated to use
   `data_size_bits` (genuine layout-pass evidence) instead, preserving the
   scenario it was actually testing.
+
+  **The same review round found two more, independent gaps.** (1)
+  `snapshot_cache.py`'s whole-snapshot disk cache
+  (`_SNAPSHOT_CACHE_VERSION`, separate from `AbiSnapshot.SCHEMA_VERSION`
+  — see that constant's own docstring) was not bumped alongside this PR's
+  new direct-clang extraction: an upgrading user's warm clang/hybrid
+  cache entry, keyed on the same headers/includes/version/lang/`extra`
+  inputs a pre-upgrade dump already covers, would keep replaying the old
+  snapshot (missing `deprecated`/`is_scoped`/`is_standard_layout`/
+  `is_trivially_copyable`, or — for a hybrid entry — retaining stale
+  bare-keyed `fact_provenance`) until the entry happened to expire or was
+  manually cleared, silently suppressing every detector this PR wires up
+  (Codex review, fresh evidence). Bumped to v7, following the same
+  documented precedent as v2/v3/v4/v6's identical "behavior changed
+  without changing the cache key" bumps. (2) `diff_layout._index()`'s
+  stdlib exclusion filtered on `rec.name` (bare) rather than
+  `rec.qualified_name or rec.name` (the same `identity` split
+  `diff_types._is_abi_surface_type` already uses) — castxml/clang keep
+  `RecordType.name` bare (e.g. `"vector"`) and carry the real namespace
+  in `qualified_name` (e.g. `"std::vector"`), so the bare-name filter
+  never actually matched the `std::`/`__gnu_cxx::`/etc. prefix. A
+  retained dependency-header stdlib record could therefore leak into
+  `diff_layout.py`'s public surface and fire `STANDARD_LAYOUT_LOST`/
+  `TRIVIALLY_COPYABLE_LOST` for a toolchain-owned type once those two
+  traits started being populated for real (G31 Phase C) — the exact
+  toolchain-noise-vs-real-break distinction the stdlib filter exists to
+  draw. Fixed to match `_is_abi_surface_type`'s identity split exactly.
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

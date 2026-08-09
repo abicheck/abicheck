@@ -206,6 +206,38 @@ class TestLayoutDescriptorDiff:
         )
         assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
 
+    def test_stdlib_record_not_flagged_when_qualified_name_carries_the_namespace(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence, second round: castxml/clang keep
+        RecordType.name bare (e.g. "vector") and carry the real namespace in
+        qualified_name (e.g. "std::vector") -- the stdlib exclusion must
+        check the qualified identity, not the bare name alone, or a
+        dependency-header std:: record leaks into the public surface once
+        is_standard_layout/is_trivially_copyable give it something to fire
+        on (G31 Phase C)."""
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    name="vector",
+                    qualified_name="std::vector",
+                    is_trivially_copyable=True,
+                )
+            ],
+        )
+        new = _snap(
+            "2",
+            types=[
+                _rec(
+                    name="vector",
+                    qualified_name="std::vector",
+                    is_trivially_copyable=False,
+                )
+            ],
+        )
+        assert ChangeKind.TRIVIALLY_COPYABLE_LOST not in _kinds(old, new)
+
     def test_stdlib_record_flagged_when_comparing_the_runtime_itself(self) -> None:
         # When abicheck compares the C++ runtime to itself (libstdc++/libc++
         # SONAME), the std:: filter is OFF — the runtime's own std:: layout
