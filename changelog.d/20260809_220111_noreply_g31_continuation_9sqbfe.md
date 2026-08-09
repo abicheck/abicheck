@@ -43,3 +43,13 @@ it should read in CHANGELOG.md. Delete the other sections.
   the newly-extracted field-default facts, or stale bare-keyed
   `fact_provenance` for a hybrid entry) until the entry expired or was
   manually cleared.
+- **Fixed a false `FIELD_DEFAULT_INITIALIZER_REMOVED` against a legacy
+  pre-v20 clang snapshot** (Codex review, fresh evidence): the new
+  same-producer gate's "producer unknown → permissive" fallback couldn't
+  tell a POSITIVELY known-unreliable value (the legacy snapshot's
+  unconditional `None`, real but wrong) apart from genuinely-never-recorded
+  provenance, so comparing a fresh clang snapshot's real initializer
+  against an unchanged, persisted pre-v20 clang baseline reported a
+  spurious removal purely from the schema upgrade. The gate now declines
+  the comparison outright whenever either side is positively known
+  unreliable, while staying permissive for truly unset provenance.

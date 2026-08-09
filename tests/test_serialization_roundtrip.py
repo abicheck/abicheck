@@ -518,6 +518,64 @@ class TestClangFieldInitializerFactsReliableRoundTrip:
             == "clang"
         )
 
+    def test_same_producer_gate_declines_against_unreliable_legacy_side(
+        self,
+    ) -> None:
+        """Codex review, PR #687: same_producer_backed_fact_qualified's
+        permissive "producer unknown -> allow" fallback must NOT treat a
+        POSITIVELY known-unreliable value (this flag False) the same as
+        genuinely-unrecorded provenance -- otherwise a fresh clang snapshot's
+        real field initializer compared against this legacy snapshot would
+        read as removed, purely from the schema upgrade."""
+        from abicheck.fact_provenance import (
+            field_fact_key,
+            same_producer_backed_fact_qualified,
+        )
+
+        legacy_clang = snapshot_from_dict(
+            _minimal_dict(schema_version=19, from_headers=True, ast_producer="clang")
+        )
+        fresh_clang = _make_snap(from_headers=True, ast_producer="clang")
+        key = field_fact_key("Cfg", "timeout", "default")
+
+        assert (
+            same_producer_backed_fact_qualified(
+                fresh_clang,
+                legacy_clang,
+                key,
+                key,
+                key,
+                old_bare_unambiguous=True,
+                new_bare_unambiguous=True,
+            )
+            is False
+        )
+        # Symmetric direction, and both-reliable stays permissive/comparable.
+        assert (
+            same_producer_backed_fact_qualified(
+                legacy_clang,
+                fresh_clang,
+                key,
+                key,
+                key,
+                old_bare_unambiguous=True,
+                new_bare_unambiguous=True,
+            )
+            is False
+        )
+        assert (
+            same_producer_backed_fact_qualified(
+                fresh_clang,
+                fresh_clang,
+                key,
+                key,
+                key,
+                old_bare_unambiguous=True,
+                new_bare_unambiguous=True,
+            )
+            is True
+        )
+
 
 class TestDependencyScopeRoundtrip:
     """Schema v18 — AbiSnapshot.dependency_scope round-trips like every

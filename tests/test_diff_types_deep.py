@@ -1566,6 +1566,66 @@ class TestHybridProvenanceKeys:
         assert ChangeKind.TYPE_BECAME_ABSTRACT in _kinds(r)
 
 
+class TestFieldDefaultUnreliableLegacySnapshot:
+    """Codex review, PR #687 (fresh evidence): ``fact_same_producer_qualified``'s
+    permissive "producer unknown -> allow compare" fallback couldn't tell a
+    POSITIVELY known-unreliable clang value (a pre-v20 clang-producer
+    snapshot's ``TypeField.default`` is unconditionally ``None`` -- real but
+    WRONG, per ``AbiSnapshot.clang_field_initializer_facts_reliable``'s own
+    docstring) apart from genuinely-never-recorded provenance. Comparing a
+    fresh clang snapshot carrying a real initializer against an unchanged,
+    persisted pre-v20 clang snapshot read as the initializer having been
+    REMOVED, purely from the schema upgrade -- not a real header edit.
+    """
+
+    def _clang_snap(self, version, field_default, *, reliable=True):
+        return AbiSnapshot(
+            library="libtest.so.1",
+            version=version,
+            types=[
+                RecordType(
+                    name="Cfg",
+                    kind="struct",
+                    size_bits=32,
+                    fields=[TypeField("x", "int", 0, default=field_default)],
+                )
+            ],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=reliable,
+        )
+
+    def test_no_false_removal_against_unreliable_legacy_new_side(self):
+        old = self._clang_snap("1.0", "42")
+        new = self._clang_snap("2.0", None, reliable=False)
+
+        r = compare(old, new)
+
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
+
+    def test_no_false_removal_against_unreliable_legacy_old_side(self):
+        # The symmetric direction: a stale, unreliable OLD snapshot compared
+        # against a fresh, reliable NEW one that happens to have lost its
+        # own genuine initializer must not silently fabricate agreement --
+        # it's already unreachable via f_old.default is None's own skip in
+        # the detector, but the gate itself should decline defensively too.
+        old = self._clang_snap("1.0", None, reliable=False)
+        new = self._clang_snap("2.0", "7")
+
+        r = compare(old, new)
+
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED not in _kinds(r)
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
+
+    def test_real_removal_still_detected_when_both_sides_reliable(self):
+        old = self._clang_snap("1.0", "42")
+        new = self._clang_snap("2.0", None)
+
+        r = compare(old, new)
+
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
+
+
 class TestEmittedSymbolStaysBare:
     """The qualified matching key introduced for FP-1 must stay internal to
     old/new type matching. Every emitted ``Change.symbol`` for a namespaced

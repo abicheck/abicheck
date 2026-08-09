@@ -241,6 +241,35 @@ def both_known_backed_fact_qualified(
     return old_producer is not None and new_producer is not None
 
 
+def _fact_positively_unreliable(snap: AbiSnapshot, key: str) -> bool:
+    """True if *snap* is POSITIVELY known to hold real-but-WRONG data for
+    *key* (a legacy pre-fix clang-producer snapshot), as opposed to simply
+    never having recorded it.
+
+    Mirrors :func:`fact_producer`'s own two reliability early-returns
+    exactly, so a caller that needs to distinguish "genuinely unknown"
+    (safe to fall through and compare) from "known and wrong" (must NOT be
+    treated as harmless unknown) can ask this in addition to
+    :func:`fact_producer`'s plain ``None`` — see
+    :func:`same_producer_backed_fact_qualified`'s use of it (Codex review,
+    fresh evidence: that gate's "producer unknown -> permissive" branch
+    can't otherwise tell a known-wrong legacy value apart from a truly
+    unrecorded one, and previously let a stale pre-v20 clang field default
+    slip through as a false ``FIELD_DEFAULT_INITIALIZER_REMOVED``).
+    """
+    if not (snap.from_headers and not snap.from_headers_inferred):
+        return False
+    if snap.ast_producer != "clang":
+        return False
+    if not snap.clang_field_initializer_facts_reliable and key.endswith(":default"):
+        return True
+    if not snap.clang_deprecation_facts_reliable and (
+        key.endswith(":deprecated") or key.endswith(":is_scoped")
+    ):
+        return True
+    return False
+
+
 def resolved_fact_producer(
     snap: AbiSnapshot,
     qualified_key: str,
@@ -297,7 +326,18 @@ def same_producer_backed_fact_qualified(
     pre-provenance baseline, or a hand-built snapshot in a test) — that would
     regress a previously-working comparison into a silent miss, the same
     reasoning ``_diff_param_defaults``' own docstring records.
+
+    That permissive fallback is checked BEFORE it applies, though: a side
+    whose value is POSITIVELY known to be unreliable (:func:`fact_producer`
+    returning ``None`` because of its own reliability gate, not because
+    nothing was ever recorded) forces a decline instead — the permissive
+    branch exists for "we have no information," and stale-but-present data
+    is the opposite of that (Codex review, fresh evidence).
     """
+    if _fact_positively_unreliable(
+        old, old_qualified_key
+    ) or _fact_positively_unreliable(new, new_qualified_key):
+        return False
     old_producer = resolved_fact_producer(
         old, old_qualified_key, bare_key, bare_unambiguous=old_bare_unambiguous
     )
