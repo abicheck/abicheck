@@ -98,10 +98,11 @@ exactly. The order matters:
 1. `verdict: null` → **not comparable**. Read `reason`, remediate the
    inputs, re-run. Do not continue into the findings, and never report this
    as "no breaking changes found".
-2. `evidence_tier`, `effective_depth` vs. `requested_depth`,
-   `coverage_warnings`, `scope.resolved` → what the run could actually see.
+2. `evidence_tier`, `evidence_tiers`, `coverage_warnings`,
+   `scope.resolved` → what the run could actually see.
 3. `verdict` and `summary` → the compatibility answer.
-4. `severity.*` and `policy_gate_decision` → the grading of that answer.
+4. `severity.*` → the grading of that answer, present only if the run
+   passed a `--severity-*` flag.
 5. `contract_coverage_failures` /
    `contract_coverage_exit_contribution` → the orthogonal coverage axis.
 6. `root_causes` / `root_cause_count` → the findings, grouped.

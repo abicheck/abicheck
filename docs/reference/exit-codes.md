@@ -83,10 +83,7 @@ suite instead.
 
 Reports state the applied number in `contract_coverage_exit_contribution`,
 which distinguishes contract coverage exit `1` from severity or aggregate
-required-target coverage. The MCP `abi_compare` tool states the same thing in
-its response's top-level `contract_coverage` block, for every `output_format`
-rather than only the one whose rendered report carries the ledger. The
-composite GitHub Action reads the same field and publishes
+required-target coverage. The composite GitHub Action reads the same field and publishes
 `verdict: COVERAGE_INCOMPLETE` rather than labelling the axis a severity-policy
 or operational failure; on `compare`, where exit `1` is shared, it uses the
 report's pre-fold `severity.exit_code` to tell the two apart. The configured `GateDecision` independently

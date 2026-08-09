@@ -426,3 +426,132 @@ def test_the_drift_check_actually_has_teeth():
         COMMAND_OBJECTS[("aggregate",)],
         "aggregate --manifest t.json --format json reports/".split(),
     ) == ["aggregate", "reports/"]
+
+
+# ---------------------------------------------------------------------------
+# Emitted-output drift: a field can exist in the schema and still never appear
+# ---------------------------------------------------------------------------
+
+#: Report fields the schema defines but a direct `abicheck compare` never
+#: emits — the GitHub Action's `check-target` envelope populates them.
+#: Verified empirically by `_real_reports` below, not asserted from docs.
+INTEGRATION_ONLY_FIELDS = frozenset(
+    {
+        "requested_depth",
+        "effective_depth",
+        "compatibility_verdict",
+        "policy_gate_decision",
+    }
+)
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentences, with Markdown table rows kept whole.
+
+    A table row is one unit — its cells state a single claim together (a
+    "which fields" cell and the "present when" cell that qualifies it), so
+    splitting per cell would separate a listing from its own explanation.
+    Ordinary prose is split on sentence boundaries after unwrapping the hard
+    line breaks these fragments are authored with.
+    """
+    units: list[str] = []
+    prose: list[str] = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("|"):
+            units.append(line)
+        else:
+            prose.append(line)
+    joined = " ".join(prose)
+    units.extend(re.split(r"(?<=[.!?])\s+", joined))
+    return units
+
+
+def _emitted_top_level_fields(tmp_path) -> set[str]:
+    """Top-level keys a real `compare --format json` emits, unioned across the
+    invocations the skills actually document.
+
+    Schema membership is not enough: `test_every_cited_report_field_still_exists`
+    passes for a field that exists in `compare_report.schema.json` but that no
+    `compare` run ever produces, which is exactly how the skills came to tell
+    an agent to read four fields it could never find.
+    """
+    import json
+
+    from click.testing import CliRunner
+
+    from abicheck.model import AbiSnapshot, Function
+    from abicheck.serialization import save_snapshot
+
+    def _snapshot(names):
+        snap = AbiSnapshot(library="libdemo.so", version="1.0")
+        snap.functions = [
+            Function(name=n, mangled=n, return_type="void") for n in names
+        ]
+        return snap
+
+    old = tmp_path / "old.abi.json"
+    new = tmp_path / "new.abi.json"
+    save_snapshot(_snapshot(["kept", "removed"]), old)
+    save_snapshot(_snapshot(["kept"]), new)
+
+    variants = (
+        [],
+        ["--severity-preset", "default"],
+        ["--contract-evaluation"],
+        ["--report-mode", "root-cause"],
+        ["--scope-public-headers"],
+    )
+    runner = CliRunner()
+    emitted: set[str] = set()
+    for index, extra in enumerate(variants):
+        out = tmp_path / f"r{index}.json"
+        runner.invoke(
+            cli_main,
+            ["compare", str(old), str(new), "--format", "json", "-o", str(out), *extra],
+        )
+        if out.is_file():
+            emitted |= set(json.loads(out.read_text(encoding="utf-8")))
+    assert emitted, "no report was produced — the probe itself is broken"
+    return emitted
+
+
+def test_integration_only_fields_really_are_never_emitted(tmp_path):
+    """Pins the claim the skills now make, against real output rather than
+    prose: these four are schema members a direct `compare` never produces."""
+    emitted = _emitted_top_level_fields(tmp_path)
+    assert emitted & INTEGRATION_ONLY_FIELDS == set()
+    # ...and the fields the skills route agents to instead really are there.
+    assert {
+        "verdict",
+        "evidence_tier",
+        "evidence_tiers",
+        "coverage_warnings",
+    } <= emitted
+
+
+def test_no_skill_tells_an_agent_to_read_an_integration_only_field(tmp_path):
+    """The defect this test exists for: instructing an agent to read a field
+    that is always absent makes the instruction unfollowable, and invites
+    reading its absence as "nothing to report" — a false green.
+
+    A skill may still *name* such a field to explain that it is Action-only;
+    what it may not do is list one among the fields to read. The two are
+    separated per *sentence* (and per table row), and only by naming the
+    real mechanism — `check-target` or "integration-only". A looser marker
+    set was tried first and proved gameable: a neighbouring sentence
+    containing the word "never" masked a genuine `effective_depth`
+    instruction two lines away.
+    """
+    emitted = _emitted_top_level_fields(tmp_path)
+    never_emitted = INTEGRATION_ONLY_FIELDS - emitted
+    markers = ("check-target", "integration-only")
+    offenders: list[str] = []
+    for path in SKILL_FILES:
+        for unit in _sentences(path.read_text(encoding="utf-8")):
+            cited = sorted(f for f in never_emitted if f"`{f}`" in unit)
+            if cited and not any(m in unit.lower() for m in markers):
+                offenders.append(
+                    f"{path.relative_to(REPO)}: cites {cited} without naming the "
+                    f"check-target envelope that alone emits it — in: {unit.strip()!r}"
+                )
+    assert offenders == []

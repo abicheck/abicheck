@@ -245,7 +245,14 @@ jobs:
   # version gate rejects, silently narrowing every run to clang-only).
   header-graph-perf:
     name: Header-graph attach-cost (trend)
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`: this job runs the checksum-pinned
+    # CastXML Superbuild, which hard-fails on any Ubuntu release it has no
+    # asset for. The floating alias silently moves between releases, so it
+    # would break this job the day GitHub repoints it. Enforced by
+    # tests/test_castxml_installer.py's runner allowlist, which only began
+    # covering this workflow once it learned to recognise composite
+    # consumers (Codex review on PR #685).
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -263,8 +270,7 @@ jobs:
           pip install -e ".[dev]"
           sudo apt-get update -qq && sudo apt-get install -y clang g++
 
-      - name: Set up pinned CastXML
-        run: bash action/install-castxml.sh
+      - uses: ./.github/actions/setup-castxml
 
       - name: Run header-graph perf gate
         run: |
@@ -307,7 +313,14 @@ jobs:
   header-graph-regression:
     name: Header-graph attach-cost regression (PR vs base)
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`: this job runs the checksum-pinned
+    # CastXML Superbuild, which hard-fails on any Ubuntu release it has no
+    # asset for. The floating alias silently moves between releases, so it
+    # would break this job the day GitHub repoints it. Enforced by
+    # tests/test_castxml_installer.py's runner allowlist, which only began
+    # covering this workflow once it learned to recognise composite
+    # consumers (Codex review on PR #685).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout base

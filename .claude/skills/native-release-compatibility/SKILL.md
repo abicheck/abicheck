@@ -49,14 +49,30 @@ reports a compatible increment while the cumulative release delta is
 breaking — the single most common way a release gate gives a false green.
 See [baselines and comparability](references/shared/baseline-and-comparability.md).
 
-If the support window covers several releases, the binding baseline is the
-**oldest** still supported.
+**If several releases are still supported, one baseline is not enough.** The
+oldest is not a safe stand-in for the rest: a symbol added in v2 and removed
+by this candidate is invisible against v1 (which never had it), yet every
+binary built against the supported v2 breaks. Compatibility with the oldest
+release does not imply compatibility with a newer one.
+
+Treat the supported release as a **matrix dimension** — compare the candidate
+against *each* supported release, and take the worst result. Add it to the
+enumeration in step 2:
+
+`{ library } × { supported release } × { platform / target } × { build profile }`
+
+Where that is genuinely too many cells to run, say which releases you did
+compare against and treat the rest as state **not run** (step 4) — an
+unknown that blocks, not an assumption that the oldest covers them.
 
 ## Step 2 — Enumerate the matrix, before running anything
 
 Write down every cell that must be checked:
 
-`{ library } × { platform / target } × { build profile }`
+`{ library } × { supported release } × { platform / target } × { build profile }`
+
+The supported-release axis is a real dimension, not a single chosen baseline —
+see step 1.
 
 This list is the gate. A cell you did not enumerate cannot later be reported
 as missing, and a cell that failed to run is not a pass
@@ -145,9 +161,10 @@ either pass or break.
 Then check the axes that are not per-finding, reading each report per
 [report interpretation](references/shared/report-interpretation.md):
 
-- `evidence_tier` / `effective_depth` — did every cell reach the depth this
-  decision requires? A cell that silently ran shallower is diagnostic, not a
-  gate result ([evidence and depth](references/shared/evidence-and-depth.md)).
+- `evidence_tier` — did every cell reach the evidence this decision
+  requires? A cell run at a shallower depth is diagnostic, not a gate result
+  ([evidence and depth](references/shared/evidence-and-depth.md)). Compare the tier
+  across cells; there is no per-report depth echo to read.
 - `contract_coverage_failures` and `contract_coverage_exit_contribution` —
   the orthogonal coverage axis. A `1` means the contract this release was
   judged against was never fully established. It is unsuppressible; report

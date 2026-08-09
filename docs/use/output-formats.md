@@ -638,7 +638,7 @@ Every JSON report carries a top-level `report_schema_version` field
 > object (`mode`, `level`, `risk`, `verdict`, `exit_code`, …). It carries its
 > own top-level `scan_schema_version` field (`MAJOR.MINOR`, importable as
 > `abicheck.schemas.SCAN_SCHEMA_VERSION`) — independent of, and not
-> interchangeable with, `report_schema_version`. The typed Python/MCP
+> interchangeable with, `report_schema_version`. The typed Python
 > `ScanResult.to_dict()` envelope (`abicheck.service`) stamps the same value at
 > its own top level, in addition to nesting the `ScanOutcome` dict (with its
 > own `scan_schema_version`) under its `report` key. There is currently no

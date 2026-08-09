@@ -664,20 +664,6 @@ class TestEvidenceDepthValidator:
         with pytest.raises(ValueError, match="effective_depth"):
             validate_evidence_depth("effective_depth", "bogus")
 
-    def test_public_depth_set_matches_mcp_server(self):
-        # Deliberately kept as a separate copy (mcp_server sits above
-        # checker_types in the dependency graph) -- this pins both stay in
-        # sync rather than silently drifting. mcp_server.py raises
-        # ImportError at import time without the optional `mcp` package
-        # (abicheck[mcp]) installed -- skip cleanly rather than failing when
-        # that extra isn't present, matching how the rest of the suite
-        # treats this same optional dependency.
-        pytest.importorskip("mcp")
-        from abicheck.checker_types import EVIDENCE_DEPTH_VALUES
-        from abicheck.mcp_server import _PUBLIC_DEPTHS
-
-        assert EVIDENCE_DEPTH_VALUES == _PUBLIC_DEPTHS
-
 
 @_requires_jsonschema
 class TestReportIdentityEnvelope:

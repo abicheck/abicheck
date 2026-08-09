@@ -96,18 +96,11 @@ python scripts/verify.py --profile full   # + integration/parity/mutation/packag
 ```
 
 `pixi run check` is exactly `python scripts/verify.py --profile pr` — treat
-either as the real definition of done, not the fast-lane command alone.
-`pixi`'s `default` environment already provisions `mkdocs`, `build`/`twine`,
-and the `mcp` extra (the `docs-build`/`distribution-build` steps'
-dependencies, plus what `tests/test_mcp_reference.py` needs to run instead of
-skipping), so `pixi run check` is complete out of the box. With plain pip,
-`pip install -e ".[dev,docs,dist,mcp]"` (not just `[dev]`) is the equivalent
-— without `docs`/`dist`, those two steps are skipped rather than run, and
-`verify.py` prints a loud warning that the `pr`-profile run is incomplete
-rather than silently reporting success. Without `mcp`, though, that warning
-doesn't fire: the skip happens *inside* pytest (`pytest.importorskip("mcp")`),
-so `verify.py`'s own `unit-pr` step still reports as passed — install `mcp`
-too, don't rely on the completeness line to catch that one.
+either as the real definition of done, not the fast-lane command alone. See
+`AGENTS.md`'s "Quick reference"/"M0-3" sections for the exact install command
+needed for full parity (`pixi run check` out of the box, or
+`pip install -e ".[dev,docs,dist]"` with plain pip) and what happens when a
+step is skipped — that's the canonical source, don't hand-duplicate it here.
 
 ### Quick tests (default CI gate)
 

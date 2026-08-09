@@ -60,10 +60,11 @@ with the operational copy shipped inside every skill as
 The skills drive the abicheck CLI, so they need whatever the workflow they run
 needs — see [CLI usage](cli-usage.md) for installation and
 [evidence and build-context flags](dump-compare-flags.md) for what deeper
-`--depth` levels require. MCP is **not** required: local CLI invocation is the
-normative execution path for every skill, so a skill works in any agent with
-shell access. An agent that does have
-[MCP configured](mcp-integration.md) may use it, without behaving differently.
+`--depth` levels require. Local CLI invocation is the only execution path a
+skill uses, so a skill works in any agent with shell access and needs no
+protocol server or other setup beyond installing the skill itself. (ADR-058
+wrote this as "CLI normative, MCP an optional adapter"; abicheck has since
+removed its MCP server, so the CLI is simply the backend.)
 
 Each skill declares the abicheck version range it was validated against and
 checks the installed version before doing anything else, rather than

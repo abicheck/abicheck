@@ -14,10 +14,3 @@
   and the same "detectors with findings or a coverage gap" filter
   `compare`'s report uses. `scan_schema_version` is `1.6`; a run without
   `--contract-evaluation` is otherwise unchanged from `1.5`.
-
-### Changed
-
-- The MCP `abi_compare` tool resolves one `CompatibilityEvaluationConfig`
-  through the canonical resolver instead of patching its own gate, so the
-  `evaluation_context` block in its report carries real per-field ADR-049 D7
-  provenance. Both live front ends now consume a resolved config.

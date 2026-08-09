@@ -86,18 +86,17 @@ and `checker.compare` itself now calls the gate — comparing `old/` against
 given, or an L2 frontend ran) carries a real `contract`, not `contract=None`
 — a plain binary/symbols-only dump with no headers still gets
 `contract=None`, per `compute_extraction_contract`'s own "nothing to
-fingerprint" rule. **Reachable today from all seven ADR-050 D2 entry
+fingerprint" rule. **Reachable today from all six ADR-050 D2 entry
 points**: the native `abicheck compare` CLI command (`--diagnostic-comparison`
 flag, `verdict: null` JSON report, exit `16`), `cli_compare_release.py`'s
 release fan-out (a per-library `"not_comparable"` verdict dominating the
 rollup, exit `16`, though it does not itself accept
 `--diagnostic-comparison`), `compat/cli.py`'s `compat check` (exit `9`),
 `cli_scan.py`'s `scan --against` (`NOT_COMPARABLE` verdict, exit `6`),
-`stack_checker.py`'s `deps compare` (`not_comparable_reason`, exit `5`), the
-`abi_compare` MCP tool (`{"status": "not_comparable", ...}`, plus its own
-`diagnostic_comparison` parameter), and `service.py`'s
-`CompareRequest`/`run_compare_request`/legacy `run_compare` shim (threads
-`diagnostic_comparison` through to whichever front-end called it).
+`stack_checker.py`'s `deps compare` (`not_comparable_reason`, exit `5`), and
+`service.py`'s `CompareRequest`/`run_compare_request`/legacy `run_compare`
+shim (threads `diagnostic_comparison` through to whichever front-end called
+it).
 `snapshot_cache.py`'s cache-key order-sensitivity, and SARIF/JUnit
 rendering of a `not_comparable` outcome (native `compare` and
 `compare-release`'s own JUnit report), and `aggregate.py`'s multi-target

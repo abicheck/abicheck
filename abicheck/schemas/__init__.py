@@ -340,7 +340,7 @@ REPORT_SCHEMA_VERSION = "2.27"
 #: :meth:`abicheck.scan_engine.ScanOutcome.to_dict` (the CLI's
 #: ``scan --format json`` contract — mode/level/risk/coverage/diff/verdict/
 #: exit_code) and :meth:`abicheck.service_scan.ScanResult.to_dict` (the typed
-#: Python/MCP service envelope — verdict/exit_code/findings/layers/confidence/
+#: Python service envelope — verdict/exit_code/findings/layers/confidence/
 #: estimate/report, where ``report`` nests the former). Same additive/breaking
 #: bump policy as :data:`REPORT_SCHEMA_VERSION` above; independent of it (scan
 #: and compare are separate contracts that evolve on their own schedules).

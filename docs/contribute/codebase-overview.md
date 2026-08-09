@@ -36,7 +36,7 @@ rendering can evolve independently.
 | Core diffing | `checker.py`, `diff_symbols.py`, `diff_types.py`, `diff_platform.py`, `diff_cpp_patterns.py`, `diff_build_config.py`, `diff_sycl.py`, `diff_templates.py`, `diff_namespaces.py`, plus smaller `diff_*` modules | Registered detectors for symbols, types, platform metadata, C++ idioms, build matrices, SYCL/plugin interfaces, and language-specific edge cases. |
 | Policy and classification | `checker_policy.py`, `change_registry.py`, `severity.py`, `policy_file.py`, `report_classifications.py` | `ChangeKind` catalog, built-in/custom policies, severity mappings, verdicts, and classification summaries. |
 | Post-processing/scope | `diff_filtering.py`, `post_processing.py`, `surface.py`, `surface_graph.py`, `internal_leak.py`, `idioms.py`, `elf_symbol_filter.py` | Public-surface resolution, evidence tiers, redundancy filtering, reachability, idiom recognition, and false-positive controls. |
-| Workflows | `cli.py`, `cli_compare_release.py`, `cli_appcompat.py`, `cli_stack.py`, `cli_baseline.py`, `cli_plugin.py`, `cli_probe.py`, `cli_surface.py`, `package.py`, `baseline.py`, `bundle.py`, `appcompat.py`, `stack_checker.py`, `resolver.py`, `binder.py`, `debian_symbols.py`, `mcp_server.py` | User-facing commands and higher-level workflows beyond a single pairwise compare. |
+| Workflows | `cli.py`, `cli_compare_release.py`, `cli_appcompat.py`, `cli_stack.py`, `cli_baseline.py`, `cli_plugin.py`, `cli_probe.py`, `cli_surface.py`, `package.py`, `baseline.py`, `bundle.py`, `appcompat.py`, `stack_checker.py`, `resolver.py`, `binder.py`, `debian_symbols.py` | User-facing commands and higher-level workflows beyond a single pairwise compare. |
 | Reporting | `reporter.py`, `html_report.py`, `sarif.py`, `junit_report.py`, `stack_report.py`, `stack_html.py`, `appcompat_html.py`, `report_summary.py`, `annotations.py` | Markdown/JSON/SARIF/HTML/JUnit reports, CI annotations, and workflow-specific renderers. |
 | Compatibility | `compat/` | ABICC-compatible CLI, descriptor parsing, ABICC dump import, and XML report generation. |
 
@@ -76,16 +76,15 @@ confidence/evidence output are all part of the normal compare pipeline.
 
 The codebase now covers more than single-library comparison: release/package
 comparison, bundle-aware analysis, application compatibility, stack checking,
-Debian symbols, ABICC compatibility, MCP integration, baseline registries,
-plugin contracts, build-matrix probes, and surface reports all have dedicated
-modules and tests.
+Debian symbols, ABICC compatibility, baseline registries, plugin contracts,
+build-matrix probes, and surface reports all have dedicated modules and
+tests.
 
 ### 2.5 Defensive parsing posture
 
 XML/YAML parsing uses safe loaders, binary readers avoid shelling out for core
-metadata, archive inputs are detected explicitly, and MCP write paths enforce
-extension and sensitive-directory restrictions. Parser/fuzzer safety checks
-remain a backlog item rather than an ignored risk.
+metadata, and archive inputs are detected explicitly. Parser/fuzzer safety
+checks remain a backlog item rather than an ignored risk.
 
 ---
 

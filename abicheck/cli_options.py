@@ -1660,57 +1660,6 @@ def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
         meta[RUN_PROFILE_META_KEY] = {"name": str(name), "injected": injected}
 
 
-#: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``
-#: MCP tool and the native ``compare`` command answer the same question through
-#: the same Tier-2 chokepoint, but their surface vocabularies differ (JSON snake
-#: keys vs ``--kebab`` flags, e.g. ``output_format`` vs ``--format``). This table
-#: is the *source of truth* that reconciles them; the ``cli-contract`` gate
-#: (D10.3) fails if an ``abi_compare`` parameter or a mapped ``compare`` flag is
-#: absent, so the two front-ends cannot silently drift. Value ``None`` marks an
-#: MCP parameter with **no** ``compare`` flag equivalent (a deliberate, reviewed
-#: omission — e.g. report-shaping knobs the MCP tool exposes that the CLI spells
-#: differently), keeping the omission explicit rather than an accident.
-MCP_CLI_NAME_MAP: dict[str, str | None] = {
-    # input operands
-    "old_input": "--old (positional OLD)",
-    "new_input": "--new (positional NEW)",
-    # ADR-040 L1: the per-side header params now map to the single side-aware
-    # ``--header`` flag (scoped via an ``old=``/``new=`` value prefix).
-    "old_headers": "--header",
-    "new_headers": "--header",
-    "headers": "--header",
-    "include_dirs": "--include",
-    "language": "--lang",
-    # policy / suppression
-    "policy": "--policy",
-    "policy_file": "--policy-file",
-    "suppression_file": "--suppress",
-    # output / report shaping
-    "output_format": "--format",
-    "show_only": "--show-only",
-    "report_mode": "--report-mode",
-    "show_impact": "--show-impact",
-    "stat": "--stat",
-    # severity-aware exit-code scheme
-    "severity_preset": "--severity-preset",
-    "severity_abi_breaking": "--severity-abi-breaking",
-    "severity_potential_breaking": "--severity-potential-breaking",
-    "severity_quality_issues": "--severity-quality-issues",
-    "severity_addition": "--severity-addition",
-    # ADR-043: generic scoped-comparison (folds the deleted appcompat/
-    # plugin-check commands into compare).
-    "used_by": "--used-by",
-    "required_symbols": "--required-symbol",
-    # ADR-050 D2: the comparability gate's diagnostic escape hatch.
-    "diagnostic_comparison": "--diagnostic-comparison",
-    # ADR-049 Phase 3: the shadow contract evaluator.
-    "contract_evaluation": "--contract-evaluation",
-    # ADR-049 Phase 6: which evidence domain that evaluator judges against
-    # (G33 Phase 5 gave the MCP tool the argument `compare` already had).
-    "contract_mode": "--contract",
-}
-
-
 #: ADR-049's contract-evaluation option decorator moved to
 #: ``cli_contract_options.py`` when this module reached its own 2000-line
 #: hard limit -- the same split, for the same reason, as ``cli_profiles.py``

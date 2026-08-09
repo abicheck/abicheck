@@ -84,7 +84,7 @@ def _tool_version_output(selected_path: str, digest: str) -> str:
     limit = 64 * 1024
     raw = bytearray()
     try:
-        # Avoid preexec_fn: dumps can originate from threaded service/MCP
+        # Avoid preexec_fn: dumps can originate from a threaded service caller
         # paths, where Python documents it as unsafe. A parent-side reader caps
         # output and kills a noisy process without buffering an unbounded pipe.
         process = subprocess.Popen(

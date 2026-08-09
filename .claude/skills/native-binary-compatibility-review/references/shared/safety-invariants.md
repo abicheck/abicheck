@@ -16,8 +16,12 @@ info for layout, no build evidence for L3+) is **unverified**, not clean.
 Report it as unverified. Never fold "we could not look" into "we looked and
 found nothing".
 
-Check `evidence_tier`, `effective_depth` vs. `requested_depth`, and
-`coverage_warnings` in the JSON report before summarizing anything.
+Check `evidence_tier`, `evidence_tiers`, and `coverage_warnings` in the JSON
+report before summarizing anything — and, when public-header scoping was
+requested, `scope.resolved`. See
+[report-interpretation.md](report-interpretation.md) for which blocks a given
+invocation actually produces: an absent block means the run did not produce
+it, never that it was clean.
 
 ## 2. A not-comparable result is not a pass
 

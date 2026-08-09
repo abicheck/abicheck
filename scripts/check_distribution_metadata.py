@@ -56,7 +56,7 @@ def main() -> int:
             fail(f"wheel {field} is {metadata.get(field)!r}, expected {expected!r}")
     # PyPI/pip-installed abicheck is the lightweight/core distribution: it must
     # never pull in CastXML transitively, on any extra. `pip install abicheck`
-    # (or `abicheck[mcp]`/`[dev]`/`[docs]`/`[dist]`/`[validation]`) installing
+    # (or `abicheck[dev]`/`[docs]`/`[dist]`/`[validation]`) installing
     # CastXML would silently promote the legacy, unsupported PyPI `castxml`
     # distribution (last released 0.4.5 in 2018 — see castxml_policy.py) into
     # abicheck's default install path, contradicting the documented contract

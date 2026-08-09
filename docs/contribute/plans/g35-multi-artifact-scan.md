@@ -4,6 +4,17 @@ level: advanced
 lifecycle: active
 ---
 
+> **Historical note (2026-08-09).** The MCP server this plan's "Phase 3 —
+> CLI + MCP surface" describes (including the `abi_scan_set` tool marked
+> "done" below) has been removed entirely — see
+> `docs/contribute/adr/021-mcp-security-model.md` (retired the same date).
+> Every MCP-specific bullet in this plan (the `abi_scan`/`abi_estimate`
+> `artifact_set` params, `abi_scan_set`, `mcp_server.py`/
+> `mcp_server_scan.py`, `docs/reference/mcp-tools-reference.md`) describes a
+> removed interface and is not something to re-implement. The CLI
+> (`scan --artifact-set`) and GitHub Action surfaces this plan describes
+> are unaffected and remain current.
+
 # G35 — Multi-Artifact / Library-Set `scan`
 
 **Origin:** User request to properly scan cases where one logical

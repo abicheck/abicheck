@@ -32,15 +32,20 @@ example is [what each level sees](../../docs/learn/what-each-level-sees.md).
 
 ## Reading the depth actually achieved
 
-Never assume the depth you asked for is the depth you got. Every JSON report
+Read what the run actually reached, not what you asked for. Every JSON report
 carries:
 
-- `requested_depth` — what the invocation asked for.
-- `effective_depth` — what the run actually reached.
 - `evidence_tier` — the canonical ordered scalar (`elf_only`,
   `dwarf_aware`, `header_aware`). **Key trust decisions off this.**
 - `evidence_tiers` — the raw list of sources that were available.
 - `coverage_warnings` — where coverage fell short.
+
+You will not find a "depth achieved" echo alongside them: `requested_depth`
+and `effective_depth` are in the report schema but only the GitHub Action's
+`check-target` envelope populates them, never a direct `abicheck compare`.
+Nothing is lost — `compare` **fails** rather than silently downgrading when an
+explicit `--depth` cannot be reached, so a report that exists reached the
+depth it was asked for. Confirm the tier; that is the real evidence claim.
 
 Per finding, `changes[].evidence_status` records what backed that specific
 finding.

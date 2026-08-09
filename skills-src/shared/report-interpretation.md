@@ -29,29 +29,45 @@ reason.message     the specific mismatch, in prose
 ## 2. What evidence backed it?
 
 ```
-requested_depth / effective_depth   asked-for vs. achieved
-evidence_tier                       elf_only | dwarf_aware | header_aware
-evidence_tiers                      raw sources available
-coverage_warnings                   where coverage fell short
-layer_coverage                      per-layer coverage detail
-scope.resolved                      false → fell back to the full export table
-contract_coverage                   "partial" → only one side had a fingerprint
+evidence_tier       elf_only | dwarf_aware | header_aware  — always present
+evidence_tiers      raw sources available                  — always present
+coverage_warnings   where coverage fell short              — always present
+scope.resolved      false → fell back to the full export table
+contract_coverage   "partial" → only one side had a fingerprint
 ```
 
-## 3. The verdict and the gate — two different things
+`evidence_tier` is the one to key trust decisions off. There is no
+"depth actually achieved" field to read on this path: `requested_depth` and
+`effective_depth` exist in the report schema but are populated only by the
+GitHub Action's `check-target` envelope, never by a direct `abicheck compare`.
+You do not need them — `compare` **fails the run** when an explicitly
+requested `--depth` cannot be reached, so a report that exists at all already
+reached the depth you asked for. Verify the tier, not a depth echo.
+
+## 3. The verdict, and the gate when one was configured
 
 ```
-verdict                 NO_CHANGE | COMPATIBLE | COMPATIBLE_WITH_RISK | API_BREAK | BREAKING
-compatibility_verdict   the compatibility-axis verdict
-severity.exit_code      the process exit code the gate computed
-severity.blocking       whether anything blocks
-policy_gate_decision    "pass" | "fail" — this check's own gate outcome
+verdict             NO_CHANGE | COMPATIBLE | COMPATIBLE_WITH_RISK | API_BREAK | BREAKING
+                    — always present; this is the compatibility answer
+severity.exit_code  the exit code the gate computed
+severity.blocking   whether anything blocks
+severity.blocking_categories / categories / config
 ```
 
-`verdict` is the compatibility answer. `policy_gate_decision` /
-`severity.*` are the *grading* of that answer under this project's
-configuration. They can legitimately disagree; report both when they do
+The whole `severity` block appears **only when the run passed a
+`--severity-*` flag** (including `--severity-preset`). Without one there is no
+gate to report: the exit code follows the legacy verdict mapping instead, and
+`verdict` is the entire answer.
+
+`verdict` is the compatibility answer; `severity.*` is the *grading* of it
+under this project's configuration. They can legitimately disagree; report
+both when both exist
 ([policies-and-suppressions.md](policies-and-suppressions.md)).
+
+`compatibility_verdict` and `policy_gate_decision` are in the schema but are
+**integration-only** — the GitHub Action's `check-target` envelope emits them,
+a direct `compare` never does. Do not look for them in a report you produced
+yourself, and do not read their absence as an old schema version.
 
 ## 4. Contract coverage — the orthogonal axis
 
@@ -101,8 +117,25 @@ findings — use `--report-mode root-cause` and read `root_causes` /
 `root_cause_count` instead. See
 [root-cause-grouping.md](root-cause-grouping.md).
 
-## Report identity
+## Absent is not empty
+
+A field missing from the document means **this run did not produce it**, not
+that its value is empty. Several blocks are conditional on how the run was
+invoked:
+
+| Block | Present when |
+|---|---|
+| `severity` | a `--severity-*` flag was passed |
+| `scope` | `--scope-public-headers` was requested |
+| `contract_coverage_failures`, `contract_coverage_exit_contribution`, `contract_context` | `--contract-evaluation` was passed |
+| `root_causes`, `root_cause_count` | `--report-mode root-cause` |
+| `reason` | the comparison was refused (`verdict: null`) |
+| `requested_depth`, `effective_depth`, `compatibility_verdict`, `policy_gate_decision` | never on a direct `compare` — Action `check-target` envelope only |
+
+If you need one of the conditional blocks, re-run with the flag that produces
+it rather than reporting the question as unanswerable — and never treat an
+absent block as a clean one.
 
 `report_schema_version` and `tool_version` identify the contract the document
-was written against. If a field this workflow expects is absent, check these
-before assuming the field is empty — an older abicheck may simply predate it.
+was written against. Check them only after ruling out the table above; an
+older abicheck predating a field is the rarer explanation.

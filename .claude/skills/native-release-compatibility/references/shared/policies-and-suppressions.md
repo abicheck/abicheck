@@ -24,10 +24,13 @@ Owned by [the policy profiles page](https://abicheck.github.io/abicheck/use/poli
 category; `--exit-code-scheme auto|legacy|severity` selects which exit-code
 contract applies.
 
-In the report, `severity.exit_code`, `severity.blocking`,
-`severity.blocking_categories`, and `policy_gate_decision` (`"pass"` /
-`"fail"`) express the gate decision. `policy_gate_decision` is the check's
-own real gate outcome, not a mirror of `verdict`.
+In the report, `severity.exit_code`, `severity.blocking`, and
+`severity.blocking_categories` express the gate decision — and the whole
+`severity` block is present **only when the run passed a `--severity-*` flag**.
+Without one there is no gate: the exit code follows the legacy verdict
+mapping. (`policy_gate_decision` is an Action `check-target` field, not
+something a direct `compare` emits — see
+[report-interpretation.md](report-interpretation.md).)
 
 Severity configuration is a **grading** decision. Changing it never removes a
 finding; it changes whether that finding blocks. Reporting "no blocking

@@ -65,22 +65,6 @@ CLI_MITIGATION = (
     "or set contract.unresolved=warn to accept incomplete coverage."
 )
 
-#: The same two questions answered for a caller of the MCP `abi_compare` tool.
-#: `contract.unresolved` can only be stated by a `kind: contract` pack (the
-#: resolver gives it no other candidate source) and that tool exposes no pack
-#: parameter, so telling this audience to "set contract.unresolved=warn"
-#: points at a control it does not have (Codex review). The finding half of
-#: the message is identical either way; only the mitigation differs, because
-#: the surfaces genuinely differ.
-MCP_MITIGATION = (
-    "The full ledger is in this response's contract_coverage.failures. "
-    "Accepting incomplete coverage needs contract.unresolved=warn from a "
-    "`kind: contract` pack, which this tool does not expose -- it is "
-    "available on the compare and scan CLIs."
-)
-
-
-
 def coverage_exit_for_context(ctx: Any) -> int:
     """The exit floor a persisted contract context imposes (``0``/``1``).
 
@@ -249,44 +233,6 @@ def report_carries_the_ledger(
         return False
     rendered = [fmt] + ([secondary_fmt] if secondary_fmt is not None else [])
     return all(f == _LEDGER_BEARING_FORMAT for f in rendered)
-
-
-def coverage_response_block(
-    result: Any, *, base_exit: int = 0, mitigation: str = MCP_MITIGATION
-) -> dict[str, Any] | None:
-    """The axis as structured data, for a front end whose answer *is* a dict.
-
-    ``None`` when the run evaluated no contract at all -- there is no domain
-    to be short of evidence for, so an empty block would suggest a question
-    was asked that never was.
-
-    Otherwise always present, including when the domain closed cleanly
-    (``failures: []``, contribution ``0``), matching how ``reporter.py``
-    emits the ledger rather than omitting it: "we looked and found nothing"
-    and "we never looked" are different answers and must not serialize the
-    same.
-
-    Why a front end needs this at all rather than reading its own rendered
-    report: only the JSON report carries the ledger, so an MCP client asking
-    for markdown/sarif/html got a change-free report beside ``exit_code: 1``
-    with nothing anywhere saying why (Codex review). Unlike the CLI's stderr
-    notice -- which is *skipped* for JSON because a second copy beside a
-    piped report is noise -- this block is emitted for every format: it is a
-    sibling key of the very ``exit_code`` it explains, and making a client
-    branch on ``output_format`` to find out why its gate failed is the
-    failure this exists to prevent.
-    """
-    ctx = getattr(result, "contract_context", None)
-    if ctx is None:
-        return None
-    failures = coverage_failures_for_context(ctx)
-    return {
-        "exit_contribution": coverage_exit_for_context(ctx),
-        "failures": [f.to_dict() for f in failures],
-        "diagnostic": coverage_failure_diagnostic(
-            result, base_exit=base_exit, mitigation=mitigation
-        ),
-    }
 
 
 def announce_coverage_floor(

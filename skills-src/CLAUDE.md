@@ -42,8 +42,11 @@ Generated output, per skill, per target tree:
 
 ## Rules
 
-1. **CLI is the normative backend.** No skill's correctness may depend on
-   MCP being configured.
+1. **The CLI is the execution backend.** A skill's workflow drives
+   `abicheck` through the shell and nothing else — no protocol server, no
+   setup beyond installing the skill. (ADR-058 framed this as "CLI
+   normative, MCP an optional adapter"; abicheck has since removed its MCP
+   server, so the CLI is simply the backend.)
 2. **Only reference surface that exists today.** `tests/test_agent_skills_drift.py`
    checks every CLI command/option and every report-JSON field path a skill
    names against the live Click tree and the live report schema. A renamed

@@ -19,7 +19,7 @@ from `abicheck.service.__all__` instead of hand-copied.
 
 `abicheck/service.py`'s `__all__` (re-exporting names from `service_scan.py`,
 `service_render.py`, and `api_types.py`) is the Tier-2 public surface — the
-same one the CLI and MCP server call through (ADR-037). `docs/use/
+same one the CLI calls through (ADR-037). `docs/use/
 python-api.md` deliberately documents only `run_compare`'s "common subset" of
 keyword arguments and explicitly punts to the docstrings for the rest; this
 generator produces the full signature/dataclass-field reference `python-

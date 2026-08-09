@@ -26,11 +26,11 @@ It catches removed or renamed symbols, changed function signatures, struct layou
 - **Public-surface scoping.** Filters findings to the library's *public* ABI surface so internal-only changes don't fail your build — fewer false positives than symbol-only tools.
 - **More than one library at a time.** Compare co-versioned multi-library releases as a single bundle ([`compare` on directory/package inputs](https://abicheck.github.io/abicheck/user-guide/multi-binary/)), check whether a specific application still works ([`compare --used-by`](https://abicheck.github.io/abicheck/user-guide/appcompat/)), or validate a binary's full dependency stack across sysroots ([`deps compare`](https://abicheck.github.io/abicheck/user-guide/cli-usage/)).
 - **Drop-in for existing tools.** A [`compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) mode mirrors `abi-compliance-checker` flags, and migration guides cover [ABICC](https://abicheck.github.io/abicheck/user-guide/from-abicc/) and [libabigail](https://abicheck.github.io/abicheck/user-guide/from-libabigail/).
-- **Agent- and script-friendly.** Structured JSON, a [Python API](#python-api), and an [MCP server](https://abicheck.github.io/abicheck/user-guide/mcp-integration/) for AI-driven workflows. Pure Python (3.10+), no heavyweight native toolchain required for binary-only mode. Four portable [Agent Skills](https://abicheck.github.io/abicheck/use/agent-skills/) ship in `.agents/skills/` so a coding agent can answer "will this break existing consumers?" without the user knowing abicheck exists.
+- **Agent- and script-friendly.** Structured JSON/SARIF output and a [Python API](#python-api) for AI-driven workflows — no separate protocol server, agents use the CLI or the typed API directly. Pure Python (3.10+), no heavyweight native toolchain required for binary-only mode. Four portable [Agent Skills](https://abicheck.github.io/abicheck/use/agent-skills/) ship in `.agents/skills/` so a coding agent can answer "will this break existing consumers?" without the user knowing abicheck exists.
 - **Contract-aware decisions** (opt-in). Gate only on changes that belong to your *declared* compatibility contract — public headers, the binary's actual export table, or everything — while excluded and unresolved findings stay in an auditable report instead of silently vanishing. See [Contract-Aware Compatibility](https://abicheck.github.io/abicheck/learn/contract-aware-compatibility/).
 - **Cross-compiler reconciliation.** When one target is checked under several compiler/build profiles (GCC, Clang, MSVC), `aggregate` folds the reports back together and tells you whether a break is universal or profile-specific. See [Aggregate Reports](https://abicheck.github.io/abicheck/use/aggregate-reports/).
 - **Consumer impact explanations.** `compare --used-by` doesn't just say an application is affected — with source evidence on the library side, it can show the public-to-internal call chain that makes the app depend on the changed declaration. See [Application Compatibility](https://abicheck.github.io/abicheck/user-guide/appcompat/#why-does-this-consumer-depend-on-the-changed-declaration).
-- **One automation model.** The Python API and MCP server resolve through the same typed request objects and compatibility semantics (native `compare` does too; native `dump` is migrating — see the [CLI/Python/MCP parity table](https://abicheck.github.io/abicheck/user-guide/python-api/#cli-python-mcp-parity)).
+- **One automation model.** The CLI and the Python API resolve through the same typed request objects and compatibility semantics (native `dump` is migrating — see the [CLI/Python parity table](https://abicheck.github.io/abicheck/user-guide/python-api/#cli-python-parity)).
 
 ---
 
@@ -203,9 +203,9 @@ print(result.old_snapshot.library, result.new_snapshot.library)
 `result, old, new = run_compare(...).as_tuple()`.
 
 See the [Python API guide](https://abicheck.github.io/abicheck/user-guide/python-api/)
-for snapshots, custom policies, and rendering, plus the
-[MCP server integration](https://abicheck.github.io/abicheck/user-guide/mcp-integration/)
-for AI-agent workflows.
+for snapshots, custom policies, and rendering. AI-agent workflows use this
+same API or the CLI's structured JSON/SARIF output — there is no separate
+protocol server.
 
 ---
 

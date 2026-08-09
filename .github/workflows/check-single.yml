@@ -295,6 +295,7 @@ jobs:
   check:
     name: ${{ inputs.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     outputs:
       outcome: ${{ steps.run.outputs.outcome }}
       check-id: ${{ steps.run.outputs.check-id }}

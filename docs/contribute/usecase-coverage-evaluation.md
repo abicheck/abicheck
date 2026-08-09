@@ -56,7 +56,7 @@ A real invocation is a point in this space:
 | **Library archetype** | pure-C system lib · C++ template/vtable lib · header-only/inline · plugin (dlopen) · static (`.a`) · kernel/eBPF · GPU/accelerator (SYCL/CUDA) · FFI-consumed C ABI |
 | **Platform** | ELF/Linux · PE+PDB/Windows (MSVC, MinGW) · Mach-O/macOS (x86-64, ARM64) |
 | **Change class** | binary ABI break · source API break · compatible addition · quality/bad-practice · deployment risk |
-| **Workflow** | CI PR gate · release/package compare · baseline pin · app-compat · multi-lib bundle · build-config matrix · stack/sysroot · Debian symbols · ABICC drop-in · MCP/agent |
+| **Workflow** | CI PR gate · release/package compare · baseline pin · app-compat · multi-lib bundle · build-config matrix · stack/sysroot · Debian symbols · ABICC drop-in · agent (CLI/typed API) |
 | **Toolchain/standard** | GCC/Clang/MSVC/ICX · C++11→23 floor · libstdc++ dual ABI · flag drift · LP64/ILP64 · char8_t/_BitInt/atomic/ABI-tags |
 
 ## Coverage scorecard
@@ -79,7 +79,6 @@ A real invocation is a point in this space:
 | Windows PE/MSVC | `complete` | **G1 closed**: `cross-platform-e2e` lane runs `compare` on MinGW DLLs; MSVC+PDB lane asserts struct-growth + removed-export verdicts |
 | macOS Mach-O/ARM64 | `complete` | **G1 closed**: `cross-platform-e2e` lane runs `compare` on Apple-clang dylibs; AAPCS64 HFA/HVA + 16-byte boundary modeled + unit-tested |
 | `compare`/release/baseline/Debian/ABICC | `complete` | dedicated CLIs + tests |
-| MCP server | `complete` | unit-tested (mocks, Linux) |
 | Reporting: JSON/SARIF/JUnit | `complete` | versioned schema + 34 SARIF / 55 JUnit tests |
 | Reporting: Markdown/HTML | `complete` | structural coverage across verdict tiers + sections + escaping (G3 done) |
 | Build-config matrix (`probe`) | `complete` | **G2 closed**: wired into `compare`; both CXX floor and API_DEPENDS proven e2e (`.o` `.symtab` surface capture fixed) |

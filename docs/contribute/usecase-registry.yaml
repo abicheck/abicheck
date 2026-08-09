@@ -363,11 +363,12 @@ use_cases:
   - id: UC-WF-mcp
     axis: workflow
     name: MCP server (AI-agent integration)
-    status: complete
-    evidence:
-      modules: [abicheck/mcp_server.py]
-      tests: [tests/test_mcp_server_unit.py]
-    note: Unit-tested with mocks; no live client/server integration test.
+    status: by_design_excluded
+    note: >
+      An experimental MCP server shipped and was later removed. Agent
+      integrations now use the CLI (structured JSON/SARIF output) or the
+      typed Python API (abicheck.service) directly — see
+      docs/use/python-api.md.
 
   - id: UC-WF-bundle
     axis: workflow
@@ -954,7 +955,6 @@ use_cases:
       modules:
         - abicheck/cli_scan.py
         - abicheck/buildsource/crosscheck.py
-        - abicheck/mcp_server.py
       tests:
         - tests/test_scan_estimate.py
         - tests/test_crosscheck.py
@@ -964,8 +964,7 @@ use_cases:
       ABI surface, public-not-exported, header/build-context mismatch,
       private-header leaks + advisory pattern facts), severity-mapped via
       `--crosscheck KEY=LEVEL` (`_audit_exit_code`: RISK advisory, API_BREAK →
-      exit 2, promoted checks gate); the MCP `abi_audit` tool exposes the same
-      catalog. REMAINS: `surface-report` reuse and the deeper one-time checks
+      exit 2, promoted checks gate). REMAINS: `surface-report` reuse and the deeper one-time checks
       (ODR variants, visibility/versioning hygiene, RTTI-for-internal-types) once
       their ChangeKinds land (Phase 2 tail).
 
@@ -1033,7 +1032,6 @@ use_cases:
       modules:
         - abicheck/cli_scan.py
         - abicheck/service.py
-        - abicheck/mcp_server.py
       tests:
         - tests/test_cli_scan.py
         - tests/test_scan_estimate.py
@@ -1044,8 +1042,8 @@ use_cases:
       and the risk score, so a partial scan is legible (never a bare "source scan
       failed"). DONE: the typed `ScanRequest`/`CostEstimate`/`LayerResult`/`Budget`
       API + `service.estimate_scan()` (probes TU count from the compile DB /
-      source tree + header fan-out), surfaced as `scan --estimate` and the MCP
-      `abi_estimate` tool — a dry-run that scans nothing. REMAINS: the full
+      source tree + header fan-out), surfaced as `scan --estimate` — a
+      dry-run that scans nothing. REMAINS: the full
       `ScanResult`/`run_scan` refactor (move the `cli_scan` orchestration body into
       `service.py`) and the provider-agreement/confidence matrix rendered by
       reporter/PR-comment/SARIF.

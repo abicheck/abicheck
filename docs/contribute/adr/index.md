@@ -115,7 +115,7 @@ against the code as unverified, regardless of how confident it reads.
 | [020a](020-build-context-capture.md) | Build-Context Aware Header Extraction | Accepted — implemented |
 | [020b](020-sycl-and-heterogeneous-stack-support.md) | SYCL and Heterogeneous Computing Stack Support | Accepted — implemented |
 | [021a](021-debug-artifact-resolution.md) | Debug Artifact Resolution Subsystem | Accepted — implemented |
-| [021b](021-mcp-security-model.md) | MCP Security Model | Accepted — implemented |
+| [021b](021-mcp-security-model.md) | MCP Security Model | Deprecated — Retired: MCP interface removed |
 | [022](022-baseline-registry.md) | Baseline Registry and Snapshot Distribution | Accepted — not implemented; the filesystem backend and `baseline` command group that once shipped were deleted by [ADR-043](043-cli-pre-1.0-surface-reset.md) D4, which also records recreating a registry as a non-goal |
 | [023](023-bundle-aware-multi-binary-analysis.md) | Bundle-Aware Multi-Binary ABI Analysis | Accepted — implemented |
 | [024](024-public-abi-surface-resolution.md) | Public ABI Surface Resolution and False-Positive Traceability | Accepted — implemented |
@@ -149,7 +149,7 @@ against the code as unverified, regardless of how confident it reads.
 | [052](052-unified-impact-assessment-model.md) | Unified Impact Assessment Model (G29 Phase 3, slices 1-9) | Accepted — slices 1-9 implemented |
 | [053](053-tu-link-unit-dso-attribution.md) | TU → Link-Unit → DSO Source-Evidence Attribution | Accepted — implemented (core algorithm + validator; CLI/Action pipeline wiring deferred, see D5) |
 | [054](054-cli-project-integration-surface-consolidation.md) | CLI Project-Integration Surface Consolidation | Accepted — implemented |
-| [055](055-typed-request-result-completeness-and-schema-registry.md) | Typed Request/Result Completeness and a Schema-Version Registry | Accepted — implemented (D1-D4), including D1's structural half: the CLI, typed API, and MCP now share one input resolution |
+| [055](055-typed-request-result-completeness-and-schema-registry.md) | Typed Request/Result Completeness and a Schema-Version Registry | Accepted — implemented (D1-D4), including D1's structural half: the CLI and typed API share one input resolution. D4 (MCP dedup) and other MCP-specific claims are historical — the MCP server was later removed |
 | [056](056-multi-artifact-library-set-scan.md) | Multi-Artifact / Library-Set `scan` | Proposed — partially implemented (Phases 1-4's engine/detector/CLI/Action slice shipped ahead of formal sign-off; MCP half, example catalog, and `--dry-run` estimator deferred); see [G35](../plans/g35-multi-artifact-scan.md) |
 | [057](057-consumer-graph-and-impact-join.md) | Consumer Graph and the Consumer/Source Impact Join (G29 Phase 4, slice 1) | Accepted — slice 1 implemented (consumer graph, the join, ADR-046 D6's tier-1 selector, the `--used-by` overlay wiring); the use-case manifest and runtime-trace halves of Phase 4 are not implemented; see [G29](../plans/g29-impact-analysis-layer.md) |
 | [058](058-native-compatibility-agent-skills.md) | Native Compatibility Agent Skills — User-Task-First Domain Layer | Accepted — partially implemented (G36 P0.1–P0.3/P0.6–P0.9: the four skills, generator, and gates shipped; P0.4/P0.5 product-surface items and all of P1 remain); see [G36](../plans/g36-native-compatibility-agent-skills.md) |
