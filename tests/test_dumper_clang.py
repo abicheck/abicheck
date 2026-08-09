@@ -928,7 +928,120 @@ def test_field_default_fingerprint_distinguishes_template_specializations() -> N
     assert types["S1"].fields[0].default != types["S2"].fields[0].default
 
 
-def test_index_disambiguates_specializations_via_child_mangled_name() -> None:
+def test_field_default_fingerprint_stable_across_unrelated_member_insertion() -> None:
+    """Codex review, PR #687, third round, fresh evidence: end-to-end
+    version of the order-independence guarantee. `S1.x = A<int>::VALUE`
+    must fingerprint identically whether or not an unrelated `AAA` member
+    was inserted earlier in the SAME specialization -- the earlier
+    "first mangled child" disambiguator broke this (adding `AAA` ahead of
+    `VALUE` changed the computed disambiguator from `VALUE`'s own mangled
+    name to `AAA`'s), producing a false `FIELD_DEFAULT_INITIALIZER_CHANGED`
+    purely from an unrelated addition."""
+
+    def _snap(with_aaa: bool):
+        members = []
+        if with_aaa:
+            members.append(
+                {
+                    "kind": "VarDecl",
+                    "id": "0xAAA",
+                    "name": "AAA",
+                    "mangledName": "_ZN1AIiE3AAAE",
+                    "type": {"qualType": "const int"},
+                }
+            )
+        members.append(
+            {
+                "kind": "VarDecl",
+                "id": "0x1",
+                "name": "VALUE",
+                "mangledName": "_ZN1AIiE5VALUEE",
+                "type": {"qualType": "const int"},
+            }
+        )
+        root = _tu(
+            {
+                "kind": "ClassTemplateSpecializationDecl",
+                "name": "A",
+                "completeDefinition": True,
+                "inner": members,
+            },
+            {
+                "kind": "CXXRecordDecl",
+                "name": "S1",
+                "tagUsed": "struct",
+                "loc": {"file": "include/foo.h", "line": 1},
+                "completeDefinition": True,
+                "inner": [_decl_ref_initializer_by_id("x", "0x1")],
+            },
+        )
+        (t,) = _ClangAstParser(root, set(), set()).parse_types()
+        return t.fields[0].default
+
+    before = _snap(with_aaa=False)
+    after = _snap(with_aaa=True)
+    assert before is not None
+    assert before == after
+
+
+def test_field_default_fingerprint_distinguishes_sizeof_operand_type() -> None:
+    """Codex review, PR #687, third round, fresh evidence: a
+    ``UnaryExprOrTypeTraitExpr`` (``sizeof``/``alignof``/...) stores its
+    TYPE operand exclusively in ``argType`` -- its own ``type`` key is just
+    the trait's result type (always ``unsigned long`` for ``sizeof``,
+    identical regardless of operand) and ``name`` only says which trait, not
+    what it was applied to. Verified against real Clang 18 output that
+    ``sizeof(int)`` and ``sizeof(long long)`` produced byte-identical nodes
+    apart from ``argType`` before this fix."""
+
+    def _sizeof_field(field_name: str, arg_qual_type: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": field_name,
+            "type": {"qualType": "unsigned long"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "UnaryExprOrTypeTraitExpr",
+                    "type": {"qualType": "unsigned long"},
+                    "name": "sizeof",
+                    "argType": {"qualType": arg_qual_type},
+                }
+            ],
+        }
+
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                _sizeof_field("a", "int"),
+                _sizeof_field("b", "long long"),
+                _sizeof_field("a_again", "int"),
+            ],
+        },
+    )
+    (t,) = _ClangAstParser(root, set(), set()).parse_types()
+    fields = {f.name: f for f in t.fields}
+
+    assert fields["a"].default is not None
+    assert fields["a"].default != fields["b"].default
+    assert fields["a"].default == fields["a_again"].default
+
+
+def test_index_disambiguates_specializations_via_scope_key() -> None:
+    """Codex review, PR #687, third round, fresh evidence: an earlier
+    version derived the specialization disambiguator from whichever direct
+    child happened to be first with a mangled name -- unstable to an
+    unrelated member being inserted earlier in the same specialization
+    (see the dedicated order-independence test below). Fixed via
+    ``_specialization_scope_key``, which extracts only the SCOPE portion of
+    a representative member's mangled name (``itanium_scope_components``,
+    dropping the trailing leaf/member component) -- identical regardless of
+    which member of the SAME specialization contributed it."""
     from abicheck.dumper_clang import _index_decl_id_qualified_names
 
     root = _tu(
@@ -966,10 +1079,43 @@ def test_index_disambiguates_specializations_via_child_mangled_name() -> None:
     )
     index = _index_decl_id_qualified_names(root)
 
-    assert index["0x1"] == "A#_ZN1AIiE5VALUEE::VALUE"
-    assert index["0x2"] == "A#_ZN1AIlE5VALUEE::VALUE"
+    assert index["0x1"] == "A#AIiE::VALUE"
+    assert index["0x2"] == "A#AIlE::VALUE"
     assert index["0x1"] != index["0x2"]
     assert index["0x3"] == "B::VALUE"
+
+
+def test_index_specialization_key_stable_across_member_insertion() -> None:
+    """The order-independence guarantee directly, at the index level: two
+    members of the SAME specialization (`VALUE` and a newly-inserted `AAA`
+    ahead of it) must resolve to the identical scope-key prefix, so adding
+    one never perturbs the other's already-computed identity."""
+    from abicheck.dumper_clang import _index_decl_id_qualified_names
+
+    root = _tu(
+        {
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "id": "0xAAA",
+                    "name": "AAA",
+                    "mangledName": "_ZN1AIiE3AAAE",
+                },
+                {
+                    "kind": "VarDecl",
+                    "id": "0x1",
+                    "name": "VALUE",
+                    "mangledName": "_ZN1AIiE5VALUEE",
+                },
+            ],
+        },
+    )
+    index = _index_decl_id_qualified_names(root)
+
+    assert index["0xAAA"] == "A#AIiE::AAA"
+    assert index["0x1"] == "A#AIiE::VALUE"
 
 
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:

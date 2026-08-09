@@ -106,3 +106,21 @@ it should read in CHANGELOG.md. Delete the other sections.
   does encode the arguments, e.g. `_ZN1AIiE5VALUEE` vs. `_ZN1AIlE5VALUEE`)
   is now used to disambiguate — build-stable, unlike the specialization
   node's own memory-address `id`.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_CHANGED` for a `sizeof`/
+  `alignof` operand type change** (Codex review, fresh evidence): a
+  `UnaryExprOrTypeTraitExpr` stores its TYPE operand exclusively in
+  `argType` — its own `type` key is just the trait's result type (always
+  `unsigned long` for `sizeof`, identical regardless of operand) — so
+  `sizeof(int)` and `sizeof(long long)` fingerprinted identically before
+  this. Verified against real Clang 18 output before fixing.
+- **Fixed the template-specialization disambiguator above being unstable
+  to unrelated member insertions** (Codex review, fresh evidence, third
+  round): it previously used whichever direct child happened to be FIRST
+  with a mangled name, so inserting a new, unrelated member earlier in the
+  same specialization changed an already-unrelated declaration's computed
+  fingerprint purely from that insertion — verified against real Clang 17
+  output. Now derives the disambiguator from only the SCOPE portion of a
+  representative member's mangled name (via the existing
+  `diff_cxx_rules.itanium_scope_components`, dropping the member's own
+  trailing leaf component), which is identical regardless of which member
+  of the same specialization contributed it.

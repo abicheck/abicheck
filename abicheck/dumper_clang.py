@@ -71,6 +71,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .diff_cxx_rules import itanium_scope_components
 from .errors import AstContextMissingError, SnapshotError
 from .model import (
     AccessLevel,
@@ -1845,7 +1846,7 @@ def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
             # one at all -- a rarer, accepted degradation, the same
             # "conservative fallback over a wrong guess" convention this
             # whole module already follows elsewhere.
-            disambiguator = _first_mangled_name(node)
+            disambiguator = _specialization_scope_key(node)
             scope_name = f"{name}#{disambiguator}" if disambiguator else name
         else:
             scope_name = name
@@ -1858,19 +1859,35 @@ def _index_decl_id_qualified_names(root: dict[str, Any]) -> dict[str, str]:
     return index
 
 
-def _first_mangled_name(node: dict[str, Any]) -> str:
-    """The first direct child's non-empty ``mangledName``, or ``""``.
+def _specialization_scope_key(node: dict[str, Any]) -> str:
+    """A build-stable, MEMBER-ORDER-INDEPENDENT identity for a
+    ``ClassTemplateSpecializationDecl``, or ``""`` when none can be derived.
 
-    Shallow only (direct children, not recursive) — used by
-    :func:`_index_decl_id_qualified_names` to derive a build-stable
-    per-specialization disambiguator from ANY one of its linkage-bearing
-    members, not to resolve one specific declaration.
+    An earlier version used whichever direct child happened to be FIRST with
+    a mangled name -- unstable to unrelated source edits (Codex review, fresh
+    evidence: real Clang 17 output confirmed inserting `static constexpr int
+    AAA` *before* an unchanged `VALUE` changed the disambiguator from
+    `VALUE`'s own mangled name to `AAA`'s, silently perturbing every OTHER
+    declaration referencing that `VALUE`, though nothing about it changed).
+
+    Fixed via the SCOPE portion of a representative member's mangled name
+    (:func:`diff_cxx_rules.itanium_scope_components`), e.g.
+    ``_ZN1AIiE5VALUEE`` -> ``["AIiE", "VALUE"]``: dropping the trailing leaf
+    leaves ``["AIiE"]``, identical regardless of which member of the SAME
+    specialization contributed it. Tries every child until one parses (not
+    just the first with a mangled name) -- a special member/operator's name
+    is not parseable this way (returns ``None``, by that function's own
+    contract), and stopping there would reopen the same instability.
     """
     for child in node.get("inner", []) or []:
-        if isinstance(child, dict):
-            mangled = child.get("mangledName")
-            if isinstance(mangled, str) and mangled:
-                return mangled
+        if not isinstance(child, dict):
+            continue
+        mangled = child.get("mangledName")
+        if not isinstance(mangled, str) or not mangled:
+            continue
+        comps = itanium_scope_components(mangled)
+        if comps and len(comps) > 1:
+            return "::".join(comps[:-1])
     return ""
 
 
@@ -1885,6 +1902,21 @@ def _canonical_expr(node: Any, id_index: dict[str, str] | None = None) -> Any:
     type_obj = node.get("type")
     if isinstance(type_obj, dict) and "qualType" in type_obj:
         out["type"] = type_obj["qualType"]
+    # A UnaryExprOrTypeTraitExpr (sizeof/alignof/... applied to a TYPE, not
+    # an expression) stores its operand EXCLUSIVELY in "argType" -- "type" is
+    # just the trait's own result type (always "unsigned long" for sizeof,
+    # identical regardless of the operand), and "name" only says which trait
+    # ("sizeof"), not what it was applied to (Codex review, fresh evidence:
+    # verified against real Clang 18 output that `sizeof(int)` and
+    # `sizeof(long long)` produce byte-identical nodes apart from this key,
+    # so a field/param default changing between the two fingerprinted
+    # identically without it). Other trait-expression operand shapes this
+    # module hasn't verified against real output (e.g. a multi-operand
+    # TypeTraitExpr's own array) are a known, narrower residual gap -- not
+    # fixed here without the same empirical verification this fix required.
+    arg_type_obj = node.get("argType")
+    if isinstance(arg_type_obj, dict) and "qualType" in arg_type_obj:
+        out["argType"] = arg_type_obj["qualType"]
     referenced = node.get("referencedDecl")
     if isinstance(referenced, dict):
         # A DeclRefExpr's own top-level keys (kind "DeclRefExpr", a "type"
