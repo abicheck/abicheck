@@ -816,10 +816,22 @@ every copied skill-specific `references/*.md` file and every copied
 generator output and the ownership check exists to cover exactly that
 class of file, not one arbitrarily narrower slice of it, and a file under
 `.claude/skills/**` is no less generator-owned than its `.agents/skills/**`
-counterpart once P0.3 commits both. Register that marker pattern in
-`GENERATED_FILE_MARKERS` so `generated-file-ownership` enumerates both
-whole generated trees, not only `.agents/skills/`'s top-level `SKILL.md`
-files. For (3):
+counterpart once P0.3 commits both. **This needs a real code change to
+`check_generated_file_ownership()`, not just a registry entry — call this
+out explicitly, the same way P0.1's `docs_contract.py` extension is called
+out below.** `GENERATED_FILE_MARKERS` today is a flat list of exact
+`(path, marker, generator)` tuples — it has no glob/tree-scan capability,
+which is exactly why `docs/reference/examples/case*.md` is already handled
+by a *second*, hardcoded glob loop in the same function rather than by
+adding entries to that list one per case file. An arbitrary-depth,
+arbitrary-count tree of per-skill generated Markdown is the same shape of
+problem, at larger and growing scale (every skill's `SKILL.md` plus every
+`references/*.md` plus every copied `shared/*.md`, times two trees) — so
+add a third loop to `check_generated_file_ownership()` that walks
+`.agents/skills/**/*.md` and `.claude/skills/**/*.md` directly (mirroring
+the existing `examples/case*.md` glob loop's shape, not registering
+individual paths in `GENERATED_FILE_MARKERS`), flagging any file under
+either root missing the marker. For (3):
 **don't invent a new bespoke drift checker** — register each
 `skills-src/shared/*.md` fragment in `docs/_meta/topics.yaml` as a
 `task_pages`/`allowed_summaries` entry against the topic(s) it summarizes
@@ -866,7 +878,9 @@ just `DOCS.rglob`. Land both extensions as their own small commit in
 from the day it's added, not merely asserted to be.
 
 **Files:** `skills-src/CLAUDE.md` (new); `scripts/check_ai_readiness.py`
-(`REQUIRED_CLAUDE_MD_DIRS`, `GENERATED_FILE_MARKERS`); `scripts/
+(`REQUIRED_CLAUDE_MD_DIRS`; a new glob-based loop in
+`check_generated_file_ownership()` for both skill trees, not a
+`GENERATED_FILE_MARKERS` entry — see above); `scripts/
 gen_agent_skills.py` (emit the marker — depends on P0.3);
 `scripts/check_docs_contract.py` (extend `task_pages`/`allowed_summaries`
 path validation to accept a repo-relative non-`docs/` path, mirroring
