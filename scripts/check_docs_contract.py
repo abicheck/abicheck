@@ -991,6 +991,8 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "--source-abi-cache",
             "--source-abi-scope",
             "--source-abi-extractor",
+            "--source-abi",
+            "--source-graph",
         ),
         frozenset(
             {"use/build-evidence-setup.md", "reference/environment.md", "AGENTS.md"}
@@ -1005,25 +1007,52 @@ def _check_retired_surfaces(f: Findings) -> None:
     Deliberately scans fenced code blocks too (unlike
     _check_stale_process_language, which blanks them) -- a stale command
     inside a ```bash example is exactly the worst place to miss one, since a
-    reader is likely to copy-paste it verbatim. WARN-only: a hit needs a
-    human read to add historical framing or an allowlist entry, not an
-    automatic rewrite."""
+    reader is likely to copy-paste it verbatim. Exempts the same lifecycle/
+    generated pages _check_stale_process_language does -- a page marked
+    historical/migration is allowed to discuss a retired surface in its own
+    historical-record capacity, same reasoning as the ADR/plans/archive
+    directory exemption below. WARN-only: a hit needs a human read to add
+    historical framing or an allowlist entry, not an automatic rewrite."""
     for path in sorted(DOCS.rglob("*.md")):
         rel = path.relative_to(DOCS).as_posix()
         if rel.startswith(_STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES):
             continue
         if _has_generated_marker(path):
             continue
+        try:
+            fm = load_front_matter(path)
+        except (yaml.YAMLError, ValueError):
+            fm = None  # front-matter errors are reported by another check
+        if fm is not None:
+            if fm.get("generated") is True:
+                continue
+            lifecycle = fm.get("lifecycle")
+            if (
+                isinstance(lifecycle, str)
+                and lifecycle in _STALE_PROCESS_LANGUAGE_EXEMPT_LIFECYCLES
+            ):
+                continue
         text = None
         for surface_name, patterns, allowed_paths in _RETIRED_SURFACES:
             if rel in allowed_paths:
                 continue
             if text is None:
                 text = path.read_text(encoding="utf-8")
-            for pattern in patterns:
+            # Longest-first, and skip a shorter pattern's match when it falls
+            # entirely inside a longer pattern's already-reported span (e.g.
+            # a bare "--source-abi" match sitting inside an already-flagged
+            # "--source-abi-cache-dir" occurrence) -- one real dead-surface
+            # mention should produce one warning, not one per overlapping
+            # registry entry that happens to match the same text.
+            reported_spans: list[tuple[int, int]] = []
+            for pattern in sorted(patterns, key=len, reverse=True):
                 idx = text.find(pattern)
                 if idx == -1:
                     continue
+                end = idx + len(pattern)
+                if any(idx >= s and end <= e for s, e in reported_spans):
+                    continue
+                reported_spans.append((idx, end))
                 line_no = text.count("\n", 0, idx) + 1
                 f.warn(
                     "retired-surfaces",

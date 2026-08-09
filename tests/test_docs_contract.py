@@ -1509,6 +1509,52 @@ def test_retired_surfaces_flags_dead_path_inside_a_fenced_command_example(
     assert "abicheck-mcp" in f.warnings[0][1]
 
 
+def test_retired_surfaces_flags_bare_top_level_flag_spelling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The registry's sub-option patterns (--source-abi-cache-dir, etc.)
+    don't cover the bare --source-abi/--source-graph spellings a
+    copy-pasted `collect --source-abi` invocation would use."""
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "use").mkdir()
+    (tmp_path / "use" / "page.md").write_text(
+        "# Page\n\n```bash\nabicheck collect --source-abi\n```\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1
+    assert "--source-abi" in f.warnings[0][1]
+
+
+def test_retired_surfaces_exempts_historical_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "use").mkdir()
+    (tmp_path / "use" / "page.md").write_text(
+        "---\nlifecycle: historical\n---\n\n# Page\n\n`mcp_server.py` (removed).\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert f.warnings == []
+
+
+def test_retired_surfaces_exempts_migration_lifecycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(dc, "DOCS", tmp_path)
+    (tmp_path / "use").mkdir()
+    (tmp_path / "use" / "page.md").write_text(
+        "---\nlifecycle: migration\n---\n\n# Page\n\n`abicheck-mcp` (removed).\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert f.warnings == []
+
+
 def test_stale_process_language_tolerates_non_string_lifecycle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
