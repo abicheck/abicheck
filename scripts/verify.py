@@ -126,6 +126,28 @@ def _need_all_bins(*names: str) -> Callable[[], str | None]:
     return check
 
 
+def _need_linux_and_all_bins(*names: str) -> Callable[[], str | None]:
+    """Like :func:`_need_all_bins`, but also requires a Linux host.
+
+    A step whose *script* self-restricts to Linux (its own module docstring,
+    not something this precondition duplicates) would otherwise still report
+    `passed` on a macOS/Windows host that happens to have every named tool on
+    PATH — the precondition would pass, the step would run, and the script's
+    own internal platform check would exit 0 immediately having measured
+    nothing, which `run_step()` cannot tell apart from genuine work (Codex
+    review: this is exactly the gap `--json-out`'s `complete` receipt field
+    exists to catch, and a step-level false pass defeats it at the source).
+    """
+    bins_check = _need_all_bins(*names)
+
+    def check() -> str | None:
+        if not sys.platform.startswith("linux"):
+            return f"Linux only (host platform is {sys.platform!r})"
+        return bins_check()
+
+    return check
+
+
 def _need_modules(*names: str) -> Callable[[], str | None]:
     def check() -> str | None:
         missing = [n for n in names if not _module_available(n)]
@@ -359,7 +381,7 @@ STEPS: tuple[Step, ...] = (
         "header-graph-perf",
         _pyscript("scripts/check_header_graph_perf.py", "--sizes", "25", "100"),
         frozenset({FULL}),
-        precondition=_need_all_bins("clang", "clang++", "g++"),
+        precondition=_need_linux_and_all_bins("clang", "clang++", "g++"),
         description="Header-graph attach-cost trend measurement (G31 Phase D, report-only)",
     ),
     Step(

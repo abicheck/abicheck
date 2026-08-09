@@ -51,7 +51,8 @@ genuine cold-invocation cost this gate exists to catch. Then time:
   way it would be in production (a direct, unscoped ``dumper.dump()`` call
   never populates it — see ``dumper_cache.py``'s own
   ``_ast_memoize_scope`` docstring).
-* ``attach_ms`` — ``service._attach_header_graph(snap, True, True, ...)``
+* ``attach_ms`` — ``service._attach_header_graph(snap, header_graph=True,
+  header_graph_includes=True, ...)``
   applied to the snapshot ``baseline_ms`` already produced, *outside* that
   scope (again matching ``_run_dump_uncached``'s own call ordering), in
   isolation. Both flags are ``True``, matching production's
@@ -176,11 +177,19 @@ def _build_fixture(tmp_dir: Path, n: int) -> tuple[Path, Path]:
     src = tmp_dir / "api.cpp"
     src.write_text(_synthesize_source(n))
     so = tmp_dir / "libhgperf.so"
-    subprocess.run(
+    proc = subprocess.run(
         ["g++", "-shared", "-fPIC", "-O0", "-o", str(so), str(src), f"-I{tmp_dir}"],
-        check=True,
         capture_output=True,
+        text=True,
     )
+    if proc.returncode != 0:
+        # check=True alone raises CalledProcessError without printing the
+        # compiler's own diagnostics, leaving a fixture-build failure as a
+        # bare non-zero-exit traceback in CI logs (CodeRabbit review).
+        raise RuntimeError(
+            f"g++ failed to build the size={n} fixture (exit {proc.returncode}):\n"
+            f"{proc.stderr}"
+        )
     return so, header
 
 
@@ -313,23 +322,25 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
             t2 = time.perf_counter()
             attached = _attach_header_graph(
                 snap,
-                True,
-                # Production (service._run_dump_uncached) always passes
-                # _HEADER_GRAPH_INCLUDES_ENABLED (a module constant, True
-                # since G31 Phase A) alongside header_graph, not just the
-                # bare AST-attach flag -- that second flag drives
+                # Keyword, not positional -- two adjacent bare `True`s made
+                # this call fragile to a silent reordering (CodeRabbit
+                # review). Production (service._run_dump_uncached) always
+                # passes _HEADER_GRAPH_INCLUDES_ENABLED (a module constant,
+                # True since G31 Phase A) alongside header_graph, not just
+                # the bare AST-attach flag -- that second flag drives
                 # ClangHeaderIncludeExtractor's own extra `clang -M`
                 # subprocess per top-level header, a real, always-on part of
                 # the production attach cost this benchmark must include too
                 # (Codex review: passing False here silently excluded it
                 # from every measurement).
-                True,
-                [header],
-                [],
-                "c++",
-                CompileContext(),
-                None,
-                None,
+                header_graph=True,
+                header_graph_includes=True,
+                headers=[header],
+                includes=[],
+                lang="c++",
+                compile=CompileContext(),
+                public_headers=None,
+                public_header_dirs=None,
             )
             t3 = time.perf_counter()
             _require_real_ast_attach(attached, n, backend)
@@ -380,7 +391,13 @@ def _measure_size(
 def measure(
     sizes: tuple[int, ...], repeat: int, backends: tuple[str, ...] = BACKENDS
 ) -> list[dict[str, Any]]:
-    active = tuple(b for b in backends if b == "clang" or _have("castxml"))
+    # "clang" needs no external optional tool (already required by main()'s
+    # own SKIP check before measure() is ever called); every other backend
+    # is gated on its own name being on PATH, not hardcoded to "castxml" --
+    # BACKENDS only ever holds these two today, but keying the check on the
+    # actual backend name rather than a specific one keeps this correct if
+    # a third backend is ever added (CodeRabbit review).
+    active = tuple(b for b in backends if b == "clang" or _have(b))
     points: list[dict[str, Any]] = []
     for n in sizes:
         points.extend(_measure_size(n, repeat, active))
@@ -409,8 +426,14 @@ def matched_points(
     case would be a false-confidence silent pass (Codex review): a
     baseline containing only size 999 would let a completely unchecked
     default 25/100/400 run report success.
+
+    Excludes an entry whose baseline value is non-positive, matching
+    ``check_regressions``'s own ``base is None or base <= 0`` skip
+    condition (CodeRabbit review) -- otherwise the final "N checked" count
+    in ``main()`` would include a point ``check_regressions`` never
+    actually gated.
     """
-    return [p for p in points if _point_key(p) in baseline]
+    return [p for p in points if baseline.get(_point_key(p), 0.0) > 0]
 
 
 def check_regressions(
@@ -463,20 +486,35 @@ def _print_markdown(points: list[dict[str, Any]]) -> None:
         )
 
 
+def _positive_int(value: str) -> int:
+    """``argparse`` ``type=`` for ``--sizes``/``--repeat``: reject <= 0.
+
+    A ``--repeat 0`` left ``baseline_samples``/``attach_samples`` empty,
+    so ``min()`` inside ``_measure_one`` raised an unhandled ``ValueError``;
+    a ``--sizes 0`` entry built a fixture with no declarations at all and
+    recorded a meaningless baseline point (CodeRabbit review). Rejecting at
+    parse time gives a clear ``argparse`` usage error instead of either.
+    """
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value!r}")
+    return parsed
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument(
         "--sizes",
-        type=int,
+        type=_positive_int,
         nargs="+",
         default=list(DEFAULT_SIZES),
         help="Declaration counts to sweep (default: %(default)s)",
     )
     p.add_argument(
         "--repeat",
-        type=int,
+        type=_positive_int,
         default=DEFAULT_REPEAT,
         help="Repeats per size; the minimum is reported (default: %(default)s)",
     )
@@ -556,7 +594,18 @@ def main(argv: list[str] | None = None) -> int:
     # every point then trivially matches itself and the gate reports OK
     # having destroyed the one file that could have shown a regression
     # (Codex review).
-    baseline = _load_baseline(args.baseline) if args.baseline is not None else None
+    baseline = None
+    if args.baseline is not None:
+        try:
+            baseline = _load_baseline(args.baseline)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            # An unreadable/malformed --baseline (missing file, invalid
+            # JSON, a report missing "attach_ms") previously propagated as
+            # an unhandled traceback -- indistinguishable in a CI log from a
+            # genuine crash in this script itself, rather than a gate
+            # failure with a clear cause (CodeRabbit review).
+            print(f"\nFAIL: could not read --baseline {args.baseline}: {exc}")
+            return 1
 
     # Never overwrite the file --baseline was just read from, regression or
     # not: even with the read-before-write ordering above, writing this run's

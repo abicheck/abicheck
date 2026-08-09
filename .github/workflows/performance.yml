@@ -65,6 +65,7 @@ on:
       - "abicheck/dumper_ast_config.py"
       - "abicheck/dumper_sysinc.py"
       - "abicheck/header_utils.py"
+      - "action/install-castxml.sh"
       - "scripts/check_header_graph_perf.py"
       - "tests/test_header_graph_perf_gate.py"
       - ".github/workflows/performance.yml"
@@ -256,6 +257,7 @@ jobs:
 
       - name: Run header-graph perf gate
         run: |
+          set -euo pipefail
           mkdir -p reports/perf
           python scripts/check_header_graph_perf.py \
             --sizes 25 100 400 \

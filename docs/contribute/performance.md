@@ -195,11 +195,11 @@ flaking on normal drift.
 The same workflow also carries a second, independent pair of jobs for the
 G31 Phase D header-graph attach-cost gate
 ([`scripts/check_header_graph_perf.py`](https://github.com/abicheck/abicheck/blob/main/scripts/check_header_graph_perf.py),
-see `docs/contribute/plans/g31-header-graph-default-on-followup.md`):
+see [the G31 Phase D follow-up plan](plans/g31-header-graph-default-on-followup.md)):
 `header-graph-perf` is report-only trend data (no stable committed baseline
 number would survive a runner/toolchain change, the same reasoning
-`check_mutation_score.py`'s `SURVIVOR_BASELINE` bootstrap avoids); `header-
-graph-regression` follows this page's own `--baseline`/`--regress-tolerance`
+`check_mutation_score.py`'s `SURVIVOR_BASELINE` bootstrap avoids);
+`header-graph-regression` follows this page's own `--baseline`/`--regress-tolerance`
 same-runner base-vs-head pattern (see [Baseline regression](#baseline-regression)
 below) and gates from day one, since that pattern never needs a stale
 committed number to begin with.

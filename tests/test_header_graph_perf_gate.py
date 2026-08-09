@@ -164,8 +164,17 @@ class TestMatchedPoints:
         baseline = {(10, "clang"): 4.0}
         assert hg_gate.matched_points(points, baseline) == [points[0]]
 
+    def test_non_positive_baseline_entry_is_not_counted_as_matched(self):
+        # matched_points must agree with check_regressions' own "base is
+        # None or base <= 0" skip -- otherwise main()'s final "N checked"
+        # count would include a point check_regressions never actually
+        # gated (CodeRabbit review).
+        points = [self._point(10)]
+        baseline = {(10, "clang"): 0.0}
+        assert hg_gate.matched_points(points, baseline) == []
 
-class TestMainSkipsWithoutToolchain:
+
+class TestMainEntryPoint:
     def test_skip_message_when_toolchain_missing(self, monkeypatch, capsys):
         monkeypatch.setattr(hg_gate, "_have", lambda tool: False)
         rc = hg_gate.main(["--sizes", "5"])
@@ -274,6 +283,67 @@ class TestMainSkipsWithoutToolchain:
         assert json.loads(shared.read_text()) == {
             "points": [{"size": 10, "backend": "clang", "attach_ms": 1.0}]
         }
+
+    def test_malformed_baseline_fails_cleanly_instead_of_crashing(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        # An unreadable/malformed --baseline previously propagated as an
+        # unhandled traceback rather than a clear gate failure (CodeRabbit
+        # review).
+        monkeypatch.setattr(hg_gate, "_have", lambda tool: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(
+            hg_gate,
+            "measure",
+            lambda sizes, repeat, backends=hg_gate.BACKENDS: [
+                {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 5.0}
+                for s in sizes
+            ],
+        )
+        bad_baseline = tmp_path / "not_json.json"
+        bad_baseline.write_text("{not valid json")
+
+        rc = hg_gate.main(["--sizes", "10", "--baseline", str(bad_baseline)])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "FAIL" in out
+        assert str(bad_baseline) in out
+
+    def test_missing_baseline_file_fails_cleanly(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(hg_gate, "_have", lambda tool: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(
+            hg_gate,
+            "measure",
+            lambda sizes, repeat, backends=hg_gate.BACKENDS: [
+                {"size": s, "backend": "clang", "baseline_ms": 10.0, "attach_ms": 5.0}
+                for s in sizes
+            ],
+        )
+        missing = tmp_path / "does_not_exist.json"
+
+        rc = hg_gate.main(["--sizes", "10", "--baseline", str(missing)])
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "FAIL" in out
+
+
+class TestPositiveInt:
+    def test_accepts_a_positive_value(self):
+        assert hg_gate._positive_int("5") == 5
+
+    def test_rejects_zero(self):
+        with pytest.raises(hg_gate.argparse.ArgumentTypeError):
+            hg_gate._positive_int("0")
+
+    def test_rejects_negative(self):
+        with pytest.raises(hg_gate.argparse.ArgumentTypeError):
+            hg_gate._positive_int("-1")
+
+    def test_sizes_and_repeat_reject_non_positive_values(self, capsys):
+        for bad_args in (["--sizes", "0"], ["--repeat", "0"], ["--sizes", "-5"]):
+            with pytest.raises(SystemExit):
+                hg_gate.parse_args(bad_args)
 
 
 class TestRequireRealAstAttach:
