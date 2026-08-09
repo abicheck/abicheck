@@ -568,6 +568,122 @@ class TestMarkReachabilityTriState:
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
 
 
+class TestMarkReachabilityImpactAssessmentCache:
+    """ADR-052 D2 follow-up (G29 Phase 3 slice 10): ``MarkReachability`` now
+    caches ``Change.impact_assessment`` right after it finalizes a change's
+    reachability/evidence fields. The measurement/decision behind doing this
+    at all is recorded in ADR-052's Slice 10 section; these are the
+    regression tests for the caching itself and for the pipeline-ordering
+    safety property the audit relies on (the cache must reflect the
+    *post*-tag value, never a stale pre-tag default).
+    """
+
+    def test_reachable_change_gets_cached_assessment_matching_fresh_call(self) -> None:
+        from abicheck.impact.engine import assess_change
+
+        old = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::detail::Base"]),
+                RecordType(name="ns::detail::Base", kind="class", size_bits=64),
+            ],
+        )
+        new = _snap(
+            functions=[_public_fn("make", "ns::Widget*")],
+            types=[
+                RecordType(name="ns::Widget", kind="class", bases=["ns::detail::Base"]),
+                RecordType(name="ns::detail::Base", kind="class", size_bits=128),
+            ],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::detail::Base",
+            description="size changed",
+        )
+        ctx = DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        found = next(c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED)
+        assert found.reachability_state == ReachabilityState.PROVEN_REACHABLE
+        assert found.impact_assessment is not None
+        cached = found.impact_assessment
+        # The cached object must be the same evidence a genuinely uncached
+        # derivation would produce from the *current* (post-tag) flat
+        # fields -- proving the two paths never disagree, same discipline
+        # Slice 8/9's own tests use. assess_change() prefers
+        # found.impact_assessment when it's non-None, so clear it first or
+        # this comparison would just read the cache under test.
+        found.impact_assessment = None
+        fresh = assess_change(found)
+        assert cached.reachability_state == fresh.reachability_state
+        assert cached.public_reachable == fresh.public_reachable
+        assert cached.reachability_kind == fresh.reachability_kind
+        assert cached.proof_path == fresh.proof_path
+
+    def test_unreachable_change_also_gets_cached_assessment(self) -> None:
+        """The ``else``/fallthrough tagging path (PROVEN_UNREACHABLE/UNKNOWN,
+        no early ``continue``) must cache too -- not just the two early-exit
+        branches."""
+        from abicheck.model import Param
+
+        old = _snap(
+            functions=[Function(
+                name="use", mangled="use", return_type="void",
+                params=[Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)],
+                visibility=Visibility.PUBLIC,
+            )],
+            types=[RecordType(name="ns::detail::Hidden", kind="struct", size_bits=32)],
+        )
+        new = _snap(
+            functions=[Function(
+                name="use", mangled="use", return_type="void",
+                params=[Param(name="h", type="ns::detail::Hidden*", pointer_depth=1)],
+                visibility=Visibility.PUBLIC,
+            )],
+            types=[RecordType(name="ns::detail::Hidden", kind="struct", size_bits=64)],
+        )
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::detail::Hidden",
+            description="size changed",
+        )
+        DEFAULT_PIPELINE.run(
+            [raw_change], old, new, suppression=_needs_evidence_suppression()
+        )
+        assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
+        assert raw_change.impact_assessment is not None
+        # The critical pipeline-ordering safety property: the cache reflects
+        # the value MarkReachability actually settled on (PROVEN_UNREACHABLE),
+        # never the pre-tag UNKNOWN default a naive "cache at construction"
+        # approach would have captured.
+        assert (
+            raw_change.impact_assessment.reachability_state
+            == ReachabilityState.PROVEN_UNREACHABLE
+        )
+
+    def test_not_cached_when_mark_reachability_is_a_no_op(self) -> None:
+        """No suppression configured at all -- MarkReachability returns
+        immediately and never tags anything, so nothing gets cached either
+        (unchanged pre-slice-10 behavior: ``impact_assessment`` stays
+        ``None`` and ``assess_change`` derives on demand from the flat
+        defaults, same result either way)."""
+        # A non-internal-namespaced symbol (Codex review: an internal-looking
+        # one is dropped by the unrelated DemoteUnreachableInternalChurn step
+        # later in the pipeline when nothing ever proved it reachable --
+        # this test is about mark_reachability's own no-op gate, not that
+        # step, so it must survive to `ctx.kept` regardless).
+        old = _snap(functions=[_public_fn("make", "PublicWidget*")])
+        new = _snap(functions=[_public_fn("make", "PublicWidget*")])
+        raw_change = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="PublicWidget",
+            description="size changed",
+        )
+        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=None)
+        found = next(c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED)
+        assert found.impact_assessment is None
+
+
 class TestProvenUnreachableOnlySuppressionGate:
     def test_matches_proven_unreachable(self) -> None:
         change = Change(

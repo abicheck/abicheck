@@ -210,8 +210,15 @@ disable_error_code = ["import-untyped"]
 # rejection) — without stubs ``yaml.SafeLoader`` types as ``Any``, so
 # subclassing it also trips ``misc`` ("cannot subclass Any").
 # ``compatibility_evaluation_packs`` (ADR-049 D8 pack-manifest loader) adds
-# its own, independent ``_StrictLoader`` for the identical reason.
-module = ["abicheck.dump_manifest", "abicheck.compatibility_evaluation_packs"]
+# its own, independent ``_StrictLoader`` for the identical reason;
+# ``abicheck.impact.use_cases``'s ``_DuplicateKeyCheckingLoader`` (Codex
+# review, G29 Phase 4 slice 2) is a fourth, independent instance of the
+# identical pattern.
+module = [
+    "abicheck.dump_manifest",
+    "abicheck.compatibility_evaluation_packs",
+    "abicheck.impact.use_cases",
+]
 disable_error_code = ["import-untyped", "misc"]
 
 [tool.pytest.ini_options]

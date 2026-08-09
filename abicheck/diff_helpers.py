@@ -41,6 +41,8 @@ from typing import Any, Protocol, TypeVar, cast
 from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .fact_provenance import both_known_backed_fact_qualified
+from .model import AbiSnapshot
 
 K = TypeVar("K")
 V = TypeVar("V")
@@ -369,3 +371,27 @@ def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
     if t.name != key and own.bare_name_is_unambiguous(t.name):
         return other.get(t.name)
     return None
+
+
+def fact_known_qualified(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_map: TypeMap[Any],
+    new_map: TypeMap[Any],
+    name: str,
+    old_qualified_key: str,
+    new_qualified_key: str,
+    bare_key: str,
+) -> bool:
+    """:func:`fact_provenance.both_known_backed_fact_qualified`, deriving its
+    ambiguity flags from *old_map*/*new_map* (``TypeMap.bare_name_is_unambiguous``)
+    — same bare-name-retry shape as :func:`lookup_matched_type` above, applied
+    to a fact-provenance dict key instead of an old/new type match. Takes
+    *old_qualified_key*/*new_qualified_key* separately (not derived from
+    *name* alone) since a matched pair's two sides can carry different
+    qualified identities."""
+    return both_known_backed_fact_qualified(
+        old, new, old_qualified_key, new_qualified_key, bare_key,
+        old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
+        new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
+    )

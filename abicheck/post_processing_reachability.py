@@ -109,6 +109,24 @@ class MarkReachability:
     review) — :meth:`SuppressionList.needs_reachability_evidence` proves
     such a file's rules can never actually consult the tag either, which is
     the common case (a handful of exact ``symbol:`` waivers).
+
+    ADR-052 D2 follow-up (G29 Phase 3 slice 10): once this step actually
+    tags a change (the branch above did *not* early-return), it also caches
+    that change's :class:`~abicheck.impact.model.ImpactAssessment` via
+    :func:`impact.engine.assess_change` right at the point its own
+    reachability/evidence fields become final -- see the ``_cache_assessment``
+    closure below for the specific per-field safety audit. This is the
+    resolution of ADR-052's own open measurement question ("is
+    ``assess_change`` ever called more than once for the same ``Change``
+    within one ``compare`` run"): measured directly (not assumed) via
+    ``compare --format json --secondary-format sarif``, which renders the
+    identical ``DiffResult``/``Change`` objects twice in one process --
+    ``reporter.py``'s JSON path and ``sarif.py``'s SARIF path each call
+    ``assess_change`` independently. A one-off instrumented run over a
+    genuinely breaking two-snapshot pair confirmed a real, non-hypothetical
+    repeat call on the same ``Change`` object (2 calls recorded for 1
+    finding) -- caching here avoids rebuilding ``proof_path``/``GraphProofPath``
+    formatting from scratch on the second and later renders.
     """
 
     name = "mark_reachability"
@@ -132,6 +150,63 @@ class MarkReachability:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if ctx.suppression is None or not ctx.suppression.needs_reachability_evidence():
             return changes
+
+        from .impact.engine import assess_change
+
+        def _cache_assessment(c: Change) -> None:
+            """ADR-052 D2 follow-up (G29 Phase 3 slice 10): cache *c*'s
+            :class:`~abicheck.impact.model.ImpactAssessment` right after this
+            step finalizes its reachability/evidence fields.
+
+            Verified safe, not assumed, per the same discipline Slice 8/9 used
+            for ``internal_leak.py``/``appcompat.py``: this is the *only* place
+            in the codebase that mutates ``public_reachable``/
+            ``reachability_state``/``reachability_kind``/
+            ``reachability_proof_path`` on an already-constructed ``Change``
+            (confirmed by a repo-wide grep, not assumed) -- so once this
+            function returns for *c*, nothing later in
+            ``post_processing.DEFAULT_PIPELINE`` (``ApplySuppression``,
+            ``SuppressRenamedPairs``, ``FilterRedundant``,
+            ``EnrichAffectedSymbols``, ``AttributeStdlibEmbedding``,
+            ``DetectCppPatterns``, ``DetectTemplatePatterns``,
+            ``DetectNamespacePatterns``, ``DetectInternalLeaks``,
+            ``DemoteUnreachableInternalChurn``, ``DetectVersionedSymbolScheme``,
+            ``EscalateFrozenNamespaceViolations``) touches them again.
+            ``confidence``/``impact_proof_path``/``affected_public_roots``/
+            ``impact_is_direct``/``impact_alternative_paths``/
+            ``impact_discarded_path_count``/``impact_occurrence_id`` are all
+            set (if at all) at ``Change`` construction time, before this step
+            ever sees the change, so they are equally stable by this point.
+
+            One residual field checked and found *not* to break this, rather
+            than overlooked: ``Change.evidence_category`` has exactly one
+            other post-construction mutator, ``diff_reconcile.
+            reconcile_build_context_findings`` (``checker.py``, gated on
+            ``--reconcile-build-context``) -- but it runs *after*
+            ``_run_post_processing`` (this step included) and only ever sets
+            ``evidence_category`` on a change it is simultaneously moving out
+            of ``kept`` into ``DiffResult.reconciled_changes``.
+            ``reporter._add_reconciled`` renders that list from its own
+            hand-built dict and never reads ``Change.impact_assessment`` for
+            it (confirmed by reading ``reporter.py``), so a change that ends
+            up reconciled never has its (by-then-stale) cached
+            ``evidence_category`` read through ``impact_assessment`` by any
+            current report path -- the mutation is real but has no reachable
+            consumer to observe it going stale.
+
+            This also gives every source-graph finding
+            (``buildsource/source_graph_findings.py``'s nine ``Change(...)``
+            sites) a correctly cached assessment once its finding reaches
+            this step: those builders run *before* ``_run_post_processing``
+            (their output is merged into ``checker.compare``'s ``changes``
+            list as ``extra_changes``, ahead of the whole pipeline -- unlike
+            ``internal_leak.py``'s builders, which are themselves a
+            *later* pipeline step), so caching directly at their own
+            construction time would capture default/unset evidence fields
+            this step hasn't tagged yet -- see the comment at each of those
+            nine sites for the negative half of this same audit.
+            """
+            c.impact_assessment = assess_change(c)
 
         from .internal_leak import (
             _IDENTITY_VTABLE_KINDS,
@@ -366,11 +441,13 @@ class MarkReachability:
                 c.public_reachable = True
                 c.reachability_kind = "direct_public_symbol"
                 c.reachability_state = ReachabilityState.PROVEN_REACHABLE
+                _cache_assessment(c)
                 continue
             if c.kind in _PUBLIC_SOURCE_ABI_KINDS:
                 c.public_reachable = True
                 c.reachability_kind = "public_source_abi_surface"
                 c.reachability_state = ReachabilityState.PROVEN_REACHABLE
+                _cache_assessment(c)
                 continue
             tagged = False
             # An enum-member finding's root still carries the "::member"
@@ -530,4 +607,5 @@ class MarkReachability:
                     c.reachability_state = ReachabilityState.PROVEN_UNREACHABLE
                 else:
                     c.reachability_state = ReachabilityState.UNKNOWN
+            _cache_assessment(c)
         return changes

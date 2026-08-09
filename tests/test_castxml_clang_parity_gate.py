@@ -109,9 +109,11 @@ def classify(
 
     ``unsupported_on_clang`` marks a fact the clang backend structurally
     cannot populate today (see model.py's own field docstrings — e.g.
-    ``TypeField.offset_bits``, ``RecordType.is_abstract``,
-    ``Function.deprecated``): a ``None`` on that side is expected, not a
-    mismatch, regardless of what castxml reports.
+    ``TypeField.offset_bits``, ``RecordType.is_abstract``): a ``None`` on
+    that side is expected, not a mismatch, regardless of what castxml
+    reports. ``Function.deprecated`` used to be in this category too
+    (before G31 Phase C wired real clang-side extraction) — it is no
+    longer, so a caller comparing it should NOT pass this flag.
     """
     if castxml_value == clang_value:
         return Parity.EQUAL
@@ -298,24 +300,24 @@ class TestFunctionsAndOverloads:
             assert classify(cf.return_type, df.return_type) is Parity.EQUAL
             assert [p.type for p in cf.params] == [p.type for p in df.params]
 
-    def test_deprecated_attribute_is_expected_producer_difference(
+    def test_deprecated_attribute_now_agrees_across_producers(
         self, cpp_snapshots
     ) -> None:
         """Function.deprecated: castxml populates it from castxml's own
-        `deprecation`/`attributes` channel; the clang backend doesn't
-        populate it yet (AbiSnapshot.ast_producer / _both_castxml_backed,
-        PR #582) — a known, gated capability gap, not a bug."""
+        `deprecation`/`attributes` channel; the direct-clang backend now
+        populates it too (G31 Phase C — dumper_clang._clang_deprecated_message,
+        reading clang's `DeprecatedAttr` AST node), with a directly
+        cross-comparable value (a plain message string, not a
+        backend-specific encoding) — so this is no longer a capability gap
+        (this test previously asserted `Parity.UNSUPPORTED_ON_ONE_PRODUCER`,
+        from before that gap was closed)."""
         castxml_snap, clang_snap = cpp_snapshots
         c_funcs = _public(castxml_snap)
         d_funcs = _public(clang_snap)
         mangled = "_ZN5outer5inner7old_apiEv"
         assert c_funcs[mangled].deprecated == "use Widget2 instead"
-        verdict = classify(
-            c_funcs[mangled].deprecated,
-            d_funcs[mangled].deprecated,
-            unsupported_on_clang=True,
-        )
-        assert verdict is Parity.UNSUPPORTED_ON_ONE_PRODUCER
+        verdict = classify(c_funcs[mangled].deprecated, d_funcs[mangled].deprecated)
+        assert verdict is Parity.EQUAL
 
 
 class TestConstructorIdentity:

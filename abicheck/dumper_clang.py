@@ -616,6 +616,71 @@ def _clang_record_is_final(node: dict[str, Any]) -> bool:
     )
 
 
+def _clang_deprecated_message(node: dict[str, Any]) -> str | None:
+    """Deprecation message for *node*, or ``None`` if not deprecated (G31
+    Phase C schema-completeness audit) — the direct-clang backend's
+    counterpart to ``dumper_castxml._deprecation_marker``, matching its exact
+    three-way convention (message text / ``""`` for a bare, messageless
+    ``[[deprecated]]`` / ``None`` for not deprecated) so the two backends'
+    ``Function.deprecated``/``Variable.deprecated``/``TypeField.deprecated``/
+    ``RecordType.deprecated``/``EnumType.deprecated`` agree.
+
+    Verified against real ``clang -ast-dump=json`` output (Clang 18) before
+    wiring this up: unlike castxml (a compound ``attributes`` string plus a
+    separate ``deprecation="..."`` XML attribute only for a non-empty
+    message), clang emits a ``DeprecatedAttr`` child node under the
+    declaration's own ``"inner"`` list — present for both the bare and
+    messaged forms, with an optional ``message`` string key present *only*
+    for the messaged form (confirmed empirically: a bare ``[[deprecated]]``'s
+    ``DeprecatedAttr`` node carries no ``message`` key at all, not an empty
+    string).
+    """
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict) and child.get("kind") == "DeprecatedAttr":
+            return str(child.get("message", ""))
+    return None
+
+
+def _clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool | None]:
+    """``(is_standard_layout, is_trivially_copyable)`` from a record's own
+    ``definitionData`` (G31 Phase C schema-completeness audit).
+
+    Verified against real ``clang -ast-dump=json`` output (Clang 18) before
+    wiring this up, following G28 Phase 1's discipline: a ``CXXRecordDecl``'s
+    ``definitionData`` carries ``isStandardLayout``/``isTriviallyCopyable`` as
+    boolean keys, but — confirmed empirically, not assumed from clang's own
+    schema docs — clang's ``JSONNodeDumper`` only *emits* a ``definitionData``
+    boolean key when the trait is ``true``; a record that does **not** have
+    the trait has the key entirely absent rather than present with a literal
+    ``false`` (e.g. a class with a private member is not standard-layout, and
+    its ``definitionData`` has no ``isStandardLayout`` key at all, confirmed
+    by direct comparison against a plain-public-members struct which does).
+    So presence recovers ``True``, and absence — while ``definitionData``
+    itself is present — recovers ``False``.
+
+    A record with no ``definitionData`` at all yields ``(None, None)`` —
+    "not collected", not "false" — matching this module's existing
+    ``RecordType.is_standard_layout``/``is_trivially_copyable`` tri-state
+    convention (see ``diff_layout.py``'s own True-vs-None handling, which
+    only fires ``STANDARD_LAYOUT_LOST``/``TRIVIALLY_COPYABLE_LOST`` on an
+    explicit ``True`` on one side, never treating "unknown" as a regression).
+    This happens for two real cases, confirmed empirically: a plain C
+    ``RecordDecl`` (these are C++-only type-trait concepts, so a C struct's
+    node carries no ``definitionData`` key whatsoever — not "trivially true
+    by default", genuinely absent), and an incomplete/forward-declared record
+    (filtered out upstream by ``_is_record_definition`` before this is ever
+    called, but kept conservative here too in case that guard's scope ever
+    narrows).
+    """
+    definition_data = node.get("definitionData")
+    if not isinstance(definition_data, dict):
+        return None, None
+    return (
+        bool(definition_data.get("isStandardLayout", False)),
+        bool(definition_data.get("isTriviallyCopyable", False)),
+    )
+
+
 def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
     """Explicit alignment (bits) from an AlignedAttr, when evaluable.
 
@@ -993,6 +1058,7 @@ class _ClangAstParser:
                     is_variadic=bool(node.get("variadic")) or "..." in qualtype,
                     contract_attributes=_clang_contract_attributes(node),
                     exception_spec=_clang_exception_spec(quals),
+                    deprecated=_clang_deprecated_message(node),
                 )
             )
         return funcs
@@ -1024,6 +1090,7 @@ class _ClangAstParser:
                     or bool(re.search(r"\bconst\b", type_name)),
                     source_location=self._source_location(entry),
                     alignment_bits=_clang_var_alignment_bits(node),
+                    deprecated=_clang_deprecated_message(node),
                 )
             )
         return variables
@@ -1122,6 +1189,7 @@ class _ClangAstParser:
         bases, virtual_bases, base_access = _parse_bases(node)
         injected = _anonymous_member_names(node)
         own_name = override_name or str(node.get("name", ""))
+        is_standard_layout, is_trivially_copyable = _clang_record_type_traits(node)
         return RecordType(
             name=own_name,
             kind=kind,
@@ -1147,6 +1215,14 @@ class _ClangAstParser:
             is_union=kind == "union",
             is_opaque=False,
             is_final=_clang_record_is_final(node),
+            # G31 Phase C: unlike layout (size/align/offsets), these are
+            # semantic type traits clang's AST computes independent of any
+            # layout pass, and are genuinely absent from CastXML's own schema
+            # (see dumper_castxml.py's own is_standard_layout/
+            # is_trivially_copyable comment) — the direct-clang backend is
+            # the one place these can actually be populated.
+            is_standard_layout=is_standard_layout,
+            is_trivially_copyable=is_trivially_copyable,
             is_template_pattern=entry.in_template,
             # True only when *every* field came from the anonymous-aggregate
             # flatten, not merely "at least one did" (Codex review): a mixed
@@ -1158,6 +1234,7 @@ class _ClangAstParser:
             has_anonymous_aggregate_fields=bool(injected)
             and all(f.name in injected for f in fields),
             source_location=self._source_location(entry),
+            deprecated=_clang_deprecated_message(node),
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:
@@ -1220,6 +1297,7 @@ class _ClangAstParser:
             is_volatile=bool(re.search(r"\bvolatile\b", cv_type)),
             is_mutable=bool(child.get("mutable")),
             access=self._access_level(access),
+            deprecated=_clang_deprecated_message(child),
         )
 
     def parse_enums(self) -> list[EnumType]:
@@ -1275,6 +1353,16 @@ class _ClangAstParser:
                     qualified_name=(
                         "::".join([*entry.scope, name]) if entry.scope else None
                     ),
+                    # G31 Phase C: clang's EnumDecl carries a "scopedEnumTag"
+                    # key ("class"/"struct") only for an `enum class`/`enum
+                    # struct` -- absent (not merely false) for a plain C-style
+                    # enum, confirmed against real clang -ast-dump=json output.
+                    # Unlike is_standard_layout/is_trivially_copyable, a plain
+                    # EnumDecl always has a definitive answer here (there is
+                    # no "not collected" case for a real enum definition), so
+                    # this is a concrete bool, never None, on this backend.
+                    is_scoped="scopedEnumTag" in node,
+                    deprecated=_clang_deprecated_message(node),
                 )
             )
         return enums

@@ -7,6 +7,7 @@ fact_provenance.py reader-side helpers every migrated detector now uses.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import patch
 
 from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
@@ -914,6 +915,244 @@ class TestEnumFactBackfill:
         assert merged_e.is_scoped is True
         assert merged_e.deprecated == "msg"
         assert is_castxml_backed_fact(merged, enum_fact_key("Color", "is_scoped"))
+
+
+class TestClangOnlyDeclarationProvenance:
+    """Codex review, fresh evidence (G31 Phase C follow-up): a declaration
+    present ONLY on the clang leg (absent from castxml, so it's appended
+    verbatim rather than routed through _merge_*) previously got no
+    provenance stamp for deprecated/is_scoped at all -- both_known_backed_fact
+    then saw fact_producer() return None for it and incorrectly declined to
+    compare a real transition on a declaration that genuinely exists on both
+    snapshot sides only via clang. Every entity kind that can appear
+    clang-only (function/type/field/enum/variable) needs its own stamp."""
+
+    def test_clang_only_function_deprecated_is_stamped(self):
+        clang_f = Function(
+            name="only_in_clang", mangled="_Z13only_in_clangv", return_type="void"
+        )
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(functions=[clang_f], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        key = func_fact_key("_Z13only_in_clangv", "deprecated")
+        assert merged.fact_provenance[key] == "clang"
+        assert fact_producer(merged, key) == "clang"
+
+    def test_clang_only_type_deprecated_and_field_deprecated_are_stamped(self):
+        clang_field = TypeField(name="x", type="int", offset_bits=0, deprecated="msg")
+        clang_t = RecordType(
+            name="OnlyInClang",
+            kind="struct",
+            size_bits=32,
+            fields=[clang_field],
+            deprecated="type msg",
+        )
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(types=[clang_t], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            fact_producer(merged, type_fact_key("OnlyInClang", "deprecated")) == "clang"
+        )
+        assert (
+            fact_producer(merged, field_fact_key("OnlyInClang", "x", "deprecated"))
+            == "clang"
+        )
+        assert merged.type_by_name("OnlyInClang").deprecated == "type msg"
+
+    def test_clang_only_enum_deprecated_and_is_scoped_are_stamped(self):
+        clang_e = EnumType(name="OnlyInClang", is_scoped=True, deprecated="msg")
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(enums=[clang_e], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert (
+            fact_producer(merged, enum_fact_key("OnlyInClang", "deprecated")) == "clang"
+        )
+        assert (
+            fact_producer(merged, enum_fact_key("OnlyInClang", "is_scoped")) == "clang"
+        )
+
+    def test_clang_only_variable_deprecated_is_stamped(self):
+        clang_v = Variable(
+            name="g", mangled="g_only_clang", type="int", deprecated="msg"
+        )
+        castxml = _snap(ast_producer="castxml")
+        clang = _snap(variables=[clang_v], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        key = var_fact_key("g_only_clang", "deprecated")
+        assert merged.fact_provenance[key] == "clang"
+        assert fact_producer(merged, key) == "clang"
+
+    def test_clang_only_declaration_deprecation_transition_is_detected_end_to_end(self):
+        # The actual regression this closes: a declaration existing on BOTH
+        # snapshot sides only via clang, gaining/losing [[deprecated]]
+        # between old and new, must fire the real detector -- not just have
+        # the right provenance recorded in isolation.
+        from abicheck.checker import ChangeKind, compare
+
+        old_clang_only = Function(
+            name="only_in_clang",
+            mangled="_Z13only_in_clangv",
+            return_type="void",
+            deprecated=None,
+        )
+        new_clang_only = Function(
+            name="only_in_clang",
+            mangled="_Z13only_in_clangv",
+            return_type="void",
+            deprecated="use something_else instead",
+        )
+        old_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(functions=[old_clang_only], ast_producer="clang"),
+        )
+        new_merged = merge_snapshots(
+            _snap(ast_producer="castxml"),
+            _snap(functions=[new_clang_only], ast_producer="clang"),
+        )
+        result = compare(old_merged, new_merged)
+        assert ChangeKind.FUNC_DEPRECATED_ADDED in {c.kind for c in result.changes}
+
+
+class TestNamespaceQualifiedMerging:
+    """Codex review, fresh evidence: merge_snapshots() matched castxml/clang
+    record types and enums by BARE name -- two distinct types sharing only a
+    bare leaf name in different namespaces (e.g. a::Foo/b::Foo) would
+    silently collide (one merging against the wrong counterpart, or a
+    genuinely clang-only type being dropped as if already present)."""
+
+    def test_two_same_bare_name_types_in_different_namespaces_merge_independently(
+        self,
+    ):
+        a_foo_castxml = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+        )
+        b_foo_castxml = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+        )
+        a_foo_clang = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_standard_layout=True,
+            is_trivially_copyable=True,
+        )
+        b_foo_clang = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_standard_layout=False,
+            is_trivially_copyable=False,
+        )
+        castxml = _snap(types=[a_foo_castxml, b_foo_castxml], ast_producer="castxml")
+        clang = _snap(types=[a_foo_clang, b_foo_clang], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        merged_by_qualname = {t.qualified_name: t for t in merged.types}
+        assert len(merged.types) == 2
+        assert merged_by_qualname["a::Foo"].is_standard_layout is True
+        assert merged_by_qualname["b::Foo"].is_standard_layout is False
+
+    def test_clang_only_type_not_dropped_when_unrelated_type_shares_its_bare_name(
+        self,
+    ):
+        a_foo_castxml = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+        )
+        b_foo_clang_only = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+        )
+        castxml = _snap(types=[a_foo_castxml], ast_producer="castxml")
+        clang = _snap(types=[b_foo_clang_only], ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+
+        merged_qualnames = {t.qualified_name for t in merged.types}
+        assert merged_qualnames == {"a::Foo", "b::Foo"}
+
+    def test_two_same_bare_name_enums_in_different_namespaces_merge_independently(
+        self,
+    ):
+        a_color = EnumType(name="Color", qualified_name="a::Color", is_scoped=True)
+        b_color = EnumType(name="Color", qualified_name="b::Color", is_scoped=False)
+        castxml = _snap(enums=[a_color, b_color], ast_producer="castxml")
+        clang = _snap(ast_producer="clang")
+        merged = merge_snapshots(castxml, clang)
+        assert len(merged.enums) == 2
+
+    def test_deprecated_provenance_keyed_qualified_not_bare(self):
+        """A third review round found the matching fix above didn't reach
+        the shared fact_provenance dict itself: two bare-name-colliding
+        types (one matched via both backends, one clang-only) wrote their
+        `deprecated` provenance to the SAME bare key, one overwriting the
+        other (Codex review, fresh evidence). The write side must key by
+        namespace-qualified identity."""
+        a_foo_castxml = RecordType(
+            name="Foo", qualified_name="a::Foo", kind="class", deprecated="castxml msg"
+        )
+        a_foo_clang = RecordType(
+            name="Foo", qualified_name="a::Foo", kind="class", deprecated="clang msg"
+        )
+        b_foo_clang_only = RecordType(
+            name="Foo", qualified_name="b::Foo", kind="class", deprecated="msg"
+        )
+        castxml = _snap(types=[a_foo_castxml], ast_producer="castxml")
+        clang = _snap(
+            types=[a_foo_clang, b_foo_clang_only], ast_producer="clang"
+        )
+        merged = merge_snapshots(castxml, clang)
+
+        assert (
+            merged.fact_provenance[type_fact_key("a::Foo", "deprecated")] == "castxml"
+        )
+        assert (
+            merged.fact_provenance[type_fact_key("b::Foo", "deprecated")] == "clang"
+        )
+        # The stale-collision shape this fix closes: both used to share the
+        # single bare key below.
+        assert type_fact_key("Foo", "deprecated") not in merged.fact_provenance
+
+    def test_legacy_bare_keyed_hybrid_baseline_still_detects_transition(self):
+        """End-to-end regression for the exact scenario Codex flagged: a
+        `--ast-frontend hybrid` baseline persisted BEFORE the provenance-key
+        qualification fix has real provenance recorded under the former
+        bare key. Comparing it against a freshly-merged snapshot must still
+        detect a genuine deprecated transition, not silently suppress it."""
+        from abicheck.checker import ChangeKind, compare
+
+        old_foo = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        # Simulates a snapshot persisted by the pre-fix merge code: real
+        # castxml-sourced provenance, but under the bare key.
+        old_legacy_hybrid = replace(
+            merge_snapshots(
+                _snap(types=[old_foo], ast_producer="castxml"),
+                _snap(ast_producer="clang"),
+            ),
+            fact_provenance={type_fact_key("Foo", "deprecated"): "castxml"},
+        )
+
+        new_foo = RecordType(
+            name="Foo", qualified_name="ns::Foo", kind="class", deprecated="use Bar"
+        )
+        new_merged = merge_snapshots(
+            _snap(types=[new_foo], ast_producer="castxml"),
+            _snap(ast_producer="clang"),
+        )
+
+        result = compare(old_legacy_hybrid, new_merged)
+        assert ChangeKind.TYPE_DEPRECATED_ADDED in {c.kind for c in result.changes}
 
 
 class TestFactProvenanceHelpers:

@@ -72,6 +72,7 @@ nav:
       - Applications & Consumers:
         - Application Compatibility: use/appcompat.md
         - API Surface Intelligence: use/api-surface-intelligence.md
+        - Use-Case Impact: use/use-case-impact.md
       - Plugins & Dynamic Loading:
         - Plugin Systems: use/plugin-systems.md
       - Python Extensions:

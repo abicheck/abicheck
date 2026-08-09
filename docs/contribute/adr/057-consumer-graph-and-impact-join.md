@@ -6,13 +6,23 @@ the `CONSUMER_*` graph vocabulary in
 `abicheck/buildsource/graph_facts.py`, ADR-046 D6's tier-1 "consumer-proven"
 selector in `abicheck/buildsource/graph_impact.py`, and the
 `abicheck/appcompat.py` wiring that puts the answer on the
-`CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay). The rest of
-[G29](../plans/g29-impact-analysis-layer.md) Phase 4 — the
-`impact-use-cases.yaml` manifest, `use_case`/`test_case` nodes, and
-runtime-trace ingestion — is **not implemented**; the three reserved edge
-kinds this ADR registers (`CONSUMER_INSTANTIATES_DECL`,
-`CONSUMER_COMPILED_FROM_HEADER`, `RUNTIME_FAILED_TO_RESOLVE_SYMBOL`) mark
-where that work attaches. See "Deliberately not implemented this slice".
+`CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay). **Slice 2 (2026-08-09) also
+implemented**: the declared-use-case half of Phase 4 —
+`abicheck/impact/use_cases.py`, the `USE_CASE_*`/`test_case` graph
+vocabulary (`USE_CASE_NODE_KINDS`/`USE_CASE_EDGE_KINDS` in
+`abicheck/buildsource/graph_facts.py`), and an optional
+`impact-use-cases.yaml` manifest (`use_case`/`entrypoints`/`tests`) that
+`build_use_case_graph`/`join_use_case_graph` promote to graph facts and join
+onto the library graph, mirroring slice 1's build/join API and mutation-safety
+discipline exactly. See "Slice 2: declared use cases" below. Still **not
+implemented**: runtime-trace ingestion, and any report-level
+`affected_use_cases`/`USE_CASE_IMPACT_CONFIRMED` surface reading the joined
+graph — the two remaining reserved use-case edge kinds this slice registers
+(`TRACE_OBSERVED_ENTRY`, `TRACE_OBSERVED_EDGE`) mark where trace ingestion
+attaches. The three `CONSUMER_*` reserved edge kinds from slice 1
+(`CONSUMER_INSTANTIATES_DECL`, `CONSUMER_COMPILED_FROM_HEADER`,
+`RUNTIME_FAILED_TO_RESOLVE_SYMBOL`) also remain unimplemented. See
+"Deliberately not implemented this slice".
 **Decision maker:** (pending — recorded per repository convention;
 implemented under [G29](../plans/g29-impact-analysis-layer.md) Phase 2's own
 "needs its own ADR before implementation starts" gate, which
@@ -286,6 +296,49 @@ all — collides with `_apply_used_by_scoping`'s `_finding_id`-based
 `scoped_only_changes` dedup (an enriched copy shares its original's id and
 would be dropped) and needs its own design across all three front ends.
 
+### Slice 2 — declared use cases (2026-08-09 amendment)
+
+Slice 1 joins a real, observed consumer's requirements onto the library
+graph. Slice 2 adds the declared, human-authored counterpart the original
+plan sketch named but this ADR deferred: an optional
+`impact-use-cases.yaml` manifest naming a project's own business/runtime use
+cases (`use_case`/`entrypoints`/`tests`), promoted to `use_case`/`test_case`
+graph nodes and `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` edges.
+
+The shape mirrors slice 1's D1/D3/D6 decisions directly, without needing new
+decisions of its own:
+
+- **An entrypoint is an edge onto the library's own existing node**, not a
+  parallel node kind — the same D1 reasoning: a `use_case` node names its
+  entry points by pointing at the library graph's real `binary_symbol`/
+  `source_decl` nodes (matched by id or label), so the join is again one
+  shared node id, not a second disconnected graph needing a name-matching
+  pass to reunite.
+- **The join is a deep copy** (`join_use_case_graph`), for the identical D3
+  reason `join_consumer_graph` is: the library graph is shared with every
+  other analysis of the same snapshot, and a shallow fold would leak one
+  project's declared use cases onto the library graph's own nodes.
+- **Degrade to no answer, never a wrong one** (D6): an `entrypoints` name
+  the library graph cannot resolve is silently skipped — no node, no edge,
+  no error. Only the manifest *document* being structurally malformed (not
+  a YAML list, a non-mapping entry, a missing/blank `use_case` name) is a
+  hard error (`UseCaseManifestError`), matching `PolicyError`'s "an
+  unknown/malformed rule must never be silently skipped" precedent for
+  user-supplied YAML, not `consumer_graph`'s degrade-on-absence rule — the
+  two are different failure classes (a malformed document vs. one
+  unresolvable entry within an otherwise-valid one).
+
+`TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE` remain reserved, unpopulated
+vocabulary — runtime-trace ingestion is still out of scope, for the same
+reason the original "Deliberately not implemented this slice" section gives:
+absence of a trace must never read as "not used", a semantics decision with
+no data yet to validate against. This slice adds no CLI flag reading the
+manifest, no report field, and no finding enrichment — it is graph-building
+only, the same position slice 1 was in before its own D5/D8 wiring. See
+[Use-Case Impact](../../use/use-case-impact.md) for the user-facing manifest
+format and the declared-vs-observed distinction, and
+`tests/test_use_cases.py` for the test coverage.
+
 ## Consequences
 
 - The top of ADR-046 D6's preference order is reachable for the first time.
@@ -306,17 +359,18 @@ would be dropped) and needs its own design across all three front ends.
 
 ## Deliberately not implemented this slice
 
-- **`impact-use-cases.yaml` and the use-case graph** (`use_case`/`test_case`
-  nodes, `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE`/`TRACE_OBSERVED_ENTRY`/
-  `TRACE_OBSERVED_EDGE`, `docs/use/use-case-impact.md`). A declared-vs-observed
-  manifest format is a user-facing schema with its own compatibility
-  obligations, and G29's own plan is emphatic that it must **not** reuse
-  `docs/contribute/usecase-registry.yaml` (which tracks abicheck's own feature
-  coverage). It needs its own design pass, not an appendix to this one.
+- **`impact-use-cases.yaml` and the use-case graph** — **implemented in
+  slice 2** (2026-08-09 amendment, above): `use_case`/`test_case` nodes and
+  `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` edges, in
+  `abicheck/impact/use_cases.py`; see
+  [Use-Case Impact](../../use/use-case-impact.md). `TRACE_OBSERVED_ENTRY`/
+  `TRACE_OBSERVED_EDGE` remain reserved, unpopulated — see the next bullet.
 - **Runtime-trace ingestion** (`RUNTIME_FAILED_TO_RESOLVE_SYMBOL`,
-  `runtime_probe`). Registered as vocabulary; no producer. The hard part is
-  not the edges — it is that absence of a trace must never read as "not used",
-  which is a semantics decision this slice has no data to validate against.
+  `runtime_probe`, and — as of slice 2 — `TRACE_OBSERVED_ENTRY`/
+  `TRACE_OBSERVED_EDGE` too). Registered as vocabulary; no producer. The hard
+  part is not the edges — it is that absence of a trace must never read as
+  "not used", which is a semantics decision this slice has no data to
+  validate against.
 - **`consumer_object` / `CONSUMER_COMPILED_FROM_HEADER` /
   `CONSUMER_INSTANTIATES_DECL`.** These need *consumer-side* build evidence
   (which TU of the consumer compiled which header, which template it

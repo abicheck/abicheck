@@ -705,3 +705,105 @@ def test_run_scan_subprocess_times_out(snap_path: Path) -> None:
         run_scan_subprocess(
             ScanRequest(binaries=[snap_path], mode="audit"), timeout=0.001
         )
+
+
+# ── run_scan_set_subprocess: the artifact-set killable MCP harness (G35) ──────
+#
+# Reuses test_run_scan_subprocess_joins_already_exited_worker's in-process
+# _FakeCtx/_FakeProcess trick: the "child" runs synchronously in this same
+# process, so monkeypatching service_scan.run_scan_set (the module-global the
+# worker calls) drives the real _scan_set_subprocess_worker/
+# run_scan_set_subprocess boundary logic without paying for a real spawn or
+# needing real ELF fixtures.
+
+
+class _FakeSetCtx:
+    def __init__(self) -> None:
+        import queue as _queue_mod
+
+        self.queue = _queue_mod.Queue()
+
+    def Queue(self):  # noqa: N802 - matches multiprocessing.Queue's name
+        return self.queue
+
+    def Process(self, target, args, daemon):  # noqa: N802
+        class _FakeProcess:
+            def start(self) -> None:
+                target(*args)
+
+            def is_alive(self) -> bool:
+                return False
+
+            def join(self, timeout: float | None = None) -> None:
+                pass
+
+        return _FakeProcess()
+
+
+def test_run_scan_set_subprocess_propagates_artifact_set_error(
+    monkeypatch: pytest.MonkeyPatch, snap_path: Path
+) -> None:
+    # P2 regression (Codex review): an ArtifactSetError (ValueError subclass)
+    # raised inside run_scan_set must cross the subprocess boundary as a real
+    # ValueError, carrying its own actionable message -- not collapse into a
+    # generic RuntimeError an MCP tool's _sanitize_error would then report as
+    # a bare "unexpected error".
+    import multiprocessing
+
+    import abicheck.service_scan as service_scan_mod
+    from abicheck.bundle import ArtifactSetError
+
+    def _fake_run_scan_set(req):
+        raise ArtifactSetError(
+            "--artifact-set has ambiguous duplicate SONAME provider(s): x"
+        )
+
+    monkeypatch.setattr(multiprocessing, "get_context", lambda _name: _FakeSetCtx())
+    monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
+    with pytest.raises(ValueError, match="ambiguous duplicate SONAME"):
+        service_scan_mod.run_scan_set_subprocess(
+            ScanRequest(binaries=[snap_path, snap_path], mode="audit"),
+            timeout=120.0,
+        )
+
+
+def test_run_scan_set_subprocess_propagates_plain_value_error(
+    monkeypatch: pytest.MonkeyPatch, snap_path: Path
+) -> None:
+    # The cardinality/baseline ValueErrors run_scan_set raises itself (not
+    # via ArtifactSetError) get the same real-ValueError treatment.
+    import multiprocessing
+
+    import abicheck.service_scan as service_scan_mod
+
+    def _fake_run_scan_set(req):
+        raise ValueError("run_scan_set requires 2 or more distinct binaries")
+
+    monkeypatch.setattr(multiprocessing, "get_context", lambda _name: _FakeSetCtx())
+    monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
+    with pytest.raises(ValueError, match="2 or more distinct binaries"):
+        service_scan_mod.run_scan_set_subprocess(
+            ScanRequest(binaries=[snap_path, snap_path], mode="audit"),
+            timeout=120.0,
+        )
+
+
+def test_run_scan_set_subprocess_propagates_unexpected_error_as_runtime_error(
+    monkeypatch: pytest.MonkeyPatch, snap_path: Path
+) -> None:
+    # Anything other than a ValueError still becomes the generic RuntimeError
+    # (unchanged behavior) -- this fix is additive, not a blanket pass-through.
+    import multiprocessing
+
+    import abicheck.service_scan as service_scan_mod
+
+    def _fake_run_scan_set(req):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(multiprocessing, "get_context", lambda _name: _FakeSetCtx())
+    monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
+    with pytest.raises(RuntimeError, match="boom"):
+        service_scan_mod.run_scan_set_subprocess(
+            ScanRequest(binaries=[snap_path, snap_path], mode="audit"),
+            timeout=120.0,
+        )

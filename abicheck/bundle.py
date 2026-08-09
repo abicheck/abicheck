@@ -345,6 +345,56 @@ def check_artifact_set_soname_collisions(libraries: dict[str, Path]) -> None:
         )
 
 
+def artifact_set_member_exports(
+    libraries: dict[str, Path],
+) -> dict[str, frozenset[str]]:
+    """Each artifact-set member's own default-exported symbol names (G35).
+
+    Deliberately narrow and cheap: an ELF header/dynsym-only parse
+    (:func:`~abicheck.elf_metadata.parse_elf_metadata`, never raises — an
+    unparseable member just contributes an empty set) with no DWARF/header-AST
+    work, run once by :func:`~abicheck.service_scan.run_scan_set` before any
+    member's full scan so each member's own ``public_not_exported``
+    cross-check can be told the union of what its *siblings* export (a shared
+    umbrella header commonly declares more than one member's own public API —
+    see :class:`~abicheck.buildsource.crosscheck.CrosscheckConfig`'s
+    ``sibling_exported_symbols`` field for what consumes this). Mirrors the
+    same ``is_default``-only filter
+    :func:`~abicheck.buildsource.crosscheck_base._exported_symbol_names`
+    applies to a live snapshot's own ELF export table, so "satisfied by a
+    sibling" uses the identical default/unversioned-binding notion of
+    "exported" as "satisfied by this member itself" — a symbol that exists
+    only as a non-default version alias on a sibling would not satisfy an
+    unversioned consumer link there either, and must not satisfy one here.
+
+    Separate from :func:`build_bundle_snapshot`'s own full ELF parse (used by
+    :func:`audit_bundle` for the resolution-graph bundle findings) rather
+    than reusing its result: that call still happens after every member's
+    own scan in ``run_scan_set``, and this export union is needed *before*
+    that loop so each member's scan can consult it while running, not after.
+
+    **Known gap (Codex review, not fixed here — see the G35 plan doc):** a
+    raw export name only, with no L4 reconciliation applied. A sibling that
+    exports a declaration only under a variant spelling (a ctor's base-object
+    clone, a Mach-O/demangle drift — the same class
+    ``crosscheck._l4_reconciled_symbols`` already exempts for the *current*
+    member) still false-positives here, since that reconciliation mapping
+    lives on a member's own built snapshot, which doesn't exist yet at this
+    point — fixing it would mean building every member's full snapshot before
+    scanning any of them, a heavier change than this ELF-only pass.
+    """
+    from . import deadline
+
+    exports: dict[str, frozenset[str]] = {}
+    for name, path in libraries.items():
+        deadline.check()
+        meta = parse_elf_metadata(path)
+        exports[name] = frozenset(
+            s.name for s in meta.symbols if s.name and s.is_default
+        )
+    return exports
+
+
 def audit_bundle(
     libraries: dict[str, Path],
     *,

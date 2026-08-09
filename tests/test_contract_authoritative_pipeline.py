@@ -1353,3 +1353,120 @@ class TestTheStageClassifiesEveryFinding:
         stage.classify(changes)
         stage.classify(changes)
         assert len(stage.changes) == 1
+
+
+class TestForcedPublicSymbolsWidenTheCommittedRootAllowlist:
+    """Codex review, fresh evidence: `--post-manifest` and `--public-symbol`
+    combined with header scoping (`_run_allowlist` in `post_processing.py`)
+    keeps a `Change` on the forced symbol as a widening overlay -- but
+    `build_contract_stage`'s own `committed_roots` (threaded into
+    `directly_referenced_stdlib_type_spellings` to scope which declarations
+    may seed a stdlib direct-reference root) never consulted
+    `force_public_symbols` at all. An uncommitted-but-forced-public
+    `api(vector<int>)` was rejected as a root, so a `std::vector` layout
+    break under it classified `UNKNOWN_UNRESOLVED` (gate: `NO_CHANGE`) even
+    though the identical comparison without the manifest is `BREAKING`."""
+
+    @staticmethod
+    def _pair() -> tuple[AbiSnapshot, AbiSnapshot]:
+        from abicheck.model import Param
+
+        rec_name = "basic_string<char, std::char_traits<char>, std::allocator<char> >"
+
+        def snap(has_cxx11: bool) -> AbiSnapshot:
+            qname = ("std::__cxx11::" if has_cxx11 else "std::") + rec_name
+            return AbiSnapshot(
+                library="libfoo.so",
+                version="1",
+                functions=[
+                    Function(
+                        name="stable",
+                        mangled="stable",
+                        return_type="void",
+                        visibility=Visibility.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    ),
+                    Function(
+                        name="api",
+                        mangled="api",
+                        return_type="void",
+                        params=[Param(name="s", type=rec_name)],
+                        visibility=Visibility.PUBLIC,
+                        origin=ScopeOrigin.PUBLIC_HEADER,
+                    ),
+                ],
+                types=[
+                    RecordType(
+                        name=rec_name,
+                        qualified_name=qname,
+                        kind="class",
+                        size_bits=40 if has_cxx11 else 32,
+                    )
+                ],
+            )
+
+        return snap(False), snap(True)
+
+    def test_an_uncommitted_but_forced_public_root_still_confirms_the_break(
+        self,
+    ) -> None:
+        old, new = self._pair()
+        # `stable` is the only committed export; `api` (which names the
+        # stdlib type) is uncommitted but explicitly forced public.
+        result = compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            contract_mode="public",
+            public_surface_allowlist={"stable"},
+            force_public_symbols={"api"},
+        )
+        change = next(
+            c for c in result.changes if c.kind is ChangeKind.TYPE_SIZE_CHANGED
+        )
+        assert change.contract_relevance is ContractRelevance.IN_CONTRACT
+        assert change.compatibility_decision is Verdict.BREAKING
+        assert result.verdict is Verdict.BREAKING
+
+    def test_without_the_forced_symbol_it_stays_unresolved(self) -> None:
+        """The control: dropping `force_public_symbols` reverts to the
+        pre-fix, manifest-only behavior -- confirming the widening, not a
+        change to the manifest's own baseline scoping."""
+        old, new = self._pair()
+        result = compare(
+            old,
+            new,
+            scope_to_public_surface=True,
+            contract_evaluation=True,
+            contract_mode="public",
+            public_surface_allowlist={"stable"},
+        )
+        change = next(
+            c for c in result.changes if c.kind is ChangeKind.TYPE_SIZE_CHANGED
+        )
+        assert change.contract_relevance is ContractRelevance.UNKNOWN_UNRESOLVED
+        assert result.verdict is Verdict.NO_CHANGE
+
+    def test_without_header_scoping_the_widening_overlay_is_not_applied(
+        self,
+    ) -> None:
+        """Mirrors `_run_allowlist`'s own gate exactly: the CLI already warns
+        `--public-symbol` is ignored under `--no-scope-public-headers`, so
+        `committed_roots` must not be widened when `scope_to_public_surface`
+        is False either -- applying it unconditionally would contradict that
+        warning."""
+        old, new = self._pair()
+        result = compare(
+            old,
+            new,
+            scope_to_public_surface=False,
+            contract_evaluation=True,
+            contract_mode="public",
+            public_surface_allowlist={"stable"},
+            force_public_symbols={"api"},
+        )
+        change = next(
+            c for c in result.changes if c.kind is ChangeKind.TYPE_SIZE_CHANGED
+        )
+        assert change.contract_relevance is ContractRelevance.UNKNOWN_UNRESOLVED

@@ -107,7 +107,7 @@ A new detector should:
 ## 5. What this contract does *not* require (yet)
 
 - **Consumer-proven evidence** (`select_preferred_graph_path`'s tier 1). This
-  now exists — [G29 Phase 4 slice 1](plans/g29-impact-analysis-layer.md#phase-4-consumer-use-case-join-slice-1-implemented-adr-057)
+  now exists — [G29 Phase 4 slice 1](plans/g29-impact-analysis-layer.md#phase-4-consumer-use-case-join-slices-1-2-implemented-adr-057)
   ([ADR-057](adr/057-consumer-graph-and-impact-join.md)) folds a real
   `--used-by` consumer's requirements into the graph — but it is still not
   something a *detector* claims. The tier is derived from

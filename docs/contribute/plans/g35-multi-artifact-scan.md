@@ -4,6 +4,17 @@ level: advanced
 lifecycle: active
 ---
 
+> **Historical note (2026-08-09).** The MCP server this plan's "Phase 3 —
+> CLI + MCP surface" describes (including the `abi_scan_set` tool marked
+> "done" below) has been removed entirely — see
+> `docs/contribute/adr/021-mcp-security-model.md` (retired the same date).
+> Every MCP-specific bullet in this plan (the `abi_scan`/`abi_estimate`
+> `artifact_set` params, `abi_scan_set`, `mcp_server.py`/
+> `mcp_server_scan.py`, `docs/reference/mcp-tools-reference.md`) describes a
+> removed interface and is not something to re-implement. The CLI
+> (`scan --artifact-set`) and GitHub Action surfaces this plan describes
+> are unaffected and remain current.
+
 # G35 — Multi-Artifact / Library-Set `scan`
 
 **Origin:** User request to properly scan cases where one logical
@@ -47,9 +58,21 @@ shipped, with unit, CLI-level, and Action-level tests (`tests/test_bundle.py`,
 `tests/test_action_run_sh_artifact_set.py`) and a real gcc-built end-to-end
 case. **Still open, not silently dropped:**
 
-- Phase 3's MCP half — `abi_scan`/`abi_estimate` don't yet accept an
-  `artifact_set` parameter, and `docs/reference/mcp-tools-reference.md`
-  hasn't been regenerated for it.
+- ~~Phase 3's MCP half~~ — **done (2026-08-09).** A new `abi_scan_set` MCP
+  tool (`mcp_server_scan.py`), not an `artifact_set` parameter grafted onto
+  `abi_scan` itself: `abi_scan`'s own `against`/`policy`/`suppression_file`/
+  `contract_evaluation` family are all baseline-comparison arguments
+  `run_scan_set` (audit-only, ADR-056 D2, rejects a baseline outright)
+  cannot accept, so a shared single-tool signature would have to make every
+  one of them silently ignored under `artifact_set` — the same reasoning
+  `cli_scan.py` already applies by giving `--artifact-set` its own code path
+  rather than overloading `scan ARTIFACT`. Takes `artifact_paths` (2+),
+  routes through the already-existing `run_scan_set_subprocess` (its own
+  docstring anticipated exactly this caller — "MCP `abi_scan` must route an
+  `artifact_set` call through this"), and forwards the same argument family
+  `abi_scan` does minus the comparison-only ones, plus
+  `bundle_system_providers`. `docs/reference/mcp-tools-reference.md`
+  regenerated.
 - The full example-catalog obligation (`examples/caseNNN_.../`,
   `ground_truth.json`, `examples/README.md`, `gen_examples_docs.py`) — a
   unit-level fixture covers the detector for now, not a binary example case.
@@ -57,30 +80,47 @@ case. **Still open, not silently dropped:**
   3's estimator bullet) — `--dry-run` is currently rejected outright for
   `--artifact-set` rather than shipped with an approximate estimate (now
   also enforced at the Action's preflight step, not just the CLI).
-- **Cross-member header-obligation attribution — investigated, not fixed
-  this pass (Codex review, real finding).** `_run_artifact_set` passes the
-  *same* declared header set to every member's scan
-  (`_run_scan_one_member` → `run_scan_core`'s per-member crosscheck pass);
-  when a shared umbrella header partitions its declared API across
-  sibling DSOs (the motivating oneDAL-style layout — `core_fn` declared in
-  a common header but only implemented/exported by `libcore.so`, not
-  `libalgo.so`), the `public_not_exported` crosscheck runs independently
-  per member and has no notion of "this symbol is satisfied by a sibling,
-  not this binary" — `abicheck/buildsource/crosscheck.py`'s
+- **Cross-member header-obligation attribution — fixed (2026-08-09), via the
+  minimum-viable half of the two options this entry originally named.**
+  `_run_artifact_set` passes the *same* declared header set to every
+  member's scan (`_run_scan_one_member` → `run_scan_core`'s per-member
+  crosscheck pass); when a shared umbrella header partitions its declared
+  API across sibling DSOs (the motivating oneDAL-style layout — `core_fn`
+  declared in a common header but only implemented/exported by
+  `libcore.so`, not `libalgo.so`), the `public_not_exported` crosscheck ran
+  independently per member and had no notion of "this symbol is satisfied
+  by a sibling, not this binary" — `abicheck/buildsource/crosscheck.py`'s
   `_check_public_not_exported` takes a single `AbiSnapshot` with no
   cross-snapshot context at all. With the check at its default advisory
-  severity this is silent (RISK-only, doesn't change the verdict/exit
+  severity this was silent (RISK-only, doesn't change the verdict/exit
   code), but `--crosscheck public_not_exported=error` — the documented way
-  to gate CI on it — turns a legitimate, correctly-partitioned set into a
-  false `API_BREAK` for every member. A real fix needs either attributing
-  each header declaration to the specific member(s) that should export it,
-  or computing the union of every member's exports before running each
-  member's crosscheck pass and treating a sibling-satisfied symbol as
-  resolved — both are genuine plumbing changes to a crosscheck engine
-  shared with the single-binary path (which has no such false-positive
-  risk, since there is only ever one binary), not a same-pass patch.
-  Deliberately not attempted here; flagged as a known limitation rather
-  than shipped silently broken.
+  to gate CI on it — turned a legitimate, correctly-partitioned set into a
+  false `API_BREAK` for every member. Fixed the "union of every member's
+  exports" way (not by attributing each header declaration to a specific
+  owning member — that stays open, see below): `bundle.py`'s new
+  `artifact_set_member_exports()` runs a cheap, ELF-header/dynsym-only pass
+  over every set member up front; `service_scan.run_scan_set()` hands each
+  member's own scan the union of what its *siblings* export via a new
+  `CrosscheckConfig.sibling_exported_symbols` field, consulted by
+  `_check_public_not_exported` alongside this member's own export table and
+  the existing L4 reconciliation set. **Still open (two gaps, both flagged
+  in review rather than shipped silently broken):** (1) per-declaration
+  ownership attribution (so a symbol that moved to the *wrong* sibling, with
+  no genuinely missing export anywhere in the set, could still be flagged
+  as a mis-attribution rather than silently accepted) — this fix accepts
+  "some sibling exports it" as sufficient, matching the minimum bar this
+  entry originally set, not the more precise future model; (2) a sibling's
+  own L4 reconciliation (ctor clone / Mach-O / demangle-drift variant
+  spellings, the same class `_l4_reconciled_symbols` already exempts for
+  the *current* member) is not applied to `sibling_exported_symbols` —
+  `artifact_set_member_exports()` is a deliberately cheap, ELF-only pass
+  with no L4/build-source data at all, run before any member's own
+  snapshot (which is what carries that reconciliation mapping) has even
+  been built, so a declaration a sibling exports only under such a variant
+  spelling still false-positives. Fixing that would mean building every
+  member's full snapshot (for its own L4 mapping) before scanning any
+  member, the same class of heavier plumbing change as (1) — not attempted
+  in the same pass as the raw-export union fix.
 
 ---
 
@@ -827,15 +867,19 @@ implementation that shipped.
   `scripts/verify.py --profile pr` fails on a stale generated file, this
   is not optional cleanup):
   - `python scripts/gen_mcp_reference.py` → `docs/reference/mcp-tools-reference.md`
-    (needs the `mcp` extra installed) for the new `artifact_set` param.
+    (needs the `mcp` extra installed) for the new `abi_scan_set` tool
+    (regenerated 2026-08-09, see the Implementation status note above).
   - `python scripts/gen_action_reference.py` → `docs/reference/github-action-inputs.md`
     for the new `new-library-set` input.
   - `python scripts/gen_cli_reference.py` → `docs/reference/cli-reference.md`
     for `--artifact-set` (already listed under G35.4 above; grouped here
     since all three generators run together in practice).
 - **CLI + GitHub Action halves shipped** (this pass's Implementation status
-  note, above). **MCP half (`abi_scan`/`abi_estimate` `artifact_set` param,
-  `mcp-tools-reference.md` regen) not started.**
+  note, above). **MCP half done (2026-08-09)** — see the Implementation
+  status note's own updated bullet for what shipped (a dedicated
+  `abi_scan_set` tool, not an `artifact_set` param on `abi_scan`, and
+  `abi_estimate` — dry-run cost estimation — is unaffected, since G35's
+  per-member estimator scaling gap is still separately open below).
 
 ### Phase 4 — Reporting
 

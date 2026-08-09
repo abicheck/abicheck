@@ -22,6 +22,8 @@ cap)."""
 
 from __future__ import annotations
 
+import sys
+
 from abicheck.diff_cxx_rules import owner_class_of
 from abicheck.model import (
     AbiSnapshot,
@@ -1526,16 +1528,33 @@ class TestNestedMatchesWithinTheSameSpellingIndex:
         Python call per nesting level in _finditer_allow_nested, raising
         RecursionError under Python's default 1,000-frame limit and
         aborting the whole comparison. An explicit stack has no such
-        limit."""
-        depth = 1000
-        inner = "X"
-        candidates = ["X"]
-        for i in range(depth, 0, -1):
-            inner = f"Wrapper{i}<{inner}>"
-            candidates.append(inner)
-        pattern = _compile_spelling_pattern(set(candidates))
-        matches = _finditer_allow_nested(pattern, inner)
-        assert len(matches) == len(candidates)
+        limit.
+
+        What matters is depth exceeding the recursion *limit in effect*,
+        not the real interpreter default -- temporarily lowering the limit
+        lets a much shallower (and much cheaper to build/compile) chain
+        exercise the same guarantee. At the original depth=1000 this test
+        was the single most expensive item in the whole unit suite
+        (~10-22s, dominated by compiling a regex alternation whose total
+        pattern text grows quadratically with depth); depth=150 against a
+        limit of 120 is >80x cheaper and proves the identical thing: an
+        explicit-stack search added no per-level recursion, so it never
+        approaches the frame ceiling regardless of where that ceiling
+        sits."""
+        original_limit = sys.getrecursionlimit()
+        sys.setrecursionlimit(120)
+        try:
+            depth = 150
+            inner = "X"
+            candidates = ["X"]
+            for i in range(depth, 0, -1):
+                inner = f"Wrapper{i}<{inner}>"
+                candidates.append(inner)
+            pattern = _compile_spelling_pattern(set(candidates))
+            matches = _finditer_allow_nested(pattern, inner)
+            assert len(matches) == len(candidates)
+        finally:
+            sys.setrecursionlimit(original_limit)
 
     def test_explicit_end_bound_restricts_the_search_window(self) -> None:
         """Direct unit coverage for the explicit start/end window this
@@ -1843,23 +1862,21 @@ class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
         # either, since that "referenced" answer is exactly as unproven.
         assert spellings == frozenset()
 
-    def test_known_conservative_gap_group_excluded_even_if_one_member_is_also_confirmed_elsewhere(
+    def test_exact_match_survives_even_when_its_stripped_form_is_ambiguous(
         self,
     ) -> None:
-        # Documents a deliberate limitation rather than asserting an ideal:
-        # even when a *different* public signature separately names one
-        # ambiguous candidate's full qualified spelling directly (a
-        # genuine, independent confirmation for that one identity), this
-        # function still excludes the whole group -- it groups by "does
-        # this identity's stripped spelling collide with another
-        # referenced identity's", which doesn't distinguish "reached only
-        # via the ambiguous route" from "also reached via an unambiguous
-        # one". Recovering that distinction needs per-match-route
-        # provenance from the underlying scan (_StdlibReferenceScan), which
-        # today only returns a flat set of referenced identities -- a
-        # deeper change than this collision-guard fix, not attempted here.
-        # Same false-negative-over-false-positive direction this whole
-        # module already commits to throughout.
+        # Per-identity match provenance (_StdlibReferenceScan.referenced_exact)
+        # distinguishes "reached only via the ambiguous shared bare
+        # spelling" from "also independently reached via its own unique,
+        # fully-qualified spelling elsewhere in the same snapshot": a
+        # different public signature separately naming
+        # `__gnu_debug::vector<int>` outright is a genuine, independent
+        # confirmation for that one identity, unaffected by the fact that
+        # `std::vector<int>` shares the same bare "vector<int>" spelling
+        # with it. `std::vector<int>` itself is reached only through that
+        # ambiguous bare spelling (never via its own exact qualified form),
+        # so it is correctly excluded, and the shared bare form itself is
+        # never exported for either identity.
         snap = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
@@ -1881,7 +1898,9 @@ class TestDirectlyReferencedStdlibTypeSpellingsAmbiguityGuard:
                 ),
             ],
         )
-        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"__gnu_debug::vector<int>"}
+        )
 
 
 class TestExcludeExportOnlyRoots:

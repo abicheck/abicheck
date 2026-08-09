@@ -19,13 +19,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`18`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`19`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 18,
+  "schema_version": 19,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -48,8 +48,12 @@ for the header-AST parse (`ast_resolved_standard`, `ast_cplusplus_macro`,
 coherence (`dwarf_layout_coherence`, `dwarf_layout_coherence_mismatches` —
 see "Compile-context provenance" below), (v17) which SYCL/DPC++ AST pass
 a header-AST snapshot was built from (`frontend_context_kind`, ADR-050 D5),
-and (v18) whether `dump`'s default toolchain/system-header exclusion was
-applied (`dependency_scope`, see `dumper_scoping.py`).
+(v18) whether `dump`'s default toolchain/system-header exclusion was
+applied (`dependency_scope`, see `dumper_scoping.py`), and (v19) whether the
+direct-clang backend's `deprecated`/`is_scoped` facts are reliable
+(`clang_deprecation_facts_reliable`, G31 Phase C — those facts became
+genuinely populated by the clang backend at this version; see
+`dumper_clang.py`).
 
 ### Forward / backward compatibility
 
@@ -60,7 +64,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 18`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 19`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -98,7 +102,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `18`). |
+| `schema_version` | int | Snapshot format version (currently `19`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -228,7 +232,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `18`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `19`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

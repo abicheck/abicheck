@@ -457,6 +457,179 @@ def test_parse_enums_sets_qualified_name_for_namespaced_enum() -> None:
     assert enums["Global"].qualified_name is None
 
 
+# ── G31 Phase C: CastXML schema-completeness audit -- direct-clang backend ──
+
+
+def test_clang_deprecated_message_three_states() -> None:
+    from abicheck.dumper_clang import _clang_deprecated_message
+
+    not_deprecated = {"kind": "FunctionDecl", "name": "f", "inner": []}
+    bare = {
+        "kind": "FunctionDecl",
+        "name": "f",
+        "inner": [{"kind": "DeprecatedAttr"}],
+    }
+    messaged = {
+        "kind": "FunctionDecl",
+        "name": "f",
+        "inner": [{"kind": "DeprecatedAttr", "message": "use g instead"}],
+    }
+    assert _clang_deprecated_message(not_deprecated) is None
+    assert _clang_deprecated_message(bare) == ""
+    assert _clang_deprecated_message(messaged) == "use g instead"
+
+
+def test_clang_record_type_traits_three_states() -> None:
+    from abicheck.dumper_clang import _clang_record_type_traits
+
+    no_definition_data = {"kind": "RecordDecl", "name": "PlainC"}
+    both_true = {
+        "kind": "CXXRecordDecl",
+        "name": "Pod",
+        "definitionData": {"isStandardLayout": True, "isTriviallyCopyable": True},
+    }
+    both_false = {
+        "kind": "CXXRecordDecl",
+        "name": "NotStdLayout",
+        # Confirmed against real clang -ast-dump=json: a trait that does NOT
+        # hold has its key entirely absent, never present as a literal false.
+        "definitionData": {},
+    }
+    assert _clang_record_type_traits(no_definition_data) == (None, None)
+    assert _clang_record_type_traits(both_true) == (True, True)
+    assert _clang_record_type_traits(both_false) == (False, False)
+
+
+def test_parse_types_populates_standard_layout_and_trivially_copyable() -> None:
+    # Wires _clang_record_type_traits into parse_types -- previously these two
+    # RecordType fields were never populated by the direct-clang backend at
+    # all, leaving the already-built STANDARD_LAYOUT_LOST/
+    # TRIVIALLY_COPYABLE_LOST detectors permanently dead on that backend
+    # (verified end-to-end against a real compiled example before wiring
+    # this up; see docs/contribute/plans/g31-header-graph-default-on-followup.md).
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Pod",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "definitionData": {"isStandardLayout": True, "isTriviallyCopyable": True},
+            "inner": [
+                {"kind": "FieldDecl", "name": "a", "type": {"qualType": "int"}},
+            ],
+        },
+        {
+            "kind": "CXXRecordDecl",
+            "name": "NotStdLayout",
+            "tagUsed": "class",
+            "loc": {"file": "include/foo.h", "line": 10},
+            "completeDefinition": True,
+            "definitionData": {"isTriviallyCopyable": True},
+            "inner": [
+                {"kind": "FieldDecl", "name": "b", "type": {"qualType": "int"}},
+            ],
+        },
+    )
+    types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
+    assert types["Pod"].is_standard_layout is True
+    assert types["Pod"].is_trivially_copyable is True
+    assert types["NotStdLayout"].is_standard_layout is False
+    assert types["NotStdLayout"].is_trivially_copyable is True
+
+
+def test_parse_types_and_enums_populate_deprecated() -> None:
+    # Mirrors dumper_castxml's own deprecated wiring -- the direct-clang
+    # backend previously left Function/Variable/TypeField/RecordType/
+    # EnumType.deprecated at None unconditionally (undocumented gap; the
+    # model.py field comment called it "castxml-only as of this field's
+    # introduction").
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Widget",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {"kind": "DeprecatedAttr", "message": "old widget"},
+                {
+                    "kind": "FieldDecl",
+                    "name": "legacy",
+                    "type": {"qualType": "int"},
+                    "inner": [{"kind": "DeprecatedAttr"}],
+                },
+            ],
+        },
+        {
+            "kind": "EnumDecl",
+            "name": "Mode",
+            "loc": {"file": "include/foo.h", "line": 20},
+            "scopedEnumTag": "class",
+            "inner": [
+                {"kind": "DeprecatedAttr", "message": "use NewMode"},
+                {"kind": "EnumConstantDecl", "name": "A"},
+            ],
+        },
+    )
+    parser = _ClangAstParser(root, set(), set())
+    types = {t.name: t for t in parser.parse_types()}
+    enums = {e.name: e for e in parser.parse_enums()}
+    assert types["Widget"].deprecated == "old widget"
+    assert types["Widget"].fields[0].deprecated == ""
+    assert enums["Mode"].deprecated == "use NewMode"
+    assert enums["Mode"].is_scoped is True
+
+
+def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
+    root = _tu(
+        {
+            "kind": "EnumDecl",
+            "name": "PlainMode",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [{"kind": "EnumConstantDecl", "name": "A"}],
+        },
+    )
+    enums = {e.name: e for e in _ClangAstParser(root, set(), set()).parse_enums()}
+    assert enums["PlainMode"].is_scoped is False
+    assert enums["PlainMode"].deprecated is None
+
+
+def test_parse_functions_and_variables_populate_deprecated() -> None:
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "old_fn",
+            "mangledName": "_Z6old_fnv",
+            "type": {"qualType": "void ()"},
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [{"kind": "DeprecatedAttr"}],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "new_fn",
+            "mangledName": "_Z6new_fnv",
+            "type": {"qualType": "void ()"},
+            "loc": {"file": "include/foo.h", "line": 2},
+            "inner": [],
+        },
+        {
+            "kind": "VarDecl",
+            "name": "old_var",
+            "mangledName": "old_var",
+            "type": {"qualType": "int"},
+            "loc": {"file": "include/foo.h", "line": 3},
+            "inner": [{"kind": "DeprecatedAttr", "message": "unused"}],
+        },
+    )
+    parser = _ClangAstParser(root, set(), set())
+    funcs = {f.name: f for f in parser.parse_functions()}
+    variables = {v.name: v for v in parser.parse_variables()}
+    assert funcs["old_fn"].deprecated == ""
+    assert funcs["new_fn"].deprecated is None
+    assert variables["old_var"].deprecated == "unused"
+
+
 def test_parse_types_anonymous_aggregate_flattening_sets_flag() -> None:
     """A record whose members come from an anonymous struct/union gets
     those members flattened into `fields` (clang emits an IndirectFieldDecl

@@ -85,6 +85,7 @@ from .elf_symbol_filter import (
 )
 from .fact_provenance import (
     both_castxml_backed_fact,
+    both_known_backed_fact,
     fact_producer,
     func_fact_key,
     var_fact_key,
@@ -1726,14 +1727,18 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     dumper doesn't capture this" (see its docstring in model.py), so a
     per-pair None check would silently miss every real transition (one side
     of a real add/remove is always None by construction). Gates per-pair on
-    :func:`fact_provenance.both_castxml_backed_fact` rather than plain
-    ``_both_header_aware``: the clang header backend doesn't populate
-    ``Function.deprecated`` yet, so a castxml-vs-clang comparison would
-    otherwise read as every deprecation having been removed (Codex review,
-    PR #582). A per-pair check (rather than the whole-snapshot
-    ``_both_castxml_backed``) also correctly handles a ``--ast-frontend
-    hybrid`` snapshot (G28 Phase 3), where this fact is castxml-backed per
-    *declaration*, not uniformly across the whole snapshot.
+    :func:`fact_provenance.both_known_backed_fact` (not the narrower
+    ``both_castxml_backed_fact``): both castxml and the direct-clang backend
+    populate ``Function.deprecated`` today (G31 Phase C — see
+    ``dumper_clang._clang_deprecated_message``; the clang backend didn't
+    when this detector was first written for PR #582), and the two
+    backends' values are directly cross-comparable (a plain message string,
+    not a backend-specific encoding), so a clang-vs-clang or
+    clang-vs-castxml pair is just as comparable as a castxml-vs-castxml one.
+    A per-pair check (rather than a whole-snapshot gate) also correctly
+    handles a ``--ast-frontend hybrid`` snapshot (G28 Phase 3), where this
+    fact's producer is recorded per *declaration*, not uniformly across the
+    whole snapshot.
     """
     changes: list[Change] = []
     old_map = _public_functions(old)
@@ -1743,7 +1748,7 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         f_new = new_map.get(mangled)
         if f_new is None:
             continue
-        if not both_castxml_backed_fact(old, new, func_fact_key(mangled, "deprecated")):
+        if not both_known_backed_fact(old, new, func_fact_key(mangled, "deprecated")):
             continue
         if f_old.deprecated is None and f_new.deprecated is not None:
             changes.append(
@@ -1826,9 +1831,10 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
 def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a variable gaining or losing `[[deprecated]]` (header-tier only).
 
-    Gates per-pair on :func:`fact_provenance.both_castxml_backed_fact` — see
-    ``FUNC_DEPRECATED_ADDED``'s docstring above (the clang backend doesn't
-    populate ``Variable.deprecated`` yet; per-declaration gating is what
+    Gates per-pair on :func:`fact_provenance.both_known_backed_fact` — see
+    ``FUNC_DEPRECATED_ADDED``'s docstring above (both castxml and the
+    direct-clang backend populate ``Variable.deprecated`` today, G31 Phase C,
+    with directly cross-comparable values; per-declaration gating is what
     correctly supports a ``--ast-frontend hybrid`` snapshot, G28 Phase 3).
     """
     changes: list[Change] = []
@@ -1839,7 +1845,7 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         v_new = new_map.get(mangled)
         if v_new is None:
             continue
-        if not both_castxml_backed_fact(old, new, var_fact_key(mangled, "deprecated")):
+        if not both_known_backed_fact(old, new, var_fact_key(mangled, "deprecated")):
             continue
         if v_old.deprecated is None and v_new.deprecated is not None:
             changes.append(

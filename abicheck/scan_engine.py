@@ -801,6 +801,7 @@ def run_scan_core(
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
     resolved_config: Any = None,
+    sibling_exported_symbols: frozenset[str] | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -808,6 +809,12 @@ def run_scan_core(
     returns a :class:`ScanCoreResult`. Raises :class:`_BudgetOverflow` on budget
     overflow (the CLI maps it to exit 5). This is the one body the CLI,
     ``service.run_scan``, and the MCP scan tool share (ADR-035 D10).
+
+    ``sibling_exported_symbols`` (G35, ``scan --artifact-set`` only via
+    ``service_scan.run_scan_set``) is forwarded to the always-on cross-check
+    tier's ``CrosscheckConfig`` unchanged — see
+    :class:`~abicheck.buildsource.crosscheck.CrosscheckConfig` for what it
+    does. ``None``/empty for the single-binary ``scan``/``compare`` paths.
     """
     stage_timings: dict[str, float] = {}
 
@@ -978,6 +985,7 @@ def run_scan_core(
         CrosscheckConfig(
             enabled=frozenset(enabled_checks),
             changed_paths=frozenset(changed) | set(symbol_tus),
+            sibling_exported_symbols=frozenset(sibling_exported_symbols or ()),
         ),
     )
     _record_stage("crosschecks", _stage)

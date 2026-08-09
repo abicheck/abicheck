@@ -32,28 +32,39 @@ their two independent :class:`~abicheck.model.AbiSnapshot`\\ s to
   mangled name via structural equivalence (same qualified enclosing class,
   compatible cv-normalized parameter signature for a constructor, same
   access) and rewriting the merged entry's key to the real mangled name.
-- **Per-fact backfill**: castxml-only facts (``deprecated``/``is_override``
-  on functions, ``deprecated`` on variables, ``is_abstract``/``deprecated``
-  on types, ``default``/``deprecated`` on fields, ``is_scoped``/
-  ``deprecated`` on enums) are taken from castxml when present, backfilled
-  from clang only when castxml's own value is ``None`` — forward-looking
-  scaffolding for once the clang backend gains any of these independently;
-  a no-op today, since ``dumper_clang.py`` doesn't populate any of them yet.
-  Every such fact records its source in the returned snapshot's
-  ``fact_provenance`` map (see ``abicheck/fact_provenance.py``), so
-  detectors can tell a castxml-backed fact apart from an unbacked one on a
-  per-declaration basis instead of trusting a whole-snapshot producer tag.
+- **Per-fact backfill**: facts that were originally castxml-only
+  (``deprecated``/``is_override`` on functions, ``deprecated`` on
+  variables, ``is_abstract``/``deprecated`` on types, ``default``/
+  ``deprecated`` on fields, ``is_scoped``/``deprecated`` on enums) are taken
+  from castxml when present, backfilled from clang only when castxml's own
+  value is ``None``. G31 Phase C closed the gap this backfill originally
+  anticipated for two of these facts specifically — ``deprecated`` (every
+  surface kind) and ``is_scoped`` — by wiring real extraction into
+  ``dumper_clang.py`` too, so this backfill is genuinely live for those two
+  now, not forward-looking scaffolding; ``is_override``/``is_abstract``/
+  field ``default`` remain castxml-only, so the backfill is still a no-op
+  for those three specifically. Every such fact records its source in the
+  returned snapshot's ``fact_provenance`` map (see
+  ``abicheck/fact_provenance.py``), so detectors can tell which backend
+  backs a fact apart from an unbacked one on a per-declaration basis
+  instead of trusting a whole-snapshot producer tag.
 
 **Layout facts**: castxml remains the PRIMARY layout source — its own real
 size/alignment/offset/vtable data is never overridden. When the optional G28
 Phase 4 companion tool (``ABICHECK_CLANG_LAYOUT_TOOL``) has already enriched
-the clang sub-dump before this merge, its facts backfill any of the same
-fields castxml itself never computes at all (``data_size_bits``,
-``is_standard_layout``, ``is_trivially_copyable``) or left empty (an opaque/
-incomplete castxml record) — see :func:`_merge_record_type`/
-:func:`_merge_field`. Without the layout tool enabled, this is a no-op:
-``dumper_clang.py``'s plain ``-ast-dump=json`` parse leaves every one of
-these fields empty too, so there is nothing to backfill from.
+the clang sub-dump before this merge, its facts backfill ``data_size_bits``
+and the offset/vptr facts castxml itself never computes at all, or left
+empty for an opaque/incomplete castxml record — see
+:func:`_merge_record_type`/:func:`_merge_field`. ``is_standard_layout``/
+``is_trivially_copyable`` are the one exception to "without the layout tool
+enabled, this is a no-op": G31 Phase C wired real extraction of both
+directly into ``dumper_clang.py``'s plain ``-ast-dump=json`` parse (no
+companion tool needed, since these are semantic type traits clang's AST
+computes independent of any layout pass — see ``_clang_record_type_traits``'s
+own docstring), so this backfill genuinely fires for those two even without
+``ABICHECK_CLANG_LAYOUT_TOOL`` set. ``data_size_bits``/``size_bits``/
+``alignment_bits``/``vptr_offset_bits`` still require the companion tool;
+``dumper_clang.py``'s plain parse leaves those empty either way.
 
 Everything not explicitly merged below (typedefs, constants, ELF/PE/Mach-O
 metadata, DWARF metadata, ...) is taken verbatim from the castxml snapshot,
@@ -70,6 +81,7 @@ from typing import Any
 
 from .comparability import PROFILE_FIELD_KEYS, _sha256_of
 from .diff_cxx_rules import _skip_template_args, itanium_scope_components
+from .diff_helpers import type_map_key
 from .dumper_castxml import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
@@ -322,9 +334,7 @@ def _match_synthetic_ctor_dtor(
     if parsed is None:
         return None
     marker, scope, param_sig = parsed
-    candidates = clang_ctor_dtor.get(
-        (marker, _normalize_scope_for_matching(scope)), []
-    )
+    candidates = clang_ctor_dtor.get((marker, _normalize_scope_for_matching(scope)), [])
     if marker == _DTOR_MARKER:
         if len(candidates) == 1 and candidates[0].access == castxml_f.access:
             return candidates[0]
@@ -403,6 +413,13 @@ def _merge_functions(
     clang_only = [cf for cf in clang_funcs if cf.mangled not in merged_mangled]
     for cf in clang_only:
         provenance[func_fact_key(cf.mangled, "param_defaults")] = "clang"
+        # A clang-only function's own deprecated value IS genuinely
+        # clang-sourced -- without this, both_known_backed_fact(old, new,
+        # func_fact_key(mangled, "deprecated")) sees no recorded provenance
+        # for it at all and incorrectly declines to compare a real
+        # deprecation transition on a declaration that exists on both sides
+        # only via clang (Codex review, fresh evidence).
+        provenance[func_fact_key(cf.mangled, "deprecated")] = "clang"
     merged.extend(clang_only)
     return merged
 
@@ -421,7 +438,11 @@ def _merge_variable(
 #: (data_size_bits/is_standard_layout/is_trivially_copyable) or leaves empty
 #: for an opaque/incomplete record (size_bits/alignment_bits/
 #: vptr_offset_bits) -- backfilled from an already-enriched clang_t below
-#: only when castxml's own value is still None (Codex review).
+#: only when castxml's own value is still None (Codex review). Since G31
+#: Phase C, is_standard_layout/is_trivially_copyable no longer need the
+#: optional ABICHECK_CLANG_LAYOUT_TOOL companion tool to backfill from --
+#: dumper_clang.py's plain parse populates both directly (see
+#: _clang_record_type_traits) -- the other four entries still do.
 _LAYOUT_SCALAR_ATTRS = (
     "size_bits",
     "alignment_bits",
@@ -433,14 +454,22 @@ _LAYOUT_SCALAR_ATTRS = (
 
 
 def _merge_field(
-    type_name: str,
+    t: RecordType,
     f: TypeField,
     clang_f: TypeField | None,
     provenance: dict[str, str],
 ) -> TypeField:
     updates: dict[str, Any] = {}
     for attr in ("default", "deprecated"):
-        key = field_fact_key(type_name, f.name, attr)
+        # "default" stays castxml-only (both_castxml_backed_fact) and keeps
+        # the bare owning-type-name key every other castxml-only fact
+        # already uses. "deprecated" is genuinely cross-producer since G31
+        # Phase C, and a clang-only sibling type sharing t's bare name can
+        # independently write to this same provenance dict (see
+        # merge_snapshots' clang-only-type append loop below) -- qualify
+        # the key so the two don't collide (Codex review, fresh evidence).
+        type_key = type_map_key(t) if attr == "deprecated" else t.name
+        key = field_fact_key(type_key, f.name, attr)
         value = _backfill_fact(
             getattr(f, attr), getattr(clang_f, attr, None), key, provenance
         )
@@ -448,7 +477,11 @@ def _merge_field(
             updates[attr] = value
     # G28 Phase 4: same layout backfill as _merge_record_type, for the
     # per-field offset the optional companion tool computes.
-    if clang_f is not None and f.offset_bits is None and clang_f.offset_bits is not None:
+    if (
+        clang_f is not None
+        and f.offset_bits is None
+        and clang_f.offset_bits is not None
+    ):
         updates["offset_bits"] = clang_f.offset_bits
     return replace(f, **updates) if updates else f
 
@@ -458,7 +491,11 @@ def _merge_record_type(
 ) -> RecordType:
     updates: dict[str, Any] = {}
     for attr in ("is_abstract", "deprecated"):
-        key = type_fact_key(t.name, attr)
+        # Same bare-vs-qualified split as _merge_field above: is_abstract
+        # stays bare (pre-existing castxml-only fact, no clang-only append
+        # writes to it), deprecated is qualified (G31 Phase C).
+        type_key = type_map_key(t) if attr == "deprecated" else t.name
+        key = type_fact_key(type_key, attr)
         value = _backfill_fact(
             getattr(t, attr), getattr(clang_t, attr, None), key, provenance
         )
@@ -482,7 +519,7 @@ def _merge_record_type(
 
     clang_fields_by_name = {cf.name: cf for cf in clang_t.fields} if clang_t else {}
     merged_fields = [
-        _merge_field(t.name, f, clang_fields_by_name.get(f.name), provenance)
+        _merge_field(t, f, clang_fields_by_name.get(f.name), provenance)
         for f in t.fields
     ]
     if merged_fields != t.fields:
@@ -495,8 +532,13 @@ def _merge_enum_type(
     e: EnumType, clang_e: EnumType | None, provenance: dict[str, str]
 ) -> EnumType:
     updates: dict[str, Any] = {}
+    # Both facts get clang-only-append writes (merge_snapshots' clang-only
+    # enum loop below), so both need the qualified key uniformly -- unlike
+    # RecordType's is_abstract/deprecated split above, there's no bare-only
+    # fact here to preserve compatibility with.
+    type_key = type_map_key(e)
     for attr in ("is_scoped", "deprecated"):
-        key = enum_fact_key(e.name, attr)
+        key = enum_fact_key(type_key, attr)
         value = _backfill_fact(
             getattr(e, attr), getattr(clang_e, attr, None), key, provenance
         )
@@ -552,8 +594,15 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
             for cv in clang_variables
         ]
 
-    clang_types_by_name = {t.name: t for t in clang_snap.types}
-    clang_enums_by_name = {e.name: e for e in clang_snap.enums}
+    # Keyed by type_map_key (namespace-qualified identity), not the bare
+    # RecordType.name/EnumType.name: two distinct types sharing only a bare
+    # leaf name in different namespaces (e.g. a::Foo/b::Foo) would otherwise
+    # silently collide here too -- one castxml record merging against the
+    # WRONG clang record, and/or a genuinely clang-only record (that merely
+    # shares its bare name with an unrelated castxml record) being dropped
+    # instead of appended (Codex review, fresh evidence).
+    clang_types_by_key = {type_map_key(t): t for t in clang_snap.types}
+    clang_enums_by_key = {type_map_key(e): e for e in clang_snap.enums}
     clang_vars_by_mangled = {v.mangled: v for v in clang_variables}
 
     merged_functions = _merge_functions(
@@ -561,27 +610,58 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     )
 
     merged_types = [
-        _merge_record_type(t, clang_types_by_name.get(t.name), provenance)
+        _merge_record_type(t, clang_types_by_key.get(type_map_key(t)), provenance)
         for t in castxml_snap.types
     ]
-    castxml_type_names = {t.name for t in castxml_snap.types}
-    merged_types.extend(t for t in clang_snap.types if t.name not in castxml_type_names)
+    castxml_type_keys = {type_map_key(t) for t in castxml_snap.types}
+    clang_only_types = [
+        t for t in clang_snap.types if type_map_key(t) not in castxml_type_keys
+    ]
+    for t in clang_only_types:
+        # A clang-only type's own deprecated value IS genuinely clang-
+        # sourced -- without this, both_known_backed_fact sees no recorded
+        # provenance at all for a declaration that exists on both snapshot
+        # sides only via clang, and incorrectly declines to compare a real
+        # transition (Codex review, fresh evidence). Qualified key (not
+        # bare t.name): two distinct types sharing only a bare leaf name in
+        # different namespaces (e.g. a genuinely clang-only b::Foo and a
+        # castxml+clang-matched a::Foo) would otherwise silently collide in
+        # this shared provenance dict too -- one writer's entry
+        # overwriting the other's (Codex review, fresh evidence, second
+        # round) -- matching _merge_record_type/_merge_field's identical
+        # qualification for this same fact above.
+        type_key = type_map_key(t)
+        provenance[type_fact_key(type_key, "deprecated")] = "clang"
+        for f in t.fields:
+            provenance[field_fact_key(type_key, f.name, "deprecated")] = "clang"
+    merged_types.extend(clang_only_types)
 
     merged_enums = [
-        _merge_enum_type(e, clang_enums_by_name.get(e.name), provenance)
+        _merge_enum_type(e, clang_enums_by_key.get(type_map_key(e)), provenance)
         for e in castxml_snap.enums
     ]
-    castxml_enum_names = {e.name for e in castxml_snap.enums}
-    merged_enums.extend(e for e in clang_snap.enums if e.name not in castxml_enum_names)
+    castxml_enum_keys = {type_map_key(e) for e in castxml_snap.enums}
+    clang_only_enums = [
+        e for e in clang_snap.enums if type_map_key(e) not in castxml_enum_keys
+    ]
+    for e in clang_only_enums:
+        # Qualified key -- same reasoning as clang_only_types above.
+        type_key = type_map_key(e)
+        provenance[enum_fact_key(type_key, "deprecated")] = "clang"
+        provenance[enum_fact_key(type_key, "is_scoped")] = "clang"
+    merged_enums.extend(clang_only_enums)
 
     merged_variables = [
         _merge_variable(v, clang_vars_by_mangled.get(v.mangled), provenance)
         for v in castxml_snap.variables
     ]
     castxml_var_mangled = {v.mangled for v in castxml_snap.variables}
-    merged_variables.extend(
+    clang_only_variables = [
         v for v in clang_variables if v.mangled not in castxml_var_mangled
-    )
+    ]
+    for v in clang_only_variables:
+        provenance[var_fact_key(v.mangled, "deprecated")] = "clang"
+    merged_variables.extend(clang_only_variables)
 
     merged = replace(
         castxml_snap,
@@ -591,8 +671,13 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         enums=merged_enums,
         ast_producer="hybrid",
         ast_toolchain={
-            **{f"castxml_{key}": value for key, value in castxml_snap.ast_toolchain.items()},
-            **{f"clang_{key}": value for key, value in clang_snap.ast_toolchain.items()},
+            **{
+                f"castxml_{key}": value
+                for key, value in castxml_snap.ast_toolchain.items()
+            },
+            **{
+                f"clang_{key}": value for key, value in clang_snap.ast_toolchain.items()
+            },
         },
         ast_fallback_reason=None,
         fact_provenance=provenance,

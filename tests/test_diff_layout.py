@@ -153,12 +153,36 @@ class TestLayoutDescriptorDiff:
         assert ChangeKind.TAIL_PADDING_REUSE_CHANGED not in _kinds(old, new)
 
     def test_layout_unverifiable_on_asymmetric_evidence(self) -> None:
-        # New side carries a layout descriptor; old side has no size at all.
+        # New side carries a real layout descriptor (data_size_bits, from an
+        # actual layout pass); old side has no size at all. Deliberately NOT
+        # is_standard_layout/is_trivially_copyable here -- those are semantic
+        # traits, not layout evidence (see test below and _has_layout_descriptor's
+        # own docstring).
         old = _snap("1", types=[_rec(name="A", size_bits=None)])
-        new = _snap("2", types=[_rec(name="A", size_bits=128, is_standard_layout=True)])
+        new = _snap("2", types=[_rec(name="A", size_bits=128, data_size_bits=120)])
         kinds = _kinds(old, new)
         assert ChangeKind.LAYOUT_UNVERIFIABLE in kinds
         assert ChangeKind.LAYOUT_UNVERIFIABLE in RISK_KINDS
+
+    def test_layout_unverifiable_not_flagged_from_semantic_traits_alone(self) -> None:
+        """Codex review, fresh evidence: since G31 Phase C the direct-clang
+        backend populates is_standard_layout/is_trivially_copyable
+        independent of any real layout pass (dumper_clang.py never sets
+        size_bits/data_size_bits/vptr_offset_bits/base_offsets without the
+        optional companion tool). A persisted pre-v19 direct-clang snapshot
+        compared against a fresh dump of UNCHANGED headers has these two
+        traits go from None to a real value on the new side alone -- that
+        flip alone must NOT be treated as "layout evidence appeared" and
+        must not fire a phantom LAYOUT_UNVERIFIABLE."""
+        old = _snap(
+            "1",
+            types=[_rec(name="A", size_bits=None, is_standard_layout=None, is_trivially_copyable=None)],
+        )
+        new = _snap(
+            "2",
+            types=[_rec(name="A", size_bits=None, is_standard_layout=True, is_trivially_copyable=True)],
+        )
+        assert ChangeKind.LAYOUT_UNVERIFIABLE not in _kinds(old, new)
 
     def test_opaque_type_skipped(self) -> None:
         # An opaque/forward-declared side is owned by the incomplete-type
@@ -181,6 +205,38 @@ class TestLayoutDescriptorDiff:
             ],
         )
         assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_stdlib_record_not_flagged_when_qualified_name_carries_the_namespace(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence, second round: castxml/clang keep
+        RecordType.name bare (e.g. "vector") and carry the real namespace in
+        qualified_name (e.g. "std::vector") -- the stdlib exclusion must
+        check the qualified identity, not the bare name alone, or a
+        dependency-header std:: record leaks into the public surface once
+        is_standard_layout/is_trivially_copyable give it something to fire
+        on (G31 Phase C)."""
+        old = _snap(
+            "1",
+            types=[
+                _rec(
+                    name="vector",
+                    qualified_name="std::vector",
+                    is_trivially_copyable=True,
+                )
+            ],
+        )
+        new = _snap(
+            "2",
+            types=[
+                _rec(
+                    name="vector",
+                    qualified_name="std::vector",
+                    is_trivially_copyable=False,
+                )
+            ],
+        )
+        assert ChangeKind.TRIVIALLY_COPYABLE_LOST not in _kinds(old, new)
 
     def test_stdlib_record_flagged_when_comparing_the_runtime_itself(self) -> None:
         # When abicheck compares the C++ runtime to itself (libstdc++/libc++
@@ -301,3 +357,105 @@ class TestStdlibEmbeddingAttribution:
         assert present.description.count("embeds a standard-library type by value") == 1
         # The change whose type is absent from `new` is left untouched.
         assert "embeds a standard-library type by value" not in missing.description
+
+
+class TestNamespaceQualifiedTypeMatching:
+    """Codex review, fresh evidence: the layout-descriptor detector used to
+    index/match record types by BARE name -- two distinct records sharing
+    only a bare leaf name in different namespaces (e.g. a::Foo/b::Foo) would
+    silently collide (the later one in iteration order winning, the earlier
+    one's layout facts never actually compared), misattributing or entirely
+    missing STANDARD_LAYOUT_LOST/TRIVIALLY_COPYABLE_LOST/etc."""
+
+    def test_two_same_bare_name_types_do_not_collide(self) -> None:
+        a_foo_old = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_standard_layout=True,
+        )
+        b_foo_old = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_standard_layout=True,
+        )
+        # a::Foo loses standard-layout; b::Foo is unchanged.
+        a_foo_new = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_standard_layout=False,
+        )
+        b_foo_new = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_standard_layout=True,
+        )
+        old = _snap("1", types=[a_foo_old, b_foo_old])
+        new = _snap("2", types=[a_foo_new, b_foo_new])
+        changes = compare(old, new).changes
+        layout_lost = [c for c in changes if c.kind == ChangeKind.STANDARD_LAYOUT_LOST]
+        # Exactly one finding, and it must be attributable to a::Foo, not
+        # accidentally suppressed OR fired twice/against the wrong type
+        # (a bare-name dict collision could produce either failure mode).
+        assert len(layout_lost) == 1
+
+    def test_second_type_still_compared_when_first_shares_its_bare_name(self) -> None:
+        # A bare-name dict's last-write-wins collision in the MATCHING step
+        # would silently drop one of the two same-named types from the index
+        # entirely, or match it against the wrong counterpart -- confirm
+        # both are correctly matched to their own qualified counterpart and
+        # independently diffed. Uses two DIFFERENT transitions (one loses
+        # trivially-copyable, the other loses standard-layout) so the
+        # resulting Change kinds differ -- isolating the matching fix from
+        # the separate, pre-existing question of whether two Change objects
+        # with byte-identical bare-name-derived descriptions get deduplicated
+        # by _dedup_exact (a real but distinct concern this test isn't
+        # scoped to cover; description text doesn't carry qualified_name for
+        # ANY bare-name-keyed detector in this codebase today).
+        a_foo_old = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_trivially_copyable=True,
+            is_standard_layout=True,
+        )
+        b_foo_old = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_trivially_copyable=True,
+            is_standard_layout=True,
+        )
+        a_foo_new = RecordType(
+            name="Foo",
+            qualified_name="a::Foo",
+            kind="class",
+            size_bits=32,
+            is_trivially_copyable=False,
+            is_standard_layout=True,
+        )
+        b_foo_new = RecordType(
+            name="Foo",
+            qualified_name="b::Foo",
+            kind="class",
+            size_bits=64,
+            is_trivially_copyable=True,
+            is_standard_layout=False,
+        )
+        old = _snap("1", types=[a_foo_old, b_foo_old])
+        new = _snap("2", types=[a_foo_new, b_foo_new])
+        kinds = _kinds(old, new)
+        # If the two records were mismatched (a::Foo diffed against b::Foo's
+        # data or vice versa) neither correct kind -- or the wrong pair of
+        # kinds -- would appear.
+        assert ChangeKind.TRIVIALLY_COPYABLE_LOST in kinds
+        assert ChangeKind.STANDARD_LAYOUT_LOST in kinds

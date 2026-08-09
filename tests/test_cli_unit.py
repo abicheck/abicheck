@@ -314,6 +314,60 @@ class TestCompareSecondaryFormat:
         assert "_Z3barv" not in secondary_text
         assert "bar" in secondary_text
 
+    def test_json_then_sarif_secondary_calls_assess_change_twice_per_change(
+        self, tmp_path
+    ):
+        """ADR-052 D2 follow-up (G29 Phase 3 slice 10): the measurement this
+        slice's ``MarkReachability`` caching decision rests on.
+        ``--format json --secondary-format sarif`` renders the *same*
+        ``DiffResult``/``Change`` objects twice in one process — the module
+        docstring of ``impact.engine`` says as much, but this asserts it
+        directly by counting real ``assess_change`` calls keyed by
+        ``id(change)``, instead of trusting that claim un-measured."""
+        import abicheck.impact.engine as engine_mod
+        import abicheck.reporter as reporter_mod
+        import abicheck.sarif as sarif_mod
+
+        calls: list[int] = []
+        orig = engine_mod.assess_change
+
+        def _counting(change, **kw):
+            calls.append(id(change))
+            return orig(change, **kw)
+
+        monkeypatch_targets = [
+            (engine_mod, "assess_change"),
+            (reporter_mod, "assess_change"),
+            (sarif_mod, "assess_change"),
+        ]
+        originals = [(mod, name, getattr(mod, name)) for mod, name in monkeypatch_targets]
+        for mod, name in monkeypatch_targets:
+            setattr(mod, name, _counting)
+        try:
+            old_p, new_p = _breaking_snapshots(tmp_path)
+            primary_out = tmp_path / "primary.json"
+            secondary_out = tmp_path / "secondary.sarif"
+            runner = CliRunner()
+            result = runner.invoke(main, [
+                "compare", str(old_p), str(new_p),
+                "--format", "json", "--output", str(primary_out),
+                "--secondary-format", "sarif", "--secondary-output", str(secondary_out),
+            ])
+        finally:
+            for mod, name, orig_fn in originals:
+                setattr(mod, name, orig_fn)
+
+        assert result.exit_code == 4
+        from collections import Counter
+
+        per_change_counts = Counter(calls)
+        assert per_change_counts, "assess_change was never called"
+        # At least one Change (the removed 'bar' function) was assessed by
+        # both the JSON and the SARIF render in this single process — the
+        # real, non-hypothetical repeat-call scenario ADR-052's open
+        # question needed measured, not assumed.
+        assert any(n > 1 for n in per_change_counts.values())
+
     def test_secondary_format_requires_secondary_output(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()

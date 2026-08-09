@@ -21,10 +21,11 @@ from abicheck.diff_helpers import (
     bool_transition,
     build_type_map,
     diff_by_key,
+    fact_known_qualified,
     lookup_matched_type,
     type_map_key,
 )
-from abicheck.model import RecordType
+from abicheck.model import AbiSnapshot, RecordType
 
 ADDED = (ChangeKind.FUNC_VIRTUAL_ADDED, "added")
 REMOVED = (ChangeKind.FUNC_VIRTUAL_REMOVED, "removed")
@@ -285,3 +286,90 @@ class TestLookupMatchedType:
         # The genuinely-unchanged type still matches fine via its own
         # qualified key -- ambiguity in `own` doesn't block direct hits.
         assert lookup_matched_type(own, other, survivor_old) is survivor_new
+
+
+def _hybrid_snap(fact_provenance: dict[str, str]) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libtest.so.1",
+        version="1.0",
+        from_headers=True,
+        ast_producer="hybrid",
+        fact_provenance=fact_provenance,
+    )
+
+
+class TestFactKnownQualified:
+    """G31 Phase C, third review round: dumper_hybrid.py qualifies
+    deprecated/is_scoped provenance keys by namespace, but a hybrid baseline
+    persisted before that fix still has real provenance recorded under the
+    former bare key. fact_known_qualified must accept that legacy data
+    (Codex review, fresh evidence) without reopening the bare-name collision
+    the qualification itself was introduced to close."""
+
+    def test_qualified_key_present_needs_no_fallback(self) -> None:
+        old = _hybrid_snap({"type:ns::Foo:deprecated": "castxml"})
+        new = _hybrid_snap({"type:ns::Foo:deprecated": "clang"})
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        old_map = build_type_map([t])
+        new_map = build_type_map([t])
+        assert fact_known_qualified(
+            old, new, old_map, new_map, "Foo",
+            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
+        )
+
+    def test_legacy_bare_key_falls_back_when_unambiguous(self) -> None:
+        # Both sides only ever recorded the pre-qualification bare key.
+        old = _hybrid_snap({"type:Foo:deprecated": "castxml"})
+        new = _hybrid_snap({"type:Foo:deprecated": "castxml"})
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        old_map = build_type_map([t])
+        new_map = build_type_map([t])
+        assert fact_known_qualified(
+            old, new, old_map, new_map, "Foo",
+            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
+        )
+
+    def test_ambiguous_bare_name_does_not_fall_back(self) -> None:
+        # Two distinct namespaced types share the bare name "Foo" on the old
+        # side -- the bare-key provenance entry (if any) cannot be safely
+        # attributed to either one, so no fallback is allowed there.
+        old = _hybrid_snap({"type:Foo:deprecated": "castxml"})
+        new = _hybrid_snap({})
+        a_foo = RecordType(name="Foo", qualified_name="a::Foo", kind="class")
+        b_foo = RecordType(name="Foo", qualified_name="b::Foo", kind="class")
+        old_map = build_type_map([a_foo, b_foo])
+        new_map = build_type_map([a_foo])
+        assert not fact_known_qualified(
+            old, new, old_map, new_map, "Foo",
+            "type:a::Foo:deprecated", "type:a::Foo:deprecated", "type:Foo:deprecated",
+        )
+
+    def test_genuinely_unknown_stays_unknown(self) -> None:
+        old = _hybrid_snap({})
+        new = _hybrid_snap({})
+        t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
+        old_map = build_type_map([t])
+        new_map = build_type_map([t])
+        assert not fact_known_qualified(
+            old, new, old_map, new_map, "Foo",
+            "type:ns::Foo:deprecated", "type:ns::Foo:deprecated", "type:Foo:deprecated",
+        )
+
+    def test_asymmetric_qualified_identity_probes_each_side_independently(self) -> None:
+        """Codex review, second round: old predates ``qualified_name``
+        entirely (its own ``type_map_key()`` is bare), while new carries the
+        real namespaced spelling -- probing new's side with OLD's
+        (bare-shaped) qualified key must not be what makes this fail; each
+        side's OWN qualified key must be tried."""
+        old = _hybrid_snap({"type:Color:deprecated": "castxml"})
+        new = _hybrid_snap({"type:ns::Color:deprecated": "clang"})
+        old_color = RecordType(name="Color", qualified_name=None, kind="class")
+        new_color = RecordType(name="Color", qualified_name="ns::Color", kind="class")
+        old_map = build_type_map([old_color])
+        new_map = build_type_map([new_color])
+        assert fact_known_qualified(
+            old, new, old_map, new_map, "Color",
+            "type:Color:deprecated",  # old's own type_map_key() -- bare
+            "type:ns::Color:deprecated",  # new's own type_map_key() -- qualified
+            "type:Color:deprecated",
+        )

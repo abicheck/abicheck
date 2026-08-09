@@ -77,46 +77,56 @@ model:
   `UNKNOWN` unless `allow_unknown_reachability: true` is set explicitly. See
   [PR #607](https://github.com/abicheck/abicheck/pull/607) and
   `docs/learn/graph-coverage.md`.
-- **G29.2** (Phase 3, **slices 1-9 done, ADR-052**) — A single
+- **G29.2** (Phase 3, **slices 1-10 done, ADR-052**) — A single
   `abicheck/impact/` package with `ImpactAssessment`, `GraphProofPath`, and
   `FindingDecision` dataclasses. **Slices 1-7 implement the read-view
   direction only**: the dataclasses exist and `reporter.py`/`sarif.py`/
   `junit_report.py` (Slice 6) surface them (including the suppression audit
   trail, slice 2, and `--report-mode root-cause` grouping in JSON,
   markdown/text, SARIF properties, and — Slice 6 — additive JUnit `<failure>`
-  attributes). **Slices 8-9 deliver the D2 direction flip for two
-  producers**: `internal_leak.py` (Slice 8) and `appcompat.py` (Slice 9) now
-  populate `Change.impact_assessment` directly for their single-purpose
-  finding builders (each verified safe by its own audit — a pipeline-ordering
-  audit for `internal_leak.py`, confirmation that `suppression.evaluate()` is
-  a pure read for `appcompat.py`), with `assess_change` reusing that cached
-  evidence while always recomputing `decision`/`root_cause_id` fresh.
-  **Two producer sites remain unmigrated, each for a documented reason**
-  (see ADR-052's "Deliberately not implemented this slice" for the full
-  detail, refined by direct code inspection rather than the original
-  decision text's assumption that all five named entries were comparably
-  scoped producers):
-  - `source_graph_findings.py` has **nine** separate `Change(...)`
-    construction sites (not one), each needing its own downstream-mutation
-    check before caching is safe there — a materially bigger audit than
-    Slices 8-9's single-site ones.
-  - `post_processing.MarkReachability` mutates existing `Change` objects via
-    four graph walks rather than constructing new ones; whether caching
-    there is even worth the suppression-safety risk is an **open, unmeasured
-    question** — `assess_change()` is already a pure read view with no graph
-    traversal of its own, so the walks aren't duplicated regardless; caching
-    would only save re-building the `ImpactAssessment` object itself on a
-    second `assess_change()` call for the same `Change`, which needs
-    confirming actually happens (e.g. one `compare` run rendering both JSON
-    and SARIF) before it's worth the risk.
+  attributes). **Slices 8-10 deliver the D2 direction flip**:
+  `internal_leak.py` (Slice 8) and `appcompat.py` (Slice 9) populate
+  `Change.impact_assessment` directly for their single-purpose finding
+  builders (each verified safe by its own audit — a pipeline-ordering audit
+  for `internal_leak.py`, confirmation that `suppression.evaluate()` is a
+  pure read for `appcompat.py`); Slice 10 closes the remaining two named
+  producer sites, each for a documented, code-inspected reason (see ADR-052's
+  "Slice 10" and "Deliberately not implemented this slice" sections for the
+  full detail):
+  - `post_processing.MarkReachability` — the open measurement question is
+    **resolved, migrated**: a real instrumented `compare --format json
+    --secondary-format sarif` run (`tests/test_cli_unit.py::
+    TestCompareSecondaryFormat::test_json_then_sarif_secondary_calls_assess_change_twice_per_change`)
+    confirmed `assess_change()` is genuinely called more than once for the
+    same `Change` object within one process (`reporter.py`'s JSON path and
+    `sarif.py`'s SARIF path each call it independently over the identical,
+    already-computed `DiffResult`). `MarkReachability` now caches
+    `impact_assessment` right after it finalizes each change's reachability
+    fields — confirmed (fresh repo-wide grep, not carried over from Slice 8's
+    claim) to be the only step that mutates those fields on an existing
+    `Change`, so nothing downstream invalidates the cache.
+  - `source_graph_findings.py` — re-audited: none of its `Change(...)`
+    construction sites are individually cacheable at construction time,
+    unlike `internal_leak.py`'s builder (itself a later `DEFAULT_PIPELINE`
+    step) — these builders' output is merged into `checker.compare`'s
+    `changes` *before* `_run_post_processing`/`DEFAULT_PIPELINE.run()`, so
+    `MarkReachability` still runs downstream of them and would invalidate an
+    eagerly-cached assessment. Each site got a brief comment documenting
+    this instead of a (would-be-wrong) construction-time cache write — but
+    the practical gap is closed anyway: `MarkReachability`'s own new caching
+    (above) reaches every `source_graph_findings.py` finding too, once it's
+    tagged. See the Phase 3 section below ("Slice 10") for the exact
+    per-function site count and breakdown.
 
-  A third entry D2's original decision text named, `suppression.py`, turns
-  out to contain **no** `Change(...)` construction at all (confirmed by
-  direct search) — the diagnostic construction near it
-  (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
+  A third entry D2's original decision text named, `suppression.py`, still
+  contains **no** `Change(...)` construction at all (confirmed by direct
+  search, unchanged from Slice 8/9's finding) — the diagnostic construction
+  near it (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
   `post_processing.py` and carries no reachability evidence to cache. This
-  is a separate, unresolved documentation question (what `suppression.py`'s
-  named D2 role was actually meant to be), not a third producer to migrate.
+  is the one item from D2's original scope still genuinely open after
+  Slice 10 — a separate, unresolved documentation question (what
+  `suppression.py`'s named D2 role was actually meant to be), not a
+  producer to migrate.
 - **G29.3** (Phase 2, **D1-D6 all done, ADR-046**) — Graph core v2:
   relation/occurrence identity split (**done**), an evidence-preserving
   (order-independent) node/edge merge (**done**), a per-kind/per-role
@@ -155,7 +165,7 @@ model:
   `impact_group_id` is currently always an alias of `root_cause_id`;
   making it independently meaningful still needs Phase 6's
   `RootCauseCorrelator`.
-- **G29.5** (Phase 4, **slice 1 done, ADR-057**) — A consumer graph
+- **G29.5** (Phase 4, **slices 1-2 done, ADR-057**) — A consumer graph
   (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_REQUIRES_VERSION`, …) that joins
   with the source graph so a `CONSUMER_REQUIRED_SYMBOL_REMOVED` finding can
   name the public entry point that produced the dependency — **done**
@@ -163,12 +173,18 @@ model:
   `binary_symbol://` node id, not a parallel node kind, and the walk reuses
   ADR-046 D5's `CALL_GRAPH_TRAVERSAL_POLICY` rather than a fresh BFS). This
   also closed ADR-046 D6's tier 1 ("consumer-proven"), which had been
-  unreachable since it was written. Still open: the optional
+  unreachable since it was written. **Slice 2 also done**: the optional
   `impact-use-cases.yaml` manifest (declared entrypoints/tests, explicitly
-  **not** a reuse of `usecase-registry.yaml`) and best-effort runtime-trace
-  ingestion — the three reserved edge kinds ADR-057 registers
+  **not** a reuse of `usecase-registry.yaml`) — `abicheck/impact/use_cases.py`
+  parses the manifest and builds/joins `use_case`/`test_case` nodes and
+  `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` edges onto the library graph,
+  mirroring slice 1's build/join API and mutation-safety discipline. Still
+  open: best-effort runtime-trace ingestion, and any report-level
+  `affected_use_cases`/`USE_CASE_IMPACT_CONFIRMED` surface reading the joined
+  use-case graph (G29 Phase 6) — the reserved edge kinds ADR-057 registers
   (`CONSUMER_INSTANTIATES_DECL`/`CONSUMER_COMPILED_FROM_HEADER`/
-  `RUNTIME_FAILED_TO_RESOLVE_SYMBOL`) mark where that work attaches.
+  `RUNTIME_FAILED_TO_RESOLVE_SYMBOL`/`TRACE_OBSERVED_ENTRY`/
+  `TRACE_OBSERVED_EDGE`) mark where that work attaches.
 - **G29.6** — The five open graph families (template instantiation, virtual
   dispatch, macro/config, callback/function-pointer, object/archive link
   provenance) implemented behind the same coverage-honesty discipline as the
@@ -345,7 +361,7 @@ current per-decision status (D1-D6 all implemented, D4 as a deliberately
 scoped subset); this paragraph originally described the pre-implementation
 "needs a recorded decision" gate (ADR-044's own bar) before the ADR existed.
 
-### Phase 3 — Reporting & root causes — **slices 1-9 implemented (ADR-052)**
+### Phase 3 — Reporting & root causes — **slices 1-10 implemented (ADR-052)**
 
 [ADR-052](../adr/052-unified-impact-assessment-model.md) records the slice 1
 decisions: `abicheck/impact/model.py`'s `ImpactAssessment`/`GraphProofPath`/
@@ -420,32 +436,43 @@ consumer-overlay builder (Slice 9), verified safe by confirming
 `suppression.evaluate()`/`matches()`/`would_withhold()` are pure reads of the
 `Change` passed in — with `impact.engine.assess_change` reusing the cached
 evidence for both while always recomputing `decision`/`root_cause_id` fresh.
-**Two producer sites still open under this same ADR, now scoped by direct
-code inspection rather than the original decision text's
-five-symmetric-producers assumption**:
-- `source_graph_findings.py` — not one site, **nine** separate
-  `Change(...)` construction sites across as many finding functions
+Slice 10 (G29 Phase 3 follow-up) then closed both remaining named producer
+sites, each resolved by a real audit rather than an assumption:
+- `post_processing.MarkReachability` — the open measurement question is
+  **resolved, migrated**. `tests/test_cli_unit.py::
+  TestCompareSecondaryFormat::test_json_then_sarif_secondary_calls_assess_change_twice_per_change`
+  instruments `assess_change` and runs a real `compare --format json
+  --secondary-format sarif` invocation, confirming the same `Change` object
+  is assessed twice in one process (`reporter.py`'s JSON path, `sarif.py`'s
+  SARIF path — both read the identical, already-computed `DiffResult`).
+  `post_processing_reachability.py`'s `MarkReachability.run()` now caches
+  `impact_assessment` right after finalizing each change's reachability
+  fields (all three per-change exit paths), re-confirming via a fresh
+  repo-wide grep (not carried over from Slice 8's own claim) that it is
+  still the only step that mutates those fields on an existing `Change`.
+- `source_graph_findings.py` — re-audited: **ten** separate `Change(...)`
+  construction sites across nine finding functions
   (`_mapping_drift_findings`, `_public_reachability_findings` ×2,
   `_generated_public_closure_findings`, `_call_reachability_findings`,
   `_include_graph_drift_findings`, `_build_option_reach_findings`,
   `_internal_dependency_findings`, `_target_dependency_findings`,
-  `_symbol_owner_findings`) — each needs its own downstream-mutation check.
-- `post_processing.MarkReachability` — mutates existing `Change`s via four
-  graph walks rather than constructing new ones; **open, unmeasured
-  question** whether caching is worth the suppression-safety risk at all,
-  since `assess_change()` already performs no graph traversal of its own —
-  see ADR-052's "Deliberately not implemented this slice" for the
-  reasoning that needs a measurement, not an assumption, before this is
-  scheduled.
+  `_symbol_owner_findings`). None are safe to cache at construction time —
+  unlike `internal_leak.py`'s builder (a later `DEFAULT_PIPELINE` step),
+  these builders' findings are merged into `checker.compare`'s `changes`
+  *before* `_run_post_processing`/`DEFAULT_PIPELINE.run()`, so
+  `MarkReachability` still runs downstream and would invalidate an
+  eagerly-cached assessment. Each site got a brief comment recording this
+  instead of a construction-time cache write; `MarkReachability`'s own new
+  caching reaches every one of these findings anyway, once tagged.
 
-A third entry the original decision text named, `suppression.py`, is a
-separate, unresolved documentation question rather than a third producer
-site: direct search found no `Change(...)` construction in this module at
-all; the nearby diagnostic (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually
-lives in `post_processing.py` and carries no reachability evidence. What
-D2's original text meant by naming `suppression.py` needs a
-documentation-only clarification pass before any code work is scheduled
-against it.
+A third entry the original decision text named, `suppression.py`, is still a
+separate, unresolved documentation question rather than a producer site:
+direct search found no `Change(...)` construction in this module at all; the
+nearby diagnostic (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
+`post_processing.py` and carries no reachability evidence. What D2's
+original text meant by naming `suppression.py` needs a documentation-only
+clarification pass before any code work is scheduled against it — this is
+the one item from D2's original scope still genuinely open after Slice 10.
 
 Also still open: the full `RootCauseCorrelator`-based correlation across
 consumer-overlay findings with no `caused_by_type` link (Phase 6) — which is
@@ -469,20 +496,23 @@ section describes, most of it still open:
   `contract_effect`/`changed_entities`/`public_entries`/`affected_consumers`/
   `affected_use_cases`/`coverage` — no data source yet (Phase 4/5), left out
   entirely rather than added as permanently-`None` placeholders.
-- `source_graph_findings.py`, `internal_leak.py`, `suppression.py`,
+- `source_graph_findings.py`, `internal_leak.py`, `post_processing.py`,
   `appcompat.py` populate `ImpactAssessment` instead of independently setting
   overlapping `Change` fields; the existing `public_reachable`/
   `reachability_kind`/`reachability_proof_path`/`reachability_state` fields
   become **derived, backward-compatible views** over it (no JSON/SARIF
-  breaking change). **Partially done (Slices 8-9)**: `internal_leak.py` and
+  breaking change). **Partially done (Slices 8-10)**: `internal_leak.py` and
   `appcompat.py` construct `Change.impact_assessment` directly for their
-  finding builders; the flat fields stay as real fields (not converted to
-  derived properties) rather than the originally-described full flip, since
-  that conversion touches every existing `Change(...)` construction site
+  finding builders (Slices 8-9); `post_processing.MarkReachability` now
+  caches it for every change it tags (Slice 10), which transitively covers
+  `source_graph_findings.py`'s findings too, without any of its own ten
+  construction sites caching directly (found unsafe by Slice 10's audit —
+  see above). The flat fields stay as real fields (not converted to derived
+  properties) rather than the originally-described full flip, since that
+  conversion touches every existing `Change(...)` construction site
   repo-wide and was judged out of scope for a verifiably-safe slice. **Still
-  open**: `source_graph_findings.py` (nine construction sites),
-  `post_processing.MarkReachability` (caching value unmeasured — see above),
-  and `suppression.py` (its D2 role needs clarification — see above).
+  open**: `suppression.py` (its D2 role needs a documentation clarification
+  pass — see above) — the one remaining item from D2's original scope.
 - `reporter.py`/`sarif.py`: structured `impact` object in JSON (**done**,
   `impact_assessment`), `codeFlows`/`threadFlows` in SARIF (**not done** —
   SARIF's root-cause mode is additive `properties.rootCauseId`/`rootCause`
@@ -512,7 +542,7 @@ section describes, most of it still open:
   `attach_impact_metadata`) for the contract to point at working code rather
   than aspirational surface.
 
-### Phase 4 — Consumer / use-case join — **slice 1 implemented (ADR-057)**
+### Phase 4 — Consumer / use-case join — **slices 1-2 implemented (ADR-057)**
 
 [ADR-057](../adr/057-consumer-graph-and-impact-join.md) records the slice 1
 decisions.
@@ -558,11 +588,21 @@ decisions.
   `docs/contribute/usecase-registry.yaml` (that registry tracks abicheck's
   *own* feature coverage — reusing it for a project's business use cases would
   conflate "abicheck supports header-only analysis" with "the DAL training
-  workflow uses `train()`", per the review's own caution).
-- `docs/use/use-case-impact.md` (new): manifest format, entrypoint
-  mapping, test association, trace ingestion, declared-vs-observed use,
-  full-library-vs-consumer-scoped verdict semantics (absence of a trace must
-  never read as "not used").
+  workflow uses `train()`", per the review's own caution). **Done** (slice
+  2): `load_use_case_manifest`/`parse_use_case_manifest` (hard-error on a
+  malformed document via `UseCaseManifestError`, silent skip on one
+  unresolvable entrypoint), `build_use_case_graph`/`join_use_case_graph`
+  (deep-copy join, mirroring `consumer_graph`'s slice 1 API/discipline
+  exactly). Only `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` are populated;
+  `TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE` stay reserved — **runtime-trace
+  ingestion itself is still not implemented**, and neither is any CLI flag
+  reading the manifest or report-level field/finding consuming the joined
+  graph (that's G29 Phase 6's `USE_CASE_IMPACT_CONFIRMED`).
+- `docs/use/use-case-impact.md` (new, **done**): manifest format, entrypoint
+  mapping, test association, declared-vs-observed use (**trace ingestion
+  itself remains unimplemented** — documented honestly as not-yet-built, not
+  described as working), full-library-vs-consumer-scoped verdict semantics
+  (absence of a trace must never read as "not used").
 
 ### Phase 5 — New semantic graph families
 
@@ -654,11 +694,11 @@ abicheck/impact/
     correlation.py       # RootCauseCorrelator (Phase 6, not started)
     root_causes.py
     consumer_graph.py    # Phase 4 slice 1, DONE — ADR-057 (consumer graph + the source join)
-    use_cases.py         # Phase 4, not started
+    use_cases.py         # Phase 4 slice 2, DONE — ADR-057 amendment (manifest + use_case/test_case graph join; trace ingestion still not started)
 docs/learn/impact-analysis.md          # Phase 3 slices 1/6/7 + Phase 4's consumer join (ADR-057), DONE
 docs/reference/source-graph-schema.md     # Phase 2 D1-D6 identity/merge/traversal-policy schema, DONE
 docs/learn/graph-coverage.md           # Phase 1, DONE
-docs/use/use-case-impact.md        # Phase 4, not started (needs the manifest design first)
+docs/use/use-case-impact.md        # Phase 4 slice 2, DONE (manifest format, entrypoint mapping, test association, declared-vs-observed; trace ingestion documented as not-yet-built)
 docs/contribute/detector-impact-contract.md  # DONE, ahead of Phase 5/6 themselves — see Phase 3 section above
 examples/case194.../case205.../           # Phase 6
 ```
@@ -704,9 +744,17 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   overapprox-still-wins rule, and an end-to-end `scope_diff_to_app` class
   covering both the enriched overlay and the byte-for-byte-unchanged
   no-graph run.
-- New per remaining phase: `tests/test_use_cases.py` (Phase 4), one
-  `test_diff_<family>.py` per
-  Phase 5 graph family, `tests/test_root_cause_correlator.py` (Phase 6).
+- `tests/test_use_cases.py` — Phase 4 slice 2 (ADR-057 amendment), done:
+  schema registration, manifest parsing (valid, empty, and each malformed
+  shape), `build_use_case_graph`'s entrypoint resolution by id and by label,
+  the unresolvable-entrypoint silent-skip path, `test_case` node/edge
+  emission independent of entrypoint resolution, `join_use_case_graph`'s
+  fold-onto-one-shared-node and its deep-copy/no-mutation guarantee
+  (asserted on object identity and fact membership, mirroring
+  `test_consumer_graph.py`'s own pattern), and an end-to-end scenario joining
+  a `use_case` node onto a library graph's public entry node.
+- New per remaining phase: one `test_diff_<family>.py` per Phase 5 graph
+  family, `tests/test_root_cause_correlator.py` (Phase 6).
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once
   `ground_truth.json` is updated (existing harness, no new test file needed).
 

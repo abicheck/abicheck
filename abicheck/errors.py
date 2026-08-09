@@ -243,6 +243,27 @@ class PackManifestError(AbicheckError, ValueError):
     """
 
 
+class UseCaseManifestError(AbicheckError, ValueError):
+    """Raised by :func:`abicheck.impact.use_cases.load_use_case_manifest` for
+    a structurally malformed ``impact-use-cases.yaml`` document (G29 Phase 4
+    slice 2, ADR-057 amendment): not a YAML list at the top level, an entry
+    that isn't a mapping, or an entry with a missing/blank ``use_case`` name.
+
+    Inherits ValueError for the same backward-compatibility reason
+    :class:`PolicyError`/:class:`ManifestValidationError` do. Deliberately a
+    sibling of those, not a subclass: an ``impact-use-cases.yaml`` document is
+    a distinct, unrelated configuration artifact (declared consumer use
+    cases, not verdict policy or a dump manifest).
+
+    A single manifest entry naming an ``entrypoints`` symbol the library
+    graph cannot resolve is **not** this error — that degrades silently to
+    "no node/edge for this entry", per the same "absence, never a wrong
+    answer" discipline :mod:`abicheck.impact.consumer_graph` already follows
+    (ADR-057). This error is only for the manifest document itself being
+    unreadable as the schema it claims to be.
+    """
+
+
 class ReportError(AbicheckError):
     """Error during report generation."""
 
