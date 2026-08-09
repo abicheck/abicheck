@@ -42,6 +42,8 @@ from .dwarf_utils import (
     attr_int as _attr_int,
     attr_str as _attr_str,
     decode_member_location as _decode_member_location,
+    dwarf_low_memory_mode,
+    free_cu_die_cache,
     has_real_dwarf_info,
     resolve_die_ref as _resolve_ref,
     resolve_type_die as _resolve_type_die,
@@ -398,7 +400,16 @@ class _DwarfSnapshotBuilder:
         """Walk every CU of *dwarf*, then filter to exported reachability.
 
         Shared by the open-here and reuse-session paths of :meth:`extract`.
+
+        On a large binary (``dwarf_low_memory_mode``), each CU's DIE cache
+        is freed as soon as this walk finishes with it -- this walk only
+        needs the plain functions/variables/types/enums/typedefs already
+        appended to ``self`` by ``_process_cu``, never the DIE objects
+        themselves afterwards, so retaining pyelftools' cache past that
+        point is pure waste on a binary large enough for it to matter (see
+        ``dwarf_utils.free_cu_die_cache``'s docstring).
         """
+        low_memory = dwarf_low_memory_mode(dwarf)
         # First pass: extract all functions, variables, types, enums, typedefs
         for CU in dwarf.iter_CUs():
             try:
@@ -409,6 +420,8 @@ class _DwarfSnapshotBuilder:
                     self._elf_path,
                     exc,
                 )
+            if low_memory:
+                free_cu_die_cache(CU)
 
         # Second pass: filter types to only those reachable from
         # exported symbols (transitive closure)

@@ -63,7 +63,7 @@ from .dwarf_advanced import (
     _process_cu_impl as _adv_process_cu,
 )
 from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
-from .dwarf_utils import has_real_dwarf_info
+from .dwarf_utils import dwarf_low_memory_mode, free_cu_die_cache, has_real_dwarf_info
 
 log = logging.getLogger(__name__)
 
@@ -156,10 +156,19 @@ def parse_dwarf_from_session(
     Behaviourally identical to the DWARF branch of :func:`parse_dwarf`; split
     out so the snapshot build can reuse the same session (and its warm DIE
     cache) instead of opening the ELF a second time.
+
+    On a large binary (``dwarf_low_memory_mode`` -- see ``dwarf_utils.py``),
+    each CU's DIE cache is freed as soon as this pass finishes with it,
+    trading that reuse for bounded peak memory: a later pass over the same
+    session (the snapshot build, the layout backfill) simply re-parses the
+    CU's DIEs from the stream on its own first touch, rather than finding
+    the whole binary's DIE tree still resident from this one. Output is
+    unaffected either way -- see ``free_cu_die_cache``'s docstring.
     """
     meta = DwarfMetadata(has_dwarf=True)
     adv = AdvancedDwarfMetadata(has_dwarf=True)
     adv.target_arch = session.arch
+    low_memory = dwarf_low_memory_mode(session.dwarf)
 
     # Per-binary type-resolution cache: (cu_offset, die_offset) → (type_name, byte_size).
     # DIE offsets are only unique within one ELF file — do not share across binaries.
@@ -174,6 +183,8 @@ def parse_dwarf_from_session(
             _adv_process_cu(CU, adv)
         except (ELFError, OSError, ValueError, KeyError) as exc:
             log.warning("parse_dwarf: adv CU skipped in %s: %s", session.path, exc)
+        if low_memory:
+            free_cu_die_cache(CU)
 
     return meta, adv
 
