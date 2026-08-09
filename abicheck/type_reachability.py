@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType, Variable
 
 __all__ = [
+    "directly_referenced_stdlib_type_spellings",
     "directly_referenced_stdlib_types",
     "type_string_references_name",
 ]
@@ -920,3 +921,42 @@ def directly_referenced_stdlib_types(snapshot: AbiSnapshot) -> frozenset[str]:
     _seed_scan_from_public_declarations(snapshot, scan, non_stdlib_identities)
     _walk_reached_records(scan, non_stdlib_records)
     return scan.referenced()
+
+
+def directly_referenced_stdlib_type_spellings(snapshot: AbiSnapshot) -> frozenset[str]:
+    """:func:`directly_referenced_stdlib_types`, re-expressed in the spelling
+    a finding's own ``symbol``/``caused_by_type`` actually carries, for a
+    caller that needs to match against those fields rather than against
+    ``RecordType`` identities.
+
+    ``directly_referenced_stdlib_types`` returns each type's *identity* --
+    ``qualified_name or name`` (see :func:`_record_identity`), the
+    fully-qualified spelling. A ``Change``'s own ``symbol``/``caused_by_type``
+    is populated from ``diff_types.py``'s comparison of two ``RecordType``
+    entries' own ``name`` fields, which per-backend may be that same
+    identity (DWARF bakes the qualified form directly into ``name``) or the
+    namespace-prefix-stripped form a signature actually spells it with
+    (castxml/direct-clang keep ``name`` bare) -- see
+    :func:`_stripped_signature_spelling`'s own docstring for the empirical
+    basis. Returning the union of both forms for every identity, rather than
+    picking one, means a caller does not have to know which backend
+    produced the snapshot it's matching against.
+
+    Contract evaluation's own use case (confirming a layout-change finding
+    on a stdlib type a public signature names outright, independent of
+    ``surface.py``'s header-origin-scoped ``public_types`` closure, which
+    deliberately excludes stdlib types as non-ABI-surface toolchain
+    internals) is why this exists as a public, separately-tested function
+    rather than an inline transform at the call site: reusing
+    :func:`_stripped_signature_spelling` here is what keeps the two stdlib
+    spelling normalizations (the one this module's own signature-matching
+    index already performs internally, and the one a caller outside this
+    module needs) from silently drifting apart.
+    """
+    spellings: set[str] = set()
+    for identity in directly_referenced_stdlib_types(snapshot):
+        spellings.add(identity)
+        stripped = _stripped_signature_spelling(identity)
+        if stripped is not None:
+            spellings.add(stripped)
+    return frozenset(spellings)

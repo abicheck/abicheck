@@ -109,6 +109,20 @@ class ContractEvaluationStage:
     evidence: ContractEvidenceBlock
     forced_public: frozenset[str] | None
     committed_exports: frozenset[str] | None
+    #: Each side's
+    #: :func:`~abicheck.type_reachability.directly_referenced_stdlib_type_spellings`
+    #: -- computed here, once per comparison, because this is the last point
+    #: in the pipeline that still has both raw snapshots in scope;
+    #: :meth:`classify` and everything it calls only ever sees the already-
+    #: derived ``PublicSurface``/``ExportSurface`` pairs. Threaded through so
+    #: :func:`~abicheck.contract_evaluation.evaluate_snapshot_pair_contract_relevance`
+    #: can confirm a layout-change finding on a stdlib type a public
+    #: signature names outright, independent of ``public_types``' own
+    #: header-origin-scoped closure (which deliberately excludes stdlib
+    #: types) -- see ``contract_evaluation._in_surface_result_is_confirmed``'s
+    #: docstring for the full reasoning.
+    directly_referenced_stdlib_old: frozenset[str]
+    directly_referenced_stdlib_new: frozenset[str]
     changes: list[Change] = field(default_factory=list)
     #: ``id()`` of every already-classified finding. Identity, not equality:
     #: two findings can compare equal (``Change`` is a plain dataclass) while
@@ -149,6 +163,8 @@ class ContractEvaluationStage:
             public_surface_allowlist=self.committed_exports,
             exports_old=self.exports_old,
             exports_new=self.exports_new,
+            directly_referenced_stdlib_old=self.directly_referenced_stdlib_old,
+            directly_referenced_stdlib_new=self.directly_referenced_stdlib_new,
         )
         for change, decision in zip(fresh, decisions, strict=True):
             change.contract_relevance = decision.relevance
@@ -290,6 +306,7 @@ def build_contract_stage(
     from .contract_relevance_types import coerce_contract_mode
     from .export_surface import compute_export_surface
     from .surface import compute_public_surface
+    from .type_reachability import directly_referenced_stdlib_type_spellings
 
     surf_old = pp_ctx.surf_old
     surf_new = pp_ctx.surf_new
@@ -340,6 +357,16 @@ def build_contract_stage(
     exports_old = compute_export_surface(old)
     exports_new = compute_export_surface(new)
 
+    # Independent of the mode/header resolutions above: a per-side signature
+    # scan over the raw snapshot, not a public-surface closure. Computed
+    # unconditionally, same reasoning as the export surfaces -- cheap
+    # relative to the rest of this function (one pass per side, no build/
+    # source evidence), and this is the only place both raw snapshots are
+    # still in scope for `ContractEvaluationStage.classify` to eventually
+    # use it.
+    directly_referenced_stdlib_old = directly_referenced_stdlib_type_spellings(old)
+    directly_referenced_stdlib_new = directly_referenced_stdlib_type_spellings(new)
+
     # ADR-049 Phase 3's observed provider ledger (plan Section 4.1).
     # Collected for *both* providers whenever the export surfaces were
     # computed at all, and always for the header provider: the block is
@@ -364,6 +391,8 @@ def build_contract_stage(
         surf_new=surf_new,
         exports_old=exports_old,
         exports_new=exports_new,
+        directly_referenced_stdlib_old=directly_referenced_stdlib_old,
+        directly_referenced_stdlib_new=directly_referenced_stdlib_new,
         evidence=evidence,
         forced_public=(
             frozenset(force_public_symbols) if force_public_symbols else None

@@ -95,6 +95,7 @@ from .surface import (
     classify_change_surface,
     surface_unions,
 )
+from .type_reachability import type_string_references_name
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     # Imported for annotations only: at runtime `contract_evidence_collect`
@@ -675,6 +676,9 @@ def _in_surface_result_is_confirmed(
     change: Change,
     surf_old: PublicSurface,
     surf_new: PublicSurface,
+    *,
+    directly_referenced_stdlib_old: frozenset[str] | None = None,
+    directly_referenced_stdlib_new: frozenset[str] | None = None,
 ) -> bool:
     """Whether ``classify_change_surface``'s ``True`` verdict for *change*
     reflects genuine public-root/closure membership, not its anti-hiding
@@ -791,16 +795,57 @@ def _in_surface_result_is_confirmed(
     (``ADDITION_KINDS`` for new-side authority, old side otherwise) and
     checks only that one side's ``public_symbols``/``public_types``/
     ``ambiguous_type_names`` throughout.
+
+    ``directly_referenced_stdlib_old``/``directly_referenced_stdlib_new``
+    (:func:`~abicheck.type_reachability.directly_referenced_stdlib_type_spellings`,
+    threaded from :func:`~abicheck.contract_pipeline.build_contract_stage`,
+    which is the only place both snapshots are still in scope -- neither
+    this function nor its callers receive one) are a second, independent
+    confirmation source alongside ``auth.public_types``: a stdlib type a
+    public signature names outright is directly ABI-relevant regardless of
+    ``surface.py``'s own closure, which deliberately excludes stdlib types
+    as non-ABI-surface toolchain internals (that exclusion is exactly what
+    lets ``diff_types._is_abi_surface_type`` filter ordinary stdlib-internal
+    churn) -- so the finding can reach this function on real evidence
+    (``diff_types.py``'s own reachability gate is what let it be *emitted*
+    at all) that ``public_types`` was never built to record. Matched against
+    ``change.symbol``/``change.caused_by_type`` *directly*
+    (:func:`~abicheck.type_reachability.type_string_references_name`), not
+    :func:`_type_candidates`'s decomposed tokens: a
+    ``TYPE_SIZE_CHANGED``-shaped finding's ``symbol`` is the type's own full
+    spelling (``"vector<int, std::allocator<int> >"``), and
+    ``_type_identifiers`` -- built for matching a *set* of possibly-several
+    referenced type names out of an arbitrary signature -- tokenizes a
+    template instantiation into its bare head and each argument
+    separately (confirmed empirically: it never yields the type's own full
+    spelling back), so intersecting it against a set of full spellings
+    could never match. Checked without the bare-tail ambiguity guard
+    ``_confirmed_type_matches`` applies to ``public_types``: these spellings
+    come from a per-type signature scan over the snapshot's own stdlib
+    ``RecordType`` identities, a different, unambiguous data source, not
+    ``surface.py``'s shared-bare-key closure where two distinct records can
+    collide.
     """
     if change.kind.value in _HIDDEN_FRIEND_KIND_NAMES:
         return _hidden_friend_confirmed_public(change, surf_old, surf_new)
     auth = _authoritative_surface(change, surf_old, surf_new)
     if _symbol_matches(change, auth.public_symbols):
         return True
-    return bool(
-        _confirmed_type_matches(
-            _type_candidates(change), auth.public_types, auth.ambiguous_type_names
-        )
+    if _confirmed_type_matches(
+        _type_candidates(change), auth.public_types, auth.ambiguous_type_names
+    ):
+        return True
+    directly_referenced_stdlib = (
+        directly_referenced_stdlib_new
+        if _new_side_is_authoritative(change)
+        else directly_referenced_stdlib_old
+    )
+    if not directly_referenced_stdlib:
+        return False
+    return any(
+        raw and type_string_references_name(raw, identity)
+        for raw in (change.symbol, change.caused_by_type)
+        for identity in directly_referenced_stdlib
     )
 
 
@@ -1229,6 +1274,8 @@ def evaluate_change_contract_relevance(
     public_surface_allowlist: frozenset[str] | None = None,
     exports_old: ExportSurface | None = None,
     exports_new: ExportSurface | None = None,
+    directly_referenced_stdlib_old: frozenset[str] | None = None,
+    directly_referenced_stdlib_new: frozenset[str] | None = None,
 ) -> ContractEvaluationDecision:
     """Compute *change*'s shadow contract-relevance decision.
 
@@ -1247,6 +1294,13 @@ def evaluate_change_contract_relevance(
     Omitting them under ``EXPORTS`` is a caller error (``ValueError``), not a
     silent degradation to a header-derived answer for a domain that is not
     header-derived.
+    ``directly_referenced_stdlib_old``/``directly_referenced_stdlib_new``
+    are each side's
+    :func:`~abicheck.type_reachability.directly_referenced_stdlib_type_spellings`
+    -- see :func:`_in_surface_result_is_confirmed`'s docstring for why this
+    is a second confirmation source, independent of ``public_types``. Omit
+    them (the default) for a caller with no snapshot in scope; a `PUBLIC`
+    evaluation degrades to exactly its pre-existing behaviour, never raising.
     ``force_public_symbols`` mirrors ``PipelineContext.force_public_symbols``
     (ADR-024 D6's widening overlay, ``FilterNonPublicSurface``'s
     ``_run_scope``/``_run_allowlist``) -- omit it (the default) when the
@@ -1443,7 +1497,13 @@ def evaluate_change_contract_relevance(
         change, surf_old, surf_new, unions=unions
     )
     if in_surface:
-        if _in_surface_result_is_confirmed(change, surf_old, surf_new):
+        if _in_surface_result_is_confirmed(
+            change,
+            surf_old,
+            surf_new,
+            directly_referenced_stdlib_old=directly_referenced_stdlib_old,
+            directly_referenced_stdlib_new=directly_referenced_stdlib_new,
+        ):
             return ContractEvaluationDecision(
                 relevance=ContractRelevance.IN_CONTRACT,
                 reason_code="public_root_membership",
@@ -1554,12 +1614,15 @@ def evaluate_snapshot_pair_contract_relevance(
     public_surface_allowlist: frozenset[str] | None = None,
     exports_old: ExportSurface | None = None,
     exports_new: ExportSurface | None = None,
+    directly_referenced_stdlib_old: frozenset[str] | None = None,
+    directly_referenced_stdlib_new: frozenset[str] | None = None,
 ) -> list[ContractEvaluationDecision]:
     """:func:`evaluate_change_contract_relevance` for a whole comparison's
     findings, computing the surface unions once (see that function's
     ``unions`` parameter) rather than once per finding. ``force_public_symbols``/
-    ``public_surface_allowlist``/``exports_old``/``exports_new`` are passed
-    through to every call -- see that function's own parameters."""
+    ``public_surface_allowlist``/``exports_old``/``exports_new``/
+    ``directly_referenced_stdlib_old``/``directly_referenced_stdlib_new`` are
+    passed through to every call -- see that function's own parameters."""
     unions = surface_unions(surf_old, surf_new)
     return [
         evaluate_change_contract_relevance(
@@ -1572,6 +1635,8 @@ def evaluate_snapshot_pair_contract_relevance(
             public_surface_allowlist=public_surface_allowlist,
             exports_old=exports_old,
             exports_new=exports_new,
+            directly_referenced_stdlib_old=directly_referenced_stdlib_old,
+            directly_referenced_stdlib_new=directly_referenced_stdlib_new,
         )
         for change in changes
     ]
