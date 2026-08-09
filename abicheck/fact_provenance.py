@@ -136,3 +136,27 @@ def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
     if snap.ast_producer == "hybrid":
         return snap.fact_provenance.get(key)
     return None
+
+
+def both_known_backed_fact(old: AbiSnapshot, new: AbiSnapshot, key: str) -> bool:
+    """True if *key* has a POSITIVELY known header-AST producer on BOTH
+    *old* and *new* — castxml, clang, or hybrid-with-a-recorded-value, in any
+    combination (G31 Phase C).
+
+    For a fact whose VALUE REPRESENTATION is directly cross-comparable
+    between backends (e.g. ``deprecated``'s message string, or
+    ``EnumType.is_scoped``'s plain bool — both backends extract the exact
+    same real-world fact, not a backend-specific encoding of it), this is
+    the correct gate once more than one backend populates it: unlike
+    :func:`both_castxml_backed_fact` (for a fact only ONE backend, castxml,
+    can produce at all — using this on a now-multi-backend fact would wrongly
+    keep rejecting a perfectly good clang-vs-clang or clang-vs-castxml pair
+    just because neither/one side is castxml), and unlike the same-producer
+    check ``diff_symbols._diff_param_defaults`` uses via plain
+    :func:`fact_producer` (needed only when the two backends' value
+    representations are NOT cross-comparable, e.g. ``Param.default``'s real
+    source expression on castxml vs. a structural placeholder on clang) —
+    this fact family needs neither restriction, only confirmation that
+    SOME known backend actually populated it on each side.
+    """
+    return fact_producer(old, key) is not None and fact_producer(new, key) is not None

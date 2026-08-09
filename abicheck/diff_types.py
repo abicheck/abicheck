@@ -41,6 +41,7 @@ from .elf_symbol_filter import (
 )
 from .fact_provenance import (
     both_castxml_backed_fact,
+    both_known_backed_fact,
     enum_fact_key,
     field_fact_key,
     type_fact_key,
@@ -1034,9 +1035,10 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     description=f"Enum removed: {name}",
                 ))
             continue
-        # Per-enum key, not the whole-snapshot _both_castxml_backed: correctly
-        # supports a --ast-frontend hybrid snapshot (G28 Phase 3).
-        if both_castxml_backed_fact(old, new, enum_fact_key(name, "is_scoped")):
+        # Per-enum key, not a whole-snapshot gate: supports --ast-frontend
+        # hybrid (G28 Phase 3). both_known_backed_fact: both backends
+        # populate is_scoped today (G31 Phase C), directly cross-comparable.
+        if both_known_backed_fact(old, new, enum_fact_key(name, "is_scoped")):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
@@ -1627,14 +1629,14 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     #582).
 
     Header-tier only, gated per-field on
-    :func:`fact_provenance.both_castxml_backed_fact` like the other four
-    deprecated detectors (the clang backend doesn't populate
-    ``TypeField.deprecated`` yet; per-field gating is what correctly
-    supports a ``--ast-frontend hybrid`` snapshot, G28 Phase 3). Unions are
-    NOT excluded — matching ``FIELD_DEFAULT_INITIALIZER_REMOVED``/
-    ``_CHANGED``'s reasoning: a union variant can carry `[[deprecated]]`
-    too, castxml parses that member's marker the same as an ordinary field,
-    and ``_diff_unions`` never checks ``deprecated`` at all.
+    :func:`fact_provenance.both_known_backed_fact` like the other four
+    deprecated detectors (both backends populate ``TypeField.deprecated``
+    today, G31 Phase C, with directly cross-comparable values; per-field
+    gating is what correctly supports a ``--ast-frontend hybrid`` snapshot,
+    G28 Phase 3). Unions are NOT excluded — matching
+    ``FIELD_DEFAULT_INITIALIZER_REMOVED``/``_CHANGED``'s reasoning: a union
+    variant can carry `[[deprecated]]` too, and ``_diff_unions`` never
+    checks ``deprecated`` at all.
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
@@ -1655,7 +1657,7 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             f_new = new_fields.get(fname)
             if f_new is None:
                 continue
-            if not both_castxml_backed_fact(
+            if not both_known_backed_fact(
                 old, new, field_fact_key(name, fname, "deprecated")
             ):
                 continue
@@ -1683,11 +1685,11 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     Header-tier only — see ``FIELD_DEFAULT_INITIALIZER_REMOVED``'s docstring
     above / ``Function.deprecated``'s in model.py for why this gates
-    per-type on :func:`fact_provenance.both_castxml_backed_fact` rather than
-    a per-pair None check or plain ``_both_header_aware`` (the clang backend
-    doesn't populate ``RecordType.deprecated`` yet — Codex review, PR #582;
-    per-type gating is what correctly supports a ``--ast-frontend hybrid``
-    snapshot, G28 Phase 3).
+    per-type on :func:`fact_provenance.both_known_backed_fact` rather than a
+    per-pair None check or plain ``_both_header_aware`` (both backends
+    populate ``RecordType.deprecated`` today, G31 Phase C, with directly
+    cross-comparable values; per-type gating is what correctly supports a
+    ``--ast-frontend hybrid`` snapshot, G28 Phase 3).
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
@@ -1701,7 +1703,7 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         # Bare, not the qualified matching key — see _diff_types's comment.
         name = t_old.name
-        if not both_castxml_backed_fact(old, new, type_fact_key(name, "deprecated")):
+        if not both_known_backed_fact(old, new, type_fact_key(name, "deprecated")):
             continue
         if t_old.deprecated is None and t_new.deprecated is not None:
             changes.append(make_change(
@@ -1725,10 +1727,10 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect an enum gaining or losing `[[deprecated]]` (header-tier only).
 
-    Gates per-enum on :func:`fact_provenance.both_castxml_backed_fact` — see
-    ``TYPE_DEPRECATED_ADDED``'s docstring above (the clang backend doesn't
-    populate ``EnumType.deprecated`` yet; per-enum gating is what correctly
-    supports a ``--ast-frontend hybrid`` snapshot, G28 Phase 3).
+    Gates per-enum on :func:`fact_provenance.both_known_backed_fact` — see
+    ``TYPE_DEPRECATED_ADDED``'s docstring above (both backends populate
+    ``EnumType.deprecated`` today, G31 Phase C, with directly cross-
+    comparable values; per-enum gating supports ``--ast-frontend hybrid``).
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
@@ -1744,7 +1746,7 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         e_new = _lookup_matched_type(old_map, new_map, e_old)
         if e_new is None:
             continue
-        if not both_castxml_backed_fact(old, new, enum_fact_key(name, "deprecated")):
+        if not both_known_backed_fact(old, new, enum_fact_key(name, "deprecated")):
             continue
         if e_old.deprecated is None and e_new.deprecated is not None:
             changes.append(make_change(

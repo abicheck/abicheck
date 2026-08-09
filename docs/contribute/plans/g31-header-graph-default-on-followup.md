@@ -142,7 +142,13 @@ building a second identity-resolution mechanism from scratch.
    G28's Phase 1 CastXML schema-completeness audit did for the flat
    snapshot. The header-only graph inherits whatever the underlying
    snapshot parse already knows, so this is a prerequisite for the graph
-   to reason about those facts at all. **Not started.**
+   to reason about those facts at all. **Partially done** — see the
+   "Direct-clang backend fact-completeness pass" bullet below; a first
+   audit pass closed several real backend-parity gaps this list assumed
+   were unstarted (bitfields, default-argument facts, and deprecation were
+   already wired for castxml via G28 Phase 1 — that work had simply moved
+   the surviving gap to the *clang* backend specifically, not left it
+   untouched everywhere).
 2. **Backend duplication (done — AST reuse, not backend unification).**
    The direct-clang backend used to run a *second*, independent
    `clang -ast-dump=json` pass specifically to build the header-only graph
@@ -174,7 +180,103 @@ building a second identity-resolution mechanism from scratch.
   discipline (verify against real CastXML XML output before claiming a
   fact is extractable — some may turn out infeasible the way `_Atomic`
   inner-type recovery and comment-text extraction did there). **Not
-  started.**
+  started** — the audit pass actually run (see below) went the other
+  direction: real *clang* AST output, closing gaps on the clang side of
+  facts G28 Phase 1 had already wired up for castxml. A from-scratch
+  CastXML-schema audit for genuinely new facts (as opposed to closing an
+  existing cross-backend gap) remains unstarted.
+- **Direct-clang backend fact-completeness pass — done for four of the
+  facts this Phase names.** Re-reading G28 Phase 1's own scope (`deprecated`
+  on every surface kind, `is_scoped` on enums, bitfields, default-argument
+  facts) against the *current* code found bitfields and default-argument
+  facts were already populated by `dumper_clang.py` — only `deprecated` and
+  `is_scoped` were still genuinely castxml-only, contrary to this plan's own
+  "Neither header AST backend..." framing above. Fixed both, each verified
+  against real `clang -ast-dump=json` output (Clang 18) before wiring up:
+  - `Function`/`Variable`/`TypeField`/`RecordType`/`EnumType.deprecated` —
+    clang emits a `DeprecatedAttr` child node under a declaration's own
+    `"inner"` list (present for both the bare and messaged
+    `[[deprecated]]`/`[[deprecated("msg")]]` forms, with an optional
+    `message` key present only for the messaged form) — see
+    `dumper_clang._clang_deprecated_message`, matching
+    `dumper_castxml._deprecation_marker`'s exact three-way convention
+    (message text / `""` bare / `None` not-deprecated).
+  - `EnumType.is_scoped` — clang's `EnumDecl` node carries a
+    `"scopedEnumTag"` key (`"class"`/`"struct"`) only for `enum class`/
+    `enum struct`, absent (never present-and-false) for a plain C-style
+    enum — a plain `EnumDecl` always has a definitive answer, so this is a
+    concrete bool, never `None`, on this backend (unlike
+    `is_standard_layout`/`is_trivially_copyable` below).
+
+  **Producer-gating fix that came with it.** Both facts were already
+  gated, per-declaration, on `fact_provenance.both_castxml_backed_fact` —
+  correct while clang genuinely didn't populate them (it made a
+  clang-parsed side's unconditional `None` unmistakable from a real
+  removal), but now silently wrong: it would keep declining to compare a
+  clang-vs-clang or clang-vs-castxml pair even though both sides now
+  genuinely know the answer. Since both facts' VALUE REPRESENTATIONS are
+  directly cross-comparable between backends (a plain message string / a
+  plain bool, not a backend-specific encoding — unlike `Param.default`,
+  where castxml keeps the real source expression and clang falls back to a
+  structural placeholder for anything non-trivial), the fix is a new,
+  looser gate rather than reusing the same-producer check
+  `_diff_param_defaults` needs: `fact_provenance.both_known_backed_fact`
+  accepts *any* combination of positively-known producers (not "both
+  castxml" specifically), while still correctly declining a genuinely
+  unknown/legacy producer. Wired into all six affected detectors
+  (`func_deprecated`, `var_deprecated`, `field_deprecated`,
+  `type_deprecated`, `enum_deprecated`, and the enum `is_scoped` gate
+  inside `_diff_enums`). Five pre-existing tests in
+  `test_castxml_schema_completeness.py`/`test_diff_types_deep.py` had
+  asserted the *old* (now-incorrect) "castxml-vs-clang must not
+  false-positive" behavior for exactly these two facts; updated to assert
+  the corrected behavior (a real cross-producer transition now fires) plus
+  a new "genuinely unknown producer still declines" case each, since that
+  narrower condition is the real remaining false-positive-avoidance
+  scenario. `is_override`/`is_abstract`/`TypeField.default` (member
+  initializer) remain castxml-only — no clang-side extraction exists for
+  any of the three — so their detectors, and the sibling
+  producer-mismatch tests covering them, are unchanged.
+  - `RecordType.is_standard_layout`/`is_trivially_copyable` — a separate,
+    already-tri-state-gated (no producer check at all, just the existing
+    None-means-unknown convention) pair `dumper_castxml.py`'s own code
+    comment already documented as genuinely infeasible for castxml
+    ("CastXML doesn't expose the trivially-copyable trait directly, and
+    'not polymorphic and no virtual bases' is not a sound standard-layout
+    signal" — Codex review #345). Confirmed empirically that clang's
+    `-ast-dump=json` output DOES expose both directly: a `CXXRecordDecl`'s
+    `definitionData` carries `isStandardLayout`/`isTriviallyCopyable` as
+    boolean keys — but only when the trait is `true` (the key is entirely
+    absent, never present-and-`false`, when the trait doesn't hold — e.g. a
+    class with a private member has no `isStandardLayout` key at all,
+    confirmed by direct comparison against a plain-public-members struct
+    which does carry it). A plain C `RecordDecl` (not `CXXRecordDecl`) has
+    no `definitionData` key whatsoever, since these are C++-only concepts —
+    yields `(None, None)`, matching this module's existing tri-state
+    convention rather than fabricating an answer. See
+    `dumper_clang._clang_record_type_traits`. This activated the
+    `STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST` detectors
+    (`diff_layout.py`) for real for the first time on any backend — they
+    were fully built (registered `ChangeKind`s, a working detector) but
+    permanently dead code on every real dump before this, since neither
+    backend had ever populated the fields they gate on. Verified end-to-end
+    against a real compiled example (a class losing standard-layout by
+    gaining a private member correctly fires `STANDARD_LAYOUT_LOST` through
+    the real `dump()`/`compare()` pipeline, not just at the unit level).
+    Also updated `dumper_hybrid.py`'s merge docstring/comment, which
+    claimed this backfill was a no-op "without the optional
+    `ABICHECK_CLANG_LAYOUT_TOOL` companion tool enabled" — no longer true
+    for these two facts specifically, since the plain clang parse (no
+    companion tool needed) now populates them; the merge's own
+    `_LAYOUT_SCALAR_ATTRS` backfill logic required no code change (it
+    already backfills any `None`-on-castxml layout attr from clang
+    unconditionally), only its stale comment did.
+
+  **Still open** for this fact-completeness pass: vptr placement remains
+  only a `0`-if-polymorphic heuristic on castxml (no real multi-inheritance
+  secondary-vtable placement) and is not populated by the clang backend at
+  all; `TypeField.default` (member initializer *value*, not the
+  default-argument facts above) remains castxml-only.
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

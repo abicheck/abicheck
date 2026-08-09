@@ -32,28 +32,39 @@ their two independent :class:`~abicheck.model.AbiSnapshot`\\ s to
   mangled name via structural equivalence (same qualified enclosing class,
   compatible cv-normalized parameter signature for a constructor, same
   access) and rewriting the merged entry's key to the real mangled name.
-- **Per-fact backfill**: castxml-only facts (``deprecated``/``is_override``
-  on functions, ``deprecated`` on variables, ``is_abstract``/``deprecated``
-  on types, ``default``/``deprecated`` on fields, ``is_scoped``/
-  ``deprecated`` on enums) are taken from castxml when present, backfilled
-  from clang only when castxml's own value is ``None`` — forward-looking
-  scaffolding for once the clang backend gains any of these independently;
-  a no-op today, since ``dumper_clang.py`` doesn't populate any of them yet.
-  Every such fact records its source in the returned snapshot's
-  ``fact_provenance`` map (see ``abicheck/fact_provenance.py``), so
-  detectors can tell a castxml-backed fact apart from an unbacked one on a
-  per-declaration basis instead of trusting a whole-snapshot producer tag.
+- **Per-fact backfill**: facts that were originally castxml-only
+  (``deprecated``/``is_override`` on functions, ``deprecated`` on
+  variables, ``is_abstract``/``deprecated`` on types, ``default``/
+  ``deprecated`` on fields, ``is_scoped``/``deprecated`` on enums) are taken
+  from castxml when present, backfilled from clang only when castxml's own
+  value is ``None``. G31 Phase C closed the gap this backfill originally
+  anticipated for two of these facts specifically — ``deprecated`` (every
+  surface kind) and ``is_scoped`` — by wiring real extraction into
+  ``dumper_clang.py`` too, so this backfill is genuinely live for those two
+  now, not forward-looking scaffolding; ``is_override``/``is_abstract``/
+  field ``default`` remain castxml-only, so the backfill is still a no-op
+  for those three specifically. Every such fact records its source in the
+  returned snapshot's ``fact_provenance`` map (see
+  ``abicheck/fact_provenance.py``), so detectors can tell which backend
+  backs a fact apart from an unbacked one on a per-declaration basis
+  instead of trusting a whole-snapshot producer tag.
 
 **Layout facts**: castxml remains the PRIMARY layout source — its own real
 size/alignment/offset/vtable data is never overridden. When the optional G28
 Phase 4 companion tool (``ABICHECK_CLANG_LAYOUT_TOOL``) has already enriched
-the clang sub-dump before this merge, its facts backfill any of the same
-fields castxml itself never computes at all (``data_size_bits``,
-``is_standard_layout``, ``is_trivially_copyable``) or left empty (an opaque/
-incomplete castxml record) — see :func:`_merge_record_type`/
-:func:`_merge_field`. Without the layout tool enabled, this is a no-op:
-``dumper_clang.py``'s plain ``-ast-dump=json`` parse leaves every one of
-these fields empty too, so there is nothing to backfill from.
+the clang sub-dump before this merge, its facts backfill ``data_size_bits``
+and the offset/vptr facts castxml itself never computes at all, or left
+empty for an opaque/incomplete castxml record — see
+:func:`_merge_record_type`/:func:`_merge_field`. ``is_standard_layout``/
+``is_trivially_copyable`` are the one exception to "without the layout tool
+enabled, this is a no-op": G31 Phase C wired real extraction of both
+directly into ``dumper_clang.py``'s plain ``-ast-dump=json`` parse (no
+companion tool needed, since these are semantic type traits clang's AST
+computes independent of any layout pass — see ``_clang_record_type_traits``'s
+own docstring), so this backfill genuinely fires for those two even without
+``ABICHECK_CLANG_LAYOUT_TOOL`` set. ``data_size_bits``/``size_bits``/
+``alignment_bits``/``vptr_offset_bits`` still require the companion tool;
+``dumper_clang.py``'s plain parse leaves those empty either way.
 
 Everything not explicitly merged below (typedefs, constants, ELF/PE/Mach-O
 metadata, DWARF metadata, ...) is taken verbatim from the castxml snapshot,
@@ -322,9 +333,7 @@ def _match_synthetic_ctor_dtor(
     if parsed is None:
         return None
     marker, scope, param_sig = parsed
-    candidates = clang_ctor_dtor.get(
-        (marker, _normalize_scope_for_matching(scope)), []
-    )
+    candidates = clang_ctor_dtor.get((marker, _normalize_scope_for_matching(scope)), [])
     if marker == _DTOR_MARKER:
         if len(candidates) == 1 and candidates[0].access == castxml_f.access:
             return candidates[0]
@@ -421,7 +430,11 @@ def _merge_variable(
 #: (data_size_bits/is_standard_layout/is_trivially_copyable) or leaves empty
 #: for an opaque/incomplete record (size_bits/alignment_bits/
 #: vptr_offset_bits) -- backfilled from an already-enriched clang_t below
-#: only when castxml's own value is still None (Codex review).
+#: only when castxml's own value is still None (Codex review). Since G31
+#: Phase C, is_standard_layout/is_trivially_copyable no longer need the
+#: optional ABICHECK_CLANG_LAYOUT_TOOL companion tool to backfill from --
+#: dumper_clang.py's plain parse populates both directly (see
+#: _clang_record_type_traits) -- the other four entries still do.
 _LAYOUT_SCALAR_ATTRS = (
     "size_bits",
     "alignment_bits",
@@ -448,7 +461,11 @@ def _merge_field(
             updates[attr] = value
     # G28 Phase 4: same layout backfill as _merge_record_type, for the
     # per-field offset the optional companion tool computes.
-    if clang_f is not None and f.offset_bits is None and clang_f.offset_bits is not None:
+    if (
+        clang_f is not None
+        and f.offset_bits is None
+        and clang_f.offset_bits is not None
+    ):
         updates["offset_bits"] = clang_f.offset_bits
     return replace(f, **updates) if updates else f
 
@@ -591,8 +608,13 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         enums=merged_enums,
         ast_producer="hybrid",
         ast_toolchain={
-            **{f"castxml_{key}": value for key, value in castxml_snap.ast_toolchain.items()},
-            **{f"clang_{key}": value for key, value in clang_snap.ast_toolchain.items()},
+            **{
+                f"castxml_{key}": value
+                for key, value in castxml_snap.ast_toolchain.items()
+            },
+            **{
+                f"clang_{key}": value for key, value in clang_snap.ast_toolchain.items()
+            },
         },
         ast_fallback_reason=None,
         fact_provenance=provenance,

@@ -262,25 +262,35 @@ class TestFieldDefaultInitializerChanged:
         the way most other field-level detectors exclude unions (Codex
         review, PR #582)."""
         t_old = RecordType(
-            name="U", kind="union", size_bits=32, is_union=True,
-            fields=[TypeField("x", "int", 0, default="1"),
-                    TypeField("y", "float", 0)],
+            name="U",
+            kind="union",
+            size_bits=32,
+            is_union=True,
+            fields=[TypeField("x", "int", 0, default="1"), TypeField("y", "float", 0)],
         )
         t_new = RecordType(
-            name="U", kind="union", size_bits=32, is_union=True,
-            fields=[TypeField("x", "int", 0, default=None),
-                    TypeField("y", "float", 0)],
+            name="U",
+            kind="union",
+            size_bits=32,
+            is_union=True,
+            fields=[TypeField("x", "int", 0, default=None), TypeField("y", "float", 0)],
         )
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
 
     def test_union_variant_initializer_changed(self):
         t_old = RecordType(
-            name="U", kind="union", size_bits=32, is_union=True,
+            name="U",
+            kind="union",
+            size_bits=32,
+            is_union=True,
             fields=[TypeField("x", "int", 0, default="1")],
         )
         t_new = RecordType(
-            name="U", kind="union", size_bits=32, is_union=True,
+            name="U",
+            kind="union",
+            size_bits=32,
+            is_union=True,
             fields=[TypeField("x", "int", 0, default="2")],
         )
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
@@ -385,19 +395,34 @@ class TestEnumDeprecatedChanged:
 
 # ── producer-mismatch regression (Codex review, PR #582) ───────────────────
 #
-# Every fact above is castxml-only today: the clang header backend
-# (--ast-frontend clang) also sets from_headers=True but never populates
-# TypeField.default/deprecated, RecordType.is_abstract/deprecated,
-# EnumType.is_scoped/deprecated, or Function.is_override/deprecated. Without
-# gating on ast_producer specifically, comparing a castxml-parsed old
-# snapshot to a clang-parsed new snapshot would read as every one of these
-# facts having been removed, purely because the new side's parser doesn't
-# capture them — never because anything really changed.
+# Originally every fact below was castxml-only: the clang header backend
+# (--ast-frontend clang) also set from_headers=True but never populated
+# TypeField.default, RecordType.is_abstract, EnumType.is_scoped, or
+# Function.is_override/deprecated (plus deprecated on every other surface
+# kind). Without gating on ast_producer specifically, comparing a
+# castxml-parsed old snapshot to a clang-parsed new snapshot would read as
+# every one of these facts having been removed, purely because the new
+# side's parser doesn't capture them — never because anything really
+# changed.
+#
+# G31 Phase C (docs/contribute/plans/g31-header-graph-default-on-followup.md)
+# closed that gap for two of these facts specifically — deprecated (every
+# surface kind) and EnumType.is_scoped — by wiring real extraction into the
+# direct-clang backend too (dumper_clang.py's _clang_deprecated_message /
+# the enum's "scopedEnumTag" handling), verified against real
+# clang -ast-dump=json output. Both facts' VALUES are directly
+# cross-comparable between backends (a plain message string / a plain bool,
+# not a backend-specific encoding), so a castxml-vs-clang pair for either is
+# now a genuine, correctly-detected comparison, not a producer-mismatch
+# false positive — see TestDeprecatedCrossProducerNowComparable below,
+# which replaces what used to be four more "does not false-positive" cases
+# in this class. is_abstract, is_override, and TypeField.default remain
+# castxml-only (no clang-side extraction exists for any of the three), so
+# their producer-mismatch tests are unchanged.
 
 
 def _clang_snap(**kwargs):
-    """Same shape as _snap, but tagged as if produced by the clang backend
-    (which never sets any of the six castxml-only facts under test)."""
+    """Same shape as _snap, but tagged as if produced by the clang backend."""
     return _snap(ast_producer="clang", **kwargs)
 
 
@@ -426,39 +451,19 @@ class TestProducerMismatchDoesNotFalsePositive:
 
     def test_field_default_initializer_producer_mismatch(self):
         t_old = RecordType(
-            name="Cfg", kind="struct", size_bits=32,
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
             fields=[TypeField("timeout", "int", 0, default="30")],
         )
         t_new = RecordType(
-            name="Cfg", kind="struct", size_bits=32,
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
             fields=[TypeField("timeout", "int", 0, default=None)],
         )
         r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
         assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
-
-    def test_func_deprecated_producer_mismatch(self):
-        f_old = _pub_func("old_api", "_Z7old_apiv", deprecated="use new_api")
-        f_new = _pub_func("old_api", "_Z7old_apiv", deprecated=None)
-        r = compare(_snap(functions=[f_old]), _clang_snap(functions=[f_new]))
-        assert ChangeKind.FUNC_DEPRECATED_REMOVED not in _kinds(r)
-
-    def test_var_deprecated_producer_mismatch(self):
-        v_old = _pub_var("kOld", "kOld", deprecated="use kNew")
-        v_new = _pub_var("kOld", "kOld", deprecated=None)
-        r = compare(_snap(variables=[v_old]), _clang_snap(variables=[v_new]))
-        assert ChangeKind.VAR_DEPRECATED_REMOVED not in _kinds(r)
-
-    def test_type_deprecated_producer_mismatch(self):
-        t_old = RecordType(name="OldWidget", kind="class", size_bits=32, deprecated="x")
-        t_new = RecordType(name="OldWidget", kind="class", size_bits=32, deprecated=None)
-        r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
-        assert ChangeKind.TYPE_DEPRECATED_REMOVED not in _kinds(r)
-
-    def test_enum_deprecated_producer_mismatch(self):
-        e_old = EnumType(name="OldMode", members=[EnumMember("A", 0)], deprecated="x")
-        e_new = EnumType(name="OldMode", members=[EnumMember("A", 0)], deprecated=None)
-        r = compare(_snap(enums=[e_old]), _clang_snap(enums=[e_new]))
-        assert ChangeKind.ENUM_DEPRECATED_REMOVED not in _kinds(r)
 
     def test_castxml_both_sides_still_fires(self):
         """Sanity check: the gate must not be so strict it also blocks the
@@ -487,6 +492,67 @@ class TestProducerMismatchDoesNotFalsePositive:
         assert new_reloaded.ast_producer == "castxml"
         r = compare(old_reloaded, new_reloaded)
         assert ChangeKind.FUNC_DEPRECATED_REMOVED in _kinds(r)
+
+
+class TestDeprecatedCrossProducerNowComparable:
+    """G31 Phase C: deprecated (every surface kind) and EnumType.is_scoped
+    used to be castxml-only, so a castxml-vs-clang comparison for either was
+    gated OFF entirely (see TestProducerMismatchDoesNotFalsePositive above,
+    which used to carry four "does not false-positive" cases for exactly
+    this scenario). Now that the direct-clang backend genuinely extracts
+    these facts too (dumper_clang.py's _clang_deprecated_message /
+    "scopedEnumTag" handling — verified against real
+    clang -ast-dump=json output before wiring this up), a castxml-vs-clang
+    (or clang-vs-clang) pair is a real, correctly-detected comparison, not a
+    producer-mismatch false positive — because a clang-tagged snapshot's
+    ``deprecated=None`` unambiguously means "not deprecated", exactly like
+    castxml's, rather than "clang doesn't know."
+    """
+
+    def test_func_deprecated_fires_across_castxml_to_clang(self):
+        f_old = _pub_func("old_api", "_Z7old_apiv", deprecated="use new_api")
+        f_new = _pub_func("old_api", "_Z7old_apiv", deprecated=None)
+        r = compare(_snap(functions=[f_old]), _clang_snap(functions=[f_new]))
+        assert ChangeKind.FUNC_DEPRECATED_REMOVED in _kinds(r)
+
+    def test_var_deprecated_fires_across_castxml_to_clang(self):
+        v_old = _pub_var("kOld", "kOld", deprecated="use kNew")
+        v_new = _pub_var("kOld", "kOld", deprecated=None)
+        r = compare(_snap(variables=[v_old]), _clang_snap(variables=[v_new]))
+        assert ChangeKind.VAR_DEPRECATED_REMOVED in _kinds(r)
+
+    def test_type_deprecated_fires_across_castxml_to_clang(self):
+        t_old = RecordType(name="OldWidget", kind="class", size_bits=32, deprecated="x")
+        t_new = RecordType(
+            name="OldWidget", kind="class", size_bits=32, deprecated=None
+        )
+        r = compare(_snap(types=[t_old]), _clang_snap(types=[t_new]))
+        assert ChangeKind.TYPE_DEPRECATED_REMOVED in _kinds(r)
+
+    def test_enum_deprecated_fires_across_castxml_to_clang(self):
+        e_old = EnumType(name="OldMode", members=[EnumMember("A", 0)], deprecated="x")
+        e_new = EnumType(name="OldMode", members=[EnumMember("A", 0)], deprecated=None)
+        r = compare(_snap(enums=[e_old]), _clang_snap(enums=[e_new]))
+        assert ChangeKind.ENUM_DEPRECATED_REMOVED in _kinds(r)
+
+    def test_enum_scoped_fires_across_castxml_to_clang(self):
+        e_old = EnumType(name="Color", members=[EnumMember("Red", 0)], is_scoped=True)
+        e_new = EnumType(name="Color", members=[EnumMember("Red", 0)], is_scoped=False)
+        r = compare(_snap(enums=[e_old]), _clang_snap(enums=[e_new]))
+        assert ChangeKind.ENUM_LOST_SCOPED in _kinds(r)
+
+    def test_deprecated_still_skipped_for_a_genuinely_unknown_producer(self):
+        # The real remaining false-positive-avoidance case: an ast_producer
+        # that isn't "castxml"/"clang"/"hybrid" at all (a hand-built
+        # snapshot in a test, or a legacy pre-provenance baseline) makes
+        # fact_producer(...) return None, so both_known_backed_fact must
+        # still correctly decline to compare -- there is genuinely no
+        # confirmed backend behind this value.
+        f_old = _pub_func("old_api", "_Z7old_apiv", deprecated="use new_api")
+        f_new = _pub_func("old_api", "_Z7old_apiv", deprecated=None)
+        unknown_producer_new = _snap(functions=[f_new], ast_producer="some_future_tool")
+        r = compare(_snap(functions=[f_old]), unknown_producer_new)
+        assert ChangeKind.FUNC_DEPRECATED_REMOVED not in _kinds(r)
 
 
 # ── Real castxml XML → model field population ───────────────────────────────
