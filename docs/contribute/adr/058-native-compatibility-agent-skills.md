@@ -557,8 +557,9 @@ dependencies/surface without strong justification":
 - **Skill version is pinned to the abicheck version whose CLI surface and
   report schema it was written against**, recorded in each `SKILL.md`'s
   `metadata` frontmatter field (not a separate versioning scheme) — pre-1.0
-  abicheck (`0.5.0` at authoring time) makes no compatibility promise
-  between minor versions (`pyproject.toml`; ADR-043's framing), so a skill
+  abicheck (`pyproject.toml`'s `version` key is the fact owner, not a
+  literal copied into this document) makes no compatibility promise
+  between minor versions (ADR-043's framing), so a skill
   must state the abicheck version range it was validated against and the
   drift tests (below) must fail loudly, not silently degrade, when that
   range is exceeded.
