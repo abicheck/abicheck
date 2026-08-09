@@ -53,3 +53,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   spurious removal purely from the schema upgrade. The gate now declines
   the comparison outright whenever either side is positively known
   unreliable, while staying permissive for truly unset provenance.
+- **Extended that same fix to cover a legacy pre-v20 hybrid snapshot**
+  (Codex review, fresh evidence, second round): a hybrid merge's
+  clang-only-appended record types never had `default` provenance stamped
+  at all under the old merge code (only `deprecated` was), so an ABSENT
+  provenance entry for one of those fields on a legacy hybrid snapshot is
+  real-but-WRONG legacy data too, not genuinely unrecorded — the same
+  reliability marker (`clang_field_initializer_facts_reliable`) now also
+  covers the `"hybrid"` producer. A MATCHED field's own recorded
+  provenance entry (always unconditionally stamped `"castxml"`, regardless
+  of schema version) stays trusted either way — only an absence on a
+  legacy hybrid snapshot is treated as unreliable.

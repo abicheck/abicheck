@@ -456,12 +456,23 @@ class TestClangFieldInitializerFactsReliableRoundTrip:
         d = _minimal_dict(schema_version=19, from_headers=True, ast_producer="castxml")
         assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is True
 
-    def test_legacy_hybrid_snapshot_stays_reliable(self) -> None:
-        """A legacy hybrid snapshot's field ``default`` provenance was
-        always recorded "castxml" for a matched pair under the OLD (pre-G31
-        Phase C) merge code, since clang could never populate it then --
-        no equivalent false-reliability risk exists for this producer."""
+    def test_legacy_hybrid_snapshot_loads_as_unreliable(self) -> None:
+        """Codex review, fresh evidence, second round: unlike
+        clang_deprecation_facts_reliable, this flag DOES need to cover
+        "hybrid" too. A MATCHED field's ``default`` provenance was always
+        recorded "castxml" under the OLD (pre-G31 Phase C) merge code, but a
+        pre-v20 hybrid merge's clang-only-APPENDED record types never had
+        ``default`` provenance stamped at ALL (only ``deprecated`` was) --
+        so an absent entry for one of those fields is real-but-WRONG legacy
+        data, not genuinely unrecorded provenance. See
+        same_producer_backed_fact_qualified's own tests below for the
+        end-to-end consequence (a matched field's recorded entry stays
+        trusted regardless of this flag; only an absent entry is blocked)."""
         d = _minimal_dict(schema_version=19, from_headers=True, ast_producer="hybrid")
+        assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is False
+
+    def test_current_hybrid_header_snapshot_loads_as_reliable(self) -> None:
+        d = _minimal_dict(schema_version=20, from_headers=True, ast_producer="hybrid")
         assert snapshot_from_dict(d).clang_field_initializer_facts_reliable is True
 
     def test_missing_schema_version_key_on_clang_header_snapshot_is_legacy(
@@ -567,6 +578,86 @@ class TestClangFieldInitializerFactsReliableRoundTrip:
             same_producer_backed_fact_qualified(
                 fresh_clang,
                 fresh_clang,
+                key,
+                key,
+                key,
+                old_bare_unambiguous=True,
+                new_bare_unambiguous=True,
+            )
+            is True
+        )
+
+    def test_same_producer_gate_declines_against_unreliable_legacy_hybrid_absence(
+        self,
+    ) -> None:
+        """Codex review, PR #687, second round, fresh evidence: a legacy
+        (pre-v20) hybrid snapshot's clang-only-appended field never had
+        ``default`` provenance stamped at all, so an ABSENT entry there must
+        be declined the same way a legacy pure-clang snapshot's explicit
+        unreliable value is -- not treated as harmless "genuinely unknown"."""
+        from abicheck.fact_provenance import (
+            field_fact_key,
+            same_producer_backed_fact_qualified,
+        )
+
+        legacy_hybrid = snapshot_from_dict(
+            _minimal_dict(schema_version=19, from_headers=True, ast_producer="hybrid")
+        )
+        fresh_hybrid = _make_snap(
+            from_headers=True,
+            ast_producer="hybrid",
+            fact_provenance={"type:Cfg:field:timeout:default": "clang"},
+        )
+        key = field_fact_key("Cfg", "timeout", "default")
+
+        # legacy_hybrid.fact_provenance has no entry for this key at all --
+        # exactly the clang-only-appended, pre-fix shape.
+        assert key not in legacy_hybrid.fact_provenance
+        assert (
+            same_producer_backed_fact_qualified(
+                fresh_hybrid,
+                legacy_hybrid,
+                key,
+                key,
+                key,
+                old_bare_unambiguous=True,
+                new_bare_unambiguous=True,
+            )
+            is False
+        )
+
+    def test_same_producer_gate_trusts_recorded_entry_on_legacy_hybrid(self) -> None:
+        """The flip side of the case above: a MATCHED field's ``default``
+        provenance on the SAME legacy hybrid snapshot was always
+        unconditionally stamped "castxml" by ``_backfill_fact`` regardless of
+        schema version -- a PRESENT entry stays trusted and comparable even
+        though the snapshot's own reliability flag is False, since that flag
+        only governs what an ABSENCE means, not a recorded value."""
+        from abicheck.fact_provenance import (
+            field_fact_key,
+            same_producer_backed_fact_qualified,
+        )
+
+        key = field_fact_key("Cfg", "timeout", "default")
+        legacy_hybrid = snapshot_from_dict(
+            _minimal_dict(
+                schema_version=19,
+                from_headers=True,
+                ast_producer="hybrid",
+                fact_provenance={key: "castxml"},
+            )
+        )
+        assert legacy_hybrid.clang_field_initializer_facts_reliable is False
+        other_castxml_matched = _make_snap(
+            from_headers=True,
+            ast_producer="hybrid",
+            fact_provenance={key: "castxml"},
+        )
+
+        assert (
+            same_producer_backed_fact_qualified(
+                legacy_hybrid,
+                other_castxml_matched,
                 key,
                 key,
                 key,

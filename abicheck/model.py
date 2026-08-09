@@ -697,10 +697,10 @@ class AbiSnapshot:
     clang_deprecation_facts_reliable: bool = field(default=True, kw_only=True)
 
     # True when this snapshot's TypeField.default (default member initializer)
-    # facts are known-reliable when its own ``ast_producer`` is ``"clang"`` --
-    # G31 Phase C (schema v20) wired real extraction into the direct-clang
-    # backend (``dumper_clang._field_initializer_value``), previously
-    # unconditionally None. Exactly the shape of
+    # facts are known-reliable when its own ``ast_producer`` is ``"clang"`` OR
+    # ``"hybrid"`` -- G31 Phase C (schema v20) wired real extraction into the
+    # direct-clang backend (``dumper_clang._field_initializer_value``),
+    # previously unconditionally None. Exactly the shape of
     # ``clang_deprecation_facts_reliable`` above, and needed for the same
     # reason: ``TypeField.default`` is documented (see the field itself) as
     # ``None`` both for "no initializer" and "this dumper doesn't capture
@@ -713,9 +713,21 @@ class AbiSnapshot:
     # landed in different schema versions -- a v19 snapshot has reliable
     # deprecated/is_scoped but unreliable field defaults, which a single
     # shared flag could not express. Not needed for "castxml" (its own
-    # extraction predates both flags, G28 Phase 1) or for a legacy "hybrid"
-    # snapshot (whose pre-fix merge always recorded "castxml" provenance for
-    # a fact clang could not then populate).
+    # extraction predates both flags, G28 Phase 1). UNLIKE
+    # ``clang_deprecation_facts_reliable``, this one DOES need to cover a
+    # legacy "hybrid" snapshot too (Codex review, fresh evidence, second
+    # round): a pre-v20 hybrid merge's clang-only-APPENDED record types
+    # (``merge_snapshots()``'s ``clang_only_types`` loop) never had
+    # ``default`` provenance stamped at all -- only ``deprecated`` was, since
+    # clang couldn't populate ``default`` yet -- so an absent provenance
+    # entry for such a field on a pre-v20 hybrid snapshot is real-but-WRONG
+    # data (the field's own value is unconditionally None), not genuinely
+    # unrecorded. A MATCHED field's ``default`` provenance is unaffected
+    # either way -- it's unconditionally stamped "castxml" regardless of
+    # schema version (``_backfill_fact`` records provenance for every
+    # matched declaration; clang's own value was always None pre-fix, so
+    # there was nothing to ever backfill from), so it always has a real,
+    # trusted provenance entry and never depends on this flag.
     clang_field_initializer_facts_reliable: bool = field(default=True, kw_only=True)
 
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.

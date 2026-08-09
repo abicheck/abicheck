@@ -1084,10 +1084,18 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             d["clang_field_initializer_facts_reliable"]
         )
     else:
-        # Only the clang producer path is affected -- see v20 above.
+        # Unlike clang_deprecation_facts_reliable, this covers "hybrid" too,
+        # not just "clang" (Codex review, fresh evidence, second round): a
+        # pre-v20 hybrid merge's clang-only-appended fields never had
+        # `default` provenance stamped at all (only `deprecated` was), so an
+        # absent entry for one of those fields on a legacy hybrid snapshot is
+        # real-but-WRONG data, same as a legacy pure-clang snapshot's
+        # unconditional None -- see AbiSnapshot.clang_field_initializer_
+        # facts_reliable's own docstring for the full reasoning, including
+        # why a MATCHED field's own provenance is unaffected either way.
         clang_field_initializer_facts_reliable_value = (
             not from_headers
-            or ast_producer_value != "clang"
+            or ast_producer_value not in ("clang", "hybrid")
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_FIELD_INITIALIZER_FACTS
         )
 

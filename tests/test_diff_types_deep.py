@@ -1626,6 +1626,90 @@ class TestFieldDefaultUnreliableLegacySnapshot:
         assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
 
 
+class TestFieldDefaultUnreliableLegacyHybridSnapshot:
+    """Codex review, PR #687, second round, fresh evidence: the same false-
+    removal risk as ``TestFieldDefaultUnreliableLegacySnapshot`` above, but
+    for a legacy (pre-v20) HYBRID snapshot's clang-only-APPENDED record type
+    -- its field never got ``default`` provenance stamped at all under the
+    old merge code (only ``deprecated`` was), so the absent entry must be
+    declined the same way an explicitly-unreliable pure-clang value is.
+    """
+
+    def _hybrid_type(self, default):
+        return RecordType(
+            name="Cfg",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField("timeout", "int", 0, default=default)],
+        )
+
+    def test_no_false_removal_against_legacy_hybrid_missing_entry(self):
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        fresh = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            types=[self._hybrid_type("30")],
+            from_headers=True,
+            ast_producer="hybrid",
+            fact_provenance={"type:Cfg:field:timeout:default": "clang"},
+        )
+        # Simulate a pre-v20 persisted hybrid snapshot whose clang-only-
+        # appended field never had `default` provenance stamped at all: same
+        # shape, but no provenance entry recorded, and schema rolled back so
+        # snapshot_from_dict re-derives the reliability flag as False.
+        legacy_dict = snapshot_to_dict(
+            AbiSnapshot(
+                library="libtest.so.1",
+                version="2.0",
+                types=[self._hybrid_type(None)],
+                from_headers=True,
+                ast_producer="hybrid",
+            )
+        )
+        legacy_dict["schema_version"] = 19
+        legacy_dict.pop("clang_field_initializer_facts_reliable", None)
+        legacy = snapshot_from_dict(legacy_dict)
+        assert legacy.clang_field_initializer_facts_reliable is False
+        assert "type:Cfg:field:timeout:default" not in legacy.fact_provenance
+
+        r = compare(fresh, legacy)
+
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED not in _kinds(r)
+
+    def test_real_removal_still_detected_when_hybrid_entry_recorded(self):
+        """The control case: when the legacy hybrid snapshot's field WAS
+        matched (a real recorded "castxml" entry, not an absence), the
+        comparison proceeds normally and a genuine removal still fires."""
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        fresh = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            types=[self._hybrid_type("30")],
+            from_headers=True,
+            ast_producer="hybrid",
+            fact_provenance={"type:Cfg:field:timeout:default": "castxml"},
+        )
+        legacy_dict = snapshot_to_dict(
+            AbiSnapshot(
+                library="libtest.so.1",
+                version="2.0",
+                types=[self._hybrid_type(None)],
+                from_headers=True,
+                ast_producer="hybrid",
+                fact_provenance={"type:Cfg:field:timeout:default": "castxml"},
+            )
+        )
+        legacy_dict["schema_version"] = 19
+        legacy_dict.pop("clang_field_initializer_facts_reliable", None)
+        legacy = snapshot_from_dict(legacy_dict)
+
+        r = compare(fresh, legacy)
+
+        assert ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED in _kinds(r)
+
+
 class TestEmittedSymbolStaysBare:
     """The qualified matching key introduced for FP-1 must stay internal to
     old/new type matching. Every emitted ``Change.symbol`` for a namespaced
