@@ -1,3 +1,9 @@
+---
+doc_type: contributor
+level: advanced
+lifecycle: active
+---
+
 # G36 — Native Compatibility Agent Skills: Design, Build, Publish
 
 **ADR:** [ADR-058](../adr/058-native-compatibility-agent-skills.md)
@@ -202,13 +208,11 @@ root command list (so a skill can self-check "does my target support
 detected on the host the same way existing dumper-provider auto-detection
 already probes), and platform capabilities (ELF/PE/Mach-O support — all
 three ship unconditionally today, but this keeps the field meaningful if
-that ever changes). Clears ADR-054's six-part admission bar: answers a
-stable question ("what can this do"), the operand is the installation
-itself (a real domain object, not a pipeline artifact), useful well outside
-any one CI wire format, doesn't fit as an option on an existing verb, has a
-validated use (this plan), and lands with `tests/test_cli_root_surface.py`
-+ `AGENTS.md` + `README.md` + generated CLI reference updated in the same
-PR per that bar's sixth criterion.
+that ever changes). Clears `AGENTS.md`'s "Adding a new top-level command"
+admission bar (ADR-054 D6) on all six criteria — see that section for the
+exact wording; lands with `tests/test_cli_root_surface.py` + `AGENTS.md` +
+`README.md` + generated CLI reference updated in the same PR per that
+bar's own sixth criterion.
 
 **Files:** `abicheck/cli_info.py` (new, sibling module per the "Adding a
 new top-level command" convention in `AGENTS.md`); `abicheck/cli.py` (side
@@ -233,43 +237,65 @@ bundled in.
 
 ---
 
-### P0.5 — Stable comparability reason-code field — **not started**
+### P0.5 — Finer-grained `reason.code` on the existing not-comparable object — **not started**
 
 **CLI/API change:** yes — additive report-schema field.
 
-**Problem:** A `not_comparable` result today requires a skill (or any
-caller) to walk nested `ExtractionContract`/scope-fingerprint diff
-structures to explain *why* two snapshots can't be compared — there is no
-one small, stable, top-level field to branch on. `native-binary-
-compatibility-review`'s "establish comparability" workflow step and
-`native-release-compatibility`'s "baseline comparability" step both need
-this to give the user an actionable reason rather than a raw mismatch dump.
+**Problem:** A `not_comparable` result already renders as a top-level
+`"reason": {"kind": ..., "message": ...}` object in the `--format json`
+document (schema 2.17, `cli_compare_helpers._report_not_comparable`), but
+`kind` today is only ever `"profile_mismatch"` or `"scope_mismatch"` — two
+coarse buckets. The *specific* mismatched field (compiler family vs.
+compiler version vs. language standard vs. ...) is only recoverable from
+the free-text `message`, so a skill (or any caller) branching on the real
+cause has to parse prose. `native-binary-compatibility-review`'s "establish
+comparability" workflow step and `native-release-compatibility`'s
+"baseline comparability" step both need a typed reason instead.
 
-**Change:** Add a `reason_codes` array (values drawn from a new, documented,
-closed enum: `compiler_family_mismatch`, `target_mismatch`,
-`language_standard_mismatch`, `abi_flag_mismatch`,
-`public_surface_mismatch`, `evidence_scope_mismatch`) to the report's
-existing top-level `comparability` block, derived from the same
-`SCOPE_FIELD_KEYS`/`ExtractionContract` comparison `comparability.py`
-already performs — this promotes existing internal evidence to a stable
-public field, it does not add new detection logic. Report-schema version
-bump per the existing `REPORT_SCHEMA_VERSION` convention (ADR-047 §7 /
-ADR-055 D3's registry).
+**Change:** Add a `code` field alongside the existing `kind`/`message` on
+that same `reason` object (no new top-level block — `comparability` does
+not exist in the current schema and this does not invent one). `code` is a
+documented, closed enum covering every field
+`comparability.py`'s `PROFILE_FIELD_KEYS` (`compiler_family`,
+`compiler_version`, `abi_dialect`, `language_standard`, `target_triple`,
+`pointer_width`, `endianness`, `macro_ops`, `pass_through_flags`,
+`include_sequence`, `header_sequence`) and `SCOPE_FIELD_KEYS`/
+`_MANIFEST_SCOPE_FIELD_KEYS` (`headers`, `public_header_dirs`,
+`translation_units`) can each independently mismatch on, plus one explicit
+fallback per exception category already carved out in `comparability.py`
+(`_PLATFORM_IDENTITY_FIELDS`, `_BUILD_CONTEXT_FIELDS`) and one
+`other_profile_mismatch`/`other_scope_mismatch` catch-all for any field not
+individually enumerated — so a future `PROFILE_FIELD_KEYS`/
+`SCOPE_FIELD_KEYS` addition degrades to a generic-but-still-typed code
+instead of silently emitting nothing. Derived from the same field-by-field
+comparison `check_contracts_comparable`/`compute_extraction_contract`
+already perform when raising `ProfileMismatchError`/`ScopeMismatchError` —
+promotes existing internal evidence to a stable public field, adds no new
+detection logic. Report-schema version bump per the existing
+`REPORT_SCHEMA_VERSION` convention (ADR-047 §7 / ADR-055 D3's registry).
 
-**Files:** `abicheck/comparability.py` (derive and attach the reason
-codes), `abicheck/schemas/__init__.py` (schema version bump + field
-registration), `abicheck/reporter.py` (emit the field), `docs/reference/
+**Files:** `abicheck/comparability.py` (`ProfileMismatchError`/
+`ScopeMismatchError` carry the specific mismatched field(s), not just a
+rendered message, so `code` can be derived without re-parsing text),
+`abicheck/cli_compare_helpers.py` (`_report_not_comparable` emits `code`),
+`abicheck/cli_compare_release.py` (its own `"reason": {...}` construction
+site gets the same field), `abicheck/mcp_server.py` (`abi_compare`'s
+`{"status": "not_comparable", "reason": ...}` path), `abicheck/schemas/
+__init__.py` (schema version bump + field registration), `docs/reference/
 change-kinds.md` or a new `docs/reference/comparability-reason-codes.md`
 (document the closed enum — new page only if it doesn't fit as a section of
 an existing comparability doc; check `docs/use/contract-evaluation.md` and
 `docs/reference/compatibility-evaluation-config.md` first per `docs/
 AGENTS.md`'s "extend an existing canonical owner" rule before creating one).
 
-**Tests:** `tests/test_comparability_gate.py` (extend with reason-code
-assertions per mismatch kind — compiler family, target, language standard,
-ABI flags, public surface, evidence scope, one case each);
+**Tests:** `tests/test_comparability_gate.py` (extend with `code`
+assertions covering every `PROFILE_FIELD_KEYS`/`SCOPE_FIELD_KEYS` entry,
+each exception carve-out, and the fallback code for an unrecognized
+field — one case each, not just the two current coarse kinds);
 `tests/test_report_schema_receipt.py`-style version-bump check if one
-exists for this schema family.
+exists for this schema family; a test asserting `abi_compare`'s MCP
+`not_comparable` path emits the identical `code` the CLI does (ADR-055 D4's
+"one shared implementation" invariant, applied to this new field).
 
 **Docs:** whichever comparability doc the field lands in, plus a
 changelog fragment (`### Added`).
@@ -405,8 +431,10 @@ from skill content or the generator.
 duplicate of existing ABI/API educational material, and to dogfooding
 before any external publication step.
 
-**Change:** One new `docs/use/agent-skills.md` page (`doc_type: use`,
-per `docs/AGENTS.md`'s front-matter schema) covering: the skill catalog
+**Change:** One new `docs/use/agent-skills.md` page (`doc_type: how-to`,
+per `docs/AGENTS.md`'s front-matter schema — `use` is not one of the eight
+valid `doc_type` values; this is a task-oriented page, matching every
+other `docs/use/` page's convention) covering: the skill catalog
 (four P0 skills, one line each, linking to their generated `.agents/skills/
 <name>/SKILL.md`), installation (what `.agents/skills/` means, which agents
 read it natively per ADR-058's ecosystem research, no per-vendor
@@ -563,9 +591,12 @@ friction found becomes a P0.2/P0.3 bug fix, not a forked skill copy — per
 ADR-058's "no second, independently-authored copy per vendor" rejection.
 
 **Files:** `skills-src/CLAUDE.md`'s validation-log section, or a small
-`docs/contribute/agent-skills-validation-log.md` working document
-(unpublished nav, per this repo's existing "Roadmap & Status" convention —
-model it on `docs/contribute/abicc-parity-status.md`'s structure).
+`docs/contribute/agent-skills-validation-log.md` working document modeled
+on `docs/contribute/abicc-parity-status.md`'s structure — if the latter,
+it must be added to `mkdocs.yml`'s nav under "Parity & Reports" the same
+way `abicc-parity-status.md` itself is (every `docs/**/*.md` page must be
+nav-reachable or linked from another doc; "working document" is not a nav
+exemption, confirmed against how its own model page is actually navigated).
 
 **Tests:** N/A — manual validation, recorded as data, not a CI gate (the
 scriptable subset already lives in P0.8).

@@ -15,9 +15,9 @@ Actions layer (ADR-047) — is reachable only by a caller who already knows
 `abicheck` exists and already knows, in outline, which of its verbs answers
 their question. ADR-047's own audit of the GitHub Actions surface found the
 same failure mode already latent there: `abicheck aggregate` had drifted
-into an implicit architectural center because each Action input was added
-"locally reasonable in isolation," and the result "read command-first rather
-than scenario-first" — a user had to already know which internal CLI mode
+into an implicit architectural center because "each addition was locally
+reasonable; the result read command-first rather than scenario-first" — a
+user had to already know which internal CLI mode
 mapped to their scenario before they could pick an Action input. ADR-047's
 fix was to reorganize the integration surface around a **project
 integration lifecycle** (config → build → evidence → target/baseline
@@ -82,6 +82,30 @@ Three problems, not one, need solving together:
    project silently, treat suppressions as a lever for making output
    quieter) so that "abicheck-verified" keeps meaning something.
 
+## Product positioning
+
+A good skill in this portfolio should answer requests such as these seven —
+none of which name abicheck, and each of which a real user could type
+without knowing the tool exists:
+
+1. "Review this PR for binary compatibility."
+2. "Can I make this public C++ API change without breaking old consumers?"
+3. "Can we release this as a minor version?"
+4. "Will this old application work with the new library?"
+5. "Why did this compatibility check suddenly report dozens of breaks?"
+6. "Will this binary still work after moving to a new OS/container?"
+7. "How do I keep ABI compatibility across compiler/client profiles?"
+
+abicheck should appear inside the resulting workflow as a deterministic
+verification engine, not as the user-facing job. Phrasings 1–4 map directly
+onto the four P0 skills (Decision → Public skill taxonomy, below); 5 is
+folded into `native-binary-compatibility-review`'s root-cause step; 6 and 7
+are P1 candidates (Decision → Skill admission criteria) — real jobs, not yet
+admitted for lack of validated usage evidence. This list is the source both
+`SKILL.md` `description` fields (Decision → Skill content model) and the
+trigger-test positive corpus (Testing and evaluation architecture, and
+G36's P0.8) are built from.
+
 ## Ecosystem validation (informs Decision, not repeated there)
 
 Researched directly against current (2026) vendor documentation rather than
@@ -144,9 +168,12 @@ assumed:
    answer, the way a human expert would reach for `nm`/`objdump`/`abidiff`
    — not because the skill exists to demonstrate the tool.
 3. **Don't reproduce CLI-surface sprawl one layer up.** ADR-043 collapsed
-   the CLI from ~31 commands to a handful precisely because a large surface
-   of narrowly-scoped, similarly-named verbs is worse for a caller than a
-   smaller number of well-chosen ones. A public skill portfolio is subject
+   the CLI root surface from ten commands down to five precisely because a
+   large surface of narrowly-scoped, similarly-named verbs is worse for a
+   caller than a smaller number of well-chosen ones (it later grew back to
+   seven — `aggregate` then `project` — each addition individually clearing
+   ADR-054's admission bar, not a relapse into the original sprawl). A
+   public skill portfolio is subject
    to the identical failure mode and the identical fix: an explicit
    admission bar (below), applied to every candidate, not "one skill per
    scenario we can think of."
@@ -335,9 +362,12 @@ skills-src/                              # editable source (this repo, DRY)
     compatibility-contracts.md
     evidence-and-depth.md
     baseline-and-comparability.md
+    public-surface-and-scoping.md
+    compiler-and-build-profiles.md
     consumer-scoping.md
     policies-and-suppressions.md
     report-interpretation.md
+    root-cause-grouping.md
     remediation-catalog.md
     safety-invariants.md
   native-binary-compatibility-review/
@@ -426,27 +456,31 @@ to, below).
 
 ### Required abicheck product capabilities
 
-Audited against what exists today (Question 6/7) before proposing anything
-new — consistent with "audit before adding," `AGENTS.md`'s "don't add
+Audited against what exists today before proposing anything new —
+consistent with "audit before adding," `AGENTS.md`'s "don't add
 dependencies/surface without strong justification":
 
 **Already sufficient, no change needed:**
 - `compare --format json` / `scan --format json` already emit a
   machine-readable verdict, per-finding kind/severity/location, evidence
   tier, and (under `--contract-evaluation`) contract coverage and
-  compatibility-decision blocks (ADR-049 Phases 4–7) — this is the compact
-  decision summary Task 10 asked whether current output already satisfies;
-  it does, for the fields ADR-049/055 already added.
+  compatibility-decision blocks (ADR-049 Phases 4–7) — this already
+  satisfies the compact-decision-summary need in substance, for the fields
+  ADR-049/055 already added.
 - Consumer scoping (`--used-by`, `--required-symbol(s)`), contract-mode
   selection (`--contract public|exports|all`), and multi-target/profile
   release gating (`project`, `aggregate`, `--exit-code-scheme`) are all
   live CLI surface a skill can drive directly.
-- Structured comparability failure already exists in substance:
-  `comparability.py`'s `ScopeMismatchError`/scope-fingerprint mismatch and
-  ADR-050's `ExtractionContract` fields give a program-checkable reason a
-  pair is `not_comparable`, even though (see gap below) it is not yet
-  surfaced as one small, stable, top-level reason-code enum a skill can
-  branch on without reading through nested report structure.
+- Structured comparability failure already exists in substance, on a
+  known, existing field: a `not_comparable` result (`ProfileMismatchError`/
+  `ScopeMismatchError`, ADR-050 D1/D2) already renders as a top-level
+  `"reason": {"kind": ..., "message": ...}` object in the `--format json`
+  document (schema 2.17, `compare_report.schema.json`;
+  `cli_compare_helpers._report_not_comparable`) — today `kind` is one of
+  exactly two coarse values, `profile_mismatch` or `scope_mismatch`, with
+  the specific mismatched field only recoverable from the free-text
+  `message`. This is what the gap below promotes, not a `comparability`
+  block that doesn't exist in the current schema.
 
 **Real, minimal gaps (P0 — do only these, no speculative surface):**
 - **`abicheck info --format json`** does not exist today (confirmed: no
@@ -454,24 +488,30 @@ dependencies/surface without strong justification":
   abicheck new enough for `--contract`," or "which extraction providers are
   available on this host," has no machine-readable way to ask — it would
   otherwise have to parse `--version`'s human-oriented string or probe by
-  trial-and-error. This is a small, additive, read-only command — clears
-  ADR-054's admission bar (a stable question — "what can this abicheck do"
-  — a real domain object, useful outside any one CI wire format, not
-  foldable into an existing verb's option).
-- **A stable top-level comparability-failure reason-code field.** The
-  underlying data already exists (per above); what is missing is
-  *promoting* it to a small, documented, stable enum
-  (`compiler_family_mismatch`, `target_mismatch`,
-  `language_standard_mismatch`, `abi_flag_mismatch`,
-  `public_surface_mismatch`, `evidence_scope_mismatch`) on the report's
-  top-level `comparability` block, so a skill can branch on one field
-  instead of re-deriving the reason from nested `ExtractionContract` diffs.
+  trial-and-error. This is a small, additive, read-only command that clears
+  AGENTS.md's CLI-command admission bar (ADR-054 D6) — see G36 P0.4 for the
+  full six-criterion check.
+- **A finer-grained `reason.code` on the existing `not_comparable` object.**
+  Rather than inventing a new top-level block, extend the existing `reason`
+  object with a `code` field: a documented, closed enum covering every
+  `PROFILE_FIELD_KEYS`/`SCOPE_FIELD_KEYS` mismatch cause
+  `comparability.py` already checks (`compiler_family`, `compiler_version`,
+  `abi_dialect`, `language_standard`, `target_triple`/`pointer_width`/
+  `endianness`, `macro_ops`, `pass_through_flags`, `include_sequence`/
+  `header_sequence`, `headers`/`public_header_dirs`, plus scope/manifest
+  fields), each mapped to a stable code, with an explicit
+  `other_profile_mismatch`/`other_scope_mismatch` fallback for any field
+  not individually enumerated (so a future `SCOPE_FIELD_KEYS` addition
+  degrades to a generic-but-still-typed code instead of silently emitting
+  nothing) — never collapsed to the two coarse existing `kind` values a
+  skill would otherwise have to re-derive the real cause from free text.
   This is a report-schema addition (a `SCHEMA_VERSION`-gated field), not a
-  new command.
-- Everything else in the ADR's Section 10 candidate list (finding/root-cause
-  querying, project discovery, baseline-candidate discovery) is **P1,
-  contingent on the P0 skills actually needing it in practice** — not
-  committed here. In particular this ADR explicitly does **not** resurrect
+  new command; see G36 P0.5 for the exact field-by-field mapping and test
+  matrix.
+- Every other candidate capability considered (finding/root-cause querying,
+  project discovery, baseline-candidate discovery) is **P1, contingent on
+  the P0 skills actually needing it in practice** — not committed here. In
+  particular this ADR explicitly does **not** resurrect
   `doctor`, `init`, or the old baseline registry (ADR-043's removals stand);
   a skill that needs "propose a `.abicheck.yml`" can compose that from
   `project validate`'s existing error output plus its own domain reasoning,
