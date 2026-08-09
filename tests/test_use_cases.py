@@ -132,6 +132,23 @@ def test_parse_rejects_a_non_mapping_entry() -> None:
 
 
 @pytest.mark.parametrize(
+    "raw_entry",
+    [
+        {"use_case": "x", "entrypoint": ["train"]},  # misspelled entrypoints
+        {"use_case": "x", "test": ["t"]},  # misspelled tests
+        {"use_case": "x", "extra_field": 1},
+    ],
+)
+def test_parse_rejects_an_unknown_field(raw_entry: dict) -> None:
+    """A misspelled/unknown field must be a hard error, not silently
+    ignored -- mapping.get(...) treats an unknown key as absent, which
+    would otherwise load successfully while quietly dropping the coverage
+    the author actually declared."""
+    with pytest.raises(UseCaseManifestError, match="unknown field"):
+        parse_use_case_manifest([raw_entry])
+
+
+@pytest.mark.parametrize(
     "raw_entry", [{}, {"use_case": ""}, {"use_case": "   "}, {"use_case": 5}]
 )
 def test_parse_rejects_a_missing_or_blank_use_case_name(raw_entry: dict) -> None:

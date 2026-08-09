@@ -162,11 +162,27 @@ class UseCaseDefinition:
     tests: tuple[str, ...] = ()
 
 
+#: The only keys a manifest entry may declare (Codex review, fresh evidence):
+#: an unrecognized key (e.g. a misspelled ``entrypoint``/``test`` instead of
+#: ``entrypoints``/``tests``) must be a hard error, not silently ignored --
+#: ``mapping.get(...)`` treats an unknown key as absent and would otherwise
+#: load successfully while quietly dropping the coverage the author actually
+#: declared, exactly the failure mode this module's docstring already
+#: promises never happens.
+_MANIFEST_ENTRY_KEYS = frozenset({"use_case", "entrypoints", "tests"})
+
+
 def _require_mapping(entry: Any, index: int) -> dict[str, Any]:
     if not isinstance(entry, dict):
         raise UseCaseManifestError(
             f"impact-use-cases.yaml: entry {index} must be a mapping, got "
             f"{type(entry).__name__}"
+        )
+    unknown = sorted(set(entry) - _MANIFEST_ENTRY_KEYS)
+    if unknown:
+        raise UseCaseManifestError(
+            f"impact-use-cases.yaml: entry {index} has unknown field(s) "
+            f"{unknown} — expected only {sorted(_MANIFEST_ENTRY_KEYS)}"
         )
     return entry
 
