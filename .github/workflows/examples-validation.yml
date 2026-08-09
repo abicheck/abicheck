@@ -195,9 +195,26 @@ jobs:
   # reported-only (a downgrade like case129 is expected evidence loss). The
   # blockable invariant across all three is the false-positive guard: a case the
   # debug ground truth calls COMPATIBLE/NO_CHANGE must never become BREAKING.
+  #
+  # Split as a 3-way matrix (one leg per mode) rather than one job running all
+  # three modes sequentially. Measured on a real run (workflow run 31317496678,
+  # 2026-08-09) the combined job took 15m33s wall-clock, of which
+  # release-headers (7m06s) and stripped-headers (6m58s) each ran back-to-back
+  # on the *same* runner despite having no data dependency on one another —
+  # only build-source (42s, a 10-case smoke subset — see its own comment
+  # below for why it isn't the full catalog) was cheap. Splitting these onto
+  # separate runners overlaps that ~14m of sequential work; the ~35s of
+  # per-leg setup (checkout/apt/castxml/python/deps) that gets duplicated
+  # three times instead of once is the trade-off, and is small next to the
+  # ~7-8m saved off the workflow's critical path (this job, not the gcc/clang
+  # `validate-examples` legs, was what `full-example-matrix` was waiting on).
   artifact-modes:
-    name: Artifact modes (release / stripped full-catalog / build-source)
+    name: Artifact modes (${{ matrix.mode }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [release-headers, stripped-headers, build-source]
 
     steps:
       - uses: actions/checkout@v6
@@ -218,7 +235,7 @@ jobs:
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
-          key-suffix: artifact-modes
+          key-suffix: artifact-modes-${{ matrix.mode }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -238,58 +255,42 @@ jobs:
       # the blockable invariant across all three modes is the false-positive
       # guard — a reduced/changed-evidence run must never manufacture a spurious
       # BREAKING on a case the debug ground truth calls compatible.
-      - name: Release-headers (reported-only + FP guard)
+      #
+      # build-source runs castxml source-replay per case (expensive), so it
+      # stays a representative smoke (fixed case list) rather than the full
+      # catalog the other two modes run — that was already true before this
+      # split and is unrelated to it.
+      - name: Run artifact-mode validation (reported-only + FP guard)
         if: always()
         run: |
           set +e
-          PYTHONPATH=. python tests/validate_examples.py --artifact-variant release-headers --json \
-            > results/validate_examples-release-headers.json
-          echo "release-headers run rc=$?"
+          if [ "${{ matrix.mode }}" = "build-source" ]; then
+            CASES="case01 case04 case98 case105 case122 case129 case130 case131 case132 case133"
+          else
+            CASES=""
+          fi
+          PYTHONPATH=. python tests/validate_examples.py $CASES --artifact-variant ${{ matrix.mode }} --json \
+            > results/validate_examples-${{ matrix.mode }}.json
+          echo "${{ matrix.mode }} run rc=$?"
           set -e
-          python tests/check_stripped_fp.py results/validate_examples-release-headers.json release-headers
-
-      - name: Stripped-headers FULL catalog (reported-only + FP guard)
-        if: always()
-        run: |
-          set +e
-          PYTHONPATH=. python tests/validate_examples.py --artifact-variant stripped-headers --json \
-            > results/validate_examples-stripped-headers.json
-          echo "stripped-headers run rc=$?"
-          set -e
-          python tests/check_stripped_fp.py results/validate_examples-stripped-headers.json stripped-headers
-
-      # build-source runs castxml source-replay per case (expensive), so this
-      # stays a representative smoke rather than the full catalog. Still
-      # reported-only + FP-guarded like the other reduced-evidence modes.
-      - name: Build-source smoke (reported-only + FP guard)
-        if: always()
-        run: |
-          MODE_SMOKE_CASES="case01 case04 case98 case105 case122 case129 case130 case131 case132 case133"
-          set +e
-          PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant build-source --json \
-            > results/validate_examples-build-source.json
-          echo "build-source run rc=$?"
-          set -e
-          python tests/check_stripped_fp.py results/validate_examples-build-source.json build-source
+          python tests/check_stripped_fp.py results/validate_examples-${{ matrix.mode }}.json ${{ matrix.mode }}
 
       - name: Upload artifact-mode results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: examples-validation-artifact-modes
+          name: examples-validation-artifact-modes-${{ matrix.mode }}
           path: results/
           retention-days: 14
 
       - name: Job summary
         if: always()
         run: |
-          echo "## Artifact-mode Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifact-mode Summary (${{ matrix.mode }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          for mode in release-headers stripped-headers build-source; do
-            f="results/validate_examples-$mode.json"
-            test -f "$f" && echo "### $mode" >> $GITHUB_STEP_SUMMARY && \
-              python -c "import json;d=json.load(open('$f'));print('summary:',json.dumps(d['summary']))" >> $GITHUB_STEP_SUMMARY || true
-          done
+          f="results/validate_examples-${{ matrix.mode }}.json"
+          test -f "$f" && \
+            python -c "import json;d=json.load(open('$f'));print('summary:',json.dumps(d['summary']))" >> $GITHUB_STEP_SUMMARY || true
 
   full-example-matrix:
     name: Full example matrix
@@ -368,7 +369,7 @@ jobs:
             --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \
             --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
             --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
-            --build-source downloaded/examples-validation-artifact-modes/validate_examples-build-source.json \
+            --build-source downloaded/examples-validation-artifact-modes-build-source/validate_examples-build-source.json \
             --bundle results/bundle-examples.json \
             --special-cli results/special-cli-examples.json \
             --proofs results/example-owner-proofs.json \
@@ -394,9 +395,9 @@ jobs:
             --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \
             --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
             --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
-            --release downloaded/examples-validation-artifact-modes/validate_examples-release-headers.json \
-            --stripped downloaded/examples-validation-artifact-modes/validate_examples-stripped-headers.json \
-            --build-source downloaded/examples-validation-artifact-modes/validate_examples-build-source.json \
+            --release downloaded/examples-validation-artifact-modes-release-headers/validate_examples-release-headers.json \
+            --stripped downloaded/examples-validation-artifact-modes-stripped-headers/validate_examples-stripped-headers.json \
+            --build-source downloaded/examples-validation-artifact-modes-build-source/validate_examples-build-source.json \
             --check
 
       - name: Job summary
