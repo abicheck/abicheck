@@ -620,11 +620,16 @@ mutation-testing precedent, generalized to a new artifact class):
    CLI (`click` introspection, the same mechanism `gen_cli_reference.py`
    already uses) and checked to still exist; a renamed/removed flag fails
    CI, not silently rots in a skill's prose.
-3. **Trigger tests** — positive examples (the seven user-request phrasings
-   this ADR's Product positioning names) must select the intended skill;
-   negative examples (REST/OpenAPI compatibility, database migrations, Java
-   API compatibility, arbitrary JSON-schema compatibility) must not
-   false-trigger any native-* skill.
+3. **Trigger tests** — positive examples (the five of the seven Product
+   positioning phrasings that map to a P0 skill) must select the intended
+   skill; the remaining two (OS/container-upgrade, compiler/client-profile
+   — P1 candidates, not yet admitted) are deliberately excluded from this
+   "must select" assertion, since no P0 skill claims them and forcing one
+   to trigger on out-of-scope phrasing would itself be a false positive —
+   they're tracked instead as an explicit "not yet claimed, not
+   mishandled" case (G36 P0.8). Negative examples (REST/OpenAPI
+   compatibility, database migrations, Java API compatibility, arbitrary
+   JSON-schema compatibility) must not false-trigger any native-* skill.
 4. **Behavioral/e2e evaluation**, reusing the existing
    `examples/`/`ground_truth.json` corpus and `validation/` harness rather
    than building a parallel one — a skill is graded on workflow choice,

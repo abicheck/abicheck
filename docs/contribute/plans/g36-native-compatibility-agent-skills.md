@@ -68,9 +68,17 @@ contract-coverage/finding blocks), `root-cause-grouping.md`,
 `native-api-evolution` skill draws from: pImpl/opaque handles, compatibility
 wrappers, overloads over destructive signature changes, reserved
 fields/slots, versioned interfaces, plugin capability negotiation,
-deprecation/migration lifecycle), and `safety-invariants.md` (verbatim
-source for ADR-058's eleven numbered invariants — every `SKILL.md` links
-this file rather than restating it). Each fragment states, at its top, which
+deprecation/migration lifecycle), and `safety-invariants.md` — the
+**operational** copy of ADR-058's eleven numbered invariants, every
+`SKILL.md` links this file rather than restating it. It is a one-time
+extraction from the ADR at the point this item is implemented, not a
+second document independently maintained in parallel: ADR-058's own text
+is a decision record (like every other ADR in this repo, it is not edited
+again after acceptance — only its Status line changes), so once this
+fragment exists it — not the frozen ADR prose — is where a future safety
+correction actually gets made and where every skill picks it up from,
+closing the two-manually-maintained-copies risk a living second copy would
+otherwise create. Each fragment states, at its top, which
 canonical `docs/learn/`/`docs/use/`/`docs/reference/` page(s) it summarizes
 (mirroring `docs/AGENTS.md`'s `summarizes:` front-matter field convention),
 so a docs-contract-style check (P0.6) can verify the summary hasn't drifted
@@ -323,10 +331,22 @@ implemented and tested as such.
 `ScopeMismatchError` carry the specific mismatched field(s) as structured
 data, not just a rendered message, so `codes` can be derived without
 re-parsing text — and so a multi-field mismatch keeps every field, not just
-the first one hit), `abicheck/cli_compare_helpers.py`
+the first one hit), `abicheck/schemas/compare_report.schema.json` (the
+`reason` object's fields are defined in the JSON Schema file itself, not in
+`abicheck/schemas/__init__.py` — that module only holds version constants
+and registry lookups; registering `codes`' closed enum here is what lets
+P0.7's schema-based drift check recognize the new field at all, not an
+optional extra), `abicheck/cli_compare_helpers.py`
 (`_report_not_comparable` emits `codes`), `abicheck/cli_compare_release.py`
-(its own `"reason": {...}` construction site gets the same field),
-`abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
+(its own `"reason": {...}` construction site, written under
+`--output-dir`, gets the same field), `abicheck/cli_compare_release_helpers.py`
+(`_compare_one_library`/`_format_release_json` — the *primary* release
+report path, distinct from the separate not-comparable document above:
+today a not-comparable library in a directory/package comparison returns
+only `"reason": str(exc)` into the entry `summary.json`/the release JSON
+actually expose, so without this file `native-release-compatibility` — the
+skill this field mainly exists for — would still see untyped text in the
+report it actually reads), `abicheck/mcp_server.py` (`abi_compare`'s `{"status": "not_comparable",
 "reason": ..., "reason_codes": [...]}` — additive sibling field, `reason`
 unchanged), `abicheck/scan_engine.py` (`scan --against` catches the same
 two exceptions at its own comparability gate, line ~1039, and today emits
@@ -360,7 +380,13 @@ backward-compatibility regression test, not just a new-field test); a
 asserting `scan --against`'s own `diff_summary` gains the identical
 `reason_codes` for the identical mismatch `compare` reports, so `scan` and
 `compare` stay in parity on this field the way ADR-055 already requires
-them to for everything else routed through the shared engine.
+them to for everything else routed through the shared engine; a
+`tests/test_cli_compare_release.py`-style test asserting a not-comparable
+library's entry in the directory/package release JSON/`summary.json`
+(`_compare_one_library`/`_format_release_json`) carries `reason_codes` too,
+not just the separate not-comparable document — this is the report path
+`native-release-compatibility` actually reads, so it's the one that must
+not be left with only untyped text.
 
 **Docs:** whichever comparability doc the field lands in, plus a
 changelog fragment (`### Added`).
