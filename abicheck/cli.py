@@ -1521,8 +1521,6 @@ def _embed_inline_source_side(
     # dump does not re-resolve under ctx.invoke (which would lose that explicitness).
     # This honors the tree's include_dirs/sysroot/frontend while keeping explicit
     # CLI overrides winning (Codex review).
-    import dataclasses
-
     from .cli_options import merge_compile_config
 
     side_cli = dataclasses.replace(compile_context, frontend=header_backend)  # type: ignore[type-var]
@@ -1964,8 +1962,6 @@ main.add_command(compat_group)
 # (Codex review).
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    import sys
-
     sys.modules.setdefault("abicheck.cli", sys.modules[__name__])
 
 from . import (  # noqa: E402  — must run after `main` and helpers are defined

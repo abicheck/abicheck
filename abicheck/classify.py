@@ -188,7 +188,7 @@ class PerlDumpClassifier(FileClassifier):
         if path.suffix.lower() not in self._PERL_EXTS:
             return None
         head = _sniff_head(path)
-        return True if _looks_like_perl_dump(head) else False
+        return bool(_looks_like_perl_dump(head))
 
 
 class FallbackSniffClassifier(FileClassifier):

@@ -385,7 +385,10 @@ def backfill_dwarf_layout(
         return header_types, None
     dwarf_candidates: dict[str, list[RecordType]] = {}
     for t in dwarf_types:
-        for key in {t.name, _topmost_scope_suffix(t.name)}:
+        # A set, not a sequence: for an unscoped name the suffix *is* the name,
+        # and appending `t` twice under the same key would make the
+        # ambiguity check in `_dwarf_match` see two candidates for one type.
+        for key in {t.name, _topmost_scope_suffix(t.name)}:  # pylint: disable=use-sequence-for-iteration
             dwarf_candidates.setdefault(key, []).append(t)
 
     def _dwarf_match(name: str) -> RecordType | None:

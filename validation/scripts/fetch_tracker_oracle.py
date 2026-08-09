@@ -383,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     for lib in args.libraries:
         try:
             html = (
-                Path(args.from_file).read_text()
+                Path(args.from_file).read_text(encoding="utf-8")
                 if args.from_file
                 else fetch_timeline(lib)
             )
@@ -467,16 +467,18 @@ def _run_compare(
     oracle_path = out_dir / f"{lib}.json"
     try:
         if from_file:
-            oracle = build_oracle(lib, Path(from_file).read_text())
+            oracle = build_oracle(lib, Path(from_file).read_text(encoding="utf-8"))
         elif oracle_path.is_file():
-            oracle = json.loads(oracle_path.read_text())
+            oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
         else:
             print(
                 f"no oracle for {lib}: run the fetch step first or pass --from-file",
                 file=sys.stderr,
             )
             return 1
-        results = load_results_map(json.loads(Path(results_path).read_text()))
+        results = load_results_map(
+            json.loads(Path(results_path).read_text(encoding="utf-8"))
+        )
     except (OSError, json.JSONDecodeError) as exc:
         print(f"[{lib}] compare failed reading inputs: {exc}", file=sys.stderr)
         return 1

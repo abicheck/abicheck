@@ -1021,7 +1021,7 @@ class SuppressionAudit:
             lines.append(f"  ⚠ {len(self.stale_rules)} stale rule(s) matched nothing")
         if self.high_risk_matches:
             lines.append(f"  ⚠ {len(self.high_risk_matches)} suppression(s) matched BREAKING changes")
-            for sup, change in self.high_risk_matches[:5]:
+            for _sup, change in self.high_risk_matches[:5]:
                 lines.append(f"    - {change.kind.value}: {change.symbol}")
         if self.expired_rules:
             lines.append(f"  ⚠ {len(self.expired_rules)} expired rule(s)")

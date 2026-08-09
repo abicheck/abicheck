@@ -692,8 +692,6 @@ def is_pack_dir(path: Path | None) -> bool:
     manifest = path / "manifest.json"
     if not manifest.is_file():
         return False
-    import json
-
     try:
         with manifest.open(encoding="utf-8") as fh:
             data = json.load(fh)

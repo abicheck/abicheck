@@ -90,10 +90,10 @@ def _validate_member_path(member_name: str, target_root: Path) -> Path:
     root_resolved = target_root.resolve()
     try:
         dest.relative_to(root_resolved)
-    except ValueError:
+    except ValueError as exc:
         raise ExtractionSecurityError(
             member_name, f"resolved path escapes extraction root: {dest}"
-        )
+        ) from exc
 
     return dest
 
@@ -107,11 +107,11 @@ def _validate_symlink_target(
     root_resolved = target_root.resolve()
     try:
         resolved.relative_to(root_resolved)
-    except ValueError:
+    except ValueError as exc:
         raise ExtractionSecurityError(
             member_name,
             f"symlink target '{link_target}' resolves outside extraction root: {resolved}",
-        )
+        ) from exc
 
 
 # ── Protocol ─────────────────────────────────────────────────────────────────
@@ -281,23 +281,23 @@ class RpmExtractor:
 
         try:
             _cpio_out, cpio_err = cpio_proc.communicate(timeout=_EXTRACT_TIMEOUT)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             cpio_proc.kill()
             rpm2cpio_proc.kill()
             cpio_proc.wait()
             rpm2cpio_proc.wait()
             raise SnapshotError(
                 f"RPM extraction timed out after {_EXTRACT_TIMEOUT}s"
-            )
+            ) from exc
 
         try:
             rpm2cpio_proc.wait(timeout=_EXTRACT_TIMEOUT)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             rpm2cpio_proc.kill()
             rpm2cpio_proc.wait()
             raise SnapshotError(
                 f"rpm2cpio timed out after {_EXTRACT_TIMEOUT}s"
-            )
+            ) from exc
 
         if rpm2cpio_proc.returncode != 0:
             raise SnapshotError(f"rpm2cpio failed (exit {rpm2cpio_proc.returncode})")
@@ -323,10 +323,10 @@ class RpmExtractor:
                 full = (dp / name).resolve()
                 try:
                     full.relative_to(root)
-                except ValueError:
+                except ValueError as exc:
                     raise ExtractionSecurityError(
                         str(full), "extracted path escapes extraction root"
-                    )
+                    ) from exc
                 # Check symlinks (files and directories)
                 fp = dp / name
                 if fp.is_symlink():
@@ -334,11 +334,11 @@ class RpmExtractor:
                     resolved = fp.resolve()
                     try:
                         resolved.relative_to(root)
-                    except ValueError:
+                    except ValueError as exc:
                         raise ExtractionSecurityError(
                             str(fp.relative_to(target_dir)),
                             f"symlink target '{link_target}' escapes extraction root",
-                        )
+                        ) from exc
 
 
 # ── Deb extractor ────────────────────────────────────────────────────────────
