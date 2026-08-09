@@ -123,16 +123,100 @@ def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
     ``--ast-frontend castxml``/``--ast-frontend clang`` run already does.
 
     - Not (confirmed) header-aware: None.
-    - ``ast_producer in ("castxml", "clang")``: that value unconditionally —
-      every fact on a single-backend snapshot came from that one backend.
+    - ``ast_producer == "clang"`` AND *key* is a ``deprecated``/``is_scoped``
+      fact AND ``snap.clang_deprecation_facts_reliable`` is False (a
+      snapshot persisted before schema v19/G31 Phase C): None — a legacy
+      clang-producer snapshot's value for exactly these two facts is real
+      but WRONG (unconditional None/False), not merely absent.
+    - ``ast_producer in ("castxml", "clang")`` (and the above didn't apply):
+      that value unconditionally — every fact on a single-backend snapshot
+      came from that one backend.
     - ``ast_producer == "hybrid"``: whatever the merge recorded for *key*
       (``None`` if neither backend's value made it into the map).
     - Anything else (``None``/unknown producer, legacy snapshot): None.
     """
     if not (snap.from_headers and not snap.from_headers_inferred):
         return None
+    if snap.ast_producer == "clang" and not snap.clang_deprecation_facts_reliable:
+        # G31 Phase C / schema v19 (Codex review, fresh evidence): a
+        # deprecated/is_scoped comparison against a snapshot persisted
+        # before the direct-clang backend genuinely extracted these facts
+        # cannot trust a "clang" producer tag for them -- every declaration
+        # on that legacy snapshot has real but WRONG data (an
+        # unconditional None/False, indistinguishable by value alone from
+        # a genuine "not deprecated"/"not scoped" fact). Scoped to exactly
+        # the two affected fact suffixes so this doesn't spuriously
+        # invalidate an unrelated multi-backend fact (e.g. param_defaults).
+        if key.endswith(":deprecated") or key.endswith(":is_scoped"):
+            return None
     if snap.ast_producer in ("castxml", "clang"):
         return snap.ast_producer
     if snap.ast_producer == "hybrid":
         return snap.fact_provenance.get(key)
     return None
+
+
+def both_known_backed_fact(old: AbiSnapshot, new: AbiSnapshot, key: str) -> bool:
+    """True if *key* has a POSITIVELY known header-AST producer on BOTH
+    *old* and *new* — castxml, clang, or hybrid-with-a-recorded-value, in any
+    combination (G31 Phase C).
+
+    For a fact whose VALUE REPRESENTATION is directly cross-comparable
+    between backends (e.g. ``deprecated``'s message string, or
+    ``EnumType.is_scoped``'s plain bool — both backends extract the exact
+    same real-world fact, not a backend-specific encoding of it), this is
+    the correct gate once more than one backend populates it: unlike
+    :func:`both_castxml_backed_fact` (for a fact only ONE backend, castxml,
+    can produce at all — using this on a now-multi-backend fact would wrongly
+    keep rejecting a perfectly good clang-vs-clang or clang-vs-castxml pair
+    just because neither/one side is castxml), and unlike the same-producer
+    check ``diff_symbols._diff_param_defaults`` uses via plain
+    :func:`fact_producer` (needed only when the two backends' value
+    representations are NOT cross-comparable, e.g. ``Param.default``'s real
+    source expression on castxml vs. a structural placeholder on clang) —
+    this fact family needs neither restriction, only confirmation that
+    SOME known backend actually populated it on each side.
+    """
+    return fact_producer(old, key) is not None and fact_producer(new, key) is not None
+
+
+def both_known_backed_fact_qualified(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_qualified_key: str,
+    new_qualified_key: str,
+    bare_key: str,
+    *,
+    old_bare_unambiguous: bool,
+    new_bare_unambiguous: bool,
+) -> bool:
+    """Like :func:`both_known_backed_fact`, but for a fact whose provenance
+    key was namespace-qualified after a hybrid snapshot may already have
+    been persisted with the former bare key (Codex review, fresh evidence:
+    a ``--ast-frontend hybrid`` baseline written before G31 Phase C's
+    qualification fix has real ``"castxml"``/``"clang"`` provenance recorded
+    under the bare key alone, since every matched declaration already got a
+    provenance entry via ``_backfill_fact`` regardless of that fact's actual
+    value — qualifying only the *lookup* key would silently treat all of
+    that real data as unknown and suppress genuine transitions).
+
+    Takes *old_qualified_key*/*new_qualified_key* SEPARATELY, not one shared
+    key — a matched old/new pair can legitimately have different qualified
+    identities (e.g. *old* predates ``qualified_name`` entirely, so its own
+    ``type_map_key()`` is bare, while *new* carries the real namespaced
+    spelling); probing both sides with only one side's key would miss the
+    other side's real, qualified-keyed entry (Codex review, fresh evidence,
+    second round). Falls back to the shared *bare_key* on either side only
+    when the caller confirms (``old_bare_unambiguous``/``new_bare_unambiguous``
+    — typically ``TypeMap.bare_name_is_unambiguous``) that no OTHER distinct
+    qualified identity on that side shares the same bare name. Without that
+    check, the fallback would reopen the exact bare-name collision the
+    qualification was introduced to close.
+    """
+    old_producer = fact_producer(old, old_qualified_key)
+    if old_producer is None and old_bare_unambiguous:
+        old_producer = fact_producer(old, bare_key)
+    new_producer = fact_producer(new, new_qualified_key)
+    if new_producer is None and new_bare_unambiguous:
+        new_producer = fact_producer(new, bare_key)
+    return old_producer is not None and new_producer is not None

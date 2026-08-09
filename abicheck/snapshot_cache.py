@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "6"
+_SNAPSHOT_CACHE_VERSION: str = "7"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -95,6 +95,17 @@ _SNAPSHOT_CACHE_VERSION: str = "6"
 # scenario it exists to catch (a stale cached "live dump" compared against a
 # freshly filtered ``dump`` baseline). Bumped so every such entry is
 # invalidated and recomputed through the now-tagging ``run_dump``.
+#
+# v7 (G31 Phase C, Codex review, fresh evidence): the direct-clang backend
+# started extracting ``deprecated``/``EnumType.is_scoped``/
+# ``RecordType.is_standard_layout``/``is_trivially_copyable`` for the first
+# time, for the same headers/includes/version/lang/``extra`` inputs a
+# pre-upgrade cache entry already covers -- an upgrading user's warm clang/
+# hybrid cache would keep replaying the old snapshot (missing all four
+# facts, or -- for a hybrid entry -- retaining stale bare-keyed
+# ``fact_provenance``) until the entry happened to expire or was manually
+# cleared, silently suppressing every newly-added detector this PR wires up.
+# Bumped so the upgrade forces re-extraction instead.
 
 
 def _get_cache_dir() -> Path:

@@ -142,7 +142,13 @@ building a second identity-resolution mechanism from scratch.
    G28's Phase 1 CastXML schema-completeness audit did for the flat
    snapshot. The header-only graph inherits whatever the underlying
    snapshot parse already knows, so this is a prerequisite for the graph
-   to reason about those facts at all. **Not started.**
+   to reason about those facts at all. **Partially done** — see the
+   "Direct-clang backend fact-completeness pass" bullet below; a first
+   audit pass closed several real backend-parity gaps this list assumed
+   were unstarted (bitfields, default-argument facts, and deprecation were
+   already wired for castxml via G28 Phase 1 — that work had simply moved
+   the surviving gap to the *clang* backend specifically, not left it
+   untouched everywhere).
 2. **Backend duplication (done — AST reuse, not backend unification).**
    The direct-clang backend used to run a *second*, independent
    `clang -ast-dump=json` pass specifically to build the header-only graph
@@ -174,7 +180,355 @@ building a second identity-resolution mechanism from scratch.
   discipline (verify against real CastXML XML output before claiming a
   fact is extractable — some may turn out infeasible the way `_Atomic`
   inner-type recovery and comment-text extraction did there). **Not
-  started.**
+  started** — the audit pass actually run (see below) went the other
+  direction: real *clang* AST output, closing gaps on the clang side of
+  facts G28 Phase 1 had already wired up for castxml. A from-scratch
+  CastXML-schema audit for genuinely new facts (as opposed to closing an
+  existing cross-backend gap) remains unstarted.
+- **Direct-clang backend fact-completeness pass — done for four of the
+  facts this Phase names.** Re-reading G28 Phase 1's own scope (`deprecated`
+  on every surface kind, `is_scoped` on enums, bitfields, default-argument
+  facts) against the *current* code found bitfields and default-argument
+  facts were already populated by `dumper_clang.py` — only `deprecated` and
+  `is_scoped` were still genuinely castxml-only, contrary to this plan's own
+  "Neither header AST backend..." framing above. Fixed both, each verified
+  against real `clang -ast-dump=json` output (Clang 18) before wiring up:
+  - `Function`/`Variable`/`TypeField`/`RecordType`/`EnumType.deprecated` —
+    clang emits a `DeprecatedAttr` child node under a declaration's own
+    `"inner"` list (present for both the bare and messaged
+    `[[deprecated]]`/`[[deprecated("msg")]]` forms, with an optional
+    `message` key present only for the messaged form) — see
+    `dumper_clang._clang_deprecated_message`, matching
+    `dumper_castxml._deprecation_marker`'s exact three-way convention
+    (message text / `""` bare / `None` not-deprecated).
+  - `EnumType.is_scoped` — clang's `EnumDecl` node carries a
+    `"scopedEnumTag"` key (`"class"`/`"struct"`) only for `enum class`/
+    `enum struct`, absent (never present-and-false) for a plain C-style
+    enum — a plain `EnumDecl` always has a definitive answer, so this is a
+    concrete bool, never `None`, on this backend (unlike
+    `is_standard_layout`/`is_trivially_copyable` below).
+
+  **Producer-gating fix that came with it.** Both facts were already
+  gated, per-declaration, on `fact_provenance.both_castxml_backed_fact` —
+  correct while clang genuinely didn't populate them (it made a
+  clang-parsed side's unconditional `None` unmistakable from a real
+  removal), but now silently wrong: it would keep declining to compare a
+  clang-vs-clang or clang-vs-castxml pair even though both sides now
+  genuinely know the answer. Since both facts' VALUE REPRESENTATIONS are
+  directly cross-comparable between backends (a plain message string / a
+  plain bool, not a backend-specific encoding — unlike `Param.default`,
+  where castxml keeps the real source expression and clang falls back to a
+  structural placeholder for anything non-trivial), the fix is a new,
+  looser gate rather than reusing the same-producer check
+  `_diff_param_defaults` needs: `fact_provenance.both_known_backed_fact`
+  accepts *any* combination of positively-known producers (not "both
+  castxml" specifically), while still correctly declining a genuinely
+  unknown/legacy producer. Wired into all six affected detectors
+  (`func_deprecated`, `var_deprecated`, `field_deprecated`,
+  `type_deprecated`, `enum_deprecated`, and the enum `is_scoped` gate
+  inside `_diff_enums`). Five pre-existing tests in
+  `test_castxml_schema_completeness.py`/`test_diff_types_deep.py` had
+  asserted the *old* (now-incorrect) "castxml-vs-clang must not
+  false-positive" behavior for exactly these two facts; updated to assert
+  the corrected behavior (a real cross-producer transition now fires) plus
+  a new "genuinely unknown producer still declines" case each, since that
+  narrower condition is the real remaining false-positive-avoidance
+  scenario. `is_override`/`is_abstract`/`TypeField.default` (member
+  initializer) remain castxml-only — no clang-side extraction exists for
+  any of the three — so their detectors, and the sibling
+  producer-mismatch tests covering them, are unchanged.
+  - `RecordType.is_standard_layout`/`is_trivially_copyable` — a separate,
+    already-tri-state-gated (no producer check at all, just the existing
+    None-means-unknown convention) pair `dumper_castxml.py`'s own code
+    comment already documented as genuinely infeasible for castxml
+    ("CastXML doesn't expose the trivially-copyable trait directly, and
+    'not polymorphic and no virtual bases' is not a sound standard-layout
+    signal" — Codex review #345). Confirmed empirically that clang's
+    `-ast-dump=json` output DOES expose both directly: a `CXXRecordDecl`'s
+    `definitionData` carries `isStandardLayout`/`isTriviallyCopyable` as
+    boolean keys — but only when the trait is `true` (the key is entirely
+    absent, never present-and-`false`, when the trait doesn't hold — e.g. a
+    class with a private member has no `isStandardLayout` key at all,
+    confirmed by direct comparison against a plain-public-members struct
+    which does carry it). A plain C `RecordDecl` (not `CXXRecordDecl`) has
+    no `definitionData` key whatsoever, since these are C++-only concepts —
+    yields `(None, None)`, matching this module's existing tri-state
+    convention rather than fabricating an answer. See
+    `dumper_clang._clang_record_type_traits`. This activated the
+    `STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST` detectors
+    (`diff_layout.py`) for real for the first time on any backend — they
+    were fully built (registered `ChangeKind`s, a working detector) but
+    permanently dead code on every real dump before this, since neither
+    backend had ever populated the fields they gate on. Verified end-to-end
+    against a real compiled example (a class losing standard-layout by
+    gaining a private member correctly fires `STANDARD_LAYOUT_LOST` through
+    the real `dump()`/`compare()` pipeline, not just at the unit level).
+    Also updated `dumper_hybrid.py`'s merge docstring/comment, which
+    claimed this backfill was a no-op "without the optional
+    `ABICHECK_CLANG_LAYOUT_TOOL` companion tool enabled" — no longer true
+    for these two facts specifically, since the plain clang parse (no
+    companion tool needed) now populates them; the merge's own
+    `_LAYOUT_SCALAR_ATTRS` backfill logic required no code change (it
+    already backfills any `None`-on-castxml layout attr from clang
+    unconditionally), only its stale comment did.
+
+  **Still open** for this fact-completeness pass: vptr placement remains
+  only a `0`-if-polymorphic heuristic on castxml (no real multi-inheritance
+  secondary-vtable placement) and is not populated by the clang backend at
+  all; `TypeField.default` (member initializer *value*, not the
+  default-argument facts above) remains castxml-only.
+
+  **Two more real gaps found and fixed in the same pass** (Codex review,
+  fresh evidence, both confirmed against real code before fixing): (1) the
+  producer-gating fix above only stamps `fact_provenance` for a declaration
+  actually routed through `_merge_function`/`_merge_record_type`/
+  `_merge_enum_type`/`_merge_variable` — a declaration present on BOTH
+  snapshot sides but ONLY ever via the clang leg (absent from castxml
+  entirely) is appended to the merged result verbatim, without going
+  through those merge functions, so its `deprecated`/`is_scoped` fact keys
+  were never recorded at all; `fact_producer()` then returned `None` for a
+  fact that genuinely IS known (clang-sourced), and
+  `both_known_backed_fact` incorrectly declined to compare a real
+  transition on it. Fixed by stamping `provenance[...] = "clang"` for every
+  clang-only function/type/field/enum/variable appended in
+  `merge_snapshots()`, verified end-to-end (a clang-only function gaining
+  `[[deprecated]]` between old and new now correctly fires
+  `FUNC_DEPRECATED_ADDED` through the real `compare()` pipeline, not just
+  provenance-map inspection). (2) `merge_snapshots()` itself matched
+  castxml/clang record types and enums by bare `name` (`{t.name: t for t in
+  clang_snap.types}`), same collision class as `diff_layout._index()`
+  above — two distinct types/enums sharing only a bare leaf name in
+  different namespaces could merge against the wrong counterpart, or a
+  genuinely clang-only type get silently dropped as "already present."
+  Fixed by keying on `diff_helpers.type_map_key` (namespace-qualified
+  identity) for the MATCH, while keeping `fact_provenance`'s own keys
+  bare-name (unchanged — that's what the detectors themselves query by).
+  `diff_layout._index()` itself was rewritten to build a real
+  `diff_helpers.TypeMap` (via `build_type_map`/`lookup_matched_type`)
+  instead of a plain `{rec.name: rec}` dict, for the identical reason —
+  this pre-existing collision already affected `base_offsets`/
+  `vptr_offset_bits` (live via castxml for a while), it just had no visible
+  consequence until `is_standard_layout`/`is_trivially_copyable` started
+  being populated for real and made the collision reachable through a
+  realistic scenario a reviewer could construct.
+
+  **A narrower, related gap found while testing the fix above, deliberately
+  NOT fixed in this pass**: two *distinct*, correctly-matched records that
+  independently undergo the identical boolean-trait transition (e.g. both
+  `a::Foo` and `b::Foo` separately lose `is_trivially_copyable` between old
+  and new) can still have their findings collapse from two to one --
+  `_check_trivially_copyable_lost`/`_check_standard_layout_lost` build
+  `Change.symbol`/description from the bare `name` alone (matching every
+  other bare-name-keyed detector's own `symbol=` convention, e.g.
+  `diff_types.py`'s "Bare, not the qualified matching key" comment), so two
+  distinct records sharing a bare name produce byte-identical `(kind,
+  description)` pairs, and `diff_filtering._dedup_exact` correctly (by its
+  own existing rule) treats that as one duplicate finding. This is real —
+  confirmed with a same-transition test reproducing the collapse — but is a
+  different, narrower failure mode than the matching bug above (a genuinely
+  *mis-attributed* finding vs. a *legitimately-deduped-looking* one that
+  happens to be wrong here), it is not new in this pass (every existing
+  bare-name-keyed `Change.symbol` in the codebase has the identical
+  exposure whenever two distinct declarations share a bare name and
+  produce identical description text), and a real fix (threading
+  qualified identity into `Change.description`/a new disambiguating field,
+  or reworking `_dedup_exact`'s key) has a blast radius across every
+  bare-name-keyed detector in `diff_types.py`/`diff_symbols.py`/
+  `diff_layout.py` alike — its own scoped follow-up, not a drive-by
+  extension of the matching fix. Re-flagged by Codex in a later review
+  round on the same PR; no new code fix applied (the reasoning above still
+  holds — a real fix needs the codebase-wide `Change.symbol` convention
+  change, not a local patch), but `diff_layout._diff_layout_descriptor`'s
+  own `name = new_rec.name` line now carries an inline comment stating this
+  deferral directly at the source, so a future reader doesn't have to find
+  this plan doc to rediscover it.
+
+  **Two more real gaps found in the very next review round on the same
+  fix** (Codex review, fresh evidence): both are cross-producer schema
+  bookkeeping gaps, not detector logic bugs. (1) `SCHEMA_VERSION` was not
+  bumped alongside wiring real clang-side `deprecated`/`is_scoped`
+  extraction — following the same precedent `header_cv_facts_reliable`
+  (schema v9) already established for the mirror-image castxml case: a
+  snapshot serialized under an *older* schema version, on the clang header
+  path, has `deprecated`/`is_scoped` values that were never actually
+  extracted (always `None`/absent from before this fix), and reloading
+  that JSON without a version gate would let `fact_producer()` claim those
+  stale `None`s are a reliably-known "not deprecated"/"not scoped" answer
+  — a real cross-producer detector could then fire a false
+  `FUNC_DEPRECATED_ADDED`/-`REMOVED` purely from re-loading old data, not a
+  genuine transition. Fixed by bumping `SCHEMA_VERSION` to **19** and
+  adding a new `AbiSnapshot.clang_deprecation_facts_reliable: bool` field
+  (default `True`, mirroring `header_cv_facts_reliable`'s exact shape) plus
+  a `_MIN_SCHEMA_VERSION_FOR_CLANG_DEPRECATION_FACTS = 19` gate in
+  `serialization.snapshot_from_dict` — a legacy clang-header snapshot
+  predating v19 loads as unreliable (prefers the explicit dict key on
+  round-trip, same "don't silently heal an already-known-unreliable
+  reserialized snapshot" precedent). `fact_provenance.fact_producer()`
+  gates on it narrowly, by key suffix (`:deprecated`/`:is_scoped` only,
+  not `:param_defaults` or any other fact), so the two flags stay
+  independent. Deliberately *not* needed for castxml or hybrid: castxml's
+  own extraction has been reliable since G28 Phase 1 (well before this
+  PR), and `merge_snapshots()`'s pre-fix backfill always stamped these two
+  facts' `fact_provenance` as `"castxml"` even under the old code, so no
+  legacy hybrid snapshot can carry a stale clang-attributed answer for
+  them. (2) `tests/test_castxml_clang_parity_gate.py`'s
+  `test_deprecated_attribute_is_expected_producer_difference` still
+  asserted the *pre*-Phase-C behavior (`Parity.UNSUPPORTED_ON_ONE_PRODUCER`
+  from `unsupported_on_clang=True`) — a real, `integration`-marked CI
+  failure only surfaced once the `integration-tests` job actually ran real
+  castxml+clang+gcc (not reproducible in a sandbox lacking those tools;
+  found by reading the CI job's own log output). Fixed by renaming it to
+  `test_deprecated_attribute_now_agrees_across_producers` and asserting
+  `Parity.EQUAL` on a plain `classify()` call with no `unsupported_on_clang`
+  flag, plus updating `classify()`'s own docstring (which still listed
+  `Function.deprecated` in its "clang structurally cannot populate this"
+  example list) to note the capability gap closed and callers should no
+  longer pass the flag for this fact.
+
+  **A third review round found the qualification fix (finding 2 of this
+  round's follow-ups) was one layer too shallow.** The `type_map_key`-based
+  matching fix makes old/new MATCHING namespace-aware, but
+  `dumper_hybrid.py`'s `fact_provenance` dict — a single flat
+  `dict[str, str]` shared across every merged/appended declaration — still
+  keyed its `deprecated`/`is_scoped` entries by bare declaration name
+  (Codex review, fresh evidence). Two distinct types sharing only a bare
+  leaf name in different namespaces (e.g. a castxml+clang-matched `a::Foo`
+  and a genuinely clang-only `b::Foo`) write to the exact same provenance
+  dict key, so one writer's entry silently overwrites the other's —
+  independent of the matching fix, since this collision is in the shared
+  write-side dict, not in old/new lookup. Confirmed real: this class of
+  write only became reachable once the clang-only-declaration
+  provenance-stamping fix (finding 2 above) started writing "clang"
+  entries for facts a bare-name-colliding, castxml+clang-matched sibling
+  might also be writing "castxml" entries for — before that fix, a
+  clang-only declaration wrote no provenance entry for these facts at
+  all, so there was nothing to collide with. Fixed by qualifying exactly
+  the affected keys (`type`/`field`/`enum` `deprecated`, and `enum`
+  `is_scoped` — the four facts Phase C's `both_known_backed_fact` gate and
+  clang-only-append writes actually touch) with
+  `diff_helpers.type_map_key()` in both `dumper_hybrid.py`'s writers
+  (`_merge_record_type`/`_merge_field`/`_merge_enum_type`, and the three
+  clang-only append loops) and `diff_types.py`'s four reader call sites —
+  while deliberately leaving `RecordType.is_abstract` and
+  `TypeField.default` (the two pre-existing, castxml-only facts
+  `_merge_record_type`/`_merge_field` also handle) on their original bare
+  keys, since neither gets a clang-only-append write and qualifying them
+  would be an unrelated, unverified change outside this finding's scope.
+  `Change.symbol`/description stay bare throughout — only the internal
+  provenance-dict key changed.
+
+  **A fourth review round found the qualification fix itself created a
+  backward-compatibility regression.** A `--ast-frontend hybrid` baseline
+  persisted *before* this qualification landed has real
+  `deprecated`/`is_scoped` provenance recorded under the *former* bare
+  key — `_backfill_fact` always records provenance for a matched
+  declaration regardless of the fact's actual value, and castxml has
+  populated `deprecated`/`is_scoped` since long before G31 Phase C, so
+  this isn't a hypothetical: any existing hybrid baseline with a
+  namespaced type has real `type:Foo:deprecated -> "castxml"`-shaped
+  entries (Codex review, fresh evidence). Once `diff_types.py`'s readers
+  started requesting the qualified key, that legacy data stopped
+  matching — `fact_producer()` returns `None` for it, silently
+  suppressing a genuine transition (a conservative false negative, not a
+  false positive, but a real regression in comparison coverage for any
+  existing persisted hybrid baseline). Fixed with the same shape
+  `lookup_matched_type`'s own bare-name retry already uses for old/new
+  type matching (PR #608): a new `diff_helpers.fact_known_qualified()`
+  tries the qualified key first, falling back to the bare key only when
+  the caller's own `TypeMap.bare_name_is_unambiguous(name)` confirms no
+  *other* distinct qualified identity in that side's snapshot shares the
+  bare name — otherwise the fallback would reopen the exact collision the
+  qualification was introduced to close. `fact_provenance.
+  both_known_backed_fact_qualified()` is the underlying old/new pair
+  check; `fact_known_qualified()` (home: `diff_helpers.py`, alongside
+  `lookup_matched_type` — the identical bare-name-retry pattern applied to
+  a fact-provenance key instead of an old/new type match, and outside
+  `diff_types.py`'s own 2000-line hard cap) derives the two
+  `TypeMap`-backed ambiguity flags so the four call sites in
+  `diff_types.py` (type/field/enum `deprecated`, enum `is_scoped`) stay a
+  single line each.
+
+  **A fifth review round found the bare-key-fallback fix itself was
+  probing both sides with only ONE side's qualified key.** The fallback
+  fix's first cut built a single `qualified_key` from `t_old`/`e_old`
+  alone and reused it for the NEW-side lookup too — correct only when
+  both sides happen to share the same qualified identity, which isn't
+  guaranteed for a matched pair: a genuinely legacy `old` snapshot that
+  predates `qualified_name` entirely has `type_map_key(t_old) ==
+  t_old.name` (bare), while a freshly-merged `new` snapshot for the same
+  namespaced declaration has a real qualified `type_map_key(t_new)` —
+  probing `new`'s provenance dict with `old`'s bare-shaped key can never
+  find `new`'s real, qualified-keyed entry (Codex review, fresh evidence,
+  third round). Fixed by threading `old_qualified_key`/`new_qualified_key`
+  through separately (`fact_provenance.both_known_backed_fact_qualified`,
+  `diff_helpers.fact_known_qualified`), each side's own `type_map_key()`
+  derived from its own matched declaration (`t_old`/`t_new`,
+  `e_old`/`e_new`) rather than one shared string — the shared `bare_key`
+  fallback stays a single value, since a matched pair's bare declaration
+  name is the same on both sides by construction (that's how the pair
+  matched in the first place).
+
+  **A sixth review round found a real, wide-blast-radius false positive
+  independent of the fact_provenance qualification chain above — this one
+  in `diff_layout.py`'s `LAYOUT_UNVERIFIABLE` heuristic.** Since G31 Phase
+  C the direct-clang backend populates `is_standard_layout`/
+  `is_trivially_copyable` (semantic traits) independent of any real
+  layout pass — `dumper_clang.py` never sets `size_bits`/`data_size_bits`/
+  `vptr_offset_bits`/`base_offsets` without the optional
+  `ABICHECK_CLANG_LAYOUT_TOOL` companion (confirmed:
+  `dumper_clang.py`'s own module docstring states this explicitly, and
+  its `RecordType` construction hardcodes `size_bits=None`). But
+  `diff_layout._has_layout_descriptor()` counted these two semantic
+  traits as "layout descriptor evidence," so a persisted pre-v19
+  direct-clang snapshot compared against a fresh dump of UNCHANGED
+  headers had the traits flip from `None` to a real value on the new
+  side alone — that flip alone made `_check_layout_unverifiable()`'s
+  `descriptor_in_play`/`old_has != new_has` gate trip and fire a phantom
+  `LAYOUT_UNVERIFIABLE` RISK finding for *every record*, purely from a
+  tool/schema upgrade, not a real change (Codex review, fresh evidence).
+  Confirmed `STANDARD_LAYOUT_LOST`/`TRIVIALLY_COPYABLE_LOST` themselves
+  were NOT affected — they already self-gate correctly on this exact
+  asymmetry (`old_rec.is_X is True` requires a real old value, so `None`
+  on the old side stays silent); only the cruder "did any layout evidence
+  appear/disappear" heuristic was affected, since it conflated "we now
+  know a semantic trait" with "we now know the type's actual
+  size/offsets" — two different kinds of evidence. Fixed by excluding
+  `is_standard_layout`/`is_trivially_copyable` from
+  `_has_layout_descriptor()`'s definition entirely — it now answers only
+  "does `rec` carry real size/offset layout evidence," which is what
+  `LAYOUT_UNVERIFIABLE` is actually about. One existing test
+  (`test_layout_unverifiable_on_asymmetric_evidence`) had accidentally
+  relied on the now-corrected coupling (using `is_standard_layout=True`
+  as its stand-in for "a layout descriptor is present"); updated to use
+  `data_size_bits` (genuine layout-pass evidence) instead, preserving the
+  scenario it was actually testing.
+
+  **The same review round found two more, independent gaps.** (1)
+  `snapshot_cache.py`'s whole-snapshot disk cache
+  (`_SNAPSHOT_CACHE_VERSION`, separate from `AbiSnapshot.SCHEMA_VERSION`
+  — see that constant's own docstring) was not bumped alongside this PR's
+  new direct-clang extraction: an upgrading user's warm clang/hybrid
+  cache entry, keyed on the same headers/includes/version/lang/`extra`
+  inputs a pre-upgrade dump already covers, would keep replaying the old
+  snapshot (missing `deprecated`/`is_scoped`/`is_standard_layout`/
+  `is_trivially_copyable`, or — for a hybrid entry — retaining stale
+  bare-keyed `fact_provenance`) until the entry happened to expire or was
+  manually cleared, silently suppressing every detector this PR wires up
+  (Codex review, fresh evidence). Bumped to v7, following the same
+  documented precedent as v2/v3/v4/v6's identical "behavior changed
+  without changing the cache key" bumps. (2) `diff_layout._index()`'s
+  stdlib exclusion filtered on `rec.name` (bare) rather than
+  `rec.qualified_name or rec.name` (the same `identity` split
+  `diff_types._is_abi_surface_type` already uses) — castxml/clang keep
+  `RecordType.name` bare (e.g. `"vector"`) and carry the real namespace
+  in `qualified_name` (e.g. `"std::vector"`), so the bare-name filter
+  never actually matched the `std::`/`__gnu_cxx::`/etc. prefix. A
+  retained dependency-header stdlib record could therefore leak into
+  `diff_layout.py`'s public surface and fire `STANDARD_LAYOUT_LOST`/
+  `TRIVIALLY_COPYABLE_LOST` for a toolchain-owned type once those two
+  traits started being populated for real (G31 Phase C) — the exact
+  toolchain-noise-vs-real-break distinction the stdlib filter exists to
+  draw. Fixed to match `_is_abi_surface_type`'s identity split exactly.
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through
@@ -243,16 +597,71 @@ case exercising the reconciliation path end-to-end.
   own LibTooling companion-tool experience (`tools/clang-layout-tool/`) as
   a worked example of the LibTooling option's cost/benefit.
 
-**Performance benchmarks + regression gate.** Now that the header-only
-graph is always-on rather than opt-in, its per-dump cost is paid on every
-run, not just when a user explicitly asked for it. Extend
-`scripts/check_tier_accuracy.py`/`scripts/check_fp_rate.py`-style gating —
-or add a new dedicated script — to track dump-time wall-clock cost with the
-graph on, gating on regression the same way those scripts gate on
-correctness. This is most meaningful *after* Phase C's AST-reuse work lands
-(see the sequencing note below); before that, the gate would just be
-re-measuring the known "second AST pass" cost Phase A's TODO already
-identifies, not catching a new regression.
+**Performance benchmarks + regression gate — done.** Now that the
+header-only graph is always-on rather than opt-in, its per-dump cost is paid
+on every run, not just when a user explicitly asked for it.
+`scripts/check_header_graph_perf.py` (new dedicated script, following
+`check_fp_rate.py`/`check_tier_accuracy.py`/`benchmark_scaling.py`'s
+conventions) isolates `service._attach_header_graph`'s own marginal cost
+from the `dumper.dump()` call it's layered on top of, across a synthetic
+header-declaration-count sweep and both header backends (`clang`'s real
+Phase C in-process memo handoff, and `castxml`'s genuine second `clang`
+invocation), verifying each attach actually completed a real AST-backed
+pass (not a silent degraded fallback) rather than trusting a possibly-fast-
+because-broken sample. Self-skips without a real `clang`/`clang++`/`g++`
+install or off Linux/ELF; `castxml` is optional (its points are just
+omitted, never fatal, unless it's genuinely present and broken). Mirrored
+in `tests/test_header_graph_perf_gate.py` (pure-logic tests run
+unconditionally; the live-measurement tests self-skip the same way the
+script does, carrying the `integration` marker so the fast lane never
+compiles fixtures or invokes a compiler).
+
+**Wired into `.github/workflows/performance.yml`** (Codex review, P1 —
+declaring this done while no CI workflow ever ran it left every standard
+PR/scheduled run silently skipping the gate). Two jobs, mirroring the
+existing `scaling`/`regression` pair's own split rather than inventing a
+third pattern:
+- `header-graph-perf` — report-only trend data on schedule/dispatch/PR
+  (path-filtered to the graph-attach/perf-gate files themselves), uploading
+  a JSON+text artifact. Deliberately *not* gated against a committed
+  baseline number: a fixed value recorded on one runner/toolchain would go
+  stale the moment either changes, the same class of drift
+  `check_mutation_score.py`'s own `SURVIVOR_BASELINE` bootstrap (`None`
+  until a real run establishes it) avoids — this job's artifacts are how
+  that trend gets established across scheduled runs instead.
+- `header-graph-regression` — real, *gating* PR-vs-base regression
+  checking, following the existing `regression` job's own pattern exactly:
+  measures the base branch and the PR head on the identical runner/
+  toolchain in the same job (via the script's own `--json-out`/`--baseline`
+  flags, exactly as `benchmark_scaling.py` already does), so there is no
+  stale-baseline problem to bootstrap past in the first place — gates from
+  day one. Falls back to report-only when the base branch predates this
+  gate entirely (a PR introducing it, or one from before it existed).
+
+Both new jobs install the pinned CastXML build (`action/install-castxml.sh`,
+the same helper `ci.yml`'s `unit-tests` job already uses) so the default
+backend's genuine second-`clang`-invocation cost — the more common
+real-world case, since most `dump`/`compare` calls use the default castxml
+frontend, not `--ast-frontend clang` — is actually part of the comparison,
+not silently narrowed to clang-only by an absent/out-of-policy castxml
+(Codex review: the bare PyPI `castxml` package a stock runner would
+otherwise see is exactly the out-of-policy build the script's own version
+gate rejects). The workflow's PR path filter also covers the attach path's
+transitive dependencies, not just the two files the gate itself touches
+directly (`dumper_ast_config.py`'s AST cache-key computation,
+`dumper_sysinc.py`'s system-include-dir probing, `buildsource/include_graph.py`'s
+depfile parsing for the include-graph pass, `header_utils.py`'s inferred-root
+resolution the script itself also calls).
+
+`scripts/verify.py`'s `full` profile also gained a `header-graph-perf` step
+(report-only, `--sizes 25 100`, gated on `clang`/`clang++`/`g++` all being
+present via the new `_need_all_bins` precondition helper) — closing the gap
+where `python scripts/verify.py --profile full` could never even run this
+script at all (Codex review). Deliberately *not* the base-vs-head
+`header-graph-regression` half: that job spans two checkouts/venvs in one
+workflow run, which is not expressible as a single `verify.py` `Step` — the
+same structural reason `benchmark_scaling.py`'s own sibling `regression` job
+was never routed through `verify.py` either.
 
 **Synthetic-consumer compile-probe layer, or a deferring ADR.** If a
 compile-probe layer (actually compiling a synthetic consumer against
