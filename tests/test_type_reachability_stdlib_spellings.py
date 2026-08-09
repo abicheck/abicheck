@@ -991,3 +991,120 @@ class TestDeepTypedefChainDoesNotRecurse:
         assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
             {"std::string", "string"}
         )
+
+
+class TestRecordFieldExactnessRespectsTheOwningRecordsOwnProvenance:
+    """Codex review, fresh evidence: a stdlib type named directly inside a
+    reached record's own field was previously credited as unconditionally
+    exact/trusted regardless of how ambiguously the record *itself* was
+    reached -- `_walk_reached_records` always scanned a record's fields
+    with the default `via_typedef=False`, even for a record reached only
+    through a typedef alias that collides with an unrelated enum's own
+    bare spelling. A public signature spelling ambiguous bare `Alias`
+    (colliding with `EnumType(name="Alias", ...)`) that also resolves,
+    via the qualified typedef key `other::Alias`, to `Wrapper` -- whose own
+    field is `std::exception` -- must not confirm `std::exception` at all:
+    `Wrapper`'s own reachability was never proven, since `Alias` could
+    just as well have meant the enum."""
+
+    def test_stdlib_type_in_an_ambiguously_reached_records_field_is_not_confirmed(
+        self,
+    ) -> None:
+        enum = EnumType(name="Alias", qualified_name="mine::Alias")
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="a", type="Alias")])],
+            types=[wrapper, RecordType(name="std::exception", kind="class")],
+            enums=[enum],
+            typedefs={"other::Alias": "Wrapper"},
+        )
+        # directly_referenced_stdlib_types (the OTHER, emission-gating
+        # function) is unaffected -- it still reaches Wrapper's field
+        # regardless of ambiguity, matching its own documented
+        # false-negative-over-false-positive policy for that consumer.
+        assert directly_referenced_stdlib_types(snap) == frozenset({"std::exception"})
+        # But the confirmation function must not trust it at all.
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset()
+
+    def test_stdlib_type_in_an_unambiguously_reached_records_field_is_confirmed(
+        self,
+    ) -> None:
+        # Sanity check alongside the guard above: with no colliding enum,
+        # `Alias` unambiguously resolves to `Wrapper`, and `std::exception`
+        # inside its field is genuinely, trustworthily reached.
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="a", type="Alias")])],
+            types=[wrapper, RecordType(name="std::exception", kind="class")],
+            typedefs={"other::Alias": "Wrapper"},
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::exception", "exception"}
+        )
+
+    def test_a_field_named_directly_in_declaration_text_is_still_trusted(
+        self,
+    ) -> None:
+        # A record reached directly (never via any typedef) still trusts
+        # its own fields unconditionally -- the fix only changes behavior
+        # for records reached via an ambiguous alias.
+        wrapper = RecordType(
+            name="Wrapper",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[_fn("api", params=[Param(name="w", type="Wrapper")])],
+            types=[wrapper, RecordType(name="std::exception", kind="class")],
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::exception", "exception"}
+        )
+
+
+class TestReachableStdlibCacheHandlesADiamondAliasGraph:
+    """`_reachable_stdlib`'s memoized cache (the fix for the quadratic
+    rewalk finding) must still produce the same result as a full walk when
+    two different aliases share a common downstream target -- a diamond
+    in the typedef graph, not just a linear chain. A third alias sharing
+    the same target additionally exercises the cache's own hit path (the
+    second-or-later query for an already-cached alias, as opposed to the
+    first query that actually computes and caches it)."""
+
+    def test_three_aliases_sharing_a_common_stdlib_target_all_confirm_it(
+        self,
+    ) -> None:
+        typedefs = {
+            "Left": "Shared",
+            "Right": "Shared",
+            "Middle": "Shared",
+            "Shared": "std::string",
+        }
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("use_left", params=[Param(name="a", type="Left")]),
+                _fn("use_right", params=[Param(name="b", type="Right")]),
+                _fn("use_middle", params=[Param(name="c", type="Middle")]),
+            ],
+            types=[RecordType(name="std::string", kind="class")],
+            typedefs=typedefs,
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::string", "string"}
+        )

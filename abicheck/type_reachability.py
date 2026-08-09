@@ -795,10 +795,63 @@ class _StdlibReferenceScan:
         # ``via_typedef``/``origin_alias`` docstring for why this needs its
         # own bucket rather than folding straight into ``_referenced_exact``.
         self._exact_typedef_aliases: dict[str, set[str]] = {}
+        # Broader siblings of the two sets above: trustworthy *at all* --
+        # matched via *any* spelling (a derived/stripped form counts, not
+        # only the identity's own self-key) in a route this scan considers
+        # trustworthy (``_referenced_trusted``: found directly, via_typedef
+        # False) or an alias-conditional route (``_trusted_via_alias``:
+        # found only via a typedef alias, keyed the same way as
+        # ``_exact_typedef_aliases``) (Codex review, fresh evidence).
+        # ``directly_referenced_stdlib_type_spellings``'s own "this
+        # identity's stripped form collides with nothing else in the
+        # snapshot" shortcut previously trusted *any* member of
+        # ``referenced()`` unconditionally for that check -- including one
+        # matched only via a derived spelling inside a record's own field,
+        # where the record itself was reached only through an ambiguous
+        # typedef alias. The bare-spelling-uniqueness argument alone cannot
+        # rescue that: "nothing else could this spelling mean" says nothing
+        # about whether the signature legitimately reaches this spelling at
+        # all. ``_referenced_exact``/``_exact_typedef_aliases`` stay exactly
+        # as before (used by the *other*, "stripped form is ambiguous"
+        # branch, which specifically needs the stronger self-key guarantee).
+        self._referenced_trusted: set[str] = set()
+        self._trusted_via_alias: dict[str, set[str]] = {}
         self._remaining = set(stdlib_identities)
         self._reached_records: set[str] = set()
         self._worklist: list[str] = []
         self._resolved_typedefs: set[str] = set()
+        # Provenance a reached record was *first* discovered under (Codex
+        # review, fresh evidence): reaching a record is deduplicated (a
+        # record's fields are only ever walked once, matching
+        # ``reach_record``'s own pre-existing "queue once" semantics), but
+        # the previous version always scanned a reached record's own
+        # fields/bases with the *default* ``via_typedef=False`` regardless
+        # of how the record itself was reached -- so a stdlib type named
+        # directly in a field of a record that was only reachable through
+        # an *ambiguous* typedef alias (colliding with an unrelated enum's
+        # bare spelling) was still credited as unconditionally exact.
+        # Confirmed empirically: ``std::exception`` inside a struct reached
+        # only via such an alias was wrongly treated as directly referenced
+        # with full confidence. Storing the provenance a record was first
+        # queued under, and threading it into the scan of that record's own
+        # fields/bases (see :func:`_walk_reached_records`), closes this --
+        # "first reach wins" is the same safe, conservative direction this
+        # whole module already commits to: a record reached first via an
+        # ambiguous route and *later* also via a trustworthy one keeps the
+        # ambiguous provenance (a missed confirmation, never a false one),
+        # which is the same trade-off ``reach_record``'s pre-existing
+        # dedup-on-first-reach already makes for reachability itself.
+        self._record_provenance: dict[str, tuple[bool, str | None]] = {}
+        # Per-alias cache of exact/any-spelling stdlib identities reachable
+        # from that alias's own target chain, memoized once per alias
+        # (Codex review, fresh evidence): the previous version re-walked an
+        # already-resolved alias's *entire remaining tail* from scratch on
+        # every subsequent declaration that named it, making a snapshot
+        # with N chained aliases named by N separate declarations
+        # (deepest-first) quadratic overall -- confirmed empirically (a
+        # 1,200-alias chain took several seconds). See
+        # :meth:`_reachable_stdlib`.
+        self._alias_reachable: dict[str, tuple[frozenset[str], frozenset[str]]] = {}
 
     @property
     def exhausted(self) -> bool:
@@ -845,9 +898,9 @@ class _StdlibReferenceScan:
         and ``_referenced`` populated) -- but a *second*, independent
         declaration reaching the same already-walked target through a
         *different*, this-time-unambiguous alias still needs its own
-        provenance recorded: see :meth:`_propagate_typedef_provenance`, the
-        cheap fallback that records just that provenance without repeating
-        the full walk.
+        provenance recorded: see :meth:`_reachable_stdlib`, the memoized
+        lookup that records just that provenance without repeating the
+        full walk.
 
         Alias-chain expansion (both the fresh-resolution branch and the
         already-resolved provenance-propagation branch) is driven by an
@@ -907,7 +960,15 @@ class _StdlibReferenceScan:
                 # ``origin_alias``, which no caller in this module ever
                 # does), but the type checker cannot see that.
                 if this_origin is not None:
-                    self._propagate_typedef_provenance(target, this_origin, {alias})
+                    exact_ids, any_ids = self._reachable_stdlib(alias)
+                    for identity in any_ids:
+                        self._trusted_via_alias.setdefault(identity, set()).add(
+                            this_origin
+                        )
+                    for identity in exact_ids:
+                        self._exact_typedef_aliases.setdefault(identity, set()).add(
+                            this_origin
+                        )
 
     def _scan_stdlib_and_records(
         self, type_string: str, via_typedef: bool, origin_alias: str | None
@@ -924,6 +985,17 @@ class _StdlibReferenceScan:
                 if identity in self._remaining:
                     self._referenced.add(identity)
                     self._remaining.discard(identity)
+                # Broader "trustworthy at all" tracking, independent of
+                # whether *spelling* is the identity's own self-key or a
+                # derived/stripped form -- see ``_referenced_trusted``'s own
+                # docstring on ``__init__`` for why this is needed alongside
+                # the narrower exactness tracking below.
+                if not via_typedef:
+                    self._referenced_trusted.add(identity)
+                elif origin_alias is not None:
+                    self._trusted_via_alias.setdefault(identity, set()).add(
+                        origin_alias
+                    )
                 if spelling != identity:
                     continue
                 # The matched key is the identity's own self-key, never a
@@ -951,57 +1023,95 @@ class _StdlibReferenceScan:
         if self._record_pattern is not None:
             for match in _finditer_allow_nested(self._record_pattern, type_string):
                 for identity in self._record_index.get(match.group(0), ()):
-                    self.reach_record(identity)
+                    self.reach_record(
+                        identity, via_typedef=via_typedef, origin_alias=origin_alias
+                    )
 
-    def _propagate_typedef_provenance(
-        self, target: str, origin_alias: str, seen: set[str]
-    ) -> None:
-        """Record *origin_alias* as exact-match provenance for every stdlib
-        identity *target* names by its own self-key, and expand into any
-        further typedef alias *target* itself contains -- without touching
-        ``_referenced``/``_reached_records``/``_resolved_typedefs``, since
-        the identities and records reachable from *target* were already
-        fully walked once via whichever alias resolved it first (see the
-        ``else`` branch in :meth:`scan` that calls this).
+    def _reachable_stdlib(self, start: str) -> tuple[frozenset[str], frozenset[str]]:
+        """``(exact, any)`` -- the stdlib identities reachable from *start*
+        alias's own target, exact self-key matches and any-spelling matches
+        respectively, transitively through further nested typedef aliases
+        (never through a reached record's own fields -- record provenance
+        is a separate, independently-threaded mechanism, see
+        :meth:`reach_record`/:func:`_walk_reached_records`).
 
-        *seen* bounds this walk against a cyclic typedef chain (a typedef
-        target naming an alias already visited by this same call is not
-        re-entered); shared with, but never confused for,
-        ``_resolved_typedefs`` since that set's purpose is deliberately
-        different, as this method exists to work around. One mutable set is
-        threaded through every step of the walk below (matching this
-        method's own pre-existing recursive semantics, where every nested
-        call shared the same ``seen`` object by reference) -- not a
-        fresh copy per branch, so an alias visited down one branch is
-        correctly skipped if a sibling branch reaches it too.
+        Memoized per alias in ``_alias_reachable`` via an explicit,
+        iterative post-order stack walk -- not recursion, and not a plain
+        re-scan of *start*'s raw text on every call (Codex review, fresh
+        evidence: see ``_alias_reachable``'s own docstring on ``__init__``
+        for the quadratic blowup this closes). Each alias's own reachable
+        set is computed at most once for the lifetime of this scan,
+        regardless of how many different declarations later name it once
+        already resolved.
 
-        Driven by an explicit worklist, not recursion (see :meth:`scan`'s
-        own docstring for the ``RecursionError`` this closes on a long
-        typedef chain).
+        A cyclic typedef chain is broken conservatively: an alias currently
+        being computed (grey) contributes nothing to itself if reached
+        again before it's done, rather than looping forever.
         """
-        worklist = [target]
-        while worklist:
-            current = worklist.pop()
-            for match in _finditer_allow_nested(self._stdlib_pattern, current):
-                spelling = match.group(0)
+        if start in self._alias_reachable:
+            return self._alias_reachable[start]
+        grey: set[str] = set()
+        stack: list[tuple[str, bool]] = [(start, False)]
+        while stack:
+            alias, expanded = stack.pop()
+            if not expanded:
+                if alias in self._alias_reachable or alias in grey:
+                    continue
+                grey.add(alias)
+                stack.append((alias, True))
+                target = self._typedef_targets[alias]
+                if self._typedef_pattern is not None:
+                    for m in _finditer_allow_nested(self._typedef_pattern, target):
+                        stack.append((m.group(0), False))
+                continue
+            target = self._typedef_targets[alias]
+            exact: set[str] = set()
+            any_ids: set[str] = set()
+            for m in _finditer_allow_nested(self._stdlib_pattern, target):
+                spelling = m.group(0)
                 for identity in self._stdlib_index.get(spelling, ()):
+                    any_ids.add(identity)
                     if spelling == identity:
-                        self._exact_typedef_aliases.setdefault(identity, set()).add(
-                            origin_alias
-                        )
+                        exact.add(identity)
             if self._typedef_pattern is not None:
-                for match in _finditer_allow_nested(self._typedef_pattern, current):
-                    alias = match.group(0)
-                    if alias in seen:
-                        continue
-                    seen.add(alias)
-                    worklist.append(self._typedef_targets[alias])
+                for m in _finditer_allow_nested(self._typedef_pattern, target):
+                    child_exact, child_any = self._alias_reachable.get(
+                        m.group(0), (frozenset(), frozenset())
+                    )
+                    exact |= child_exact
+                    any_ids |= child_any
+            self._alias_reachable[alias] = (frozenset(exact), frozenset(any_ids))
+            grey.discard(alias)
+        return self._alias_reachable[start]
 
-    def reach_record(self, identity: str) -> None:
-        """Queue a non-stdlib record's own fields/bases to be walked, once."""
+    def reach_record(
+        self,
+        identity: str,
+        *,
+        via_typedef: bool = False,
+        origin_alias: str | None = None,
+    ) -> None:
+        """Queue a non-stdlib record's own fields/bases to be walked, once.
+
+        *via_typedef*/*origin_alias* -- the context this record was first
+        discovered under -- are stored (first reach only, matching this
+        method's own pre-existing "queue once" dedup) so
+        :func:`_walk_reached_records` can scan that record's own fields
+        with the *same* trust level, instead of unconditionally trusting
+        them regardless of how ambiguously the record itself was reached
+        (see ``_record_provenance``'s own docstring on ``__init__``).
+        """
         if identity not in self._reached_records:
             self._reached_records.add(identity)
             self._worklist.append(identity)
+            self._record_provenance[identity] = (via_typedef, origin_alias)
+
+    def record_provenance(self, identity: str) -> tuple[bool, str | None]:
+        """The ``(via_typedef, origin_alias)`` context *identity* (a
+        reached record) was first queued under -- ``(False, None)`` if
+        never reached (should not happen for a caller that only queries an
+        identity it itself popped from :meth:`next_reached_record`)."""
+        return self._record_provenance.get(identity, (False, None))
 
     def next_reached_record(self) -> str | None:
         """Pop the next queued record identity, or ``None`` when the queue
@@ -1041,6 +1151,27 @@ class _StdlibReferenceScan:
         ambiguous aliases also happened to reach the same identity.
         """
         return {k: frozenset(v) for k, v in self._exact_typedef_aliases.items()}
+
+    def referenced_trusted(self) -> frozenset[str]:
+        """Which of :meth:`referenced`'s identities were matched at least
+        once via *any* spelling (self-key or a derived/stripped form alike)
+        in a route this scan considers unconditionally trustworthy (a real
+        declaration's own literal text, or a reached record's own field/
+        base scanned with that same trust level -- see
+        :meth:`reach_record`). Broader than :meth:`referenced_exact` (which
+        additionally requires the self-key spelling specifically); see
+        ``_referenced_trusted``'s own docstring on ``__init__`` for why the
+        broader form is needed."""
+        return frozenset(self._referenced_trusted)
+
+    def trusted_via_alias(self) -> dict[str, frozenset[str]]:
+        """The alias-conditional sibling of :meth:`referenced_trusted`,
+        mirroring :meth:`referenced_exact_typedef_aliases` but for *any*
+        spelling rather than only the self-key one -- see that method's own
+        docstring for how a caller is expected to use this (trust an
+        identity here as soon as any one alias that produced it is itself
+        unambiguous)."""
+        return {k: frozenset(v) for k, v in self._trusted_via_alias.items()}
 
 
 def _seed_scan_from_public_declarations(
@@ -1131,6 +1262,14 @@ def _walk_reached_records(
     ``stop_when_exhausted`` mirrors
     :func:`_seed_scan_from_public_declarations`'s own parameter -- see its
     docstring.
+
+    Each record's own fields/bases are scanned with the *same*
+    ``via_typedef``/``origin_alias`` context the record itself was first
+    reached under (Codex review, fresh evidence: see
+    ``_StdlibReferenceScan.reach_record``'s own docstring) -- a record
+    reached only through an ambiguous typedef alias must not have a stdlib
+    type named directly in one of its own fields treated as unconditionally
+    exact/trusted just because the field's own text is "direct".
     """
     while True:
         if stop_when_exhausted and scan.exhausted:
@@ -1138,13 +1277,14 @@ def _walk_reached_records(
         identity = scan.next_reached_record()
         if identity is None:
             return
+        via_typedef, origin_alias = scan.record_provenance(identity)
         for rec in non_stdlib_records[identity]:
             if rec.origin in _NON_PUBLIC_ORIGINS:
                 continue
             if exclude_export_only and rec.origin is ScopeOrigin.EXPORT_ONLY:
                 continue
             for f in rec.fields:
-                scan.scan(f.type)
+                scan.scan(f.type, via_typedef=via_typedef, origin_alias=origin_alias)
             # Both direct and virtual bases are ABI-reachable through the
             # derived type (virtual inheritance still embeds the base
             # subobject + vtable path), same as surface.py's own closure
@@ -1152,7 +1292,7 @@ def _walk_reached_records(
             # non-stdlib Base whose own field is a stdlib record was
             # otherwise never reached, since only rec.fields was followed.
             for base in (*rec.bases, *rec.virtual_bases):
-                scan.scan(base)
+                scan.scan(base, via_typedef=via_typedef, origin_alias=origin_alias)
 
 
 def _run_stdlib_reference_scan(
@@ -1545,6 +1685,21 @@ def directly_referenced_stdlib_type_spellings(
         if aliases - non_stdlib_spellings:
             exact_mut.add(identity)
     exact = frozenset(exact_mut)
+    # Broader sibling of `exact` above, mirroring the same alias-ambiguity
+    # check but for *any* spelling (self-key or derived) rather than only
+    # the self-key one -- needed below for the "stripped form collides with
+    # nothing else in the snapshot" shortcut, which is a *different*
+    # confirmation route than exactness and must not trust a match whose
+    # own reachability was never itself proven trustworthy (Codex review,
+    # fresh evidence: a stdlib type named directly in a record's own field,
+    # where the record itself was reached only through an ambiguous
+    # typedef alias, was previously confirmed unconditionally through this
+    # shortcut regardless of that ambiguity -- confirmed empirically).
+    trusted_mut = set(scan.referenced_trusted())
+    for identity, aliases in scan.trusted_via_alias().items():
+        if aliases - non_stdlib_spellings:
+            trusted_mut.add(identity)
+    trusted = frozenset(trusted_mut)
     # Every spelling a typedef could be reached by -- not just its literal
     # dict key -- via the same suffix-expansion _StdlibReferenceScan itself
     # already uses to resolve a typedef alias to its target: a raw
@@ -1618,9 +1773,26 @@ def directly_referenced_stdlib_type_spellings(
             if identity in exact:
                 spellings.add(identity)
             continue
+        if identity not in trusted:
+            # The stripped form is unambiguous against everything else in
+            # the snapshot -- but that alone only says "nothing else could
+            # this spelling mean," not "the signature legitimately reaches
+            # this spelling at all." An identity whose own reachability was
+            # never proven trustworthy (e.g. found only inside a record
+            # that was itself reached solely through an ambiguous typedef
+            # alias) cannot be rescued by bare-spelling uniqueness alone.
+            # No fallback to `exact` here (unlike the ambiguous-stripped-
+            # form branch above): `exact` is always a subset of `trusted`
+            # by construction (every site that adds to `_referenced_exact`/
+            # `_exact_typedef_aliases` adds the identical identity/origin to
+            # `_referenced_trusted`/`_trusted_via_alias` first), so
+            # `identity not in trusted` already implies `identity not in
+            # exact` -- nothing would ever survive here.
+            continue
         # Unambiguous against every stdlib identity in the snapshot *and*
-        # against every non-stdlib spelling in it: keep both the identity
-        # and its derived bare form, regardless of route.
+        # against every non-stdlib spelling in it, *and* independently
+        # proven trustworthy: keep both the identity and its derived bare
+        # form.
         spellings.add(identity)
         spellings.add(stripped)
     return frozenset(spellings)
