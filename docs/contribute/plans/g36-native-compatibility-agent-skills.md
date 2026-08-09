@@ -442,13 +442,29 @@ both:**
   in command-line order, so `abicheck --version --format json` (`--version`
   typed first) fires the version callback first regardless of whether both
   flags are eager or both are non-eager — `ctx.params["format"]` still
-  isn't populated yet either way. The one ordering that actually works
-  regardless of argv order is **mixed eagerness**: make `--format` eager
-  and leave `--version` non-eager. Click always processes the whole eager
-  group before the whole non-eager group, independent of command-line
-  position, so `--format` is guaranteed to have populated `ctx.params`
-  by the time `--version`'s (non-eager) callback runs and reads it — no
-  argv-order dependence left. Test the documented `abicheck --version
+  isn't populated yet either way. **Mixed eagerness (`--format` eager,
+  `--version` non-eager) — this item's own earlier revision — has a
+  separate, worse problem: it isn't just a `--version`-scoped flag, it's a
+  real root-level `--format` option Click resolves independently of any
+  subcommand's own option of the same name.** Confirmed against the live
+  CLI (`python -m abicheck --help` exposes only `--version`/`--help` at
+  root today; `python -m abicheck compare --help` defines its own
+  `--format`, "Output format," as a `compare`-scoped option) — registering
+  a root `--format` would make `abicheck --format json compare OLD NEW`
+  silently consume the root value while `compare`'s own `--format` stays at
+  its text default, a real correctness regression for every other command,
+  not just a `--version`-adjacent quirk. The right fix therefore isn't a
+  registered Click option at all: keep only `--version` as a real
+  (non-eager) parameter, and inside its own callback, parse `--format`
+  directly out of `ctx.args`/`sys.argv` (a narrow, manual check for the
+  literal `--format json` token) rather than declaring a second global
+  option — this scopes the format detection to version discovery alone
+  and leaves every subcommand's own `--format` untouched. Add a regression
+  test asserting a non-`--version` invocation
+  (`abicheck --format json compare OLD NEW` or similar) behaves
+  identically with and without this change — i.e. that adding version
+  discovery introduces no new root `--format` option at all. Test the
+  documented `abicheck --version
   --format json` spelling itself (both flag orders — `--format json
   --version` too), not just each flag in isolation; no root-command
   surface changes at all, so
@@ -1256,10 +1272,23 @@ error); `validation/data/skill_eval_scenarios.yaml`
 json` lookup correctly reaches every named category's case through
 `catalog["verdicts"][case_dir]` (not the top level) before the eval
 harness itself is trusted to run against real fixtures; the eval harness
-itself is the test; gate a minimum pass rate in CI once the first baseline
-run establishes one (mirroring `SURVIVOR_BASELINE`'s pattern for mutation
-testing — establish, then gate on non-regression, not an arbitrary target
-chosen up front).
+itself is the test. **The six rubric dimensions do not all gate the same
+way — split them, don't fold all six into one baseline-rate number.**
+Two of the six are this ADR's own non-negotiable safety invariants
+translated into grading criteria: "preserved uncertainty" and "no
+compatibility claim without sufficient evidence." A `SURVIVOR_BASELINE`-
+style "establish once, gate on non-regression thereafter" baseline —
+appropriate for the other four (workflow choice, evidence obtained,
+root-cause explanation, remediation proposed), where some initial
+imperfection is expected and improvement over time is the realistic goal
+— is the wrong model for these two: if the *first* evaluation run already
+contains a false-green or lost-uncertainty failure, establishing the
+baseline from that run would accept the failure as the permanent floor,
+and P1.4's later "acceptable baseline rate" publication check would never
+independently catch it. Gate these two dimensions at **zero tolerance,
+every scenario, from the first run** — a single failure on either blocks
+publication outright, not just lowers an aggregate rate — and gate the
+remaining four dimensions with the baseline/non-regression model.
 
 **Dependencies:** P0.1–P0.3, P0.8 for a *first* pass — but, same freshness
 caveat as P1.5's below, **the run P1.4 relies on for publication must
