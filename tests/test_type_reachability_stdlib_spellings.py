@@ -1486,3 +1486,89 @@ class TestTypedefTargetSuffixMustNotBeARealCapturedIdentityElsewhere:
         assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
             {"std::vector<int>", "vector<int>"}
         )
+
+
+class TestDirectRecordProvenanceStopsAccumulatingRedundantTypedefAliases:
+    """Codex review, fresh evidence (P2, performance): once a record is
+    already unconditionally trusted (`_record_direct`), a further typedef
+    alias that also reaches it must not keep growing
+    `_record_typedef_origins` or requeuing the record for a rescan -- the
+    unconditional direct scan already finds every match at the strongest
+    trust tier, so a new alias can never add anything a direct scan
+    wouldn't already find. A snapshot with a public record carrying many
+    alias-typed fields all targeting an already-directly-reached record
+    previously queued the same identity once per distinct alias, each pop
+    rescanning under every accumulated alias -- quadratic in alias count."""
+
+    def test_many_aliases_to_an_already_direct_record_still_confirms_correctly(
+        self,
+    ) -> None:
+        target = RecordType(
+            name="Target",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        typedefs: dict[str, str] = {}
+        fields = []
+        for i in range(200):
+            alias = f"ns{i}::Target"
+            typedefs[alias] = "Target"
+            fields.append(TypeField(name=f"f{i}", type=alias))
+        holder = RecordType(name="Holder", kind="struct", fields=fields)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("api_holder", params=[Param(name="h", type="Holder")]),
+                # A direct, unaliased reference to `Target` itself makes it
+                # unconditionally trusted independent of any of the 200
+                # ambiguous-looking aliases above.
+                _fn("api_target", params=[Param(name="t", type="Target")]),
+            ],
+            types=[target, holder, RecordType(name="std::exception", kind="class")],
+            typedefs=typedefs,
+        )
+        assert directly_referenced_stdlib_type_spellings(snap) == frozenset(
+            {"std::exception", "exception"}
+        )
+
+    def test_many_aliases_to_an_already_direct_record_completes_quickly(
+        self,
+    ) -> None:
+        """Absolute-time bound rather than a small-vs-large ratio: a ratio
+        computed from two wall-clock measurements is itself sensitive to
+        ordinary CI timing noise on the smaller, sub-millisecond baseline.
+        A single generous absolute ceiling for the large case is enough to
+        distinguish "near-linear" from the reported ~12s/quadratic
+        behavior without that extra noise source -- the reported repro used
+        1,200 aliases and took roughly 12 seconds; this fix keeps the same
+        shape comfortably under a second, so 5s leaves a wide margin
+        without weakening the check the fix is meant to guard."""
+        import time
+
+        target = RecordType(
+            name="Target",
+            kind="struct",
+            fields=[TypeField(name="e", type="std::exception")],
+        )
+        typedefs: dict[str, str] = {}
+        fields = []
+        for i in range(1200):
+            alias = f"ns{i}::Target"
+            typedefs[alias] = "Target"
+            fields.append(TypeField(name=f"f{i}", type=alias))
+        holder = RecordType(name="Holder", kind="struct", fields=fields)
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                _fn("api_holder", params=[Param(name="h", type="Holder")]),
+                _fn("api_target", params=[Param(name="t", type="Target")]),
+            ],
+            types=[target, holder, RecordType(name="std::exception", kind="class")],
+            typedefs=typedefs,
+        )
+        start = time.monotonic()
+        directly_referenced_stdlib_type_spellings(snap)
+        elapsed = time.monotonic() - start
+        assert elapsed < 5.0, f"took {elapsed:.2f}s -- looks quadratic again"

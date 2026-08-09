@@ -574,7 +574,23 @@ class _StdlibReferenceScan:
             if identity not in self._record_direct:
                 self._record_direct.add(identity)
                 upgraded = True
-        elif origin_alias is not None:
+        elif origin_alias is not None and identity not in self._record_direct:
+            # Once `identity` is unconditionally trusted (`_record_direct`),
+            # accumulating further typedef-alias origins is pure bookkeeping
+            # with no observable effect: `_walk_reached_records` already
+            # scans a direct record's fields unconditionally (the strongest
+            # trust tier), so a *new* alias origin can never add a match a
+            # direct scan wouldn't already have found -- yet the old code
+            # kept recording every distinct alias and requeuing on each one
+            # regardless (Codex review, fresh evidence: a snapshot with a
+            # public record carrying ~1,200 alias-typed fields all targeting
+            # an already-directly-reached record queued the same identity
+            # ~1,200 times, each pop rescanning under every accumulated
+            # alias -- quadratic). Skipping the update once already direct
+            # closes this without weakening provenance: `record_provenance`
+            # reports `is_direct=True` regardless of `typedef_origins`'
+            # contents, and every alias this branch would have added is
+            # strictly redundant with the unconditional direct scan.
             origins = self._record_typedef_origins.setdefault(identity, set())
             if origin_alias not in origins:
                 origins.add(origin_alias)
@@ -797,7 +813,18 @@ def _walk_reached_records(
             # otherwise never reached, since only rec.fields was followed.
             for text in texts:
                 if is_direct:
+                    # The unconditional direct scan already marks any match
+                    # at the strongest trust tier (`referenced_exact`), so
+                    # rescanning the same text once per accumulated typedef
+                    # alias below would only ever reproduce a strictly
+                    # weaker or identical result -- skipped entirely (Codex
+                    # review, fresh evidence: a record already trusted
+                    # directly but also reached through hundreds of
+                    # ambiguous typedef aliases before that direct route was
+                    # found made this loop quadratic in alias count for no
+                    # observable gain).
                     scan.scan(text)
+                    continue
                 # Scanned once per distinct alias that reached this record
                 # (not just one) -- one genuinely unambiguous route among
                 # several is real proof, the same principle already applied
