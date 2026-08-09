@@ -47,9 +47,21 @@ shipped, with unit, CLI-level, and Action-level tests (`tests/test_bundle.py`,
 `tests/test_action_run_sh_artifact_set.py`) and a real gcc-built end-to-end
 case. **Still open, not silently dropped:**
 
-- Phase 3's MCP half — `abi_scan`/`abi_estimate` don't yet accept an
-  `artifact_set` parameter, and `docs/reference/mcp-tools-reference.md`
-  hasn't been regenerated for it.
+- ~~Phase 3's MCP half~~ — **done (2026-08-09).** A new `abi_scan_set` MCP
+  tool (`mcp_server_scan.py`), not an `artifact_set` parameter grafted onto
+  `abi_scan` itself: `abi_scan`'s own `against`/`policy`/`suppression_file`/
+  `contract_evaluation` family are all baseline-comparison arguments
+  `run_scan_set` (audit-only, ADR-056 D2, rejects a baseline outright)
+  cannot accept, so a shared single-tool signature would have to make every
+  one of them silently ignored under `artifact_set` — the same reasoning
+  `cli_scan.py` already applies by giving `--artifact-set` its own code path
+  rather than overloading `scan ARTIFACT`. Takes `artifact_paths` (2+),
+  routes through the already-existing `run_scan_set_subprocess` (its own
+  docstring anticipated exactly this caller — "MCP `abi_scan` must route an
+  `artifact_set` call through this"), and forwards the same argument family
+  `abi_scan` does minus the comparison-only ones, plus
+  `bundle_system_providers`. `docs/reference/mcp-tools-reference.md`
+  regenerated.
 - The full example-catalog obligation (`examples/caseNNN_.../`,
   `ground_truth.json`, `examples/README.md`, `gen_examples_docs.py`) — a
   unit-level fixture covers the detector for now, not a binary example case.
@@ -844,15 +856,19 @@ implementation that shipped.
   `scripts/verify.py --profile pr` fails on a stale generated file, this
   is not optional cleanup):
   - `python scripts/gen_mcp_reference.py` → `docs/reference/mcp-tools-reference.md`
-    (needs the `mcp` extra installed) for the new `artifact_set` param.
+    (needs the `mcp` extra installed) for the new `abi_scan_set` tool
+    (regenerated 2026-08-09, see the Implementation status note above).
   - `python scripts/gen_action_reference.py` → `docs/reference/github-action-inputs.md`
     for the new `new-library-set` input.
   - `python scripts/gen_cli_reference.py` → `docs/reference/cli-reference.md`
     for `--artifact-set` (already listed under G35.4 above; grouped here
     since all three generators run together in practice).
 - **CLI + GitHub Action halves shipped** (this pass's Implementation status
-  note, above). **MCP half (`abi_scan`/`abi_estimate` `artifact_set` param,
-  `mcp-tools-reference.md` regen) not started.**
+  note, above). **MCP half done (2026-08-09)** — see the Implementation
+  status note's own updated bullet for what shipped (a dedicated
+  `abi_scan_set` tool, not an `artifact_set` param on `abi_scan`, and
+  `abi_estimate` — dry-run cost estimation — is unaffected, since G35's
+  per-member estimator scaling gap is still separately open below).
 
 ### Phase 4 — Reporting
 

@@ -401,3 +401,169 @@ def abi_scan(
         return json.dumps(
             {"status": "error", "error": _sanitize_error(exc, context="abi_scan")}
         )
+
+
+@mcp.tool()
+def abi_scan_set(
+    artifact_paths: list[str],
+    headers: list[str] | None = None,
+    include_dirs: list[str] | None = None,
+    public_header_dirs: list[str] | None = None,
+    sources: str | None = None,
+    compile_db: str | None = None,
+    build_info: str | None = None,
+    depth: str | None = None,
+    changed_paths: list[str] | None = None,
+    language: str = "c++",
+    bundle_system_providers: list[str] | None = None,
+    ast_frontend: str = "auto",
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    sysroot: str | None = None,
+    nostdinc: bool = False,
+    frontend_context: str = "host",
+) -> str:
+    """Audit a declared multi-library artifact set as one product (ADR-056/G35).
+
+    The MCP sibling of ``scan --artifact-set``: no old side (no ``against`` —
+    ``run_scan_set`` is audit-only by construction, ADR-056 D2), each member
+    gets the same always-on tier + pinned evidence level a single-binary
+    ``abi_scan`` runs, plus one cross-library bundle-audit pass over the
+    whole set. Unlike ``abi_scan``, comparison-only arguments (``policy``,
+    ``suppression_file``, ``contract_evaluation``, ...) have no equivalent
+    here and are not accepted.
+
+    Args:
+        artifact_paths: 2 or more library files that together make up one
+            logical product (e.g. ``libcore.so`` + ``libalgo.so`` behind one
+            shared header tree). Each is validated the same way
+            ``--artifact-set``'s explicit path-list form is — a real ELF
+            shared object, not just matching magic bytes.
+        headers: Public header files shared across the set (provenance +
+            pattern pre-scan), fed to every member's own scan.
+        include_dirs: Extra include directories for the parser.
+        public_header_dirs: Directories whose headers are public; see
+            ``abi_scan``'s own argument of the same name.
+        sources: Source tree (compile DB auto-discovered within it).
+        compile_db: Explicit compile_commands.json (else discovered in
+            sources).
+        build_info: Out-of-tree build dir / compile_commands.json / pack.
+        depth: Coarse evidence-depth selector: "binary", "headers", "build",
+            or "source" (None = inferred from inputs).
+        changed_paths: Changed-path set focusing the scan (ADR-035 D7).
+        language: Language mode — "c++" (default) or "c".
+        bundle_system_providers: Caller-declared external DSO allow-list for
+            the bundle-audit detector's closed-world resolution (mirrors
+            ``scan --bundle-system-providers``).
+        ast_frontend: L2 header-AST frontend — "auto" (default), "castxml",
+            "clang", or "hybrid" (see ``abi_scan``'s own argument).
+        gcc_path: Explicit compiler binary for the header frontend.
+        gcc_prefix: Cross-toolchain prefix for the header frontend.
+        gcc_options: Extra compiler flags for the header frontend, as one
+            shell-quoted string.
+        sysroot: Alternate sysroot for the header frontend.
+        nostdinc: Suppress the standard include paths for the header
+            frontend.
+        frontend_context: Which AST context the header frontend targets —
+            "host" (default) or "device" (SYCL/DPC++ offload target).
+    """
+    t0 = _time.monotonic()
+    names = [Path(p).name for p in artifact_paths]
+    try:
+        from .service import Budget, ScanRequest, run_scan_set_subprocess
+
+        if len(artifact_paths) < 2:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "artifact_paths must name 2 or more binaries "
+                    f"(got {len(artifact_paths)}).",
+                }
+            )
+        bin_paths = [_safe_read_path(p, label="artifact_paths") for p in artifact_paths]
+        for p in bin_paths:
+            if not p.exists():
+                return json.dumps(
+                    {"status": "error", "error": f"Binary file not found: {p}"}
+                )
+            _check_file_size(p, label="artifact_paths")
+        try:
+            depth = _validate_public_depth(depth)
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
+        hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        for hdr in hdr_paths:
+            _check_file_size(hdr, label="header")
+        inc_paths = [
+            _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
+        ]
+        try:
+            phd_paths = _public_header_dir_paths(public_header_dirs)
+            src_path = _existing_path(sources, label="sources") if sources else None
+            cdb_path = (
+                _existing_path(compile_db, label="compile_db") if compile_db else None
+            )
+            bi_path = (
+                _existing_path(build_info, label="build_info") if build_info else None
+            )
+            compile_ctx = _compile_context_from_args(
+                ast_frontend=ast_frontend,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                frontend_context=frontend_context,
+            )
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)})
+        frontend_error = _source_abi_only_frontend_error(ast_frontend)
+        if frontend_error is not None:
+            return json.dumps({"status": "error", "error": frontend_error})
+
+        req = ScanRequest(
+            binaries=bin_paths,
+            headers=hdr_paths,
+            includes=inc_paths,
+            public_header_dirs=phd_paths,
+            sources=src_path,
+            compile_db=cdb_path,
+            build_info=bi_path,
+            mode="audit",
+            depth=depth,
+            changed_paths=list(changed_paths or []),
+            seeded=changed_paths is not None,
+            budget=Budget(),
+            lang=language,
+            compile=compile_ctx or CompileContext(),
+            bundle_system_providers=tuple(bundle_system_providers or ()),
+        )
+
+        # Same killable-child-process contract as abi_scan: a hung/deep
+        # multi-member scan is terminated (process tree + clang subtree)
+        # rather than orphaned to keep burning CPU past the MCP timeout.
+        try:
+            payload = run_scan_set_subprocess(req, mcp_shared.MCP_TIMEOUT)
+        except TimeoutError:
+            elapsed = _time.monotonic() - t0
+            _audit_log(
+                "abi_scan_set", {"artifacts": ",".join(names)}, elapsed, "timeout"
+            )
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": f"abi_scan_set timed out after {mcp_shared.MCP_TIMEOUT}s",
+                }
+            )
+
+        elapsed = _time.monotonic() - t0
+        _audit_log("abi_scan_set", {"artifacts": ",".join(names)}, elapsed, "ok")
+        return json.dumps({"status": "ok", **payload})
+    except Exception as exc:
+        elapsed = _time.monotonic() - t0
+        _audit_log("abi_scan_set", {"artifacts": ",".join(names)}, elapsed, "error")
+        _logger.exception("abi_scan_set failed")
+        return json.dumps(
+            {"status": "error", "error": _sanitize_error(exc, context="abi_scan_set")}
+        )

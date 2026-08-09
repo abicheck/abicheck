@@ -53,6 +53,7 @@ from abicheck.mcp_server import (  # noqa: E402
     abi_dump,
     abi_estimate,
     abi_scan,
+    abi_scan_set,
     main,
 )
 from abicheck.mcp_shared import _env_int  # noqa: E402
@@ -300,6 +301,84 @@ class TestAbiScan:
         monkeypatch.setattr(service, "run_scan_subprocess", _fake)
         data = json.loads(abi_scan(str(snap), depth=good_depth))
         assert data["status"] == "ok"
+
+
+class TestAbiScanSet:
+    """G35 MCP parity: ``abi_scan_set`` is the multi-artifact sibling of
+    ``abi_scan``, routed through ``run_scan_set_subprocess`` (ADR-056).
+    """
+
+    def test_rejects_single_artifact(self, tmp_path: Path):
+        so = _fake_elf(tmp_path)
+        data = json.loads(abi_scan_set([str(so)]))
+        assert data["status"] == "error"
+        assert "2 or more" in data["error"]
+
+    def test_missing_artifact_returns_error(self, tmp_path: Path):
+        so = _fake_elf(tmp_path, "a.so")
+        data = json.loads(abi_scan_set([str(so), str(tmp_path / "absent.so")]))
+        assert data["status"] == "error"
+        assert "not found" in data["error"].lower()
+
+    def test_forwards_binaries_and_bundle_system_providers(
+        self, tmp_path: Path, monkeypatch
+    ):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        captured: dict[str, object] = {}
+
+        def _fake(req, timeout):
+            captured["binaries"] = req.binaries
+            captured["mode"] = req.mode
+            captured["bundle_system_providers"] = req.bundle_system_providers
+            return {"verdict": "COMPATIBLE", "exit_code": 0, "per_artifact": []}
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _fake)
+        data = json.loads(
+            abi_scan_set(
+                [str(a), str(b)],
+                bundle_system_providers=["libexternal.so"],
+            )
+        )
+        assert data["status"] == "ok"
+        assert data["verdict"] == "COMPATIBLE"
+        assert set(captured["binaries"]) == {a.resolve(), b.resolve()}
+        assert captured["mode"] == "audit"
+        assert captured["bundle_system_providers"] == ("libexternal.so",)
+
+    def test_timeout_branch(self, tmp_path: Path, monkeypatch):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _timeout(req, timeout):
+            raise TimeoutError
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _timeout)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "error"
+        assert "timed out" in data["error"]
+
+    def test_exception_branch_is_sanitized(self, tmp_path: Path, monkeypatch):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+
+        def _boom(req, timeout):
+            raise RuntimeError("secret 0xBEEF")
+
+        monkeypatch.setattr(service, "run_scan_set_subprocess", _boom)
+        data = json.loads(abi_scan_set([str(a), str(b)]))
+        assert data["status"] == "error"
+        assert "0xBEEF" not in data["error"]
+        assert "unexpected error" in data["error"]
+
+    @pytest.mark.parametrize("bad_depth", ["full", "symbols", "graph"])
+    def test_rejects_internal_only_depth(self, tmp_path: Path, bad_depth: str):
+        a = _fake_elf(tmp_path, "liba.so")
+        b = _fake_elf(tmp_path, "libb.so")
+        data = json.loads(abi_scan_set([str(a), str(b)], depth=bad_depth))
+        assert data["status"] == "error"
+        assert "Unknown depth" in data["error"]
 
 
 class TestAbiEstimateDepthValidation:

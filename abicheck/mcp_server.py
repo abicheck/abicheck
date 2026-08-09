@@ -1626,7 +1626,7 @@ from .mcp_server_project import (  # noqa: E402,F401
     abi_project_plan,
     abi_project_validate,
 )
-from .mcp_server_scan import abi_estimate, abi_scan  # noqa: E402,F401
+from .mcp_server_scan import abi_estimate, abi_scan, abi_scan_set  # noqa: E402,F401
 
 # ---------------------------------------------------------------------------
 # Entry point
