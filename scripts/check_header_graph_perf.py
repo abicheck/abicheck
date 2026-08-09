@@ -312,7 +312,18 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
                     [header],
                     extra_includes=inc_extra,
                     header_backend=backend,
-                    lang="c++",
+                    # None, not "c++": production normalizes the default
+                    # C++ request to None for both this call and the
+                    # _attach_header_graph call below (service.py's
+                    # `lang if lang == "c" else None`) -- lang is part of
+                    # _clang_header_dump's AST cache key, so passing the
+                    # unnormalized "c++" here exercised a different cache
+                    # key than the one a real default-C++ dump computes
+                    # (Codex review). Auto-detection (_detect_cpp_headers)
+                    # still resolves this fixture as C++ correctly, since
+                    # its synthesized `namespace hgperf { ... }` is one of
+                    # the structural C++ patterns it matches.
+                    lang=None,
                     gcc_option_tokens=deferred_tokens,
                     extra_hash_dirs=extra_hash_dirs,
                 )
@@ -337,7 +348,9 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
                 header_graph_includes=True,
                 headers=[header],
                 includes=[],
-                lang="c++",
+                # None, matching the primary dump() call above -- see its
+                # own comment (Codex review).
+                lang=None,
                 compile=CompileContext(),
                 public_headers=None,
                 public_header_dirs=None,
