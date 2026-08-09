@@ -1243,14 +1243,16 @@ chosen up front).
 
 **Dependencies:** P0.1–P0.3, P0.8 for a *first* pass — but, same freshness
 caveat as P1.5's below, **the run P1.4 relies on for publication must
-postdate P0.4/P0.5's own required follow-up commits** (P0.2's "Dependencies"
-note: P0.4/P0.5 each require a small follow-up commit updating the skills
-to actually consume `info`'s capability discovery and typed
-`reason_codes`). A P1.1 pass completed before those follow-ups land never
-exercised the capability-discovery or non-comparability branches those
-commits add, so it can't stand in as evidence those branches work —
-re-run (or initially defer) the publication-relied-on pass until after
-they land.
+postdate P0.4/P0.5's own required follow-up commits, and P1.6's CI-wiring
+commit too** (P0.2's "Dependencies" note: P0.4/P0.5 each require a small
+follow-up commit updating the skills to actually consume `info`'s
+capability discovery and typed `reason_codes`; P1.6 separately adds the
+CI-wiring workflow step and its documentation links to two of the four
+`SKILL.md` files). A P1.1 pass completed before any of these land never
+exercised the capability-discovery/non-comparability branches or the
+CI-wiring content those commits add, so it can't stand in as evidence
+those branches or that content work — re-run (or initially defer) the
+publication-relied-on pass until after all three (P0.4, P0.5, P1.6) land.
 
 **PR boundary:** own PR per skill is reasonable given the evaluation volume
 (four PRs), or one combined PR if reviewed together — team's call.
@@ -1397,15 +1399,20 @@ scriptable subset already lives in P0.8).
 
 **Dependencies:** P0.1–P0.3 for a *first* pass, but **the pass P1.4 relies
 on for publication must additionally postdate P0.4/P0.5's own required
-follow-up commits** — P0.4/P0.5 each explicitly require a small follow-up
-commit updating the four `SKILL.md` files to actually consume capability
-discovery and typed comparability reasons once those land (see P0.2's own
-"Dependencies" note), which changes the generated tree's content after an
-early P1.5 run could have already validated it. Re-run (or initially defer)
-this item's validation pass until after those follow-up commits land, so
+follow-up commits, and P1.6's CI-wiring commit too** — P0.4/P0.5 each
+explicitly require a small follow-up commit updating the four `SKILL.md`
+files to actually consume capability discovery and typed comparability
+reasons once those land (see P0.2's own "Dependencies" note), and P1.6
+separately adds the CI-wiring workflow step and its documentation links to
+`native-binary-compatibility-review`/`native-release-compatibility`'s
+`SKILL.md` files — every one of these changes the generated tree's content
+after an early P1.5 run could have already validated it (P1.6's own
+dependency is only P0.2, so nothing else already forces it to land before
+a P1.5 pass). Re-run (or initially defer) this item's validation pass
+until after all three (P0.4, P0.5, P1.6) land, so
 the recorded log reflects the artifact P1.4 actually publishes rather than
-an earlier one — a P1.5 entry that predates them is stale for publication
-purposes even though it is marked complete.
+an earlier one — a P1.5 entry that predates any of them is stale for
+publication purposes even though it is marked complete.
 
 **PR boundary:** own PR per validation-log update, or batched — low risk.
 
