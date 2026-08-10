@@ -667,6 +667,97 @@ def _template_param_kinds(class_template_decl: dict[str, Any]) -> list[str | Non
     return kinds
 
 
+def _register_template_param_metadata(
+    idx: dict[str, list[str | None]],
+    ambiguous: set[str],
+    node_ids: dict[str, str],
+    qualname: str,
+    node: dict[str, Any],
+    value: list[str | None],
+) -> None:
+    """Register *value* for *qualname* in *idx*, treating a conflicting
+    second registration as ambiguous UNLESS clang's own ``previousDecl``
+    link says it's a legal redeclaration of the SAME entity, not a
+    coincidentally same-named different one.
+
+    Shared by :func:`_index_template_param_kinds`/:func:`_index_template_
+    param_defaults`/:func:`_index_template_param_names` (Codex review,
+    fresh evidence, fourth round): the *names* list specifically can
+    legally differ across a redeclaration of the identical template --
+    ``template<class T, class U=T> struct A;`` followed later by
+    ``template<class X, class Y> struct A {...};`` is one C++ entity, and
+    clang always spells a dependent default's inherited text using the
+    ORIGINAL declaration's parameter name (``"T"``, never renamed to
+    ``"X"``/``"Y"`` on the later declaration) -- confirmed empirically, so
+    treating the differing NAME lists as a genuine conflict (the third
+    round's fix did, unconditionally) broke dependent-default substitution
+    for this ordinary, legal C++ shape. Distinguished from a genuine
+    conflict (two nested templates in two different outer specializations
+    coincidentally sharing a bare qualname, e.g. ``Outer<int>``'s and
+    ``Outer<double>``'s own nested ``struct A``) via ``previousDecl``:
+    confirmed empirically that clang stamps it on every legal
+    redeclaration and NEVER on two genuinely unrelated declarations.
+
+    The tracked ``node_ids[qualname]`` -- the id ``previousDecl`` is
+    matched against for the NEXT registration -- is only ever advanced on
+    a CONFIRMED same-entity link (the first registration, or a
+    ``previousDecl`` match), never merely because a later registration's
+    *value* happens to equal the stored one (Codex review, fresh evidence,
+    fifth round). Two genuinely unrelated declarations sharing a bare
+    qualname (the ``Outer<int>``/``Outer<double>`` case above) can easily
+    have byte-identical kinds/defaults/names by coincidence -- e.g. both
+    nested ``template<class T, class U=T> struct A`` before either is ever
+    redeclared -- and advancing ``node_ids`` to the second, unrelated
+    node's id there would corrupt the chain for the FIRST entity's own
+    later, legal redeclaration: its real ``previousDecl`` (pointing at the
+    first node) would then mismatch the corrupted tracked id and get
+    wrongly deleted as ambiguous, confirmed with a real end-to-end repro.
+    A value-equal-but-unconfirmed registration is still safely absorbed
+    (the stored value doesn't change either way), it just doesn't get to
+    reassign whose id is being tracked.
+
+    On a CONFIRMED redeclaration, the stored value is positionally MERGED
+    with the new one -- not simply kept as-is -- because C++ allows a
+    later declaration to legally ADD a default a parameter didn't have
+    before (never repeat one already given elsewhere): ``template<class
+    T, class U> struct A;`` followed by ``template<class T, class U=T>
+    struct A {...};`` is one entity whose effective default for ``U`` only
+    becomes known on the SECOND declaration (Codex review, fresh evidence,
+    sixth round). Keeping only the first declaration's value unconditionally
+    (the fourth round's fix did) silently dropped that added default,
+    leaving the dependent-default substitution unable to trim a trailing
+    argument and mis-indexing the specialization -- confirmed end to end.
+    Merging is safe for every position: where the tracked value already
+    has data (a default, or a parameter's own name), it wins, preserving
+    the ORIGINAL declaration's spelling this module already relies on for
+    dependent-default substitution; only a position the tracked value has
+    nothing for adopts the new declaration's own value there. Length
+    mismatch (parameter count cannot legally change across a redeclaration
+    of the same template) falls back to keeping the existing value as-is,
+    the identical safe default this branch already used before merging was
+    added.
+    """
+    existing = idx.get(qualname)
+    node_id = node.get("id")
+    if existing is None:
+        idx[qualname] = value
+        if node_id:
+            node_ids[qualname] = node_id
+        return
+    previous_decl = node.get("previousDecl")
+    if previous_decl and previous_decl == node_ids.get(qualname):
+        if len(existing) == len(value):
+            idx[qualname] = [e if e is not None else v for e, v in zip(existing, value)]
+        if node_id:
+            node_ids[qualname] = node_id
+        return
+    if existing == value:
+        return
+    ambiguous.add(qualname)
+    del idx[qualname]
+    node_ids.pop(qualname, None)
+
+
 def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | None]]:
     """``qualified template name -> per-position param-kind list`` (see
     :func:`_template_param_kinds`) over every ``ClassTemplateDecl`` in the
@@ -678,18 +769,40 @@ def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | No
     depth, confirmed with a real clang build for both an implicit and an
     explicit specialization). A redeclaration of the same template (e.g.
     seen again through a second ``#include``) shares an identical parameter
-    list, so first-registration-wins is safe.
+    list, so keeping the first registration is safe THERE -- but a bare,
+    unspelled qualname (this function never extends scope through a
+    ``ClassTemplateSpecializationDecl``, see :func:`build_specialization_index`'s
+    own *lookup_scope* split) collapses a member template nested in one
+    explicit outer specialization with a SAME-NAMED, genuinely DIFFERENT
+    member template nested in a sibling outer specialization -- e.g.
+    ``Outer<int>``'s own nested ``template<class U=int> struct A`` and
+    ``Outer<double>``'s own nested ``template<class U=double> struct A``
+    both register under the bare key ``"A"`` (Codex review, fresh evidence,
+    real end-to-end repro: with first-registration-wins, ``Outer<double>::
+    A<>``'s trailing default couldn't be trimmed against the WRONG
+    (``Outer<int>``-borrowed) default, leaving the base unresolvable and an
+    added virtual method on the derived class completely undetected). A
+    conflicting SECOND registration under the same qualname is therefore
+    treated as genuinely ambiguous and dropped entirely (equivalent to no
+    entry at all, degrading to this module's usual unresolvable-base false
+    negative) rather than trusting either candidate -- only an EXACTLY
+    matching redeclaration is safe to keep.
     """
     idx: dict[str, list[str | None]] = {}
+    ambiguous: set[str] = set()
+    node_ids: dict[str, str] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name:
-            qualname = "::".join((*scope, name)) if scope else name
-            idx.setdefault(qualname, _template_param_kinds(node))
+        if kind == "ClassTemplateDecl" and name and (
+            qualname := ("::".join((*scope, name)) if scope else name)
+        ) not in ambiguous:
+            _register_template_param_metadata(
+                idx, ambiguous, node_ids, qualname, node, _template_param_kinds(node)
+            )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
@@ -738,18 +851,83 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
     """``qualified template name -> per-position default-spelling list``
     (see :func:`_template_param_defaults`), scope-tracked identically to
     :func:`_index_template_param_kinds` (same reasoning applies here for
-    why a specialization's scope+name always matches its owning template's).
+    why a specialization's scope+name always matches its owning template's,
+    and the same conflicting-registration-is-ambiguous discipline for a
+    same-named member template nested in two DIFFERENT explicit outer
+    specializations -- see that function's own docstring).
+
+    A dependent default's raw spelling (``"T"`` in ``template<class T,
+    class U=T> struct A;``) names an EARLIER parameter of the SAME
+    declaration it appears on -- :func:`_specialization_spelling` resolves
+    it by looking up that text in the *tracked* names index
+    (:func:`_index_template_param_names`'s own fully-merged output). When
+    a CONFIRMED redeclaration (the sixth round's merge) contributes a
+    NEWLY adopted default and that redeclaration also renamed its
+    parameters, the raw text it carries names one of ITS OWN (renamed)
+    parameters, not the tracked ones -- e.g. ``template<class T, class U>
+    struct A;`` followed by ``template<class X, class Y=X> struct
+    A {...};`` spells the added default as literal ``"X"``, which the
+    tracked names index (still ``["T", "U"]`` here) never contains, so the
+    substitution silently fails (Codex review, fresh evidence, eighth
+    round; confirmed end to end this left the base unresolvable and a
+    real virtual-method addition undetected). Fixed by translating a
+    newly adopted default's dependent reference through THIS
+    declaration's own positional name list into the TRACKED name at that
+    same position (parameter order/count can't legally change across a
+    redeclaration of the same template, so position always lines up)
+    before merging it in.
+
+    The translation target is :func:`_index_template_param_names`'s own
+    output for the WHOLE tree, computed once up front, not a locally
+    hand-rolled "first name seen for this qualname" copy -- an earlier
+    version of this fix kept its own local shadow, updated only at a
+    qualname's very first sighting here, and it silently went stale
+    whenever an INTERMEDIATE redeclaration was the one that actually
+    named a previously-unnamed parameter: ``template<class, class>
+    struct A;`` (both unnamed) then ``template<class X, class Y> struct
+    A;`` (a redeclaration that names them) then ``template<class T, class
+    U=T> struct A {...};`` (a further redeclaration that adds a default)
+    -- the real, fully-merged names index correctly resolves to
+    ``["X", "Y"]``, but the stale local shadow here still held
+    ``[None, None]`` from the very first sighting, so the translation
+    target for the added default's position was falsy and the raw,
+    untranslated text was kept -- reproducing the identical unresolvable-
+    base failure (Codex review, fresh evidence, ninth round). Reusing
+    :func:`_index_template_param_names`'s own already-correct, fully-
+    merged result sidesteps the whole class of "which registration counts
+    as authoritative" bug rather than re-deriving (and risking
+    re-diverging) it a second time here.
     """
     idx: dict[str, list[str | None]] = {}
+    ambiguous: set[str] = set()
+    node_ids: dict[str, str] = {}
+    tracked_names_by_qualname = _index_template_param_names(root)
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name:
-            qualname = "::".join((*scope, name)) if scope else name
-            idx.setdefault(qualname, _template_param_defaults(node))
+        if kind == "ClassTemplateDecl" and name and (
+            qualname := ("::".join((*scope, name)) if scope else name)
+        ) not in ambiguous:
+            this_names = _template_param_names(node)
+            defaults = _template_param_defaults(node)
+            tracked_names = tracked_names_by_qualname.get(qualname)
+            if tracked_names is not None:
+                own_positions = {n: i for i, n in enumerate(this_names) if n}
+                defaults = [
+                    tracked_names[own_positions[d]]
+                    if d is not None
+                    and d in own_positions
+                    and own_positions[d] < len(tracked_names)
+                    and tracked_names[own_positions[d]]
+                    else d
+                    for d in defaults
+                ]
+            _register_template_param_metadata(
+                idx, ambiguous, node_ids, qualname, node, defaults
+            )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
@@ -788,18 +966,24 @@ def _template_param_names(class_template_decl: dict[str, Any]) -> list[str | Non
 def _index_template_param_names(root: dict[str, Any]) -> dict[str, list[str | None]]:
     """``qualified template name -> per-position parameter-name list`` (see
     :func:`_template_param_names`), scope-tracked identically to
-    :func:`_index_template_param_kinds`.
+    :func:`_index_template_param_kinds`, including its same conflicting-
+    registration-is-ambiguous discipline.
     """
     idx: dict[str, list[str | None]] = {}
+    ambiguous: set[str] = set()
+    node_ids: dict[str, str] = {}
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
-        if kind == "ClassTemplateDecl" and name:
-            qualname = "::".join((*scope, name)) if scope else name
-            idx.setdefault(qualname, _template_param_names(node))
+        if kind == "ClassTemplateDecl" and name and (
+            qualname := ("::".join((*scope, name)) if scope else name)
+        ) not in ambiguous:
+            _register_template_param_metadata(
+                idx, ambiguous, node_ids, qualname, node, _template_param_names(node)
+            )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         for child in node.get("inner", []) or []:
             walk(child, child_scope)
@@ -910,8 +1094,21 @@ def _specialization_spelling(
             if default != args[-1]:
                 break
             args.pop()
-    if not args:
-        return None
+        if not args:
+            # EVERY argument was popped as matching its own default --
+            # clang still prints an explicit, empty angle-bracket pair
+            # (`"A<>"`), never a bare `"A"` (Codex review, fresh evidence;
+            # confirmed with a real clang build:
+            # `template<class T=int> struct A {...}; struct D : A<> {...};`
+            # gives `bases[0].type.qualType == "A<>"` on the base
+            # reference). Returning `None` here (as the earlier
+            # no-arguments-at-all case above correctly does, for a
+            # template-template argument/pack-expansion/zero-parameter
+            # shape) would degrade this to an unresolvable base even
+            # though every argument is safely known -- unlike that case,
+            # this one has real, fully-resolved argument data; it's only
+            # the resulting spelling that happens to be the empty list.
+            return f"{name}<>"
     return f"{name}<{', '.join(args)}>"
 
 
@@ -999,13 +1196,37 @@ def build_specialization_index(
         param_names_by_qualname = _index_template_param_names(root)
     idx: dict[str, dict[str, Any]] = {}
 
-    def walk(node: Any, scope: tuple[str, ...]) -> None:
+    def walk(
+        node: Any, scope: tuple[str, ...], lookup_scope: tuple[str, ...]
+    ) -> None:
         if not isinstance(node, dict):
             return
         kind = node.get("kind")
         name = str(node.get("name") or "")
         if kind == "ClassTemplateSpecializationDecl" and name:
-            template_qualname = "::".join((*scope, name)) if scope else name
+            # *lookup_scope* -- deliberately the ORIGINAL, unextended scope
+            # convention (grows only through `_SCOPE_NODE_KINDS`, exactly
+            # like `_index_template_param_kinds`/`_index_template_param_
+            # defaults`/`_index_template_param_names`'s own walks) -- is
+            # used ONLY for the param_kinds/defaults/names lookup below,
+            # kept deliberately separate from *scope* (Codex review, fresh
+            # evidence, second round): those three index functions register
+            # a NESTED template's own `ClassTemplateDecl` under ITS
+            # natural, unspelled scope (confirmed empirically: nested `A`
+            # inside `Outer<int>`'s specialization body registers under
+            # bare `"A"`, since `ClassTemplateSpecializationDecl` doesn't
+            # extend scope in THEIR walks at all), never under the outer
+            # specialization's SPELLED qualname (`"Outer<int>::A"`).
+            # Looking it up with the spelled *scope* (as an earlier fix
+            # here did) missed every entry, silently degrading a nested
+            # specialization with DEFAULTED arguments back to the same
+            # unresolvable-base false negative this whole mechanism exists
+            # to close (`Outer<int>::A<>`'s own trailing default couldn't
+            # be trimmed without a param_defaults hit) -- confirmed with a
+            # real clang build reproducing the exact mismatch.
+            template_qualname = (
+                "::".join((*lookup_scope, name)) if lookup_scope else name
+            )
             spelling = _specialization_spelling(
                 node,
                 name,
@@ -1020,9 +1241,33 @@ def build_specialization_index(
                     not _is_record_definition(existing) and _is_record_definition(node)
                 ):
                     idx[qualname] = node
-        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
+            # A specialization containing its own NESTED specialization
+            # (`struct D : Outer<int>::A<double>`) must descend under the
+            # OUTER specialization's own spelled qualname (`"Outer<int>"`),
+            # not its bare `name` (`"Outer"`) -- `ClassTemplateSpecialization
+            # Decl` is deliberately not in `_SCOPE_NODE_KINDS` (it isn't an
+            # ordinary namespace/class/linkage-spec scope), so falling
+            # through to the generic branch below would silently drop the
+            # outer specialization's template arguments from the nested
+            # one's qualname, indexing it as bare `"A<double>"` instead of
+            # `"Outer<int>::A<double>"` (Codex review, fresh evidence;
+            # mirrors `dumper_clang.py`'s own `_walk` handling of the
+            # identical shape for scoping a specialization's own members).
+            # Falls back to the unscoped behavior (bare `name`) when the
+            # spelling can't be reconstructed, same as every other
+            # unresolvable-specialization degradation in this module. Only
+            # *scope* (the registration/descent scope) extends this way --
+            # *lookup_scope* never does, per the note above.
+            child_scope = (*scope, spelling) if spelling else scope
+            child_lookup_scope = lookup_scope
+        elif kind in _SCOPE_NODE_KINDS and name:
+            child_scope = (*scope, name)
+            child_lookup_scope = (*lookup_scope, name)
+        else:
+            child_scope = scope
+            child_lookup_scope = lookup_scope
         for child in node.get("inner", []) or []:
-            walk(child, child_scope)
+            walk(child, child_scope, child_lookup_scope)
 
-    walk(root, ())
+    walk(root, (), ())
     return idx

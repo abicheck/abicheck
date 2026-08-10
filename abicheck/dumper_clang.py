@@ -809,6 +809,7 @@ class _ClangAstParser:
         self._walk(
             root,
             scope=(),
+            lookup_scope=(),
             current_file="",
             access="public",
             extern_c=False,
@@ -822,6 +823,7 @@ class _ClangAstParser:
         node: dict[str, Any],
         *,
         scope: tuple[str, ...],
+        lookup_scope: tuple[str, ...],
         current_file: str,
         access: str,
         extern_c: bool,
@@ -834,6 +836,22 @@ class _ClangAstParser:
         node in source order, so the last file seen in a child's *subtree* must
         flow to the next sibling. Returns the last file seen anywhere below
         *node* so the caller can thread it forward.
+
+        *lookup_scope* is a SEPARATE scope tuple from *scope*, growing only
+        through `_SCOPE_NODE_KINDS` (never through a `ClassTemplateSpecial
+        izationDecl`'s own spelling) -- exactly the convention `_index_
+        template_param_kinds`/`_index_template_param_defaults`/`_index_
+        template_param_names` use for their own qualname keys (Codex
+        review, fresh evidence, second round: see the identical *lookup_
+        scope* split in `dumper_clang_vtable.build_specialization_index`
+        for the full empirical reasoning -- those three index functions
+        register a NESTED template's own `ClassTemplateDecl` under its
+        natural, unspelled scope, confirmed empirically to differ from
+        *scope*'s own spelled qualname the moment a specialization ancestor
+        is involved. Using *scope* for this lookup silently missed every
+        such entry, degrading a nested specialization's own member back to
+        the SAME owner-mismatch false positive the `ClassTemplateSpecial
+        izationDecl` branch below was originally built to fix).
         """
         if not isinstance(node, dict):
             return current_file
@@ -861,6 +879,7 @@ class _ClangAstParser:
         )
         if kind in _SCOPE_NODE_KINDS and name:
             child_scope = (*scope, name)
+            child_lookup_scope = (*lookup_scope, name)
         elif kind == "ClassTemplateSpecializationDecl" and name:
             # A concrete template specialization's own members (e.g. `A<int>
             # ::f`) are otherwise scoped as if declared at the SAME level as
@@ -890,7 +909,9 @@ class _ClangAstParser:
             # back to the unscoped behavior (bare `name`, degrading the SAME
             # way an unresolvable base already degrades elsewhere in this
             # module) when the spelling can't be reconstructed.
-            template_qualname = "::".join((*scope, name)) if scope else name
+            template_qualname = (
+                "::".join((*lookup_scope, name)) if lookup_scope else name
+            )
             spelling = _specialization_spelling(
                 node,
                 name,
@@ -899,8 +920,10 @@ class _ClangAstParser:
                 self._template_param_names_by_qualname.get(template_qualname),
             )
             child_scope = (*scope, spelling) if spelling else scope
+            child_lookup_scope = lookup_scope
         else:
             child_scope = scope
+            child_lookup_scope = lookup_scope
         running = (
             _default_record_access(node)
             if kind in ("CXXRecordDecl", "RecordDecl")
@@ -935,6 +958,7 @@ class _ClangAstParser:
             file = self._walk(
                 child,
                 scope=child_scope,
+                lookup_scope=child_lookup_scope,
                 current_file=file,
                 access=child.get("access", running),
                 extern_c=child_extern_c,

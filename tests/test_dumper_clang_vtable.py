@@ -21,6 +21,14 @@ emit surface is exercised without clang installed). Every shape here was
 first verified against a REAL ``clang++ -Xclang -ast-dump=json`` run before
 being reduced to a fixture -- see ``dumper_clang_vtable.py``'s own docstring
 for the exact empirical findings this module's design rests on.
+
+Class-template REDECLARATION identity (kinds/defaults/names merging across
+a ``previousDecl`` chain, and the ambiguity guard for two unrelated
+declarations sharing a bare qualname) lives in the sibling
+``test_dumper_clang_vtable_redecl.py`` instead -- split out once this file
+crossed the AI-readiness 2000-line hard cap (``tests/CLAUDE.md``'s
+file-size convention). Both files share their hand-built node builders via
+``tests._dumper_clang_vtable_helpers``.
 """
 
 from __future__ import annotations
@@ -32,67 +40,16 @@ from abicheck.dumper_clang_vtable import (
     _normalize_param_type,
     _top_level_param_list_close,
 )
-
-
-def _tu(*inner: dict) -> dict:
-    return {"kind": "TranslationUnitDecl", "inner": list(inner)}
-
-
-def _record(name: str, *inner: dict, bases: list[dict] | None = None) -> dict:
-    node = {
-        "kind": "CXXRecordDecl",
-        "name": name,
-        "tagUsed": "struct",
-        "loc": {"file": "include/foo.h", "line": 1},
-        "completeDefinition": True,
-        "inner": list(inner),
-    }
-    if bases:
-        node["bases"] = bases
-    return node
-
-
-def _base(qualtype: str, *, is_virtual: bool = False) -> dict:
-    return {"type": {"qualType": qualtype}, "access": "public", "isVirtual": is_virtual}
-
-
-def _method(
-    name: str,
-    mangled: str,
-    *,
-    virtual: bool = False,
-    override_attr: bool = False,
-    params: list[str] | None = None,
-    is_const: bool = False,
-) -> dict:
-    qual = f"void ({', '.join(params or [])})" + (" const" if is_const else "")
-    inner = [{"kind": "ParmVarDecl", "type": {"qualType": p}} for p in (params or [])]
-    if override_attr:
-        inner.append({"kind": "OverrideAttr"})
-    node: dict = {
-        "kind": "CXXMethodDecl",
-        "name": name,
-        "mangledName": mangled,
-        "type": {"qualType": qual},
-        "inner": inner,
-    }
-    if virtual:
-        node["virtual"] = True
-    return node
-
-
-def _dtor(mangled: str, *, virtual: bool = False, implicit: bool = False) -> dict:
-    node: dict = {"kind": "CXXDestructorDecl", "mangledName": mangled}
-    if virtual:
-        node["virtual"] = True
-    if implicit:
-        node["isImplicit"] = True
-    return node
-
-
-def _types(root: dict) -> dict[str, object]:
-    return {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
-
+from tests._dumper_clang_vtable_helpers import (
+    _base,
+    _dtor,
+    _forward_specialization,
+    _method,
+    _record,
+    _specialization,
+    _tu,
+    _types,
+)
 
 # ── primary vtable, no inheritance ────────────────────────────────────────
 
@@ -796,21 +753,6 @@ def test_ref_qualifier_mismatch_survives_trailing_exception_spec() -> None:
 # ── record (Codex review, fresh evidence, P1) ──────────────────────────
 
 
-def _specialization(name: str, *inner: dict, type_args: list[str]) -> dict:
-    """A ``ClassTemplateSpecializationDecl`` node, mirroring real clang
-    output: one ``TemplateArgument`` child per type argument (each carrying
-    only the ``type.qualType`` this module's spelling-reconstruction
-    reads), followed by *inner*'s own children.
-    """
-    args = [{"kind": "TemplateArgument", "type": {"qualType": t}} for t in type_args]
-    return {
-        "kind": "ClassTemplateSpecializationDecl",
-        "name": name,
-        "completeDefinition": True,
-        "inner": [*args, *inner],
-    }
-
-
 def test_base_resolved_via_concrete_template_specialization() -> None:
     """A base that is a CONCRETE template specialization (``struct D :
     A<int> {...};``) used to be entirely unresolvable: clang emits the
@@ -901,18 +843,6 @@ def test_specialization_base_override_with_no_keyword_replaces_slot_in_place() -
     # matches D.bases == ["A<int>"] and produces a false
     # TYPE_VTABLE_CHANGED once the base above is resolved at all.
     assert funcs["_ZN1AIiE1fEi"].name == "A<int>::f"
-
-
-def _forward_specialization(name: str, *, type_args: list[str]) -> dict:
-    """A forward-declared explicit specialization node -- no
-    ``completeDefinition``, no member children -- sharing the same spelling
-    a later complete definition would."""
-    args = [{"kind": "TemplateArgument", "type": {"qualType": t}} for t in type_args]
-    return {
-        "kind": "ClassTemplateSpecializationDecl",
-        "name": name,
-        "inner": args,
-    }
 
 
 def test_specialization_forward_declaration_does_not_shadow_complete_definition() -> (
@@ -1353,3 +1283,165 @@ def test_partially_dependent_default_is_conservatively_not_substituted() -> None
     # Wrapper<double>>", which never matches the base reference's own
     # "A<double>" -- correctly conservative rather than guessing.
     assert types["D"].vtable == []
+
+
+def test_fully_defaulted_specialization_still_indexes_as_empty_angle_brackets() -> (
+    None
+):
+    """Codex review, fresh evidence (P1): when EVERY template argument
+    equals its own default, popping them all left ``args`` empty and the
+    whole specialization returned ``None`` (unresolvable) -- but clang
+    still prints an explicit, empty angle-bracket pair (``"A<>"``) on the
+    base reference, never a bare ``"A"`` (confirmed with a real clang
+    build: ``template<class T=int> struct A {...}; struct D : A<> {...};``
+    gives ``bases[0].type.qualType == "A<>"``). Unlike a genuine
+    no-arguments case (a template-template argument, pack expansion, or
+    zero-parameter template), every argument here IS safely known -- only
+    the resulting joined spelling happens to be empty.
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "inner": [
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "T",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "int"},
+                    },
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIiE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["int"],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIiE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
+
+
+def test_nested_specialization_with_defaulted_argument_resolves() -> None:
+    """Codex review, fresh evidence (P1, second round): a NESTED template's
+    own defaulted argument (``Outer<int>::A<>``) needs its
+    param_kinds/param_defaults/param_names looked up under the SAME
+    unspelled scope the whole-AST index functions themselves use for a
+    nested template's own ``ClassTemplateDecl`` (confirmed empirically:
+    ``_index_template_param_kinds`` registers a specialization's own
+    nested template under its bare, unqualified name -- e.g. ``"A"`` --
+    never under the outer specialization's spelled qualname
+    ``"Outer<int>::A"``, since ``ClassTemplateSpecializationDecl`` never
+    extends scope in those three index functions' own walks). Looking the
+    lookup up with the SPELLED scope (as an earlier fix here did, for
+    getting the FINAL registration qualname right) missed every entry,
+    leaving the trailing default un-trimmed and the whole nested
+    specialization unresolvable.
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "Outer",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("Outer"),
+                {
+                    "kind": "ClassTemplateSpecializationDecl",
+                    "name": "Outer",
+                    "completeDefinition": True,
+                    "inner": [
+                        {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                        {
+                            "kind": "ClassTemplateDecl",
+                            "name": "A",
+                            "inner": [
+                                {
+                                    "kind": "TemplateTypeParmDecl",
+                                    "name": "U",
+                                    "defaultArg": {
+                                        "kind": "TemplateArgument",
+                                        "type": {"qualType": "int"},
+                                    },
+                                },
+                                _record("A"),
+                                _specialization(
+                                    "A",
+                                    {
+                                        "kind": "CXXMethodDecl",
+                                        "name": "f",
+                                        "mangledName": "_ZN5OuterIiE1AIiE1fEv",
+                                        "type": {"qualType": "void ()"},
+                                        "virtual": True,
+                                    },
+                                    type_args=["int"],
+                                ),
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+        _record("D", bases=[_base("Outer<int>::A<>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN5OuterIiE1AIiE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
+
+
+def test_nested_specialization_indexes_under_outer_specialization_qualname() -> None:
+    """Codex review, fresh evidence (P2): a specialization containing its
+    own NESTED specialization (``struct D : Outer<int>::A<double>``) must
+    descend under the OUTER specialization's own SPELLED qualname
+    (``"Outer<int>"``), not its bare ``name`` (``"Outer"``) --
+    ``ClassTemplateSpecializationDecl`` is deliberately not in
+    ``_SCOPE_NODE_KINDS`` (it isn't an ordinary namespace/class/
+    linkage-spec scope), so falling through to that generic branch would
+    silently drop the outer specialization's own template arguments from
+    the nested one's qualname, indexing it as bare ``"A<double>"`` instead
+    of ``"Outer<int>::A<double>"`` and leaving the base unresolvable.
+    """
+    inner_spec = _specialization(
+        "A",
+        {
+            "kind": "CXXMethodDecl",
+            "name": "f",
+            "mangledName": "_ZN5OuterIiE1AIdE1fEv",
+            "type": {"qualType": "void ()"},
+            "virtual": True,
+        },
+        type_args=["double"],
+    )
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "Outer",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                _record("Outer"),
+                {
+                    "kind": "ClassTemplateSpecializationDecl",
+                    "name": "Outer",
+                    "completeDefinition": True,
+                    "inner": [
+                        {"kind": "TemplateArgument", "type": {"qualType": "int"}},
+                        inner_spec,
+                    ],
+                },
+            ],
+        },
+        _record("D", bases=[_base("Outer<int>::A<double>")]),
+    )
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN5OuterIiE1AIdE1fEv"]
+    assert types["D"].vptr_offset_bits == 0
