@@ -15,6 +15,20 @@
   evidence that layout held still, and is not a fallback for missing
   information.
 
+- **A vtable finding is no longer suppressed for an over-aligned class
+  gaining a *pure* virtual** — a pure virtual has no out-of-line definition,
+  so the DWARF path drops its declaration-only DIE from `snapshot.functions`
+  while still counting it as a vtable child of the class; with `alignas`
+  absorbing the new vptr the size does not move either, so the evidence guard
+  reached its size backstop and suppressed the transition. It now also
+  consults `RecordType.vptr_offset_bits` — the layout descriptor's own
+  witness of polymorphism, and the one signal there that is not another
+  projection of the same subprogram DIEs. The break was not hidden in
+  practice (`diff_layout`'s independent `vptr_introduced` fires on the same
+  transition, so the verdict stayed `BREAKING`), but a guard that leans on a
+  sibling detector to cover its own blind spot is one refactor from being
+  wrong.
+
 ### Added
 
 - **Severity-blocking compatible findings are named in `scan --against`

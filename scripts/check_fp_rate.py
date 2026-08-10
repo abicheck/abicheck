@@ -918,6 +918,38 @@ def _overaligned_first_vptr_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     )
 
 
+def _overaligned_pure_virtual_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The sibling of the case above, and the one it does not cover: a *pure*
+    # virtual has no out-of-line definition, so `dwarf_snapshot` drops its
+    # declaration-only DIE from `snapshot.functions` while still counting it
+    # as a vtable child of the class. Both owned-signature sets therefore read
+    # empty, and `alignas` keeps the size from moving, so the size backstop
+    # suppressed a class gaining its first vptr *and* becoming abstract
+    # (Codex review). Reproduced against g++ with
+    # `struct alignas(8) A { virtual void f() = 0; }` compiled alongside a
+    # concrete derived class (which is what makes GCC emit A's complete DIE
+    # rather than a `DW_AT_declaration` stub): old vtable `[]`, new vtable
+    # `['_ZN1A1fEv']`, both 8 bytes, and `_ZN1A1fEv` absent from the function
+    # map on both sides.
+    #
+    # `vptr_offset_bits` is the layout descriptor's own witness, and the only
+    # signal here that is not another projection of the same subprogram DIEs.
+    def cls(vtable: list[str], vptr: int | None) -> RecordType:
+        return RecordType(
+            name="Abstract", kind="class", size_bits=64,
+            vtable=vtable, vptr_offset_bits=vptr,
+        )
+
+    return (
+        _snap("1", functions=[_fn("api", ret="Abstract *")], types=[cls([], None)]),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Abstract *")],
+            types=[cls(["Abstract::f()"], 0)],
+        ),
+    )
+
+
 def _namespaced_leaf_vtable_removal_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     # CastXML records a namespaced class under its bare leaf (`A`) while the
     # method's mangled name is fully qualified (`ns::A::foo`), so an *exact*
@@ -1033,6 +1065,11 @@ CORPUS: list[Case] = [
         "overaligned_first_vptr_stays_breaking",
         False,
         _overaligned_first_vptr_stays_breaking,
+    ),
+    Case(
+        "overaligned_pure_virtual_stays_breaking",
+        False,
+        _overaligned_pure_virtual_stays_breaking,
     ),
     Case("empty_base_added_stays_breaking", False, _empty_base_added_stays_breaking),
     Case(
@@ -1530,6 +1567,7 @@ CASE_CATEGORY: dict[str, str] = {
     "vtable_reorder_stays_breaking": "evidence-absence",
     "namespaced_leaf_vtable_removal_stays_breaking": "evidence-absence",
     "overaligned_first_vptr_stays_breaking": "evidence-absence",
+    "overaligned_pure_virtual_stays_breaking": "evidence-absence",
     "empty_base_added_stays_breaking": "evidence-absence",
     "nonempty_base_added_stays_breaking": "evidence-absence",
     # versioned-symbol scheme / multi-.so bundle

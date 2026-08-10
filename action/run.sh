@@ -1028,7 +1028,12 @@ _report_compat_verdict() {
     echo "$_answer"
     return
   fi
-  sed -n 's/.*Verdict:[^A-Z]*\(API_BREAK\|BREAKING\).*/\1/p' \
+  # `sed -E`, not the basic-regex `\(a\|b\)` the other readers here get away
+  # with not needing: BSD sed (macOS runners, which this Action supports and
+  # CI covers) has no alternation in BRE at all, so the pattern silently
+  # matched nothing there and every demoted break read as COMPATIBLE on
+  # macOS while passing on Linux. `-E` is accepted by both.
+  sed -nE 's/.*Verdict:[^A-Z]*(API_BREAK|BREAKING).*/\1/p' \
     <<<"$(_text_report_content)" | head -1
 }
 

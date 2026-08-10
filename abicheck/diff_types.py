@@ -1167,6 +1167,26 @@ def _vtable_transition_is_evidenced(
         # artifact or provenance evidence (`_ZTV` presence, per-finding
         # providers) the type-level detector does not yet receive.
         return True
+    if (t_old.vptr_offset_bits is None) != (t_new.vptr_offset_bits is None):
+        # The layout descriptor's own witness of polymorphism, and the one
+        # signal here that is not another projection of the same subprogram
+        # DIEs. It closes the case both checks above miss: a *pure* virtual
+        # has no out-of-line definition, so ``dwarf_snapshot`` drops its
+        # declaration-only DIE from ``snapshot.functions`` while still
+        # counting it as a vtable child of the class -- leaving both owned
+        # signature sets empty. With ``alignas`` absorbing the new vptr into
+        # existing padding the size does not move either, so an over-aligned
+        # class gaining its first pure virtual reached the size check and was
+        # suppressed (Codex review; reproduced against g++ with
+        # ``struct alignas(8) A { virtual void f() = 0; }``).
+        #
+        # The break was not actually hidden in that run -- ``diff_layout``'s
+        # independent ``_check_vptr_introduced`` fires on the same transition
+        # and the verdict stayed BREAKING -- but a guard that leans on a
+        # sibling detector to cover its own blind spot is one refactor away
+        # from being wrong, and this reads the same field that detector
+        # trusts.
+        return True
     if t_old.size_bits is None or t_new.size_bits is None:
         return True
     if t_old.size_bits != t_new.size_bits:

@@ -151,10 +151,15 @@ FACT_LOSS_BASELINE = 0
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
     "public": 1,
-    "exports": 29,
+    "exports": 31,
     "all": 0,
 }
-#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 (the last +2 is
+#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 (the last +2 is
+#: `overaligned_pure_virtual_stays_breaking`, the FN sentinel for a pure
+#: virtual: its declaration-only DIE never reaches `snapshot.functions`, so
+#: the owned-signature check cannot see it and `vptr_offset_bits` answers
+#: instead. Same reading as every step below -- a real break with no export
+#: table to resolve against. The step before that +2 is
 #: `namespaced_leaf_vtable_removal_stays_breaking`, another FN sentinel --
 #: a real vtable removal an exact owner comparison had been suppressing) as the `evidence-absence` corpus cases
 #: landed (vtable first, then bases). Attribution for the second step, same

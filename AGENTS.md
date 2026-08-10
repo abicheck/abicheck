@@ -1018,9 +1018,29 @@ Once a root command genuinely clears the bar above, pick the right home:
   size does not, making it indistinguishable from capture noise without a
   real polymorphism walk over both sides' base chains
   (`diff_vtable_layout._is_polymorphic`) plus the per-finding provenance the
-  entry below describes. Guarded by three FP-corpus cases under the
-  `evidence-absence` axis (one FP guard, two FN sentinels) and three
-  Hypothesis properties in `tests/test_detector_properties.py`.
+  entry below describes. (4) A *pure* virtual reached that same size backstop
+  for a different reason, and this one **was** closed: a pure virtual has no
+  out-of-line definition, so `dwarf_snapshot` drops its declaration-only DIE
+  from `snapshot.functions` while still counting it as a vtable child of the
+  class, leaving both owned-signature sets empty — and with `alignas`
+  absorbing the new vptr the size does not move either. Reproduced against
+  g++ (`struct alignas(8) A { virtual void f() = 0; }` compiled alongside a
+  concrete derived class, which is what makes GCC emit A's complete DIE
+  rather than a `DW_AT_declaration` stub): old vtable `[]`, new vtable
+  `['_ZN1A1fEv']`, both 8 bytes, `_ZN1A1fEv` absent from the function map on
+  both sides. The guard now also consults `RecordType.vptr_offset_bits`, the
+  layout descriptor's own witness and the only signal here that is not
+  another projection of the same subprogram DIEs. Worth recording that the
+  break was **not** actually hidden: `diff_layout._check_vptr_introduced`
+  fires independently on the same transition and the verdict stayed
+  `BREAKING`, which is also why the FP-rate corpus (a verdict-level gate)
+  could not catch this and the regression coverage is a direct unit test on
+  the predicate (`tests/test_vtable_evidence_guard.py`) instead. A guard
+  leaning on a sibling detector to cover its own blind spot is one refactor
+  from being wrong, so it was fixed anyway. Guarded by four FP-corpus cases
+  under the `evidence-absence` axis (one FP guard, three FN sentinels), the
+  unit tests above, and three Hypothesis properties in
+  `tests/test_detector_properties.py`.
 
 - **Evidence-provider model — investigated, found not to reproduce as
   described; no fix applied.** A status-review follow-up asked whether
