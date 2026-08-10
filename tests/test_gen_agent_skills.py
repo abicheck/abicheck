@@ -381,6 +381,57 @@ def test_a_fence_inside_a_block_quote_is_a_hard_error(synthetic, fence):
         gen.render_all(gen.SRC_DIR)
 
 
+@pytest.mark.parametrize("fence", ["```md", "~~~md"], ids=["tick", "tilde"])
+def test_a_fence_indented_under_a_list_item_is_a_hard_error(synthetic, fence):
+    """A list item's content indent is four spaces; the fence mask reads at
+    most three, so such a block is processed as prose and its example links
+    rewritten. Rejected rather than partially supported, same as the
+    block-quote container."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    "- step one:\n\n"
+                    f"    {fence}\n"
+                    "    [example](../../docs/use/cli-usage.md)\n"
+                    f"    {fence[:3]}\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="under a list item"):
+        gen.render_all(gen.SRC_DIR)
+
+
+@pytest.mark.parametrize(
+    ("body", "why"),
+    [
+        (
+            "prose:\n\n    ```\n    literal fence text\n    ```\n",
+            "a top-level indented code block whose content happens to be fence "
+            "characters is literal, not a container-indented fence",
+        ),
+        (
+            "````md\n```\n    ```\n```\n````\n",
+            "fence characters printed inside a top-level fenced block are "
+            "content, whatever their indent",
+        ),
+        (
+            "- step\n\n```bash\nabicheck compare a b\n```\n",
+            "a flush-left fence following a list is an ordinary fence",
+        ),
+    ],
+    ids=["indented-block", "fence-in-fence", "flush-left-after-list"],
+)
+def test_an_ambiguous_four_space_indent_is_not_read_as_a_nested_fence(body, why):
+    """The guard runs after both block-level masks precisely so these cases
+    are already masked by the time it looks. Flagging any of them would reject
+    a valid source for demonstrating what Markdown syntax looks like."""
+    assert gen._container_indented_fence_line(body) is None, why
+
+
 def test_a_tilde_run_does_not_close_a_backtick_fence(synthetic):
     """The delimiter character must be consistent: `~~~` cannot close a
     backtick fence, so the block runs on and its content stays masked."""

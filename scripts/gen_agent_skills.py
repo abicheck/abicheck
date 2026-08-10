@@ -54,6 +54,7 @@ import argparse
 import re
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -170,6 +171,18 @@ _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 #: silently. Same rule as every other construct the rewrite cannot handle.
 _BLOCKQUOTED_FENCE_RE = re.compile(r"^ {0,3}(?:> ?)+ {0,3}(?:`{3,}|~{3,})", re.M)
 
+#: A fence carrying container indentation — four or more spaces, which under a
+#: list item is the item's own content indent rather than an indented code
+#: block. `_FENCE_RE` allows at most three, so such a block is never masked and
+#: its examples are rewritten as prose, exactly as in the block-quote case.
+#:
+#: Only meaningful against text the two *block-level* passes have already
+#: masked (`_mask_block_code`): a four-space-indented fence at top level is
+#: literal content inside an indented code block, and the fence delimiters
+#: printed inside a top-level fenced block are content too. Both are masked by
+#: then, so what survives this pattern is a genuine list-nested fence.
+_CONTAINER_INDENTED_FENCE_RE = re.compile(r"^(?: {4,}|\t)[ \t]*(?:`{3,}|~{3,})")
+
 #: Placeholder body — `\x00` cannot occur in a Markdown source, so a masked
 #: region is invisible to every link pattern and cannot be produced by one.
 _MASK = "\x00m{index}\x00"
@@ -225,6 +238,64 @@ def _indented_code_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _masker(replacements: dict[str, str]) -> Callable[[re.Match[str]], str]:
+    """A `re.sub` replacement that banks each match under a fresh placeholder.
+
+    The placeholder keeps the region's newline count so every line number
+    reported downstream still refers to the real source line.
+    """
+
+    def mask(match: re.Match[str]) -> str:
+        original = match.group(0)
+        token = _MASK.format(index=len(replacements))
+        placeholder = token + "\n" * original.count("\n")
+        replacements[placeholder] = original
+        return placeholder
+
+    return mask
+
+
+def _mask_block_code(text: str, replacements: dict[str, str]) -> str:
+    """Mask indented code blocks, then fenced ones. Block level only.
+
+    Split out of `mask_code_regions` because the container-indented-fence
+    guard needs exactly this intermediate state: both block-level passes done
+    (which is what makes a *surviving* indented fence meaningful) but inline
+    code spans not yet paired — that pass incidentally masks the backtick form
+    of the very construct the guard looks for.
+    """
+    # Indented blocks first, by line range: they are defined by position, and
+    # masking them up front keeps the regex pass below from seeing content the
+    # renderer shows literally.
+    lines = text.split("\n")
+    for start, end in reversed(_indented_code_spans(text)):
+        original = "\n".join(lines[start:end])
+        token = _MASK.format(index=len(replacements))
+        placeholder = token + "\n" * original.count("\n")
+        replacements[placeholder] = original
+        lines[start:end] = placeholder.split("\n")
+    return _FENCE_RE.sub(_masker(replacements), "\n".join(lines))
+
+
+def _container_indented_fence_line(text: str) -> int | None:
+    """1-based line of a fence opened under a list item, or `None`.
+
+    A four-space indent is ambiguous in Markdown, so this cannot be answered
+    by a pattern alone: at top level it opens an indented code block (the
+    fence characters are literal content), while under a list item it is the
+    item's own content indent and the fence is real. `_indented_code_spans`
+    already resolves that ambiguity — deliberately declining to treat anything
+    inside a list as an indented block — so running the two block-level masks
+    first and asking what is *left* distinguishes the two cases without a
+    second, independently-drifting notion of list state.
+    """
+    residue = _mask_block_code(text, {})
+    for index, line in enumerate(residue.split("\n")):
+        if _CONTAINER_INDENTED_FENCE_RE.match(line):
+            return index + 1
+    return None
+
+
 def mask_code_regions(text: str) -> tuple[str, dict[str, str]]:
     """Replace code blocks and spans with opaque placeholders.
 
@@ -237,27 +308,8 @@ def mask_code_regions(text: str) -> tuple[str, dict[str, str]]:
     messages keep reporting real source line numbers.
     """
     replacements: dict[str, str] = {}
-
-    # Indented blocks first, by line range: they are defined by position, and
-    # masking them up front keeps the regex passes below from seeing content
-    # the renderer shows literally.
-    lines = text.split("\n")
-    for start, end in reversed(_indented_code_spans(text)):
-        original = "\n".join(lines[start:end])
-        token = _MASK.format(index=len(replacements))
-        placeholder = token + "\n" * original.count("\n")
-        replacements[placeholder] = original
-        lines[start:end] = placeholder.split("\n")
-    text = "\n".join(lines)
-
-    def mask(match: re.Match[str]) -> str:
-        original = match.group(0)
-        token = _MASK.format(index=len(replacements))
-        placeholder = token + "\n" * original.count("\n")
-        replacements[placeholder] = original
-        return placeholder
-
-    return _INLINE_CODE_RE.sub(mask, _FENCE_RE.sub(mask, text)), replacements
+    masked = _mask_block_code(text, replacements)
+    return _INLINE_CODE_RE.sub(_masker(replacements), masked), replacements
 
 
 def unmask_code_regions(text: str, replacements: dict[str, str]) -> str:
@@ -634,6 +686,19 @@ def _render(
             "quote. The mask anchors on the line start and does not read "
             "container prefixes, so the block would be processed as prose and "
             "its example links rewritten. Move the example out of the quote."
+        )
+
+    # Same failure, the other container: a fence indented to a list item's own
+    # content column. Rejected for the same reason the block-quote form is —
+    # supporting it means real container parsing, and a partial parser that
+    # masks the wrong span fails silently.
+    nested_fence = _container_indented_fence_line(body)
+    if nested_fence is not None:
+        raise SkillGenerationError(
+            f"{source_path}: line ~{nested_fence}: fenced code block indented "
+            "under a list item. The mask reads at most three leading spaces, "
+            "so the block would be processed as prose and its example links "
+            "rewritten. Move the example out of the list, to the left margin."
         )
 
     # Code examples are literal content: their link syntax must be neither
