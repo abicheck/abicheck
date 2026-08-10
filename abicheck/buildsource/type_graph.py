@@ -1281,6 +1281,18 @@ def _emit_template_parameter_edges(
     - ``template <class T = detail::Impl> struct Box`` — the default argument
       (``defaultArg.type.qualType``), role ``default_template_arg``.
 
+    **Scope note (Codex review, fresh evidence):** ``template_param`` answers
+    "what type does this *parameter* require", not "what does a specific
+    *instantiation's argument* reference" — a declaration-valued non-type
+    argument at a use site (``Holder<&detail::f>``) is a different question
+    this function does not answer, resolved instead (when it is resolved at
+    all) via a ``ClassTemplateSpecializationDecl``'s own ``TemplateArgument.
+    decl`` cross-reference — exactly ``template_graph.py``'s reserved,
+    unpopulated ``TEMPLATE_USES_DECL``, not this role. ``_walk_types``
+    deliberately never emits edges for a ``ClassTemplateSpecializationDecl``
+    node at all (see its own comment), so no code path here could reach that
+    case even incidentally.
+
     Two default-argument shapes are deliberately **not** emitted, because
     clang's JSON simply does not carry the dependency (both verified against
     real Clang 18 output, not assumed):

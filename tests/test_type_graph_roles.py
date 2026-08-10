@@ -398,6 +398,59 @@ def test_template_with_no_recognized_templated_child_emits_nothing() -> None:
     assert _find(ast, "template_param") == []
 
 
+# ── scope boundary: template_param is a parameter-type question, not an
+#    argument-value question (Codex review, fresh evidence, second round) ──
+
+
+def test_declaration_valued_specialization_argument_emits_no_template_param_edge() -> (
+    None
+):
+    """``template_param`` answers "what type does the parameter require",
+    never "what does a specific instantiation's argument reference".
+
+    A declaration-valued non-type argument at a use site
+    (``Holder<&detail::f>``) resolves — when it resolves at all — through a
+    ``ClassTemplateSpecializationDecl``'s own ``TemplateArgument.decl``
+    cross-reference, which is ``template_graph.py``'s reserved, unpopulated
+    ``TEMPLATE_USES_DECL`` (G29 Phase 5 item 1), not this role.
+    ``_walk_types`` deliberately never emits edges for a
+    ``ClassTemplateSpecializationDecl`` node at all (misattribution to the
+    shared generic template otherwise), so this AST shape — verified
+    against real Clang 18 — produces nothing here, correctly.
+    """
+    ast = _tu(
+        _detail_ns(),
+        {"kind": "FunctionDecl", "name": "f", "type": {"qualType": "void ()"}},
+        _namespace(
+            "api",
+            _class_template("Holder", _non_type_parm("H", "detail::Handle")),
+            {
+                "kind": "ClassTemplateSpecializationDecl",
+                "name": "Holder",
+                "inner": [
+                    {
+                        "kind": "TemplateArgument",
+                        "decl": {
+                            "kind": "FunctionDecl",
+                            "name": "f",
+                            "type": {"qualType": "void ()"},
+                        },
+                    }
+                ],
+            },
+        ),
+    )
+    # The parameter's own type still resolves — that part of the role is
+    # unaffected by this scope boundary.
+    assert _find(ast, "template_param") == [
+        (EDGE_TYPE_HAS_FIELD_TYPE, "api::Holder", "detail::Handle", CONF_HIGH)
+    ]
+    # The specialization's own argument-declaration reference (naming the
+    # private free function `f`) is never emitted under any role — the
+    # load-bearing assertion this test exists for.
+    assert not any(e.dst in ("f", "detail::f") for e in parse_clang_ast_types(ast))
+
+
 @pytest.mark.parametrize(
     "inner",
     [
@@ -709,6 +762,7 @@ struct Impl { int x; };
 using Handle = int;
 constexpr Handle K = 3;
 template <class> struct Def {};
+void f();
 }
 namespace api {
 enum class Color : detail::Handle { Red };
@@ -723,6 +777,8 @@ template <detail::Handle H, class U = detail::Impl> void slot();
 int detail::Impl::*pm;
 void (detail::Impl::*pmf)(int);
 template <template <detail::Handle H> class C> struct Outer { C<0> c; };
+template <void (*Fn)()> struct Holder {};
+using Public = Holder<&detail::f>;
 }
 """
 
@@ -770,6 +826,24 @@ def test_real_clang_emits_every_new_role_end_to_end(tmp_path) -> None:
         "a non-type parameter nested inside a template-template parameter "
         "still resolves onto the outer templated entity"
     )
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
+def test_real_clang_never_resolves_a_declaration_valued_specialization_argument(
+    tmp_path,
+) -> None:
+    """Scope-boundary regression (Codex review, fresh evidence, second
+    round): ``template_param`` must never be mistaken for resolving a
+    specific instantiation's own argument. ``Holder<&detail::f>`` — a
+    declaration-valued non-type argument — must produce no edge naming
+    ``detail::f`` under any role; that is ``template_graph.py``'s reserved
+    ``TEMPLATE_USES_DECL``, not this module's job. The parameter's own type
+    (``void (*)()``, fundamental, contributes no edge either way) is not
+    what this test is pinning — the absence of an argument-level edge is.
+    """
+    edges = parse_clang_ast_types(_real_clang_ast(tmp_path))
+    assert not any(e.dst in ("f", "detail::f") for e in edges)
 
 
 @pytest.mark.integration

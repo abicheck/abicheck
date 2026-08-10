@@ -1476,7 +1476,9 @@ the existing `type_graph.py` walk.
      realistic, commonly-seen shapes. Documented in the module's own
      docstring ("a fourth accepted, documented limitation") and pinned by
      a dedicated regression test.
-5. **Full type-role coverage — done for eight of the nine roles; the ninth
+5. **Full type-role coverage — done for seven of the nine roles as
+   originally worded; one (non-type template argument) turned out to name a
+   narrower role than implemented, corrected below; the ninth
    (concept/constraint) is investigated and deliberately deferred with its
    evidence recorded.** The item's list was: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
@@ -1486,6 +1488,26 @@ the existing `type_graph.py` walk.
    below was checked against **real Clang 18 AST output** before being
    written, not inferred from the role names: the audit found the nine split
    three ways rather than nine-missing.
+   **Scope-boundary correction (Codex review, fresh evidence, second
+   round):** the original wording "non-type template argument" was
+   implemented as `template_param` (below) — the non-type *parameter*'s own
+   declared type (`template <detail::Handle H>` depends on
+   `detail::Handle`). That is real and correct for what it is, but it is
+   not the same claim as resolving a non-type template **argument**'s own
+   value: what a `Holder<&detail::f>`-shaped specialization's
+   `TemplateArgument.decl` cross-reference points at (confirmed against
+   real Clang 18: `ClassTemplateSpecializationDecl`'s own child
+   `TemplateArgument` node carries `{"decl": {"kind": "FunctionDecl",
+   "name": "f", ...}}`, a clean, non-heuristic reference — but `_walk_types`
+   deliberately skips edge emission for `ClassTemplateSpecializationDecl`
+   nodes entirely, for an unrelated, already-documented reason: attributing
+   one specific instantiation's dependency to the shared generic template
+   node would misattribute it). That is exactly item 1's already-reserved
+   `TEMPLATE_USES_DECL` (`template_graph.py`, "a non-type template argument
+   ... that names a declaration rather than a literal value ... needs its
+   own empirical AST verification") — this item's `template_param` role
+   does not close it, and the original bullet's ambiguous wording should
+   not have been read as claiming it did.
    - **Five were already covered**, by an existing role, and needed no
      producer — the same "closed a gap by discovering pre-existing coverage"
      pattern this plan used for ADR-057 D6's tier 1 and item 3's
