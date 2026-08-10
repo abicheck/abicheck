@@ -19,7 +19,12 @@
   declaration wrote the `override` keyword — a compiler-checked signal) or
   the weaker `override_signature_match` (no keyword, matched purely by
   signature) in its `resolution` attribute. Multiple inheritance emits an
-  edge to each matching ancestor; only `CXXMethodDecl` participates in this
+  edge to each matching ancestor whose OWN slot is independently virtual —
+  a same-signature but non-virtual method on a sibling base is a real,
+  legal C++ shape (`override` only requires overriding at least ONE base
+  virtual, and clang accepts it) that must not be recorded as a second,
+  false override target (Codex review, fresh evidence, verified against
+  real Clang 17 output); only `CXXMethodDecl` participates in this
   first slice (constructors/destructors and class-template specializations
   are deliberately out of scope — see the module's own docstring); a
   covariant return type is a documented false negative, not a false

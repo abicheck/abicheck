@@ -237,3 +237,15 @@ it should read in CHANGELOG.md. Delete the other sections.
   specialization, which has none of its own), so it's now used as the
   index value outright whenever the node is a function/variable template
   specialization.
+- **Documented a second known, deliberately-deferred gap** (Codex review,
+  fresh evidence, fourth round): a template-DEPENDENT initializer operand
+  inside an uninstantiated class template pattern (e.g. `T::template
+  value<1>()` vs. `T::template value<2>()`) is a
+  `DependentScopeDeclRefExpr` that clang's `-ast-dump=json` prints with no
+  name, value, or children at all — verified against real Clang 17 output
+  that both instances reduce to the byte-identical structural form, so a
+  default changing between two dependent operands like this is silently
+  missed. A real fix needs either re-invoking clang in a different dump
+  mode or reading the raw source text at the node's range offsets, neither
+  a narrow extension of this pure AST-JSON-only fingerprint chain; pinned
+  with a regression test rather than guessed at.

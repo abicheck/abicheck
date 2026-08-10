@@ -391,7 +391,26 @@ def _normalize_qual_type(qual_type: str) -> str:
 
 
 def _canonical_expr(node: Any, id_index: _IdIndexProvider | None = None) -> Any:
-    """Reduce an expression node to a structural form (drop ids/locations)."""
+    """Reduce an expression node to a structural form (drop ids/locations).
+
+    KNOWN, deliberately-deferred gap (Codex review, fresh evidence): a
+    template-DEPENDENT operand — e.g. ``T::template value<1>()`` inside an
+    uninstantiated class template pattern — is a ``DependentScopeDeclRefExpr``
+    that clang's ``-ast-dump=json`` prints with NO ``name``, no ``value``, no
+    ``referencedDecl``, and no ``inner`` children at all (verified against
+    real Clang 17 output): every key this function reads is either absent or
+    the same fixed placeholder ``"<dependent type>"`` regardless of the
+    actual template argument (``value<1>()`` vs. ``value<2>()`` fingerprint
+    byte-identically). The dependent argument spelling genuinely isn't
+    exposed anywhere in the compact JSON AST for a node in this state —
+    recovering it would mean either re-invoking clang in a different dump
+    mode or reading the raw source text at the node's ``range`` offsets,
+    both a materially different (and unverified) architecture for this pure,
+    AST-JSON-only module, not a narrow extension of it. Left as a silent
+    false negative — the same conservative default this fingerprint chain
+    already uses throughout (a wrong guess here is worse than the
+    pre-existing gap).
+    """
     if not isinstance(node, dict):
         return node
     out: dict[str, Any] = {}

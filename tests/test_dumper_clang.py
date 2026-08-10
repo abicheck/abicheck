@@ -1471,6 +1471,54 @@ def test_field_default_changes_across_function_template_specializations() -> Non
     assert value_int != value_long
 
 
+def test_dependent_scope_initializer_documents_known_gap() -> None:
+    """Codex review, PR #687, fourth round, fresh evidence: a template-
+    DEPENDENT operand inside an uninstantiated class template pattern (e.g.
+    ``T::template value<1>()`` vs. ``T::template value<2>()``) is a
+    ``DependentScopeDeclRefExpr`` that clang's ``-ast-dump=json`` prints
+    with no ``name``, no ``value``, and no children at all -- verified
+    against real Clang 17 output that BOTH instances reduce to the
+    byte-identical ``{"kind": "DependentScopeDeclRefExpr", "type":
+    "<dependent type>"}``. This is a KNOWN, deliberately deferred gap (see
+    ``_canonical_expr``'s own docstring) -- this test pins the current,
+    honest collision behavior (never crashes or fabricates a value) so a
+    future fix has a concrete regression to flip, and so this doesn't
+    silently regress further."""
+    from abicheck.dumper_clang_expr import _field_initializer_value
+
+    def _dependent_field(kind: str) -> dict:
+        return {
+            "kind": "FieldDecl",
+            "name": "x",
+            "type": {"qualType": "int"},
+            "hasInClassInitializer": True,
+            "inner": [
+                {
+                    "kind": "CallExpr",
+                    "type": {"qualType": "<dependent type>"},
+                    "inner": [
+                        {
+                            "kind": kind,
+                            "type": {"qualType": "<dependent type>"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+    field_1 = _dependent_field("DependentScopeDeclRefExpr")
+    field_2 = _dependent_field("DependentScopeDeclRefExpr")
+
+    value_1 = _field_initializer_value(field_1)
+    value_2 = _field_initializer_value(field_2)
+
+    # The documented collision, not a crash -- pinned so a real fix (which
+    # needs source-text or a different clang dump mode, per the docstring)
+    # has a concrete regression to flip.
+    assert value_1 is not None
+    assert value_1 == value_2
+
+
 def test_parse_enums_is_scoped_false_for_plain_enum() -> None:
     root = _tu(
         {

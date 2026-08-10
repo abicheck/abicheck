@@ -361,6 +361,25 @@ def parse_clang_ast_overrides(ast: dict[str, Any]) -> list[OverrideEdge]:
                 bm = declared[(base_qname, m.sig_key)]
                 if m.identity == bm.identity:
                     continue
+                # qname's OWN slot being virtual (checked above) only means
+                # SOME ancestor makes it so -- under multiple inheritance a
+                # sibling base can independently declare a same-signature
+                # NON-virtual method that m merely HIDES, not overrides
+                # (Codex review, fresh evidence, verified against real Clang
+                # 17 output: B1::f virtual, B2::f not, D : B1, B2 overriding
+                # f -- clang accepts D::f's `override` keyword and attaches
+                # OverrideAttr since it overrides B1::f, but D::f does NOT
+                # override the unrelated, non-virtual B2::f). Each candidate
+                # ancestor's OWN slot must independently be virtual too.
+                if not _is_virtual(
+                    base_qname,
+                    bm.sig_key,
+                    bases_of,
+                    declared,
+                    ancestor_memo,
+                    virtual_memo,
+                ):
+                    continue
                 key = (m.identity, bm.identity)
                 if key in seen:
                     continue

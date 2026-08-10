@@ -246,6 +246,39 @@ def test_non_virtual_base_method_is_not_an_override_target() -> None:
     assert parse_clang_ast_overrides(ast) == []
 
 
+def test_multiple_inheritance_skips_the_non_virtual_sibling_base() -> None:
+    # Codex review, fresh evidence, verified against real Clang 17 output:
+    # B1::f is virtual, B2::f is NOT, D : B1, B2 overrides f. clang accepts
+    # D::f's `override` keyword (OverrideAttr present) since it overrides
+    # B1::f -- but D::f does NOT override the unrelated, non-virtual B2::f;
+    # it only hides it. Emitting an edge to B2::f as well as B1::f would be
+    # a false virtual-dispatch candidate: qname's own slot being virtual
+    # (via B1) must not be read as "every nearest declaring ancestor is a
+    # real override target" -- each candidate's OWN slot must independently
+    # be checked.
+    ast = _tu(
+        _record(
+            "B1",
+            inner=[_method("f", "_ZN2B11fEv", "void ()", is_virtual=True)],
+        ),
+        _record("B2", inner=[_method("f", "_ZN2B21fEv", "void ()")]),
+        _record(
+            "D",
+            bases=["B1", "B2"],
+            inner=[_method("f", "_ZN1D1fEv", "void ()", has_override_attr=True)],
+        ),
+    )
+    edges = parse_clang_ast_overrides(ast)
+    assert edges == [
+        OverrideEdge(
+            "_ZN1D1fEv",
+            "_ZN2B11fEv",
+            CONF_HIGH,
+            RESOLUTION_OVERRIDE_CONFIRMED,
+        )
+    ]
+
+
 def test_override_reaches_through_non_redeclaring_intermediate_class() -> None:
     # Codex review, fresh evidence, verified against real Clang 17 output:
     # Base declares a virtual run(); Mid : Base does NOT redeclare it at
