@@ -1959,6 +1959,92 @@ def test_common_dependency_edge_kinds_header_only_confirmed_pass_widens_family()
     )
 
 
+def test_l5_internal_dep_skipped_on_new_role_within_already_covered_header_only_kind() -> (
+    None
+):
+    # Codex P1 review (second round, PR #712): the role-coverage-disagreement
+    # filter checked role keys only under the build-integrated "type_graph"
+    # pass name -- but header_graph.py's build_header_only_graph reuses the
+    # identical type_graph.parse_clang_ast_types() walker and stamps its own
+    # role coverage under the "header_type_graph" alias, not "type_graph".
+    # Two header-only-collected graphs -- an "old" one from before
+    # header_graph.py started stamping role keys at all, an identically-
+    # shaped "new" one collected after -- must still be recognized as
+    # disagreeing on role coverage, the same way the build-integrated case
+    # is. Mirrors test_l5_internal_dep_skipped_on_new_role_within_already_
+    # covered_kind above, but for the header-only pass name.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ]
+    old = SourceGraphSummary(
+        # Pre-role-coverage-stamping header_graph.py: family flag only.
+        nodes=nodes,
+        edges=base,
+        extractor_passes={"header_type_graph": True},
+    )
+    new = SourceGraphSummary(
+        # Post-fix header_graph.py: family flag plus the role's own key,
+        # under the header-only alias, and a first-ever edge riding it.
+        nodes=nodes,
+        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")],
+        extractor_passes={
+            "header_type_graph": True,
+            _role_coverage_key(
+                "header_type_graph", "DECL_HAS_TYPE", "template_param"
+            ): True,
+        },
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
+
+
+def test_l5_internal_dep_flags_new_edge_when_header_only_role_coverage_agrees() -> None:
+    # Positive counterpart: both sides confirm the same header-only role key
+    # (same abicheck version), so a first-ever edge under that role is a
+    # genuine new dependency, not a coverage artifact.
+    nodes = [
+        _N("hdr", "header", "api.h"),
+        _N("pub", "source_decl", "pub()"),
+        _N("sym", "binary_symbol", "pub"),
+        _N(
+            "priv_type",
+            "record_type",
+            "detail::PrivateType",
+            visibility="private_header",
+        ),
+    ]
+    base = [
+        _E("pub", "sym", "SOURCE_DECL_MAPS_TO_SYMBOL"),
+        _E("hdr", "pub", "SOURCE_DECLARES"),
+    ]
+    passes = {
+        "header_type_graph": True,
+        _role_coverage_key(
+            "header_type_graph", "DECL_HAS_TYPE", "template_param"
+        ): True,
+    }
+    old = SourceGraphSummary(nodes=nodes, edges=base, extractor_passes=dict(passes))
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=base + [_E("pub", "priv_type", "DECL_HAS_TYPE")],
+        extractor_passes=dict(passes),
+    )
+    kinds = _graph_kinds(old, new)
+    assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value in kinds
+
+
 def test_common_dependency_edge_kinds_header_and_build_pass_names_not_double_counted() -> (
     None
 ):

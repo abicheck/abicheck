@@ -786,20 +786,27 @@ single change.
   G29 Phase 2/3 tail-closing pass): the mismatch is deeper than the data
   model alone, confirmed by reading the walk's own enqueue logic
   (`_enqueue_record_children`/`_enqueue_typedef_targets`).** This walk has
-  no analogue for either of `TraversalPolicy`'s two defining fields:
-  `allowed_edges` filters nothing here — bases, virtual bases, fields, and
-  typedef targets are *all* unconditionally enqueued, by design (the walk's
-  own docstring: "Fields are included regardless of whether they are
-  pointers/references — identity/vtable changes propagate via those too");
-  and `stop_conditions` has no counterpart either, since this walk's whole
-  purpose is exhaustive reachability from the public surface, unlike the
-  call-graph walk's deliberate stop at a non-consumer-compiled boundary.
-  Forcing a `TraversalPolicy`-shaped object onto a walk with no filtering
-  or stopping semantics to configure would be ceremony with no behavior or
-  clarity gain — this stays out of scope on its own terms, not only
-  because of the data-model change; adopting `TraversalPolicy` here needs a
-  genuinely different walk semantics first, which no current caller asks
-  for.
+  no analogue for any of `TraversalPolicy`'s four fields, not only the two
+  edge/stop-shaped ones a first reading might single out (CodeRabbit
+  review, precision fix): `allowed_edges` filters nothing here — bases,
+  virtual bases, fields, and typedef targets are *all* unconditionally
+  enqueued, by design (the walk's own docstring: "Fields are included
+  regardless of whether they are pointers/references — identity/vtable
+  changes propagate via those too"); `stop_conditions` has no counterpart
+  either, since this walk's whole purpose is exhaustive reachability from
+  the public surface, unlike the call-graph walk's deliberate stop at a
+  non-consumer-compiled boundary. The other two fields fail even earlier,
+  for a data-availability reason rather than a design choice:
+  `minimum_confidence` filters by `GraphEdge.confidence`, and
+  `effect_transitions` downgrades precision by `CallEdge.call_kind` — this
+  walk's `RecordType`/typedef model carries neither a per-edge confidence
+  nor a call-kind concept at all, so there is nothing for either field to
+  read here even if a caller wanted them. Forcing a `TraversalPolicy`-shaped
+  object onto a walk with no filtering, stopping, confidence, or precision
+  semantics to configure would be ceremony with no behavior or clarity gain
+  — this stays out of scope on its own terms, not only because of the
+  data-model change; adopting `TraversalPolicy` here needs a genuinely
+  different walk semantics first, which no current caller asks for.
 - `tests/test_internal_leak.py` (`TestTraversalPolicy`): the shared policy's
   `allowed_edges`; a custom policy's `minimum_confidence` actually excludes
   a lower-confidence edge from reachability (not merely accepted and

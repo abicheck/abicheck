@@ -28,4 +28,13 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   *remove* a kind neither the whole-family-widening nor per-kind-fallback
   path would otherwise have admitted, never add a false exclusion of its
   own, and is a no-op for the overwhelming common case where both sides
-  were collected by the same abicheck version.
+  were collected by the same abicheck version. A second review round found
+  the same false positive still reachable through `header_graph.py`'s
+  no-build header-only pass (ADR-041 header-only-graph addendum): it reuses
+  the identical `type_graph.parse_clang_ast_types()` walker but never
+  stamped a `ROLE_COVERAGE_MATRIX` key at all, so two header-only-collected
+  graphs compared before/after the same abicheck upgrade read as vacuous
+  agreement (both sides permanently absent) rather than "coverage unknown."
+  `build_header_only_graph` now stamps role coverage under its own
+  `header_type_graph` pass alias, and `_role_coverage_disagrees()` checks
+  both the build-integrated and header-only key for each side.

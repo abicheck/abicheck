@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
@@ -38,7 +38,7 @@ from abicheck.model import AbiSnapshot
 from abicheck.serialization import save_snapshot
 
 
-def _run(args: list[str]):
+def _run(args: list[str]) -> Result:
     return CliRunner().invoke(main, ["project", "validate-use-cases", *args])
 
 
@@ -108,6 +108,30 @@ class TestStructuralValidationOnly:
     def test_nonexistent_manifest_is_a_usage_error(self, tmp_path: Path) -> None:
         res = _run([str(tmp_path / "does-not-exist.yaml")])
         assert res.exit_code != 0
+
+    def test_manifest_read_failure_is_a_usage_error_not_a_traceback(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """load_use_case_manifest() deliberately leaves a missing/unreadable
+        MANIFEST as a bare OSError (its own docstring) -- Click's
+        exists=True path check only proves the file was there at argument
+        parsing time, not at the read a moment later (a TOCTOU race: the
+        file is deleted, or a permission error, in between). Simulated here
+        via monkeypatch rather than an actual race/chmod, since this suite
+        runs as root in some environments where a permission bit is a
+        no-op."""
+        import abicheck.impact.use_cases as use_cases_mod
+
+        manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
+
+        def _raise_os_error(path):
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(use_cases_mod, "load_use_case_manifest", _raise_os_error)
+        res = _run([str(manifest)])
+        assert res.exit_code == 64
+        assert res.exception is None or isinstance(res.exception, SystemExit)
+        assert "permission denied" in res.output
 
     def test_json_format_carries_no_use_cases_key_without_against(
         self, tmp_path: Path

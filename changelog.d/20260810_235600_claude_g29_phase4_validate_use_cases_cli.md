@@ -10,8 +10,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   fully-tested library API but no CLI front door — a manifest author had no
   way to find out a declared entrypoint failed to resolve short of writing
   their own Python calling the module directly. The new subcommand checks
-  the manifest's own structure on its own (empty/malformed/unknown-field
-  documents are a clean usage error, exit 64), and, given `--against
+  the manifest's own structure on its own (a malformed or unknown-field
+  document is a clean usage error, exit 64 — an *empty* document is valid,
+  zero declared use cases), and, given `--against
   <snapshot>` carrying an embedded L5 source graph, reports which declared
   entrypoints resolved against it and which didn't, per use case, in text or
   `--format json`. An unresolved entrypoint is never a command failure —

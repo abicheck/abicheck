@@ -95,6 +95,7 @@ from typing import TYPE_CHECKING, Any
 from ..model import AbiSnapshot, ScopeOrigin
 from ..provenance import build_public_set, classify_origin
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
+from .inline_graph_fold import _mark_role_coverage
 from .source_graph import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -462,6 +463,20 @@ def _seed_ast_graph(
     # from "never ran").
     graph.extractor_passes[HEADER_CALL_GRAPH_PASS] = True
     graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
+    # ADR-046 D3 role coverage (Codex review, fresh evidence): this call above
+    # is the *same* ``type_graph.parse_clang_ast_types()`` walker the
+    # build-integrated ``fold_type_graph`` drives — reused unmodified, per
+    # this module's own docstring — so it has the identical per-role fidelity
+    # (no known gap for any ``ROLE_COVERAGE_MATRIX`` role, same as the
+    # build-integrated pass). Without this, `source_graph_findings.
+    # _role_coverage_disagrees()` would see *no* role key on either side of a
+    # header-only-vs-header-only comparison, forever (this pass has never
+    # stamped one, in any abicheck version) — reading as vacuous agreement
+    # rather than "role coverage unknown," and letting a genuinely new
+    # `template_param`/`default_template_arg`/`enum_underlying` edge slip
+    # through as a false `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the same way
+    # the build-integrated pass's own pre-D3-consumer gap did.
+    _mark_role_coverage(graph.extractor_passes, HEADER_TYPE_GRAPH_PASS)
 
 
 def _seed_flat_graph(

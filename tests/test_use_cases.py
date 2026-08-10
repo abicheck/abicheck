@@ -614,16 +614,43 @@ def test_resolve_use_case_entrypoints_no_entrypoints_declared() -> None:
 
 
 def test_resolve_use_case_entrypoints_preserves_manifest_declared_order() -> None:
-    library = _library_graph()
+    # A local graph with two public entries (`_library_graph()` only has
+    # one) so both resolved_entrypoints and unresolved_entrypoints can pin
+    # order, not just the latter — CodeRabbit review.
+    library = SourceGraphSummary()
+    library.add_node(
+        GraphNode(
+            id="decl://evaluate",
+            kind="source_decl",
+            label="evaluate",
+            attrs={"visibility": "public_header"},
+        )
+    )
+    library.add_node(
+        GraphNode(
+            id="decl://train",
+            kind="source_decl",
+            label="train",
+            attrs={"visibility": "public_header"},
+        )
+    )
     resolution = resolve_use_case_entrypoints(
         [
             UseCaseDefinition(
                 use_case="uc1",
-                entrypoints=("does_not_exist_a", "train", "does_not_exist_b"),
+                # Declared out of alphabetical order and interleaved with
+                # unresolvable names, on both sides of the split.
+                entrypoints=(
+                    "does_not_exist_a",
+                    "evaluate",
+                    "train",
+                    "does_not_exist_b",
+                ),
             )
         ],
         library,
     )[0]
+    assert resolution.resolved_entrypoints == ("evaluate", "train")
     assert resolution.unresolved_entrypoints == (
         "does_not_exist_a",
         "does_not_exist_b",

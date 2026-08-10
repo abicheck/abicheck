@@ -1606,11 +1606,21 @@ the existing `type_graph.py` walk.
      that fallback is exactly what let an absent role key silently read as
      "covered." Verified: the version-skew repro now produces zero findings;
      a same-version repro (both sides confirm the same role key) still
-     correctly produces one; the full relevant test suite (683 pre-existing
-     tests across 12 files) shows zero regressions; three new dedicated
-     regression tests pin both directions plus a control case (a kind
-     outside `ROLE_COVERAGE_MATRIX`, e.g. `DECL_CALLS_DECL`, is unaffected)
-     in `tests/test_l3l4l5_new_kinds.py`.
+     correctly produces one; the full relevant existing test suite (every
+     module the fix or its call sites touch) shows zero regressions; three
+     new dedicated regression tests pin both directions plus a control case
+     (a kind outside `ROLE_COVERAGE_MATRIX`, e.g. `DECL_CALLS_DECL`, is
+     unaffected) in `tests/test_l3l4l5_new_kinds.py`. A companion gap in the
+     same fix, found by a later review round: the header-only pass
+     (`header_graph.py`, ADR-041 header-only-graph addendum) reuses the
+     identical `type_graph.parse_clang_ast_types()` walker but never stamped
+     a `ROLE_COVERAGE_MATRIX` key at all, so two header-only-collected graphs
+     compared before/after this same abicheck upgrade would read as vacuous
+     agreement (both sides absent, forever) rather than "coverage unknown" —
+     `build_header_only_graph` now stamps role coverage under its own
+     `header_type_graph` pass alias the same way the build-integrated pass
+     does, and `_role_coverage_disagrees()` checks both the build-integrated
+     and header-only key for each side.
    - **Concept/constraint dependency — investigated, deliberately NOT
      implemented, evidence recorded so the follow-up doesn't re-derive it.**
      A public template constrained by an internal concept (`template

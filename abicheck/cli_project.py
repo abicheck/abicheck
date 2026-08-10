@@ -351,7 +351,14 @@ def project_validate_use_cases_cmd(
 
     try:
         definitions = load_use_case_manifest(manifest)
-    except UseCaseManifestError as exc:
+    except (UseCaseManifestError, OSError) as exc:
+        # OSError alongside the manifest-specific error (Codex review, fresh
+        # evidence): load_use_case_manifest() deliberately leaves a missing/
+        # unreadable MANIFEST unwrapped (its own docstring) — Click's
+        # exists=True check only guarantees the path was there at argument
+        # parsing time, not at the read a moment later (permissions change,
+        # the file disappearing), so an unhandled OSError here would exit 1
+        # with a bare traceback instead of the documented usage-error path.
         raise click.UsageError(str(exc)) from exc
 
     resolutions: list[UseCaseResolution] | None = None

@@ -159,6 +159,7 @@ topics:
       - abicheck/impact/model.py
       - abicheck/impact/engine.py
       - abicheck/impact/use_cases.py
+      - abicheck/cli_project.py
       - abicheck/buildsource/graph_impact.py
       - abicheck/buildsource/graph_facts.py
       - abicheck/buildsource/macro_graph.py

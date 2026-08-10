@@ -40,7 +40,9 @@ from abicheck.buildsource.inline_graph_fold import ROLE_COVERAGE_MATRIX
 from abicheck.buildsource.type_graph import (
     CONF_HIGH,
     EDGE_DECL_HAS_TYPE,
+    EDGE_DECL_REFERENCES_DECL,
     EDGE_TYPE_HAS_FIELD_TYPE,
+    EDGE_TYPE_INHERITS,
     parse_clang_ast_types,
 )
 
@@ -742,15 +744,21 @@ def test_role_coverage_matrix_matches_the_roles_the_parser_emits() -> None:
 
 
 def test_every_matrix_edge_kind_is_a_kind_the_parser_emits() -> None:
-    ast = _tu(_detail_ns())
-    known = {
-        "TYPE_INHERITS",
-        "TYPE_HAS_FIELD_TYPE",
-        "DECL_HAS_TYPE",
-        "DECL_REFERENCES_DECL",
+    # Pins the matrix's key set against the parser's own EDGE_* constants
+    # (not duplicated string literals) so a renamed edge kind fails this
+    # test loudly instead of silently drifting the two apart. Whether the
+    # parser actually *emits* each of these kinds — and every role under
+    # it — is what the role-agreement test above and each role's own test
+    # already assert; this test is deliberately just the key-set pin
+    # (CodeRabbit review: an earlier version also asserted
+    # ``parse_clang_ast_types(ast) is not None``, which can never fail
+    # since the function always returns a list).
+    assert set(ROLE_COVERAGE_MATRIX) == {
+        EDGE_TYPE_INHERITS,
+        EDGE_TYPE_HAS_FIELD_TYPE,
+        EDGE_DECL_HAS_TYPE,
+        EDGE_DECL_REFERENCES_DECL,
     }
-    assert set(ROLE_COVERAGE_MATRIX) == known
-    assert parse_clang_ast_types(ast) is not None
 
 
 # ── integration: the real clang AST shapes these fixtures encode ───────────

@@ -492,18 +492,37 @@ def _role_coverage_disagrees(
     :data:`~abicheck.buildsource.inline_graph_fold.ROLE_COVERAGE_MATRIX`
     doesn't track (e.g. ``DECL_CALLS_DECL``, outside this file's own
     ``_DEPENDENCY_EDGE_FAMILIES``) is unaffected.
+
+    Also checked under *pass_name*'s header-only alias
+    (:data:`_HEADER_PASS_ALIAS`, e.g. ``"header_type_graph"`` for
+    ``"type_graph"``), on each side independently — Codex review, fresh
+    evidence: ``header_graph.py``'s ``build_header_only_graph`` reuses the
+    exact same ``type_graph.parse_clang_ast_types()`` walker and stamps its
+    own role-coverage keys under that alias (mirroring the build-integrated
+    pass), so a header-only-confirmed side's role coverage must be read from
+    there — checking only the build-integrated name would see no key at all
+    on a header-only side, for every abicheck version, past or future, and
+    that "always absent" is not evidence of agreement.
     """
     from .inline_graph_fold import ROLE_COVERAGE_MATRIX, _role_coverage_key
 
-    for role in ROLE_COVERAGE_MATRIX.get(kind, ()):
+    header_name = _HEADER_PASS_ALIAS.get(pass_name, "")
+
+    def _covered(graph: SourceGraphSummary, role: str) -> bool:
         key = _role_coverage_key(pass_name, kind, role)
-        old_covered = old.extractor_passes.get(key, False) or old.narrowed_passes.get(
+        if graph.extractor_passes.get(key, False) or graph.narrowed_passes.get(
             key, False
-        )
-        new_covered = new.extractor_passes.get(key, False) or new.narrowed_passes.get(
-            key, False
-        )
-        if old_covered != new_covered:
+        ):
+            return True
+        if not header_name:
+            return False
+        header_key = _role_coverage_key(header_name, kind, role)
+        return graph.extractor_passes.get(
+            header_key, False
+        ) or graph.narrowed_passes.get(header_key, False)
+
+    for role in ROLE_COVERAGE_MATRIX.get(kind, ()):
+        if _covered(old, role) != _covered(new, role):
             return True
     return False
 
