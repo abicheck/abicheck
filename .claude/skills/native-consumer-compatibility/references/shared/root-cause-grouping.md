@@ -36,9 +36,12 @@ For each root cause, in descending order of severity:
 
 1. **Name the single underlying change** in source terms ("`struct Config`
    gained a member before `timeout`"), not in finding terms.
-2. **State the blast radius** — how many findings it caused
-   (`caused_count`), which public roots it reaches
-   (`affected_public_roots`).
+2. **State the blast radius** — how many findings the group holds
+   (`root_causes[].finding_count`), which public roots it reaches
+   (`affected_public_roots`). Not `caused_count`: that is a *per-finding*
+   count of derived changes collapsed during filtering, optional and absent
+   on many ordinary findings, so reading it as the group size understates the
+   radius or reports nothing at all.
 3. **Attribute it.** A group whose members are all standard-library or
    toolchain-instantiated types is toolchain churn, not a library change —
    see [compiler-and-build-profiles.md](compiler-and-build-profiles.md) and

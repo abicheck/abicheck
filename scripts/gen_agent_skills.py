@@ -160,6 +160,54 @@ _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 #: region is invisible to every link pattern and cannot be produced by one.
 _MASK = "\x00m{index}\x00"
 
+_LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s")
+
+
+def _indented_code_spans(text: str) -> list[tuple[int, int]]:
+    """Line ranges of top-level indented (4-space) code blocks.
+
+    Deliberately conservative about lists. A 4-space indent means *two* things
+    in Markdown: an indented code block, and a continuation of the list item
+    above it. Masking the second kind would leave a real link unrewritten in
+    an installed skill — a worse failure than the one this fixes, and a silent
+    one. So a run is treated as code only when it is blank-line separated and
+    no list is open above it; inside a list, nothing is masked.
+
+    An indented code block also cannot interrupt a paragraph (CommonMark
+    §4.4), which the blank-line requirement already encodes.
+    """
+    lines = text.split("\n")
+    spans: list[tuple[int, int]] = []
+    list_open = False
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip():
+            index += 1
+            continue
+        if _LIST_ITEM_RE.match(line):
+            list_open = True
+            index += 1
+            continue
+        if not line.startswith(" "):
+            list_open = False  # a flush-left line closes any open list
+            index += 1
+            continue
+        indented = line.startswith("    ") or line.startswith("\t")
+        blank_before = index > 0 and not lines[index - 1].strip()
+        if indented and blank_before and not list_open:
+            start = index
+            while index < len(lines) and (
+                not lines[index].strip() or lines[index].startswith(("    ", "\t"))
+            ):
+                index += 1
+            while index - 1 > start and not lines[index - 1].strip():
+                index -= 1  # trailing blanks belong to the document, not the block
+            spans.append((start, index))
+            continue
+        index += 1
+    return spans
+
 
 def mask_code_regions(text: str) -> tuple[str, dict[str, str]]:
     """Replace code blocks and spans with opaque placeholders.
@@ -173,6 +221,18 @@ def mask_code_regions(text: str) -> tuple[str, dict[str, str]]:
     messages keep reporting real source line numbers.
     """
     replacements: dict[str, str] = {}
+
+    # Indented blocks first, by line range: they are defined by position, and
+    # masking them up front keeps the regex passes below from seeing content
+    # the renderer shows literally.
+    lines = text.split("\n")
+    for start, end in reversed(_indented_code_spans(text)):
+        original = "\n".join(lines[start:end])
+        token = _MASK.format(index=len(replacements))
+        placeholder = token + "\n" * original.count("\n")
+        replacements[placeholder] = original
+        lines[start:end] = placeholder.split("\n")
+    text = "\n".join(lines)
 
     def mask(match: re.Match[str]) -> str:
         original = match.group(0)
@@ -433,7 +493,20 @@ def _rewrite_target(
     file, and `shared/` for a fragment (whose only legitimate relative links
     are sibling fragments, already handled above).
     """
-    if "://" in target or target.startswith(("#", "mailto:", "/")):
+    if target.startswith("/"):
+        # Root-relative: resolved against whatever host or filesystem root
+        # renders the installed skill, which is neither the skill's own
+        # directory nor abicheck's docs site. There is no correct rewrite —
+        # the intended base is unknowable — so reject rather than publish a
+        # link whose meaning depends on where it is read.
+        raise SkillGenerationError(
+            f"{source_path.relative_to(REPO_DIR).as_posix()}: root-relative "
+            f"link {target!r} — write a path relative to this file, or a full "
+            "URL. A leading slash resolves against the reader's root, not the "
+            "installed skill."
+        )
+
+    if "://" in target or target.startswith(("#", "mailto:")):
         return target
 
     bare, _, anchor = target.partition("#")

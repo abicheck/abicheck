@@ -358,6 +358,48 @@ def test_a_tilde_run_does_not_close_a_backtick_fence(synthetic):
     assert "[example](../../docs/use/cli-usage.md)" in rendered
 
 
+def test_indented_code_block_is_masked(synthetic):
+    """A four-space-indented block is code too, and its link syntax is content
+    the renderer shows literally."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\nReal: [a](../shared/a.md)\n\n"
+                    "Example:\n\n    [example](../../docs/use/cli-usage.md)\n\n"
+                    "After.\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+    assert "    [example](../../docs/use/cli-usage.md)" in rendered
+    assert "references/shared/a.md" in rendered
+
+
+def test_an_indented_list_continuation_is_not_treated_as_code(synthetic):
+    """The failure mode the check above must not cause. A 4-space indent under
+    a list item is a *continuation*, not code — masking it would leave a real
+    link unrewritten in the installed skill, which is silent and worse than
+    the bug the indented-code masking fixes."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n"
+                    "- first item\n\n"
+                    "    continuation with [a](../shared/a.md)\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+    assert "references/shared/a.md" in rendered
+    assert "../shared/a.md" not in rendered
+
+
 def test_a_fragment_cited_only_inside_a_code_example_is_not_a_citation(synthetic):
     """Masking must apply to citation scanning too, or a fragment merely
     *shown* in an example would be copied into the skill — and, if that were
