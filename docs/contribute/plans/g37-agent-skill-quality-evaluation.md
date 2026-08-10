@@ -470,19 +470,30 @@ positive, compile-profile difference.
 
 **Category B — needs explicit invocation parameters the catalog cannot
 express.** Non-comparable snapshots, **evidence too shallow for the question
-asked**, consumer-unaffected-despite-global-break,
+asked**, **incomplete contract-provider evidence**,
+consumer-unaffected-despite-global-break,
 consumer-actually-affected, plugin required-symbol loss, missing matrix target.
 These need `--used-by`, `--required-symbol`, a multi-target matrix, a
-deliberately broken comparability contract, or an L0-only pair whose question
-requires L2 evidence. They get explicit records in
+deliberately broken comparability contract, an L0-only pair whose question
+requires L2 evidence, or a `--contract-evaluation` run whose selected
+`--contract` domain cannot be closed. They get explicit records in
 `agent-evals/skills/scenarios.yaml` with their own fixtures.
 
-The shallow-evidence scenario is here because **each of dimension 2's three
-uncertainty kinds (D4) needs at least one scenario, or a zero-tolerance rule
-gates on nothing.** Not-comparable and contract-coverage are covered by the
-first and last entries above; "evidence too shallow for the question asked" is
-the middle kind, and an earlier draft of this corpus had no scenario for it —
-the rule existed with nothing exercising it.
+**Each of dimension 2's three uncertainty kinds (D4) needs its own scenario,
+or a zero-tolerance rule gates on nothing.** The first three entries above are
+exactly those three, and the third was missing until this review round: an
+earlier draft claimed "missing matrix target" covered the contract-coverage
+kind, which it does not — that scenario exercises *release-matrix assurance*
+(an unrun target in a multi-platform release), a different mechanism entirely.
+Contract coverage is `contract_coverage_ledger.py`'s unsuppressible ledger:
+it exists only under `--contract-evaluation`, is answered per selected
+`--contract` domain, and surfaces as `contract_coverage_failures` plus the
+orthogonal exit contribution. A scenario for it must therefore *run*
+`--contract-evaluation` against a pair whose chosen domain has genuinely
+incomplete provider evidence — e.g. an exports-domain run over a side whose
+export table was never captured, which `export_surface.py` reports as
+`resolvable=False` rather than as "exports nothing". Anything short of that
+leaves the rule ungated no matter how many other Category B scenarios exist.
 
 Category B is where the highest-value safety scenarios live — every one of them
 is a place a skill can plausibly manufacture a green result — so it is built
@@ -833,6 +844,21 @@ this plan's to restate.) Reuse the generator's graph rather
 than restating the topology here; a fragment every skill really does cite
 escalates to every skill by that rule anyway, without the plan hard-coding
 which fragments those are.
+
+**A build-surface change affects every skill, and the selector must say so —
+otherwise the two halves deadlock.** D6's third hash covers the abicheck
+surface the skills consume, and it is not reachable from any `skills-src/`
+path: a PR touching only the CLI tree, the report schema, or the `ChangeKind`
+verdict mapping moves that hash, invalidating every committed bundle, while a
+selector reading only `skills-src/` diffs would nominate *no* skill to refresh.
+The freshness check then fails with nothing the author can run to satisfy it.
+So affected-skill selection is the union of two rules: the skills whose own
+tree hash moved, **plus every skill when the build-surface hash moves**. The
+practical effect is that a CLI/report-schema change costs a full re-evaluation
+— which is the correct price, since it is exactly the change class that can
+silently alter what every skill's workflow produces, and the hash is
+deliberately scoped to consumed surface (D6) so ordinary detector-internals
+commits do not trigger it.
 
 Deterministic rotation was considered and rejected for the wide cases: a
 rotating subset would make the gate's strength depend on when a PR happened to
