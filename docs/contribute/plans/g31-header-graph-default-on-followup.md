@@ -1441,13 +1441,33 @@ building a second identity-resolution mechanism from scratch.
   castxml's type-chain walk stops at the outer `PointerType` and correctly
   answers False — so this would have introduced a fresh cross-backend false
   positive of exactly the kind the change exists to remove (Codex review,
-  reproduced against real clang 18 output). Fixed by requiring a depth-0
-  pointer before searching at all, which is semantically exact rather than
-  merely defensive: C11 6.7.3p2 allows `restrict` only on a pointer to an
-  *object* type, so nothing legal is lost. That last point was verified
-  rather than assumed — `void (*restrict cb)(int)` is rejected outright by
-  clang in C and C++ alike, which retired an "accepted false negative" note
-  an earlier draft of this fix had written for it.
+  reproduced against real clang 18 output). The first fix — require a
+  depth-0 pointer before searching at all — was **too strong, and a second
+  review round caught it**: `int (*restrict p)[3]` (a pointer to an array)
+  is parenthesized for the same declarator-precedence reason, but is a
+  perfectly legal restrict-qualified *object* pointer that castxml does
+  see, so requiring depth 0 turned the false positive into a false
+  negative. The rule that holds in both directions is that a
+  **parenthesized declarator group wins over depth 0**: when C forces the
+  parameter's own `*` into parentheses, everything at depth 0 belongs to
+  something else — the pointee (`int *(*restrict)[3]`, whose leading `*` is
+  the array element's) or the callback's parameter list. `_declarator_group`
+  finds the group that actually holds the parameter's pointer, identified
+  as the first depth-0 parenthesized group whose contents begin with `*` —
+  which distinguishes it from a function pointer's trailing parameter list
+  (contents begin with a type name) and from an array extent (not
+  parenthesized). Twelve spellings verified end to end against real clang
+  18, including one **neither review round named** and which the depth-0
+  rule got wrong in the original direction: `int *(*)(int *restrict)`, a
+  function pointer with a pointer return type, has a depth-0 `*` from
+  `int *`, so searching after it scans the callback's parameter list and
+  matches its `restrict`. Function-pointer declarators need no special case
+  despite looking identical in shape: C11 6.7.3p2 allows `restrict` only on
+  a pointer to an *object* type, so such a group can never legally carry
+  the qualifier. Verified rather than assumed — both
+  `void (*restrict cb)(int)` and `int *(*restrict cb)(void)` are rejected
+  outright by clang in C and C++ alike, which also retired an "accepted
+  false negative" note an earlier draft had written for that shape.
   (2) *Detector registration order is user-visible.* Registering the new
   module from `checker.py`'s top import block pulled `diff_symbols` (and its
   `diff_symbols_renames` sibling, which owns `fingerprint_renames`) forward

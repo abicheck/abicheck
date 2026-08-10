@@ -104,6 +104,54 @@ def _field_own_cv_source(desugared: str) -> str:
     return desugared[end:] if end >= 0 else desugared
 
 
+def _declarator_group(type_str: str) -> str | None:
+    """Contents of *type_str*'s parenthesized declarator group, or ``None``.
+
+    C's declarator precedence parenthesizes a pointer whose pointee is an
+    array or a function, so clang spells those as ``int (*restrict)[3]`` and
+    ``void (*)(int *restrict)`` — in both, the declared entity's own ``*``
+    is inside the parentheses and NOTHING at depth 0 describes it. This
+    returns that group's contents (``"*restrict"``, ``"*"``) so a caller can
+    ask its question there instead.
+
+    The group is identified as the first depth-0 parenthesized group whose
+    contents begin with ``*``. That distinguishes it from the trailing
+    parameter list of a function pointer (``(int *restrict)``, which begins
+    with a type name) and from an array extent (``[3]``, not parenthesized
+    at all) — confirmed against real clang 18 output for the pointer-to-
+    array, pointer-to-function, pointer-to-pointer-to-array, and
+    array-of-pointers spellings.
+
+    ``None`` when the spelling has no such group, i.e. an ordinary
+    unparenthesized declarator like ``int *restrict``, where depth 0 is
+    exactly where the answer lives.
+    """
+    depth = 0
+    i = 0
+    while i < len(type_str):
+        ch = type_str[i]
+        if ch in "<([":
+            if ch == "(" and depth == 0:
+                j = i + 1
+                while j < len(type_str) and type_str[j] == " ":
+                    j += 1
+                if j < len(type_str) and type_str[j] == "*":
+                    inner = 1
+                    k = i + 1
+                    while k < len(type_str) and inner:
+                        if type_str[k] in "<([":
+                            inner += 1
+                        elif type_str[k] in ">)]":
+                            inner -= 1
+                        k += 1
+                    return type_str[i + 1 : k - 1]
+            depth += 1
+        elif ch in ">)]":
+            depth = max(0, depth - 1)
+        i += 1
+    return None
+
+
 def _clang_param_is_restrict(node: dict[str, Any]) -> bool:
     """Whether *node* (a ``ParmVarDecl``) is a ``restrict``-qualified pointer.
 
@@ -125,30 +173,31 @@ def _clang_param_is_restrict(node: dict[str, Any]) -> bool:
       the parameter itself unqualified, while ``int **restrict`` qualifies
       the parameter (both spellings confirmed empirically). Scanning the
       whole spelling would conflate the two.
-    - **A missing depth-0 pointer means "no", never "search everything".**
-      This is deliberately NOT :func:`_field_own_cv_source`, whose
-      no-pointer fallback (return the whole spelling) is right for a
-      const/volatile *field* but wrong here. A callback parameter spells as
-      ``void (*)(int *restrict)`` — its own ``*`` sits inside parentheses,
-      so there is no depth-0 pointer, and the fallback would hand the whole
-      spelling to the regex and match the CALLBACK ARGUMENT's ``restrict``
-      as though it qualified the parameter (Codex review, confirmed against
-      real clang 18 output: castxml's type-chain walk stops at the outer
-      ``PointerType`` and correctly answers False, so this would have been
-      a fresh cross-backend false positive of exactly the kind this
-      extraction exists to remove). Requiring the depth-0 pointer is also
-      semantically exact rather than merely defensive — ``restrict`` is
-      only valid on a pointer, so a spelling with no top-level pointer can
-      never be restrict-qualified.
+    - **A parenthesized declarator wins over the top level**, which is the
+      one rule that is not obvious from the plain-pointer case. When C's
+      declarator precedence forces the parameter's own ``*`` into
+      parentheses, everything at depth 0 belongs to something else — the
+      pointee (``int *(*restrict)[3]``, whose leading ``*`` is the array
+      element's) or the callback's parameter list (``void (*)(int
+      *restrict)``, whose ``restrict`` is the CALLBACK ARGUMENT's).
+      :func:`_declarator_group` finds the group that actually holds the
+      parameter's pointer and the search happens inside it, so both of
+      those answer correctly. Two review rounds each found one of them:
+      scanning the whole spelling reported a false True for the callback,
+      and requiring a depth-0 ``*`` reported a false False for the pointer
+      to an array — a real, legal, restrict-qualified object pointer that
+      castxml does see. Every spelling in this docstring was confirmed
+      against real clang 18 output.
 
-    Answering False for a function-pointer parameter costs nothing, which is
-    worth stating because it is easy to assume otherwise: a pointer to a
+    A function-pointer parameter answers False, and that costs nothing even
+    though it looks like the same shape as the array case: a pointer to a
     *function* may not be ``restrict``-qualified at all (C11 6.7.3p2 —
-    ``restrict`` qualifies a pointer to an object type), so there is no
-    legal declaration this loses. Verified rather than reasoned about:
-    ``void (*restrict cb)(int)`` is rejected outright by clang in C and C++
-    alike ("pointer to function type 'void (int)' may not be 'restrict'
-    qualified"), so the shape cannot appear in a header abicheck parses.
+    ``restrict`` qualifies a pointer to an *object* type), so its declarator
+    group can never legally carry the qualifier and no distinction between
+    the two declarator kinds is needed here. Verified rather than reasoned
+    about: both ``void (*restrict cb)(int)`` and ``int *(*restrict cb)(void)``
+    are rejected outright by clang in C and C++ alike ("pointer to function
+    type ... may not be 'restrict' qualified").
 
     Both the C spelling (``restrict``) and the C++ ones (``__restrict`` /
     ``__restrict__``, which clang normalizes to ``__restrict``) are
@@ -156,7 +205,10 @@ def _clang_param_is_restrict(node: dict[str, Any]) -> bool:
     ``restrict_like`` from matching.
     """
     desugared = _desugared_qualtype(node)
-    end = _last_top_level_ptr_end(desugared)
+    scope = _declarator_group(desugared)
+    if scope is None:
+        scope = desugared
+    end = _last_top_level_ptr_end(scope)
     if end < 0:
         return False
-    return bool(re.search(r"\b(?:__)?restrict(?:__)?\b", desugared[end:]))
+    return bool(re.search(r"\b(?:__)?restrict(?:__)?\b", scope[end:]))

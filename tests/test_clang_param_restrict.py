@@ -49,6 +49,7 @@ import pytest
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.dumper_clang import _clang_param_is_restrict
+from abicheck.dumper_clang_qualifiers import _declarator_group
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 
 
@@ -89,28 +90,93 @@ class TestClangParamIsRestrict:
             # A type merely NAMED like the keyword must not match.
             ("restrict_like *", False),
             ("struct restrict_like *", False),
-            # A CALLBACK parameter: the parameter's own `*` is inside
-            # parentheses, so there is no depth-0 pointer at all. The
-            # `restrict` belongs to the callback's ARGUMENT, not to the
-            # parameter — answering True here would be a fresh cross-backend
-            # false positive, since castxml's type-chain walk stops at the
-            # outer PointerType and says False (Codex review).
+            # ── Parenthesized declarators ─────────────────────────────
+            # C's declarator precedence puts the parameter's own `*` inside
+            # parentheses whenever the pointee is an array or a function, so
+            # NOTHING at depth 0 describes the parameter. Both review rounds
+            # on this predicate landed here, one per direction.
+            #
+            # A CALLBACK parameter: the `restrict` belongs to the callback's
+            # ARGUMENT. Scanning the whole spelling said True, against
+            # castxml's False (Codex review, round 1).
             ("void (*)(int *restrict)", False),
             ("void (*)(int *)", False),
             ("void (*)(int)", False),
+            # A pointer to an ARRAY: a legal, genuinely restrict-qualified
+            # object pointer that castxml does see. Requiring a depth-0 `*`
+            # said False (Codex review, round 2).
+            ("int (*restrict)[3]", True),
+            ("int (*)[3]", False),
+            # Same, one indirection out: the qualifier is on the parameter's
+            # own (outer) pointer...
+            ("int (**restrict)[3]", True),
+            # ...versus on the inner one, where the parameter itself is
+            # plain — the parenthesized twin of `int *restrict *`.
+            ("int (*restrict *)[3]", False),
+            # A pointer to an array OF POINTERS: the leading depth-0 `*`
+            # belongs to the element type, not the parameter.
+            ("int *(*restrict)[3]", True),
+            # The case neither review round named, and the one that shows
+            # why "declarator group wins" is the rule rather than "prefer
+            # depth 0": a function pointer with a pointer RETURN type has a
+            # depth-0 `*` (from `int *`), so searching after it would scan
+            # the callback's parameter list and match its `restrict`.
+            ("int *(*)(int *restrict)", False),
         ],
     )
     def test_spellings(self, qual_type: str, expected: bool) -> None:
         assert _clang_param_is_restrict(_param_node(qual_type)) is expected
 
     def test_a_non_pointer_spelling_is_never_restrict(self) -> None:
-        """`restrict` is only valid on a pointer, so "no depth-0 `*`" is an
-        exact answer rather than a defensive default — and specifically NOT
-        the "search the whole spelling" fallback `_field_own_cv_source` uses
-        for a const/volatile field, which is what let a callback argument's
-        qualifier leak in."""
+        """No pointer anywhere means no qualification to find — and notably
+        NOT the "search the whole spelling" fallback `_field_own_cv_source`
+        uses for a const/volatile field, which is what let a callback
+        argument's qualifier leak in."""
         assert _clang_param_is_restrict(_param_node("struct S")) is False
         assert _clang_param_is_restrict(_param_node("int &")) is False
+
+
+class TestDeclaratorGroup:
+    """`_declarator_group` — which parenthesized group holds the declared
+    entity's own pointer, as opposed to a parameter list or a pointee."""
+
+    @pytest.mark.parametrize(
+        ("spelling", "expected"),
+        [
+            # A parenthesized pointer declarator, array and function pointee.
+            ("int (*restrict)[3]", "*restrict"),
+            ("void (*)(int *restrict)", "*"),
+            ("int *(*restrict)[3]", "*restrict"),
+            ("int (*restrict *)[3]", "*restrict *"),
+            # A function pointer's trailing PARAMETER LIST is not one: its
+            # contents start with a type name, not `*`.
+            ("void (int *restrict)", None),
+            # An ordinary declarator has no group at all — depth 0 is where
+            # the answer lives.
+            ("int *restrict", None),
+            ("int", None),
+            # A template argument list is not a declarator group either
+            # (nor is a `(` nested inside one at depth > 0).
+            ("std::function<void(int *)>", None),
+            # A declarator group may itself contain a nested group — a
+            # pointer to an array of pointers to arrays. Real clang output:
+            # `int (*(*restrict p)[3])[2]` prints exactly this.
+            ("int (*(*restrict)[3])[2]", "*(*restrict)[3]"),
+            ("void (*(*restrict)[3])(int)", "*(*restrict)[3]"),
+        ],
+    )
+    def test_group(self, spelling: str, expected: str | None) -> None:
+        assert _declarator_group(spelling) == expected
+
+    def test_whitespace_after_the_open_paren(self) -> None:
+        """clang emits no space there today, but the scan tolerates one
+        rather than silently misclassifying the group if it ever does."""
+        assert _declarator_group("int ( *restrict)[3]") == " *restrict"
+
+    def test_nested_group_resolves_to_the_outer_pointer(self) -> None:
+        """The nested-group spellings above answer True end to end: the
+        qualifier sits on the outermost `*`, which is the parameter's own."""
+        assert _clang_param_is_restrict(_param_node("int (*(*restrict)[3])[2]")) is True
 
     def test_typedef_indirection_is_followed(self) -> None:
         """A parameter declared through ``typedef int *restrict rptr;``
@@ -228,6 +294,41 @@ class TestClangParamIsRestrictAgainstRealClang:
         assert (params["takes_cb"][0].get("type") or {}).get(
             "qualType"
         ) == "void (*)(int *restrict)"
+
+    def test_parenthesized_object_pointers(self, tmp_path: Path) -> None:
+        """The other half of the declarator story: a pointer to an ARRAY is
+        parenthesized exactly like a function pointer, but IS a legal
+        restrict-qualified object pointer that castxml sees. Requiring a
+        depth-0 pointer (the first fix for the callback case) reported False
+        for all of these (Codex review, round 2)."""
+        root = self._parse(
+            tmp_path,
+            """
+            void arr_ptr(int (*restrict p)[3]);
+            void arr_ptr_plain(int (*p)[3]);
+            void outer_restrict(int (**restrict p)[3]);
+            void inner_restrict(int (*restrict *p)[3]);
+            void arr_of_ptr(int *(*restrict p)[3]);
+            void cb_ret_ptr(int *(*cb)(int *restrict));
+            """,
+            cpp=False,
+        )
+        params = self._params_by_function(root)
+        expected = {
+            "arr_ptr": True,
+            "arr_ptr_plain": False,
+            "outer_restrict": True,
+            # The parameter is a plain pointer to a restrict pointer.
+            "inner_restrict": False,
+            # The leading depth-0 `*` belongs to the array's element type.
+            "arr_of_ptr": True,
+            # A depth-0 `*` from the RETURN type, with the only `restrict`
+            # in the callback's parameter list.
+            "cb_ret_ptr": False,
+        }
+        for fn, want in expected.items():
+            assert fn in params, f"clang emitted no ParmVarDecl for {fn}"
+            assert _clang_param_is_restrict(params[fn][0]) is want, fn
 
     def test_a_restrict_function_pointer_is_not_legal_c(self, tmp_path: Path) -> None:
         """Why answering False for a function-pointer parameter loses nothing.
