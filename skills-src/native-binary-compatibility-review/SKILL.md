@@ -78,8 +78,15 @@ abicheck compare OLD NEW \
 
 Add as the situation requires:
 
-- `--header PUBLIC_HEADER` (repeatable) when the public headers are not
-  auto-discoverable.
+- `--header old=OLD_HEADER --header new=NEW_HEADER` (repeatable) when the
+  public headers are not auto-discoverable, and `--include old=... --include
+  new=...` for the directories the parse needs. **Scope both per side.** A
+  bare `--header PATH`/`--include PATH` applies to *both* artifacts, so when
+  `OLD` and `NEW` come from different revisions it parses the old binary
+  against the new checkout's API — a changed signature or layout then appears
+  on both sides and cancels out, reporting compatible
+  ([getting the two sides](references/getting-the-two-sides.md)). Use the bare
+  form only when one set of paths genuinely describes both sides.
 - `--policy plugin_abi` / `--policy sdk_vendor`, or `--policy-file`, when the
   project has its own view of what a given change kind means
   ([policies and suppressions](../shared/policies-and-suppressions.md)).

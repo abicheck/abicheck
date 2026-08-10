@@ -627,6 +627,52 @@ def _page_links_to(path: Path, target_rel_to_docs: str) -> bool:
     return False
 
 
+def _check_external_summary_pages_claim_their_topics(
+    f: Findings, topics: dict[str, dict[str, object]]
+) -> None:
+    """Enforce the registry-to-page direction for non-`docs/` entries.
+
+    `_check_front_matter_schema` runs page-to-registry: a page's `summarizes`
+    ids must round-trip. That check is vacuous for a page with no front matter
+    (it `continue`s) or one whose front matter simply omits the claim — so an
+    approved `skills-src/shared/*.md` file could be registered as a topic's
+    summary, never claim the topic, never link its canonical page, and still
+    pass. Inside `docs/` the front-matter schema is only being rolled out
+    incrementally, so silence there is deliberate; a fragment registered under
+    ADR-058's exception is opting in by construction and must claim what it
+    was registered for.
+    """
+    for topic_id, entry in sorted(topics.items()):
+        if not isinstance(entry, dict):
+            continue
+        for key in ("task_pages", "allowed_summaries"):
+            values = entry.get(key, [])
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                text = str(value)
+                if _is_file_under(DOCS, text) or not _is_registered_page(text):
+                    continue
+                path = _resolves_under(ROOT, text)
+                if path is None or not path.is_file():
+                    continue  # existence is _check_referenced_paths_exist's job
+                try:
+                    fm = load_front_matter(path)
+                except (yaml.YAMLError, ValueError):
+                    continue  # reported by the front-matter scan
+                claimed = fm.get("summarizes") if isinstance(fm, dict) else None
+                claimed = claimed if isinstance(claimed, list) else []
+                if topic_id not in [str(c) for c in claimed]:
+                    f.err(
+                        "front-matter",
+                        f"{_rel(path)}: registered as topic {topic_id!r}'s "
+                        f"{key} entry but its front matter does not list "
+                        f"{topic_id!r} under `summarizes` — an out-of-docs "
+                        "summary page must claim the topic it is registered "
+                        "for, or the round-trip passes vacuously",
+                    )
+
+
 def _check_front_matter_schema(
     f: Findings, topics: dict[str, dict[str, object]]
 ) -> None:
@@ -1146,6 +1192,7 @@ def main() -> int:
         _check_referenced_paths_exist(f, topics)
         _check_canonical_page_uniqueness(f, topics)
         _check_front_matter_schema(f, topics)
+        _check_external_summary_pages_claim_their_topics(f, topics)
         _check_canonical_pages_declare_ownership(f, topics)
     terms = _load_terminology(f)
     if terms is not None:

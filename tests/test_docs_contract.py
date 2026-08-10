@@ -1537,6 +1537,39 @@ def test_registered_summary_entry_outside_the_approved_tree_is_rejected(
     assert f.errors, f"{entry} must not satisfy a documentation-page entry"
 
 
+@pytest.mark.parametrize(
+    "front_matter",
+    ["", "---\ndoc_type: reference\n---\n", "---\nsummarizes:\n  - other\n---\n"],
+    ids=["no-front-matter", "no-summarizes", "wrong-topic"],
+)
+def test_external_summary_entry_must_claim_its_topic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, front_matter: str
+) -> None:
+    """Registry-to-page direction. The page-to-registry check is vacuous when
+    a page has no front matter (it skips) or simply omits the claim, so an
+    approved fragment could be registered as a topic's summary, never claim
+    the topic, and still pass."""
+    topics, fragment = _external_registry(tmp_path)
+    fragment.write_text(front_matter + "\n# Fragment\n", encoding="utf-8")
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)
+    assert f.errors, "an unclaimed external summary entry must fail"
+
+
+def test_external_summary_entry_that_claims_its_topic_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The complement: the well-formed fragment the exception exists for."""
+    topics, _ = _external_registry(tmp_path)
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)
+    assert f.errors == []
+
+
 def test_registered_summary_page_outside_docs_is_accepted(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

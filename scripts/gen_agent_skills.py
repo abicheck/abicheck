@@ -137,7 +137,11 @@ _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 
 #: Fenced code blocks, then inline code spans. Applied in that order so a
 #: backtick *inside* a fence is never mistaken for an inline span.
-_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?\n {0,3}\1[^\n]*$", re.M | re.S)
+#: The closing delimiter permits only trailing whitespace after it — a line
+#: like ```` ```oops ```` inside a block is an *info-string* line, not a
+#: closer. Accepting arbitrary text there ended the mask early, so the rest of
+#: the block was treated as prose: its link syntax rewritten or rejected.
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?\n {0,3}\1[ \t]*$", re.M | re.S)
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 
 #: Placeholder body — `\x00` cannot occur in a Markdown source, so a masked

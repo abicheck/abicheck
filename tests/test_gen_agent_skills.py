@@ -293,6 +293,29 @@ def test_link_syntax_inside_a_code_example_is_left_alone(synthetic):
     assert "references/shared/a.md" in rendered
 
 
+def test_a_pseudo_closer_inside_a_fence_does_not_end_the_mask(synthetic):
+    """A Markdown fence closes only on a delimiter line carrying nothing but
+    trailing whitespace. A line like ```` ```oops ```` is an info-string, not
+    a closer — treating it as one ended the mask early and left the rest of
+    the block to be rewritten as prose."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n[a](../shared/a.md)\n\n"
+                    "````markdown\n"
+                    "```oops\n"
+                    "[example](../../docs/use/cli-usage.md)\n"
+                    "````\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    rendered = gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+    assert "[example](../../docs/use/cli-usage.md)" in rendered
+
+
 def test_a_fragment_cited_only_inside_a_code_example_is_not_a_citation(synthetic):
     """Masking must apply to citation scanning too, or a fragment merely
     *shown* in an example would be copied into the skill — and, if that were
