@@ -28,10 +28,9 @@ Three layers are covered here, mirroring ``test_clang_param_va_list.py``:
 1. Synthetic-XML unit tests against ``_CastxmlParser`` directly (no castxml
    binary needed — mirrors the shape ``test_castxml_hidden_friends.py`` and
    siblings already use), confirmed to match real castxml output in (2).
-2. A live, real-``castxml``-invoking test parsing the XML output directly
-   (deliberately NOT ``integration``-marked — see that class's own
-   docstring for why; self-skips without castxml regardless) — the exact
-   spellings verified against real castxml 0.6 output.
+2. A live, real-``castxml``-invoking ``integration``-marked test parsing
+   the XML output directly — the exact spellings verified against real
+   castxml 0.6 output.
 3. The diff-level gates: header-tier, "castxml"-producer-only (not
    "hybrid"), and the pre-v24 legacy-baseline flag for ``access``;
    ``value`` needs no gate at all (protected by ``_diff_var_values``'s
@@ -229,13 +228,93 @@ class TestCastxmlVariableAccessAndValue:
         (v,) = parser.parse_variables()
         assert v.value == "f()"
 
+    def test_mutable_pointer_to_const_pointee_has_no_value(self) -> None:
+        """``const int *p = &a;`` — the POINTEE is const, but ``p`` itself is
+        a mutable pointer that can legally be reassigned. The loose
+        ``is_const`` (word-boundary regex over the rendered spelling) reads
+        "const" in ``"const int *"`` and would wrongly treat ``&a`` as a
+        baked-in compile-time contract; ``value`` must gate on the
+        variable's own TOP-LEVEL constness instead (Codex review, fresh
+        evidence). Mirrors real castxml's shape verified in the live test
+        below: ``p``'s own ``type`` resolves directly to a ``PointerType``,
+        never a ``CvQualifiedType`` — unlike a genuinely const ``int
+        *const``, which the sibling test right after this one covers."""
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        f1 = SubElement(root, "File")
+        f1.set("id", "f1")
+        f1.set("name", "lib.h")
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+        SubElement(root, "FundamentalType", attrib={"id": "_23", "name": "int"})
+        SubElement(
+            root, "CvQualifiedType", attrib={"id": "_23c", "type": "_23", "const": "1"}
+        )
+        # `p`'s own type is a plain PointerType to the const pointee -- NOT
+        # wrapped in its own CvQualifiedType, matching real castxml output
+        # for a mutable pointer.
+        SubElement(root, "PointerType", attrib={"id": "_24", "type": "_23c"})
+        SubElement(
+            root,
+            "Variable",
+            attrib={
+                "id": "_11",
+                "name": "p",
+                "type": "_24",
+                "context": "_1",
+                "init": "&a",
+                "file": "f1",
+                "location": "f1:1",
+            },
+        )
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        (v,) = parser.parse_variables()
+        # The loose, pre-existing `Variable.is_const` still reads True here
+        # (a separate, pre-existing imprecision this fix does not touch --
+        # it feeds VAR_BECAME_CONST/VAR_LOST_CONST, not `value`) — pinned so
+        # a future reader isn't surprised by the apparent inconsistency.
+        assert v.is_const is True
+        assert v.value is None
 
+    def test_genuinely_const_pointer_still_has_a_value(self) -> None:
+        """The positive control for the fix above: ``int *const p = &a;`` —
+        the POINTER itself is const (cannot be reassigned) — DOES resolve
+        to its own ``CvQualifiedType`` wrapping the ``PointerType``, and its
+        initializer is a real compile-time contract."""
+        root = Element("CastXML", attrib={"format": "1.4.0"})
+        f1 = SubElement(root, "File")
+        f1.set("id", "f1")
+        f1.set("name", "lib.h")
+        SubElement(root, "Namespace", attrib={"id": "_1", "name": "::"})
+        SubElement(root, "FundamentalType", attrib={"id": "_23", "name": "int"})
+        SubElement(root, "PointerType", attrib={"id": "_24", "type": "_23"})
+        SubElement(
+            root, "CvQualifiedType", attrib={"id": "_24c", "type": "_24", "const": "1"}
+        )
+        SubElement(
+            root,
+            "Variable",
+            attrib={
+                "id": "_12",
+                "name": "p",
+                "type": "_24c",
+                "context": "_1",
+                "init": "&a",
+                "file": "f1",
+                "location": "f1:1",
+            },
+        )
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        (v,) = parser.parse_variables()
+        assert v.value == "&a"
+
+
+@pytest.mark.integration
 class TestCastxmlVariableAccessAndValueAgainstRealCastxml:
     """The exact XML shapes above, confirmed against a live castxml run.
 
-    Self-skips without a ``castxml``/``g++`` install (not marked
-    ``integration``'s stricter Linux gate, which also demands ``gcc`` — this
-    doesn't touch a compiled binary at all, only the header-XML dump).
+    Marked ``integration`` per ``AGENTS.md``'s "if a test needs castxml,
+    mark it `@pytest.mark.integration`" rule, so the canonical fast unit
+    lane never becomes host-dependent on whether castxml happens to be
+    installed (Codex review).
     """
 
     def _dump_variables(self, tmp_path: Path, source: str) -> list[Variable]:
@@ -301,6 +380,24 @@ class TestCastxmlVariableAccessAndValueAgainstRealCastxml:
         # their initializer LOOKS constant.
         assert by_name["simple"].value is None
         assert by_name["computed"].value is None
+
+    def test_mutable_pointer_to_const_pointee_has_no_value(
+        self, tmp_path: Path
+    ) -> None:
+        """The synthetic-XML regression above, confirmed against real
+        castxml: a MUTABLE pointer to a const pointee must not surface its
+        address-of initializer as `value` (Codex review)."""
+        variables = self._dump_variables(
+            tmp_path,
+            """
+            int a = 1, b = 2;
+            const int *p = &a;
+            int *const q = &a;
+            """,
+        )
+        by_name = {v.name: v for v in variables}
+        assert by_name["p"].value is None
+        assert by_name["q"].value == "&a"
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:

@@ -1273,18 +1273,23 @@ class _CastxmlParser:
                     visibility=vis,
                     is_const=is_const,
                     # G31 Phase C continued: `_access_level`, already used
-                    # for a `Field`, reads the identical structured `access`
-                    # attribute on a static class member's `<Variable>`
-                    # element (verified against real castxml output).
+                    # for a `Field`, reads the identical `access` attribute
+                    # a static class member's `<Variable>` also carries.
                     access=self._access_level(el),
-                    # G31 Phase C continued: `init` is a verbatim
-                    # (unevaluated) expression, like `TypeField.default`/
-                    # `Param.default`. Restricted to `is_const` (mirroring
-                    # `_iter_public_constants`'s own filter below): a
-                    # non-const initializer can be an arbitrary runtime
-                    # expression (`init="f()"`, verified empirically), not
-                    # the "compile-time constant" `Variable.value` promises.
-                    value=el.get("init") if is_const else None,
+                    # G31 Phase C continued: `init` is verbatim/unevaluated,
+                    # like `TypeField.default`. Gated on TOP-LEVEL constness
+                    # via `_resolve_cv_restrict` (stops at `PointerType`) --
+                    # NOT the loose `is_const` above, which reads "const"
+                    # anywhere in the spelling: `const int *p` is a MUTABLE
+                    # pointer whose "value" (an address) is not a
+                    # compile-time contract (Codex review; confirmed `p`'s
+                    # type resolves to a plain `PointerType`, never a
+                    # `CvQualifiedType`, unlike a real `int *const`).
+                    value=(
+                        el.get("init")
+                        if self._resolve_cv_restrict(el.get("type", ""))[0]
+                        else None
+                    ),
                     source_location=self._source_location(el),
                     # Explicit alignas/aligned override when castxml emits an
                     # ``align`` attribute on the Variable itself; falls back to
