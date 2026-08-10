@@ -14,5 +14,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   real, resolvable offset. `vptr_offset_bits` is now read from GCC/Clang's
   artificial `_vptr.<Class>`/`_vptr$<Class>` debug-info member directly,
   falling back to the resolved primary base's own already-known offset for
-  a class with no local vptr member of its own (G31 Phase C).
+  a class with no local vptr member of its own, and to the original
+  `0`-if-polymorphic heuristic only for the residual case neither mechanism
+  can explain (a "nearly empty" virtual base sharing its vptr slot with no
+  local member of its own) (G31 Phase C). This DWARF-derived value also
+  reaches castxml/clang snapshots via `dumper_layout_backfill.py`'s
+  existing layout backfill, so the whole-snapshot disk cache version was
+  bumped (v8 → v9) to invalidate a warm cache holding the old, less-accurate
+  backfilled value.
 

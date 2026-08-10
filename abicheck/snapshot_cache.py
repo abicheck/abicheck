@@ -45,7 +45,7 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "8"
+_SNAPSHOT_CACHE_VERSION: str = "9"
 # v2: castxml's CvQualifiedType type-name spelling changed for a
 # volatile-qualified pointer/reference VALUE (now a suffix, "T * volatile",
 # matching clang's own convention, rather than always a prefix) -- an
@@ -116,6 +116,21 @@ _SNAPSHOT_CACHE_VERSION: str = "8"
 # provenance still bare-keyed from before the qualification fix that landed
 # alongside this extraction) until it happened to expire or was manually
 # cleared. Bumped so the upgrade forces re-extraction instead.
+#
+# v9 (G31 Phase C continuation, Codex review): ``dwarf_snapshot.py``'s
+# ``RecordType.vptr_offset_bits`` stopped using a ``0 if vtable else None``
+# heuristic in favor of reading GCC/Clang's own artificial vptr debug-info
+# member (plus a whole-binary resolution pass for a class whose vtable is
+# entirely inherited). This DWARF-derived value reaches a *cacheable*
+# snapshot indirectly: ``dumper_layout_backfill.backfill_dwarf_layout()``
+# backfills a header-AST (castxml/clang) snapshot's ``vptr_offset_bits``
+# from the real binary's DWARF whenever the header-derived value is
+# ``None`` -- the normal "binary + public headers" cacheable shape, not
+# only the always-uncacheable ``--dwarf-only`` path. Without this bump, an
+# upgrading user's warm cache entry (headers/includes/version/lang/
+# ``extra`` all unchanged) would keep replaying the old, less-accurate
+# backfilled value indefinitely. Bumped so the upgrade forces
+# re-extraction instead.
 
 
 def _get_cache_dir() -> Path:

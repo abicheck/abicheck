@@ -161,9 +161,10 @@ decision" below) — a driving case is not the open question, see below.
      denylist is sufficient.
   Each of the four is a real design decision, not a detail to fill in while
   coding — exactly the bar this repository's ADR process exists to clear
-  before implementation starts (see `docs/contribute/adr/044-reachability-
-  aware-suppression.md`'s own "Post-merge review rounds" note, cited by
-  G31's Phase B entry as the same bar graph-identity changes need).
+  before implementation starts (see
+  `docs/contribute/adr/044-reachability-aware-suppression.md`'s own
+  "Post-merge review rounds" note, cited by G31's Phase B entry as the same
+  bar graph-identity changes need).
 - **Cost is real and ongoing, not one-time.** Unlike a detector that runs
   once against already-extracted facts, this layer would invoke a real
   compiler binary per synthesized probe per comparison — the same
@@ -207,9 +208,9 @@ satisfied (see below); criterion 2 is the actual blocker:
 
 ## Consequences
 
-- G31's plan doc (`docs/contribute/plans/g31-header-graph-default-on-
-  followup.md`) is updated to mark this item resolved-via-deferral, linking
-  here, rather than left as an open, unscoped bullet.
+- G31's plan doc (`docs/contribute/plans/g31-header-graph-default-on-followup.md`)
+  is updated to mark this item resolved-via-deferral, linking here, rather
+  than left as an open, unscoped bullet.
 - No code, schema, or `ChangeKind` changes ship with this ADR — it is a
   scope decision only.
 - `probe_harness.py`, the `examples/*/app.c`/`app.cpp` fixtures,
