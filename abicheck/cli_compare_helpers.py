@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -70,8 +69,22 @@ from .cli_compare_options import (
 )
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_helpers_compare import (
+    # The ADR-043 scoped-gating family lives there (this module is at the
+    # file-size cap); re-exported so ``cli_compare_helpers._verdict_exit_code``
+    # -- which cli_scan_baseline imports -- and the existing test patch targets
+    # keep resolving unchanged.
+    _app_compat_summary as _app_compat_summary,
+    _apply_required_symbol_scoping as _apply_required_symbol_scoping,
+    _apply_runtime_probe as _apply_runtime_probe,
+    _apply_used_by_scoping as _apply_used_by_scoping,
     _pair_wide_dialect_override,
+    _plugin_contract_summary as _plugin_contract_summary,
+    _require_used_by_binary_evidence as _require_used_by_binary_evidence,
     _resolve_per_side_options,
+    _scoped_exit_code as _scoped_exit_code,
+    _scoped_severity_summary as _scoped_severity_summary,
+    _verdict_exit_code as _verdict_exit_code,
+    _verdict_severity_rank as _verdict_severity_rank,
     _warn_ignored_flags,
     fold_l0_hard_removals,
     load_required_symbols,
@@ -360,418 +373,6 @@ def _classify_and_reject_operands(
 
 
 
-def _app_compat_summary(result: object) -> dict[str, Any]:
-    """Project an :class:`appcompat.AppCompatResult` into a small JSON-safe dict."""
-    return {
-        "app": result.app_path,  # type: ignore[attr-defined]
-        "verdict": result.verdict.value,  # type: ignore[attr-defined]
-        "required_symbol_count": result.required_symbol_count,  # type: ignore[attr-defined]
-        "missing_symbols": result.missing_symbols,  # type: ignore[attr-defined]
-        "missing_versions": result.missing_versions,  # type: ignore[attr-defined]
-        "relevant_change_count": len(result.breaking_for_app),  # type: ignore[attr-defined]
-        "symbol_coverage": round(result.symbol_coverage, 1),  # type: ignore[attr-defined]
-    }
-
-
-def _plugin_contract_summary(result: object) -> dict[str, Any]:
-    """Project a :class:`appcompat.PluginHostContractResult` into a small dict."""
-    return {
-        "verdict": result.verdict.value,  # type: ignore[attr-defined]
-        "required_entrypoints": sorted(result.required_entrypoints),  # type: ignore[attr-defined]
-        "missing_entrypoints": result.missing_entrypoints,  # type: ignore[attr-defined]
-        "relevant_change_count": len(result.breaking_for_host),  # type: ignore[attr-defined]
-        "coverage": round(result.coverage, 1),  # type: ignore[attr-defined]
-    }
-
-
-def _verdict_exit_code(verdict: object) -> int:
-    """Map a scoped-comparison Verdict to its floor exit code (ADR-043)."""
-    value = getattr(verdict, "value", verdict)
-    if value == "BREAKING":
-        return 4
-    if value == "API_BREAK":
-        return 2
-    return 0
-
-
-_VERDICT_SEVERITY_RANK = {
-    "BREAKING": 3, "API_BREAK": 2, "COMPATIBLE_WITH_RISK": 1,
-    "COMPATIBLE": 0, "NO_CHANGE": 0,
-}
-
-
-def _verdict_severity_rank(verdict: object) -> int:
-    """Rank a Verdict by severity, independent of any exit-code scheme.
-
-    Under a severity scheme, a BREAKING app can carry exit code 0 (e.g.
-    ``--severity-preset info-only``) -- ranking "worst app" by exit code
-    would then let a later COMPATIBLE app (also exit code 0) overwrite the
-    reported scoped verdict, so JSON/HTML/SARIF could claim COMPATIBLE while
-    an earlier --used-by summary is still BREAKING (Codex review). Verdict
-    selection for reporting must stay keyed on verdict severity, not on the
-    (independently correct) max-exit-code computation used for gating.
-    """
-    value = getattr(verdict, "value", verdict)
-    return _VERDICT_SEVERITY_RANK.get(value, 0) if isinstance(value, str) else 0
-
-
-def _scoped_exit_code(
-    scoped: Any, relevant_changes: list[Any],
-    result: Any, exit_code_scheme: str, sev_config: Any,
-    policy: str, policy_file: PolicyFile | None,
-    *, has_missing_contract: bool = False,
-) -> int:
-    """Compute a scoped result's exit code under the active exit-code scheme.
-
-    ADR-043's --used-by/--required-symbol(s) floor the exit code on the
-    *scoped* verdict rather than the full library's -- but that floor must
-    still respect ``--exit-code-scheme severity``/``--severity-*``: without
-    this, a scoped compare silently reverted to the legacy 0/2/4 mapping no
-    matter what severity configuration the caller passed, because the scoped
-    branch returned straight to ``sys.exit`` before the severity-aware exit
-    handler ever ran.
-
-    *has_missing_contract* (a required symbol/version/entrypoint absent from
-    the new library) floors the severity-scheme exit code separately from
-    *relevant_changes*: a missing contract symbol is BREAKING but is not a
-    diff ``Change``, so ``compute_exit_code`` never sees it and would
-    otherwise return 0 (Codex review).
-    """
-    if exit_code_scheme == "severity":
-        from .severity import compute_exit_code, missing_contract_exit_code
-
-        code = compute_exit_code(
-            relevant_changes, sev_config,
-            policy=policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=policy_file,
-        )
-        if has_missing_contract:
-            code = max(code, missing_contract_exit_code(sev_config))
-        return code
-    return _verdict_exit_code(scoped.verdict)
-
-
-def _scoped_severity_summary(
-    relevant_changes: list[Any], missing: Iterable[str],
-    result: Any, sev_config: Any, policy: str, policy_file: PolicyFile | None,
-) -> tuple[tuple[str, ...], dict[str, int]]:
-    """(blocking_categories, per-category counts) for one scoped result.
-
-    Mirrors ``_scoped_exit_code``'s missing-contract floor: a missing
-    symbol/version/entrypoint with no matching diff Change is folded into
-    ``abi_breaking`` directly here -- both into the blocking-categories set
-    (when abi_breaking is severity-configured as error, matching the exit
-    -code floor) and into the count (always, since a count is a factual
-    tally, not a gate decision) -- otherwise a missing-contract-only scoped
-    BREAKING would report an empty ``blocking_categories`` alongside a
-    nonzero exit code, or a ``categories.abi_breaking.count`` of 0 alongside
-    a blocking ``abi_breaking`` category (Codex review). A *missing* entry
-    that already has a matching Change in *relevant_changes* (e.g. a removed
-    symbol is both "missing" from the new export table and a ``FUNC_REMOVED``
-    Change) is excluded via ``uncovered_missing_symbols`` -- otherwise that
-    single ABI break would be counted twice (Codex review follow-up).
-    """
-    from .appcompat import uncovered_missing_symbols
-    from .severity import (
-        IssueCategory,
-        SeverityLevel,
-        categorize_changes,
-        compute_gate_decision,
-    )
-
-    categorized = categorize_changes(
-        relevant_changes, policy=policy,
-        kind_sets=result._effective_kind_sets(), policy_file=policy_file,
-    )
-    counts = {
-        "abi_breaking": len(categorized.abi_breaking),
-        "potential_breaking": len(categorized.potential_breaking),
-        "quality_issues": len(categorized.quality_issues),
-        "addition": len(categorized.addition),
-    }
-    gate = compute_gate_decision(
-        relevant_changes, sev_config,
-        policy=policy, kind_sets=result._effective_kind_sets(), policy_file=policy_file,
-    )
-    categories = list(gate.blocking_categories)
-    uncovered = uncovered_missing_symbols(missing, relevant_changes)
-    if uncovered:
-        counts["abi_breaking"] += len(uncovered)
-        if (
-            sev_config.abi_breaking == SeverityLevel.ERROR
-            and IssueCategory.ABI_BREAKING.value not in categories
-        ):
-            categories.append(IssueCategory.ABI_BREAKING.value)
-    return tuple(categories), counts
-
-
-def _apply_used_by_scoping(
-    result: Any, used_by_apps: tuple[Path, ...],
-    old_input: Path, new_input: Path,
-    old_snapshot: Any, new_snapshot: Any,
-    policy: str, policy_file: PolicyFile | None,
-    exit_code_scheme: str = "legacy", sev_config: Any = None,
-    verify_runtime: bool = False,
-    suppression: Any = None,
-) -> int:
-    """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
-
-    OLD/NEW may be real library binaries or JSON snapshots (e.g. a saved
-    ``dump`` output): a recognized binary is parsed directly; otherwise the
-    already-loaded snapshot (``old_snapshot``/``new_snapshot``, from
-    ``compare``'s own pipeline) is used instead, since a snapshot's
-    ``elf``/``pe``/``macho`` fields already carry the SONAME/export table/
-    version list/PE ordinal table :func:`~abicheck.appcompat.scope_diff_to_app`
-    needs. Attaches a JSON-safe summary to ``result.used_by`` for the
-    renderer and returns the worst app's exit code, computed under
-    *exit_code_scheme* (legacy verdict floor, or severity-aware over each
-    app's relevant changes when the caller passed --severity-*).
-
-    *verify_runtime* (ADR-044 P2 item 2) additionally runs each app once
-    against the old library and once against the new one
-    (:func:`~abicheck.runtime_probe.run_runtime_probe`) when both are real
-    binaries — a JSON-snapshot side has no file to execute against, so the
-    probe is silently skipped for that app, same as the static check's own
-    snapshot fallback degrades gracefully.
-
-    *suppression* (ADR-044 P2, Codex review) is forwarded to
-    :func:`~abicheck.appcompat.scope_diff_to_app` and also consulted here
-    directly for the ``CONSUMER_RUNTIME_LOAD_FAILED`` overlay: both findings
-    are synthesized *after* the pipeline's own suppression pass already ran
-    over ``result.changes``, so without this they would be unsuppressible
-    even by an exact rule.
-    """
-    from .appcompat import scope_diff_to_app
-    from .service import detect_binary_format
-
-    old_lib = old_input if detect_binary_format(old_input) is not None else old_snapshot
-    new_lib = new_input if detect_binary_format(new_input) is not None else new_snapshot
-
-    for lib, path, label in (
-        (old_lib, old_input, "OLD"), (new_lib, new_input, "NEW"),
-    ):
-        has_binary_evidence = isinstance(lib, Path) or any(
-            getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
-        )
-        if not has_binary_evidence:
-            raise click.UsageError(
-                f"--used-by requires OLD/NEW to be real library binaries, or "
-                f"JSON snapshots carrying binary evidence (a `dump` of a real "
-                f"library, not headers-only); {label} ({path}) is neither."
-            )
-
-    from .appcompat import uncovered_missing_symbols
-    from .reporter import _finding_id
-
-    summaries = []
-    worst_exit = 0
-    worst_verdict = None
-    worst_verdict_rank = -1
-    # Keyed by the change's semantic identity (kind/symbol/old/new/location/
-    # description, via `_finding_id`) -- not id(change) -- so a Change or
-    # missing symbol shared by two tied apps (e.g. both import the same
-    # removed symbol) collapses to one entry instead of being tallied once
-    # per app (Codex review) -- `_scoped_severity_summary` runs once at the
-    # end over this deduplicated union, not per app summed together.
-    # `id()` alone under-deduplicates PE_ORDINAL_RETARGETED findings:
-    # `scope_diff_to_app` synthesizes a fresh `Change` object per app (via
-    # `_check_pe_ordinal_imports`), so two apps hitting the same ordinal
-    # retarget produce structurally-identical but object-distinct `Change`s
-    # that `id()` would double-count in the severity summary.
-    worst_changes: dict[str, Any] = {}
-    worst_missing: set[str] = set()
-    # Union across ALL apps (not just the worst-exit-code one) of which
-    # findings this --used-by gate actually cares about -- SARIF/JUnit
-    # consult this to make their own result levels/failure counts follow
-    # the scoped gate instead of the full, unscoped library diff (CLI-audit
-    # P1: "SARIF/JUnit computing pass/fail from the full library diff").
-    relevant_finding_ids: set[str] = set()
-    # Union across ALL apps of relevant Change objects, keyed by finding id --
-    # not just their ids -- so scoped-only changes (e.g. PE_ORDINAL_RETARGETED,
-    # which scope_diff_to_app synthesizes fresh per app and never adds to
-    # result.changes) can still be rendered by SARIF/JUnit instead of only
-    # contributing to the gate's exit code with nothing to explain it (Codex
-    # review).
-    relevant_changes_by_id: dict[str, Any] = {}
-    missing_labels: set[str] = set()
-    for app in used_by_apps:
-        scoped = scope_diff_to_app(
-            result, app, old_lib, new_lib,
-            policy=policy, policy_file=policy_file, suppression=suppression,
-            # ADR-057: old_lib above is the *path* whenever OLD is a real
-            # binary, and a path carries no L5 graph -- pass the snapshot
-            # compare's own pipeline already resolved so the consumer-impact
-            # join can explain why a consumer required a removed symbol.
-            # Graph lookup only; old_lib still owns every export/version read.
-            old_snapshot=old_snapshot,
-        )
-        if verify_runtime and isinstance(old_lib, Path) and isinstance(new_lib, Path):
-            from .checker_policy import ChangeKind, ReachabilityState
-            from .diff_helpers import make_change
-            from .runtime_probe import run_runtime_probe
-
-            probe = run_runtime_probe(app, old_lib, new_lib)
-            regressed_symbol = probe.regressed_symbol
-            if regressed_symbol:
-                # public_reachable=True (Codex review, fresh evidence, mirrors
-                # appcompat.scope_diff_to_app's identical fix for
-                # CONSUMER_REQUIRED_SYMBOL_REMOVED): this finding only exists
-                # because the dynamic linker itself failed to resolve a
-                # symbol for a real, executed --used-by consumer binary --
-                # left at the dataclass default (False), a broad
-                # namespace/source_location suppression rule's default
-                # "unreachable-only" reachability would read it as
-                # unreachable and silently suppress a runtime regression that
-                # is, by construction, always consumer-proven real.
-                runtime_change = make_change(
-                    ChangeKind.CONSUMER_RUNTIME_LOAD_FAILED,
-                    symbol=regressed_symbol,
-                    name=app.name,
-                    public_reachable=True,
-                    reachability_kind="consumer_proven",
-                    reachability_state=ReachabilityState.PROVEN_REACHABLE,
-                )
-                add_finding = suppression is None
-                if suppression is not None:
-                    outcome = suppression.evaluate(runtime_change)
-                    add_finding = not outcome.suppressed
-                    # outcome.withheld_unknown_rule is never set here:
-                    # runtime_change is always constructed with
-                    # reachability_state=PROVEN_REACHABLE above (it is by
-                    # construction consumer-proven), and
-                    # would_withhold_unknown_reachability only ever fires on
-                    # UNKNOWN.
-                    if add_finding and outcome.withheld_rule is not None:
-                        from .post_processing import _build_suppression_overreach_change
-
-                        scoped.breaking_for_app.append(
-                            _build_suppression_overreach_change(
-                                runtime_change, outcome.withheld_rule
-                            )
-                        )
-                if add_finding:
-                    scoped.breaking_for_app.append(runtime_change)
-                    # scope_diff_to_app already computed scoped.verdict before
-                    # this RISK-tier finding existed -- recompute so a clean
-                    # static scope plus a runtime regression reports
-                    # COMPATIBLE_WITH_RISK instead of a stale COMPATIBLE
-                    # (Codex review).
-                    from .appcompat import _compute_appcompat_verdict
-
-                    scoped.verdict = _compute_appcompat_verdict(
-                        scoped.missing_symbols, scoped.missing_versions,
-                        scoped.breaking_for_app, scoped.required_symbol_count,
-                        policy, policy_file,
-                    )
-        summaries.append(_app_compat_summary(scoped))
-        relevant_finding_ids.update(_finding_id(c) for c in scoped.breaking_for_app)
-        relevant_changes_by_id.update(
-            {_finding_id(c): c for c in scoped.breaking_for_app}
-        )
-        # A missing symbol/version already covered by a relevant Change (e.g.
-        # FUNC_REMOVED) must not also become a synthetic missing-contract
-        # finding -- that would double-report the same ABI break (Codex
-        # review, mirrors _scoped_severity_summary's own dedup below).
-        missing_labels.update(
-            uncovered_missing_symbols(
-                list(scoped.missing_symbols) + list(scoped.missing_versions),
-                scoped.breaking_for_app,
-            )
-        )
-        exit_code = _scoped_exit_code(
-            scoped, scoped.breaking_for_app, result, exit_code_scheme, sev_config,
-            policy, policy_file,
-            has_missing_contract=bool(scoped.missing_symbols or scoped.missing_versions),
-        )
-        # exit code (gating) and verdict (reporting) are maxed/ranked
-        # independently: under a severity scheme the two can disagree (a
-        # BREAKING app can carry exit code 0 under e.g. `--severity-preset
-        # info-only`), so picking the reported scoped_verdict by exit code
-        # could let a later, less-severe app overwrite an earlier BREAKING
-        # one merely because their exit codes tied at 0 (Codex review).
-        if exit_code_scheme == "severity":
-            if exit_code > worst_exit:
-                worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
-                worst_missing = set(scoped.missing_symbols) | set(scoped.missing_versions)
-            elif exit_code == worst_exit:
-                worst_changes.update({_finding_id(c): c for c in scoped.breaking_for_app})
-                worst_missing |= set(scoped.missing_symbols) | set(scoped.missing_versions)
-        worst_exit = max(worst_exit, exit_code)
-        rank = _verdict_severity_rank(scoped.verdict)
-        if worst_verdict is None or rank >= worst_verdict_rank:
-            worst_verdict_rank = rank
-            worst_verdict = scoped.verdict
-    result.used_by = summaries  # type: ignore[attr-defined]
-    result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
-    result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
-    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
-    result.gate_scope = "used_by"  # type: ignore[attr-defined]
-    result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
-    result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
-    _existing_ids = {_finding_id(c) for c in result.changes}
-    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
-        c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
-    )
-    if exit_code_scheme == "severity":
-        categories, counts = _scoped_severity_summary(
-            list(worst_changes.values()), worst_missing,
-            result, sev_config, policy, policy_file,
-        )
-        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
-        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
-    return worst_exit
-
-
-def _apply_required_symbol_scoping(
-    result: Any, required_symbols: tuple[str, ...],
-    old: Any, new: Any,
-    policy: str, policy_file: PolicyFile | None,
-    exit_code_scheme: str = "legacy", sev_config: Any = None,
-) -> int:
-    """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043)."""
-    from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
-    from .reporter import _finding_id
-
-    scoped = scope_diff_to_required_symbols(
-        result, old, new, required_symbols,
-        policy=policy, policy_file=policy_file,
-    )
-    result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
-    result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
-    result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
-    result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
-        _finding_id(c) for c in scoped.breaking_for_host
-    )
-    # An entrypoint already covered by a relevant Change must not also
-    # become a synthetic missing-contract finding (Codex review, mirrors
-    # _apply_used_by_scoping's identical dedup).
-    result.scoped_missing_labels = tuple(sorted(  # type: ignore[attr-defined]
-        uncovered_missing_symbols(scoped.missing_entrypoints, scoped.breaking_for_host)
-    ))
-    # Scoped-only changes: relevant to the host contract but never added to
-    # result.changes (mirrors _apply_used_by_scoping's identical handling).
-    _existing_ids = {_finding_id(c) for c in result.changes}
-    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
-        c for c in scoped.breaking_for_host if _finding_id(c) not in _existing_ids
-    )
-    exit_code = _scoped_exit_code(
-        scoped, scoped.breaking_for_host, result, exit_code_scheme, sev_config,
-        policy, policy_file,
-        has_missing_contract=bool(scoped.missing_entrypoints),
-    )
-    result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
-    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
-    if exit_code_scheme == "severity":
-        categories, counts = _scoped_severity_summary(
-            scoped.breaking_for_host, scoped.missing_entrypoints,
-            result, sev_config, policy, policy_file,
-        )
-        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
-        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
-    return exit_code
-
-
 def _render_compare_dry_run(
     *,
     old_input: Path, new_input: Path,
@@ -1041,6 +642,539 @@ def _preflight_manifests_and_audit(
     return old_manifest_obj, new_manifest_obj
 
 
+def _resolve_required_symbol_policy(
+    ctx: click.Context, policy: str, required_symbols: tuple[str, ...],
+    required_symbols_from_file: tuple[str, ...],
+    required_symbols_file: Path | None, required_symbols_sha: str | None,
+) -> tuple[str, str | None, Path | None, str | None]:
+    """Pick ``policy`` for a ``--required-symbol`` contract, and say what picked it.
+
+    Required-symbol contracts default to the plugin-oriented policy unless the
+    user explicitly picked one -- an explicit ``--policy`` always wins (ADR-043).
+    Recorded, not just applied: the ADR-049 receipt has to name whatever really
+    selected ``policy.base``, and this value was chosen by a typed
+    ``--required-symbol`` rather than by ``--policy`` or a built-in default
+    (Codex review, fresh evidence -- the receipt claimed ``strict_abi`` for a run
+    that used ``plugin_abi``).
+
+    Which spelling actually *contributed* decides what the receipt names -- not
+    merely which was passed. A ``--required-symbols FILE`` run never passed
+    ``--required-symbol``, so naming the inline flag fabricates a selector; but a
+    file that parsed to nothing selected nothing either, so naming it for a
+    ``--required-symbol api_b --required-symbols empty.txt`` run omits the option
+    that really made the contract non-empty (Codex review, two rounds). The file
+    form wins when it contributed, since it is then both true and the one
+    carrying a path and digest to audit.
+
+    Returns ``(policy, selected_by, selected_path, selected_sha)``.
+    """
+    if not required_symbols or (
+        ctx.get_parameter_source("policy") == click.core.ParameterSource.COMMANDLINE
+    ):
+        return policy, None, None, None
+    if required_symbols_from_file:
+        return (
+            "plugin_abi", "--required-symbols",
+            required_symbols_file, required_symbols_sha,
+        )
+    return "plugin_abi", "--required-symbol", None, None
+
+
+def _reject_manifest_header_conflicts(
+    old_manifest_obj: Any, new_manifest_obj: Any, old_h: Any, new_h: Any,
+) -> None:
+    """``--dump-manifest <side>=`` and that side's ``-H`` are mutually exclusive."""
+    for manifest, side_headers, side in (
+        (old_manifest_obj, old_h, "old"), (new_manifest_obj, new_h, "new"),
+    ):
+        if manifest is not None and side_headers:
+            raise click.UsageError(
+                f"--dump-manifest {side}=... and a header for the {side} side "
+                "(-H/--header) are mutually exclusive -- declare the "
+                f"{side} side's public surface in the manifest's own base "
+                "profile instead."
+            )
+
+
+def _reject_manifest_non_elf(
+    old_manifest_obj: Any, new_manifest_obj: Any,
+    old_fmt: str | None, new_fmt: str | None,
+) -> None:
+    """``--dump-manifest`` extraction is wired for ELF only (ADR-050 D3)."""
+    for manifest, fmt, side in (
+        (old_manifest_obj, old_fmt, "old"), (new_manifest_obj, new_fmt, "new"),
+    ):
+        if manifest is not None and fmt != "elf":
+            raise click.UsageError(
+                f"--dump-manifest {side}=... requires the {side} input to be an "
+                f"ELF binary (ADR-050 D3); got {fmt or 'a non-binary input'}."
+            )
+
+
+def _apply_scoped_gating(
+    result: Any, old: Any, new: Any, policy: str, pf: PolicyFile | None,
+    *,
+    used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
+    used_by_old_input: Path, used_by_new_input: Path,
+    exit_code_scheme: str, sev_config: Any,
+    verify_runtime: bool, suppression: Any,
+) -> int | None:
+    """Apply whichever ADR-043 scoped gate this run selected, if any.
+
+    ``--used-by`` and ``--required-symbol`` are mutually exclusive (rejected
+    earlier), so at most one applies. Returns the scoped exit code, or ``None``
+    when the run is unscoped and the full-library verdict gates instead.
+    """
+    if used_by_apps:
+        return _apply_used_by_scoping(
+            result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
+            policy, pf,
+            exit_code_scheme=exit_code_scheme, sev_config=sev_config,
+            verify_runtime=verify_runtime, suppression=suppression,
+        )
+    if required_symbols:
+        return _apply_required_symbol_scoping(
+            result, required_symbols, old, new, policy, pf,
+            exit_code_scheme=exit_code_scheme, sev_config=sev_config,
+        )
+    return None
+
+
+def _embed_inline_source_sides(
+    ctx: click.Context, *,
+    old_input: Path, new_input: Path,
+    old_sources: Path | None, new_sources: Path | None,
+    old_build_info: Path | None, new_build_info: Path | None,
+    old_h: Any, new_h: Any, old_inc: Any, new_inc: Any,
+    old_version: str, new_version: str, lang: str,
+    header_backend: str,
+    old_header_backend: str | None, new_header_backend: str | None,
+    compile_context: Any,
+    follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
+    dwarf_only: bool, effective_debug_format: str | None,
+    pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
+    resolved_old_debug: Any, resolved_new_debug: Any,
+    debuginfod: bool, debuginfod_url: str | None,
+    collect_mode: str, depth: str | None,
+    include_labels: dict[Path, str] | None,
+    include_dependencies: bool,
+) -> tuple[Path, Path | None, Path | None, Path, Path | None, Path | None]:
+    """Dump each raw source/build-dir side inline, returning the rewritten inputs.
+
+    Inline source-tree collection (deep-compare folded into compare): when a
+    side's ``--old/new-sources`` points at a raw checkout, or
+    ``--old/new-build-info`` at a raw build dir / ``compile_commands.json`` (not
+    a ``collect`` pack), dump that side at ``--depth`` so its L3-L5 facts ride
+    embedded in the snapshot, the way the standalone deep-compare command used
+    to. Pre-built packs fall through unchanged to
+    ``prepare_embedded_build_source``.
+
+    Returns ``(old_input, old_sources, old_build_info, new_input, new_sources,
+    new_build_info)`` -- an embedded side has its input rewritten to a temporary
+    JSON snapshot.
+    """
+    # G29 Phase A: the L2 header-only semantic graph is no longer a flag
+    # a user can request here, so there is nothing to reject loudly. The
+    # inline dump below runs through `dump_cmd` (which has no L2-graph
+    # attach step of its own — that only lives on compare's own
+    # resolve_input calls / dump's own perform_elf_dump/
+    # handle_non_elf_dump path), and the rewritten old_input/new_input
+    # become a temporary JSON snapshot that _resolve_compare_snapshots
+    # below loads via resolve_input's JSON branch, which never attaches
+    # a graph either. So a raw --old/new-sources tree or raw
+    # --old/new-build-info combination structurally skips the L2 graph
+    # (silent, not_collected) — same behavior as before this change,
+    # just without a flag to have explicitly asked for it. See
+    # docs/contribute/plans/g31-header-graph-default-on-followup.md for
+    # extending graph coverage to this path.
+    import shutil
+    import tempfile
+
+    # CLI-over-config explicitness read from compare's *real* ctx (where
+    # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
+    # dump runs under ctx.invoke where that signal is lost, so we compute it
+    # here and thread it through (Codex review). A per-side --old/new-ast-frontend
+    # is itself an explicit frontend for that side.
+    _nostdinc_explicit = (
+        ctx.get_parameter_source("nostdinc")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+    _frontend_explicit = (
+        ctx.get_parameter_source("header_backend")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+
+    _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
+    # Cleanup on context teardown so the temp dir never leaks, even if an
+    # inline dump or _resolve_compare_snapshots raises before we return.
+    ctx.call_on_close(lambda: shutil.rmtree(_src_tmp, ignore_errors=True))
+    old_input, old_sources, old_build_info = _embed_inline_source_side(
+        ctx, input_path=old_input, sources=old_sources,
+        headers=old_h, includes=old_inc, version=old_version, lang=lang,
+        header_backend=old_header_backend or header_backend,
+        compile_context=compile_context,
+        frontend_explicit=_frontend_explicit or old_header_backend is not None,
+        # A nostdinc already resolved True (from --config) must survive the
+        # tree-config merge even when the tree omits it (Codex review); False
+        # is the default and indistinguishable from "unset", so only True needs
+        # preserving.
+        nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
+        build_info=old_build_info,
+        follow_deps=follow_deps, search_paths=search_paths,
+        ld_library_path=ld_library_path,
+        dwarf_only=dwarf_only, debug_format=effective_debug_format,
+        pdb_path=old_pdb_path or pdb_path,
+        debug_roots=tuple(resolved_old_debug),
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+        collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
+        depth=depth, include_labels=include_labels,
+        include_dependencies=include_dependencies,
+    )
+    new_input, new_sources, new_build_info = _embed_inline_source_side(
+        ctx, input_path=new_input, sources=new_sources,
+        headers=new_h, includes=new_inc, version=new_version, lang=lang,
+        header_backend=new_header_backend or header_backend,
+        compile_context=compile_context,
+        frontend_explicit=_frontend_explicit or new_header_backend is not None,
+        nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
+        build_info=new_build_info,
+        follow_deps=follow_deps, search_paths=search_paths,
+        debug_roots=tuple(resolved_new_debug),
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+        ld_library_path=ld_library_path,
+        dwarf_only=dwarf_only, debug_format=effective_debug_format,
+        pdb_path=new_pdb_path or pdb_path,
+        collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
+        depth=depth, include_labels=include_labels,
+        include_dependencies=include_dependencies,
+    )
+    return (
+        old_input, old_sources, old_build_info,
+        new_input, new_sources, new_build_info,
+    )
+
+
+def _resolve_evaluation_config(
+    ctx: click.Context, *,
+    resolved_cfg: Any, project_cfg: Any, cfg_path: Path | None, cfg_sha: str | None,
+    policy: str, policy_file_path: Path | None, policy_file: PolicyFile | None,
+    suppression: Any, suppress: Path | None, symbols_list: Any,
+    contract_mode: str | None, contract_evaluation: bool,
+    scope_public_headers: bool,
+    public_symbols: tuple[str, ...], public_symbols_list: Path | None,
+    require_justification: bool,
+    exit_code_scheme: str | None, severity_preset: str | None,
+    severity_abi_breaking: str | None, severity_potential_breaking: str | None,
+    severity_quality_issues: str | None, severity_addition: str | None,
+    pack_paths: tuple[Path, ...],
+    policy_selected_by: str | None, policy_selected_path: Path | None,
+    policy_selected_sha: str | None,
+) -> tuple[Any, PolicyFile | None, Any]:
+    """Resolve this invocation's ADR-049 configuration and apply its packs.
+
+    Returns ``(evaluation_config, policy_file, resolved_cfg)``. A D7 same-tier
+    conflict, a D8 pack conflict, or an inapplicable manifest is a usage error
+    -- the exit code the resolver leaves to its front end.
+    """
+    pf = policy_file
+    # ADR-049: one resolved configuration for this invocation -- the receipt
+    # the report carries *and*, since D8's `--pack` landed, the thing that
+    # configures the run (hence: before the comparison). Built from the raw
+    # CLI values, not the already-merged locals several of these were
+    # overwritten with above -- the resolver merges them itself, and a
+    # pre-merged value would look CLI-stated.
+    from .cli_compare_receipt import resolve_and_apply, typed_parameter_names
+    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
+    from .compatibility_evaluation_resolver import (
+        FieldResolutionError,
+        PackConflictError,
+    )
+    from .errors import PackManifestError
+
+    try:
+        evaluation_config, pf, resolved_cfg = resolve_and_apply(
+            {
+                "contract_mode": contract_mode,
+                "scope_public_headers": scope_public_headers,
+                "policy": policy,
+                "policy_file_path": policy_file_path,
+                "public_symbols": public_symbols,
+                "public_symbols_list": public_symbols_list,
+                "suppress": suppress,
+                "require_justification": require_justification,
+                "exit_code_scheme": exit_code_scheme,
+                "severity_preset": severity_preset,
+                "severity_abi_breaking": severity_abi_breaking,
+                "severity_potential_breaking": severity_potential_breaking,
+                "severity_quality_issues": severity_quality_issues,
+                "severity_addition": severity_addition,
+                "pack_paths": pack_paths,
+            },
+            resolved_cfg=resolved_cfg,
+            policy=policy,
+            contract_evaluation=contract_evaluation,
+            # Only this module holds the Click context, so it answers "did the
+            # user type this?" and hands the answers over as data -- which is
+            # what keeps `cli_compare_receipt` a leaf.
+            typed={n for n in typed_parameter_names() if _param_from_cli(n)},
+            project_cfg=project_cfg,
+            project_path=cfg_path,
+            # Both already loaded for the comparison itself; re-reading them
+            # here could pair one content's digest with another's rules.
+            policy_file=pf,
+            suppression=suppression,
+            suppress_path=suppress,
+            run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
+            policy_option=policy_selected_by,
+            policy_path=policy_selected_path,
+            policy_sha256=policy_selected_sha,
+            project_sha256=cfg_sha,
+            symbols_list=symbols_list,
+        )
+    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+        # A D7 same-tier conflict / D8 pack conflict / inapplicable manifest
+        # is a usage error, the exit code the resolver leaves to its front end.
+        raise click.UsageError(str(exc)) from exc
+    return evaluation_config, pf, resolved_cfg
+
+
+def _render_compare_report(
+    result: Any, old: Any, new: Any, *,
+    fmt: str, follow_deps: bool, show_only: str | None, report_mode: str,
+    show_impact: bool, stat: bool, severity_config: Any,
+    recommend: bool, demangle: bool, contract_evaluation: bool,
+    old_build_info: Path | None, new_build_info: Path | None,
+    old_sources: Path | None, new_sources: Path | None,
+) -> str:
+    """Render one compare report and fold every post-render section into it.
+
+    The primary (``--format``) and secondary (``--secondary-format``) renders
+    run the identical four-step pipeline and differ only in their arguments, so
+    they share this one function rather than keeping two copies that can drift.
+    """
+    text = _render_output(
+        fmt, result, old, new,
+        follow_deps=follow_deps,
+        show_only=show_only, report_mode=report_mode,
+        show_impact=show_impact, stat=stat,
+        severity_config=severity_config,
+        show_recommendation=recommend,
+        demangle=demangle,
+        contract_evaluation=contract_evaluation,
+    )
+    text = _fold_scoped_compat_into_text(
+        text, fmt, result,
+        severity_config=severity_config,
+        show_only=show_only, report_mode=report_mode,
+        contract_evaluation=contract_evaluation,
+    )
+    text = _fold_suppression_audit_into_text(
+        text, fmt, getattr(result, "suppression_audit", None)
+    )
+    return _fold_evidence_depth_into_json(
+        text, fmt, old, new,
+        old_build_info=old_build_info, new_build_info=new_build_info,
+        old_sources=old_sources, new_sources=new_sources,
+    )
+
+
+def _attach_suppression_audit(result: Any, suppression: Any) -> None:
+    """Attach the ``--audit-suppressions`` audit trail to *result*.
+
+    Guarded above: audit_suppressions=True implies suppression is not
+    None. Audited against the full pre-suppression change set (kept +
+    suppressed) plus any --used-by/--required-symbol scoped_only_changes
+    (Codex review, fresh evidence: run *after* scoping, not before, so a
+    rule matching only a scoping-synthesized finding like
+    CONSUMER_REQUIRED_SYMBOL_REMOVED isn't misreported as stale). Not a
+    complete fix: scope_diff_to_app/scope_diff_to_required_symbols apply
+    suppression internally to their own candidates before this ever
+    sees them, so a rule matching only a scoping candidate suppression
+    itself already dropped (never reaching scoped_only_changes at all)
+    is still invisible here -- closing that needs those functions to
+    expose their own pre-suppression candidate list, a separate,
+    larger change to appcompat.py this fix does not attempt.
+    """
+    assert suppression is not None
+    # Codex review, fresh evidence: pass the *effective*, policy-override-
+    # applied breaking set (not the static BREAKING_KINDS default) so a
+    # rule's "high risk" classification matches the verdict this run's
+    # own --policy-file would actually produce, e.g. a rule suppressing
+    # a kind the policy promoted to BREAKING is reported as high-risk
+    # even though it isn't in the built-in BREAKING_KINDS.
+    effective_breaking_kinds, _, _, _ = result._effective_kind_sets()
+    result.suppression_audit = suppression.audit(  # type: ignore[attr-defined]
+        list(result.changes)
+        + list(result.suppressed_changes)
+        + list(getattr(result, "scoped_only_changes", ()) or ()),
+        breaking_kinds=effective_breaking_kinds,
+    )
+
+
+def _reject_flags_unsupported_for_set_inputs(
+    ctx: click.Context, project_cfg: Any, *,
+    exit_code_scheme: str | None, reconcile_build_context: bool,
+    env_matrix_path: Path | None, secondary_fmt: str | None,
+    used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
+    diagnostic_comparison: bool, audit_suppressions: bool,
+    pack_paths: tuple[Path, ...], include_labels: dict[Path, str] | None,
+) -> None:
+    """Reject the single-pair-only flags on a directory/package compare.
+
+    The per-library fan-out (``compare-release`` backend) consumes the
+    resolved scheme from config but has no public CLI support for these
+    flags on set inputs -- reject them loudly (ADR-037 D12). Validated ahead
+    of the ``--dry-run`` emit (not just before the real dispatch) so a dry
+    run can't report "ok" for a flag combination the real run would then
+    reject (Codex review).
+    """
+    # The per-library fan-out (`compare-release` backend) consumes the
+    # resolved scheme from config but has no public CLI support for these
+    # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
+    # Validated ahead of the --dry-run emit below (not just before the real
+    # dispatch) so a dry run can't report "ok" for a flag combination the
+    # real run would then reject (Codex review).
+    _reject_set_input_flags(
+        exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
+        used_by_apps=used_by_apps, required_symbols=required_symbols,
+        diagnostic_comparison=diagnostic_comparison,
+        audit_suppressions=audit_suppressions,
+        pack_paths=pack_paths,
+        include_labels=include_labels,
+    )
+    _reject_compile_context_for_set_inputs(ctx, project_cfg)
+    _reject_evidence_flags_for_set_inputs(ctx)
+
+
+def _report_compare_result(
+    ctx: click.Context, result: Any, old: Any, new: Any, *,
+    old_input: Path, new_input: Path,
+    resolved_cfg: Any, evaluation_config: Any,
+    sev_config: Any, report_severity: Any,
+    layer_coverage_rows: Any, evidence_metrics: Any, extra_changes: Any,
+    explain_patterns: bool,
+    show_redundant: bool, show_filtered: bool,
+    annotate: bool, annotate_additions: bool,
+    contract_evaluation: bool,
+    policy: str, pf: PolicyFile | None,
+    used_by_apps: tuple[Path, ...], required_symbols: tuple[str, ...],
+    used_by_old_input: Path, used_by_new_input: Path,
+    verify_runtime: bool, suppression: Any, audit_suppressions: bool,
+    fmt: str, output: Path | None, show_only: str | None, report_mode: str,
+    show_impact: bool, stat: bool, recommend: bool,
+    demangle: bool, demangle_explicit: bool | None, follow_deps: bool,
+    secondary_fmt: str | None, secondary_output: Path | None,
+    old_build_info: Path | None, new_build_info: Path | None,
+    old_sources: Path | None, new_sources: Path | None,
+) -> None:
+    """Everything after the comparison: annotate, scope, render, exit.
+
+    ``run_compare``'s third phase (resolve -> compare -> report), split out so
+    each reads as one job. Terminal: ends in
+    :func:`_exit_with_severity_or_verdict`, which never returns.
+    """
+    from .cli_buildsource import attach_evidence_metrics
+    from .cli_compare_receipt import record_resolved_config
+
+    record_resolved_config(result, resolved_cfg, evaluation_config)
+    if layer_coverage_rows:
+        result.layer_coverage = layer_coverage_rows
+    # Pass all injected findings (probe-matrix + evidence) so artifact-backed
+    # excludes them — none come from L0-L2 diffing.
+    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
+
+    if explain_patterns:
+        echo_pattern_modulations(result)
+
+    _finalize_compare_result(
+        result, old_input, new_input,
+        show_redundant=show_redundant, show_filtered=show_filtered,
+        annotate=annotate, annotate_additions=annotate_additions,
+        severity_config=report_severity,
+        contract_evaluation=contract_evaluation,
+    )
+
+    scoped_exit_code = _apply_scoped_gating(
+        result, old, new, policy, pf,
+        used_by_apps=used_by_apps, required_symbols=required_symbols,
+        used_by_old_input=used_by_old_input, used_by_new_input=used_by_new_input,
+        exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
+        verify_runtime=verify_runtime, suppression=suppression,
+    )
+
+    if audit_suppressions:
+        _attach_suppression_audit(result, suppression)
+
+    # ADR-049 Phase 3 (Codex review, fresh evidence): --used-by/
+    # --required-symbol scoping above can add scoped_only_changes (fresh
+    # Change objects scope_diff_to_app/scope_diff_to_required_symbols
+    # synthesize, e.g. PE_ORDINAL_RETARGETED) and mark existing
+    # result.changes entries as relevant to the scoped contract -- neither
+    # ever passes through checker._apply_contract_evaluation_shadow, so
+    # both stayed permanently unstamped even when --contract-evaluation was
+    # given. This must run before _render_output below serializes
+    # result.changes, and mirrors the identical fix already applied to the
+    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal
+    # (CodeRabbit review: hand-copying it here previously let one call site
+    # drift out of sync with the other).
+    if contract_evaluation:
+        from .reporter import _finding_id
+
+        stamp_scoped_result_findings(result, finding_id=_finding_id)
+
+    _write_or_echo(
+        output,
+        _render_compare_report(
+            result, old, new, fmt=fmt,
+            follow_deps=follow_deps, show_only=show_only, report_mode=report_mode,
+            show_impact=show_impact, stat=stat, severity_config=report_severity,
+            recommend=recommend, demangle=demangle,
+            contract_evaluation=contract_evaluation,
+            old_build_info=old_build_info, new_build_info=new_build_info,
+            old_sources=old_sources, new_sources=new_sources,
+        ),
+    )
+
+    if secondary_fmt is not None:
+        # Always the full, unfiltered report — ignores --show-only/--stat
+        # (which describe the *primary* format's display) and forces
+        # report_mode="full" (not the primary's --report-mode leaf) so a
+        # --secondary-* consumer (e.g. a CI action rendering a PR-comment
+        # JSON from a markdown-format primary run) sees the complete change
+        # set the gate actually acted on, not whatever the primary format
+        # chose to filter or group down to. Reuses the same already-computed
+        # `result` — no second comparison run.
+        # Resolve demangle against secondary_fmt, not the primary-resolved
+        # value above — otherwise a machine primary format (e.g. json) paired
+        # with a markdown/review secondary format would wrongly inherit
+        # demangle=False into the secondary render (Codex review, PR #557).
+        _write_or_echo(
+            secondary_output,
+            _render_compare_report(
+                result, old, new, fmt=secondary_fmt,
+                follow_deps=follow_deps, show_only=None, report_mode="full",
+                show_impact=show_impact, stat=False,
+                severity_config=report_severity,
+                recommend=recommend,
+                demangle=_resolve_demangle(secondary_fmt, demangle_explicit),
+                contract_evaluation=contract_evaluation,
+                old_build_info=old_build_info, new_build_info=new_build_info,
+                old_sources=old_sources, new_sources=new_sources,
+            ),
+        )
+
+    if scoped_exit_code is not None:
+        # ADR-043: --used-by / --required-symbol(s) scope the primary verdict
+        # to the application/plugin-host contract, floored at the worst
+        # scoped result -- the full library verdict stays informational only.
+        # ADR-049 §7's coverage axis is orthogonal to that scoping.
+        announce_coverage_floor(result, base_exit=scoped_exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
+        sys.exit(fold_coverage_exit(scoped_exit_code, result))
+
+    _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
+    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme, fmt, stat, secondary_fmt)
+
+
 def run_compare(
     ctx: click.Context,
     *,
@@ -1140,33 +1274,12 @@ def run_compare(
             "exclusive: scope the comparison to either application imports or "
             "an explicit required-symbol contract, not both."
         )
-    # Required-symbol contracts default to the plugin-oriented policy unless the
-    # user explicitly picked one -- an explicit --policy always wins (ADR-043).
-    # Recorded, not just applied: the ADR-049 receipt has to name whatever
-    # really selected `policy.base`, and this value was chosen by a typed
-    # `--required-symbol` rather than by `--policy` or a built-in default
-    # (Codex review, fresh evidence -- the receipt claimed `strict_abi` for a
-    # run that used `plugin_abi`).
-    # Which spelling actually *contributed* decides what the receipt names --
-    # not merely which was passed. A `--required-symbols FILE` run never
-    # passed `--required-symbol`, so naming the inline flag fabricates a
-    # selector; but a file that parsed to nothing selected nothing either, so
-    # naming it for a `--required-symbol api_b --required-symbols empty.txt`
-    # run omits the option that really made the contract non-empty (Codex
-    # review, two rounds). The file form wins when it contributed, since it is
-    # then both true and the one carrying a path and digest to audit.
-    policy_selected_by: str | None = None
-    policy_selected_path: Path | None = None
-    policy_selected_sha: str | None = None
-    if required_symbols and ctx.get_parameter_source("policy") != click.core.ParameterSource.COMMANDLINE:
-        policy = "plugin_abi"
-        if required_symbols_from_file:
-            policy_selected_by = "--required-symbols"
-            policy_selected_path = required_symbols_file
-            policy_selected_sha = required_symbols_sha
-        else:
-            policy_selected_by = "--required-symbol"
-
+    policy, policy_selected_by, policy_selected_path, policy_selected_sha = (
+        _resolve_required_symbol_policy(
+            ctx, policy, required_symbols,
+            required_symbols_from_file, required_symbols_file, required_symbols_sha,
+        )
+    )
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
@@ -1219,22 +1332,17 @@ def run_compare(
     old_kind, new_kind = _classify_and_reject_operands(old_input, new_input)
 
     if {old_kind, new_kind} & {"directory", "package"}:
-        # The per-library fan-out (`compare-release` backend) consumes the
-        # resolved scheme from config but has no public CLI support for these
-        # single-pair-only flags on set inputs — reject them loudly (ADR-037 D12).
-        # Validated ahead of the --dry-run emit below (not just before the real
-        # dispatch) so a dry run can't report "ok" for a flag combination the
-        # real run would then reject (Codex review).
-        _reject_set_input_flags(
-            exit_code_scheme, reconcile_build_context, env_matrix_path, secondary_fmt,
+        _reject_flags_unsupported_for_set_inputs(
+            ctx, project_cfg,
+            exit_code_scheme=exit_code_scheme,
+            reconcile_build_context=reconcile_build_context,
+            env_matrix_path=env_matrix_path, secondary_fmt=secondary_fmt,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
             audit_suppressions=audit_suppressions,
             pack_paths=pack_paths,
             include_labels=include_labels,
         )
-        _reject_compile_context_for_set_inputs(ctx, project_cfg)
-        _reject_evidence_flags_for_set_inputs(ctx)
 
     # Parsed after the directory/package rejection above (not before, like an
     # earlier revision of this function did): a malformed --dump-manifest on
@@ -1371,18 +1479,7 @@ def run_compare(
         headers, includes, old_headers_only, new_headers_only,
         old_includes_only, new_includes_only,
     )
-    if old_manifest_obj is not None and old_h:
-        raise click.UsageError(
-            "--dump-manifest old=... and a header for the old side "
-            "(-H/--header) are mutually exclusive -- declare the old side's "
-            "public surface in the manifest's own base profile instead."
-        )
-    if new_manifest_obj is not None and new_h:
-        raise click.UsageError(
-            "--dump-manifest new=... and a header for the new side "
-            "(-H/--header) are mutually exclusive -- declare the new side's "
-            "public surface in the manifest's own base profile instead."
-        )
+    _reject_manifest_header_conflicts(old_manifest_obj, new_manifest_obj, old_h, new_h)
     if config_includes:
         old_inc = list(old_inc) + list(config_includes)
         new_inc = list(new_inc) + list(config_includes)
@@ -1408,79 +1505,29 @@ def run_compare(
     # the standalone deep-compare command used to. Pre-built packs fall through
     # unchanged to prepare_embedded_build_source below.
     if _needs_inline_embed(old_sources, new_sources, old_build_info, new_build_info):
-        # G29 Phase A: the L2 header-only semantic graph is no longer a flag
-        # a user can request here, so there is nothing to reject loudly. The
-        # inline dump below runs through `dump_cmd` (which has no L2-graph
-        # attach step of its own — that only lives on compare's own
-        # resolve_input calls / dump's own perform_elf_dump/
-        # handle_non_elf_dump path), and the rewritten old_input/new_input
-        # become a temporary JSON snapshot that _resolve_compare_snapshots
-        # below loads via resolve_input's JSON branch, which never attaches
-        # a graph either. So a raw --old/new-sources tree or raw
-        # --old/new-build-info combination structurally skips the L2 graph
-        # (silent, not_collected) — same behavior as before this change,
-        # just without a flag to have explicitly asked for it. See
-        # docs/contribute/plans/g31-header-graph-default-on-followup.md for
-        # extending graph coverage to this path.
-        import shutil
-        import tempfile
-
-        # CLI-over-config explicitness read from compare's *real* ctx (where
-        # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
-        # dump runs under ctx.invoke where that signal is lost, so we compute it
-        # here and thread it through (Codex review). A per-side --old/new-ast-frontend
-        # is itself an explicit frontend for that side.
-        _nostdinc_explicit = (
-            ctx.get_parameter_source("nostdinc")
-            == click.core.ParameterSource.COMMANDLINE
-        )
-        _frontend_explicit = (
-            ctx.get_parameter_source("header_backend")
-            == click.core.ParameterSource.COMMANDLINE
-        )
-
-        _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
-        # Cleanup on context teardown so the temp dir never leaks, even if an
-        # inline dump or _resolve_compare_snapshots raises before we return.
-        ctx.call_on_close(lambda: shutil.rmtree(_src_tmp, ignore_errors=True))
-        old_input, old_sources, old_build_info = _embed_inline_source_side(
-            ctx, input_path=old_input, sources=old_sources,
-            headers=old_h, includes=old_inc, version=old_version, lang=lang,
-            header_backend=old_header_backend or header_backend,
+        (
+            old_input, old_sources, old_build_info,
+            new_input, new_sources, new_build_info,
+        ) = _embed_inline_source_sides(
+            ctx,
+            old_input=old_input, new_input=new_input,
+            old_sources=old_sources, new_sources=new_sources,
+            old_build_info=old_build_info, new_build_info=new_build_info,
+            old_h=old_h, new_h=new_h, old_inc=old_inc, new_inc=new_inc,
+            old_version=old_version, new_version=new_version, lang=lang,
+            header_backend=header_backend,
+            old_header_backend=old_header_backend,
+            new_header_backend=new_header_backend,
             compile_context=compile_context,
-            frontend_explicit=_frontend_explicit or old_header_backend is not None,
-            # A nostdinc already resolved True (from --config) must survive the
-            # tree-config merge even when the tree omits it (Codex review); False
-            # is the default and indistinguishable from "unset", so only True needs
-            # preserving.
-            nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
-            build_info=old_build_info,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
-            dwarf_only=dwarf_only, debug_format=effective_debug_format,
-            pdb_path=old_pdb_path or pdb_path,
-            debug_roots=tuple(resolved_old_debug),
+            dwarf_only=dwarf_only, effective_debug_format=effective_debug_format,
+            pdb_path=pdb_path, old_pdb_path=old_pdb_path, new_pdb_path=new_pdb_path,
+            resolved_old_debug=resolved_old_debug,
+            resolved_new_debug=resolved_new_debug,
             debuginfod=debuginfod, debuginfod_url=debuginfod_url,
-            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
-            depth=depth, include_labels=include_labels,
-            include_dependencies=include_dependencies,
-        )
-        new_input, new_sources, new_build_info = _embed_inline_source_side(
-            ctx, input_path=new_input, sources=new_sources,
-            headers=new_h, includes=new_inc, version=new_version, lang=lang,
-            header_backend=new_header_backend or header_backend,
-            compile_context=compile_context,
-            frontend_explicit=_frontend_explicit or new_header_backend is not None,
-            nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
-            build_info=new_build_info,
-            follow_deps=follow_deps, search_paths=search_paths,
-            debug_roots=tuple(resolved_new_debug),
-            debuginfod=debuginfod, debuginfod_url=debuginfod_url,
-            ld_library_path=ld_library_path,
-            dwarf_only=dwarf_only, debug_format=effective_debug_format,
-            pdb_path=new_pdb_path or pdb_path,
-            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
-            depth=depth, include_labels=include_labels,
+            collect_mode=collect_mode, depth=depth,
+            include_labels=include_labels,
             include_dependencies=include_dependencies,
         )
 
@@ -1497,16 +1544,7 @@ def run_compare(
     # new_input (which, in that case, no longer point at the original library).
     used_by_old_input, _ = cli._normalize_binary_input(used_by_old_input)
     used_by_new_input, _ = cli._normalize_binary_input(used_by_new_input)
-    if old_manifest_obj is not None and old_fmt != "elf":
-        raise click.UsageError(
-            "--dump-manifest old=... requires the old input to be an ELF "
-            f"binary (ADR-050 D3); got {old_fmt or 'a non-binary input'}."
-        )
-    if new_manifest_obj is not None and new_fmt != "elf":
-        raise click.UsageError(
-            "--dump-manifest new=... requires the new input to be an ELF "
-            f"binary (ADR-050 D3); got {new_fmt or 'a non-binary input'}."
-        )
+    _reject_manifest_non_elf(old_manifest_obj, new_manifest_obj, old_fmt, new_fmt)
     _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
         old_fmt is not None, new_fmt is not None,
@@ -1559,64 +1597,26 @@ def run_compare(
     )
     _warn_force_public_ignored(force_public, scope_public_headers)
 
-    # ADR-049: one resolved configuration for this invocation -- the receipt
-    # the report carries *and*, since D8's `--pack` landed, the thing that
-    # configures the run (hence: before the comparison). Built from the raw
-    # CLI values, not the already-merged locals several of these were
-    # overwritten with above -- the resolver merges them itself, and a
-    # pre-merged value would look CLI-stated.
-    from .cli_compare_receipt import resolve_and_apply, typed_parameter_names
-    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
-    from .compatibility_evaluation_resolver import (
-        FieldResolutionError,
-        PackConflictError,
+    evaluation_config, pf, resolved_cfg = _resolve_evaluation_config(
+        ctx,
+        resolved_cfg=resolved_cfg, project_cfg=project_cfg, cfg_path=cfg_path,
+        cfg_sha=cfg_sha, policy=policy, policy_file_path=policy_file_path,
+        policy_file=pf, suppression=suppression, suppress=suppress,
+        symbols_list=symbols_list,
+        contract_mode=contract_mode, contract_evaluation=contract_evaluation,
+        scope_public_headers=scope_public_headers,
+        public_symbols=public_symbols, public_symbols_list=public_symbols_list,
+        require_justification=require_justification,
+        exit_code_scheme=exit_code_scheme, severity_preset=severity_preset,
+        severity_abi_breaking=severity_abi_breaking,
+        severity_potential_breaking=severity_potential_breaking,
+        severity_quality_issues=severity_quality_issues,
+        severity_addition=severity_addition,
+        pack_paths=pack_paths,
+        policy_selected_by=policy_selected_by,
+        policy_selected_path=policy_selected_path,
+        policy_selected_sha=policy_selected_sha,
     )
-    from .errors import PackManifestError
-
-    try:
-        evaluation_config, pf, resolved_cfg = resolve_and_apply(
-            {
-                "contract_mode": contract_mode,
-                "scope_public_headers": scope_public_headers,
-                "policy": policy,
-                "policy_file_path": policy_file_path,
-                "public_symbols": public_symbols,
-                "public_symbols_list": public_symbols_list,
-                "suppress": suppress,
-                "require_justification": require_justification,
-                "exit_code_scheme": exit_code_scheme,
-                "severity_preset": severity_preset,
-                "severity_abi_breaking": severity_abi_breaking,
-                "severity_potential_breaking": severity_potential_breaking,
-                "severity_quality_issues": severity_quality_issues,
-                "severity_addition": severity_addition,
-                "pack_paths": pack_paths,
-            },
-            resolved_cfg=resolved_cfg,
-            policy=policy,
-            contract_evaluation=contract_evaluation,
-            # Only this module holds the Click context, so it answers "did the
-            # user type this?" and hands the answers over as data -- which is
-            # what keeps `cli_compare_receipt` a leaf.
-            typed={n for n in typed_parameter_names() if _param_from_cli(n)},
-            project_cfg=project_cfg,
-            project_path=cfg_path,
-            # Both already loaded for the comparison itself; re-reading them
-            # here could pair one content's digest with another's rules.
-            policy_file=pf,
-            suppression=suppression,
-            suppress_path=suppress,
-            run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
-            policy_option=policy_selected_by,
-            policy_path=policy_selected_path,
-            policy_sha256=policy_selected_sha,
-            project_sha256=cfg_sha,
-            symbols_list=symbols_list,
-        )
-    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
-        # A D7 same-tier conflict / D8 pack conflict / inapplicable manifest
-        # is a usage error, the exit code the resolver leaves to its front end.
-        raise click.UsageError(str(exc)) from exc
     # A gate pack may have moved a severity level; later consumers read it
     # off here, so re-derive rather than keep the pre-pack value.
     sev_config = resolved_cfg.severity
@@ -1636,7 +1636,7 @@ def run_compare(
 
     # Build-info + source facts (ADR-028/033): the helper times inline diffing
     # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.
-    from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
+    from .cli_buildsource import prepare_embedded_build_source
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
         prepare_embedded_build_source(
             old, new, collect_mode, extra_changes,
@@ -1652,6 +1652,9 @@ def run_compare(
     )
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
+    # Reporting reads the severity config only under the severity exit scheme;
+    # resolved once here rather than re-spelled at each of the five consumers.
+    report_severity = sev_config if resolved_cfg.exit_code_scheme == "severity" else None
     from .service import compare_snapshots, load_env_matrix
     try:
         env_matrix = load_env_matrix(env_matrix_path)
@@ -1676,162 +1679,30 @@ def run_compare(
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
-    from .cli_compare_receipt import record_resolved_config
-
-    record_resolved_config(result, resolved_cfg, evaluation_config)
-    if layer_coverage_rows:
-        result.layer_coverage = layer_coverage_rows
-    # Pass all injected findings (probe-matrix + evidence) so artifact-backed
-    # excludes them — none come from L0-L2 diffing.
-    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
-
-    if explain_patterns:
-        echo_pattern_modulations(result)
-
-    _finalize_compare_result(
-        result, old_input, new_input,
+    _report_compare_result(
+        ctx, result, old, new,
+        old_input=old_input, new_input=new_input,
+        resolved_cfg=resolved_cfg, evaluation_config=evaluation_config,
+        sev_config=sev_config, report_severity=report_severity,
+        layer_coverage_rows=layer_coverage_rows,
+        evidence_metrics=evidence_metrics, extra_changes=extra_changes,
+        explain_patterns=explain_patterns,
         show_redundant=show_redundant, show_filtered=show_filtered,
         annotate=annotate, annotate_additions=annotate_additions,
-        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
         contract_evaluation=contract_evaluation,
-    )
-
-    scoped_exit_code: int | None = None
-    if used_by_apps:
-        scoped_exit_code = _apply_used_by_scoping(
-            result, used_by_apps, used_by_old_input, used_by_new_input, old, new,
-            policy, pf,
-            exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
-            verify_runtime=verify_runtime, suppression=suppression,
-        )
-    elif required_symbols:
-        scoped_exit_code = _apply_required_symbol_scoping(
-            result, required_symbols, old, new, policy, pf,
-            exit_code_scheme=resolved_cfg.exit_code_scheme, sev_config=sev_config,
-        )
-
-    if audit_suppressions:
-        # Guarded above: audit_suppressions=True implies suppression is not
-        # None. Audited against the full pre-suppression change set (kept +
-        # suppressed) plus any --used-by/--required-symbol scoped_only_changes
-        # (Codex review, fresh evidence: run *after* scoping, not before, so a
-        # rule matching only a scoping-synthesized finding like
-        # CONSUMER_REQUIRED_SYMBOL_REMOVED isn't misreported as stale). Not a
-        # complete fix: scope_diff_to_app/scope_diff_to_required_symbols apply
-        # suppression internally to their own candidates before this ever
-        # sees them, so a rule matching only a scoping candidate suppression
-        # itself already dropped (never reaching scoped_only_changes at all)
-        # is still invisible here -- closing that needs those functions to
-        # expose their own pre-suppression candidate list, a separate,
-        # larger change to appcompat.py this fix does not attempt.
-        assert suppression is not None
-        # Codex review, fresh evidence: pass the *effective*, policy-override-
-        # applied breaking set (not the static BREAKING_KINDS default) so a
-        # rule's "high risk" classification matches the verdict this run's
-        # own --policy-file would actually produce, e.g. a rule suppressing
-        # a kind the policy promoted to BREAKING is reported as high-risk
-        # even though it isn't in the built-in BREAKING_KINDS.
-        effective_breaking_kinds, _, _, _ = result._effective_kind_sets()
-        result.suppression_audit = suppression.audit(  # type: ignore[attr-defined]
-            list(result.changes)
-            + list(result.suppressed_changes)
-            + list(getattr(result, "scoped_only_changes", ()) or ()),
-            breaking_kinds=effective_breaking_kinds,
-        )
-
-    # ADR-049 Phase 3 (Codex review, fresh evidence): --used-by/
-    # --required-symbol scoping above can add scoped_only_changes (fresh
-    # Change objects scope_diff_to_app/scope_diff_to_required_symbols
-    # synthesize, e.g. PE_ORDINAL_RETARGETED) and mark existing
-    # result.changes entries as relevant to the scoped contract -- neither
-    # ever passes through checker._apply_contract_evaluation_shadow, so
-    # both stayed permanently unstamped even when --contract-evaluation was
-    # given. This must run before _render_output below serializes
-    # result.changes, and mirrors the identical fix already applied to the
-    # MCP abi_compare tool (mcp_server.py) -- both share the same traversal
-    # (CodeRabbit review: hand-copying it here previously let one call site
-    # drift out of sync with the other).
-    if contract_evaluation:
-        from .reporter import _finding_id
-
-        stamp_scoped_result_findings(result, finding_id=_finding_id)
-
-    text = _render_output(
-        fmt, result, old, new,
+        policy=policy, pf=pf,
+        used_by_apps=used_by_apps, required_symbols=required_symbols,
+        used_by_old_input=used_by_old_input, used_by_new_input=used_by_new_input,
+        verify_runtime=verify_runtime, suppression=suppression,
+        audit_suppressions=audit_suppressions,
+        fmt=fmt, output=output, show_only=show_only, report_mode=report_mode,
+        show_impact=show_impact, stat=stat, recommend=recommend,
+        demangle=demangle, demangle_explicit=demangle_explicit,
         follow_deps=follow_deps,
-        show_only=show_only, report_mode=report_mode,
-        show_impact=show_impact, stat=stat,
-        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
-        show_recommendation=recommend,
-        demangle=demangle,
-        contract_evaluation=contract_evaluation,
-    )
-    text = _fold_scoped_compat_into_text(
-        text, fmt, result,
-        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
-        show_only=show_only, report_mode=report_mode,
-        contract_evaluation=contract_evaluation,
-    )
-    text = _fold_suppression_audit_into_text(
-        text, fmt, getattr(result, "suppression_audit", None)
-    )
-    text = _fold_evidence_depth_into_json(
-        text, fmt, old, new,
+        secondary_fmt=secondary_fmt, secondary_output=secondary_output,
         old_build_info=old_build_info, new_build_info=new_build_info,
         old_sources=old_sources, new_sources=new_sources,
     )
-
-    _write_or_echo(output, text)
-
-    if secondary_fmt is not None:
-        # Always the full, unfiltered report — ignores --show-only/--stat
-        # (which describe the *primary* format's display) and forces
-        # report_mode="full" (not the primary's --report-mode leaf) so a
-        # --secondary-* consumer (e.g. a CI action rendering a PR-comment
-        # JSON from a markdown-format primary run) sees the complete change
-        # set the gate actually acted on, not whatever the primary format
-        # chose to filter or group down to. Reuses the same already-computed
-        # `result` — no second comparison run.
-        # Resolve demangle against secondary_fmt, not the primary-resolved
-        # value above — otherwise a machine primary format (e.g. json) paired
-        # with a markdown/review secondary format would wrongly inherit
-        # demangle=False into the secondary render (Codex review, PR #557).
-        secondary_demangle = _resolve_demangle(secondary_fmt, demangle_explicit)
-        secondary_text = _render_output(
-            secondary_fmt, result, old, new,
-            follow_deps=follow_deps,
-            show_only=None, report_mode="full",
-            show_impact=show_impact, stat=False,
-            severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
-            show_recommendation=recommend,
-            demangle=secondary_demangle,
-            contract_evaluation=contract_evaluation,
-        )
-        secondary_text = _fold_scoped_compat_into_text(
-            secondary_text, secondary_fmt, result,
-            severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
-            contract_evaluation=contract_evaluation,
-        )
-        secondary_text = _fold_suppression_audit_into_text(
-            secondary_text, secondary_fmt, getattr(result, "suppression_audit", None)
-        )
-        secondary_text = _fold_evidence_depth_into_json(
-            secondary_text, secondary_fmt, old, new,
-            old_build_info=old_build_info, new_build_info=new_build_info,
-            old_sources=old_sources, new_sources=new_sources,
-        )
-        _write_or_echo(secondary_output, secondary_text)
-
-    if scoped_exit_code is not None:
-        # ADR-043: --used-by / --required-symbol(s) scope the primary verdict
-        # to the application/plugin-host contract, floored at the worst
-        # scoped result -- the full library verdict stays informational only.
-        # ADR-049 §7's coverage axis is orthogonal to that scoping.
-        announce_coverage_floor(result, base_exit=scoped_exit_code, fmt=fmt, stat=stat, secondary_fmt=secondary_fmt)
-        sys.exit(fold_coverage_exit(scoped_exit_code, result))
-
-    _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
-    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme, fmt, stat, secondary_fmt)
 
 
 def _fold_evidence_depth_into_json(

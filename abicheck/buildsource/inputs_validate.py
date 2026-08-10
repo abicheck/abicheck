@@ -165,6 +165,89 @@ def _fact_set_recipe_issues(tus: list[SourceAbiTu]) -> list[str]:
     return issues
 
 
+def _resolve_pack_fact_set(
+    tus: list[SourceAbiTu], manifest: InputsManifest
+) -> tuple[dict[str, object], list[str]]:
+    """``(fact_set, warnings)`` — the identity this pack can actually claim.
+
+    Prefers the per-TU rollup over the manifest-declared ``fact_set``: a plugin
+    that stamps ``manifest.json`` up front cannot know whether every TU later
+    agreed with it, so a manifest-level ``fact_set`` must never mask a TU-level
+    inconsistency (Codex review). Falls back to the manifest only when there is
+    no TU-level signal to check it against (no TUs, or no TU ever stamped a
+    ``fact_set`` at all).
+    """
+    tu_fact_set = rollup_fact_set(tus)
+    stamped_tus_disagree = (
+        bool(tus) and any(tu.fact_set for tu in tus) and not tu_fact_set
+    )
+    if stamped_tus_disagree:
+        return {}, [
+            "TU records do not agree on a single fact_set identity (mixed "
+            "producers/versions, or some TUs missing fact_set entirely) — the "
+            "manifest-level fact_set cannot be trusted to describe every TU."
+        ]
+    fact_set = tu_fact_set or manifest.fact_set
+    if fact_set:
+        return fact_set, []
+    return {}, [
+        "no fact_set identity found (manifest nor any TU record) — this "
+        "pack predates ADR-038 C.8 coverage/fact-set reporting, or mixes "
+        "producers inconsistently."
+    ]
+
+
+def _fact_set_identity_errors(fact_set: dict[str, object]) -> list[str]:
+    """Errors for a fact_set naming a contract this build does not implement."""
+    if not fact_set:
+        return []
+    errors: list[str] = []
+    name = fact_set.get("name")
+    if name != SOURCE_ABI_FACT_SET_NAME:
+        errors.append(
+            f"pack fact_set name is {name!r}; this abicheck build expects "
+            f"{SOURCE_ABI_FACT_SET_NAME!r} — a different name is a different "
+            "canonical fact-set contract even if the version number matches, "
+            "so mandatory fact families may differ from what downstream "
+            "comparison assumes."
+        )
+    version = fact_set.get("version")
+    if version != SOURCE_ABI_FACT_SET_VERSION:
+        errors.append(
+            f"pack fact_set version is {version!r}; this abicheck build "
+            f"expects {SOURCE_ABI_FACT_SET_VERSION!r} — mandatory fact "
+            "families may differ from what downstream comparison assumes."
+        )
+    return errors
+
+
+def _empty_surface_warnings(
+    tus: list[SourceAbiTu], manifest: InputsManifest
+) -> list[str]:
+    """Warn when linking this pack's TUs yields no public surface at all.
+
+    Checks every reachable bucket (declarations/types/macros/templates/inline
+    bodies), not just declarations+types — a macro-only or header-only pack's
+    public evidence can land entirely in the other buckets, and checking only
+    two of the five would false-warn on a genuinely non-empty pack (Codex
+    review).
+    """
+    if not tus:
+        return []
+    surface = link_source_abi(
+        tus,
+        exported_symbols=sorted(set(manifest.exported_symbols)),
+        library=manifest.library,
+    )
+    if any(surface.reachable_buckets().values()):
+        return []
+    return [
+        "linked surface has an empty public surface (no reachable "
+        "declarations, types, macros, templates, or inline bodies) — "
+        "check public-header-roots scoping."
+    ]
+
+
 def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
     """Validate one ``abicheck_inputs/`` pack directory; never raises for a
     structurally-readable pack — problems are reported, not thrown. Raises
@@ -214,50 +297,10 @@ def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
     report.errors.extend(_target_id_issues(tus, manifest))
     report.errors.extend(_fact_set_recipe_issues(tus))
 
-    # Prefer the per-TU rollup over the manifest-declared fact_set: a plugin
-    # that stamps manifest.json up front cannot know whether every TU later
-    # agreed with it, so a manifest-level fact_set must never mask a TU-level
-    # inconsistency (Codex review). Only fall back to the manifest when there
-    # is no TU-level signal to check it against (no TUs, or no TU ever stamped
-    # a fact_set at all).
-    tu_fact_set = rollup_fact_set(tus)
-    stamped_tus_disagree = (
-        bool(tus) and any(tu.fact_set for tu in tus) and not tu_fact_set
-    )
-    if stamped_tus_disagree:
-        fact_set: dict[str, object] = {}
-        report.warnings.append(
-            "TU records do not agree on a single fact_set identity (mixed "
-            "producers/versions, or some TUs missing fact_set entirely) — the "
-            "manifest-level fact_set cannot be trusted to describe every TU."
-        )
-    else:
-        fact_set = tu_fact_set or manifest.fact_set
+    fact_set, fact_set_warnings = _resolve_pack_fact_set(tus, manifest)
     report.fact_set = fact_set
-    if not fact_set:
-        if not stamped_tus_disagree:
-            report.warnings.append(
-                "no fact_set identity found (manifest nor any TU record) — this "
-                "pack predates ADR-038 C.8 coverage/fact-set reporting, or mixes "
-                "producers inconsistently."
-            )
-    else:
-        name = fact_set.get("name")
-        if name != SOURCE_ABI_FACT_SET_NAME:
-            report.errors.append(
-                f"pack fact_set name is {name!r}; this abicheck build expects "
-                f"{SOURCE_ABI_FACT_SET_NAME!r} — a different name is a different "
-                "canonical fact-set contract even if the version number matches, "
-                "so mandatory fact families may differ from what downstream "
-                "comparison assumes."
-            )
-        version = fact_set.get("version")
-        if version != SOURCE_ABI_FACT_SET_VERSION:
-            report.errors.append(
-                f"pack fact_set version is {version!r}; this abicheck build "
-                f"expects {SOURCE_ABI_FACT_SET_VERSION!r} — mandatory fact "
-                "families may differ from what downstream comparison assumes."
-            )
+    report.warnings.extend(fact_set_warnings)
+    report.errors.extend(_fact_set_identity_errors(fact_set))
 
     coverage = rollup_coverage(tus)
     # A fact_set accepted above may have come entirely from the
@@ -284,21 +327,6 @@ def validate_inputs_pack(root: Path | str) -> InputsValidationReport:
             "absence from findings as proof nothing changed."
         )
 
-    if tus:
-        exports = sorted(set(manifest.exported_symbols))
-        surface = link_source_abi(
-            tus, exported_symbols=exports, library=manifest.library
-        )
-        # Every reachable bucket (declarations/types/macros/templates/inline
-        # bodies), not just declarations+types — a macro-only or header-only
-        # pack's public evidence can land entirely in the other buckets, and
-        # checking only two of the five would false-warn on a genuinely
-        # non-empty pack (Codex review).
-        if not any(surface.reachable_buckets().values()):
-            report.warnings.append(
-                "linked surface has an empty public surface (no reachable "
-                "declarations, types, macros, templates, or inline bodies) — "
-                "check public-header-roots scoping."
-            )
+    report.warnings.extend(_empty_surface_warnings(tus, manifest))
 
     return report

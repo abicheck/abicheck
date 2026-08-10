@@ -227,6 +227,22 @@ def is_synthetic_dtor_key(key: str) -> bool:
     return key.startswith(_SYNTHETIC_DTOR_KEY_PREFIX)
 
 
+def _virtual_method_mangled_name(method_el: Any) -> str:
+    """A virtual method's mangled name, with the destructor fallback.
+
+    castxml ``<Destructor>`` elements carry no ``mangled`` attribute. Without a
+    fallback every virtual destructor is silently dropped from the vtable,
+    which makes each polymorphic type look like it lacks a destructor slot
+    (false ``POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR``). The ``name`` attribute is the
+    class name, so ``"~Name"`` is a stable, per-class entry.
+    """
+    mangled_name: str = method_el.get("mangled", "")
+    if not mangled_name and method_el.tag == "Destructor":
+        name = method_el.get("name", "")
+        mangled_name = f"~{name}" if name else ""
+    return mangled_name
+
+
 class _CastxmlParser:
     """Parse castxml XML into ABI model objects."""
 
@@ -1733,108 +1749,13 @@ class _CastxmlParser:
         if class_el is None:
             return {}
 
-        slots: dict[int | str, tuple[int | None, str]] = {}
-        for base in class_el:
-            if base.tag != "Base":
-                continue
-            base_type_el = self._resolve(base.get("type", ""))
-            if base_type_el is not None:
-                slots.update(
-                    self._collect_virtual_methods(base_type_el.get("id", ""), seen)
-                )
-
+        slots = self._inherited_vtable_slots(class_el, seen)
         for method_el in self._virtual_methods_by_class.get(cid, []):
-            mangled_name = method_el.get("mangled", "")
-            if not mangled_name and method_el.tag == "Destructor":
-                # castxml <Destructor> elements carry no mangled attribute.
-                # Without a fallback every virtual destructor is silently
-                # dropped from the vtable, which makes each polymorphic type
-                # look like it lacks a destructor slot (false
-                # POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR). The name attribute is
-                # the class name, so "~Name" is a stable, per-class entry.
-                name = method_el.get("name", "")
-                mangled_name = f"~{name}" if name else ""
+            mangled_name = _virtual_method_mangled_name(method_el)
             if not mangled_name:
                 continue
-            idx = _parse_vtable_index(method_el.get("vtable_index"))
             mid = method_el.get("id", "")
-            overrides_id = method_el.get("overrides")
-            key: int | str
-            extra_keys: list[int | str] = []
-            if overrides_id:
-                # An override always reuses whatever slot its base declaration
-                # landed under -- checked BEFORE falling back to this
-                # declaration's own vtable_index. Preferring a fresh idx here
-                # instead would miss the reverse mixed-index direction: a base
-                # that lacks vtable_index (so its slot is keyed by its own
-                # string id) but is overridden by a declaration that DOES
-                # carry an index would otherwise open a new int-keyed slot
-                # instead of collapsing onto the base's string-keyed one.
-                #
-                # castxml can list more than one overridden declaration as a
-                # whitespace-separated id list when a single override
-                # simultaneously covers more than one base-class branch (e.g.
-                # non-virtual multiple inheritance -- Derived : Base1, Base2 --
-                # where one final overrider satisfies both Base1::foo() and
-                # Base2::foo()). Each resolved id is a genuinely distinct
-                # position in the object's real vtable-group layout (typically
-                # an adjusting thunk for all but one) -- an exact lookup of the
-                # raw composite string never matches _vtable_slot_root, so
-                # resolve each id: the first resolved slot becomes this
-                # entry's own key, and every OTHER resolved slot keeps its own
-                # key and prior sort position (extra_keys, applied below)
-                # with only its content updated to this override, rather than
-                # collapsing them into one entry -- which would under-report
-                # the vtable's true size -- or leaving them with stale
-                # pre-override content.
-                #
-                # A resolved id can itself carry extra roots from an earlier
-                # multi-slot override (a further-derived override referencing
-                # an intermediate override's id by `overrides` must propagate
-                # to every slot that intermediate one touched, not just its
-                # primary) -- both _vtable_slot_root and
-                # _vtable_slot_extra_roots are consulted per id below.
-                resolved_keys: list[int | str] = []
-                for oid in overrides_id.split():
-                    candidates: list[int | str] = []
-                    primary = self._vtable_slot_root.get(oid)
-                    if primary is not None:
-                        candidates.append(primary)
-                    candidates.extend(self._vtable_slot_extra_roots.get(oid, ()))
-                    for candidate in candidates:
-                        if candidate not in resolved_keys:
-                            resolved_keys.append(candidate)
-                if resolved_keys:
-                    key = resolved_keys[0]
-                    extra_keys = resolved_keys[1:]
-                else:
-                    key = overrides_id
-                if isinstance(key, int):
-                    # Consistently-indexed lineage: adopt the resolved index
-                    # for sorting when this declaration has none of its own,
-                    # so _build_vtable's final _vt_sort_key sort places it at
-                    # the inherited position instead of the unindexed tail
-                    # (which would silently reorder it past any indexed
-                    # sibling slot declared after this one, an apparent
-                    # "vtable reordered" that never actually happened).
-                    if idx is None:
-                        idx = key
-                else:
-                    # Unindexed lineage (key is a string): a fresh
-                    # vtable_index on THIS declaration has no verified
-                    # relationship to sibling unindexed slots' true positions
-                    # (e.g. Base has unindexed foo then bar; Derived overrides
-                    # bar with its own vtable_index="1" -- that "1" doesn't
-                    # mean "after foo", it's not comparable to foo's unknown
-                    # position at all), so it must not be trusted for
-                    # cross-slot ordering. Discard it and let _vt_sort_key
-                    # treat this slot as unindexed, preserving its original
-                    # discovery-order position.
-                    idx = None
-            elif idx is not None:
-                key = idx
-            else:
-                key = mid or mangled_name
+            key, extra_keys, idx = self._vtable_slot_key(method_el, mid, mangled_name)
             if mid:
                 # Record the *actual* slot key (int index or str id) this method
                 # landed under, not just a self-reference -- a downstream override
@@ -1846,7 +1767,7 @@ class _CastxmlParser:
                 if extra_keys:
                     # This id itself touches more than one slot -- a further-
                     # derived override referencing it by `overrides` must
-                    # propagate to all of them (see the resolution loop above).
+                    # propagate to all of them.
                     self._vtable_slot_extra_roots[mid] = list(extra_keys)
             slots[key] = (idx, mangled_name)
             for extra_key in extra_keys:
@@ -1854,6 +1775,104 @@ class _CastxmlParser:
                 slots[extra_key] = (prev_idx, mangled_name)
 
         return slots
+
+    def _inherited_vtable_slots(
+        self, class_el: Any, seen: set[str]
+    ) -> dict[int | str, tuple[int | None, str]]:
+        """Every base class's slots, in base-declaration order."""
+        slots: dict[int | str, tuple[int | None, str]] = {}
+        for base in class_el:
+            if base.tag != "Base":
+                continue
+            base_type_el = self._resolve(base.get("type", ""))
+            if base_type_el is not None:
+                slots.update(
+                    self._collect_virtual_methods(base_type_el.get("id", ""), seen)
+                )
+        return slots
+
+    def _resolved_override_keys(self, overrides_id: str) -> list[int | str]:
+        """Every existing slot key the ``overrides`` attribute resolves to.
+
+        castxml can list more than one overridden declaration as a
+        whitespace-separated id list when a single override simultaneously
+        covers more than one base-class branch (e.g. non-virtual multiple
+        inheritance -- ``Derived : Base1, Base2`` -- where one final overrider
+        satisfies both ``Base1::foo()`` and ``Base2::foo()``). Each resolved id
+        is a genuinely distinct position in the object's real vtable-group
+        layout (typically an adjusting thunk for all but one), and an exact
+        lookup of the raw composite string never matches ``_vtable_slot_root``,
+        so every id is resolved separately.
+
+        A resolved id can itself carry extra roots from an earlier multi-slot
+        override (a further-derived override referencing an intermediate
+        override's id by ``overrides`` must propagate to every slot that
+        intermediate one touched, not just its primary), so both
+        ``_vtable_slot_root`` and ``_vtable_slot_extra_roots`` are consulted
+        per id.
+        """
+        resolved: list[int | str] = []
+        for oid in overrides_id.split():
+            candidates: list[int | str] = []
+            primary = self._vtable_slot_root.get(oid)
+            if primary is not None:
+                candidates.append(primary)
+            candidates.extend(self._vtable_slot_extra_roots.get(oid, ()))
+            for candidate in candidates:
+                if candidate not in resolved:
+                    resolved.append(candidate)
+        return resolved
+
+    def _vtable_slot_key(
+        self, method_el: Any, mid: str, mangled_name: str
+    ) -> tuple[int | str, list[int | str], int | None]:
+        """``(key, extra_keys, vtable_index)`` for one virtual method declaration.
+
+        An override always reuses whatever slot its base declaration landed
+        under -- checked BEFORE falling back to this declaration's own
+        ``vtable_index``. Preferring a fresh index would miss the reverse mixed-
+        index direction: a base that lacks ``vtable_index`` (so its slot is
+        keyed by its own string id) but is overridden by a declaration that DOES
+        carry an index would otherwise open a new int-keyed slot instead of
+        collapsing onto the base's string-keyed one.
+
+        The first resolved slot becomes this entry's own key; every OTHER
+        resolved slot keeps its own key and prior sort position (*extra_keys*)
+        with only its content updated to this override, rather than collapsing
+        them into one entry -- which would under-report the vtable's true size
+        -- or leaving them with stale pre-override content.
+        """
+        idx = _parse_vtable_index(method_el.get("vtable_index"))
+        overrides_id = method_el.get("overrides")
+        if not overrides_id:
+            return (idx if idx is not None else (mid or mangled_name)), [], idx
+
+        resolved_keys = self._resolved_override_keys(overrides_id)
+        if resolved_keys:
+            key: int | str = resolved_keys[0]
+            extra_keys = resolved_keys[1:]
+        else:
+            key, extra_keys = overrides_id, []
+        if isinstance(key, int):
+            # Consistently-indexed lineage: adopt the resolved index for
+            # sorting when this declaration has none of its own, so
+            # _build_vtable's final _vt_sort_key sort places it at the
+            # inherited position instead of the unindexed tail (which would
+            # silently reorder it past any indexed sibling slot declared after
+            # this one, an apparent "vtable reordered" that never happened).
+            if idx is None:
+                idx = key
+        else:
+            # Unindexed lineage (key is a string): a fresh vtable_index on THIS
+            # declaration has no verified relationship to sibling unindexed
+            # slots' true positions (e.g. Base has unindexed foo then bar;
+            # Derived overrides bar with its own vtable_index="1" -- that "1"
+            # doesn't mean "after foo", it's not comparable to foo's unknown
+            # position at all), so it must not be trusted for cross-slot
+            # ordering. Discard it and let _vt_sort_key treat this slot as
+            # unindexed, preserving its original discovery-order position.
+            idx = None
+        return key, extra_keys, idx
 
     def parse_enums(self) -> list[EnumType]:
         enums = []

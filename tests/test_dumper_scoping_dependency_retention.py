@@ -19,9 +19,13 @@ for the full "direct-vs-transitive" design rationale.
 
 from __future__ import annotations
 
-from abicheck.dumper_scoping import scope_snapshot_excluding_dependencies
+from abicheck.dumper_scoping import (
+    _raw_candidate_spellings,
+    scope_snapshot_excluding_dependencies,
+)
 from abicheck.model import (
     AbiSnapshot,
+    EnumType,
     Function,
     Param,
     RecordType,
@@ -1527,3 +1531,59 @@ class TestDirectlyReferencedDependencyRetention:
         assert [t.name for t in scoped.types] == ["Own"]
 
 
+
+
+class TestRawCandidateSpellings:
+    """`_raw_candidate_spellings` must emit single-tag elaborated forms only.
+
+    A record whose kind is `struct`/`class` has two legal elaborated keywords
+    (C++ lets either refer to the same non-union record), so the elaboration
+    step iterates twice over the same spelling set. `set.update` consumes its
+    generator incrementally, so re-evaluating the base set inside that
+    generator let the second keyword see the first one's output and emit
+    double-tagged junk like `class struct Foo` -- varying with frozenset
+    iteration order (CodeRabbit review).
+    """
+
+    def test_struct_emits_each_keyword_once(self) -> None:
+        spellings = _raw_candidate_spellings(
+            RecordType(name="Foo", kind="struct"), "ns::Foo"
+        )
+        assert spellings == {
+            "ns::Foo",
+            "Foo",
+            "::ns::Foo",
+            "struct ns::Foo",
+            "struct Foo",
+            "struct ::ns::Foo",
+            "class ns::Foo",
+            "class Foo",
+            "class ::ns::Foo",
+        }
+
+    def test_no_spelling_carries_two_tag_keywords(self) -> None:
+        for candidate, identity in (
+            (RecordType(name="Foo", kind="struct"), "ns::Foo"),
+            (RecordType(name="Bar", kind="class"), "a::b::Bar"),
+            (RecordType(name="U", kind="union"), "U"),
+            (EnumType(name="E"), "ns::E"),
+        ):
+            for spelling in _raw_candidate_spellings(candidate, identity):
+                keyword, _, rest = spelling.partition(" ")
+                assert not rest.startswith(("struct ", "class ", "union ", "enum ")), (
+                    f"{identity}: double-tagged spelling {spelling!r}"
+                )
+
+    def test_single_keyword_kinds_tag_once(self) -> None:
+        assert _raw_candidate_spellings(RecordType(name="U", kind="union"), "U") == {
+            "U",
+            "::U",
+            "union U",
+            "union ::U",
+        }
+        assert _raw_candidate_spellings(EnumType(name="E"), "E") == {
+            "E",
+            "::E",
+            "enum E",
+            "enum ::E",
+        }

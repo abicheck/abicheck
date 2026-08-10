@@ -324,6 +324,127 @@ def _read_response_file(path: Path, root: Path) -> str | None:
 _ResponseFileCache = dict[tuple[str, bool], "list[str] | None"]
 
 
+def _read_and_tokenize_response_file(
+    path: Path,
+    root: Path,
+    *,
+    cl_style: bool,
+    read_budget: list[int],
+    cache_token_budget: list[int] | None,
+) -> list[str] | None:
+    """One response file's tokens, or ``None`` when it must not be expanded.
+
+    ``None`` is a *cacheable* rejection — unreadable/oversized/out-of-tree file,
+    unparsable contents, or a token count no entry could ever afford — so the
+    caller memoizes it and no later entry re-reads the same file to reach the
+    same answer.
+
+    Two of those rejections are size caps rather than errors:
+
+    * Over ``_MAX_RESPONSE_FILE_OUTPUT_TOKENS``: no entry's own output budget
+      ever starts above this constant (a fresh top-level call always defaults to
+      it), so a file this dense can never fit any entry regardless of how much
+      of that budget is left -- cache the rejection instead of the full token
+      list, or many distinct oversized files in one untrusted database would
+      each retain a huge, never-usable tokens list indefinitely (Codex review,
+      sixth round).
+    * Over the remaining *cache_token_budget*: a distinct file under the fixed
+      per-entry cap (so not caught above) can still be over THIS entry's own
+      remaining budget and be rejected for it -- but its full tokens list would
+      still be retained for possible reuse by a later entry with a fresh budget.
+      Many such distinct, never-actually-used files can accumulate unbounded
+      cached memory without ever charging the database-wide output budget (which
+      is only charged when tokens are actually spliced into some entry's
+      output). This separate, cache-population-time budget is charged instead,
+      regardless of whether the tokens end up used (Codex review, seventh round).
+    """
+    text = _read_response_file(path, root)
+    if text is None:
+        return None
+    read_budget[0] -= 1
+    try:
+        tokens = _split_command_line(text, cl_style=cl_style)
+    except ValueError:
+        return None
+    if len(tokens) > _MAX_RESPONSE_FILE_OUTPUT_TOKENS:
+        return None
+    if cache_token_budget is not None:
+        if len(tokens) > cache_token_budget[0]:
+            return None
+        cache_token_budget[0] -= len(tokens)
+    return tokens
+
+
+def _exceeds_output_budget(
+    tokens: list[str], output_budget: list[int], db_output_budget: list[int] | None
+) -> bool:
+    """True when splicing *tokens* would overrun a remaining output budget.
+
+    The pre-loop budget check only rejects a *subsequent* ``@file`` once the
+    budget has already gone negative, so a single response file at or near the
+    byte cap (tokenizable into hundreds of thousands of short tokens) could
+    otherwise still be expanded whole in one shot before that check ever fires
+    (Codex review, third round). The caller rejects the whole file rather than
+    partially truncating it -- a partial flag list is worse than none.
+    """
+    return len(tokens) > output_budget[0] or (
+        db_output_budget is not None and len(tokens) > db_output_budget[0]
+    )
+
+
+def _response_file_tokens_for_arg(
+    arg: str,
+    directory: Path,
+    root: Path,
+    *,
+    cl_style: bool,
+    read_budget: list[int],
+    output_budget: list[int],
+    db_output_budget: list[int] | None,
+    cache_token_budget: list[int] | None,
+    file_cache: _ResponseFileCache,
+) -> list[str] | None:
+    """Tokens for one ``@file`` argument, or ``None`` to keep the token as-is.
+
+    Resolves the path against *directory* (the compile action's own working
+    directory) unless already absolute, consults *file_cache*, and applies every
+    budget gate. ``None`` covers all four "do not expand" outcomes: an exhausted
+    output budget, an exhausted read budget, a cached-or-fresh rejection from
+    :func:`_read_and_tokenize_response_file`, and a token count that would
+    overrun the remaining output budget.
+    """
+    if output_budget[0] <= 0 or (
+        db_output_budget is not None and db_output_budget[0] <= 0
+    ):
+        return None
+    raw_path = Path(arg[1:])
+    path = raw_path if raw_path.is_absolute() else directory / raw_path
+    resolved = _safe_resolve(path)
+    cache_key = (str(resolved), cl_style) if resolved is not None else None
+    if cache_key is not None and cache_key in file_cache:
+        tokens = file_cache[cache_key]
+    elif read_budget[0] <= 0:
+        # No read budget left. Deliberately *not* cached: nothing was read, so
+        # there is no result to memoize -- a later call with its own budget must
+        # still get a real chance to read this file.
+        return None
+    else:
+        tokens = _read_and_tokenize_response_file(
+            path,
+            root,
+            cl_style=cl_style,
+            read_budget=read_budget,
+            cache_token_budget=cache_token_budget,
+        )
+        if cache_key is not None:
+            file_cache[cache_key] = tokens
+    if tokens is None or _exceeds_output_budget(
+        tokens, output_budget, db_output_budget
+    ):
+        return None
+    return tokens
+
+
 def _expand_response_files(
     arguments: list[str],
     directory: Path,
@@ -422,82 +543,18 @@ def _expand_response_files(
         if not arg.startswith("@") or len(arg) == 1:
             expanded.append(arg)
             continue
-        if _output_budget[0] <= 0 or (
-            _db_output_budget is not None and _db_output_budget[0] <= 0
-        ):
-            expanded.append(arg)
-            continue
-        raw_path = Path(arg[1:])
-        path = raw_path if raw_path.is_absolute() else directory / raw_path
-        resolved = _safe_resolve(path)
-        cache_key = (str(resolved), cl_style) if resolved is not None else None
-        if cache_key is not None and cache_key in _file_cache:
-            tokens = _file_cache[cache_key]
-        else:
-            if _budget[0] <= 0:
-                expanded.append(arg)
-                continue
-            text = _read_response_file(path, root)
-            if text is None:
-                tokens = None
-            else:
-                _budget[0] -= 1
-                try:
-                    tokens = _split_command_line(text, cl_style=cl_style)
-                except ValueError:
-                    tokens = None
-                if (
-                    tokens is not None
-                    and len(tokens) > _MAX_RESPONSE_FILE_OUTPUT_TOKENS
-                ):
-                    # No entry's own _output_budget ever starts above this
-                    # constant (a fresh top-level call always defaults to
-                    # it), so a file this dense can never fit any entry
-                    # regardless of how much of that budget is left --
-                    # cache the rejection instead of the full token list,
-                    # or many distinct oversized files in one untrusted
-                    # database would each retain a huge, never-usable
-                    # tokens list in _file_cache indefinitely (Codex
-                    # review, sixth round).
-                    tokens = None
-                if (
-                    tokens is not None
-                    and _cache_token_budget is not None
-                    and len(tokens) > _cache_token_budget[0]
-                ):
-                    # A distinct file under the fixed per-entry cap (so not
-                    # caught above) can still be over THIS entry's own
-                    # remaining budget and be rejected for it -- but its
-                    # full tokens list would still be retained in
-                    # _file_cache for possible reuse by a later entry with
-                    # a fresh budget. Many such distinct, never-actually-
-                    # used files can accumulate unbounded cached memory
-                    # without ever charging _db_output_budget (which is
-                    # only charged when tokens are actually spliced into
-                    # some entry's output). Charge this separate,
-                    # cache-population-time budget instead, regardless of
-                    # whether the tokens end up used (Codex review, seventh
-                    # round).
-                    tokens = None
-                elif tokens is not None and _cache_token_budget is not None:
-                    _cache_token_budget[0] -= len(tokens)
-            if cache_key is not None:
-                _file_cache[cache_key] = tokens
+        tokens = _response_file_tokens_for_arg(
+            arg,
+            directory,
+            root,
+            cl_style=cl_style,
+            read_budget=_budget,
+            output_budget=_output_budget,
+            db_output_budget=_db_output_budget,
+            cache_token_budget=_cache_token_budget,
+            file_cache=_file_cache,
+        )
         if tokens is None:
-            expanded.append(arg)
-            continue
-        if len(tokens) > _output_budget[0] or (
-            _db_output_budget is not None and len(tokens) > _db_output_budget[0]
-        ):
-            # This single file's own token count already exceeds the
-            # remaining output budget -- the pre-loop budget check above
-            # only rejects a *subsequent* @file once the budget has already
-            # gone negative, so a single response file at or near the byte
-            # cap (tokenizable into hundreds of thousands of short tokens)
-            # could otherwise still be expanded whole in one shot before
-            # that check ever fires (Codex review, third round). Reject the
-            # whole file rather than partially truncating it -- a partial
-            # flag list is worse than none.
             expanded.append(arg)
             continue
         _output_budget[0] -= len(tokens)

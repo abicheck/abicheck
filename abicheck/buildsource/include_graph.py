@@ -118,6 +118,101 @@ _DEPFILE_OUTPUT_PREFIXES = (
 )
 
 
+def _expand_argv_response_files(
+    args: list[str],
+    unwrapped: list[str],
+    directory: str | None,
+    trusted_root: str | None,
+) -> list[str]:
+    """Expand any remaining ``@response-file`` token in *args*, or leave it be.
+
+    Only expands when both *directory* (the compile unit's own working
+    directory, used to resolve a *relative* ``@file`` token) and *trusted_root*
+    (an independently-sourced, verified-real directory the expansion must stay
+    under) are given -- see :func:`depfile_args_from_argv`'s docstring for why
+    *trusted_root* must not simply be *directory*.
+    """
+    if (
+        directory is None
+        or trusted_root is None
+        or not any(a.startswith("@") and len(a) > 1 for a in args)
+    ):
+        return args
+
+    from pathlib import Path
+
+    from ..build_context import (
+        _expand_response_files,
+        _is_cl_style_driver,
+        _safe_resolve,
+    )
+    from .source_extractors._argv import unredact_home
+
+    # Response-file quoting depends on the driver actually invoked, not the
+    # host OS (Codex review) -- unwrapped[0] is still the compiler token here
+    # (the flags-only branch in the caller has not stripped it from *unwrapped*).
+    cl_style = (
+        bool(unwrapped)
+        and not unwrapped[0].startswith("-")
+        and _is_cl_style_driver(unredact_home(unwrapped[0]))
+    )
+
+    # unredact_home() first: a persisted CompileUnit.directory (and any
+    # individual @response-file argument, e.g. "@~/build/args.rsp") may carry
+    # RedactionPolicy's "~" home-dir placeholder, which bare Path() would treat
+    # as a literal, non-existent relative component (Path("~/build") stays
+    # under the process cwd and is never is_absolute(), so an absolute redacted
+    # @file token would even be wrongly joined onto cu_dir instead of resolved
+    # on its own) -- silently failing every response-file expansion for a
+    # redacted compile unit otherwise (Codex review, two rounds). Unredacting
+    # an already-real (non-redacted) token is a harmless no-op.
+    cu_dir = Path(unredact_home(directory))
+    root_dir = Path(unredact_home(trusted_root))
+    return _expand_response_files(
+        [unredact_home(a) for a in args],
+        cu_dir,
+        _safe_resolve(root_dir) or root_dir,
+        cl_style=cl_style,
+    )
+
+
+def _depfile_token_takes_value(tok: str) -> bool:
+    """True for a flag whose *next* argv token is its value and must go too."""
+    return tok == "--config" or tok in (
+        _DEPFILE_DROP_WITH_VALUE | _DEPFILE_UNSAFE_WITH_VALUE | _DEPFILE_OUTPUT_WITH_VALUE
+    )
+
+
+def _depfile_token_dropped(tok: str) -> bool:
+    """True for a standalone token that must not reach ``clang -MM``.
+
+    Covers unsafe/output flags and their prefixes, an unexpanded ``@file``, the
+    glued ``-oFOO``/``-MFfoo.d`` forms and the GCC long ``--output=foo.o``
+    spelling (clang ``-M`` with ``--output=`` writes the depfile to that file
+    and leaves stdout empty, losing the include entry -- Codex review), and
+    warning/diagnostic flags: those do not affect the include closure, but can
+    turn a harmless clang depfile-replay warning into a hard failure when the
+    original Bazel/GCC action recorded ``-Werror``.
+    """
+    if tok.startswith("@"):
+        return True
+    if tok in _DEPFILE_UNSAFE_FLAG or tok in _DEPFILE_OUTPUT_FLAG:
+        return True
+    if tok.startswith(_DEPFILE_UNSAFE_PREFIXES) or tok.startswith(
+        _DEPFILE_OUTPUT_PREFIXES
+    ):
+        return True
+    if tok.startswith("--output="):
+        return True
+    if any(tok.startswith(f) and tok != f for f in ("-o", "-MF", "-MT", "-MQ", "-MJ")):
+        return True
+    if tok in _DEPFILE_DROP_FLAG:
+        return True
+    return tok.startswith(_DEPFILE_DROP_PREFIXES) or (
+        tok.startswith("-W") and not tok.startswith("-Wp,")
+    )
+
+
 def depfile_args_from_argv(
     argv: list[str],
     directory: str | None = None,
@@ -177,91 +272,17 @@ def depfile_args_from_argv(
         if unwrapped and not unwrapped[0].startswith("-")
         else list(unwrapped)
     )
-    if (
-        directory is not None
-        and trusted_root is not None
-        and any(a.startswith("@") and len(a) > 1 for a in args)
-    ):
-        from pathlib import Path
-
-        from ..build_context import (
-            _expand_response_files,
-            _is_cl_style_driver,
-            _safe_resolve,
-        )
-        from .source_extractors._argv import unredact_home
-
-        # Response-file quoting depends on the driver actually invoked, not
-        # the host OS (Codex review) -- unwrapped[0] is still the compiler
-        # token here (the flags-only branch above hasn't stripped it yet).
-        cl_style = (
-            bool(unwrapped)
-            and not unwrapped[0].startswith("-")
-            and (_is_cl_style_driver(unredact_home(unwrapped[0])))
-        )
-
-        # The compile unit's own working directory is the base a relative
-        # @file resolves against; *trusted_root* (an independently-sourced,
-        # verified-real directory -- NOT `directory` itself, see the
-        # docstring) is the jail it must stay under. unredact_home() first:
-        # a persisted CompileUnit.directory (and any individual
-        # @response-file argument, e.g. "@~/build/args.rsp") may carry
-        # RedactionPolicy's "~" home-dir placeholder, which bare Path()
-        # would treat as a literal, non-existent relative component
-        # (Path("~/build") stays under the process cwd and is never
-        # is_absolute(), so an absolute redacted @file token would even be
-        # wrongly joined onto cu_dir instead of resolved on its own) --
-        # silently failing every response-file expansion for a redacted
-        # compile unit otherwise (Codex review, two rounds). Unredacting an
-        # already-real (non-redacted) token is a harmless no-op.
-        cu_dir = Path(unredact_home(directory))
-        root_dir = Path(unredact_home(trusted_root))
-        args = [unredact_home(a) for a in args]
-        args = _expand_response_files(
-            args, cu_dir, _safe_resolve(root_dir) or root_dir, cl_style=cl_style
-        )
+    args = _expand_argv_response_files(args, unwrapped, directory, trusted_root)
     out: list[str] = []
     skip_next = False
     for tok in args:
         if skip_next:
             skip_next = False
             continue
-        if (
-            tok in _DEPFILE_DROP_WITH_VALUE
-            or tok in _DEPFILE_UNSAFE_WITH_VALUE
-            or tok in _DEPFILE_OUTPUT_WITH_VALUE
-        ):
+        if _depfile_token_takes_value(tok):
             skip_next = True
             continue
-        if tok == "--config":
-            skip_next = True
-            continue
-        if tok.startswith("@"):
-            continue
-        if (
-            tok in _DEPFILE_UNSAFE_FLAG
-            or tok in _DEPFILE_OUTPUT_FLAG
-            or tok.startswith(_DEPFILE_UNSAFE_PREFIXES)
-            or tok.startswith(_DEPFILE_OUTPUT_PREFIXES)
-        ):
-            continue
-        # `-oFOO` / `-MFfoo.d` glued forms and the GCC long `--output=foo.o`
-        # spelling (clang -M with --output=… writes the depfile to that file and
-        # leaves stdout empty, losing the include entry — Codex review).
-        if tok.startswith("--output="):
-            continue
-        if any(
-            tok.startswith(f) and tok != f for f in ("-o", "-MF", "-MT", "-MQ", "-MJ")
-        ):
-            continue
-        if tok in _DEPFILE_DROP_FLAG:
-            continue
-        # Warning/diagnostic flags do not affect the include closure, but they
-        # can turn harmless clang depfile replay warnings into hard failures when
-        # the original Bazel/GCC action recorded `-Werror`.
-        if tok.startswith(_DEPFILE_DROP_PREFIXES) or (
-            tok.startswith("-W") and not tok.startswith("-Wp,")
-        ):
+        if _depfile_token_dropped(tok):
             continue
         out.append(tok)
     return out

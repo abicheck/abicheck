@@ -816,6 +816,199 @@ def _run_artifact_set(
         sys.exit(result.exit_code)
 
 
+def _resolve_scan_evaluation_config(
+    *,
+    against: Path | None, contract_evaluation: bool, pack_paths: tuple[Path, ...],
+    policy: str, policy_file: Any,
+    project_cfg: Any, cfg_path: Path | None, project_sha256: str | None,
+    suppression: Any, suppress: Path | None, symbols_list: Any,
+) -> tuple[Any, Any]:
+    """Resolve this scan's ADR-049 configuration and fold in any ``--pack``.
+
+    Returns ``(resolved_config, policy_file)`` -- ``(None, policy_file)`` when
+    there is nothing to resolve, i.e. no ``--against`` to compare against or
+    neither ``--contract-evaluation`` nor ``--pack`` given.
+
+    ADR-049 Phase 5's "same typed config", for the third and last front end.
+    ``checker.compare`` can only claim ``API_REQUEST`` for arguments it was
+    handed, so without this the scan's persisted ``evaluation_context`` carried
+    the core verb's reconstruction rather than real D7 provenance -- the same
+    defect already fixed for ``compare``. Resolved here because this is where
+    the Click context is: which flags the user actually typed is a question
+    only the front end can answer.
+    """
+    if against is None or not (contract_evaluation or pack_paths):
+        return None, policy_file
+    resolved_config = None
+    from .cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
+    from .compatibility_evaluation_resolver import (
+        FieldResolutionError,
+        PackConflictError,
+    )
+    from .errors import PackManifestError
+
+    _ctx = click.get_current_context()
+    _params = {name: _ctx.params.get(name) for name in SCAN_CONFIG_PARAMS}
+    _typed = {
+        name
+        for name in SCAN_CONFIG_PARAMS
+        if _ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+    }
+    try:
+        resolved_config = resolve_scan_config(
+            _params,
+            typed=_typed,
+            project_cfg=project_cfg,
+            project_path=cfg_path,
+            project_sha256=project_sha256,
+            policy_file=policy_file,
+            suppression=suppression,
+            suppress_path=suppress,
+            symbols_list=symbols_list,
+        )
+        if pack_paths:
+            # ADR-049 D8: a pack that reached the receipt and not the
+            # engine is exactly what got the flag reverted once before, so
+            # its contributions are folded into the policy file the
+            # baseline comparison runs with. `gate_supported=False`
+            # because a scan's exit code follows its verdict directly --
+            # the same reason `cli_scan_receipt._without_gate_settings`
+            # blanks the gate rather than reporting one it never used.
+            from .pack_application import (
+                check_resolved_config_applies_packs,
+                pack_application,
+                policy_file_with_packs,
+            )
+
+            # Emptiness is not asked here: it is a property of the file,
+            # and `load_selected_packs` -- which the resolution above
+            # already went through -- rejects an empty manifest on the
+            # very revision that configured this run. Asking it again
+            # from a second read would only move that window, not close
+            # it (Codex review).
+            #
+            # Everything else is asked of the resolution, not a second
+            # read of the files -- same reasoning as the compare path:
+            # the resolver already loaded its own copy, so re-reading
+            # would validate a revision that is not the one configuring
+            # the run (Codex review, raised for compare and then here).
+            check_resolved_config_applies_packs(
+                resolved_config,
+                gate_supported=False,
+                gate_reason=(
+                    "a scan's exit code follows its compatibility verdict "
+                    "directly, so it has no severity or exit-code scheme "
+                    "for a gate pack to move (compare does)"
+                ),
+                contract_evaluation=contract_evaluation,
+            )
+            policy_file = policy_file_with_packs(
+                policy_file,
+                pack_application(resolved_config, policy_file=policy_file),
+                base_policy=policy,
+            )
+    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
+        # A D7 same-tier conflict or a D8 pack conflict is a usage error,
+        # exactly as it is for `compare` -- not a traceback out of a
+        # command that had already validated its own flags.
+        #
+        # Narrower than `service_scan._scan_request_config`'s
+        # `except (ValueError, PackManifestError)` on purpose, not by
+        # oversight: the extra case that catch covers is an unknown base
+        # policy, which reaches the resolver only as a free string on a
+        # typed `ScanRequest`. Here `--policy` is a `click.Choice`, so
+        # Click rejects an unknown base before this call. If either front
+        # end gains a new failure mode, change both.
+        raise click.UsageError(str(exc)) from exc
+    return resolved_config, policy_file
+
+
+def _reject_incoherent_scan_operands(
+    *,
+    artifact: Path | None,
+    artifact_set: str | None,
+    against: Path | None,
+    dry_run: bool,
+    bundle_system_providers: str,
+) -> None:
+    """Reject operand/flag combinations ``scan`` cannot serve.
+
+    An empty ``--artifact-set`` is rejected explicitly rather than left to
+    collapse to ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit
+    review). ``--artifact-set`` is audit-only -- there is no old side for a set
+    -- so ``--against`` is rejected with it, and ``--dry-run`` is not wired for
+    it yet. ``--bundle-system-providers`` is the mirror case: it only means
+    something *for* a set.
+    """
+    if artifact_set is not None and not artifact_set.strip():
+        raise click.UsageError("--artifact-set must not be empty.")
+    if (artifact is not None) == (artifact_set is not None):
+        raise click.UsageError(
+            "scan requires exactly one of ARTIFACT or --artifact-set."
+        )
+    if artifact_set is not None:
+        if against is not None:
+            raise click.UsageError(
+                "--against is not supported with --artifact-set "
+                "(audit-only -- no old side for a set)."
+            )
+        if dry_run:
+            raise click.UsageError(
+                "--dry-run is not yet supported with --artifact-set."
+            )
+    elif bundle_system_providers:
+        raise click.UsageError("--bundle-system-providers requires --artifact-set.")
+
+
+def _discover_scan_project_config(
+    build_config: Path | None, sources: Path | None, against: Path | None,
+) -> tuple[Path | None, Any, str | None]:
+    """Resolve the project config for this scan, with the digest that parsed it.
+
+    Returns ``(cfg_path, project_cfg, sha256)``. An explicitly-bound
+    ``--build-config`` that cannot be parsed is a usage error; an
+    auto-discovered one is best-effort and degrades to a warning with
+    ``cfg_path`` cleared, matching ``merge_compile_config``'s own convention --
+    a config the user never explicitly bound to shouldn't fail a run it wasn't
+    asked to affect.
+    """
+    from .buildsource.inline import discover_build_config
+
+    explicit_config = build_config is not None
+    cfg_path = build_config if explicit_config else discover_build_config(sources)
+    if cfg_path is None and not explicit_config and against is not None:
+        from .cli_helpers_compare import discover_project_config
+
+        cfg_path = discover_project_config()
+    project_cfg = None
+    # ADR-049 D6: a project-derived receipt entry must name the path *and*
+    # prove which revision supplied the value, from the same read that
+    # parsed it -- so the digest comes from `load_build_config_with_digest`
+    # rather than a second read at receipt time.
+    _project_sha256: str | None = None
+    if cfg_path is not None:
+        try:
+            from .buildsource.build_config_io import load_build_config_with_digest
+
+            project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
+        except ValueError as exc:
+            if explicit_config:
+                raise click.UsageError(
+                    f"cannot parse build config {cfg_path}: {exc}"
+                ) from exc
+            # Auto-discovered (--sources root or cwd-upward): best-effort,
+            # matching `merge_compile_config`'s own identical convention --
+            # a config the user never explicitly bound to shouldn't fail a
+            # run it wasn't asked to affect.
+            click.echo(
+                f"warning: could not parse auto-discovered {cfg_path}; "
+                f"using CLI compile/comparison settings only ({exc}).",
+                err=True,
+            )
+            cfg_path = None
+    return cfg_path, project_cfg, _project_sha256
+
+
 @main.command("scan")
 @click.argument(
     "artifact", type=click.Path(exists=True, path_type=Path), required=False
@@ -1149,22 +1342,11 @@ def scan_cmd(
     # check and then silently ignored ARTIFACT, resolving the empty string
     # to Path("") == Path(".") and auditing the whole CWD instead of
     # erroring (CodeRabbit review).
-    if artifact_set is not None and not artifact_set.strip():
-        raise click.UsageError("--artifact-set must not be empty.")
-    if (artifact is not None) == (artifact_set is not None):
-        raise click.UsageError(
-            "scan requires exactly one of ARTIFACT or --artifact-set."
-        )
+    _reject_incoherent_scan_operands(
+        artifact=artifact, artifact_set=artifact_set, against=against,
+        dry_run=dry_run, bundle_system_providers=bundle_system_providers,
+    )
     if artifact_set is not None:
-        if against is not None:
-            raise click.UsageError(
-                "--against is not supported with --artifact-set "
-                "(audit-only -- no old side for a set)."
-            )
-        if dry_run:
-            raise click.UsageError(
-                "--dry-run is not yet supported with --artifact-set."
-            )
         _reject_comparison_only_flags(no_baseline_reason="drop --artifact-set")
         _run_artifact_set(
             artifact_set=artifact_set,
@@ -1197,8 +1379,6 @@ def scan_cmd(
             frontend_context=frontend_context,
         )
         return
-    if bundle_system_providers:
-        raise click.UsageError("--bundle-system-providers requires --artifact-set.")
     # The mutual-exclusion check above already guarantees exactly one of
     # ARTIFACT/--artifact-set is set, and the --artifact-set branch always
     # returns -- so `artifact` is non-None on every path reaching here.
@@ -1251,40 +1431,9 @@ def scan_cmd(
     # only flags without --against" guard above, only attempted for an
     # actual `--against` comparison -- a plain one-build audit never needs
     # any of this, so it must not even try the cwd-upward walk.
-    from .buildsource.inline import discover_build_config
-
-    explicit_config = build_config is not None
-    cfg_path = build_config if explicit_config else discover_build_config(sources)
-    if cfg_path is None and not explicit_config and against is not None:
-        from .cli_helpers_compare import discover_project_config
-
-        cfg_path = discover_project_config()
-    project_cfg = None
-    # ADR-049 D6: a project-derived receipt entry must name the path *and*
-    # prove which revision supplied the value, from the same read that
-    # parsed it -- so the digest comes from `load_build_config_with_digest`
-    # rather than a second read at receipt time.
-    _project_sha256: str | None = None
-    if cfg_path is not None:
-        try:
-            from .buildsource.build_config_io import load_build_config_with_digest
-
-            project_cfg, _project_sha256 = load_build_config_with_digest(cfg_path)
-        except ValueError as exc:
-            if explicit_config:
-                raise click.UsageError(
-                    f"cannot parse build config {cfg_path}: {exc}"
-                ) from exc
-            # Auto-discovered (--sources root or cwd-upward): best-effort,
-            # matching `merge_compile_config`'s own identical convention --
-            # a config the user never explicitly bound to shouldn't fail a
-            # run it wasn't asked to affect.
-            click.echo(
-                f"warning: could not parse auto-discovered {cfg_path}; "
-                f"using CLI compile/comparison settings only ({exc}).",
-                err=True,
-            )
-            cfg_path = None
+    cfg_path, project_cfg, _project_sha256 = _discover_scan_project_config(
+        build_config, sources, against
+    )
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver bundles the cross-toolchain + frontend flags and folds the
@@ -1425,88 +1574,13 @@ def scan_cmd(
     # -- the same defect already fixed for `compare` and the MCP tool.
     # Resolved here because this is where the Click context is: which flags
     # the user actually typed is a question only the front end can answer.
-    resolved_config = None
-    if against is not None and (contract_evaluation or pack_paths):
-        from .cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
-        from .compatibility_evaluation_resolver import (
-            FieldResolutionError,
-            PackConflictError,
-        )
-        from .errors import PackManifestError
-
-        _ctx = click.get_current_context()
-        _params = {name: _ctx.params.get(name) for name in SCAN_CONFIG_PARAMS}
-        _typed = {
-            name
-            for name in SCAN_CONFIG_PARAMS
-            if _ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
-        }
-        try:
-            resolved_config = resolve_scan_config(
-                _params,
-                typed=_typed,
-                project_cfg=project_cfg,
-                project_path=cfg_path,
-                project_sha256=_project_sha256,
-                policy_file=policy_file,
-                suppression=suppression,
-                suppress_path=suppress,
-                symbols_list=_symbols_list,
-            )
-            if pack_paths:
-                # ADR-049 D8: a pack that reached the receipt and not the
-                # engine is exactly what got the flag reverted once before, so
-                # its contributions are folded into the policy file the
-                # baseline comparison runs with. `gate_supported=False`
-                # because a scan's exit code follows its verdict directly --
-                # the same reason `cli_scan_receipt._without_gate_settings`
-                # blanks the gate rather than reporting one it never used.
-                from .pack_application import (
-                    check_resolved_config_applies_packs,
-                    pack_application,
-                    policy_file_with_packs,
-                )
-
-                # Emptiness is not asked here: it is a property of the file,
-                # and `load_selected_packs` -- which the resolution above
-                # already went through -- rejects an empty manifest on the
-                # very revision that configured this run. Asking it again
-                # from a second read would only move that window, not close
-                # it (Codex review).
-                #
-                # Everything else is asked of the resolution, not a second
-                # read of the files -- same reasoning as the compare path:
-                # the resolver already loaded its own copy, so re-reading
-                # would validate a revision that is not the one configuring
-                # the run (Codex review, raised for compare and then here).
-                check_resolved_config_applies_packs(
-                    resolved_config,
-                    gate_supported=False,
-                    gate_reason=(
-                        "a scan's exit code follows its compatibility verdict "
-                        "directly, so it has no severity or exit-code scheme "
-                        "for a gate pack to move (compare does)"
-                    ),
-                    contract_evaluation=contract_evaluation,
-                )
-                policy_file = policy_file_with_packs(
-                    policy_file,
-                    pack_application(resolved_config, policy_file=policy_file),
-                    base_policy=policy,
-                )
-        except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
-            # A D7 same-tier conflict or a D8 pack conflict is a usage error,
-            # exactly as it is for `compare` -- not a traceback out of a
-            # command that had already validated its own flags.
-            #
-            # Narrower than `service_scan._scan_request_config`'s
-            # `except (ValueError, PackManifestError)` on purpose, not by
-            # oversight: the extra case that catch covers is an unknown base
-            # policy, which reaches the resolver only as a free string on a
-            # typed `ScanRequest`. Here `--policy` is a `click.Choice`, so
-            # Click rejects an unknown base before this call. If either front
-            # end gains a new failure mode, change both.
-            raise click.UsageError(str(exc)) from exc
+    resolved_config, policy_file = _resolve_scan_evaluation_config(
+        against=against, contract_evaluation=contract_evaluation,
+        pack_paths=pack_paths, policy=policy, policy_file=policy_file,
+        project_cfg=project_cfg, cfg_path=cfg_path,
+        project_sha256=_project_sha256,
+        suppression=suppression, suppress=suppress, symbols_list=_symbols_list,
+    )
 
     budget_s = _parse_budget(budget)
     enabled_checks, severities = _parse_crosschecks(crosschecks)

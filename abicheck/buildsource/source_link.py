@@ -1122,6 +1122,111 @@ def _is_public(entity: SourceEntity) -> bool:
     return bool(loc and loc.origin in ("PUBLIC_HEADER", "GENERATED"))
 
 
+def _valid_source_edge(edge: Any) -> tuple[str, str, str] | None:
+    """``(edge, src, dst)`` for a well-formed source-edge record, else ``None``."""
+    if not isinstance(edge, dict):
+        return None
+    name, src, dst = edge.get("edge"), edge.get("src"), edge.get("dst")
+    if not (
+        isinstance(name, str)
+        and name
+        and isinstance(src, str)
+        and src
+        and isinstance(dst, str)
+        and dst
+    ):
+        return None
+    return (name, src, dst)
+
+
+def _merge_dst_file(existing: dict[str, Any], edge: dict[str, Any]) -> None:
+    """Fill a missing ``attrs.dst_file`` on the surviving duplicate edge.
+
+    A later TU's copy of the same logical ``(edge, src, dst)`` may resolve a
+    ``dst_file`` the first-seen copy couldn't (e.g. only this TU's AST carries
+    the callee/type's declaring file) -- fill it into the surviving row rather
+    than silently keeping the poorer one (Codex review): otherwise the
+    surviving row's missing ``dst_file`` means ``fold_source_edges()`` can
+    never mark that endpoint ``defined_in_project``, and
+    ``PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`` is skipped for a dependency the
+    graph otherwise has full evidence for.
+    """
+    new_attrs = edge.get("attrs")
+    new_dst_file = new_attrs.get("dst_file") if isinstance(new_attrs, dict) else None
+    if not new_dst_file:
+        return
+    existing_attrs = existing.get("attrs")
+    if not isinstance(existing_attrs, dict):
+        existing_attrs = {}
+        existing["attrs"] = existing_attrs
+    if not existing_attrs.get("dst_file"):
+        existing_attrs["dst_file"] = new_dst_file
+
+
+def _fold_tu_source_edges(tus: list[SourceAbiTu]) -> list[dict[str, Any]]:
+    """Every TU's graph-edge facts, deduplicated on ``(edge, src, dst)``.
+
+    ADR-038 C.9 / PR1: folded up to the surface so ``build_source_graph()`` can
+    consume them directly instead of them being serialized-but-unused dead data.
+    TUs that share a public header re-emit the same edges, hence the dedup.
+    """
+    edge_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    source_edges: list[dict[str, Any]] = []
+    for tu in tus:
+        for edge in tu.source_edges:
+            edge_key = _valid_source_edge(edge)
+            if edge_key is None:
+                continue
+            existing = edge_by_key.get(edge_key)
+            if existing is not None:
+                _merge_dst_file(existing, edge)
+                continue
+            edge_by_key[edge_key] = edge
+            source_edges.append(edge)
+    return source_edges
+
+
+def _is_duplicate_entity(entity: SourceEntity, state: _LinkState) -> bool:
+    """True for a byte-identical entity already routed from another TU.
+
+    Folds entities re-emitted by every TU that includes the same public header.
+    The key carries every identity- and hash-bearing field, so overloads (same
+    name, different mangled/sig), ODR variants (same name/id but a divergent
+    ``type_hash``/``body_hash`` -- the type id intentionally excludes the
+    content hash), and any other semantic difference still route and are
+    detected; only true duplicates are dropped. Shrinks the surface, its
+    content-hash ``json.dumps``, and the relink work proportionally.
+
+    A genuine ``identity_collision_detected`` pair (two distinct decls, proven
+    distinct by a differing USR) can still share every field in the key -- none
+    of them carry per-declaration provenance, so a bare, unmangled cross-scope
+    name/signature collision hashes identically. Only treat this as the
+    "byte-identical re-emission across TUs" case the dedup exists for when the
+    USRs agree (or are unknown, e.g. castxml/plain-clang extractors that never
+    stamp one) -- otherwise let the second entity through so
+    ``_route_declaration``'s USR-collision check actually sees it (Codex
+    review; ADR-041 P1 #5).
+    """
+    key = (
+        entity.kind,
+        entity.qualified_name,
+        entity.mangled_name,
+        entity.id,
+        entity.signature_hash,
+        entity.type_hash,
+        entity.body_hash,
+        entity.value,
+    )
+    usr = entity.names.get("usr", "")
+    prev_usr = state.seen_entity_usr.get(key, "")
+    if key in state.seen_entity_keys and (not usr or not prev_usr or usr == prev_usr):
+        return True
+    state.seen_entity_keys.add(key)
+    if usr and not prev_usr:
+        state.seen_entity_usr[key] = usr
+    return False
+
+
 def link_source_abi(
     tus: Iterable[SourceAbiTu],
     *,
@@ -1149,55 +1254,8 @@ def link_source_abi(
     state = _LinkState()
     state.export_index = _build_export_index(exported)
     state.exact_index = _build_exact_index(exported)
-    seen_edge_keys: set[tuple[str, str, str]] = set()
-    edge_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
-    source_edges: list[dict[str, Any]] = []
+    source_edges = _fold_tu_source_edges(tus)
     for tu in tus:
-        for edge in tu.source_edges:
-            if not isinstance(edge, dict):
-                continue
-            edge_name, edge_src, edge_dst = (
-                edge.get("edge"),
-                edge.get("src"),
-                edge.get("dst"),
-            )
-            if not (
-                isinstance(edge_name, str)
-                and edge_name
-                and isinstance(edge_src, str)
-                and edge_src
-                and isinstance(edge_dst, str)
-                and edge_dst
-            ):
-                continue
-            edge_key = (edge_name, edge_src, edge_dst)
-            if edge_key in seen_edge_keys:
-                # A later TU's copy of the same logical (edge, src, dst) may
-                # resolve a dst_file the first-seen copy couldn't (e.g. only
-                # this TU's AST carries the callee/type's declaring file) --
-                # fill it into the surviving row rather than silently
-                # keeping the poorer one (Codex review): otherwise the
-                # surviving row's missing dst_file means
-                # fold_source_edges() can never mark that endpoint
-                # defined_in_project, and PUBLIC_API_INTERNAL_DEPENDENCY_ADDED
-                # is skipped for a dependency the graph otherwise has full
-                # evidence for.
-                existing = edge_by_key.get(edge_key)
-                new_attrs = edge.get("attrs")
-                new_dst_file = (
-                    new_attrs.get("dst_file") if isinstance(new_attrs, dict) else None
-                )
-                if existing is not None and new_dst_file:
-                    existing_attrs = existing.get("attrs")
-                    if not isinstance(existing_attrs, dict):
-                        existing_attrs = {}
-                        existing["attrs"] = existing_attrs
-                    if not existing_attrs.get("dst_file"):
-                        existing_attrs["dst_file"] = new_dst_file
-                continue
-            seen_edge_keys.add(edge_key)
-            edge_by_key[edge_key] = edge
-            source_edges.append(edge)
         for header in tu.public_header_roots:
             surface.mappings["public_header_to_target"][header] = (
                 tu.target_id or target_id
@@ -1205,50 +1263,10 @@ def link_source_abi(
         for entity in tu.all_entities():
             if not (_is_public(entity) or entity.qualified_name in forced):
                 continue
-            # Fold byte-identical entities re-emitted by every TU that includes
-            # the same public header. The key carries every identity- and
-            # hash-bearing field, so overloads (same name, different mangled/sig),
-            # ODR variants (same name/id but a divergent type_hash/body_hash — the
-            # type id intentionally excludes the content hash), and any other
-            # semantic difference still route and are detected; only true
-            # duplicates are dropped. Shrinks the surface, its content-hash
-            # json.dumps, and the relink work proportionally.
-            key = (
-                entity.kind,
-                entity.qualified_name,
-                entity.mangled_name,
-                entity.id,
-                entity.signature_hash,
-                entity.type_hash,
-                entity.body_hash,
-                entity.value,
-            )
-            usr = entity.names.get("usr", "")
-            prev_usr = state.seen_entity_usr.get(key, "")
-            # A genuine identity_collision_detected pair (two distinct decls,
-            # proven distinct by a differing USR) can still share every field
-            # in `key` above -- none of them carry per-declaration provenance,
-            # so a bare, unmangled cross-scope name/signature collision hashes
-            # identically. Only treat this as the "byte-identical re-emission
-            # across TUs" case the dedup exists for when the USRs agree (or
-            # are unknown, e.g. castxml/plain-clang extractors that never
-            # stamp one) -- otherwise let the second entity through so
-            # `_route_declaration`'s USR-collision check actually sees it
-            # (Codex review; ADR-041 P1 #5).
-            if key in state.seen_entity_keys and (
-                not usr or not prev_usr or usr == prev_usr
-            ):
+            if _is_duplicate_entity(entity, state):
                 continue
-            state.seen_entity_keys.add(key)
-            if usr and not prev_usr:
-                state.seen_entity_usr[key] = usr
             state.public_decl_ids.append(entity.id)
             _route_entity(entity, surface, state, exported)
-
-    # ADR-038 C.9 / PR1: fold every TU's collected graph-edge facts up to the
-    # surface (deduplicated above by (edge, src, dst) across TUs that share a
-    # public header), so build_source_graph() can consume them directly instead
-    # of them being serialized-but-unused dead data.
     surface.source_edges = source_edges
     surface.roots["public_header_declarations"] = sorted(set(state.public_decl_ids))
     # Second-tier: rescue decls whose mangled name differs textually from the

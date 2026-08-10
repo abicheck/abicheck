@@ -33,6 +33,8 @@ never the reverse (no new import cycle; CLAUDE.md "M1-3").
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 
 _PP_IF_OPEN_PATTERN = re.compile(rb"^[ \t]*#[ \t]*(?:if|ifdef|ifndef)\b")
 # A parenthesized literal (``#if (0)``, ``#elif (1)``) is the same
@@ -292,124 +294,286 @@ _PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN = re.compile(
 )
 
 
-def _frame_for_chain_open(
-    line: bytes,
-    *,
-    invert_dialect_fallback_guards: bool,
-    mask_cplusplus_defined_guards: bool,
-) -> list[bool]:
+#: The three stack frames a chain can open with, as
+#: ``(recognized, masking, settled)`` — see :func:`_frame_for_chain_open`.
+_FRAME_LIVE_SETTLED = (True, False, True)
+_FRAME_MASKED = (True, True, False)
+_FRAME_UNRECOGNIZED = (False, False, False)
+
+
+@dataclass(frozen=True)
+class _ChainPolicy:
+    """The two masking-policy flags every chain-classifier rule consults.
+
+    Bundled into one object so the rule tables below can share a single
+    ``(line, policy)`` matcher signature; the flags themselves are documented
+    on :func:`_strip_inactive_if_zero_blocks`, the only caller that sets them.
+    """
+
+    invert_dialect_fallback_guards: bool
+    mask_cplusplus_defined_guards: bool
+
+
+_ChainMatcher = Callable[[bytes, _ChainPolicy], bool]
+
+
+def _opens_pre_cpp20_dialect_fallback(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#if __cplusplus < N`` — the pre-C++20-safe fallback arm.
+
+    Opposite polarity from the general __cplusplus-guard rule: a less-than
+    comparison's guarded arm is the pre-C++20-safe fallback, so it's scanned
+    live and immediately settled so any #else (feature present, circular)
+    stays masked -- ordered ahead of the general rule since it would otherwise
+    also match. Skipped entirely when invert_dialect_fallback_guards is False
+    (shadow-scan callers), falling through to the general rule instead -- see
+    :func:`_strip_inactive_if_zero_blocks`.
+    """
+    return policy.invert_dialect_fallback_guards and bool(
+        _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN.match(line)
+    )
+
+
+def _opens_missing_feature_fallback(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#if !defined(__cpp_x)`` — the feature-absent fallback arm.
+
+    Same inverted polarity as ``#ifndef __cpp_x`` below -- ordered ahead of the
+    general rule since this spelling (unlike ``#ifndef``) starts with ``#if``
+    and would otherwise be caught there first. Same shadow-scan exception as
+    above.
+    """
+    return policy.invert_dialect_fallback_guards and bool(
+        _PP_IF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line)
+    )
+
+
+def _opens_missing_cplusplus_fallback(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#ifndef __cplusplus`` / ``#if !defined(__cplusplus)``, C-only arm.
+
+    Opposite polarity from the general rule's unconditional treatment of the
+    same spellings -- ordered ahead of it since it would otherwise also match.
+    See the docstring above ``_PP_NOT_DEFINED_CPLUSPLUS``.
+    """
+    return policy.mask_cplusplus_defined_guards and bool(
+        _PP_IFNDEF_CPLUSPLUS_PATTERN.match(line)
+        or _PP_IF_NOT_DEFINED_CPLUSPLUS_PATTERN.match(line)
+    )
+
+
+def _opens_unreachable_or_circular_guard(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#if 0`` or a dialect/feature-test guard whose arm must not be scanned.
+
+    The general masking rule: permanently-unreachable literals plus the
+    circular guards (``__cplusplus``, ``__cpp_*``) whose own content must never
+    be allowed to decide the ``-std=`` this heuristic is picking.
+    """
+    return bool(
+        _PP_IF_ZERO_PATTERN.match(line)
+        or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
+        or _PP_IFNDEF_CPLUSPLUS_PATTERN.match(line)
+        or (
+            not policy.invert_dialect_fallback_guards
+            and _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(line)
+        )
+        or (
+            policy.mask_cplusplus_defined_guards
+            and _PP_IFDEF_CPLUSPLUS_PATTERN.match(line)
+        )
+        or (
+            _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
+            and (
+                policy.mask_cplusplus_defined_guards
+                or not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+            )
+        )
+    )
+
+
+def _opens_unconditionally_true(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#if 1``/``#if true``, or ``#ifdef``/``#if defined(__cplusplus)``.
+
+    ``#if defined(__cplusplus)``/``#ifdef __cplusplus``/bare ``#if __cplusplus``
+    (Codex review, twenty-second round): tracked as *settled*-true here, the
+    same way ``#if 1``/``#if true`` already is, not left as an unrecognized
+    chain (whose #else/#elif arms then get scanned right along with this one,
+    unmasked). Without this, a dual C/C++ header's ``#else`` (C-only) fallback
+    -- e.g. a ``struct concept {};`` compatibility shim -- stayed visible to the
+    shadow-name scan alongside a genuine C++20 declaration in the *active*
+    ``#if`` arm, wrongly shadowing it. Elif-level already settles the equivalent
+    ``#elif`` spelling this same way; this closes the gap for it as the chain's
+    *opening* condition. The ``__cplusplus`` spellings are skipped when
+    mask_cplusplus_defined_guards is True (the caller already masked that
+    guard's own content in the general rule above, and never reaches here).
+    """
+    return bool(
+        _PP_IF_TRUE_PATTERN.match(line)
+        or (
+            not policy.mask_cplusplus_defined_guards
+            and (
+                _PP_IFDEF_CPLUSPLUS_PATTERN.match(line)
+                or _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+            )
+        )
+    )
+
+
+def _opens_ifndef_feature_fallback(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#ifndef __cpp_x`` — the feature-absent fallback arm.
+
+    Opposite polarity from the general masking rule above: the
+    ``#ifndef``-guarded arm (feature absent) is the trustworthy one here, so
+    it's scanned live and immediately settled so any #else (feature present,
+    circular) stays masked. Skipped for a shadow-scan caller -- already folded
+    into the general mask rule above instead.
+    """
+    return policy.invert_dialect_fallback_guards and bool(
+        _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(line)
+    )
+
+
+#: Ordered ``(matcher, frame)`` rules for a chain-opening directive. Order is
+#: load-bearing: every inverted-polarity spelling is tested ahead of the
+#: general guard rule that would otherwise also match it.
+_CHAIN_OPEN_RULES: tuple[tuple[_ChainMatcher, tuple[bool, bool, bool]], ...] = (
+    (_opens_pre_cpp20_dialect_fallback, _FRAME_LIVE_SETTLED),
+    (_opens_missing_feature_fallback, _FRAME_LIVE_SETTLED),
+    (_opens_missing_cplusplus_fallback, _FRAME_LIVE_SETTLED),
+    (_opens_unreachable_or_circular_guard, _FRAME_MASKED),
+    (_opens_unconditionally_true, _FRAME_LIVE_SETTLED),
+    # The one inverted-polarity rule that does *not* precede the general mask
+    # rule, and safely so: the two are mutually exclusive by construction --
+    # `_opens_unreachable_or_circular_guard` only tests
+    # `_PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN` when
+    # `invert_dialect_fallback_guards` is False, and this rule only fires when
+    # it is True, so neither can shadow the other whatever the order. Stated
+    # here so a later edit to that rule's gating cannot silently change this
+    # spelling's classification (CodeRabbit review).
+    (_opens_ifndef_feature_fallback, _FRAME_LIVE_SETTLED),
+)
+
+
+def _frame_for_chain_open(line: bytes, policy: _ChainPolicy) -> list[bool]:
     """Classify a chain-opening ``#if``/``#ifdef``/``#ifndef`` directive.
 
     Returns the ``[recognized, masking, settled]`` stack frame this chain
     opens with. The caller has already established the chain is not itself
     nested inside dead code, so this answers only what *this* condition
-    says. Branch order is load-bearing: every inverted-polarity spelling is
-    tested ahead of the general guard branch that would otherwise also
-    match it.
+    says. The rules are consulted in ``_CHAIN_OPEN_RULES`` order, which is
+    load-bearing; an unrecognized condition falls through to the same
+    conservative pass-through the top level always applied to an ``#if`` it
+    can't evaluate.
     """
-    if invert_dialect_fallback_guards and _PP_IF_CPLUSPLUS_LESS_THAN_PATTERN.match(
-        line
-    ):
-        # Opposite polarity from the general __cplusplus-guard
-        # branch below: a less-than comparison's guarded arm is
-        # the pre-C++20-safe fallback, so it's scanned live and
-        # immediately settled so any #else (feature present,
-        # circular) stays masked -- checked ahead of the general
-        # branch since it would otherwise also match. Skipped
-        # entirely when invert_dialect_fallback_guards is False
-        # (shadow-scan callers), falling through to the general
-        # branch below instead -- see the docstring.
-        return [True, False, True]
-    if (
-        invert_dialect_fallback_guards
-        and _PP_IF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line)
-    ):
-        # Same inverted polarity as #ifndef __cpp_x below --
-        # checked ahead of the general branch since this spelling
-        # (unlike #ifndef) starts with "#if" and would otherwise
-        # be caught there first. Same shadow-scan exception as
-        # above.
-        return [True, False, True]
-    if mask_cplusplus_defined_guards and (
-        _PP_IFNDEF_CPLUSPLUS_PATTERN.match(line)
-        or _PP_IF_NOT_DEFINED_CPLUSPLUS_PATTERN.match(line)
-    ):
-        # Opposite polarity from the general branch below's
-        # unconditional #ifndef __cplusplus/!defined(__cplusplus)
-        # treatment -- checked ahead of it since it would
-        # otherwise also match. See the docstring above
-        # _PP_NOT_DEFINED_CPLUSPLUS.
-        return [True, False, True]
-    if (
-        _PP_IF_ZERO_PATTERN.match(line)
-        or _PP_IFDEF_CPLUSPLUS_FEATURE_GUARD_PATTERN.match(line)
-        or _PP_IFNDEF_CPLUSPLUS_PATTERN.match(line)
+    for matches, frame in _CHAIN_OPEN_RULES:
+        if matches(line, policy):
+            return list(frame)
+    return list(_FRAME_UNRECOGNIZED)
+
+
+def _arm_settle(frame: list[bool]) -> None:
+    """A decisive arm: flip which arm is masked, then settle the level.
+
+    Every later sibling in the chain is unconditionally unreachable once an
+    unconditionally-reachable arm has been seen, so masking resumes for them.
+    """
+    frame[1] = frame[2]
+    frame[2] = True
+
+
+def _arm_mask(frame: list[bool]) -> None:
+    """A provably-unreachable or circular arm (``#elif 0``, dialect guard)."""
+    frame[1] = True
+
+
+def _arm_flip(frame: list[bool]) -> None:
+    """A plain ``#elif``/``#else``: masked iff the level has already settled."""
+    frame[1] = frame[2]
+
+
+def _arm_is_pre_cpp20_dialect_fallback(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#elif __cplusplus < N``.
+
+    Same inverted polarity as the ``#if``-opening case, ordered ahead of the
+    general rule below since it would otherwise also match. Same shadow-scan
+    exception as the ``#if``-opening case: falls through to the general rule
+    (mask) when invert_dialect_fallback_guards is False.
+    """
+    return policy.invert_dialect_fallback_guards and bool(
+        _PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN.match(line)
+    )
+
+
+def _arm_is_missing_feature_fallback(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#elif !defined(__cpp_x)``.
+
+    Same inverted polarity as ``#if !defined(__cpp_x)``, ordered ahead of the
+    general rule since it would otherwise also match. Same shadow-scan
+    exception.
+    """
+    return policy.invert_dialect_fallback_guards and bool(
+        _PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line)
+    )
+
+
+def _arm_is_missing_cplusplus_fallback(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#elif !defined(__cplusplus)``.
+
+    Opposite polarity from the general rule's unconditional
+    ``!defined(__cplusplus)`` treatment, ordered ahead of it since it would
+    otherwise also match. Same reasoning as the ``#if``-opening case.
+    """
+    return policy.mask_cplusplus_defined_guards and bool(
+        _PP_ELIF_NOT_DEFINED_CPLUSPLUS_PATTERN.match(line)
+    )
+
+
+def _arm_is_unreachable_or_circular_guard(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#elif 0``/``#elif false``, or a circular dialect/feature-test guard."""
+    return bool(
+        _PP_ELIF_ZERO_PATTERN.match(line)
         or (
-            not invert_dialect_fallback_guards
-            and _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(line)
-        )
-        or (mask_cplusplus_defined_guards and _PP_IFDEF_CPLUSPLUS_PATTERN.match(line))
-        or (
-            _PP_IF_CPLUSPLUS_GUARD_PATTERN.match(line)
+            _PP_ELIF_CPLUSPLUS_GUARD_PATTERN.match(line)
             and (
-                mask_cplusplus_defined_guards
-                or not _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+                policy.mask_cplusplus_defined_guards
+                or not _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
             )
         )
-    ):
-        return [True, True, False]
-    if _PP_IF_TRUE_PATTERN.match(line) or (
-        not mask_cplusplus_defined_guards
-        and (
-            _PP_IFDEF_CPLUSPLUS_PATTERN.match(line)
-            or _PP_IF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
+    )
+
+
+def _arm_is_unconditionally_true(line: bytes, policy: _ChainPolicy) -> bool:
+    """``#elif 1``/``#elif true``, or ``#elif defined(__cplusplus)``."""
+    return bool(
+        _PP_ELIF_TRUE_PATTERN.match(line)
+        or (
+            not policy.mask_cplusplus_defined_guards
+            and _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
         )
-    ):
-        # ``#if defined(__cplusplus)``/``#ifdef __cplusplus``/bare
-        # ``#if __cplusplus`` (Codex review, twenty-second round):
-        # tracked as *settled*-true here, the same way ``#if 1``/
-        # ``#if true`` already is, not left as an unrecognized
-        # chain (whose #else/#elif arms then get scanned right
-        # along with this one, unmasked). Without this, a dual
-        # C/C++ header's ``#else`` (C-only) fallback -- e.g. a
-        # ``struct concept {};`` compatibility shim -- stayed
-        # visible to the shadow-name scan alongside a genuine
-        # C++20 declaration in the *active* ``#if`` arm, wrongly
-        # shadowing it. Elif-level already settles the equivalent
-        # ``#elif`` spelling this same way; this closes the gap
-        # for it as the chain's *opening* condition. Skipped when
-        # mask_cplusplus_defined_guards is True (the caller
-        # already masked this guard's own content in the general
-        # branch above instead, and never reaches this line).
-        return [True, False, True]
-    if invert_dialect_fallback_guards and _PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN.match(
-        line
-    ):
-        # Opposite polarity from the branch above: the
-        # #ifndef-guarded arm (feature absent) is the trustworthy
-        # one here, so it's scanned live and immediately settled
-        # so any #else (feature present, circular) stays masked.
-        # Skipped for a shadow-scan caller -- already folded into
-        # the general mask branch above instead.
-        return [True, False, True]
-    # Unrecognized condition — same conservative pass-through the
-    # top level always applied to an #if it can't evaluate.
-    return [False, False, False]
+    )
 
 
-def _line_for_open_arm(
-    line: bytes,
-    frame: list[bool],
-    *,
-    invert_dialect_fallback_guards: bool,
-    mask_cplusplus_defined_guards: bool,
-) -> bytes:
+def _arm_is_plain_alternative(line: bytes, policy: _ChainPolicy) -> bool:
+    """Any other ``#elif``/``#else`` — a condition this heuristic can't read."""
+    return bool(_PP_ELIF_PATTERN.match(line) or _PP_ELSE_PATTERN.match(line))
+
+
+#: Ordered ``(matcher, mutator)`` rules for one arm of an already-open chain.
+#: Same load-bearing ordering rationale as ``_CHAIN_OPEN_RULES``.
+_OPEN_ARM_RULES: tuple[tuple[_ChainMatcher, Callable[[list[bool]], None]], ...] = (
+    (_arm_is_pre_cpp20_dialect_fallback, _arm_settle),
+    (_arm_is_missing_feature_fallback, _arm_settle),
+    (_arm_is_missing_cplusplus_fallback, _arm_settle),
+    (_arm_is_unreachable_or_circular_guard, _arm_mask),
+    (_arm_is_unconditionally_true, _arm_settle),
+    (_arm_is_plain_alternative, _arm_flip),
+)
+
+
+def _line_for_open_arm(line: bytes, frame: list[bool], policy: _ChainPolicy) -> bytes:
     """Advance the innermost open chain by one line; return what to emit.
 
     *frame* is mutated in place: an ``#elif``/``#else`` arm changes which of
     this level's arms is currently masked, and may settle the level. A
-    non-directive line inside the chain is emitted or blanked purely by the
-    frame's current masking state.
+    non-directive line inside the chain matches no rule and is emitted or
+    blanked purely by the frame's current masking state.
     """
     if not frame[0]:
         # This level's own #if condition was unrecognized — its
@@ -417,56 +581,10 @@ def _line_for_open_arm(
         # exactly like the top level's unrecognized-chain
         # pass-through.
         return line
-    if invert_dialect_fallback_guards and _PP_ELIF_CPLUSPLUS_LESS_THAN_PATTERN.match(
-        line
-    ):
-        # Same inverted polarity as the #if-opening case, checked
-        # ahead of the general branch below since it would
-        # otherwise also match. Same shadow-scan exception as the
-        # #if-opening case: falls through to the general branch
-        # (mask) when invert_dialect_fallback_guards is False.
-        frame[1] = frame[2]
-        frame[2] = True
-        return b"" if frame[1] else line
-    if (
-        invert_dialect_fallback_guards
-        and _PP_ELIF_NOT_DEFINED_CPP_FEATURE_GUARD_PATTERN.match(line)
-    ):
-        # Same inverted polarity as #if !defined(__cpp_x) above,
-        # checked ahead of the general branch since it would
-        # otherwise also match. Same shadow-scan exception.
-        frame[1] = frame[2]
-        frame[2] = True
-        return b"" if frame[1] else line
-    if mask_cplusplus_defined_guards and _PP_ELIF_NOT_DEFINED_CPLUSPLUS_PATTERN.match(
-        line
-    ):
-        # Opposite polarity from the general branch below's
-        # unconditional !defined(__cplusplus) treatment, checked
-        # ahead of it since it would otherwise also match. Same
-        # reasoning as the #if-opening case above.
-        frame[1] = frame[2]
-        frame[2] = True
-        return b"" if frame[1] else line
-    if _PP_ELIF_ZERO_PATTERN.match(line) or (
-        _PP_ELIF_CPLUSPLUS_GUARD_PATTERN.match(line)
-        and (
-            mask_cplusplus_defined_guards
-            or not _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
-        )
-    ):
-        frame[1] = True
-        return b""
-    if _PP_ELIF_TRUE_PATTERN.match(line) or (
-        not mask_cplusplus_defined_guards
-        and _PP_ELIF_CPLUSPLUS_ALWAYS_TRUE_PATTERN.match(line)
-    ):
-        frame[1] = frame[2]
-        frame[2] = True
-        return b"" if frame[1] else line
-    if _PP_ELIF_PATTERN.match(line) or _PP_ELSE_PATTERN.match(line):
-        frame[1] = frame[2]
-        return b"" if frame[1] else line
+    for matches, advance in _OPEN_ARM_RULES:
+        if matches(line, policy):
+            advance(frame)
+            break
     return b"" if frame[1] else line
 
 
@@ -586,6 +704,10 @@ def _strip_inactive_if_zero_blocks(
     #   settled: an unconditionally-true arm already fired at this level,
     #     so every later sibling arm here is unconditionally unreachable.
     stack: list[list[bool]] = []
+    # Built once for the whole scan, not per line: both flags are constant for
+    # this call, and `_line_for_open_arm` runs once per line inside every chain
+    # of every scanned header (CodeRabbit review).
+    policy = _ChainPolicy(invert_dialect_fallback_guards, mask_cplusplus_defined_guards)
 
     def unreachable() -> bool:
         # Unreachable if this level or any ancestor is masking — a dead
@@ -610,11 +732,7 @@ def _strip_inactive_if_zero_blocks(
                 stack.append([False, True, True])
                 out.append(b"")
                 continue
-            frame = _frame_for_chain_open(
-                line,
-                invert_dialect_fallback_guards=invert_dialect_fallback_guards,
-                mask_cplusplus_defined_guards=mask_cplusplus_defined_guards,
-            )
+            frame = _frame_for_chain_open(line, policy)
             stack.append(frame)
             # Every recognized opener is itself blanked; only the
             # unrecognized pass-through frame keeps its own directive line.
@@ -633,12 +751,7 @@ def _strip_inactive_if_zero_blocks(
                 out.append(b"")
                 continue
             out.append(
-                _line_for_open_arm(
-                    line,
-                    stack[-1],
-                    invert_dialect_fallback_guards=invert_dialect_fallback_guards,
-                    mask_cplusplus_defined_guards=mask_cplusplus_defined_guards,
-                )
+                _line_for_open_arm(line, stack[-1], policy)
             )
             continue
 
