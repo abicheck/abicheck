@@ -501,11 +501,53 @@ all three as `GraphProofPath.alternative_paths`/`discarded_path_count` on
 family level (`"call_graph"`, `"type_graph"`, …); `ROLE_COVERAGE_MATRIX`
 (`abicheck/buildsource/inline_graph_fold.py`, ADR-046 D3) extends this to a
 `(kind, role)` grain, e.g. `"type_graph:DECL_HAS_TYPE:param"` vs.
-`"type_graph:DECL_HAS_TYPE:variable"` — so a producer that covers
+`"type_graph:DECL_HAS_TYPE:var"` — so a producer that covers
 return/parameter types but not variable/typedef-underlying types can
 honestly report partial coverage per role instead of one blanket family
 flag. See [Graph Coverage & Negative Evidence](../learn/graph-coverage.md)
 for why an absent edge is never proof of an absent dependency.
+
+The roles `type_graph.py` populates (G29 Phase 5 item 5 brought this set to
+the parity the plan asked for):
+
+| Edge kind | Role | What the edge means |
+|---|---|---|
+| `TYPE_INHERITS` | `base` | a record's base class |
+| `TYPE_HAS_FIELD_TYPE` | `field` | a record's field type |
+| `TYPE_HAS_FIELD_TYPE` | `alias` | a typedef/type-alias — **and an alias template** — target type |
+| `TYPE_HAS_FIELD_TYPE` | `enum_underlying` | an enum's fixed underlying type (`enum class Color : detail::Handle`) |
+| `TYPE_HAS_FIELD_TYPE` / `DECL_HAS_TYPE` | `template_param` | a **non-type** template parameter's own type (`template <detail::Handle H>`) |
+| `TYPE_HAS_FIELD_TYPE` / `DECL_HAS_TYPE` | `default_template_arg` | a template parameter's default *type* argument (`template <class T = detail::Impl>`) |
+| `DECL_HAS_TYPE` | `var` | a namespace/class-scope variable's own type |
+| `DECL_HAS_TYPE` | `return` | a function's return type |
+| `DECL_HAS_TYPE` | `param` | a function's parameter type |
+| `DECL_REFERENCES_DECL` | `ref` | a body referencing a variable/enumerator (non-call) |
+
+The last three roles the plan item names need no role of their own:
+**member-pointer type** (`int Owner::*`, `void (Owner::*)(int)`) and
+**function-pointer signature** (`void (*)(detail::Impl *)`) are reached by
+the same nested type-name walk that already extracts template arguments, so
+they surface under whichever role the enclosing declaration carries; the
+**typedef target** is `alias`. The two `template_param`/
+`default_template_arg` rows carry *two* edge kinds because the role is
+attributed to the **templated entity**, not to the template wrapper (which
+is not a node): a class/alias template's parameter dependency lands on its
+`record_type` node, a function/variable template's on its `source_decl` one
+— the same nodes those entities' own field/signature edges already use.
+
+Two shapes are deliberately **not** emitted, because clang's JSON carries no
+dependency to emit (verified against real Clang 18, and pinned by
+`tests/test_type_graph_roles.py`'s integration tests so a future clang that
+*does* carry them shows up as a failure rather than a silent gap): a
+*non-type* parameter's default **value** (`template <detail::Handle H =
+detail::K>` dumps as `{"kind": "TemplateArgument", "isExpr": true}` with no
+`type` — the referenced constant is a `DeclRefExpr`, a `DECL_REFERENCES_DECL`
+question rather than a type role), and a *template template* parameter's
+default (`template <template <class> class C = detail::Def>` dumps as a bare
+`{"kind": "TemplateArgument"}` — neither a type nor a name). The remaining
+role from the plan item, **concept/constraint dependency**, is not
+implemented — see the G29 plan's Phase 5 item 5 for the AST evidence and
+what closing it needs.
 
 ## `EntityResolver` (ADR-046 D4, scoped implementation)
 

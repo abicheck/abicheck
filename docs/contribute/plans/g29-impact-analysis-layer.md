@@ -637,9 +637,13 @@ decisions.
 
 ### Phase 5 — New semantic graph families
 
-In review-stated priority order. Items 1 and 6 are **done**; item 6 shipped
-out of order first since it needed no compiler frontend, unlike the rest,
-which all depend on a Clang AST pass.
+In review-stated priority order. Items 1, 2, 5 and 6 are **done**, items 3
+and 4 partially (each with named, reserved vocabulary members and a recorded
+reason per member); item 6 shipped out of order first since it needed no
+compiler frontend, unlike the rest, which all depend on a Clang AST pass —
+and items 3 and 5 turned out to need no *new* pass either, item 3 being a
+pure transform over already-folded graph state and item 5 an extension of
+the existing `type_graph.py` walk.
 
 1. **Template instantiation — done.** `abicheck/buildsource/template_graph.py`
    is a third, independent `clang -ast-dump=json` pass (alongside the call
@@ -1439,11 +1443,103 @@ which all depend on a Clang AST pass.
      realistic, commonly-seen shapes. Documented in the module's own
      docstring ("a fourth accepted, documented limitation") and pinned by
      a dedicated regression test.
-5. **Full type-role coverage** to parity: variable type, typedef target,
+5. **Full type-role coverage — done for eight of the nine roles; the ninth
+   (concept/constraint) is investigated and deliberately deferred with its
+   evidence recorded.** The item's list was: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer
-   signature, member-pointer type — feeds the Phase 2 per-role coverage
-   matrix.
+   signature, member-pointer type — feeding the Phase 2 per-role coverage
+   matrix (`inline_graph_fold.ROLE_COVERAGE_MATRIX`, ADR-046 D3). Every claim
+   below was checked against **real Clang 18 AST output** before being
+   written, not inferred from the role names: the audit found the nine split
+   three ways rather than nine-missing.
+   - **Five were already covered**, by an existing role, and needed no
+     producer — the same "closed a gap by discovering pre-existing coverage"
+     pattern this plan used for ADR-057 D6's tier 1 and item 3's
+     `DECL_OVERRIDES_DECL`. *Variable type* is `_emit_var_decl_edge`'s `var`
+     role and *typedef target* is `_emit_alias_edge`'s `alias` role, both
+     pre-existing. *Alias-template target* turned out to reach that same
+     `alias` role for a structural reason worth recording: clang nests the
+     real `TypeAliasDecl` inside the `TypeAliasTemplateDecl`, and
+     `_walk_types` recurses into a template wrapper's children with the
+     unchanged scope, so `template <class T> using Ptr = detail::Impl *;`
+     arrives as an ordinary `TypeAliasDecl` and emits `api::Ptr ->
+     detail::Impl` with no new code at all. *Member-pointer type* (`int
+     Owner::*`, `void (Owner::*)(int)`) and *function-pointer signature*
+     (`void (*)(detail::Impl *)`) are both reached by
+     `_resolve_nested_type_names`'s existing pointer-to-member/declarator
+     handling, so they surface under whichever role the enclosing
+     declaration carries rather than needing one of their own. All five are
+     now pinned by `tests/test_type_graph_roles.py` so a later refactor of
+     the walk can't silently drop what was never explicitly claimed.
+   - **Three were genuinely missing and are now implemented**, each with a
+     real AST source and each landing on the node the entity's own edges
+     already use. `enum_underlying` (`TYPE_HAS_FIELD_TYPE`): an `EnumDecl`
+     carries **no `type` key at all** — the underlying type lives in its own
+     `fixedUnderlyingType` object — so the shared typedef path this kind
+     already took read an empty spelling and emitted nothing, and `enum class
+     Color : detail::Handle` produced no dependency on the private alias it
+     is laid out as. `qualType` (as written, `"detail::Handle"`) is read
+     rather than the sibling `desugaredQualType` (`"int"`), which has already
+     lost the identity the edge exists to name; an unscoped enum carries no
+     `fixedUnderlyingType` at all and a scoped one with no written type gets
+     an implicit `"int"` the pre-existing fundamental-type filter drops, so
+     neither shape produces a noise edge. `template_param` and
+     `default_template_arg` (both on `TYPE_HAS_FIELD_TYPE` *or*
+     `DECL_HAS_TYPE`) cover a non-type template parameter's own type
+     (`template <detail::Handle H> struct Slot`) and a parameter's default
+     *type* argument (`template <class T = detail::Impl> struct Box`). The
+     load-bearing correctness property is the **src identity**: a template
+     wrapper (`ClassTemplateDecl`/`FunctionTemplateDecl`/`VarTemplateDecl`/
+     `TypeAliasTemplateDecl`) is not a node in this graph, and its parameters
+     are direct children of the *wrapper* while the templated entity is a
+     sibling child — so `_templated_entity_src` re-derives the templated
+     child's identity exactly the way the walk does for that child's own kind
+     (a record/alias → `record_type` node, hence `TYPE_HAS_FIELD_TYPE`; a
+     function/variable → `source_decl`, hence `DECL_HAS_TYPE`). That matters
+     concretely for a function template, whose pattern `FunctionDecl` carries
+     **no `mangledName`**: both sides must fall through the same
+     qualified-name+signature-hash identity or the constraint would sit on an
+     orphan node nothing else reaches. Verified end to end against real
+     clang, not just at the unit level. Two default-argument shapes are
+     deliberately **not** emitted because clang's JSON carries no dependency
+     to emit: a *non-type* parameter's default **value** (`template
+     <detail::Handle H = detail::K>` dumps as `{"kind": "TemplateArgument",
+     "isExpr": true}` with no `type` — the referenced constant is a nested
+     `DeclRefExpr`, a `DECL_REFERENCES_DECL` question rather than a type
+     role), and a *template template* parameter's default (`template
+     <template <class> class C = detail::Def>` dumps as a bare `{"kind":
+     "TemplateArgument"}` — neither a type nor a name to resolve), so both
+     degrade to no fact rather than a guessed one (ADR-028 D3). Both
+     non-emissions are pinned by integration tests against the compiler
+     itself, so a future clang that *does* carry them fails a test instead of
+     leaving a silent gap.
+   - **Concept/constraint dependency — investigated, deliberately NOT
+     implemented, evidence recorded so the follow-up doesn't re-derive it.**
+     A public template constrained by an internal concept (`template
+     <detail::Storable T> struct Keeper`, or a `requires detail::Storable<T>`
+     clause) is a real dependency, but clang's JSON AST **does not name the
+     concept at the use site**: a `ConceptSpecializationExpr`'s key set is
+     exactly `{id, inner, kind, range, type, valueCategory}` — no name, no
+     `conceptId`, no `referencedDecl` — and grepping a whole real dump for
+     the concept's own spelling finds it exactly *once*, on the `ConceptDecl`
+     itself. There **is** a usable join, verified across three use sites and
+     two distinct concepts in one TU: the nested
+     `ImplicitConceptSpecializationDecl`'s `loc.offset` is byte-for-byte the
+     declaring `ConceptDecl`'s own `loc.offset`, so `(file, offset)` resolves
+     the constraint deterministically — but consuming it needs the sticky
+     whole-document file cursor (clang omits `loc.file` when unchanged, the
+     same quirk `macro_graph.py` documents), which this module tracks only
+     file-coarsely today. The larger blocker is the **node model**, not the
+     resolution: a concept is a named declaration that is not a type, and
+     there is no `concept` node kind in `source_graph.NODE_KINDS` — routing
+     it through `DECL_REFERENCES_DECL` (`source_decl` → `source_decl`) would
+     put a *class* template's constraint on a `decl://` node while every
+     other edge that class has lives on its `record_type` one, fragmenting
+     the identity this item's other two roles were careful to keep single.
+     Registering a new node kind is exactly the step item 3 treated as
+     notable when it introduced `vtable`, so this gets its own scoped
+     decision rather than a drive-by addition here.
 6. **Object/link provenance — done.** `abicheck/buildsource/archive_graph.py`
    is the real `ar`-index introspection pass: a pure parser over the
    archive's own linker-written symbol index (GNU `/`/`/SYM64/` and
@@ -1589,6 +1685,16 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
   (asserted on object identity and fact membership, mirroring
   `test_consumer_graph.py`'s own pattern), and an end-to-end scenario joining
   a `use_case` node onto a library graph's public entry node.
+- `tests/test_type_graph_roles.py` — Phase 5 item 5, done (a sibling split of
+  `test_type_graph.py`, which sits at its own line-count cap): the three new
+  roles' emission and node-identity properties, the five roles found already
+  covered (pinned so a walk refactor can't drop them), the two deliberately
+  unemitted default-argument shapes, an executable
+  `ROLE_COVERAGE_MATRIX`-vs-parser agreement check in **both** directions (a
+  role the parser emits but the matrix omits is an unclaimed capability; one
+  the matrix claims with no producer is a false coverage claim), and
+  `integration`-marked tests re-deriving every AST shape the fixtures encode
+  from a real compiler.
 - New per remaining phase: one `test_diff_<family>.py` per Phase 5 graph
   family, `tests/test_root_cause_correlator.py` (Phase 6).
 - `tests/test_abi_examples.py` picks up `case194`-`case205` automatically once
