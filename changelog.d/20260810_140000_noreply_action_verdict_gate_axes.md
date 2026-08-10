@@ -22,4 +22,9 @@
   render which tier actually gated and which severity categories blocked —
   through one shared note, since the `API_BREAK` branch having its own copy
   and `BREAKING` having none is exactly how escalation produced a failing
-  summary that mentioned only the ABI break.
+  summary that mentioned only the ABI break. An escalated
+  contract-coverage gate keeps its own axis: `GATE_TIER` can hold
+  `COVERAGE_INCOMPLETE`, and describing that as a severity-policy failure is
+  the exact confusion ADR-049's orthogonal axis exists to prevent — the note
+  now names the coverage axis and still reports which provider fell short,
+  which escalation had been dropping along with the displaced verdict branch.

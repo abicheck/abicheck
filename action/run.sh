@@ -1099,10 +1099,29 @@ _blocking_gate_note() {
     echo ">"
     echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`. This fails the step independently of \`fail-on-breaking\`/\`fail-on-api-break\`."
   fi
-  if [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]]; then
-    echo ">"
+  [[ -n "$GATE_TIER" && "$GATE_TIER" != "$VERDICT" ]] || return 0
+  echo ">"
+  if [[ "$GATE_TIER" == "COVERAGE_INCOMPLETE" ]]; then
+    # ADR-049's coverage axis is *orthogonal*: it never rewrites a
+    # compatibility verdict or a gate contribution, and calling it a severity
+    # failure is exactly the confusion the axis exists to avoid. Escalation
+    # also displaces the COVERAGE_INCOMPLETE summary branch, taking its
+    # missing-provider explanation with it -- so render that here rather than
+    # leave the reader with a bare tier name (Codex review).
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal contract-coverage axis$(_coverage_where_suffix). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Supply the missing evidence, or accept incomplete assurance with \`contract.unresolved: warn\`."
+  else
     echo "> ℹ️ Verdict escalated from the report: the severity policy gated this run at \`$GATE_TIER\` (exit ${ABICHECK_EXIT}), so that tier -- not the verdict above -- is what \`fail-on-*\` applies to."
   fi
+}
+
+# `: \`old/export_table\`` when the report names which provider fell short,
+# empty otherwise. Shared so the COVERAGE_INCOMPLETE verdict branch and the
+# escalated-verdict note above cannot drift into describing the same axis
+# differently -- the escalated path silently lost this detail entirely.
+_coverage_where_suffix() {
+  local _where
+  _where=$(_report_query "$(_json_report_src)" coverage_where)
+  [[ -n "$_where" ]] && printf ': `%s`' "$_where"
 }
 
 # Exit 0 is not the only exit a severity policy can understate, which is what

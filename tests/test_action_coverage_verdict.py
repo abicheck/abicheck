@@ -1161,3 +1161,50 @@ class TestTheDisplacedGateIsNamedInTheSummary:
         # embeds this test's name ("...un-escalated...") into the summary via
         # the library paths, so a substring check matched the path instead.
         assert "Verdict escalated from the report" not in summary, summary
+
+
+class TestAnEscalatedCoverageGateKeepsItsOwnAxis:
+    """``GATE_TIER`` can hold ``COVERAGE_INCOMPLETE``, which is not severity.
+
+    ADR-049's coverage axis is orthogonal: it never rewrites a compatibility
+    verdict or a gate contribution. Escalating the verdict to the demoted
+    break displaced the ``COVERAGE_INCOMPLETE`` summary branch, so the run
+    lost its missing-provider explanation *and* the escalation note called
+    the coverage gate a severity-policy failure — the exact confusion the
+    orthogonal axis exists to prevent (Codex review).
+    """
+
+    def _summary(self, tmp_path: Path) -> str:
+        report = {
+            "verdict": "BREAKING",
+            "exit_code": 1,
+            "diff": {"verdict": "BREAKING"},
+            # The severity gate cleared; coverage is the only exit-1 cause.
+            "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []},
+            "contract_coverage_exit_contribution": 1,
+            "contract_coverage_failures": [COVERAGE_FAILURE],
+        }
+        bindir = _stub_abicheck(tmp_path, exit_code=1, report=report)
+        return _run_action(
+            tmp_path,
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
+                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
+                "INPUT_FORMAT": "json",
+                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+            },
+            bindir,
+        )["_summary"]
+
+    def test_it_is_not_called_a_severity_failure(self, tmp_path: Path) -> None:
+        summary = self._summary(tmp_path)
+        assert "Verdict escalated from the report" in summary, summary
+        assert "contract-coverage axis" in summary, summary
+        assert "the severity policy gated this run" not in summary, summary
+
+    def test_the_missing_provider_is_still_named(self, tmp_path: Path) -> None:
+        """The actionable part. Escalation displaced the branch that used to
+        render it, leaving a bare tier name."""
+        summary = self._summary(tmp_path)
+        assert "export_table" in summary, summary
