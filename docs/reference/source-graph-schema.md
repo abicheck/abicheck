@@ -374,13 +374,22 @@ instantiated polymorphic class may go undetected), never a wrong claim on an
 unrelated same-named type. For every non-template class the two forms
 coincide exactly, since a plain identifier mangles to itself length-prefixed.
 
-Coverage is tracked at `extractor_passes["virtual_dispatch_graph"]`, set
-whenever the pass runs at all — there is no subprocess step here that can
-fail, so this coverage flag is only meaningful evidence in conjunction with
-`call_graph`/`type_graph`/`override_graph`'s own coverage: a reader checking
-whether "zero edges" from this pass means anything should check those three
-passes' coverage, not a fourth clang-availability signal a pass that never
-touches a compiler cannot produce.
+This pass never touches a compiler itself — its coverage is entirely
+*derived* from `call_graph`/`type_graph`/`override_graph`'s own already-
+stamped coverage (worst-wins: a degraded or never-run prerequisite outranks
+a narrowed one, which outranks a fully-covered one), so a reader checking
+whether "zero edges" from this pass means anything should read this pass's
+own derived stamp, not re-check the three prerequisites by hand. The three
+resulting stamps are mutually exclusive, mirroring every other clang-backed
+pass's own `if`/`elif`/`elif` shape: `extractor_passes
+["virtual_dispatch_graph"]` only when all three prerequisites are
+themselves fully covered; `narrowed_passes["virtual_dispatch_graph"]` (plus
+`narrowed_scope["virtual_dispatch_graph"]`, copied from whichever
+prerequisite carries a scope) when none is degraded/missing but at least
+one is narrowed; `degraded_passes["virtual_dispatch_graph"]` when any
+prerequisite is degraded or never ran at all. `callback_graph.py`'s own
+Part A join propagates `call_graph`'s coverage state the identical way —
+see that family's own coverage row below.
 
 ## The callback/function-pointer half of the graph (G29 Phase 5 item 4)
 
@@ -459,10 +468,18 @@ deferred (extending `call_graph.py`'s own identity/reference resolution,
 `CXXMemberCallExpr` registration detection).
 
 Coverage is tracked at `extractor_passes["callback_graph"]`/
-`degraded_passes["callback_graph"]`, the same family-level coverage-honesty
-contract the other Clang-backed passes use — driven by
+`narrowed_passes["callback_graph"]`/`degraded_passes["callback_graph"]`
+(mutually exclusive, same as every other Clang-backed pass) — driven by
 `inline_graph_fold.fold_callback_graph`, run after `fold_macro_graph` (its
-own Part A needs `fold_call_graph`'s edges already folded).
+own Part A needs `fold_call_graph`'s edges already folded). Unlike a plain
+single-extractor pass, this stamp is the worst of *two* independent
+signals: this pass's own Part B clang run, and `call_graph`'s own already-
+recorded coverage state — because Part A's `CALLBACK_MAY_INVOKE` join reads
+`call_graph`'s function-pointer-kind `DECL_CALLS_DECL` edges, a degraded or
+never-run `call_graph` pass can hide a real dispatch target even when this
+pass's own clang run examined the whole compile DB cleanly, mirroring how
+`virtual_dispatch_graph.py` derives its own coverage from its three
+prerequisites (see above).
 
 ## `primary_path` / `alternative_paths` / `discarded_path_count`
 
