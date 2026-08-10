@@ -164,7 +164,7 @@ class TestSnapshotSerializationRoundTrip:
             ast_sysroot="/opt/sysroot",
         )
         d = snapshot_to_dict(snap)
-        assert d["schema_version"] == 20
+        assert d["schema_version"] == 21
         back = snapshot_from_dict(d)
         assert back.ast_resolved_standard == "gnu++17"
         assert back.ast_cplusplus_macro == "201703L"

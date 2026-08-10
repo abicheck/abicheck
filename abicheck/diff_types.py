@@ -253,6 +253,9 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_types = _build_type_map(t for t in old.types)
     new_types = _build_type_map(t for t in new.types)
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
+    vtable_facts_reliable = (
+        old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
+    )
 
     # Tracked by object identity, not key membership: a legacy-schema-vs-fresh
     # pair can match through diff_helpers.TypeMap's bare-name alias even though the two
@@ -304,6 +307,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     old, new, type_fact_key(name, "is_abstract")
                 ),
                 cv_facts_reliable=cv_facts_reliable,
+                vtable_facts_reliable=vtable_facts_reliable,
             )
         )
 
@@ -409,6 +413,7 @@ def _diff_type_pair(
     *,
     castxml_backed: bool = False,
     cv_facts_reliable: bool = True,
+    vtable_facts_reliable: bool = True,
 ) -> list[Change]:
     changes: list[Change] = []
 
@@ -433,7 +438,14 @@ def _diff_type_pair(
     changes.extend(_diff_type_bases(name, t_old, t_new))
     changes.extend(
         _diff_type_vtable(
-            name, t_old, t_new, old_funcs, new_funcs, old_types, new_types
+            name,
+            t_old,
+            t_new,
+            old_funcs,
+            new_funcs,
+            old_types,
+            new_types,
+            vtable_facts_reliable=vtable_facts_reliable,
         )
     )
     _append_type_finality_changes(changes, name, t_old, t_new)
@@ -1269,8 +1281,21 @@ def _diff_type_vtable(
     new_funcs: dict[str, Function],
     old_types: Mapping[str, RecordType],
     new_types: Mapping[str, RecordType],
+    *,
+    vtable_facts_reliable: bool = True,
 ) -> list[Change]:
     if t_old.vtable == t_new.vtable:
+        return []
+    if not vtable_facts_reliable:
+        # Either side is a persisted, pre-v21 direct-clang snapshot whose
+        # vtable was unconditionally vtable=[] for EVERY record -- real but
+        # WRONG data for an already-polymorphic class, not merely absent
+        # (AbiSnapshot.clang_vtable_facts_reliable's own docstring). Every
+        # differing-vtable pair reaching this point on such a comparison is
+        # capture-tool noise, not a genuine change, so decline exactly like
+        # the unevidenced-transition guard below -- see
+        # _vtable_transition_is_evidenced for the same discipline applied to
+        # a different (genuinely ambiguous, rather than known-wrong) cause.
         return []
     if not _vtable_transition_is_evidenced(name, t_old, t_new, old_funcs, new_funcs):
         return []

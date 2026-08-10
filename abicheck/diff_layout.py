@@ -102,7 +102,9 @@ def _index(snap: AbiSnapshot, *, exclude_stdlib: bool) -> TypeMap[RecordType]:
     return build_type_map(rec for rec in snap.types if _keep(rec))
 
 
-def _has_layout_descriptor(rec: RecordType) -> bool:
+def _has_layout_descriptor(
+    rec: RecordType, *, vtable_facts_reliable: bool = True
+) -> bool:
     """Return True if any v7 REAL-LAYOUT descriptor field is populated on
     ``rec`` (size/offset evidence only — see below for why
     ``is_standard_layout``/``is_trivially_copyable`` are deliberately
@@ -116,7 +118,7 @@ def _has_layout_descriptor(rec: RecordType) -> bool:
     evidence here (Codex review, fresh evidence): since G31 Phase C the
     direct-clang backend populates these two SEMANTIC traits independent of
     any real layout pass (`dumper_clang.py` never sets `size_bits`/
-    `data_size_bits`/`vptr_offset_bits`/`base_offsets` without the optional
+    `data_size_bits`/`base_offsets` without the optional
     `ABICHECK_CLANG_LAYOUT_TOOL` companion), so a persisted pre-v19
     direct-clang snapshot compared against a freshly-dumped one of
     UNCHANGED headers has these two traits appear from `None` to a real
@@ -131,10 +133,27 @@ def _has_layout_descriptor(rec: RecordType) -> bool:
     was affected, since it conflated "we now know a semantic trait" with
     "we now know the type's actual size/offsets," two different kinds of
     evidence.
+
+    ``vptr_offset_bits`` IS a real-layout-evidence field in general (unlike
+    the two semantic traits above) — but this docstring's own claim that
+    `dumper_clang.py` "never sets" it without `ABICHECK_CLANG_LAYOUT_TOOL`
+    stopped being true the moment G31 Phase C's clang vtable reconstruction
+    landed (`vptr_offset_bits=0 if vtable else None`, unconditional). That
+    means the exact same tool-upgrade phantom this docstring already
+    documents for the two semantic traits reproduces for `vptr_offset_bits`
+    too, on a persisted pre-v21 clang baseline: it goes from `None` (every
+    record, unconditionally) to a real `0`/`None` split on a fresh dump of
+    UNCHANGED headers, purely from the schema upgrade (Codex review, fresh
+    evidence). Guarded the same way `_check_vptr_introduced` is: when
+    `vtable_facts_reliable` is False, `vptr_offset_bits` is excluded from
+    this evidence check entirely, so a legacy clang baseline's blanket
+    `None` doesn't manufacture a phantom "evidence appeared" transition —
+    `data_size_bits`/`base_offsets` are untouched, since those still require
+    the unrelated `ABICHECK_CLANG_LAYOUT_TOOL` opt-in either way.
     """
     return (
         rec.data_size_bits is not None
-        or rec.vptr_offset_bits is not None
+        or (vtable_facts_reliable and rec.vptr_offset_bits is not None)
         or bool(rec.base_offsets)
     )
 
@@ -161,7 +180,11 @@ def _check_base_offsets(
 
 
 def _check_vptr_introduced(
-    name: str, old_rec: RecordType, new_rec: RecordType
+    name: str,
+    old_rec: RecordType,
+    new_rec: RecordType,
+    *,
+    vtable_facts_reliable: bool = True,
 ) -> list[Change]:
     """Emit VPTR_INTRODUCED when the type gains its first virtual function.
 
@@ -172,7 +195,17 @@ def _check_vptr_introduced(
     falsely report an introduction against such a baseline (Codex #345).
     An empty old vtable is positive evidence the old side was
     non-polymorphic; require the new side to be positively polymorphic too.
+
+    ``vtable_facts_reliable=False`` (Codex review, fresh evidence) means
+    either side is a persisted, pre-v21 direct-clang snapshot whose vtable
+    was unconditionally empty for EVERY record, polymorphic or not -- an old
+    side reading "non-polymorphic" there is real but WRONG, not genuine
+    positive evidence, so this detector must decline entirely rather than
+    fire on what looks like a first-vptr introduction
+    (AbiSnapshot.clang_vtable_facts_reliable's own docstring).
     """
+    if not vtable_facts_reliable:
+        return []
     if (
         not old_rec.vtable
         and old_rec.vptr_offset_bits is None
@@ -251,7 +284,11 @@ def _check_tail_padding_reuse(
 
 
 def _check_layout_unverifiable(
-    name: str, old_rec: RecordType, new_rec: RecordType
+    name: str,
+    old_rec: RecordType,
+    new_rec: RecordType,
+    *,
+    vtable_facts_reliable: bool = True,
 ) -> list[Change]:
     """Emit LAYOUT_UNVERIFIABLE when evidence is present on one side only.
 
@@ -259,12 +296,22 @@ def _check_layout_unverifiable(
     evidence at all (size unknown). Calm, non-escalating: we cannot confirm
     or rule out a change. Gated on the descriptor so it never fires on
     snapshots predating the v7 layout fields.
+
+    ``vtable_facts_reliable`` is threaded straight into
+    ``_has_layout_descriptor`` — see that function's own docstring for why a
+    persisted, pre-v21 direct-clang baseline's blanket-``None``
+    ``vptr_offset_bits`` must not count as "no evidence" turning into
+    "evidence appeared" on a fresh dump of unchanged headers.
     """
-    old_has = old_rec.size_bits is not None or _has_layout_descriptor(old_rec)
-    new_has = new_rec.size_bits is not None or _has_layout_descriptor(new_rec)
-    descriptor_in_play = _has_layout_descriptor(old_rec) or _has_layout_descriptor(
-        new_rec
+    old_has = old_rec.size_bits is not None or _has_layout_descriptor(
+        old_rec, vtable_facts_reliable=vtable_facts_reliable
     )
+    new_has = new_rec.size_bits is not None or _has_layout_descriptor(
+        new_rec, vtable_facts_reliable=vtable_facts_reliable
+    )
+    descriptor_in_play = _has_layout_descriptor(
+        old_rec, vtable_facts_reliable=vtable_facts_reliable
+    ) or _has_layout_descriptor(new_rec, vtable_facts_reliable=vtable_facts_reliable)
     if descriptor_in_play and old_has != new_has:
         return [
             make_change(
@@ -291,6 +338,9 @@ def _diff_layout_descriptor(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = stdlib_namespaces_excluded(old, new)
     old_idx = _index(old, exclude_stdlib=excl)
     new_idx = _index(new, exclude_stdlib=excl)
+    vtable_facts_reliable = (
+        old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
+    )
 
     # .items() iterates one entry per type under its qualified TypeMap key
     # (never the bare-name alias — see TypeMap's own docstring), so this
@@ -318,10 +368,18 @@ def _diff_layout_descriptor(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # investigation and reasoning.
         name = new_rec.name
         changes.extend(_check_base_offsets(name, old_rec, new_rec))
-        changes.extend(_check_vptr_introduced(name, old_rec, new_rec))
+        changes.extend(
+            _check_vptr_introduced(
+                name, old_rec, new_rec, vtable_facts_reliable=vtable_facts_reliable
+            )
+        )
         changes.extend(_check_trivially_copyable_lost(name, old_rec, new_rec))
         changes.extend(_check_standard_layout_lost(name, old_rec, new_rec))
         changes.extend(_check_tail_padding_reuse(name, old_rec, new_rec))
-        changes.extend(_check_layout_unverifiable(name, old_rec, new_rec))
+        changes.extend(
+            _check_layout_unverifiable(
+                name, old_rec, new_rec, vtable_facts_reliable=vtable_facts_reliable
+            )
+        )
 
     return changes

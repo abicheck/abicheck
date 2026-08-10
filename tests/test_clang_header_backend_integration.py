@@ -754,3 +754,50 @@ def test_clang_backend_resolves_dependent_default_template_argument(
     result = compare(old_snap, new_snap)
     assert ChangeKind.VPTR_INTRODUCED not in {c.kind for c in result.changes}
     assert ChangeKind.TYPE_VTABLE_CHANGED not in {c.kind for c in result.changes}
+
+
+def test_clang_backend_does_not_widen_extern_c_function_virtuality(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fresh evidence (P2): an uninstantiated template method
+    carries no `mangledName` at all, so `_collect_virtual_slots` falls back
+    to its bare, unmangled `name` as the slot's "mangled" identity (e.g.
+    `"f"`). A free `extern "C"` function sharing that same bare name mangles
+    to the identical string by C-linkage design, so
+    `_virtual_mangled_names()`'s plain membership test must not widen that
+    unrelated free function's `is_virtual` to True purely from the name
+    collision -- confirmed with a real clang dump of a template `f()` and an
+    unrelated `extern "C" void f();` sharing the same TU.
+    """
+    if not (_have("clang") and _have("g++")):
+        pytest.skip(
+            "clang and g++ are required for the clang L2 backend integration test"
+        )
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+    old_header = old_dir / "api.h"
+    old_header.write_text(
+        "template <class T>\nstruct A {\n    virtual void f();\n};\n"
+        'extern "C" void f();\n'
+    )
+    old_src = old_dir / "old.cpp"
+    old_src.write_text('#include "api.h"\nvoid f() {}\n')
+    v1_so = tmp_path / "libv1.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-o", str(v1_so), str(old_src), f"-I{old_dir}"],
+        check=True,
+        capture_output=True,
+    )
+
+    old_snap = dump(v1_so, [old_header], header_backend="clang")
+    # Both the template's own uninstantiated method and the unrelated free
+    # extern "C" function share the identical bare name/fallback-mangled
+    # identity ("f"/"f") -- there is nothing in the Function model to pick
+    # one out from the other by name/mangled alone, so assert on the set:
+    # exactly one of the two is genuinely virtual (the template method,
+    # which carries clang's own `virtual` keyword directly, node.get
+    # ("virtual") -- untouched by this fix). Before the fix, BOTH read as
+    # virtual (the free function widened purely from the name collision).
+    f_funcs = [fn for fn in old_snap.functions if fn.name == "f" and fn.mangled == "f"]
+    assert len(f_funcs) == 2
+    assert sum(fn.is_virtual for fn in f_funcs) == 1

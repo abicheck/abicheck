@@ -1237,6 +1237,63 @@ building a second identity-resolution mechanism from scratch.
   traits started being populated for real (G31 Phase C) — the exact
   toolchain-noise-vs-real-break distinction the stdlib filter exists to
   draw. Fixed to match `_is_abi_surface_type`'s identity split exactly.
+
+  **A ninth review round found the exact same class of legacy-baseline
+  false positive one more time, this time for the clang vtable
+  reconstruction feature itself (Codex review, fresh evidence, real
+  end-to-end repro against a persisted schema-v20 direct-clang
+  snapshot).** The vtable/vptr reconstruction (`dumper_clang_vtable.py`)
+  made `RecordType.vtable`/`vptr_offset_bits` real for the first time on
+  the direct-clang backend — before it, EVERY record read `vtable=[]`/
+  `vptr_offset_bits=None`, unconditionally, regardless of the class's real
+  polymorphism. Exactly the same shape as the `is_standard_layout`/
+  `is_trivially_copyable` false positive above and the `deprecated`/
+  `is_scoped`/`TypeField.default` false positives before it: a persisted,
+  pre-fix clang snapshot's blanket-empty vtable is real but WRONG data for
+  an already-polymorphic class, indistinguishable by value alone from a
+  genuine non-polymorphic class — so comparing it against a fresh dump of
+  the SAME, unchanged headers read as every polymorphic class gaining its
+  first vptr (confirmed: `struct A { virtual void f(); };` unchanged,
+  `VPTR_INTRODUCED` fired). Worse than the semantic-trait case: the same
+  legacy-vs-fresh asymmetry also reaches `TYPE_VTABLE_CHANGED` (a vtable
+  differing in slot count between the two sides) and
+  `_has_layout_descriptor()`'s `vptr_offset_bits is not None` check — the
+  identical `LAYOUT_UNVERIFIABLE` phantom the sixth review round fixed for
+  the two semantic traits, now reachable through the vptr field this
+  reconstruction feature newly populates. Fixed with the same
+  established pattern: schema bumped to **v21**, a new
+  `AbiSnapshot.clang_vtable_facts_reliable` marker (mirroring
+  `clang_deprecation_facts_reliable`'s shape — clang-producer-only, not
+  hybrid, since the reconstruction lives entirely in
+  `dumper_clang_vtable.py`, a module the hybrid merge path never invokes),
+  threaded into `_diff_type_vtable` (declines `TYPE_VTABLE_CHANGED`
+  entirely when unreliable), `_check_vptr_introduced` (declines
+  `VPTR_INTRODUCED` entirely), and `_has_layout_descriptor` (excludes
+  `vptr_offset_bits` from the evidence check when unreliable, mirroring
+  the sixth round's semantic-trait exclusion). Verified end-to-end through
+  `compare()` for all three findings, plus a positive-control test
+  confirming the bug reproduces when both sides claim reliable facts (so
+  the suppression isn't just masking an already-inert case).
+
+  **The same round found a second, independent gap in the reconstruction
+  itself: an uninstantiated template method's bare fallback name collided
+  with an unrelated `extern "C"` free function's real mangled name.** A
+  template method with no `mangledName` at all falls back to its bare
+  `name` (e.g. `"f"`) as the vtable slot's identity in
+  `_collect_virtual_slots`; a free `extern "C"` function sharing that same
+  bare name mangles to the identical string by C-linkage design. Since
+  `parse_functions()`'s inferred-virtuality recovery
+  (`_virtual_mangled_names()`) is a plain string-membership test with no
+  owner/kind context, the free function was incorrectly widened to
+  `is_virtual=True` purely from the name collision — confirmed with a real
+  clang dump of `template<class T> struct A { virtual void f(); };
+  extern "C" void f();`, where both `f`s share the identical unmangled
+  fallback string. Fixed by restricting the widening to actual
+  member-function declaration kinds (`kind != "FunctionDecl"`) — only a
+  class member can be virtual in C++ at all, and `_collect_virtual_slots`
+  only ever walks member kinds when building the set this check consults,
+  so a bare `FunctionDecl` can never legitimately appear in it.
+
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through

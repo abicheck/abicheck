@@ -1249,8 +1249,34 @@ class _ClangAstParser:
                     # docstring). _virtual_mangled_names() recovers it from
                     # the reconstructed vtables, which already do this
                     # matching; only ever widens False -> True.
+                    #
+                    # Restricted to actual member-function kinds (Codex
+                    # review, fresh evidence): an uninstantiated template
+                    # method carries no `mangledName` at all, so
+                    # `_collect_virtual_slots` falls back to its bare,
+                    # unmangled `name` as the slot's "mangled" identity (e.g.
+                    # `"f"`). A free `extern "C"` function sharing that same
+                    # bare name mangles to the identical string by design (C
+                    # linkage), so the plain `mangled in
+                    # self._virtual_mangled_names()` membership test above
+                    # matched an unrelated global FunctionDecl purely by
+                    # name collision -- confirmed with a real clang dump of
+                    # `template<class T> struct A { virtual void f(); };
+                    # extern "C" void f();`, where both `f`s share the
+                    # identical unmangled fallback string. Only a
+                    # CXXMethodDecl/CXXConstructorDecl/CXXDestructorDecl/
+                    # CXXConversionDecl can be virtual at all in C++, and
+                    # `_collect_virtual_slots` only ever walks those same
+                    # member kinds when building `_virtual_mangled_names()`
+                    # -- a bare `FunctionDecl` (never a class member) can
+                    # never legitimately appear in that set, so excluding it
+                    # here closes the collision without narrowing any real
+                    # member-override case.
                     is_virtual=bool(node.get("virtual"))
-                    or mangled in self._virtual_mangled_names(),
+                    or (
+                        kind != "FunctionDecl"
+                        and mangled in self._virtual_mangled_names()
+                    ),
                     is_noexcept=_is_noexcept_qualifier(quals),
                     # An ``extern "C"`` linkage spec is authoritative; fall back
                     # to the mangled==name heuristic for a plain C-mode parse
