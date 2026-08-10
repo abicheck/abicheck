@@ -859,31 +859,49 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
     A dependent default's raw spelling (``"T"`` in ``template<class T,
     class U=T> struct A;``) names an EARLIER parameter of the SAME
     declaration it appears on -- :func:`_specialization_spelling` resolves
-    it by looking up that text in the *tracked* (frozen-at-first-
-    -declaration) names index. When a CONFIRMED redeclaration (the sixth
-    round's merge) contributes a NEWLY adopted default and that
-    redeclaration also renamed its parameters, the raw text it carries
-    names one of ITS OWN (renamed) parameters, not the tracked/original
-    ones -- e.g. ``template<class T, class U> struct A;`` followed by
-    ``template<class X, class Y=X> struct A {...};`` spells the added
-    default as literal ``"X"``, but the tracked names index still holds
-    ``["T", "U"]`` from the first declaration, so ``"X"`` is never found
-    there and the substitution silently fails (Codex review, fresh
-    evidence, eighth round; confirmed end to end this left the base
-    unresolvable and a real virtual-method addition undetected). Fixed by
-    translating a newly adopted default's dependent reference through
-    THIS declaration's own positional name list into the FIRST
-    declaration's name at that same position (parameter order/count can't
-    legally change across a redeclaration of the same template, so
-    position always lines up) before merging it in -- keeping every
-    stored default spelled in terms of the one, tracked name convention
-    :func:`_specialization_spelling` already expects, regardless of which
-    declaration in the chain actually contributed it.
+    it by looking up that text in the *tracked* names index
+    (:func:`_index_template_param_names`'s own fully-merged output). When
+    a CONFIRMED redeclaration (the sixth round's merge) contributes a
+    NEWLY adopted default and that redeclaration also renamed its
+    parameters, the raw text it carries names one of ITS OWN (renamed)
+    parameters, not the tracked ones -- e.g. ``template<class T, class U>
+    struct A;`` followed by ``template<class X, class Y=X> struct
+    A {...};`` spells the added default as literal ``"X"``, which the
+    tracked names index (still ``["T", "U"]`` here) never contains, so the
+    substitution silently fails (Codex review, fresh evidence, eighth
+    round; confirmed end to end this left the base unresolvable and a
+    real virtual-method addition undetected). Fixed by translating a
+    newly adopted default's dependent reference through THIS
+    declaration's own positional name list into the TRACKED name at that
+    same position (parameter order/count can't legally change across a
+    redeclaration of the same template, so position always lines up)
+    before merging it in.
+
+    The translation target is :func:`_index_template_param_names`'s own
+    output for the WHOLE tree, computed once up front, not a locally
+    hand-rolled "first name seen for this qualname" copy -- an earlier
+    version of this fix kept its own local shadow, updated only at a
+    qualname's very first sighting here, and it silently went stale
+    whenever an INTERMEDIATE redeclaration was the one that actually
+    named a previously-unnamed parameter: ``template<class, class>
+    struct A;`` (both unnamed) then ``template<class X, class Y> struct
+    A;`` (a redeclaration that names them) then ``template<class T, class
+    U=T> struct A {...};`` (a further redeclaration that adds a default)
+    -- the real, fully-merged names index correctly resolves to
+    ``["X", "Y"]``, but the stale local shadow here still held
+    ``[None, None]`` from the very first sighting, so the translation
+    target for the added default's position was falsy and the raw,
+    untranslated text was kept -- reproducing the identical unresolvable-
+    base failure (Codex review, fresh evidence, ninth round). Reusing
+    :func:`_index_template_param_names`'s own already-correct, fully-
+    merged result sidesteps the whole class of "which registration counts
+    as authoritative" bug rather than re-deriving (and risking
+    re-diverging) it a second time here.
     """
     idx: dict[str, list[str | None]] = {}
     ambiguous: set[str] = set()
     node_ids: dict[str, str] = {}
-    first_names: dict[str, list[str | None]] = {}
+    tracked_names_by_qualname = _index_template_param_names(root)
 
     def walk(node: Any, scope: tuple[str, ...]) -> None:
         if not isinstance(node, dict):
@@ -895,10 +913,8 @@ def _index_template_param_defaults(root: dict[str, Any]) -> dict[str, list[str |
         ) not in ambiguous:
             this_names = _template_param_names(node)
             defaults = _template_param_defaults(node)
-            tracked_names = first_names.get(qualname)
-            if tracked_names is None:
-                first_names[qualname] = this_names
-            else:
+            tracked_names = tracked_names_by_qualname.get(qualname)
+            if tracked_names is not None:
                 own_positions = {n: i for i, n in enumerate(this_names) if n}
                 defaults = [
                     tracked_names[own_positions[d]]
