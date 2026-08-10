@@ -39,7 +39,7 @@ from abicheck.provenance import (
     is_dependency_header,
     tag_provenance,
 )
-from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 
 # ── header_from_location ──────────────────────────────────────────────────────
 
@@ -398,7 +398,7 @@ def test_apply_provenance_shares_one_cache_across_all_declaration_kinds(monkeypa
 def test_serialization_round_trip_preserves_provenance():
     snap = apply_provenance(_snapshot(), public_headers=["include/api.h"])
     d = snapshot_to_dict(snap)
-    assert d["schema_version"] == 21
+    assert d["schema_version"] == SCHEMA_VERSION
     # Enum value serialized as a plain string.
     assert d["functions"][0]["origin"] == "public_header"
     assert d["functions"][0]["source_header"] == "/build/include/api.h"

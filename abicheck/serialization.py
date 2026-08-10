@@ -223,7 +223,21 @@ from .model import (
 #     already-polymorphic class purely from a tool upgrade (Codex review,
 #     fresh evidence, real end-to-end repro against a persisted schema-v20
 #     clang snapshot).
-SCHEMA_VERSION: int = 21
+#   22 — G31 Phase C (`dumper_clang._clang_param_is_restrict`): the
+#     direct-clang backend's `Param.is_restrict` became a real extracted fact
+#     instead of the model default `False` for EVERY parameter. castxml had
+#     been the only producer of it since it shipped, so this also closes a
+#     live cross-backend false positive (`_diff_param_restrict` compares the
+#     two bools with no producer gate). Same real-but-WRONG shape as v19-v21:
+#     `is_restrict` is a plain bool with no "not collected" state, so a
+#     pre-v22 clang/hybrid-producer parameter's blanket False cannot be told
+#     from a genuinely unqualified parameter by value alone.
+#     `snapshot_from_dict` marks such a snapshot's
+#     `AbiSnapshot.clang_restrict_facts_reliable` False so
+#     `diff_symbols._diff_param_restrict` declines to trust it, instead of
+#     reporting a false `PARAM_RESTRICT_CHANGED` for every restrict-qualified
+#     parameter purely from a tool upgrade.
+SCHEMA_VERSION: int = 22
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -239,6 +253,10 @@ _MIN_SCHEMA_VERSION_FOR_CLANG_FIELD_INITIALIZER_FACTS = 20
 # Schema version at which the direct-clang backend's RecordType.vtable/
 # vptr_offset_bits facts became reliable (see v21 above).
 _MIN_SCHEMA_VERSION_FOR_CLANG_VTABLE_FACTS = 21
+
+# Schema version at which the direct-clang backend's Param.is_restrict facts
+# became reliable (see v22 above).
+_MIN_SCHEMA_VERSION_FOR_CLANG_RESTRICT_FACTS = 22
 
 # ADR-050 D1 — the schema version at which a verdict-blocking field
 # (``AbiSnapshot.contract``) was first introduced. This constant only takes
@@ -1158,6 +1176,27 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_VTABLE_FACTS
         )
 
+    if "clang_restrict_facts_reliable" in d:
+        # Same explicit-marker-wins reasoning as the flags above.
+        clang_restrict_facts_reliable_value = bool(d["clang_restrict_facts_reliable"])
+    else:
+        # Covers "hybrid" as well as "clang" -- and, like
+        # clang_field_initializer_facts_reliable above, spells that as
+        # `== "castxml"` rather than `not in ("clang", "hybrid")` so a
+        # snapshot persisted before `ast_producer` was tracked at all (its
+        # value here is None, i.e. UNKNOWN, not "castxml") is treated as
+        # possibly clang-family rather than silently trusted. A hybrid
+        # merge keeps castxml's `params` verbatim for every matched
+        # function, so only its clang-ONLY appended functions carry clang's
+        # blanket-False parameters -- but that is enough to need the flag,
+        # exactly as the pre-v20 hybrid clang-only-append case did for
+        # field initializers. See AbiSnapshot.clang_restrict_facts_reliable.
+        clang_restrict_facts_reliable_value = (
+            not from_headers
+            or ast_producer_value == "castxml"
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CLANG_RESTRICT_FACTS
+        )
+
     # ADR-050 D1 (schema v12) — profile/scope fingerprints. Missing key (every
     # snapshot predating this field) loads as None, same as every other
     # additive optional field.
@@ -1262,6 +1301,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # an explicit dict key, falling back to a schema_version + producer
         # derivation scoped to the direct-clang path specifically.
         clang_vtable_facts_reliable=clang_vtable_facts_reliable_value,
+        # See clang_restrict_facts_reliable_value's computation above: prefers
+        # an explicit dict key, falling back to a schema_version + producer
+        # derivation covering the clang and hybrid paths alike.
+        clang_restrict_facts_reliable=clang_restrict_facts_reliable_value,
         # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
         # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
         # loads as the empty dict (same "unknown" default as a fresh snapshot).

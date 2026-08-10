@@ -81,6 +81,16 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
     _specialization_scope_key,
     _unwrap_expr,
 )
+
+# Split out to keep this module under the 2000-line hard cap; imported (not
+# just referenced) so the historical ``dumper_clang._name`` import paths that
+# tests and sibling modules already use keep resolving.
+from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
+    _clang_param_is_restrict,
+    _desugared_qualtype,
+    _field_own_cv_source,
+    _last_top_level_ptr_end,
+)
 from .dumper_clang_vtable import (
     _index_template_param_defaults,
     _index_template_param_kinds,
@@ -1237,6 +1247,13 @@ class _ClangAstParser:
                     name=str(p.get("name", "")),
                     type=_qualtype(p),
                     pointer_depth=_pointer_depth(_qualtype(p)),
+                    # G31 Phase C: castxml was the ONLY producer of this fact
+                    # (`_resolve_cv_restrict`), so a castxml-vs-clang comparison
+                    # of unchanged headers reported PARAM_RESTRICT_CHANGED for
+                    # every restrict-qualified parameter — the detector compares
+                    # the two bools directly, with no producer gate to decline
+                    # on (unlike `deprecated`/`is_scoped` before this phase).
+                    is_restrict=_clang_param_is_restrict(p),
                     # Preserve the actual default-argument value (so a changed
                     # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
                     # bare presence marker when the value can't be evaluated.
@@ -1748,72 +1765,6 @@ def _qualtype(node: dict[str, Any]) -> str:
     if isinstance(type_obj, dict):
         return str(type_obj.get("qualType", ""))
     return ""
-
-
-def _desugared_qualtype(node: dict[str, Any]) -> str:
-    """The fully-desugared type spelling, when clang provides one.
-
-    A field declared through a typedef to a cv-qualified type
-    (``typedef const int T; struct S { T x; };``) renders ``qualType`` as
-    the bare alias ``"T"`` — the real ``"const int"`` is only visible via
-    the separate ``desugaredQualType`` key clang emits precisely when a
-    type alias needs unwrapping. A plain (non-aliased) field carries no
-    ``desugaredQualType`` key at all (confirmed empirically), so falling
-    back to ``qualType`` is exact, not merely a guess, for every other
-    case. Used only for the const/volatile regex check below — the
-    field's own displayed ``type`` spelling stays the sugared form users
-    actually wrote (Codex review, PR #582: mirrors dumper_castxml's
-    Typedef-indirection walk for the identical reason — a regex on the
-    display spelling alone misses a qualifier hidden behind an alias).
-    """
-    type_obj = node.get("type")
-    if isinstance(type_obj, dict):
-        desugared = type_obj.get("desugaredQualType")
-        if isinstance(desugared, str) and desugared:
-            return desugared
-        return str(type_obj.get("qualType", ""))
-    return ""
-
-
-def _last_top_level_ptr_end(type_str: str) -> int:
-    """Index just past the last depth-0 ``*`` in *type_str*, or -1 if none.
-
-    A ``*`` nested inside a template argument list, function-parameter
-    list, or array subscript doesn't count — the value itself isn't a
-    pointer at that syntactic position. Depth tracking mirrors
-    ``name_classification._has_top_level_ptr_or_ref``.
-    """
-    depth = 0
-    last = -1
-    for i, ch in enumerate(type_str):
-        if ch in "<([":
-            depth += 1
-        elif ch in ">)]":
-            depth = max(0, depth - 1)
-        elif ch == "*" and depth == 0:
-            last = i + 1
-    return last
-
-
-def _field_own_cv_source(desugared: str) -> str:
-    """Substring of *desugared* that describes the FIELD's OWN const/
-    volatile qualifier, as opposed to its pointee's.
-
-    A pointer typedef's desugared spelling puts a POINTEE qualifier before
-    the ``*`` (``const int *`` — pointer to const int, the pointer itself
-    is NOT const) and the pointer VALUE's own qualifier as a suffix after
-    it, with no space (``int *const`` — confirmed against real clang
-    output). Scanning the whole string for ``const``/``volatile`` (as an
-    earlier version of ``_make_field`` did) misread the pointee's
-    qualifier as the field's own, so a field typed through
-    ``typedef const int *P;`` was wrongly marked ``is_const=True`` even
-    though ``P`` itself is a plain, non-const pointer (Codex review, PR
-    #582 — a pointer-typedef sibling of the scalar-typedef case
-    ``_desugared_qualtype`` already handles). A non-pointer type has no
-    such ambiguity — the whole spelling describes the field itself.
-    """
-    end = _last_top_level_ptr_end(desugared)
-    return desugared[end:] if end >= 0 else desugared
 
 
 def _node_file(node: dict[str, Any], current: str) -> str:

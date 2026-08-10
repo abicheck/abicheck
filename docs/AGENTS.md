@@ -288,6 +288,7 @@ python scripts/gen_cli_reference.py       # docs/reference/cli-reference.md
 python scripts/gen_python_api_reference.py  # docs/reference/python-api-reference.md
 python scripts/gen_config_reference.py    # docs/reference/config-keys-reference.md
 python scripts/gen_platform_matrix.py     # docs/reference/platforms.md's "Quick Reference" section
+python scripts/gen_backend_capability_matrix.py  # docs/reference/header-backend-capabilities.md's fact matrix
 python scripts/gen_agent_skills.py        # .agents/skills/, .claude/skills/, .gemini/skills/ (from skills-src/)
 ```
 

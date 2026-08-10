@@ -1386,6 +1386,189 @@ building a second identity-resolution mechanism from scratch.
   functions' key shape, not a drive-by extension of the ambiguity guard.
   Left as a documented, tracked limitation rather than attempted here.
 
+  **A later pass closed one more fact-completeness gap — `Param.is_restrict`
+  — and it was found by building Phase D's capability matrix rather than by
+  reading this list.** The matrix's own drift check (an `ast` pass over both
+  parsers, see Phase D below) reported a divergence this plan had never
+  recorded: castxml populated `Param.is_restrict` from the day it shipped
+  (`_resolve_cv_restrict`), the clang backend never did, and unlike
+  `deprecated`/`is_scoped` before this phase, `_diff_param_restrict` had
+  **no producer gate at all** — it compares the two bools directly. So a
+  castxml-vs-clang comparison of unchanged headers reported
+  `param_restrict_changed` for every `restrict`-qualified parameter, and had
+  since the fact was introduced. Closed the same way this phase closed
+  `deprecated`/`is_scoped`: extract it on the clang side rather than gate it,
+  since the value representation is a plain bool that is directly
+  cross-comparable (`dumper_clang_qualifiers._clang_param_is_restrict`,
+  verified against real clang 18 output for the C `restrict`, the C++
+  `__restrict`/`__restrict__` spellings clang normalizes to one form, a
+  typedef whose qualification is only visible in `desugaredQualType`, and
+  the `int *restrict *` vs `int **restrict` split where the qualifier
+  belongs to the pointee rather than the parameter). Reuses
+  `_desugared_qualtype`/`_last_top_level_ptr_end`, the typedef-unwrapping and
+  top-level-qualifier helpers the cv-qualifier work already needed, and adds
+  `_declarator_group` for the parenthesized-declarator rule the review rounds
+  below forced. (An early cut reused `_field_own_cv_source` as well; that is
+  the discarded approach finding (1) below describes, not what shipped.)
+
+  Two gates came with it, both following precedent already set in this
+  phase rather than inventing a third pattern. (1) A **header-tier gate**
+  (`_both_header_aware`, as `param_defaults` uses): DWARF, PDB and the
+  symbol-table paths never populate this fact, so a non-header side's
+  `False` means "not collected" — comparing it against a header-parsed side
+  manufactured the same finding from an evidence-tier difference alone.
+  This gate can only ever remove findings that were false, since a
+  non-header side is unconditionally `False`. (2) A **legacy-baseline
+  flag**, schema **v22**'s `clang_restrict_facts_reliable` — the fourth
+  instance of the shape v19/v20/v21 established, and covering `"hybrid"`
+  alongside `"clang"` for the same reason v20 did (a merge keeps castxml's
+  `params` verbatim for a matched function, but appends a clang-ONLY
+  function's parameters as they are). Snapshot disk cache bumped to v10 on
+  the v7/v8 precedent. Both `dumper_clang.py` and `diff_symbols.py` were
+  within 30 lines of the 2000-line hard cap, so this landed with two
+  splits: `dumper_clang_qualifiers.py` (the top-level-qualifier
+  helpers, re-exported so existing import paths resolve) and
+  `diff_param_qualifiers.py` (the `param_restrict` + `param_va_list`
+  detectors, registered through `checker.py`'s import block so no cycle is
+  introduced).
+
+  **Two review findings on that change, both worth not rediscovering.**
+  (1) *A callback parameter's argument qualifier is not the parameter's.*
+  The first cut reused `_field_own_cv_source`, whose no-pointer fallback
+  returns the whole type spelling — right for a const/volatile field, wrong
+  here. clang spells a callback parameter as `void (*)(int *restrict)`, its
+  own `*` inside parentheses, so there is no depth-0 pointer and the
+  fallback handed the whole spelling to the regex, matching the
+  *callback argument's* `restrict` as though it qualified the parameter.
+  castxml's type-chain walk stops at the outer `PointerType` and correctly
+  answers False — so this would have introduced a fresh cross-backend false
+  positive of exactly the kind the change exists to remove (Codex review,
+  reproduced against real clang 18 output). The first fix — require a
+  depth-0 pointer before searching at all — was **too strong, and a second
+  review round caught it**: `int (*restrict p)[3]` (a pointer to an array)
+  is parenthesized for the same declarator-precedence reason, but is a
+  perfectly legal restrict-qualified *object* pointer that castxml does
+  see, so requiring depth 0 turned the false positive into a false
+  negative. The rule that holds in both directions is that a
+  **parenthesized declarator group wins over depth 0**: when C forces the
+  parameter's own `*` into parentheses, everything at depth 0 belongs to
+  something else — the pointee (`int *(*restrict)[3]`, whose leading `*` is
+  the array element's) or the callback's parameter list. `_declarator_group`
+  finds the group that actually holds the parameter's pointer, identified
+  as the first depth-0 parenthesized group whose contents begin with `*` —
+  which distinguishes it from a function pointer's trailing parameter list
+  (contents begin with a type name) and from an array extent (not
+  parenthesized). Twelve spellings verified end to end against real clang
+  18, including one **neither review round named** and which the depth-0
+  rule got wrong in the original direction: `int *(*)(int *restrict)`, a
+  function pointer with a pointer return type, has a depth-0 `*` from
+  `int *`, so searching after it scans the callback's parameter list and
+  matches its `restrict`. Function-pointer declarators need no special case
+  despite looking identical in shape: C11 6.7.3p2 allows `restrict` only on
+  a pointer to an *object* type, so such a group can never legally carry
+  the qualifier. Verified rather than assumed — both
+  `void (*restrict cb)(int)` and `int *(*restrict cb)(void)` are rejected
+  outright by clang in C and C++ alike, which also retired an "accepted
+  false negative" note an earlier draft had written for that shape.
+  A third round found the mirror-image case one level out: `int *__restrict &`
+  (a *reference* to a restrict-qualified pointer) is legal C++ whose
+  qualifier clang still prints, but castxml's walk follows only
+  `CvQualifiedType`/`Typedef`/`ElaboratedType` and stops dead at the outer
+  `ReferenceType`, reporting False. Matching the visible qualifier would
+  therefore have re-created the cross-backend disagreement from the other
+  side, so a top-level `&` after the parameter's own pointer answers False —
+  matching castxml deliberately rather than the spelling. Confirmed against
+  real clang for the lvalue-reference, rvalue-reference, plain-reference and
+  reference-to-array-of-pointers spellings.
+
+  A fourth round found two more, and the method matters more than either
+  fix. Hand-picking spellings had by then failed three times running, so
+  this round built a *systematic* corpus instead: every declarator shape,
+  each compiled twice — once with `restrict` on the parameter's own pointer
+  and once without — with the expected answer encoded in the function's own
+  name (`_r`/`_n`). That corpus isolated exactly one wrong case out of
+  fifteen, and in doing so revealed the actual rule rather than another
+  patch: **the parameter's own declarator is the INNERMOST parenthesized
+  `(*…)` group**. `int (*(*restrict p)[3])[2]` (p IS restrict) and
+  `int (*restrict (*p)[3])[2]` (p is plain; the qualifier is on the array's
+  element type) print as `int (*(*restrict)[3])[2]` and
+  `int (*restrict (*)[3])[2]` — taking the outer group answers both alike
+  and gets the second wrong. Descending to the innermost group is correct
+  for all fifteen. The second finding was narrower: `decltype(*gp + 0)
+  *__restrict` opens a depth-0 `(` whose contents begin with `*` — a
+  dereference, not a declarator — so the group selection now rejects a `(`
+  that directly follows an identifier character, which separates a
+  call-like operand (`decltype(`, `typeof(`) from a declarator exactly. The
+  corpus itself is now a live-clang test, so a future shape has to be added
+  with its expected answer rather than argued about.
+
+  A fifth round found that second fix half-right, and the reason it was
+  half-right is the useful part. `typeof (*gp) *__restrict` answered False:
+  clang prints `typeof` **spaced** whatever the source wrote — even
+  `typeof(*gp)` comes back as `typeof (*gp)`, confirmed against clang 18 —
+  so "directly follows an identifier character" sees a space and calls
+  `(*gp)` the declarator group, searching `*gp` and missing the parameter's
+  own qualifier. `decltype(` passed only because clang happens to print it
+  unspaced. The obvious repair — skip whitespace, then require an
+  identifier — was checked before being applied and is wrong in the other
+  direction: `int (*restrict)[3]` and `void (*)(int *restrict)` also read
+  as `<identifier><space>(`, so it would dismiss both as expression
+  operands and regress rounds 1 and 2. What actually separates the two
+  families is the *specific keyword*, so the rule is now a closed set
+  (`decltype`, `typeof`, `__typeof`, `__typeof__`, `typeof_unqual`) in
+  `_follows_type_operator_keyword` — these being the only constructs clang
+  prints in a type spelling whose parenthesized operand is an expression.
+  Re-verified against real clang: all three source spellings plus the
+  unqualified control, the `decltype` pair, the fifteen-parameter corpus,
+  and the reference wrappers, 25 cases, no regressions.
+  (2) *Detector registration order is user-visible, and a split must not
+  change it.* `registry.detector()` stamps an incrementing counter and
+  `run_all()` executes in that order, so registration order fixes the order
+  findings appear in every JSON/text report. Registering the new module from
+  `checker.py`'s top import block broke this **twice over**, and the two
+  halves were found by different means. First, it pulled `diff_symbols` (and
+  its `diff_symbols_renames` sibling, which owns `fingerprint_renames`)
+  forward from its own import much further down `checker.py`, moving those
+  detectors ahead of `diff_elf_layout`'s and reordering the coverage-gap rows
+  — caught by five golden-output tests, a marker the everyday fast command
+  excludes, which is the case for running `verify.py --profile pr` before
+  opening a PR. Making the shared-helper imports function-local fixed that
+  half. It did **not** fix the second half, which no test covered: the two
+  *moved* detectors themselves went from indices 16 and 20 to 5 and 6,
+  because they now registered with the new module at the top of `checker.py`
+  rather than from `diff_symbols` in the middle (Codex review; measured by
+  dumping `registry.detector_names` against a worktree at the base commit —
+  note that comparison is only valid with `PYTHONPATH` pointed at the
+  worktree, since the editable install otherwise shadows it and reports a
+  false "identical").
+
+  The shape that preserves order exactly: the **registrations stay in
+  `diff_symbols.py`** at their original source positions, and only the loop
+  bodies moved. Each detector applies its snapshot-level gates and hands
+  `diff_param_qualifiers` the already-selected public-function maps, so the
+  new module takes `dict[str, Function]` and imports nothing from
+  `diff_symbols` at all. That last point is a constraint, not a preference:
+  once `diff_symbols` imports the new module, a back-import would be a real
+  cycle, and the AI-readiness import-cycle gate walks *every* AST import —
+  a function-local one included — so the "function-local import" escape
+  hatch is not available in that direction. `checker.py` is left untouched;
+  `ensure_loaded`'s prefix discovery imports the new `diff_*` module anyway,
+  and it registers nothing. Verified by re-measuring: all 65 detectors, same
+  order as base, with `param_restrict` back at 16 and `param_va_list` at 20.
+
+  (3) *A documentation claim that was not verified.* The capability page's
+  graph-edge table asserted that a `hybrid` dump pays a second `clang`
+  invocation for the graph attach, "same as castxml". It does not, normally:
+  `service._run_dump_uncached` runs the clang sub-dump inside
+  `dumper_cache.ast_memoize_scope()`, and the memo slot outlives that scope
+  (it is cleared only on failure), so the `_attach_header_graph` that follows
+  consumes the same parsed AST whenever its own resolved headers/includes/
+  toolchain hash to the same key (Codex review). Corrected to describe the
+  handoff and the one condition it depends on. Worth noting as a category:
+  this was the only finding in four rounds that landed on *prose* rather than
+  code — the generated half of that page is machine-checked against the
+  parsers, and the hand-authored half is not.
+
 - ~~Single-AST reuse for the direct-clang backend~~ **Done** (see above) —
   via in-process memoization of `_clang_header_dump`'s result, not by
   threading the parser's already-consumed AST object through
@@ -1442,7 +1625,8 @@ each new fact family from Phase C's schema audit, at least one case per new
 `ChangeKind` above, and a header-only-vs-build-integrated collector-upgrade
 case exercising the reconciliation path end-to-end.
 
-**Full documentation rewrite** covering:
+**Full documentation rewrite — done.** All three bullets below shipped as
+`docs/reference/header-backend-capabilities.md`:
 - A backend capability matrix (CastXML vs. direct-clang vs. hybrid, which
   facts/edges each can and cannot see).
 - "Why CastXML can't do all graph edges" (the schema-limit findings from
@@ -1453,6 +1637,48 @@ case exercising the reconciliation path end-to-end.
   `VTableContext` — when each is the right tool, referencing G28 Phase 4's
   own LibTooling companion-tool experience (`tools/clang-layout-tool/`) as
   a worked example of the LibTooling option's cost/benefit.
+
+**What shipped, and the one design decision worth recording.** The matrix is
+**not prose**: `scripts/backend_capabilities.py` carries one `FactRow` per
+field of the six declaration dataclasses the two backends build (95 rows),
+`scripts/gen_backend_capability_matrix.py` renders them into the page's
+generated section (the `gen_platform_matrix.py`/`platform_capabilities.py`
+splice pattern, one sibling over), and the hybrid column is **derived** from
+`dumper_hybrid.py`'s real backfill lists rather than hand-typed. The reason
+for that shape is this plan's own history: several rounds recorded here
+found a fact's real backend coverage had moved on while a document still
+described the old world, so `tests/test_backend_capability_matrix.py`
+re-derives every published claim by reading `dumper_castxml.py`/
+`dumper_clang.py` with `ast` — asking not "is this keyword passed?" but
+"is it passed a real expression, or a placeholder like `size_bits=None`
+/`is_opaque=False`?" — and fails when the claim and the code disagree. That
+check is what found the `Param.is_restrict` gap recorded under Phase C
+above; it was written to prevent drift and immediately paid for itself by
+catching a live false positive.
+
+**Gaps the matrix surfaced and documented rather than fixed** (each needs
+its own verification, and castxml was not installable in the environment
+this pass ran in — the same "verify before claiming" bar the rest of this
+phase held to):
+- `EnumType.underlying_type` is clang-only; a castxml (and therefore
+  hybrid) enum keeps the model default `int` whatever the header declared.
+  No diff detector reads it — `enum_underlying_size_changed` comes from
+  DWARF — but `tu_merge.py`'s ODR-conflict check does.
+- A hybrid merge is castxml-based, so a clang-only fact it does not
+  explicitly backfill (`is_template_pattern`,
+  `has_anonymous_aggregate_fields`, `underlying_type`) is dropped for any
+  declaration both backends saw. Both of the first two look benign on
+  inspection (castxml never emits an uninstantiated pattern, and supplies
+  the real offsets the anonymous-aggregate flag exists to help find), but
+  "looks benign" is the claim that needs a castxml host to check.
+- An opaque handle type is **absent** from a clang snapshot rather than
+  opaque: `parse_types` skips every non-definition, so `is_opaque=False` is
+  correct by construction while the type itself never appears.
+- `Variable.value`, `Variable.access` and `Param.is_va_list` have no
+  producer on any layer, which makes `param_became_va_list`/
+  `param_lost_va_list` unreachable on real input. Recorded in
+  `diff_param_qualifiers.py`'s own docstring too, since a backend that
+  later populates `is_va_list` inherits `param_restrict`'s exact problem.
 
 **Performance benchmarks + regression gate — done.** Now that the
 header-only graph is always-on rather than opt-in, its per-dump cost is paid
