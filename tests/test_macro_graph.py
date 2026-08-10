@@ -946,6 +946,40 @@ def test_extract_from_compile_unit_leaves_absolute_file_untouched(
     assert ranges == [DeclRange("f", abs_file, 3, 3)]
 
 
+def test_extract_from_safe_args_degrades_on_malformed_line_value(monkeypatch) -> None:
+    """CodeRabbit review, fresh evidence: ``_LocationCursor.advance()`` calls
+    ``int(loc["line"])`` with no type check -- a malformed ``line`` value
+    (``null``, a list, ...) in adversarial or corrupted AST JSON raised an
+    uncaught ``TypeError``, aborting extraction for the whole build instead
+    of degrading to a diagnostic like every other malformed-input case this
+    extractor handles."""
+    import abicheck.buildsource.macro_graph as macro_graph_mod
+
+    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    malformed_ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "f",
+                "mangledName": "_Zf",
+                "loc": {"file": "a.c", "line": None},
+                "range": {
+                    "begin": {"file": "a.c", "line": None},
+                    "end": {"file": "a.c", "line": None},
+                },
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        macro_graph_mod, "run_clang_ast_dump", lambda *a, **k: malformed_ast
+    )
+    ranges = extractor._extract_from_safe_args(["--"])
+    assert ranges == []
+    assert any("could not parse clang AST JSON" in d for d in extractor.diagnostics)
+
+
 def test_extract_from_build_keeps_distinct_spans_for_same_identity(monkeypatch) -> None:
     """Codex review, PR #708: a forward declaration and its own later
     definition share ``(identity, file)`` but have distinct spans -- the

@@ -489,8 +489,15 @@ def _index_walk(
             _index_walk(child, scope, id_index, callee_params, field_by_id)
         return
 
-    if kind in _RECORD_DECL_KINDS and name:
-        child_scope = [*scope, name]
+    if kind in _RECORD_DECL_KINDS:
+        # An unnamed struct/union still owns real FieldDecl children whose
+        # own id a MemberExpr can reference (CodeRabbit review, fresh
+        # evidence) -- gating field indexing on `name` truthy skipped an
+        # anonymous record's fields entirely, so a callback slot inside one
+        # (`union { handler_t cb; };`) could never resolve. Its own scope
+        # only extends with a name when it has one; an unnamed record
+        # contributes no extra qualification level of its own.
+        child_scope = [*scope, name] if name else scope
         for child in node.get("inner", []) or []:
             if isinstance(child, dict) and child.get("kind") == "FieldDecl":
                 field_id = str(child.get("id") or "")
@@ -839,6 +846,17 @@ def augment_graph_with_callback_invocations(
                     attrs={
                         "resolution": RESOLUTION_OVERAPPROX,
                         "slot": e.dst,
+                        # The same caller can reach the same registered
+                        # function through two DIFFERENT slots (`a` and `b`
+                        # both hold `h`) -- without a role, both edges share
+                        # the identical (src, dst, kind) relation_key
+                        # (ADR-046 D1) and SourceGraphSummary.add_edge's
+                        # dedup-on-relation-key collapses the second into
+                        # the first, silently dropping one real dispatch
+                        # path (Codex review, fresh evidence; reproduced
+                        # empirically: only 1 of 2 expected edges survived).
+                        # The slot id is itself the natural role here.
+                        "role": e.dst,
                         "registration_kind": registration_kind,
                     },
                 )

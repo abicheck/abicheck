@@ -797,7 +797,14 @@ def fold_callback_graph(
     elif worst_state == "narrowed":
         graph.narrowed_passes["callback_graph"] = True
         graph.narrowed_scope["callback_graph"] = (
-            scope_key if own_state == "narrowed" else graph.narrowed_scope["call_graph"]
+            scope_key
+            if own_state == "narrowed"
+            # A real fold_call_graph run always sets narrowed_scope
+            # alongside narrowed_passes, but a hand-built/deserialized
+            # graph is not guaranteed to (CodeRabbit review, fresh
+            # evidence) -- .get() degrades to an empty scope rather than
+            # raising and aborting this whole fold.
+            else graph.narrowed_scope.get("call_graph", frozenset())
         )
     elif own_state != "none" or call_graph_state != "none":
         graph.degraded_passes["callback_graph"] = True

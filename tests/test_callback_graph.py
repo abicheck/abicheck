@@ -444,6 +444,85 @@ class TestParseCallbacksTakesAddressOf:
             )
         ]
 
+    def test_field_in_unnamed_record_still_resolves(self) -> None:
+        """CodeRabbit review, fresh evidence: an unnamed struct/union
+        (``union { handler_t cb; };``) still owns a real ``FieldDecl`` a
+        ``MemberExpr`` can reference by id -- gating field indexing on the
+        record's own ``name`` being truthy previously skipped an anonymous
+        record's fields entirely, so a callback slot inside one could never
+        resolve."""
+        my_handler = _func_decl("my_handler", "F1", mangled="_Z10my_handleri")
+        member_expr = {
+            "kind": "MemberExpr",
+            "name": "cb",
+            "referencedMemberDecl": "FLD1",
+            "type": {"qualType": "handler_t", "desugaredQualType": "void (*)(int)"},
+            "inner": [
+                {
+                    "kind": "DeclRefExpr",
+                    "referencedDecl": {
+                        "id": "P1",
+                        "kind": "ParmVarDecl",
+                        "name": "w",
+                        "type": {"qualType": "Widget *"},
+                    },
+                }
+            ],
+        }
+        widget = {
+            "kind": "CXXRecordDecl",
+            "name": "Widget",
+            "inner": [
+                {
+                    # An unnamed union nested directly in Widget -- no "name".
+                    "kind": "RecordDecl",
+                    "inner": [
+                        {
+                            "kind": "FieldDecl",
+                            "id": "FLD1",
+                            "name": "cb",
+                            "type": {
+                                "qualType": "handler_t",
+                                "desugaredQualType": "void (*)(int)",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        assign = {
+            "kind": "BinaryOperator",
+            "opcode": "=",
+            "inner": [member_expr, _addr_of(my_handler)],
+        }
+        assign_field = _func_decl(
+            "assign_field",
+            "F2",
+            [
+                {
+                    "kind": "ParmVarDecl",
+                    "id": "P1",
+                    "name": "w",
+                    "type": {"qualType": "Widget *"},
+                }
+            ],
+            qual_type="void (Widget *)",
+            extra_inner=[{"kind": "CompoundStmt", "inner": [assign]}],
+        )
+        ast = _tu(my_handler, widget, assign_field)
+
+        edges = parse_clang_ast_callbacks(ast)
+
+        assert edges == [
+            CallbackEdge(
+                "_Z10my_handleri",
+                "cb",
+                EDGE_DECL_TAKES_ADDRESS_OF,
+                CONF_REDUCED,
+                "void (*)(int)",
+            )
+        ]
+
     def test_var_decl_initializer_records_takes_address_of(self) -> None:
         other_handler = _func_decl("other_handler", "F1", mangled="_Z13other_handleri")
         global_cb = {
@@ -615,6 +694,33 @@ class TestCallbackMayInvoke:
         assert dispatch[0].resolved["resolution"] == "overapprox"
         assert dispatch[0].resolved["slot"] == "decl://h"
         assert dispatch[0].confidence == CONF_REDUCED
+
+    def test_same_caller_reaching_same_function_through_two_slots_keeps_both(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: the same caller invoking the same
+        registered function through two DIFFERENT slots (`a` and `b`, both
+        holding `h`) previously collapsed onto one edge -- without a role
+        discriminator, both CALLBACK_MAY_INVOKE edges shared the identical
+        (src, dst, kind) relation_key (ADR-046 D1), so
+        SourceGraphSummary.add_edge's dedup silently dropped one real
+        dispatch path (and its own `slot` fact)."""
+        g = SourceGraphSummary()
+        for ident in ("caller", "h", "a", "b"):
+            g.add_node(_decl_node(ident))
+        g.add_edge(_fp_call_edge("caller", "a"))
+        g.add_edge(_fp_call_edge("caller", "b"))
+        g.add_edge(_registration_edge("h", "a"))
+        g.add_edge(_registration_edge("h", "b"))
+
+        result = augment_graph_with_callback_invocations(g)
+
+        assert result.dispatch_edges_added == 2
+        dispatch = [e for e in g.edges if e.kind == EDGE_CALLBACK_MAY_INVOKE]
+        assert len(dispatch) == 2
+        slots = {e.resolved["slot"] for e in dispatch}
+        assert slots == {"decl://a", "decl://b"}
+        assert all(e.src == "decl://caller" and e.dst == "decl://h" for e in dispatch)
 
     def test_bare_name_collision_across_unrelated_functions_is_a_known_false_positive(
         self,

@@ -986,7 +986,13 @@ class ClangMacroGraphExtractor:
             return []
         try:
             return parse_clang_ast_decl_ranges(ast)
-        except (ValueError, RecursionError) as exc:
+        except (TypeError, ValueError, RecursionError) as exc:
+            # TypeError (CodeRabbit review, fresh evidence): _LocationCursor.
+            # advance() calls int(loc["line"]) with no type check -- a
+            # malformed line value (null, a list, ...) in adversarial or
+            # corrupted AST JSON raises TypeError, which must degrade to a
+            # diagnostic like every other malformed-input case here, not
+            # escape and abort extraction for the whole build.
             self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
             return []
 
