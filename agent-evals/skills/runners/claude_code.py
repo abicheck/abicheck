@@ -91,7 +91,7 @@ When you have finished, end your reply with a fenced ```json block — nothing
 after it — in exactly this shape:
 
 {"verdict": "<one of NO_CHANGE, COMPATIBLE, COMPATIBLE_WITH_RISK, API_BREAK, BREAKING, or null if the two sides cannot be compared at all>",
- "evidence": [<the numeric ids of the tool calls this rests on, from the order you ran them, starting at 0>],
+ "evidence": [<which compatibility-tool runs this rests on: number *only* your invocations of the compatibility-checking tool itself, from 0, in the order you ran them — not shell commands, file reads, or compiles. Each run also prints its own number on stderr; use that if you have it>],
  "confident": true or false}
 
 If `confident` is false, add an `"uncertainty"` object with `"reason"` (one of

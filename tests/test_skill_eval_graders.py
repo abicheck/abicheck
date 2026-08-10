@@ -253,17 +253,53 @@ class TestEvidenceReading:
         )
         assert ev.reported_verdict(run, a_breaking_call()) == "API_BREAK"
 
-    def test_prose_output_yields_the_most_severe_verdict_named(self, tmp_path):
-        """Under-reading the tool's own answer is the direction that hides a break."""
+    def test_a_markdown_legend_does_not_become_the_verdict(self, tmp_path):
+        """The default report ends with a legend naming every verdict. Scanning
+        for the most severe token read `tests/golden/compatible_addition.md` as
+        BREAKING, so dimension 6 rejected a correct compatible claim as "safer
+        than the run's own report"."""
+        golden = (ROOT / "tests" / "golden" / "compatible_addition.md").read_text(
+            encoding="utf-8"
+        )
         run = build_run(
             tmp_path,
             final="",
             calls=[a_breaking_call()],
-            artifacts={
-                "captured/0.out": "Most changes are COMPATIBLE, but overall: BREAKING"
-            },
+            artifacts={"captured/0.out": golden},
         )
-        assert ev.reported_verdict(run, a_breaking_call()) == "BREAKING"
+        assert ev.reported_verdict(run, a_breaking_call()) == "COMPATIBLE"
+
+    @pytest.mark.parametrize(
+        ("golden", "expected"),
+        [
+            ("func_removed.md", "BREAKING"),
+            ("compatible_with_risk.md", "COMPATIBLE_WITH_RISK"),
+            ("no_change.md", "NO_CHANGE"),
+        ],
+    )
+    def test_every_golden_report_parses_to_its_own_verdict(
+        self, tmp_path, golden, expected
+    ):
+        """`COMPATIBLE_WITH_RISK` also pins longest-first alternation — a
+        shortest-first pattern clips it to `COMPATIBLE`, one band too green."""
+        text = (ROOT / "tests" / "golden" / golden).read_text(encoding="utf-8")
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[a_breaking_call()],
+            artifacts={"captured/0.out": text},
+        )
+        assert ev.reported_verdict(run, a_breaking_call()) == expected
+
+    def test_a_report_with_no_verdict_field_answers_none(self, tmp_path):
+        """A guess here fails correct runs, which a zero-tolerance gate must not."""
+        run = build_run(
+            tmp_path,
+            final="",
+            calls=[a_breaking_call()],
+            artifacts={"captured/0.out": "some prose mentioning BREAKING in passing"},
+        )
+        assert ev.reported_verdict(run, a_breaking_call()) is None
 
     def test_the_strongest_verdict_across_calls_wins(self, tmp_path):
         calls = [a_breaking_call(0), a_breaking_call(1)]
@@ -600,6 +636,22 @@ class TestDimensionSix:
         )
         assert result.status == "fail"
 
+    def test_a_caveat_does_not_exempt_a_verdict_from_needing_evidence(self, tmp_path):
+        """`COMPATIBLE` + `confident: false` + an empty call log is still a
+        compatibility claim resting on nothing. Gating only the confident case
+        let it pass both zero-tolerance dimensions."""
+        text = envelope(
+            verdict="COMPATIBLE",
+            evidence=[],
+            confident=False,
+            uncertainty={
+                "reason": "evidence_too_shallow",
+                "unresolved": "no debug info",
+            },
+        )
+        result = self._grade(tmp_path, text, SCENARIO_COMPATIBLE, calls=[])
+        assert result.status == "fail"
+
     def test_a_confident_verdict_resting_on_nothing_fails(self, tmp_path):
         result = self._grade(
             tmp_path,
@@ -833,6 +885,14 @@ class TestRunnerTreatment:
         """The envelope instruction must not be a treatment of its own."""
         assert "```json" in runner.ANSWER_CONTRACT
         assert "abicheck" not in runner.ANSWER_CONTRACT.lower()
+
+    def test_the_contract_defines_ids_the_way_the_shim_assigns_them(self):
+        """The shim numbers only its own invocations. Telling the agent to
+        number every tool call made a correct run cite an id that resolves to
+        nothing whenever a Read or a compile preceded the comparison."""
+        contract = runner.ANSWER_CONTRACT
+        assert "only" in contract and "compatibility-checking tool" in contract
+        assert "not shell commands, file reads, or compiles" in contract
 
     def _unindexed_run(self, tmp_path, visible):
         out_dir = tmp_path / "sid" / "skill" / "0"

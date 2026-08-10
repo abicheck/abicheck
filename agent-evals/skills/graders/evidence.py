@@ -77,7 +77,21 @@ SUPPRESSION_FLAGS = (
     "--exit-code-scheme",
 )
 
-_VERDICT_TOKEN = re.compile(r"\b(" + "|".join(VERDICT_ORDER) + r")\b")
+#: The report's own verdict *field*, not any verdict word in the text. The
+#: default Markdown report ends with a legend naming every verdict — so a
+#: "most severe token wins" scan reads a `COMPATIBLE` report as `BREAKING`
+#: off its own legend, and dimension 6 then rejects a correct compatible claim
+#: as "safer than the run's own report". Confirmed against
+#: `tests/golden/compatible_addition.md`.
+#:
+#: Matches `| **Verdict** | ❌ \`BREAKING\` |` and a plain `Verdict: BREAKING`
+#: alike. Longest-first alternation so `COMPATIBLE_WITH_RISK` is not clipped
+#: to `COMPATIBLE`.
+_VERDICT_FIELD = re.compile(
+    r"Verdict\**\s*[:|]\s*[^|\n]*?\b("
+    + "|".join(sorted(VERDICT_ORDER, key=len, reverse=True))
+    + r")\b"
+)
 
 
 def load_calls(run_dir: Path) -> list[dict]:
@@ -200,11 +214,11 @@ def _artifact_texts(run_dir: Path, call: dict) -> list[str]:
 def reported_verdict(run_dir: Path, call: dict) -> str | None:
     """The verdict the tool itself produced for this call, if it stated one.
 
-    JSON first, because that is unambiguous. The text fallback takes the *most
-    severe* token present rather than the first: a human-readable report names
-    a verdict in its summary and may name others while explaining them, and
-    under-reading the tool's own answer is the direction that lets a false
-    green through.
+    JSON first, because that is unambiguous; otherwise the report's own verdict
+    field. A report whose verdict cannot be located answers `None` rather than
+    a guess — the consumer of this value only ever asks "is the claim greener
+    than the tool's own answer", and inventing an answer there fails correct
+    runs, which is the one outcome a zero-tolerance gate must not produce.
     """
     severest: int | None = None
     for text in _artifact_texts(run_dir, call):
@@ -216,7 +230,7 @@ def reported_verdict(run_dir: Path, call: dict) -> str | None:
             index = VERDICT_ORDER.index(parsed["verdict"])
             severest = index if severest is None else max(severest, index)
             continue
-        for token in _VERDICT_TOKEN.findall(text):
+        for token in _VERDICT_FIELD.findall(text):
             index = VERDICT_ORDER.index(token)
             severest = index if severest is None else max(severest, index)
     return None if severest is None else VERDICT_ORDER[severest]

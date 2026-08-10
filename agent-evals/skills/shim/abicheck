@@ -262,6 +262,14 @@ def main() -> int:
 
     sys.stdout.buffer.write(proc.stdout)
     sys.stderr.buffer.write(proc.stderr)
+    # The number this call is recorded under, so the answer envelope can *cite*
+    # it rather than guess. The agent otherwise has to reconstruct the sequence
+    # from its own side, where a `Read` or a compile step shifts the count and
+    # a correct run then cites an id that resolves to nothing — a false failure
+    # of the strictest dimension, which is the one outcome that gets a gate
+    # switched off. On stderr, so it never contaminates a `--format json`
+    # report the agent may pipe or re-read.
+    sys.stderr.write(f"[recorded as call {seq}]\n")
     return proc.returncode
 
 
