@@ -414,6 +414,40 @@ building a second identity-resolution mechanism from scratch.
   cross-translation-unit inheritance-only resolution, and same-bare-name
   colliding direct bases.
 
+  **A fourth review round on the same fix found a real regression, not a
+  missing enhancement.** `struct E : virtual A { virtual void e(); };`,
+  where `A` has no data members of its own ("nearly empty" for the Itanium
+  ABI's virtual-primary-base rule), can be laid out so `E` and `A` SHARE
+  one vptr slot at offset 0 with GCC emitting no local `_vptr.E` member for
+  `E` at all — confirmed by DIE dump, and different from every other
+  virtual-base case this fix already covered (`struct D : virtual A {
+  virtual void d(); int di; };` DOES get its own `_vptr.D`, since a real
+  data member of its own forces a non-degenerate layout). Because `E`'s
+  only base is virtual, it's entirely excluded from the primary-base walk
+  (mirroring `base_offsets`'s own long-standing virtual-base exclusion —
+  the offset is dynamic, not static), so `E` fell through to `None` where
+  the pre-fix code — which never distinguished "resolved via a real
+  mechanism" from "just assumed 0 whenever `vtable` is non-empty" — used
+  to give the (here, correct) answer `0`. Fixed with a final fallback pass
+  in `_finalize_vptr_offsets`, after the fixed-point resolution loop
+  completes: any type still `None` with a non-empty `vtable` is set to `0`,
+  restoring the original blanket heuristic exactly for the residual set
+  this fix's more precise mechanisms cannot explain — a change verified to
+  be strictly additive over the pre-fix behavior (every case the old code
+  resolved to 0 still resolves to at worst 0; several cases it could only
+  guess at now resolve to a real, DWARF-derived offset instead). New
+  regression test with exactly this shape.
+
+  **The same pass's fourth regression test pushed `test_dwarf_snapshot.py`
+  over the file-size hard cap** (2045 lines against the 2000-line ERROR
+  threshold, `scripts/check_ai_readiness.py`'s `file-size` check) — the
+  whole `TestDwarfSnapshotVptrOffset` class (all vptr-offset coverage
+  added across this fix's several review rounds) moved to a new sibling
+  file, `tests/test_dwarf_vptr_offset.py`, self-contained with its own
+  `g++`-availability check rather than importing across test modules
+  (matching this repo's existing test-file-splitting convention for a
+  large module — see `AGENTS.md`'s "Files that are large" section).
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

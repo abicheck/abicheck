@@ -1178,6 +1178,18 @@ class _DwarfSnapshotBuilder:
         the real definition is not guaranteed to already be known at the
         point the stub DIE was encountered); and, only once both DIE-identity
         tiers miss, the original bare-name ``by_name`` fallback.
+
+        A LAST, final pass (after the fixed-point loop below) restores the
+        original blanket "0 if polymorphic" heuristic for whatever remains
+        unresolved — see that pass's own comment for the real case requiring
+        it (a virtual-only base sharing a "nearly empty" primary base's
+        vptr, which never enters this loop at all since virtual bases are
+        excluded from ``bases``/``base_edges`` for the same static-offset
+        reason ``base_offsets`` excludes them). This makes the whole
+        function strictly additive over the pre-fix behavior: every type the
+        old code resolved to 0 still resolves to (at worst) 0, and several
+        classes it could only guess at now resolve to a real, DWARF-derived
+        offset instead.
         """
         by_name = {t.name: t for t in self.types}
         unresolved = [t for t in self.types if t.vptr_offset_bits is None and t.bases]
@@ -1211,6 +1223,35 @@ class _DwarfSnapshotBuilder:
                 else:
                     still_unresolved.append(rec)
             unresolved = still_unresolved
+
+        # Final fallback: restore the original "0 if polymorphic" heuristic
+        # for whatever remains unresolved, rather than leaving it None.
+        # Real gap (Codex review, reproduced against real GCC output):
+        # `struct E : virtual A { virtual void e(); };` where A is "nearly
+        # empty" (no data members beyond its own vtable pointer) can be laid
+        # out under the Itanium ABI's virtual-primary-base rule so E and A
+        # SHARE one vptr slot at offset 0 with no local `_vptr.E` member of
+        # E's own — GCC emits no such member here, unlike every other
+        # virtual-base case this fix already handles (`struct D : virtual A
+        # { virtual void d(); int di; };`, which DOES get its own
+        # `_vptr.D`, confirmed by DIE dump, since D has a real data member
+        # forcing a non-degenerate layout). Because E's only base is
+        # virtual, it's entirely absent from `bases`/`base_edges` (mirroring
+        # `base_offsets`'s own long-standing exclusion of virtual bases —
+        # their offset is dynamic, not a fixed one this resolution walks),
+        # so the loop above never even considers it. Every class this
+        # applies to has `own_vptr_offset_bits is None` (no local member)
+        # AND is unreachable via the primary-base walk (no resolvable
+        # non-virtual base, or none at all) — exactly the shape the
+        # original heuristic covered by assuming 0 for any type with a
+        # non-empty `vtable`, so restoring it here for the specific
+        # remaining unresolved set is a pure regression fix, not a
+        # reintroduction of the original guess for cases this pass already
+        # resolves more precisely (those are excluded here since their
+        # `vptr_offset_bits` is already set).
+        for rec in self.types:
+            if rec.vptr_offset_bits is None and rec.vtable:
+                rec.vptr_offset_bits = 0
 
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
         """Resolve DW_AT_decl_file to a source file path.
