@@ -1354,6 +1354,48 @@ which all depend on a Clang AST pass.
      to exactly one element since a scalar (function-pointer) type
      type-checks to exactly one initializer in valid C++, so a real
      aggregate/multi-element list can never be accidentally swallowed.
+   - **A twenty-first finding, confirmed real and fixed: a virtual
+     overloaded operator invoked through a base reference/pointer was never
+     classified as virtual.** `B &b; b();` — a `CXXOperatorCallExpr`, not a
+     `CXXMemberCallExpr` — has a plain `DeclRefExpr` as its own callee, not
+     a `MemberExpr`, so `_classify_call`'s virtuality check (which only ever
+     looked at `CXXMemberCallExpr`) never fired, silently excluding a real
+     derived `operator()` override from `VIRTUAL_CALL_MAY_DISPATCH_TO`.
+     Reproduced empirically against real Clang 18. Extending
+     `_classify_call` to also check `CXXOperatorCallExpr` alone wasn't
+     enough: a `DeclRefExpr`'s own compact `referencedDecl` stub never
+     carries `virtual`/`inner` (`OverrideAttr`/`FinalAttr`) the way the full
+     declaration node does, and — unlike a `MemberExpr`'s string-shaped
+     `referencedMemberDecl`, which `_find_referenced_decl` already resolved
+     to the full node via `member_index` — a dict-shaped `referencedDecl`
+     was returned as-is, never upgraded. Fixed by extending
+     `_find_referenced_decl` to also resolve a dict-shaped stub's own `id`
+     through `member_index` when indexed, falling back to the stub itself
+     otherwise (preserving `_POINTER_DECL_KINDS` function-pointer-call
+     classification for `VarDecl`/`ParmVarDecl`/`FieldDecl` refs, which are
+     never added to `member_index`). An explicitly-qualified operator call
+     (`b.Base::operator()()`) is a narrower, separately-verified case not
+     attempted here.
+   - **A twenty-second finding, investigated and deliberately NOT fixed:
+     backslash-newline line splicing before a `//` comment.** A real
+     preprocessor removes every `\<newline>` pair before tokenizing, so a
+     `//` comment ending in `\` carries onto the next physical line too —
+     including anything that looks like a directive. Reproduced
+     empirically: a `#ifdef OUTER` / `// comment continues \` /
+     (spliced-away) `#endif` / real trailing `#endif` nest truncates
+     `OUTER`'s region early, the identical desync shape the four other
+     comment-tracking fixes in this plan close for a different mechanism
+     each (`/* */` nesting, a leading same-line comment, a carried-over
+     multi-line comment closing mid-line, and now this one). Deliberately
+     not attempted: unlike those three, correctly handling splicing needs a
+     genuinely different per-line carry-over mechanism than the existing
+     `in_block` state, threaded through every line-number-keyed caller
+     without disturbing their existing physical-line-number contract
+     (clang's own AST ranges are physical-line-based too) — a same-slice
+     fix risks getting that fidelity subtly wrong, worse than the current,
+     honest gap. Documented in the module's own docstring ("a third
+     accepted, documented limitation") and pinned by a dedicated regression
+     test rather than silently accepted.
 5. **Full type-role coverage** to parity: variable type, typedef target,
    alias-template target, enum underlying type, non-type template argument,
    default template argument, concept/constraint dependency, function-pointer

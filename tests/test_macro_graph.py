@@ -354,6 +354,27 @@ def test_lines_starting_inside_block_comment_still_tracks_a_real_block_comment()
     assert starts == [False, True, True, True, True, False]
 
 
+def test_backslash_spliced_line_comment_containing_endif_is_a_known_false_positive() -> (
+    None
+):
+    """Codex review, fresh evidence: a real preprocessor removes every
+    backslash-newline pair before tokenizing, so a `//` comment ending in
+    `\\` carries onto the next physical line too -- including anything that
+    looks like a directive. This scanner has no notion of line splicing at
+    all, so the `#endif` on the spliced-continuation line is (wrongly) read
+    as live, popping the enclosing guard's frame early. Documented,
+    deliberately-unfixed limitation (module docstring's "third accepted
+    limitation") -- pinned here rather than silently regressed."""
+    text = "#ifdef OUTER\n// comment continues \\\n#endif\nvoid real_decl();\n#endif\n"
+    regions = scan_conditional_regions(text)
+    # The correct answer (a real preprocessor's view) would be a single
+    # OUTER region spanning lines 2-4; this pins the current, known-wrong
+    # behavior instead -- OUTER's frame is popped by the spliced-away
+    # #endif on line 3, and the real, trailing #endif on line 5 has nothing
+    # left to pop.
+    assert regions == [ConditionalRegion("OUTER", False, 2, 2)]
+
+
 def test_macro_definition_lines_ignores_define_inside_block_comment() -> None:
     text = "/* #define FEATURE_X 1 */\nvoid f() { return FEATURE_X; }\n"
     assert _macro_definition_lines(text) == {}

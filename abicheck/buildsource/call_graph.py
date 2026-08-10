@@ -289,6 +289,22 @@ def _find_referenced_decl(
     """
     ref = node.get("referencedDecl")
     if isinstance(ref, dict):
+        # Upgrade a compact stub to the FULL declaration node when one is
+        # already indexed (Codex review, fresh evidence): a plain
+        # DeclRefExpr's own `referencedDecl` never carries `virtual`/
+        # `inner` (OverrideAttr/FinalAttr) the way the full node does --
+        # verified against real Clang 18 output for a virtual overloaded
+        # operator invoked through a base reference (`B &b; b();`), whose
+        # callee is a DeclRefExpr, not a MemberExpr, so it never went
+        # through the string-`referencedMemberDecl` resolution path below
+        # (which already upgrades to the full node). Falls back to the
+        # stub itself when nothing is indexed for this id yet -- a forward
+        # reference, or a non-function-decl-kind ref (VarDecl/ParmVarDecl/
+        # FieldDecl, never added to member_index at all) whose own `kind`
+        # the _POINTER_DECL_KINDS check downstream still needs intact.
+        ref_id = str(ref.get("id") or "")
+        if ref_id and ref_id in member_index:
+            return member_index[ref_id]
         return ref
     member_ref = node.get("referencedMemberDecl")
     if isinstance(member_ref, dict):
@@ -558,7 +574,20 @@ def _classify_call(
         # Called through a variable/parameter/field → a function pointer; the
         # static target is unknown (could be any compatible function).
         return callee, CALL_KIND_FUNCTION_POINTER, RESOLUTION_UNKNOWN
-    if call_node.get("kind") == "CXXMemberCallExpr" and _ref_is_virtual(ref):
+    if call_node.get("kind") in (
+        "CXXMemberCallExpr",
+        "CXXOperatorCallExpr",
+    ) and _ref_is_virtual(ref):
+        # A virtual overloaded operator invoked through a base reference/
+        # pointer (`B &b; b();`) is a CXXOperatorCallExpr, not a
+        # CXXMemberCallExpr (Codex review, fresh evidence, verified against
+        # real Clang 18 output): its own callee is a plain DeclRefExpr/
+        # FunctionToPointerDecay, not wrapped in a MemberExpr at all, so
+        # `_find_member_expr` correctly finds nothing to qualify-check for
+        # this shape -- an explicitly-qualified operator call
+        # (`b.Base::operator()()`) is a narrower, separately-verified case
+        # not attempted here (same conservative false-negative default this
+        # module already uses throughout).
         member_expr = _find_member_expr(call_node)
         if member_expr is not None and _member_expr_is_qualified(member_expr):
             # An explicitly-qualified call (obj.Base::f()) suppresses virtual

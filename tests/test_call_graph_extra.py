@@ -31,6 +31,85 @@ from abicheck.buildsource.call_graph import (
 )
 
 
+def _b_operator_call_ast(virtual: bool) -> dict:
+    """``struct B { <virtual> void operator()(); }; void use(B &b) { b(); }``
+    -- the real Clang 18 shape for a virtual overloaded-operator call
+    through a base reference: a ``CXXOperatorCallExpr`` whose own callee is
+    a plain ``DeclRefExpr``/``FunctionToPointerDecay`` (no ``MemberExpr`` at
+    all), unlike an ordinary ``obj.f()`` member call."""
+    method: dict = {
+        "kind": "CXXMethodDecl",
+        "id": "0xm",
+        "name": "operator()",
+        "mangledName": "_ZN1BclEv",
+        "type": {"qualType": "void ()"},
+    }
+    if virtual:
+        method["virtual"] = True
+    b_record = {"kind": "CXXRecordDecl", "name": "B", "inner": [method]}
+    call = {
+        "kind": "CXXOperatorCallExpr",
+        "inner": [
+            {
+                "kind": "ImplicitCastExpr",
+                "castKind": "FunctionToPointerDecay",
+                "inner": [
+                    {
+                        "kind": "DeclRefExpr",
+                        "referencedDecl": {"id": "0xm", "kind": "CXXMethodDecl"},
+                    }
+                ],
+            },
+            {
+                "kind": "DeclRefExpr",
+                "referencedDecl": {"id": "0xb", "kind": "ParmVarDecl", "name": "b"},
+            },
+        ],
+    }
+    use = {
+        "kind": "FunctionDecl",
+        "id": "0xu",
+        "name": "use",
+        "mangledName": "_Z3useR1B",
+        "inner": [{"kind": "CompoundStmt", "inner": [call]}],
+    }
+    return {"kind": "TranslationUnitDecl", "inner": [b_record, use]}
+
+
+def test_virtual_operator_call_through_base_reference_is_virtual() -> None:
+    """Codex review, fresh evidence, verified against real Clang 18 output:
+    a virtual overloaded operator invoked through a base reference/pointer
+    (``B &b; b();``) is a ``CXXOperatorCallExpr``, not a
+    ``CXXMemberCallExpr`` -- the previous virtuality check only ever looked
+    at the latter kind, so this call classified `direct`/`exact` even
+    though ``B::operator()`` is virtual, excluding a real derived
+    ``operator()`` override from ``VIRTUAL_CALL_MAY_DISPATCH_TO``
+    entirely."""
+    edges = parse_clang_ast_calls(_b_operator_call_ast(virtual=True))
+    assert edges == [
+        CallEdge(
+            "_Z3useR1B",
+            "_ZN1BclEv",
+            CALL_KIND_VIRTUAL,
+            RESOLUTION_OVERAPPROX,
+        )
+    ]
+
+
+def test_non_virtual_operator_call_stays_direct() -> None:
+    """Contrast case: a non-virtual operator() call must not be swept into
+    the new CXXOperatorCallExpr virtuality check."""
+    edges = parse_clang_ast_calls(_b_operator_call_ast(virtual=False))
+    assert edges == [
+        CallEdge(
+            "_Z3useR1B",
+            "_ZN1BclEv",
+            CALL_KIND_DIRECT,
+            RESOLUTION_EXACT,
+        )
+    ]
+
+
 def _b_d_override_call_ast(d_f_inner: list[dict]) -> dict:
     """``struct B { virtual void f(); }; struct D : B { void f()<extra>;
     void h(){ f(); } };`` -- shared by the two ``_ref_is_virtual`` tests

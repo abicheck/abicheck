@@ -139,6 +139,33 @@ following it, all resolving to their correct source lines end to end.
   same-file: a macro ``#define``d in one header and referenced from a
   declaration in a different file/TU is not modeled (cross-file macro-use
   tracking is a stretch goal deliberately left out of this slice).
+
+**A third accepted, documented limitation, investigated and deliberately
+NOT closed this pass (Codex review, fresh evidence): backslash-newline line
+splicing before a ``//`` line comment.** A real preprocessor removes every
+``\\<newline>`` pair *before* tokenizing, so ``// comment continues \\`` +
+a following physical line makes that WHOLE next physical line part of the
+same, still-open comment — including anything that looks like a directive.
+This scanner operates per *physical* line and has no concept of splicing at
+all, so a genuinely live directive commented out this way (`` // ... \\ ``
+followed by ``#endif``) is read as a real, live ``#endif`` on its own
+physical line — reproduced empirically: nested inside an enclosing guard,
+this pops that guard's frame early, the identical truncation shape every
+other comment-tracking fix in this module closes for a *different*
+mechanism (`` /* */ `` nesting, a leading same-line comment, a carried-over
+multi-line comment closing mid-line). Deliberately not attempted here: unlike
+those three, correctly handling splicing means tracking, per physical line,
+whether the immediately preceding physical line's own ``//`` comment (or
+any other spliced logical line) carries forward onto it — a genuinely
+different propagation mechanism from the existing ``in_block`` carry-over,
+and one that must be threaded through every line-number-keyed caller
+(``ConditionalRegion``'s ``start_line``/``end_line``, ``DeclRange``
+matching) without disturbing their existing physical-line-number contract,
+since clang's own AST ranges are physical-line-based too. A narrower,
+same-slice fix risks getting that line-number fidelity subtly wrong in a
+way worse than the current, honest gap. Pinned by a dedicated regression
+test documenting the current, known-incomplete behavior rather than
+silently accepted.
 """
 
 from __future__ import annotations
