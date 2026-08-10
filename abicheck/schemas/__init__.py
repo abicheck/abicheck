@@ -439,9 +439,33 @@ REPORT_SCHEMA_VERSION = "2.27"
 #:       section 6.4 requires the two commands to be comparable field by
 #:       field, and a row stating only the relevance was not (Codex review).
 #:       Not ``gate_contribution``: that is a property of a severity gate
-#:       ``scan --against`` does not run. Absent without the opt-in, so an
-#:       ordinary scan is still unchanged.
-SCAN_SCHEMA_VERSION = "1.8"
+#:       ``scan --against`` did not run at the time. Absent without the
+#:       opt-in, so an ordinary scan is still unchanged. (1.9 gave ``scan
+#:       --against`` a real severity gate; ``gate_contribution`` is still
+#:       not emitted per finding, which stays a deliberate follow-up.)
+#: 1.9 — the ``diff`` block gained a ``severity`` gate object (the same shape
+#:       ``compare``'s own report carries: ``config``/``categories``/
+#:       ``exit_code``/``blocking``/``blocking_categories``, built by the one
+#:       shared ``reporter._build_severity_json``), emitted when ``scan
+#:       --against`` resolves the ``severity`` exit-code scheme. Under that
+#:       scheme a *compatible* diff can exit non-zero (``--severity-addition
+#:       error`` on an additions-only diff exits 1), so without this block a
+#:       report read ``COMPATIBLE`` with exit 1 and no stated cause --
+#:       indistinguishable from ADR-049 Phase 7's orthogonal
+#:       contract-coverage 1 (Codex review). Absent under the default legacy
+#:       scheme, where there is no gate to report, so an ordinary scan is
+#:       unchanged from 1.8.
+#:       The block is the scan's *compatibility* gate, not the baseline diff's
+#:       alone: a ``--crosscheck KEY=error`` promotion raises it (with a
+#:       ``promoted_crosscheck`` entry in ``blocking_categories``, deliberately
+#:       outside ``IssueCategory``'s vocabulary since no severity level
+#:       produced it -- the same shape as ``aggregate``'s own
+#:       ``operational_error``/``not_comparable``). Without that the block
+#:       claimed a passing gate while the process exited 2, and `aggregate`
+#:       -- which prefers this block -- dropped the gated target from
+#:       ``blocking_targets`` (Codex review). It never lowers the gate: the
+#:       promotion is a floor.
+SCAN_SCHEMA_VERSION = "1.9"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

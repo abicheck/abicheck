@@ -215,7 +215,7 @@ jobs:
           # build-output.json) still falls through to that block's "was not
           # produced" branch instead of aborting this step with a bare
           # traceback.
-          python3 -c "
+          python3 -I -c "
           import json
           import os
           from pathlib import Path
@@ -231,7 +231,7 @@ jobs:
           report = derive_baseline_libraries(build_output, directory)
           Path('baseline-libraries.json').write_text(json.dumps(report.to_dict()))
           " || true
-          python3 -c "
+          python3 -I -c "
           import json, sys
 
           try:

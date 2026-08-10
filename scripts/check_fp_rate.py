@@ -858,6 +858,176 @@ def _python_ext_internal_symbol_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _vtable_capture_asymmetry_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # `RecordType.vtable` cannot express "not captured" -- it is a plain list,
+    # and on the DWARF path it is just the class's own virtual-method DIEs in
+    # child order. So one side's debug info covering a TU the other's did not
+    # (differing -g level, a differently-inlined TU, ODR first-definition-wins)
+    # made an *identical* class look like it gained a whole vtable, and
+    # `type_vtable_changed` fired BREAKING with no `_ZTV` symbol anywhere and
+    # no layout movement at all. Size and virtual bases hold still here, which
+    # is what proves no real polymorphism change happened.
+    def cls(vtable: list[str]) -> RecordType:
+        return RecordType(name="Widget", kind="class", size_bits=128, vtable=vtable)
+
+    return (
+        _snap("1", functions=[_fn("api", ret="Widget *")], types=[cls([])]),
+        _snap("2", functions=[_fn("api", ret="Widget *")], types=[cls(["Widget::draw()"])]),
+    )
+
+
+def _vtable_became_polymorphic_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The FN sentinel for the guard above: a class that *genuinely* gains its
+    # first virtual function also gains a vptr, so it grows. That size movement
+    # is the independent evidence the capture-artifact case lacks, and the
+    # break must still be reported.
+    def cls(vtable: list[str], size: int) -> RecordType:
+        return RecordType(name="Widget", kind="class", size_bits=size, vtable=vtable)
+
+    return (
+        _snap("1", functions=[_fn("api", ret="Widget *")], types=[cls([], 128)]),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Widget *")],
+            types=[cls(["Widget::draw()"], 192)],
+        ),
+    )
+
+
+def _overaligned_first_vptr_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A sufficiently over-aligned class absorbs its new vptr into existing
+    # padding -- verified against g++: `struct alignas(8) A {}` and
+    # `struct alignas(8) A { virtual void f(); }` are both 8 bytes. So "the
+    # class grew" is NOT a sound proxy for "it gained a vtable", and a
+    # size-only guard suppressed this real layout break. The class's own
+    # virtual *functions* are the independent evidence stream that keeps it.
+    def cls(vtable: list[str]) -> RecordType:
+        return RecordType(name="Aligned", kind="class", size_bits=64, vtable=vtable)
+
+    virt = Function(
+        name="Aligned::f", mangled="_ZN7Aligned1fEv", return_type="void",
+        visibility=Visibility.PUBLIC, is_virtual=True,
+    )
+    return (
+        _snap("1", functions=[_fn("api", ret="Aligned *")], types=[cls([])]),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Aligned *"), virt],
+            types=[cls(["Aligned::f()"])],
+        ),
+    )
+
+
+def _overaligned_pure_virtual_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The sibling of the case above, and the one it does not cover: a *pure*
+    # virtual has no out-of-line definition, so `dwarf_snapshot` drops its
+    # declaration-only DIE from `snapshot.functions` while still counting it
+    # as a vtable child of the class. Both owned-signature sets therefore read
+    # empty, and `alignas` keeps the size from moving, so the size backstop
+    # suppressed a class gaining its first vptr *and* becoming abstract
+    # (Codex review). Reproduced against g++ with
+    # `struct alignas(8) A { virtual void f() = 0; }` compiled alongside a
+    # concrete derived class (which is what makes GCC emit A's complete DIE
+    # rather than a `DW_AT_declaration` stub): old vtable `[]`, new vtable
+    # `['_ZN1A1fEv']`, both 8 bytes, and `_ZN1A1fEv` absent from the function
+    # map on both sides.
+    #
+    # `vptr_offset_bits` is the layout descriptor's own witness, and the only
+    # signal here that is not another projection of the same subprogram DIEs.
+    def cls(vtable: list[str], vptr: int | None) -> RecordType:
+        return RecordType(
+            name="Abstract", kind="class", size_bits=64,
+            vtable=vtable, vptr_offset_bits=vptr,
+        )
+
+    return (
+        _snap("1", functions=[_fn("api", ret="Abstract *")], types=[cls([], None)]),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Abstract *")],
+            types=[cls(["Abstract::f()"], 0)],
+        ),
+    )
+
+
+def _namespaced_leaf_vtable_removal_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # CastXML records a namespaced class under its bare leaf (`A`) while the
+    # method's mangled name is fully qualified (`ns::A::foo`), so an *exact*
+    # owner comparison never matched and the class's virtuals read as empty on
+    # both sides -- which let the size backstop suppress a class losing its
+    # last virtual. No other detector reports that, so the run went NO_CHANGE.
+    def cls(vtable: list[str]) -> RecordType:
+        return RecordType(name="A", kind="class", size_bits=64, vtable=vtable)
+
+    virt = Function(
+        name="foo", mangled="_ZN2ns1A3fooEv", return_type="void",
+        visibility=Visibility.PUBLIC, is_virtual=True,
+    )
+    return (
+        _snap("1", functions=[_fn("api", ret="A *"), virt], types=[cls(["A::foo()"])]),
+        _snap("2", functions=[_fn("api", ret="A *")], types=[cls([])]),
+    )
+
+
+def _vtable_reorder_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The other FN sentinel: when *both* sides captured a vtable, there is no
+    # missing evidence to reason about and a reorder is a real break. The guard
+    # must not widen into "any vtable difference is suspect".
+    def cls(vtable: list[str]) -> RecordType:
+        return RecordType(name="Widget", kind="class", size_bits=128, vtable=vtable)
+
+    return (
+        _snap(
+            "1",
+            functions=[_fn("api", ret="Widget *")],
+            types=[cls(["Widget::a()", "Widget::b()"])],
+        ),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Widget *")],
+            types=[cls(["Widget::b()", "Widget::a()"])],
+        ),
+    )
+
+
+_EMPTY_BASE = RecordType(name="Tag", kind="class", size_bits=8)
+_SOLID_BASE = RecordType(
+    name="Payload", kind="class", size_bits=64, fields=[TypeField(name="y", type="int")]
+)
+
+
+def _derived(bases: list[str], size: int) -> RecordType:
+    return RecordType(
+        name="Derived", kind="class", size_bits=size,
+        fields=[TypeField(name="x", type="int")], bases=list(bases),
+    )
+
+
+def _empty_base_added_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The FN sentinel that stops the guard being a copy of the vtable one: an
+    # *empty* base is layout-invisible (EBO -- verified against g++, one and
+    # two empty bases both leave sizeof unchanged), so a static size is
+    # explained and is not evidence of a capture gap. Adding one is a real
+    # ABI-relevant change (conversions, RTTI, overload resolution).
+    return (
+        _snap("1", functions=[_fn("api", ret="Derived *")],
+              types=[_derived([], 64), _EMPTY_BASE]),
+        _snap("2", functions=[_fn("api", ret="Derived *")],
+              types=[_derived(["Tag"], 64), _EMPTY_BASE]),
+    )
+
+
+def _nonempty_base_added_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The ordinary real break: a storage-contributing base moves the size, so
+    # the transition is evidenced and must still be reported.
+    return (
+        _snap("1", functions=[_fn("api", ret="Derived *")],
+              types=[_derived([], 64), _SOLID_BASE]),
+        _snap("2", functions=[_fn("api", ret="Derived *")],
+              types=[_derived(["Payload"], 128), _SOLID_BASE]),
+    )
+
+
 def _python_api_function_dropped() -> tuple[AbiSnapshot, AbiSnapshot]:
     # A public function disappears from the extension's Python API — a real
     # source break the oracle must never scope away (authority rule).
@@ -873,6 +1043,40 @@ CORPUS: list[Case] = [
     # a real Python-API break stays breaking (FN sentinel / authority rule).
     Case("python_ext_internal_symbol_churn", True, _python_ext_internal_symbol_churn),
     Case("python_api_function_dropped", False, _python_api_function_dropped),
+    # Evidence-absence vs. real polymorphism change: one FP guard plus two FN
+    # sentinels, so the guard cannot widen into suppressing real vtable breaks.
+    Case(
+        "vtable_capture_asymmetry_stays_filtered",
+        True,
+        _vtable_capture_asymmetry_stays_filtered,
+    ),
+    Case(
+        "vtable_became_polymorphic_stays_breaking",
+        False,
+        _vtable_became_polymorphic_stays_breaking,
+    ),
+    Case("vtable_reorder_stays_breaking", False, _vtable_reorder_stays_breaking),
+    Case(
+        "namespaced_leaf_vtable_removal_stays_breaking",
+        False,
+        _namespaced_leaf_vtable_removal_stays_breaking,
+    ),
+    Case(
+        "overaligned_first_vptr_stays_breaking",
+        False,
+        _overaligned_first_vptr_stays_breaking,
+    ),
+    Case(
+        "overaligned_pure_virtual_stays_breaking",
+        False,
+        _overaligned_pure_virtual_stays_breaking,
+    ),
+    Case("empty_base_added_stays_breaking", False, _empty_base_added_stays_breaking),
+    Case(
+        "nonempty_base_added_stays_breaking",
+        False,
+        _nonempty_base_added_stays_breaking,
+    ),
     Case("elf_only_function_removed", True, _elf_only_function_removed),
     Case("internal_field_type_changed", True, _internal_field_type_changed),
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
@@ -1357,6 +1561,15 @@ CASE_CATEGORY: dict[str, str] = {
     "public_stdlib_type_used_directly_layout_changed": "stdlib-direct-reference",
     "public_std_string_typedef_alias_layout_changed": "stdlib-direct-reference",
     "stdlib_internal_owner_method_stays_filtered": "stdlib-direct-reference",
+    # evidence-absence vs. real change (a finding must rest on evidence)
+    "vtable_capture_asymmetry_stays_filtered": "evidence-absence",
+    "vtable_became_polymorphic_stays_breaking": "evidence-absence",
+    "vtable_reorder_stays_breaking": "evidence-absence",
+    "namespaced_leaf_vtable_removal_stays_breaking": "evidence-absence",
+    "overaligned_first_vptr_stays_breaking": "evidence-absence",
+    "overaligned_pure_virtual_stays_breaking": "evidence-absence",
+    "empty_base_added_stays_breaking": "evidence-absence",
+    "nonempty_base_added_stays_breaking": "evidence-absence",
     # versioned-symbol scheme / multi-.so bundle
     "versioned_scheme_internal_churn": "versioned-scheme",
     "bundle_sibling_soname_churn": "versioned-scheme",

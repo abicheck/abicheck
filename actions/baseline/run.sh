@@ -56,6 +56,15 @@ for i, e in enumerate(entries):
     if "stage_binary" in e and not isinstance(e["stage_binary"], bool):
         bad_stage_binary = e["stage_binary"]
         sys.exit(f"entry {i} has an invalid \"stage_binary\" {bad_stage_binary!r} -- must be a boolean")
+    # These strings are serialized below as newline-separated records whose
+    # fields use ASCII Unit Separator. Reject either delimiter before
+    # serialization so one field cannot inject a synthetic, unvalidated row.
+    for field in ("artifact", "header", "include"):
+        value = e.get(field, "")
+        if not isinstance(value, str):
+            sys.exit(f"entry {i} has an invalid \"{field}\" {value!r} -- must be a string")
+        if "\n" in value or "\r" in value or "\x1f" in value:
+            sys.exit(f"entry {i} has an invalid \"{field}\" {value!r} -- must not contain record delimiters")
     # Both run.sh ("$OUTPUT_DIR/$name.abicheck.json", bash string concat)
     # and build_manifest.py (output_dir / f"{name}.abicheck.json", pathlib)
     # build the per-library snapshot path directly from this string, so a

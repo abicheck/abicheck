@@ -144,6 +144,325 @@ def test_scan_breaking_exits_four(runner, baseline_snap, new_snap_breaking):
     assert "Verdict: BREAKING" in res.output
 
 
+def test_scan_breaking_with_severity_info_only_exits_zero(
+    runner, baseline_snap, new_snap_breaking
+):
+    # AGENTS.md "Known gaps": `scan --against` used to compute its exit code
+    # from the verdict alone, ignoring `--severity-*`/`--exit-code-scheme` --
+    # unlike `compare`, where `--severity-preset info-only` can leave a
+    # BREAKING verdict at exit 0. Same BREAKING fixture as
+    # test_scan_breaking_exits_four above, but now severity-gated to 0.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(baseline_snap),
+            "--severity-preset",
+            "info-only",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "Verdict: BREAKING" in res.output
+
+
+def test_scan_breaking_with_severity_default_still_exits_four(
+    runner, baseline_snap, new_snap_breaking
+):
+    # `--exit-code-scheme severity` with the *default* severity preset keeps
+    # abi_breaking at error level, so the exit code is unchanged from the
+    # legacy scheme's 4 -- the severity path is a strict superset of the
+    # legacy one, not merely "different".
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(baseline_snap),
+            "--exit-code-scheme",
+            "severity",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+
+
+def test_scan_severity_gate_block_explains_a_nonzero_compatible_exit(
+    runner, baseline_snap, new_snap_compatible
+):
+    # Codex review: under the severity scheme a *compatible* diff can exit
+    # non-zero (`--severity-addition error` on an additions-only diff exits
+    # 1). Without a gate block in the report that reads as "COMPATIBLE, exit
+    # 1, no stated cause" -- indistinguishable from ADR-049 Phase 7's
+    # orthogonal contract-coverage 1. The block names the culprit category.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "--severity-addition",
+            "error",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 1, res.output
+    payload = _payload(res)
+    gate = payload["diff"]["severity"]
+    assert gate["exit_code"] == 1, gate
+    assert gate["blocking"] is True, gate
+    assert gate["blocking_categories"] == ["addition"], gate
+    assert gate["config"]["addition"] == "error", gate
+
+
+def test_scan_severity_blocking_addition_is_named_in_findings(
+    runner, baseline_snap, new_snap_compatible
+):
+    # Codex review: the gate named the blocking *category* and count while
+    # `_baseline_summary` omitted compatible findings, so the report gave no
+    # symbol/kind/description for the finding that actually failed the scan.
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+         "--severity-addition", "error", "--format", "json"],
+    )
+    assert res.exit_code == 1, res.output
+    findings = _payload(res)["diff"].get("findings") or []
+    assert any(
+        f["bucket"] == "compatible" and f["symbol"] == "_Z3bazv" for f in findings
+    ), findings
+
+
+def test_scan_non_blocking_compatible_findings_stay_unitemized(
+    runner, baseline_snap, new_snap_compatible
+):
+    # The complement: when additions do NOT gate, itemizing them would be the
+    # noise `_baseline_summary` deliberately omits. Legacy output unchanged.
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+         "--format", "json"],
+    )
+    assert res.exit_code == 0, res.output
+    diff = _payload(res)["diff"]
+    assert diff["compatible"] >= 1, diff
+    assert not [
+        f for f in (diff.get("findings") or []) if f["bucket"] == "compatible"
+    ], diff
+
+
+def test_scan_legacy_scheme_emits_no_severity_gate_block(
+    runner, baseline_snap, new_snap_breaking
+):
+    # The default (legacy) scheme runs no severity gate, so reporting one
+    # would claim a gate the run never used -- an ordinary scan's summary
+    # stays byte-identical to before this feature.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_breaking),
+            "--against",
+            str(baseline_snap),
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+    assert "severity" not in _payload(res)["diff"]
+
+
+def test_scan_severity_gate_is_rendered_in_default_text_output(
+    runner, baseline_snap, new_snap_compatible
+):
+    # Codex review: text is the *default* format, so the JSON gate block
+    # alone left the common case unexplained -- `Verdict: COMPATIBLE` and
+    # exit 1 with nothing naming the cause, indistinguishable in a CI log
+    # from ADR-049 §7's orthogonal contract-coverage 1.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new_snap_compatible),
+            "--against",
+            str(baseline_snap),
+            "--severity-addition",
+            "error",
+        ],
+    )
+    assert res.exit_code == 1, res.output
+    assert "Verdict: COMPATIBLE" in res.output
+    assert "severity gate: exit 1 — blocking: addition" in res.output
+
+
+def test_scan_legacy_scheme_text_has_no_severity_gate_line(
+    runner, baseline_snap, new_snap_breaking
+):
+    # A legacy-scheme scan runs no severity gate, so its text output must be
+    # unchanged -- reporting a gate would claim one the run never used.
+    res = runner.invoke(
+        main,
+        ["scan", str(new_snap_breaking), "--against", str(baseline_snap)],
+    )
+    assert res.exit_code == 4, res.output
+    assert "severity gate" not in res.output
+
+
+class TestScanPreCoverageBaseExit:
+    """`_scan_pre_coverage_base_exit` — what ADR-049 §7's notice explains itself against.
+
+    Codex review: `_emit_scan_report` re-derived `_verdict_exit_code(verdict)`
+    unconditionally, which is wrong under the severity scheme -- a verdict
+    promoted (or demoted) by severity has a different pre-coverage base, so
+    the published coverage notice could contradict the real exit code.
+    """
+
+    @staticmethod
+    def _outcome(verdict: str, diff_summary):
+        from abicheck.buildsource.risk import RiskScore
+        from abicheck.scan_engine import ScanOutcome
+
+        return ScanOutcome(
+            mode="pr", resolved_method="s5", depth="source",
+            collect_mode="off", risk=RiskScore(total=0), auto=True,
+            changed_path_count=0, changed_path_source="none",
+            diff_summary=diff_summary, verdict=verdict,
+        )
+
+    def test_severity_scheme_reads_the_gate_that_actually_ran(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        # The exact shape Codex named: a COMPATIBLE_WITH_RISK verdict whose
+        # legacy code is 0, promoted to 2 by --severity-potential-breaking
+        # error. The notice must explain itself against 2, not 0.
+        out = self._outcome(
+            "COMPATIBLE_WITH_RISK",
+            {"severity": {"exit_code": 2, "blocking": True,
+                          "blocking_categories": ["potential_breaking"]}},
+        )
+        assert _scan_pre_coverage_base_exit(out) == 2
+
+    def test_severity_scheme_reads_a_demoted_base_too(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        # The inverse: BREAKING (legacy 4) demoted to 0 by info-only.
+        out = self._outcome(
+            "BREAKING",
+            {"severity": {"exit_code": 0, "blocking": False,
+                          "blocking_categories": []}},
+        )
+        assert _scan_pre_coverage_base_exit(out) == 0
+
+    def test_legacy_scheme_falls_back_to_the_verdict_mapping(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        assert _scan_pre_coverage_base_exit(self._outcome("BREAKING", {})) == 4
+        assert _scan_pre_coverage_base_exit(self._outcome("API_BREAK", {})) == 2
+        assert _scan_pre_coverage_base_exit(self._outcome("COMPATIBLE", {})) == 0
+
+    def test_absent_diff_summary_falls_back(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        assert _scan_pre_coverage_base_exit(self._outcome("BREAKING", None)) == 4
+
+    def test_malformed_gate_block_falls_back_rather_than_crashing(self):
+        from abicheck.cli_scan import _scan_pre_coverage_base_exit
+
+        # A NOT_COMPARABLE summary is {"reason": ...}, and a corrupt/foreign
+        # `severity` value must not take down the notice path.
+        assert _scan_pre_coverage_base_exit(
+            self._outcome("BREAKING", {"reason": "scope drift"})
+        ) == 4
+        assert _scan_pre_coverage_base_exit(
+            self._outcome("BREAKING", {"severity": "nonsense"})
+        ) == 4
+        assert _scan_pre_coverage_base_exit(
+            self._outcome("BREAKING", {"severity": {"exit_code": "2"}})
+        ) == 4
+
+
+class TestScanDryRunExitCodePreview:
+    """`--dry-run` must preview the exit-code contract the real run would use.
+
+    Codex review: it stated the legacy codes unconditionally, so
+    `--severity-preset info-only` previewed "0 compatible / 4 ABI break" for a
+    run that exits 0 on a breaking comparison.
+    """
+
+    def test_legacy_scheme_previews_the_verdict_codes(
+        self, runner, baseline_snap, new_snap_compatible
+    ):
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+             "--dry-run"],
+        )
+        assert res.exit_code == 0, res.output
+        assert "exit-code scheme: legacy (0/2/4)" in res.output
+        assert "0 compatible" in res.output
+        assert "resolved severity:" not in res.output
+
+    def test_severity_scheme_previews_the_category_codes_and_levels(
+        self, runner, baseline_snap, new_snap_compatible
+    ):
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+             "--dry-run", "--severity-preset", "info-only"],
+        )
+        assert res.exit_code == 0, res.output
+        assert "exit-code scheme: severity" in res.output
+        assert "abi_breaking=info" in res.output
+        # The consequence a user needs to see, stated outright.
+        assert "breaking comparison can exit 0" in res.output
+
+    def test_config_only_severity_is_not_previewed_as_legacy(
+        self, runner, tmp_path, baseline_snap, new_snap_compatible, monkeypatch
+    ):
+        # The case `dry_run_scheme_label` was itself fixed for: severity comes
+        # from .abicheck.yml with no CLI flag, so a raw-flag check would say
+        # "legacy" while the real run gates on severity.
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  preset: info-only\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        res = runner.invoke(
+            main,
+            ["scan", str(new_snap_compatible), "--against", str(baseline_snap),
+             "--dry-run"],
+        )
+        assert res.exit_code == 0, res.output
+        assert "exit-code scheme: severity" in res.output
+
+    def test_audit_only_run_previews_legacy(self, runner, new_snap_compatible):
+        # No --against means no comparison to gate, so there is no severity
+        # scheme to preview regardless of config.
+        res = runner.invoke(
+            main, ["scan", str(new_snap_compatible), "--dry-run"]
+        )
+        assert res.exit_code == 0, res.output
+        assert "exit-code scheme: legacy (0/2/4)" in res.output
+        assert "resolved severity:" not in res.output
+
+
+def test_scan_severity_preset_without_against_is_usage_error(tmp_path: Path):
+    # --severity-preset only configures the --against baseline comparison,
+    # like the rest of _COMPARISON_ONLY_FLAGS (test_scan_rejects_comparison_
+    # only_flags_without_against in test_scan_baseline_headers.py covers the
+    # pre-existing members of that set).
+    snap = tmp_path / "artifact.so"
+    snap.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+
+    res = CliRunner().invoke(
+        main, ["scan", str(snap), "--severity-preset", "info-only"]
+    )
+    assert res.exit_code == 64, res.output
+    assert "only take effect with --against" in res.output
+
+
 def test_scan_json_format_is_structured(runner, baseline_snap, new_snap_compatible):
     res = runner.invoke(
         main,
@@ -653,6 +972,114 @@ def test_baseline_compare_promoted_crosscheck_still_gates(runner, tmp_path):
     assert res.exit_code == 2, res.output
     payload = _payload(res)
     assert payload["verdict"] == "API_BREAK"
+
+
+def test_published_gate_reflects_a_promoted_crosscheck(runner, tmp_path):
+    # Codex review (P1): the gate block is written by `_run_baseline_compare`
+    # from the baseline diff alone, then `run_scan_core` promotes the exit for
+    # an error-level crosscheck. A clean baseline gate therefore published
+    # `exit_code: 0, blocking: false` while the process exited 2 -- and since
+    # `aggregate.GateInfo.from_scan_report` now *prefers* this block, the
+    # explicitly gated target read as nonblocking. Same un-blocking failure
+    # the nested-block preference was introduced to fix, other route in.
+    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
+    new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--exit-code-scheme", "severity",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    gate = _payload(res)["diff"]["severity"]
+    assert gate["exit_code"] == 2, gate
+    assert gate["blocking"] is True, gate
+    assert "promoted_crosscheck" in gate["blocking_categories"], gate
+
+    # …and the aggregate reader must agree, which is the whole point.
+    from abicheck.aggregate import GateInfo
+
+    parsed = GateInfo.from_scan_report(_payload(res))
+    assert parsed is not None and parsed.blocking is True
+
+
+def test_a_promoted_crosscheck_never_lowers_an_already_blocking_gate(
+    runner, tmp_path, baseline_snap, new_snap_breaking
+):
+    # The promotion is a floor: it may add a blocking reason, never clear one
+    # a severity category already raised (crosscheck exit is at most 2).
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new_snap_breaking), "--against", str(baseline_snap),
+            "--crosscheck", "exported_not_public=error",
+            "--exit-code-scheme", "severity",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+    gate = _payload(res)["diff"]["severity"]
+    assert gate["exit_code"] == 4, gate
+    assert "abi_breaking" in gate["blocking_categories"], gate
+    assert "promoted_crosscheck" not in gate["blocking_categories"], gate
+
+
+def test_severity_demoted_breaking_verdict_survives_crosscheck_promotion(
+    runner, tmp_path
+):
+    # Codex review: the promoted-crosscheck block used to assume
+    # `sev_exit > exit_code` only holds when `exit_code == 0` implies the
+    # diff verdict was already non-breaking (true under the legacy scheme,
+    # where BREAKING always maps to exit 4). `--severity-preset info-only`
+    # breaks that assumption -- a genuinely BREAKING diff can now exit 0 --
+    # so a promoted crosscheck (exit 2) must still raise the exit code, but
+    # must NOT relabel the verdict "API_BREAK": that would understate a real
+    # BREAKING diff as the less severe API_BREAK.
+    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
+    # Same crosscheck-triggering shape as `old`, but with `bar` removed --
+    # a hard ABI break -- so the baseline diff verdict is BREAKING.
+    from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    new_snap = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        parsed_with_build_context=False,
+        functions=[],
+        elf=_elf(),
+    )
+    new_snap.build_source = BuildSourcePack(
+        root=Path(""),
+        build_evidence=BuildEvidence(
+            build_options=[
+                BuildOption(key="glibcxx_use_cxx11_abi", value="1", abi_relevant=True)
+            ]
+        ),
+    )
+    new = _write_snapshot(tmp_path / "new.abi.json", new_snap)
+
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            str(new),
+            "--against",
+            str(old),
+            "--crosscheck",
+            "header_build_context_mismatch=error",
+            "--severity-preset",
+            "info-only",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    payload = _payload(res)
+    assert payload["verdict"] == "BREAKING"
 
 
 def _snap_with_build_flag(tmp_path: Path, name: str, value: str) -> Path:

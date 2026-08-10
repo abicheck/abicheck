@@ -65,6 +65,9 @@ topics:
     fact_sources:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
+      - abicheck/severity.py
+      - abicheck/cli_scan.py
+      - abicheck/cli_scan_baseline.py
     reference_page: reference/exit-codes.md
     task_pages:
       - use/ci-gating.md

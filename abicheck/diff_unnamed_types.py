@@ -54,56 +54,83 @@ from .model import AbiSnapshot
 _UNNAMED_STRUCT_TOKEN = re.compile(r"Ut\d*_")
 
 
+def _skip_source_name(mangled: str, i: int, n: int) -> int | None:
+    """Index just past the ``<source-name> ::= <decimal length> <identifier>``
+    at *i*, or None when its length prefix is invalid.
+
+    Skipping the whole identifier is what keeps a token inside a user name from
+    ever being matched.
+    """
+    j = i
+    while j < n and mangled[j].isdigit():
+        j += 1
+    # Symbol names are untrusted input from ELF files/snapshots.
+    # Avoid feeding an unbounded digit run to int(): Python's
+    # integer-string guard can raise ValueError (and, if disabled, a
+    # huge conversion would waste CPU/memory). A source-name length
+    # larger than the whole mangled string cannot be valid anyway.
+    if j - i > len(str(n)):
+        return None
+    # The slice is non-empty, ASCII-decimal-only, and bounded above,
+    # so int() cannot raise ValueError here.
+    length = int(mangled[i:j])
+    if length == 0 or length > n - j:
+        return None
+    return j + length
+
+
+def _skip_substitution(mangled: str, i: int, n: int) -> int:
+    """Index just past the ``substitution ::= S <seq-id (base-36)> _ |
+    S <std abbrev> | S_`` at *i*."""
+    nxt = mangled[i + 1] if i + 1 < n else ""
+    if nxt in "abdiost":  # St/Sa/Sb/Ss/Si/So/Sd 2-char std abbreviations
+        return i + 2
+    j = i + 1
+    while j < n and (mangled[j].isdigit() or mangled[j].isupper()):
+        j += 1
+    return j + 1 if j < n and mangled[j] == "_" else i + 1
+
+
+def _skip_number_terminated(mangled: str, i: int, n: int) -> int:
+    """Index just past a ``template-param ::= T <number> _ | T_`` or
+    ``array-type ::= A <number> _ <type> | A _ <type>`` at *i*."""
+    j = i + 1
+    while j < n and mangled[j].isdigit():
+        j += 1
+    return j + 1 if j < n and mangled[j] == "_" else i + 1
+
+
+def _next_token_index(mangled: str, i: int, n: int) -> int | None:
+    """Index just past the length-or-bound-carrying production at *i*; *i*
+    itself when none starts here; None when the mangling is invalid.
+
+    Substitution / template-param / array productions embed a seq-id or bound
+    that must NOT be read as a <source-name> length prefix — their leading
+    letter would otherwise be stepped over and the *following* digit misread as
+    a length, skipping a real `Ut_`/`Ul…` token. (`Ut`/`Ul` start with `U`,
+    never `S`/`T`/`A`, so they are unaffected.)
+    """
+    ch = mangled[i]
+    if ch.isdigit():
+        return _skip_source_name(mangled, i, n)
+    if ch == "S":
+        return _skip_substitution(mangled, i, n)
+    if ch in "TA":
+        return _skip_number_terminated(mangled, i, n)
+    return i
+
+
 def _unnamed_kind(mangled: str) -> str | None:
     """Return a human label if *mangled* embeds an unnamed type at a real
     mangling-token boundary, else None."""
     i = 0
     n = len(mangled)
     while i < n:
-        ch = mangled[i]
-        if ch.isdigit():
-            # <source-name> ::= <decimal length> <identifier>. Skip the whole
-            # identifier so tokens inside a user name are never matched.
-            j = i
-            while j < n and mangled[j].isdigit():
-                j += 1
-            # Symbol names are untrusted input from ELF files/snapshots.
-            # Avoid feeding an unbounded digit run to int(): Python's
-            # integer-string guard can raise ValueError (and, if disabled, a
-            # huge conversion would waste CPU/memory). A source-name length
-            # larger than the whole mangled string cannot be valid anyway.
-            if j - i > len(str(n)):
-                return None
-            # The slice is non-empty, ASCII-decimal-only, and bounded above,
-            # so int() cannot raise ValueError here.
-            length = int(mangled[i:j])
-            if length == 0 or length > n - j:
-                return None
-            i = j + length
-            continue
-        # Substitution / template-param / array productions embed a seq-id or
-        # bound that must NOT be read as a <source-name> length prefix — their
-        # leading letter would otherwise be stepped over and the *following*
-        # digit misread as a length, skipping a real `Ut_`/`Ul…` token:
-        #   substitution   ::= S <seq-id (base-36)> _ | S <std abbrev> | S_
-        #   template-param ::= T <number> _ | T_
-        #   array-type     ::= A <number> _ <type> | A _ <type>
-        # (`Ut`/`Ul` start with `U`, never `S`/`T`/`A`, so they are unaffected.)
-        if ch == "S":
-            nxt = mangled[i + 1] if i + 1 < n else ""
-            if nxt in "abdiost":  # St/Sa/Sb/Ss/Si/So/Sd 2-char std abbreviations
-                i += 2
-                continue
-            j = i + 1
-            while j < n and (mangled[j].isdigit() or mangled[j].isupper()):
-                j += 1
-            i = j + 1 if j < n and mangled[j] == "_" else i + 1
-            continue
-        if ch in "TA":
-            j = i + 1
-            while j < n and mangled[j].isdigit():
-                j += 1
-            i = j + 1 if j < n and mangled[j] == "_" else i + 1
+        nxt = _next_token_index(mangled, i, n)
+        if nxt is None:
+            return None
+        if nxt != i:
+            i = nxt
             continue
         # Structural position: `Ut[<n>]_` / `Ul…E[<n>]_` are the productions.
         if mangled.startswith("Ul", i):

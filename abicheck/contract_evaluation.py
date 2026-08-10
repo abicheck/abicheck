@@ -1287,74 +1287,18 @@ def _exports_mode_decision(
     )
 
 
-def evaluate_change_contract_relevance(
+def _mode_dispatch_decision(
     change: Change,
+    mode: ContractMode,
     surf_old: PublicSurface,
     surf_new: PublicSurface,
-    *,
-    mode: ContractMode = ContractMode.PUBLIC,
-    unions: SurfaceUnions | None = None,
-    force_public_symbols: frozenset[str] | None = None,
-    public_surface_allowlist: frozenset[str] | None = None,
-    exports_old: ExportSurface | None = None,
-    exports_new: ExportSurface | None = None,
-    directly_referenced_stdlib_old: frozenset[str] | None = None,
-    directly_referenced_stdlib_new: frozenset[str] | None = None,
-) -> ContractEvaluationDecision:
-    """Compute *change*'s shadow contract-relevance decision.
-
-    ``mode`` selects the declared contract (all three ADR-049 D2 values are
-    implemented). ``surf_old``/``surf_new`` are
-    the same :class:`~abicheck.surface.PublicSurface` pair
-    ``FilterNonPublicSurface`` already computes; pass a precomputed
-    ``unions`` (:func:`~abicheck.surface.surface_unions`) when evaluating many
-    changes against the same pair, mirroring
-    :func:`~abicheck.surface.classify_change_surface`'s own guidance.
-    ``exports_old``/``exports_new`` are the corresponding
-    :class:`~abicheck.export_surface.ExportSurface` pair
-    (:func:`~abicheck.export_surface.compute_export_surface`), required when
-    and only when ``mode`` is ``EXPORTS`` -- that domain's roots are the
-    binary's own export table, evidence a ``PublicSurface`` does not carry.
-    Omitting them under ``EXPORTS`` is a caller error (``ValueError``), not a
-    silent degradation to a header-derived answer for a domain that is not
-    header-derived.
-    ``directly_referenced_stdlib_old``/``directly_referenced_stdlib_new``
-    are each side's
-    :func:`~abicheck.type_reachability.directly_referenced_stdlib_type_spellings`
-    -- see :func:`_in_surface_result_is_confirmed`'s docstring for why this
-    is a second confirmation source, independent of ``public_types``. Omit
-    them (the default) for a caller with no snapshot in scope; a `PUBLIC`
-    evaluation degrades to exactly its pre-existing behaviour, never raising.
-    ``force_public_symbols`` mirrors ``PipelineContext.force_public_symbols``
-    (ADR-024 D6's widening overlay, ``FilterNonPublicSurface``'s
-    ``_run_scope``/``_run_allowlist``) -- omit it (the default) when the
-    caller has no such overlay configured for this run. ``public_surface_allowlist``
-    mirrors ``PipelineContext.public_surface_allowlist`` (the ``--post-manifest``
-    committed-export set consulted by ``FilterNonPublicSurface._run_allowlist``)
-    -- omit it (the default) for a run with no POST manifest configured.
-
-    Never raises for a *finding* it cannot confidently classify -- every such
-    case degrades to ``UNKNOWN_UNRESOLVED`` (see the module docstring's
-    ``UNKNOWN_UNPROVEN`` rule). It raises for an entirely invalid ``mode``
-    value, and for ``EXPORTS`` without an ``ExportSurface`` pair (both
-    ``ValueError``).
+    exports_old: ExportSurface | None,
+    exports_new: ExportSurface | None,
+) -> ContractEvaluationDecision | None:
+    """The decisions settled by the finding's kind and the selected contract
+    domain alone, before any header-surface evidence is consulted. ``None``
+    when none applies and the PUBLIC path continues.
     """
-    # `ContractMode` is a `str` Enum, so an untyped caller passing the bare
-    # serialized value (e.g. `"all"` from a config/API adapter) would compare
-    # equal to a member (equality/hash) but then silently fail the
-    # `is ContractMode.ALL` identity check below, falling through to the
-    # PUBLIC path for a caller that actually asked for ALL (Codex review).
-    # Coercing through the enum constructor first (a no-op for an
-    # already-real member) means every later `is` comparison is safe.
-    mode = coerce_contract_mode(mode)
-    if mode is ContractMode.EXPORTS and (exports_old is None or exports_new is None):
-        raise ValueError(
-            "contract mode 'exports' requires an ExportSurface pair "
-            "(exports_old/exports_new, from "
-            "abicheck.export_surface.compute_export_surface) -- its roots are "
-            "the binary's own export table, which a PublicSurface does not carry"
-        )
-
     if change.kind.value in _NOT_APPLICABLE_KIND_SLUGS:
         return _not_applicable_decision()
 
@@ -1392,8 +1336,21 @@ def evaluate_change_contract_relevance(
 
     if mode is ContractMode.ALL:
         return _all_mode_decision()
+    return None
 
-    # mode is ContractMode.PUBLIC from here on.
+
+def _pipeline_authority_decision(
+    change: Change,
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+    *,
+    force_public_symbols: frozenset[str] | None,
+    public_surface_allowlist: frozenset[str] | None,
+) -> ContractEvaluationDecision | None:
+    """Decisions an earlier pipeline step already made authoritatively, which a
+    from-scratch ``classify_change_surface`` recomputation here cannot see and
+    could contradict. ``None`` when none applies.
+    """
     # A finding already demoted to the audit ledger by an earlier pipeline
     # step (FilterNonPublicSurface / DemoteOffPythonSurface /
     # DemoteUnreachableInternalChurn, post_processing.py) already carries
@@ -1493,28 +1450,22 @@ def evaluate_change_contract_relevance(
             reason_code="public_root_membership",
             assurance=ContractAssurance.COMPLETE,
         )
+    return None
 
-    # ADR-049 D4: "If the authoritative side is unresolved, evidence from
-    # the other side cannot manufacture confidence." Checking the
-    # *authoritative* side specifically (not "either side" -- a prior
-    # version of this gate used `surf_old.resolvable or surf_new.resolvable`,
-    # which let an unrelated resolvable *non*-authoritative side substitute
-    # for the authoritative one) -- e.g. a `FUNC_REMOVED` finding is proven
-    # by the *old* side alone (the function existed and was public there;
-    # the new side's own header availability is irrelevant to that fact),
-    # so only the old side's resolvability matters for it; a `FUNC_ADDED`
-    # finding is the mirror image, judged by the new side alone (Codex
-    # review, fresh evidence).
-    auth = _authoritative_surface(change, surf_old, surf_new)
-    if not auth.resolvable:
-        return _unresolved_decision(
-            "required_evidence_incomplete", ContractAssurance.UNAVAILABLE
-        )
 
-    identity = resolve_change_identity(change)
-    if identity.tier == IDENTITY_TIER_REDUCED:
-        return _unresolved_decision("identity_ambiguous", ContractAssurance.PARTIAL)
-
+def _surface_classification_decision(
+    change: Change,
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+    *,
+    unions: SurfaceUnions | None,
+    directly_referenced_stdlib_old: frozenset[str] | None,
+    directly_referenced_stdlib_new: frozenset[str] | None,
+) -> ContractEvaluationDecision:
+    """The from-scratch header-surface classification, reached only once every
+    earlier authority has declined to settle the finding and both the
+    authoritative surface and the finding's identity have resolved.
+    """
     if unions is None:
         unions = surface_unions(surf_old, surf_new)
     in_surface, reason = classify_change_surface(
@@ -1546,6 +1497,122 @@ def evaluate_change_contract_relevance(
     # still be unresolvable and fall through to here, in which case
     # `classify_change_surface`'s own gate keeps it at `in_surface=True`).
     return _decision_for_surface_reason(reason or "", change, surf_old, surf_new)
+
+
+def evaluate_change_contract_relevance(
+    change: Change,
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+    *,
+    mode: ContractMode = ContractMode.PUBLIC,
+    unions: SurfaceUnions | None = None,
+    force_public_symbols: frozenset[str] | None = None,
+    public_surface_allowlist: frozenset[str] | None = None,
+    exports_old: ExportSurface | None = None,
+    exports_new: ExportSurface | None = None,
+    directly_referenced_stdlib_old: frozenset[str] | None = None,
+    directly_referenced_stdlib_new: frozenset[str] | None = None,
+) -> ContractEvaluationDecision:
+    """Compute *change*'s shadow contract-relevance decision.
+
+    ``mode`` selects the declared contract (all three ADR-049 D2 values are
+    implemented). ``surf_old``/``surf_new`` are
+    the same :class:`~abicheck.surface.PublicSurface` pair
+    ``FilterNonPublicSurface`` already computes; pass a precomputed
+    ``unions`` (:func:`~abicheck.surface.surface_unions`) when evaluating many
+    changes against the same pair, mirroring
+    :func:`~abicheck.surface.classify_change_surface`'s own guidance.
+    ``exports_old``/``exports_new`` are the corresponding
+    :class:`~abicheck.export_surface.ExportSurface` pair
+    (:func:`~abicheck.export_surface.compute_export_surface`), required when
+    and only when ``mode`` is ``EXPORTS`` -- that domain's roots are the
+    binary's own export table, evidence a ``PublicSurface`` does not carry.
+    Omitting them under ``EXPORTS`` is a caller error (``ValueError``), not a
+    silent degradation to a header-derived answer for a domain that is not
+    header-derived.
+    ``directly_referenced_stdlib_old``/``directly_referenced_stdlib_new``
+    are each side's
+    :func:`~abicheck.type_reachability.directly_referenced_stdlib_type_spellings`
+    -- see :func:`_in_surface_result_is_confirmed`'s docstring for why this
+    is a second confirmation source, independent of ``public_types``. Omit
+    them (the default) for a caller with no snapshot in scope; a `PUBLIC`
+    evaluation degrades to exactly its pre-existing behaviour, never raising.
+    ``force_public_symbols`` mirrors ``PipelineContext.force_public_symbols``
+    (ADR-024 D6's widening overlay, ``FilterNonPublicSurface``'s
+    ``_run_scope``/``_run_allowlist``) -- omit it (the default) when the
+    caller has no such overlay configured for this run. ``public_surface_allowlist``
+    mirrors ``PipelineContext.public_surface_allowlist`` (the ``--post-manifest``
+    committed-export set consulted by ``FilterNonPublicSurface._run_allowlist``)
+    -- omit it (the default) for a run with no POST manifest configured.
+
+    Never raises for a *finding* it cannot confidently classify -- every such
+    case degrades to ``UNKNOWN_UNRESOLVED`` (see the module docstring's
+    ``UNKNOWN_UNPROVEN`` rule). It raises for an entirely invalid ``mode``
+    value, and for ``EXPORTS`` without an ``ExportSurface`` pair (both
+    ``ValueError``).
+    """
+    # `ContractMode` is a `str` Enum, so an untyped caller passing the bare
+    # serialized value (e.g. `"all"` from a config/API adapter) would compare
+    # equal to a member (equality/hash) but then silently fail the
+    # `is ContractMode.ALL` identity check below, falling through to the
+    # PUBLIC path for a caller that actually asked for ALL (Codex review).
+    # Coercing through the enum constructor first (a no-op for an
+    # already-real member) means every later `is` comparison is safe.
+    mode = coerce_contract_mode(mode)
+    if mode is ContractMode.EXPORTS and (exports_old is None or exports_new is None):
+        raise ValueError(
+            "contract mode 'exports' requires an ExportSurface pair "
+            "(exports_old/exports_new, from "
+            "abicheck.export_surface.compute_export_surface) -- its roots are "
+            "the binary's own export table, which a PublicSurface does not carry"
+        )
+
+    mode_decision = _mode_dispatch_decision(
+        change, mode, surf_old, surf_new, exports_old, exports_new
+    )
+    if mode_decision is not None:
+        return mode_decision
+
+    # mode is ContractMode.PUBLIC from here on.
+    pipeline_decision = _pipeline_authority_decision(
+        change,
+        surf_old,
+        surf_new,
+        force_public_symbols=force_public_symbols,
+        public_surface_allowlist=public_surface_allowlist,
+    )
+    if pipeline_decision is not None:
+        return pipeline_decision
+
+    # ADR-049 D4: "If the authoritative side is unresolved, evidence from
+    # the other side cannot manufacture confidence." Checking the
+    # *authoritative* side specifically (not "either side" -- a prior
+    # version of this gate used `surf_old.resolvable or surf_new.resolvable`,
+    # which let an unrelated resolvable *non*-authoritative side substitute
+    # for the authoritative one) -- e.g. a `FUNC_REMOVED` finding is proven
+    # by the *old* side alone (the function existed and was public there;
+    # the new side's own header availability is irrelevant to that fact),
+    # so only the old side's resolvability matters for it; a `FUNC_ADDED`
+    # finding is the mirror image, judged by the new side alone (Codex
+    # review, fresh evidence).
+    auth = _authoritative_surface(change, surf_old, surf_new)
+    if not auth.resolvable:
+        return _unresolved_decision(
+            "required_evidence_incomplete", ContractAssurance.UNAVAILABLE
+        )
+
+    identity = resolve_change_identity(change)
+    if identity.tier == IDENTITY_TIER_REDUCED:
+        return _unresolved_decision("identity_ambiguous", ContractAssurance.PARTIAL)
+
+    return _surface_classification_decision(
+        change,
+        surf_old,
+        surf_new,
+        unions=unions,
+        directly_referenced_stdlib_old=directly_referenced_stdlib_old,
+        directly_referenced_stdlib_new=directly_referenced_stdlib_new,
+    )
 
 
 def evidence_refs_for_change(

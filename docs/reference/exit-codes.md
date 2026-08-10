@@ -254,6 +254,68 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 > ever exits `0`/`1`/`64`, never a verdict code; see
 > [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
 
+### `scan --against` and severity (mirrors `compare`)
+
+`scan --against` accepts the same severity surface as `compare` —
+`--severity-preset`, the hidden per-category `--severity-*` overrides, and
+`--exit-code-scheme` (plus `.abicheck.yml`'s `severity:`/`exit_code_scheme`
+keys) — and, like `compare`, uses them to compute the `0`/`2`/`4` portion of
+the exit code above from `severity.compute_exit_code` instead of the raw
+verdict when the resolved scheme is `severity`. A `BREAKING` verdict under
+`--severity-preset info-only` can therefore exit `0`, exactly as it can with
+`compare`.
+
+Under the `severity` scheme the JSON report's `diff` block also carries a
+`severity` gate object — the same `config`/`categories`/`exit_code`/
+`blocking`/`blocking_categories` shape `compare`'s own report uses (one
+shared builder, so the two are comparable field by field), added in
+`scan_schema_version` 1.9. It is what makes a non-zero exit on an otherwise
+*compatible* diff self-explanatory: `--severity-addition error` on an
+additions-only diff exits `1`, and `blocking_categories: ["addition"]` names
+the cause, distinguishing it from the orthogonal contract-coverage `1`
+above. The default **text** output states the same fact in its
+`Baseline comparison` block:
+
+```
+Baseline comparison
+  breaking=0 api_break=0 risk=0 compatible=1
+  severity gate: exit 1 — blocking: addition
+
+Verdict: COMPATIBLE
+```
+
+Both are absent under the default legacy scheme, which runs no severity
+gate.
+
+The block is the scan's **compatibility gate**, not the baseline diff's
+alone: a cross-check the maintainer promoted with `--crosscheck KEY=error`
+raises it too, adding a `promoted_crosscheck` entry to `blocking_categories`
+(deliberately outside the four severity categories, since no severity level
+produced it). The promotion is a floor — it can add a blocking reason but
+never clear one a severity category already raised.
+
+`aggregate` reads that `diff.severity` block as the target's compatibility
+gate when it is present, exactly as it reads a `compare` report's own
+`severity` block (and with the same fail-closed validation). This is what
+keeps the two orthogonal axes separable for a scan target: a legacy-scheme
+scan has no native exit `1`, so a raw `1` can only be the coverage
+contribution — but a severity-scheme scan *does* (an error-level addition),
+and folding both to `1` would otherwise be indistinguishable. See
+[`abicheck aggregate`](#abicheck-aggregate).
+
+`scan --dry-run` previews whichever scheme the invocation resolves —
+the scheme label, the per-category severity levels, and that scheme's exit
+codes — so the preview matches the run it is predicting.
+
+This is CLI/config-level parity only — a gate pack (`--pack`)
+does not yet fold a `gate.*` assignment into a scan's severity the way it
+does for `compare`; pass `--severity-*`/`--exit-code-scheme` directly
+instead. Every flag in this family is a comparison-only flag (rejected as a
+usage error without `--against`, exit `64`) — see the table above. The
+budget (`5`), `NOT_COMPARABLE` (`6`), and evidence-contract-error exit codes
+are unaffected: they are returned before the baseline comparison — and
+therefore before any severity computation — ever runs.
+
 ---
 
 ## `abicheck aggregate`
@@ -268,8 +330,11 @@ Phase 7), and the exit code is the worst contribution across them:
   those, it never recomputes a gate from the compatibility verdict. So a
   `COMPATIBLE` report with an `addition=error` policy still contributes exit
   `1`, and a `BREAKING` report under a demoted preset can contribute `0`. A
-  `scan` report is read via its own top-level `exit_code` (keyed on
-  `scan_schema_version`). Reports produced without any gate block fall back to
+  `scan` report is read via its own nested `diff.severity` gate block when it
+  has one (a severity-scheme `scan --against`, schema 1.9+ — read through the
+  identical validator a `compare` block goes through), and otherwise via its
+  top-level `exit_code` (keyed on `scan_schema_version`).
+  Reports produced without any gate block fall back to
   the legacy verdict→exit mapping (`0`/`2`/`4`). Reading is **fail-closed**: a
   report whose gate block is *present but corrupt* (an out-of-range or
   non-integer `exit_code`, a `blocking` flag that contradicts it, non-string
@@ -503,16 +568,24 @@ one of those.
 |-----------------|------------------------|--------------------------|-------------|-------------------|----------------------|---------------|
 | `NO_CHANGE` / `PASS` / compatible | `0` | `0` | `0` | `0` | `0` | `0` |
 | `COMPATIBLE` | `0` | `0` | `0`‡ | — | — | `0` |
-| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0`‡ | — | — | `0` |
-| Additions only | `0` | `0`–`1`* | `0`‡ | — | — | n/a |
-| Quality issues only | `0` | `0`–`1`* | `0`‡ | — | — | n/a |
+| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0` / `0`–`2`*‡ | — | — | `0` |
+| Additions only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — | n/a |
+| Quality issues only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — | n/a |
 | `WARN` (ABI risk) | — | — | — | — | `1` | — |
-| `API_BREAK` | `2` | `0`–`2`* | `2` | — | — | `2` |
-| `BREAKING` / `FAIL` | `4` | `4` | `4` | — | `4` | `1` |
+| `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — | `2` |
+| `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` | `1` |
 | `--budget` overflow | — | — | `5` | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — | — |
 | Load failure | — | — | — | — | `4` | — |
 | Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† | `3/4/5/6/7/8/10/11` |
+
+In the `scan` column, the value left of the `/` is the legacy (verdict-based)
+mapping — the default — and the value right of it applies once `scan
+--against` resolves the `severity` scheme (any `--severity-preset`/
+`--severity-*`/`--exit-code-scheme severity`, or a config `severity:` block),
+where it follows the same `compare` exit (severity) column; see
+["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare)
+above.
 
 App/plugin-scoped comparisons (`compare --used-by`/`--required-symbol`) reuse
 the `compare` columns above — see
@@ -524,9 +597,15 @@ see [`abicheck aggregate`](#abicheck-aggregate).
 none of these rows — it always exits `0`/`1`/`64`; see
 [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) above.
 
-\* Severity exit codes depend on the configuration. For example, with
+\* Severity exit codes depend on the configuration, and the range covers the
+whole configuration space — **including demotion of a real break**. With
 `--severity-addition error`, additions exit `1`; with `--severity-preset
-info-only`, everything exits `0`.
+info-only` every category is `info`, so *everything* exits `0`, a `BREAKING`
+comparison included. The default preset leaves `potential_breaking` at
+`warning`, so an `API_BREAK` exits `0` unless `--severity-preset strict` (or
+`--severity-potential-breaking error`) raises it to `2`. Read the report's
+own `severity` gate block — `exit_code`/`blocking`/`blocking_categories` —
+rather than inferring the cause from the code.
 
 † Every command exits `64` for an invalid invocation — bad arguments/options
 or an unreadable/unrecognised input — deliberately outside the verdict/result
@@ -534,9 +613,16 @@ space so a usage error is never mistaken for a compatibility result. To
 reliably distinguish verdicts from errors in a script, use `--format json` and
 read the `verdict` field where available.
 
-‡ `scan`'s own scheme collapses every compatible/advisory-only state (no
-break, deployment risk, additions, quality signals) to exit `0` — read
-`--format json` if your pipeline needs to distinguish them.
+‡ Two schemes, shown as `legacy / severity`. `scan`'s **legacy** scheme (the
+default) collapses every compatible/advisory-only state (no break,
+deployment risk, additions, quality signals) to exit `0` — read `--format
+json` if your pipeline needs to distinguish them. Under a resolved
+`severity` scheme (`scan --against` with any `--severity-*`/
+`--exit-code-scheme severity`, or a config `severity:` block) `scan` follows
+the `compare` exit (severity) column on the same `*` terms, in **both**
+directions: `--severity-addition error` exits `1` on an additions-only diff,
+and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
+["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare).
 
 ---
 

@@ -172,6 +172,27 @@ class TestLibrariesJsonValidation:
         assert result.returncode == 1
         assert "entry 1" in result.stdout
 
+    @pytest.mark.parametrize("field", ["artifact", "header", "include"])
+    @pytest.mark.parametrize("delimiter", ["\n", "\r", "\x1f"])
+    def test_record_delimiter_in_field_fails(
+        self, tmp_path: Path, field: str, delimiter: str
+    ) -> None:
+        entry = {"name": "safe", "artifact": "libsafe.so"}
+        entry[field] = f"safe{delimiter}../../injected\x1fpayload.so\x1f\x1f\x1f1"
+        result, _ = _run_action({"INPUT_LIBRARIES": json.dumps([entry])}, tmp_path)
+        assert result.returncode == 1
+        assert f'invalid "{field}"' in result.stdout
+        assert "must not contain record delimiters" in result.stdout
+        assert not (tmp_path.parent / "injected.abicheck.json").exists()
+
+    @pytest.mark.parametrize("field", ["artifact", "header", "include"])
+    def test_non_string_field_fails(self, tmp_path: Path, field: str) -> None:
+        entry = {"name": "safe", "artifact": "libsafe.so", field: ["unsafe"]}
+        result, _ = _run_action({"INPUT_LIBRARIES": json.dumps([entry])}, tmp_path)
+        assert result.returncode == 1
+        assert f'invalid "{field}"' in result.stdout
+        assert "must be a string" in result.stdout
+
     def test_duplicate_library_name_fails(self, tmp_path: Path) -> None:
         # A generated matrix producing two entries with the same name would
         # otherwise have the second dump silently overwrite the first's

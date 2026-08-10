@@ -1631,6 +1631,99 @@ class TestContractCoverageAxis:
         assert result.contract_coverage_targets == (LINUX,)
         assert result.to_dict()["contract_coverage"]["exit_contribution"] == 1
 
+    def test_a_severity_scheme_scan_gate_survives_a_coincident_coverage_failure(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review: `from_scan_report` separated the coverage contribution
+        # by arguing scan "has no native 1" -- true until severity reached
+        # `scan --against`. An error-level addition is a native compatibility
+        # 1; folded with a coverage 1 it yields a top-level 1 that the raw-code
+        # branch attributed entirely to coverage, returning a *passing* gate
+        # and dropping the target from `blocking_targets`. The severity-scheme
+        # report answers directly via its own `diff.severity` block.
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.9",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 1,
+                    "contract_coverage_exit_contribution": 1,
+                    "diff": {
+                        "contract_coverage_exit_contribution": 1,
+                        "severity": {
+                            "exit_code": 1,
+                            "blocking": True,
+                            "blocking_categories": ["addition"],
+                        },
+                    },
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        # Both axes fire, independently and for their own reasons.
+        assert result.contract_coverage_exit == 1
+        assert LINUX in result.blocking_targets, (
+            "a severity-gated scan target must keep blocking even when a "
+            "coverage failure folds to the same top-level exit code"
+        )
+        target = next(t for t in result.targets if t.target_id == LINUX)
+        assert target.gate is not None
+        assert target.gate.blocking_categories == ("addition",)
+
+    def test_a_clean_severity_scheme_scan_still_passes_the_compatibility_axis(
+        self, tmp_path: Path
+    ) -> None:
+        # The complement: a severity gate that cleared must not be turned into
+        # a compatibility failure by a coincident coverage-only exit 1 -- the
+        # two axes stay orthogonal (ADR-049 §7).
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.9",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 1,
+                    "contract_coverage_exit_contribution": 1,
+                    "diff": {
+                        "contract_coverage_exit_contribution": 1,
+                        "severity": {
+                            "exit_code": 0,
+                            "blocking": False,
+                            "blocking_categories": [],
+                        },
+                    },
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert result.contract_coverage_exit == 1
+        assert LINUX not in result.blocking_targets
+
+    def test_a_corrupt_scan_severity_gate_fails_closed(self, tmp_path: Path) -> None:
+        # A corrupt nested gate must not silently fall through to the greener
+        # raw-code path -- same fail-closed rule a corrupt `compare` gate gets.
+        (tmp_path / f"abi-report-{LINUX}.json").write_text(
+            json.dumps(
+                {
+                    "scan_schema_version": "1.9",
+                    "target_id": LINUX,
+                    "verdict": "COMPATIBLE",
+                    "exit_code": 0,
+                    "diff": {
+                        "severity": {
+                            "exit_code": 0,
+                            "blocking": True,  # contradicts exit_code
+                            "blocking_categories": [],
+                        }
+                    },
+                }
+            )
+        )
+        result = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        target = next(t for t in result.targets if t.target_id == LINUX)
+        assert target.gate is None, "a corrupt gate must make the target unavailable"
+
     def test_a_non_scan_report_is_not_mined_for_a_nested_field(
         self, tmp_path: Path
     ) -> None:

@@ -481,6 +481,79 @@ class TestAugmentReport:
         assert out["exit_code"] == 0
         assert out["compatibility_verdict"] == "BREAKING"
 
+    def test_advisory_neutralizes_a_scan_nested_severity_gate(self):
+        """Codex review (P1): a severity-scheme `scan --against` (schema 1.9+)
+        publishes a real gate at `diff.severity`, and
+        `aggregate.GateInfo.from_scan_report` *prefers* it over the top-level
+        `exit_code` this function already zeroed -- so an explicitly advisory
+        check still blocked the trailing aggregate.
+        """
+        import copy
+
+        from abicheck.aggregate import GateInfo
+
+        scan_report = {
+            "scan_schema_version": "1.9",
+            "verdict": "COMPATIBLE",
+            "exit_code": 1,
+            "diff": {
+                "breaking": 0,
+                "severity": {
+                    "exit_code": 1,
+                    "blocking": True,
+                    "blocking_categories": ["addition"],
+                },
+            },
+        }
+        original = copy.deepcopy(scan_report)
+        out = augment_report(
+            scan_report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["diff"]["severity"]["exit_code"] == 0
+        assert out["diff"]["severity"]["blocking"] is False
+        assert out["diff"]["severity"]["blocking_categories"] == []
+        # The point of the fix: what the aggregate actually reads.
+        gate = GateInfo.from_scan_report(out)
+        assert gate is not None and gate.blocking is False
+        # …and this module's "the caller's report is never mutated" contract
+        # must survive writing through a *nested* container.
+        assert scan_report == original
+
+    def test_deferred_keeps_a_scan_nested_severity_gate(self):
+        """The complement: `deferred` exists so the trailing aggregate computes
+        the gate from the real value, so neutralizing there would defeat it.
+        """
+        from abicheck.aggregate import GateInfo
+
+        scan_report = {
+            "scan_schema_version": "1.9",
+            "verdict": "COMPATIBLE",
+            "exit_code": 1,
+            "diff": {
+                "severity": {
+                    "exit_code": 1,
+                    "blocking": True,
+                    "blocking_categories": ["addition"],
+                }
+            },
+        }
+        out = augment_report(
+            scan_report,
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="deferred",
+        )
+        gate = GateInfo.from_scan_report(out)
+        assert gate is not None and gate.blocking is True
+        assert gate.blocking_categories == ("addition",)
+
     def test_scan_report_with_no_severity_block_defaults_pass(self):
         scan_report = {
             "scan_schema_version": "1.1",
