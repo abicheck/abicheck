@@ -151,9 +151,27 @@ FACT_LOSS_BASELINE = 0
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
     "public": 1,
-    "exports": 23,
+    "exports": 27,
     "all": 0,
 }
+#: `exports` moved 20 -> 23 -> 26 -> 27 as the `evidence-absence` corpus cases
+#: landed (vtable first, then bases). Attribution for the second step, same
+#: method as the first:
+#:
+#:   nonempty_base_added_stays_breaking         +2
+#:   empty_base_added_stays_breaking            +1
+#:   base_capture_asymmetry_stays_filtered       0
+#:
+#: The pattern repeats exactly: both contributors are FN sentinels (real
+#: breaks with no export table to resolve against), and the FP guard again
+#: contributes nothing because it emits no finding at all -- the same
+#: end-to-end confirmation, now for `_base_transition_is_evidenced`.
+#:
+#: The +1 third step is `overaligned_first_vptr_stays_breaking`, another FN
+#: sentinel (a real first-vptr addition an over-aligned class absorbs into
+#: padding), so the same reading applies.
+#:
+#: The first step's attribution follows.
 #: `exports` moved 20 -> 23 when the `evidence-absence` corpus cases landed.
 #: Measured per case rather than assumed, since a budget raised without
 #: attribution is indistinguishable from one hiding a regression:

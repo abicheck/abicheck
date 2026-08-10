@@ -430,7 +430,7 @@ def _diff_type_pair(
         changes.extend(
             _diff_type_fields(name, t_old, t_new, cv_facts_reliable=cv_facts_reliable)
         )
-    changes.extend(_diff_type_bases(name, t_old, t_new))
+    changes.extend(_diff_type_bases(name, t_old, t_new, old_types, new_types))
     changes.extend(
         _diff_type_vtable(
             name, t_old, t_new, old_funcs, new_funcs, old_types, new_types
@@ -1013,8 +1013,82 @@ def _new_field_change_kind(t_new: RecordType) -> ChangeKind:
     )
 
 
-def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
+def _record_contributes_storage(rec: RecordType | None) -> bool | None:
+    """Whether *rec* adds storage when used as a base. ``None`` if unknowable.
+
+    The empty-base optimization is what makes this necessary: an empty base
+    contributes zero bytes to the derived object, so a base-list change that
+    adds or removes one leaves ``size_bits`` completely still. Verified
+    against g++ -- one empty base and two empty bases both leave ``sizeof``
+    at the no-base value, while a non-empty base grows it.
+
+    ``None`` for an absent record: not knowing is not the same as knowing it
+    is empty, and callers must not read the first as the second.
+    """
+    if rec is None:
+        return None
+    return bool(rec.fields or rec.bases or rec.virtual_bases or rec.vtable)
+
+
+def _base_transition_is_evidenced(
+    t_old: RecordType,
+    t_new: RecordType,
+    old_set: set[str],
+    new_set: set[str],
+    old_types: Mapping[str, RecordType],
+    new_types: Mapping[str, RecordType],
+) -> bool:
+    """Whether an *empty↔non-empty* base-list difference rests on real evidence.
+
+    The same ambiguity :func:`_vtable_transition_is_evidenced` answers, and
+    answered the same way -- one side listing no bases means either "has none"
+    or "this side's DWARF did not carry them" -- but it deliberately does
+    **not** reuse that function, because the base case has a failure mode the
+    vtable case does not.
+
+    A non-virtual *empty* base is layout-invisible (empty-base optimization),
+    so "size held still" is not evidence of a capture gap for it: adding one
+    is a real, ABI-relevant change (conversions, RTTI, overload resolution)
+    that a size-only guard would silently swallow. That is why the changed
+    bases themselves are inspected: a base that *does* contribute storage
+    cannot be added or removed without moving ``size_bits``, so a static size
+    alongside one is genuinely self-contradictory and marks the capture gap.
+    An empty base -- or one this snapshot does not describe at all -- explains
+    the static size instead, and the finding is kept.
+
+    Virtual bases need no such carve-out and get the plain size check: a
+    virtual base always costs a pointer, empty or not (verified: 4 -> 16 for
+    `struct D : virtual Empty { int x; }` under g++).
+    """
+    if old_set and new_set:
+        return True
+    if t_old.size_bits is None or t_new.size_bits is None:
+        return True
+    if t_old.size_bits != t_new.size_bits:
+        return True
+    if list(t_old.vtable) != list(t_new.vtable):
+        return True
+    for base in old_set ^ new_set:
+        contributes = _record_contributes_storage(
+            new_types.get(base) or old_types.get(base)
+        )
+        if contributes is not True:
+            # Empty (EBO explains the static size) or undescribed (nothing to
+            # contradict) -- either way this difference is not refuted.
+            return True
+    return False
+
+
+def _diff_type_bases(
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
+    old_types: Mapping[str, RecordType] | None = None,
+    new_types: Mapping[str, RecordType] | None = None,
+) -> list[Change]:
     changes: list[Change] = []
+    old_types = old_types if old_types is not None else {}
+    new_types = new_types if new_types is not None else {}
 
     # BASE_CLASS_POSITION_CHANGED: same set of non-virtual bases, different order
     # This shifts this-pointer adjustments for all bases → old binaries call wrong method.
@@ -1030,7 +1104,9 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
                 new_value=str(t_new.bases),
             )
         )
-    elif old_bases_set != new_bases_set:
+    elif old_bases_set != new_bases_set and _base_transition_is_evidenced(
+        t_old, t_new, old_bases_set, new_bases_set, old_types, new_types
+    ):
         # General base class set change (add/remove base) → TYPE_BASE_CHANGED
         changes.append(
             make_change(
@@ -1068,7 +1144,9 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
         # Pure add/remove of a virtual base (not a migration from non-virtual):
         # e.g. class D : virtual A  →  class D : virtual A, virtual B
         # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
-        if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
+        if not changes and _base_transition_is_evidenced(
+            t_old, t_new, old_virt_set, new_virt_set, old_types, new_types
+        ):
             changes.append(
                 make_change(
                     ChangeKind.TYPE_BASE_CHANGED,
@@ -1082,7 +1160,13 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
     return changes
 
 
-def _vtable_transition_is_evidenced(t_old: RecordType, t_new: RecordType) -> bool:
+def _vtable_transition_is_evidenced(
+    name: str,
+    t_old: RecordType,
+    t_new: RecordType,
+    old_funcs: Mapping[str, Function],
+    new_funcs: Mapping[str, Function],
+) -> bool:
     """Whether an *empty↔non-empty* vtable difference rests on real evidence.
 
     ``RecordType.vtable`` cannot express "not captured": it is a plain list,
@@ -1110,6 +1194,19 @@ def _vtable_transition_is_evidenced(t_old: RecordType, t_new: RecordType) -> boo
     neither moved and both sizes are known, no real polymorphism change can
     have occurred and the differing list is capture noise.
 
+    Size alone is **not** sufficient, which is why the class's own virtual
+    functions are consulted first. A sufficiently over-aligned class absorbs
+    its new vptr into existing padding: verified against g++, both
+    ``struct alignas(8) A {}`` and ``struct alignas(8) A { virtual void f(); }``
+    are 8 bytes, as are the ``alignas(16)`` pair at 16 -- so a size-only guard
+    suppressed a genuine first-vptr addition (Codex review). It compounded:
+    ``diff_cxx_rules.virtual_method_addition`` withholds
+    ``VIRTUAL_METHOD_ADDED`` whenever the vtable lists differ, so the run was
+    left with a compatible ``FUNC_ADDED`` and a ``COMPATIBLE`` verdict on a
+    real layout break. ``snapshot.functions`` is a separate evidence stream
+    from the class DIE's virtual-method children, so it answers that case
+    without weakening the capture-gap guard.
+
     Deliberately conservative in the other direction: an *unknown* size on
     either side corroborates nothing but also refutes nothing, so the finding
     is kept. The suppression needs positive evidence that layout held still;
@@ -1129,11 +1226,37 @@ def _vtable_transition_is_evidenced(t_old: RecordType, t_new: RecordType) -> boo
         # Both sides captured something, so the difference is a real
         # reorder/replace rather than one side's evidence going missing.
         return True
+    if _owned_virtual_signatures(name, old_funcs) != _owned_virtual_signatures(
+        name, new_funcs
+    ):
+        # The strongest signal, and independent of layout: the class's own
+        # virtual *functions* are a separate evidence stream from its vtable
+        # list (`snapshot.functions` vs `RecordType.vtable`), so the two
+        # agreeing that a virtual came or went is not a capture gap. This is
+        # also what keeps an over-aligned class honest -- see below.
+        return True
     if t_old.size_bits is None or t_new.size_bits is None:
         return True
     if t_old.size_bits != t_new.size_bits:
         return True
     return list(t_old.virtual_bases) != list(t_new.virtual_bases)
+
+
+def _owned_virtual_signatures(name: str, funcs: Mapping[str, Function]) -> set[str]:
+    """The mangled names of *name*'s own virtual member functions.
+
+    An evidence stream independent of ``RecordType.vtable``: these come from
+    ``snapshot.functions`` (their own DIEs / AST nodes), not from the class
+    DIE's virtual-method children, so one going missing does not take the
+    other with it.
+    """
+    from .diff_cxx_rules import owner_class_of
+
+    return {
+        mangled
+        for mangled, fn in funcs.items()
+        if getattr(fn, "is_virtual", False) and owner_class_of(fn) == name
+    }
 
 
 def _diff_type_vtable(
@@ -1147,7 +1270,7 @@ def _diff_type_vtable(
 ) -> list[Change]:
     if t_old.vtable == t_new.vtable:
         return []
-    if not _vtable_transition_is_evidenced(t_old, t_new):
+    if not _vtable_transition_is_evidenced(name, t_old, t_new, old_funcs, new_funcs):
         return []
     # Same slot count, same order, and every differing slot is a same-signature
     # override reusing its base's slot (case185) -> no real layout change, just

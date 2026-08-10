@@ -894,6 +894,30 @@ def _vtable_became_polymorphic_stays_breaking() -> tuple[AbiSnapshot, AbiSnapsho
     )
 
 
+def _overaligned_first_vptr_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A sufficiently over-aligned class absorbs its new vptr into existing
+    # padding -- verified against g++: `struct alignas(8) A {}` and
+    # `struct alignas(8) A { virtual void f(); }` are both 8 bytes. So "the
+    # class grew" is NOT a sound proxy for "it gained a vtable", and a
+    # size-only guard suppressed this real layout break. The class's own
+    # virtual *functions* are the independent evidence stream that keeps it.
+    def cls(vtable: list[str]) -> RecordType:
+        return RecordType(name="Aligned", kind="class", size_bits=64, vtable=vtable)
+
+    virt = Function(
+        name="Aligned::f", mangled="_ZN7Aligned1fEv", return_type="void",
+        visibility=Visibility.PUBLIC, is_virtual=True,
+    )
+    return (
+        _snap("1", functions=[_fn("api", ret="Aligned *")], types=[cls([])]),
+        _snap(
+            "2",
+            functions=[_fn("api", ret="Aligned *"), virt],
+            types=[cls(["Aligned::f()"])],
+        ),
+    )
+
+
 def _vtable_reorder_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     # The other FN sentinel: when *both* sides captured a vtable, there is no
     # missing evidence to reason about and a reorder is a real break. The guard
@@ -912,6 +936,58 @@ def _vtable_reorder_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
             functions=[_fn("api", ret="Widget *")],
             types=[cls(["Widget::b()", "Widget::a()"])],
         ),
+    )
+
+
+_EMPTY_BASE = RecordType(name="Tag", kind="class", size_bits=8)
+_SOLID_BASE = RecordType(
+    name="Payload", kind="class", size_bits=64, fields=[TypeField(name="y", type="int")]
+)
+
+
+def _derived(bases: list[str], size: int) -> RecordType:
+    return RecordType(
+        name="Derived", kind="class", size_bits=size,
+        fields=[TypeField(name="x", type="int")], bases=list(bases),
+    )
+
+
+def _base_capture_asymmetry_stays_filtered() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The base-list twin of the vtable capture gap: one side's DWARF did not
+    # carry the class's `DW_TAG_inheritance` children. What makes it provable
+    # rather than merely suspected is the base itself -- `Payload` has a
+    # field, so it *cannot* be added or removed without moving the derived
+    # class's size. A static size alongside it is self-contradictory.
+    return (
+        _snap("1", functions=[_fn("api", ret="Derived *")],
+              types=[_derived([], 64), _SOLID_BASE]),
+        _snap("2", functions=[_fn("api", ret="Derived *")],
+              types=[_derived(["Payload"], 64), _SOLID_BASE]),
+    )
+
+
+def _empty_base_added_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The FN sentinel that stops the guard being a copy of the vtable one: an
+    # *empty* base is layout-invisible (EBO -- verified against g++, one and
+    # two empty bases both leave sizeof unchanged), so a static size is
+    # explained and is not evidence of a capture gap. Adding one is a real
+    # ABI-relevant change (conversions, RTTI, overload resolution).
+    return (
+        _snap("1", functions=[_fn("api", ret="Derived *")],
+              types=[_derived([], 64), _EMPTY_BASE]),
+        _snap("2", functions=[_fn("api", ret="Derived *")],
+              types=[_derived(["Tag"], 64), _EMPTY_BASE]),
+    )
+
+
+def _nonempty_base_added_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The ordinary real break: a storage-contributing base moves the size, so
+    # the transition is evidenced and must still be reported.
+    return (
+        _snap("1", functions=[_fn("api", ret="Derived *")],
+              types=[_derived([], 64), _SOLID_BASE]),
+        _snap("2", functions=[_fn("api", ret="Derived *")],
+              types=[_derived(["Payload"], 128), _SOLID_BASE]),
     )
 
 
@@ -943,6 +1019,22 @@ CORPUS: list[Case] = [
         _vtable_became_polymorphic_stays_breaking,
     ),
     Case("vtable_reorder_stays_breaking", False, _vtable_reorder_stays_breaking),
+    Case(
+        "overaligned_first_vptr_stays_breaking",
+        False,
+        _overaligned_first_vptr_stays_breaking,
+    ),
+    Case(
+        "base_capture_asymmetry_stays_filtered",
+        True,
+        _base_capture_asymmetry_stays_filtered,
+    ),
+    Case("empty_base_added_stays_breaking", False, _empty_base_added_stays_breaking),
+    Case(
+        "nonempty_base_added_stays_breaking",
+        False,
+        _nonempty_base_added_stays_breaking,
+    ),
     Case("elf_only_function_removed", True, _elf_only_function_removed),
     Case("internal_field_type_changed", True, _internal_field_type_changed),
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
@@ -1431,6 +1523,10 @@ CASE_CATEGORY: dict[str, str] = {
     "vtable_capture_asymmetry_stays_filtered": "evidence-absence",
     "vtable_became_polymorphic_stays_breaking": "evidence-absence",
     "vtable_reorder_stays_breaking": "evidence-absence",
+    "overaligned_first_vptr_stays_breaking": "evidence-absence",
+    "base_capture_asymmetry_stays_filtered": "evidence-absence",
+    "empty_base_added_stays_breaking": "evidence-absence",
+    "nonempty_base_added_stays_breaking": "evidence-absence",
     # versioned-symbol scheme / multi-.so bundle
     "versioned_scheme_internal_churn": "versioned-scheme",
     "bundle_sibling_soname_churn": "versioned-scheme",
