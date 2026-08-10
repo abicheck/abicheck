@@ -97,6 +97,14 @@ _MD_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)(\s+\"[^\"]*\")?\)")
 #: silently-supported second one is how the rewrite stops being exhaustive.
 _MD_REF_DEF_RE = re.compile(r"^ {0,3}\[([^\]^][^\]]*)\]:\s*\S+", re.MULTILINE)
 
+#: Markdown images (`![alt](target)`), excluded from `_MD_LINK_RE` by its
+#: negative lookbehind and rejected here for the same reason as a reference
+#: definition: the destination is never rewritten, and this generator copies
+#: only Markdown — so a published skill would carry a repo-relative path to an
+#: asset its own directory does not contain. Self-containment is the property
+#: that makes a single skill directory installable on its own.
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)")
+
 _FRONT_MATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---\r?\n", re.DOTALL)
 
 
@@ -366,6 +374,16 @@ def _render(
             "`[text](target)` links only. The link rewrite does not see a "
             "reference definition, so it would be published verbatim and "
             "point outside the installed skill."
+        )
+
+    images = [m.group(2) for m in _MD_IMAGE_RE.finditer(body)]
+    if images:
+        raise SkillGenerationError(
+            f"{source_path}: Markdown image(s) {sorted(images)} — this "
+            "generator publishes Markdown only and never rewrites an image "
+            "destination, so the installed skill would reference an asset it "
+            "does not contain. Describe the diagram in text, or link the "
+            "published docs page that hosts it."
         )
 
     def replace(match: re.Match[str]) -> str:

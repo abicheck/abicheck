@@ -146,7 +146,7 @@ until this has run:
 
 ```bash
 abicheck compare baseline.abi.json path/to/libfoo.so \
-  --header include/foo/api.h \
+  --header new=include/foo/api.h \
   --depth headers \
   --scope-public-headers \
   --report-mode root-cause \

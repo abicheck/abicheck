@@ -36,7 +36,10 @@ least safe.
 **Semantic versioning** applied to a native library, in ABI terms:
 
 - **MAJOR** — any removal or incompatible change to the public ABI or API.
-  Accompanied by a SONAME bump.
+  Accompanied by a SONAME bump **when the break is binary** (`BREAKING`).
+  A source-only break (`API_BREAK` — e.g. a removed overload never emitted)
+  is still a major version by this scheme, but already-compiled consumers
+  keep working, so the SONAME usually stays; see the source-only row below.
 - **MINOR** — additive only: new exports, new types, new enumerators
   appended. Existing consumers keep working unmodified.
 - **PATCH** — no public surface change at all; implementation only.

@@ -47,9 +47,9 @@ baseline:
 abicheck dump build/libfoo.so \
   --header include/foo/api.h --depth headers -o baseline.abi.json
 
-# later
+# later — the baseline carries its own header evidence, so scope the live side
 abicheck compare baseline.abi.json build/libfoo.so \
-  --header include/foo/api.h --depth headers --format json
+  --header new=include/foo/api.h --depth headers --format json
 ```
 
 `dump` hard-fails an explicit `--depth headers` that header evidence never
@@ -68,10 +68,22 @@ auto-discovery cannot:
 
 ```bash
 abicheck compare OLD NEW \
-  --header include/foo/api.h --header include/foo/types.h \
+  --header old=../old-side/include/foo/api.h \
+  --header new=include/foo/api.h \
   --include include/ \
   --depth headers --format json
 ```
+
+**Scope each side to its own headers.** A bare `--header PATH` applies to
+*both* sides; the `old=`/`new=` prefixes select one. When the two artifacts
+come from different revisions, parsing both against the current checkout's
+headers describes the new API twice — a changed signature or layout then
+appears on both sides and cancels out, yielding a false compatible. Use the
+bare form only when one set of headers genuinely describes both sides.
+
+The same applies when one side is a snapshot: it already carries its own
+header evidence, so scope the live side only — `abicheck compare
+baseline.abi.json build/libfoo.so --header new=include/foo/api.h`.
 
 `--include`/`-I`, `--sysroot`, and `--gcc-option` shape the parse the same way
 they shape the real build. They must match the real build, or the extracted

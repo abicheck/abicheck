@@ -150,6 +150,26 @@ def test_reference_style_link_definition_is_a_hard_error(synthetic):
         gen.render_all(gen.SRC_DIR)
 
 
+def test_markdown_image_is_a_hard_error(synthetic):
+    """Same class as the reference-definition case: `_MD_LINK_RE`'s negative
+    lookbehind skips images, and the generator copies only Markdown — so an
+    image would ship a repo-relative path to an asset the installed skill
+    directory does not contain."""
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    "---\nname: demo\n---\n\n![diagram](../../docs/img/x.png)\n\n"
+                    "[a](../shared/a.md)\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    with pytest.raises(gen.SkillGenerationError, match="image"):
+        gen.render_all(gen.SRC_DIR)
+
+
 def test_footnote_definition_is_not_mistaken_for_a_reference_link(synthetic):
     """`[^1]:` is a footnote, not a link definition — the rewrite has nothing
     to do with it, so it must not trip the guard above."""
