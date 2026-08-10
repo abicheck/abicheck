@@ -19,9 +19,12 @@
   exit on an otherwise compatible diff names its own cause instead of being
   indistinguishable from the orthogonal contract-coverage exit `1`. Both
   are absent under the default legacy scheme, which runs no severity gate.
-  `aggregate` reads that nested block as the target's compatibility gate
-  when present (through the same fail-closed validator a `compare` gate
-  goes through), which is what keeps the compatibility and
+  The block is the scan's compatibility gate rather than the baseline
+  diff's alone — a `--crosscheck KEY=error` promotion raises it too, adding
+  a `promoted_crosscheck` blocking category (a floor: it never lowers the
+  gate). `aggregate` reads that nested block as the target's compatibility
+  gate when present (through the same fail-closed validator a `compare`
+  gate goes through), which is what keeps the compatibility and
   contract-coverage axes separable now that a scan can natively exit `1`.
   `--pack` gate-severity folding is not yet extended to `scan`; pass
   severity settings directly. See `docs/reference/exit-codes.md`'s new

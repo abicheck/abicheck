@@ -287,6 +287,13 @@ Verdict: COMPATIBLE
 Both are absent under the default legacy scheme, which runs no severity
 gate.
 
+The block is the scan's **compatibility gate**, not the baseline diff's
+alone: a cross-check the maintainer promoted with `--crosscheck KEY=error`
+raises it too, adding a `promoted_crosscheck` entry to `blocking_categories`
+(deliberately outside the four severity categories, since no severity level
+produced it). The promotion is a floor — it can add a blocking reason but
+never clear one a severity category already raised.
+
 `aggregate` reads that `diff.severity` block as the target's compatibility
 gate when it is present, exactly as it reads a `compare` report's own
 `severity` block (and with the same fail-closed validation). This is what

@@ -874,6 +874,59 @@ def test_baseline_compare_promoted_crosscheck_still_gates(runner, tmp_path):
     assert payload["verdict"] == "API_BREAK"
 
 
+def test_published_gate_reflects_a_promoted_crosscheck(runner, tmp_path):
+    # Codex review (P1): the gate block is written by `_run_baseline_compare`
+    # from the baseline diff alone, then `run_scan_core` promotes the exit for
+    # an error-level crosscheck. A clean baseline gate therefore published
+    # `exit_code: 0, blocking: false` while the process exited 2 -- and since
+    # `aggregate.GateInfo.from_scan_report` now *prefers* this block, the
+    # explicitly gated target read as nonblocking. Same un-blocking failure
+    # the nested-block preference was introduced to fix, other route in.
+    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
+    new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new), "--against", str(old),
+            "--crosscheck", "header_build_context_mismatch=error",
+            "--exit-code-scheme", "severity",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    gate = _payload(res)["diff"]["severity"]
+    assert gate["exit_code"] == 2, gate
+    assert gate["blocking"] is True, gate
+    assert "promoted_crosscheck" in gate["blocking_categories"], gate
+
+    # …and the aggregate reader must agree, which is the whole point.
+    from abicheck.aggregate import GateInfo
+
+    parsed = GateInfo.from_scan_report(_payload(res))
+    assert parsed is not None and parsed.blocking is True
+
+
+def test_a_promoted_crosscheck_never_lowers_an_already_blocking_gate(
+    runner, tmp_path, baseline_snap, new_snap_breaking
+):
+    # The promotion is a floor: it may add a blocking reason, never clear one
+    # a severity category already raised (crosscheck exit is at most 2).
+    res = runner.invoke(
+        main,
+        [
+            "scan", str(new_snap_breaking), "--against", str(baseline_snap),
+            "--crosscheck", "exported_not_public=error",
+            "--exit-code-scheme", "severity",
+            "--format", "json",
+        ],
+    )
+    assert res.exit_code == 4, res.output
+    gate = _payload(res)["diff"]["severity"]
+    assert gate["exit_code"] == 4, gate
+    assert "abi_breaking" in gate["blocking_categories"], gate
+    assert "promoted_crosscheck" not in gate["blocking_categories"], gate
+
+
 def test_severity_demoted_breaking_verdict_survives_crosscheck_promotion(
     runner, tmp_path
 ):

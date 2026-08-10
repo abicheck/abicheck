@@ -455,6 +455,16 @@ REPORT_SCHEMA_VERSION = "2.27"
 #:       contract-coverage 1 (Codex review). Absent under the default legacy
 #:       scheme, where there is no gate to report, so an ordinary scan is
 #:       unchanged from 1.8.
+#:       The block is the scan's *compatibility* gate, not the baseline diff's
+#:       alone: a ``--crosscheck KEY=error`` promotion raises it (with a
+#:       ``promoted_crosscheck`` entry in ``blocking_categories``, deliberately
+#:       outside ``IssueCategory``'s vocabulary since no severity level
+#:       produced it -- the same shape as ``aggregate``'s own
+#:       ``operational_error``/``not_comparable``). Without that the block
+#:       claimed a passing gate while the process exited 2, and `aggregate`
+#:       -- which prefers this block -- dropped the gated target from
+#:       ``blocking_targets`` (Codex review). It never lowers the gate: the
+#:       promotion is a floor.
 SCAN_SCHEMA_VERSION = "1.9"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
