@@ -92,6 +92,44 @@ def test_every_scenario_is_in_the_pack(pack: dict[str, Any]) -> None:
     assert set(pack["scenarios"]) == {s["id"] for s in manifest["scenarios"]}
 
 
+def test_pack_carries_runnable_scenarios(pack: dict[str, Any]) -> None:
+    """The pack is the cross-repository interface. A consumer that had to read
+    `scenarios.yaml` to get the prompt, or `ground_truth.json` to get the
+    expected outcome, would be coupled to this repository's private layout —
+    the coupling publishing an artifact instead of a library avoids."""
+    for scenario_id, entry in pack["scenarios"].items():
+        assert entry["prompt"].strip(), scenario_id
+        assert entry["inputs"], scenario_id
+        assert "expected" in entry, scenario_id
+
+
+def test_category_a_expectations_are_resolved_into_the_pack(
+    pack: dict[str, Any],
+) -> None:
+    """Resolved, not restated: the catalog stays the one fact owner and the
+    pack carries its answer, so a consumer needs neither."""
+    catalog = json.loads(
+        (REPO / "examples" / "ground_truth.json").read_text(encoding="utf-8")
+    )
+    for scenario_id, entry in pack["scenarios"].items():
+        if entry["category"] != "A":
+            continue
+        expected = entry["expected"]
+        assert expected["resolved_from"] == "examples/ground_truth.json"
+        assert expected["verdict"] in {
+            v["expected"] for v in catalog["verdicts"].values()
+        }, scenario_id
+
+
+def test_pack_carries_the_gating_contract(pack: dict[str, Any]) -> None:
+    """`k` and each dimension's gating mode are what a consumer grades with."""
+    rubric = pack["rubric"]
+    assert rubric["repetitions"] >= 1
+    assert {d["id"] for d in rubric["dimensions"]} == set(range(1, 7))
+    zero = {d["id"] for d in rubric["dimensions"] if d["gating"] == "zero_tolerance"}
+    assert zero == {2, 6}
+
+
 def test_scenario_digest_covers_the_fixture_not_just_the_record(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -146,57 +184,78 @@ def test_scenario_digest_covers_the_ground_truth_entry() -> None:
     assert gen._scenario_digest(scenario, mutated) != original
 
 
-def _compare_option(name: str) -> Any:
-    from abicheck.cli import main as cli_main
-
-    compare = cli_main.commands["compare"]
-    return next(p for p in compare.params if name in (p.opts or []))
-
-
-@pytest.mark.parametrize(
-    ("attribute", "value"),
-    [
-        ("default", "a-different-default"),
-        ("required", True),
-        ("multiple", True),
-        ("nargs", 2),
-    ],
-)
-def test_surface_digest_moves_on_an_option_semantics_change(
-    attribute: str, value: Any, monkeypatch: pytest.MonkeyPatch
+def test_surface_digest_is_a_function_of_committed_files_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An option keeping its name while its default, arity or requiredness
-    changes alters the result of the exact command a skill runs. A digest over
-    spellings alone would leave every committed bundle passing the freshness
-    gate through that change."""
+    """The pack is committed and its `--check` runs on three operating systems,
+    so a digest that varies with the host makes the gate unsatisfiable
+    somewhere — which is how the macOS lane failed while every other passed.
+    Reading committed files is what makes it reproducible; this pins that the
+    digest is exactly that and nothing else."""
+    surface = tmp_path / "surface.md"
+    surface.write_text("one", encoding="utf-8")
+    monkeypatch.setattr(gen, "ROOT", tmp_path)
+    monkeypatch.setattr(gen, "SURFACE_SOURCES", (Path("surface.md"),))
+
     before = gen._surface_digest()
-    monkeypatch.setattr(_compare_option("--format"), attribute, value)
+    assert gen._surface_digest() == before, "not deterministic within one process"
+    surface.write_text("two", encoding="utf-8")
     assert gen._surface_digest() != before
 
 
-def test_surface_digest_moves_when_a_choice_is_added(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The concrete case: a `--format`/`--contract`-style option gaining a
-    value is new surface a skill can reach, under an unchanged spelling."""
-    import click
+def test_surface_sources_are_the_generated_projections() -> None:
+    """Each is drift-gated against the live objects elsewhere in `pr`, which is
+    what lets this digest be file-based without going blind to a real surface
+    change: a renamed flag reaches `cli-reference.md` in the PR that renames
+    it, or `gen_cli_reference.py --check` fails."""
+    assert set(gen.SURFACE_SOURCES) == {
+        Path("docs/reference/cli-reference.md"),
+        Path("docs/reference/detector-spec.json"),
+        Path("abicheck/schemas/compare_report.schema.json"),
+    }
+    for source in gen.SURFACE_SOURCES:
+        assert (REPO / source).is_file(), source
 
-    option = _compare_option("--format")
-    before = gen._surface_digest()
-    widened = click.Choice([*option.type.choices, "a-new-format"])
-    monkeypatch.setattr(option, "type", widened)
-    assert gen._surface_digest() != before
 
+def test_every_hashed_input_is_tracked_by_git() -> None:
+    """A digest over a file git does not track is a pack that differs between
+    a clean checkout and a machine where something was built — `examples/**/*.so`
+    is gitignored and would otherwise land in a scenario's fixture closure."""
+    import subprocess
 
-def test_surface_digest_ignores_help_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The other half of the asymmetry: rewording help does not change what a
-    command does, and invalidating every bundle over prose is the
-    invalidate-everything behaviour D6 rejects."""
-    before = gen._surface_digest()
-    monkeypatch.setattr(
-        _compare_option("--format"), "help", "totally rewritten help text"
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout.split()
     )
-    assert gen._surface_digest() == before
+    hashed: list[Path] = []
+    for name in gen._published_skill_names():
+        hashed += gen._tree_files(gen.PUBLISHED_SKILLS / name)
+    for scenario in gen._load_scenarios()["scenarios"]:
+        hashed += gen._fixture_paths(scenario)
+    hashed += gen._expand(gen.SURFACE_SOURCES) + gen._expand(gen.HARNESS_SOURCES)
+    # BUILD_SOURCES walks all of `abicheck/`, which is where install residue
+    # would land — the remaining candidate for the cross-platform mismatch
+    # that motivated this test.
+    hashed += gen._expand(gen.BUILD_SOURCES)
+
+    untracked = sorted(
+        p.relative_to(REPO).as_posix()
+        for p in hashed
+        if p.relative_to(REPO).as_posix() not in tracked
+    )
+    assert not untracked, f"untracked files reached a pack digest: {untracked}"
+
+
+def test_drift_report_names_the_entry_that_moved() -> None:
+    """A `--check` failure saying only 'out of date' is most of what made the
+    cross-platform failure hard to diagnose."""
+    committed = json.loads(PACK.read_text(encoding="utf-8"))
+    mutated = json.loads(json.dumps(committed))
+    mutated["shared"]["abicheck_surface"]["digest"] = "sha256:" + "f" * 64
+
+    drift = gen.describe_drift(json.dumps(committed), json.dumps(mutated))
+    assert any("abicheck_surface" in line for line in drift), drift
 
 
 def test_publication_build_digest_is_not_the_committed_one(
@@ -462,6 +521,23 @@ def test_a_bundle_missing_a_required_hash_fails(
 ) -> None:
     bundle = _bundle(pack)
     del bundle["hashes"][dropped]
+    assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
+
+
+def test_an_input_routing_only_to_a_hash_this_bundle_lacks_fails(
+    pack: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Routing to *some* hash in the pack is not enough. A binary-review bundle
+    that read another skill's SKILL.md records only its own tree hash, so an
+    edit to the skill it actually read leaves it 'fresh' — completeness is a
+    property of this bundle's own recorded hashes, not of the pack."""
+    bundle = _bundle(pack)
+    bundle["observed_inputs"].append(
+        {
+            "path": ".agents/skills/native-api-evolution/SKILL.md",
+            "digest": "sha256:" + "9" * 64,
+        }
+    )
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 
 

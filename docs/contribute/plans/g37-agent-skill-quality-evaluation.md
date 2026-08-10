@@ -906,17 +906,27 @@ writing the checks made the gap visible:
 - **`rubric.yaml`**, not only its schema. D4's gating modes are read by the
   graders *and* by the publication gate, so leaving them as a table in this
   document would have meant two consumers each interpreting prose.
-- **The consumed-surface digest is computed from the live objects**, not from
-  the bytes of the modules D6 names. Hashing `abicheck/cli.py` would move the
-  hash on every unrelated edit to a 2000-line file, reproducing at file
-  granularity exactly the invalidate-everything behaviour D6 rejects at
-  package granularity. The pack records those paths as *routes* instead, which
-  is what the completeness check needs them for. The digest covers each
-  parameter's default, type, choices, arity and flag-ness alongside its
-  spelling: an option that keeps its name while its default flips or its
-  choice set widens changes the result of the exact command a skill runs, and
-  a spelling-only digest would pass every committed bundle straight through
-  that change.
+- **The consumed-surface digest is read off committed files, not live
+  objects — and this one was got wrong first.** The obvious implementation
+  introspects the live Click tree and `ChangeKind` registry: narrow, and it
+  moves for exactly the changes a skill can see. It also makes the pack a
+  function of the running interpreter, and the pack is a *committed* artifact
+  whose `--check` runs on Linux, macOS and Windows. CI said so plainly — the
+  macOS lane failed while every other passed, then Ubuntu 3.14 joined it — and
+  the specific varying input was never isolated, which is the point: an
+  artifact whose inputs cannot be enumerated is one that will drift again. The
+  digest now covers `docs/reference/cli-reference.md`,
+  `docs/reference/detector-spec.json` and the compare-report schema — three
+  committed files that are themselves drift-gated against the live objects in
+  the same `pr` profile. That keeps the asymmetry D6 wants (a `cli.py` edit
+  that changes no user-facing surface moves nothing; a renamed flag reaches
+  the reference in the PR that renames it) without any host dependence, and it
+  covers *more* than the live walk did — defaults, choices and help text
+  included. The source paths stay in the pack as *routes*, which is what the
+  completeness check needs them for. Two mechanisms keep the class closed
+  rather than the instance: a test asserts every hashed input is a git-tracked
+  file, and `--check` now names the entry that moved instead of reporting only
+  that the file differs.
 - **A consumer-scoped scenario states both verdicts.** In a scoped run the
   top-level `verdict` is the *scoped* answer and `full_verdict` is the
   library-wide one — `native-consumer-compatibility/SKILL.md` uses exactly the

@@ -272,8 +272,10 @@ def check_bundle(
                 )
 
     nominated: set[str] = set()
+    recorded_ids: set[str] = set()
     for key, digest in _bundle_hash_ids(bundle).items():
         hash_id = f"skill_tree:{skill}" if key == "skill_tree" else key
+        recorded_ids.add(hash_id)
         entry = entries.get(hash_id)
         if entry is None:
             out.err(
@@ -290,14 +292,28 @@ def check_bundle(
             )
             nominated.update(entry.get("affects") or [])
 
+    # Completeness is per *bundle*, not per pack. Asking only whether a path
+    # routes to some hash somewhere in the pack lets a bundle read an input it
+    # never hashed — a review-flagged case: a binary-review bundle reading
+    # `native-api-evolution/SKILL.md` routes fine, but records only its own
+    # skill-tree hash, so editing the evolution skill leaves it "fresh". The
+    # question is whether *this* evidence can be invalidated by *this* input.
     for observed in bundle.get("observed_inputs", []):
         observed_path = observed.get("path", "")
-        if not route(observed_path, entries):
+        routed = route(observed_path, entries)
+        if not routed:
             out.err(
                 "completeness",
                 f"{rel}: read {observed_path!r}, which routes to no hash — evidence "
                 f"stays 'fresh' when that input changes. Add it to a pack entry's "
                 f"roots ({REGENERATE})",
+            )
+        elif not (routed & recorded_ids):
+            out.err(
+                "completeness",
+                f"{rel}: read {observed_path!r}, which routes to {sorted(routed)} — none "
+                f"of them recorded by this bundle, so a change there cannot make this "
+                f"evidence stale",
             )
     return nominated
 

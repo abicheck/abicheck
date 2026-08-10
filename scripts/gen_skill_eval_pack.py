@@ -37,11 +37,13 @@ What it records, and why each entry exists (G37 D6):
   harness                    the runner, the recording shim and the graders — a
                              transcript produced under a different treatment is
                              not evidence about the same thing
-  abicheck_surface           the surface the skills actually consume: the CLI
-                             command/option tree, the report schema version, and
-                             the ChangeKind verdict mapping. Deliberately narrow
-                             — hashing all of abicheck/ would invalidate every
-                             bundle on every source commit
+  abicheck_surface           the surface the skills actually consume — the CLI
+                             command/option reference, the detector spec, and the
+                             report schema, read as committed files. Deliberately
+                             narrow (hashing all of abicheck/ would invalidate
+                             every bundle on every source commit) and
+                             deliberately not live introspection (that made the
+                             pack a function of the host; see SURFACE_SOURCES)
   build                      publication only: abicheck/ + pyproject.toml +
                              resolved runtime dependency versions. abicheck/
                              alone is not the build
@@ -88,6 +90,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PUBLISHED_SKILLS = ROOT / ".agents" / "skills"
 EVAL_DIR = ROOT / "agent-evals" / "skills"
 SCENARIOS = EVAL_DIR / "scenarios.yaml"
+RUBRIC = EVAL_DIR / "rubric.yaml"
 TRIGGER_CORPUS = ROOT / "tests" / "agent_skills" / "trigger_corpus.yaml"
 GROUND_TRUTH = ROOT / "examples" / "ground_truth.json"
 EXAMPLES = ROOT / "examples"
@@ -97,13 +100,38 @@ PACK = EVAL_DIR / "skill-eval-pack.json"
 #: shape fails loudly rather than misreading a field.
 PACK_VERSION = 1
 
-#: Routing declarations for the consumed-surface hash. The digest itself is
-#: computed from the *live* command tree, report schema and verdict mapping
-#: (`_surface_digest`), not from these files' bytes — hashing whole modules
-#: would move the hash on every unrelated edit to `cli.py`, which is exactly
-#: the invalidate-everything behaviour D6 rejects. These paths only answer
-#: "a change here may move that digest".
+#: The consumed surface, hashed through the repository's own *generated*
+#: projections of it rather than through live introspection.
+#:
+#: An earlier version walked the live Click tree and registry. That is a
+#: function of the running interpreter, and the pack is a committed artifact
+#: whose `--check` runs on Linux, macOS and Windows alike — so any component
+#: that varies with the host makes this gate unsatisfiable on some platform,
+#: which is exactly what happened (the macOS unit lane failed while every
+#: other lane passed). A digest over committed files cannot.
+#:
+#: These three are not a compromise on narrowness: `cli-reference.md` is
+#: generated from the live command tree and carries every command, option,
+#: default, choice and help string; `detector-spec.json` carries every
+#: `ChangeKind`'s verdict, severity and minimum evidence; the report schema is
+#: what a skill parses. All three are drift-gated against the live objects in
+#: the same `pr` profile (`gen_cli_reference.py --check`,
+#: `gen_detector_spec.py --check`), so a real surface change reaches them in
+#: the PR that makes it, while an edit to `cli.py` that changes no user-facing
+#: surface moves nothing here — the asymmetry D6 asks for, now without the
+#: host dependence.
+SURFACE_SOURCES = (
+    Path("docs/reference/cli-reference.md"),
+    Path("docs/reference/detector-spec.json"),
+    Path("abicheck/schemas/compare_report.schema.json"),
+)
+
+#: Routing declarations for the surface hash: the artifacts above plus the
+#: sources whose change is what regenerates them. Routes over-nominate on
+#: purpose (see the module docstring), and a route to the *source* is what
+#: makes an observed read of `cli.py` resolve to this hash at all.
 SURFACE_ROOTS = (
+    *SURFACE_SOURCES,
     Path("abicheck/cli.py"),
     Path("abicheck/cli_options.py"),
     Path("abicheck/cli_options_contract.py"),
@@ -149,11 +177,27 @@ def _digest_paths(paths: list[Path]) -> str:
     return "sha256:" + h.hexdigest()
 
 
+#: Build and install residue that is present in one checkout and absent in
+#: another. Digesting it makes the pack a property of what happened to be run
+#: on a machine rather than of the repository — `examples/**/*.so` is
+#: gitignored precisely because it is built, and a `pip install -e .` can leave
+#: artifacts inside the package tree. `tests/test_skill_eval_pack.py` checks
+#: the stronger property (every hashed file is git-tracked); this is the filter
+#: that keeps the common cases from ever reaching it.
+UNTRACKED_SUFFIXES = frozenset(
+    {".pyc", ".pyo", ".so", ".dylib", ".dll", ".pyd", ".o", ".a"}
+)
+UNTRACKED_DIR_NAMES = frozenset({"__pycache__", ".pytest_cache", "build", "dist"})
+
+
 def _tree_files(root: Path) -> list[Path]:
     return [
         p
         for p in sorted(root.rglob("*"))
-        if p.is_file() and "__pycache__" not in p.parts
+        if p.is_file()
+        and not (UNTRACKED_DIR_NAMES & set(p.parts))
+        and p.suffix not in UNTRACKED_SUFFIXES
+        and not p.name.endswith(".egg-info")
     ]
 
 
@@ -215,69 +259,15 @@ def _scenario_digest(scenario: dict[str, Any], ground_truth: dict[str, Any]) -> 
 def _surface_digest() -> str:
     """Digest the surface a skill can actually invoke or read.
 
-    Computed from the live objects, the same introspection
-    `tests/test_agent_skills_drift.py` and `scripts/gen_cli_reference.py`
-    already do — a renamed flag, a removed command, a changed report field or a
-    changed default verdict moves it, while a detector-internals commit that
-    touches none of them does not. That asymmetry is the whole point (D6):
-    hashing `abicheck/`'s bytes here would invalidate every committed bundle on
-    every source commit and make the evaluation unrunnable. The residual — a
-    verdict that changes with no surface change — is what Phase 6's
-    full-build-digest pass exists to close.
-
-    **Spellings alone are not the surface.** An option that keeps its name
-    while its default, type, choices, arity or flag-ness changes alters the
-    result of the exact command a skill runs, so each parameter contributes its
-    behaviourally relevant metadata too — otherwise a `--contract` gaining a
-    domain, or a default flipping, would leave every bundle passing this gate
-    (Codex review). Positional arguments are recorded for the same reason:
-    `compare OLD NEW` is as much the invocation contract as any flag.
+    Read off `SURFACE_SOURCES` — three committed, drift-gated projections of
+    the live objects — rather than by introspecting those objects here. See
+    that constant for why: a committed artifact checked on three operating
+    systems cannot be a function of the running interpreter, and hashing
+    `abicheck/`'s bytes instead would invalidate every bundle on every source
+    commit. The residual — a verdict that changes with no surface change — is
+    what Phase 6's full-build-digest pass exists to close.
     """
-    import click
-
-    from abicheck.change_registry import REGISTRY
-    from abicheck.cli import main as cli_main
-    from abicheck.schemas import load_compare_report_schema
-
-    def param_shape(param: click.Parameter) -> dict[str, Any]:
-        param_type = getattr(param, "type", None)
-        return {
-            "kind": param.param_type_name,
-            "opts": sorted(set(param.opts or [])),
-            "secondary_opts": sorted(set(param.secondary_opts or [])),
-            # repr, not the value: a default may be a Path, a sentinel, or a
-            # callable, none of which are JSON-serializable — and a changed
-            # repr is exactly the signal wanted here.
-            "default": repr(getattr(param, "default", None)),
-            "type": getattr(param_type, "name", None) or type(param_type).__name__,
-            "choices": sorted(str(c) for c in getattr(param_type, "choices", []) or []),
-            "required": bool(getattr(param, "required", False)),
-            "multiple": bool(getattr(param, "multiple", False)),
-            "nargs": getattr(param, "nargs", None),
-            "is_flag": bool(getattr(param, "is_flag", False)),
-        }
-
-    def walk(cmd: click.Command, path: tuple[str, ...] = ()) -> dict[str, Any]:
-        tree: dict[str, Any] = {
-            " ".join(path): sorted(
-                (param_shape(p) for p in cmd.params),
-                key=lambda shape: (shape["opts"], shape["kind"]),
-            )
-        }
-        if isinstance(cmd, click.Group):
-            for name, sub in cmd.commands.items():
-                tree.update(walk(sub, (*path, name)))
-        return tree
-
-    surface = {
-        "cli": walk(cli_main),
-        "report_schema": load_compare_report_schema(),
-        "verdicts": {
-            kind: meta.default_verdict.value
-            for kind, meta in sorted(REGISTRY.entries.items())
-        },
-    }
-    return _digest(json.dumps(surface, sort_keys=True).encode())
+    return _digest_paths(_expand(SURFACE_SOURCES))
 
 
 def _expand(sources: tuple[Path, ...]) -> list[Path]:
@@ -335,6 +325,35 @@ def publication_build_digest() -> str:
     return _digest(json.dumps(payload, sort_keys=True).encode())
 
 
+def _rubric_summary() -> dict[str, Any]:
+    """The gating contract, projected into the pack.
+
+    Only what a consumer needs to grade against: `k`, and per dimension its
+    grader kind and gating mode. Deliberately not the notes — `rubric.yaml`
+    stays the fact owner, and duplicating its prose would give the pack a
+    second copy to drift.
+    """
+    rubric = yaml.safe_load(RUBRIC.read_text(encoding="utf-8"))
+    return {
+        "schema_version": rubric["schema_version"],
+        "repetitions": rubric["repetitions"],
+        "dimensions": [
+            {
+                "id": d["id"],
+                "name": d["name"],
+                "grader": d["grader"],
+                "gating": d["gating"],
+                **(
+                    {"uncertainty_rules": d["uncertainty_rules"]}
+                    if "uncertainty_rules" in d
+                    else {}
+                ),
+            }
+            for d in rubric["dimensions"]
+        ],
+    }
+
+
 def _roots(sources: tuple[Path, ...]) -> list[str]:
     """Declared routes, not the resolved file list.
 
@@ -356,10 +375,33 @@ def build_pack() -> dict[str, Any]:
             fixture_root = (EXAMPLES / scenario["case"]).relative_to(ROOT).as_posix()
         else:
             fixture_root = scenario["fixture"]
+        # The pack is the cross-repository interface, so a scenario entry has
+        # to be runnable and gradeable from the pack alone: a consumer that
+        # had to read `scenarios.yaml` and `ground_truth.json` to reconstruct
+        # the prompt or the expected outcome would be coupled to this
+        # repository's private layout, which is exactly what publishing an
+        # artifact instead of a library is meant to avoid (Codex review).
+        # Category A's expectation is *resolved* here rather than restated:
+        # the catalog stays the one fact owner, and the pack carries its
+        # answer.
+        expected = dict(scenario.get("expected") or {})
+        if scenario["category"] == "A":
+            entry = ground_truth.get("verdicts", {}).get(scenario["case"], {})
+            expected = {
+                "verdict": entry.get("expected"),
+                "kinds": entry.get("expected_kinds", []),
+                "min_evidence": entry.get("min_evidence"),
+                "resolved_from": "examples/ground_truth.json",
+            }
+
         scenarios[scenario["id"]] = {
             "skill": scenario["skill"],
             "category": scenario["category"],
             "status": scenario["status"],
+            "prompt": scenario["prompt"],
+            "inputs": fixture_root,
+            "invocation": scenario.get("invocation", {}),
+            "expected": expected,
             "digest": _scenario_digest(scenario, ground_truth),
             # The manifest and the catalog are shared by every scenario, so a
             # path under either routes to all of them. Over-nomination is the
@@ -378,6 +420,11 @@ def build_pack() -> dict[str, Any]:
     # mapping would reject evidence while nominating nothing to regenerate it.
     return {
         "pack_version": PACK_VERSION,
+        # Carried for the same self-containment reason as the scenario bodies
+        # above: a consumer grading against this pack needs `k` and each
+        # dimension's gating mode, and reading them out of `rubric.yaml`
+        # would put it back inside this repository.
+        "rubric": _rubric_summary(),
         "skills": {
             name: {
                 "tree": _skill_tree_digest(name),
@@ -424,6 +471,41 @@ def build_pack() -> dict[str, Any]:
 GENERATED_MARKER = "generated by scripts/gen_skill_eval_pack.py — do not hand-edit"
 
 
+def describe_drift(committed_text: str, rendered_text: str) -> list[str]:
+    """Name the entries that differ, not just the fact that the file does.
+
+    A `--check` failure that says only "out of date" is a fine message for the
+    author who just edited a skill and knows why. It is a poor one for the
+    failure this exists to make legible: a pack that reproduces on one machine
+    and not another. That happened — the macOS lane failed while every other
+    passed — and the message gave no way to tell *which* entry moved, which is
+    most of what made diagnosing it hard.
+    """
+    try:
+        committed = json.loads(committed_text)
+        rendered = json.loads(rendered_text)
+    except json.JSONDecodeError:
+        return ["(committed pack is not valid JSON — regenerate it)"]
+
+    drift: list[str] = []
+    for section in ("skills", "scenarios", "shared"):
+        old, new = committed.get(section, {}), rendered.get(section, {})
+        for key in sorted(set(old) | set(new)):
+            if key not in old:
+                drift.append(f"{section}.{key}: added")
+            elif key not in new:
+                drift.append(f"{section}.{key}: removed")
+            elif old[key] != new[key]:
+                drift.append(
+                    f"{section}.{key}: committed {old[key].get('digest') or old[key].get('tree')}"
+                    f" -> generated {new[key].get('digest') or new[key].get('tree')}"
+                )
+    for key in ("pack_version", "rubric"):
+        if committed.get(key) != rendered.get(key):
+            drift.append(f"{key}: differs")
+    return drift or ["(entries match; the difference is in formatting)"]
+
+
 def _render(pack: dict[str, Any]) -> str:
     return (
         json.dumps({"_generated": GENERATED_MARKER, **pack}, indent=2, sort_keys=True)
@@ -454,12 +536,15 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    if PACK.read_text(encoding="utf-8") != rendered:
+    committed = PACK.read_text(encoding="utf-8")
+    if committed != rendered:
         print(
             f"ERROR: {PACK.relative_to(ROOT)} is out of date (or was hand-edited).\n"
             "       Run `python scripts/gen_skill_eval_pack.py` and commit the result.",
             file=sys.stderr,
         )
+        for line in describe_drift(committed, rendered):
+            print(f"       {line}", file=sys.stderr)
         return 1
     print(f"{PACK.relative_to(ROOT)} is up to date")
     return 0
