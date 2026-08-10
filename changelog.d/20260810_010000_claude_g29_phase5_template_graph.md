@@ -392,3 +392,38 @@
   construction. `C3` (the allocating constructor) is deliberately omitted —
   not observed emitted by clang/GCC in either test, unlike `C1`/`C2` which
   were always both present.
+
+  A fifteenth review round found two more real, empirically-confirmed
+  gaps. First, the fourteenth round's own `_ctor_dtor_symbol_variants`
+  fix had a real correctness bug: it located the ctor/dtor marker with a
+  naive `mangled.find("C1E"/"D1E")` substring search, and a class
+  literally named `C1Evil<int>` mangles to `_ZN6C1EvilIiEC1Ev` — the
+  first `"C1E"` match is inside the *class name*'s own length-prefixed
+  encoding (`6C1Evil`), not the real ctor code that follows it, so the
+  derivation produced `_ZN6C2EvilIiEC1Ev`, which happens to be the real
+  constructor mangling of the genuinely different class `C2Evil<int>` if
+  that class is also exported — a false positive, not merely a missed
+  edge, since the module's usual join-only-onto-an-existing-node safety
+  net doesn't catch a corrupted string that coincidentally *is* a real,
+  different symbol. Fixed with a new, structurally correct
+  `diff_cxx_rules.itanium_ctor_dtor_marker_span()` (reusing the same
+  length-prefix-aware nested-name walk `itanium_scope_components()`
+  already uses, so a length-prefixed identifier is always skipped as one
+  whole unit rather than scanned character-by-character for a
+  coincidental match) instead of the naive search; `_member_symbols` now
+  normalizes the Mach-O prefix once up front, since the new locator's
+  offset arithmetic requires a single `"_Z..."` prefix. Second, a nested
+  specialization whose own argument is opaque to the JSON AST parser (a
+  template-template argument) previously fell back to its bare,
+  unparameterized primary-template name when resolving an *outer*
+  argument naming it — `Outer<Use<A>>` and `Outer<Use<B>>`, where
+  `Use<A>`/`Use<B>` both take an opaque template-template argument, both
+  resolved their outer argument's `target_qname` to the identical
+  ambiguous `"Use"`, so both emitted a `TEMPLATE_USES_TYPE` edge to the
+  *same* graph node, falsely merging dependencies on two genuinely
+  distinct specializations (confirmed empirically: the outer
+  instantiation *nodes* themselves stayed correctly distinct, only the
+  argument's own target was wrong). `_resolve_specialization_qname` now
+  returns unresolved (`None`, no edge) in this case instead of the
+  ambiguous bare name, matching this module's usual "never guess"
+  discipline.

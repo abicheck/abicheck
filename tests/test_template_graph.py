@@ -786,6 +786,91 @@ def test_nested_specialization_argument_disambiguated_by_its_own_args() -> None:
     assert outer_int.args[0].target_qname != outer_double.args[0].target_qname
 
 
+def test_outer_argument_naming_an_opaque_nested_specialization_stays_unresolved() -> (
+    None
+):
+    """A nested specialization whose *own* argument is opaque to the JSON
+    AST parser (a template-template argument -- see
+    :func:`_is_opaque_template_argument`) must not collapse to its bare,
+    unparameterized primary-template name when it's itself used as an
+    *outer* template argument (Codex review, fresh evidence, verified
+    empirically against real clang AST output): ``Outer<Use<A>>`` and
+    ``Outer<Use<B>>`` -- where ``Use<A>``/``Use<B>`` both take an opaque
+    template-template argument -- previously both resolved their outer
+    argument's ``target_qname`` to the identical ambiguous ``"Use"``, so
+    both would emit a ``TEMPLATE_USES_TYPE`` edge to the *same* graph node,
+    falsely merging dependencies on two genuinely distinct specializations.
+    The outer instantiation *nodes* themselves stay correctly distinct
+    (each keeps its own full spelling); only the argument's own
+    ``target_qname`` must degrade to unresolved (``None``, no edge) rather
+    than a merged one."""
+
+    def use_spec(spec_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Use",
+            "completeDefinition": True,
+            "inner": [
+                # An opaque template-template argument: no type/value/isPack.
+                {"kind": "TemplateArgument"},
+            ],
+        }
+
+    def outer_spec(spec_id: str, arg_spelling: str, use_spec_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "Outer",
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "TemplateArgument",
+                    "type": {"qualType": arg_spelling},
+                    "inner": [
+                        {
+                            "kind": "RecordType",
+                            "decl": {
+                                "id": use_spec_id,
+                                "kind": "ClassTemplateSpecializationDecl",
+                                "name": "Use",
+                            },
+                        }
+                    ],
+                },
+            ],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Use",
+                "inner": [use_spec("0xUSEA"), use_spec("0xUSEB")],
+            },
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "Outer",
+                "inner": [
+                    outer_spec("0xOA", "Use<A>", "0xUSEA"),
+                    outer_spec("0xOB", "Use<B>", "0xUSEB"),
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    by_label = {i.label: i for i in out}
+    outer_a = by_label["Outer<Use<A>>"]
+    outer_b = by_label["Outer<Use<B>>"]
+    # The outer instantiation nodes themselves stay correctly distinct...
+    assert outer_a.label != outer_b.label
+    # ...but the argument's own target must be unresolved, not a merged
+    # "Use" both would otherwise share.
+    assert outer_a.args[0].target_qname is None
+    assert outer_b.args[0].target_qname is None
+
+
 def test_instantiation_file_inherits_sticky_location_from_an_earlier_sibling() -> None:
     """Clang emits ``loc.file`` only on the very *first* node with a location
     in a TU -- every later sibling (including a ``ClassTemplateSpecialization

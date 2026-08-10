@@ -653,10 +653,23 @@ def _resolve_specialization_qname(
     if args is None:
         # An opaque argument (e.g. a template-template argument -- see
         # _is_opaque_template_argument) means this specialization's own
-        # disambiguated label can't be trusted; fall back to the bare,
-        # unparameterized qname rather than risk merging two genuinely
-        # distinct nested specializations onto one identity.
-        return id_to_qname.get(spec_id)
+        # disambiguated label can't be trusted. Return unresolved (None)
+        # rather than the bare, unparameterized qname (Codex review, fresh
+        # evidence, verified empirically against real clang AST output): an
+        # earlier revision's bare-qname fallback let two genuinely distinct
+        # nested specializations -- Outer<Use<A>> and Outer<Use<B>>, where
+        # Use<A>/Use<B> both take an opaque template-template argument --
+        # both resolve their outer argument's target_qname to the identical
+        # ambiguous "Use", so both TEMPLATE_USES_TYPE edges landed on the
+        # same type://Use node, falsely merging dependencies on two
+        # concrete specializations. The outer instantiation *nodes*
+        # themselves stayed correctly distinct (each keeps its own full
+        # spelling, "Use<A>"/"Use<B>"), so only this edge target was wrong.
+        # None here means _resolve_arg_targets' caller sees an unresolved
+        # target_qname and (per its own docstring) omits the
+        # TEMPLATE_USES_TYPE edge entirely -- a missed edge, not a merged
+        # one, matching this module's usual "never guess" discipline.
+        return None
     resolved_args = _resolve_arg_targets(
         args,
         id_to_qname,
