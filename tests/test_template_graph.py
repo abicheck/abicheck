@@ -591,6 +591,92 @@ def test_template_template_argument_instantiation_is_skipped_not_merged() -> Non
     assert out == []
 
 
+def test_auto_nttp_bare_value_argument_instantiation_is_skipped_not_merged() -> None:
+    """An ``auto`` non-type template parameter (``template <auto V> struct
+    A;``) whose deduced type is a scoped enum produces a bare ``{"value":
+    N}`` ``TemplateArgument`` -- no ``type`` field distinguishing the
+    *deduced* type at all -- verified empirically against real clang 18 AST
+    output (Codex review): ``A<E1::X>`` and ``A<E2::X>`` (two different
+    enum types sharing the same underlying value ``1``) both reduce to the
+    identical label ``"A<1>"`` if the bare value is trusted, colliding onto
+    one graph node and merging their genuinely distinct emitted-symbol
+    edges. The fix skips the instantiation entirely rather than record a
+    wrong, merged identity -- the same discipline already applied to an
+    opaque template-template argument."""
+
+    def a_spec(spec_id: str) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "completeDefinition": True,
+            "inner": [{"kind": "TemplateArgument", "value": 1}],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "A",
+                "inner": [
+                    {
+                        "kind": "NonTypeTemplateParmDecl",
+                        "name": "V",
+                        "type": {"qualType": "auto"},
+                    },
+                    {"kind": "CXXRecordDecl", "name": "A", "inner": []},
+                    a_spec("0xA_E1"),
+                    a_spec("0xA_E2"),
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    assert out == []
+
+
+def test_plain_int_nttp_bare_value_argument_still_resolves() -> None:
+    """A concrete, non-``auto`` NTTP (``template <int V>``) carries no such
+    ambiguity -- its type is fixed and known from the parameter declaration
+    itself, so the identical bare ``{"value": N}`` shape means the
+    identical, single-typed argument every time. Only an ``auto`` NTTP
+    parameter triggers the skip above; this, the far more common shape,
+    must keep resolving normally."""
+
+    def a_spec(spec_id: str, value: int) -> dict:
+        return {
+            "id": spec_id,
+            "kind": "ClassTemplateSpecializationDecl",
+            "name": "A",
+            "completeDefinition": True,
+            "inner": [{"kind": "TemplateArgument", "value": value}],
+        }
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "ClassTemplateDecl",
+                "name": "A",
+                "inner": [
+                    {
+                        "kind": "NonTypeTemplateParmDecl",
+                        "name": "V",
+                        "type": {"qualType": "int"},
+                    },
+                    {"kind": "CXXRecordDecl", "name": "A", "inner": []},
+                    a_spec("0xA_1", 1),
+                    a_spec("0xA_2", 2),
+                ],
+            },
+        ],
+    }
+    out = parse_clang_ast_templates(ast)
+    labels = {i.label for i in out}
+    assert labels == {"A<1>", "A<2>"}
+
+
 def test_typedef_alias_argument_resolves_through_to_the_real_record() -> None:
     """clang's own printer resolves a ``using``/typedef alias argument
     straight to the underlying record's ``decl`` -- no typedef-chain

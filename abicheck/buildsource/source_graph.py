@@ -689,9 +689,10 @@ def _version_script_node_id(path: str) -> str:
 
 
 #: Suffixes that identify a static-library archive among a LinkUnit's inputs
-#: (ADR-041 P1 #2) — everything else is treated as an object file. Best-effort
-#: textual classification (no archive introspection), mirroring this module's
-#: existing approximate-by-design conventions elsewhere.
+#: (ADR-041 P1 #2) — everything else is an object file. Lowercase only —
+#: compared case-insensitively below (Codex review): Windows evidence can
+#: spell this uppercase (``FOO.LIB``), hidden from ``archive_graph.py``
+#: otherwise, same as ``adapters/make.py``'s own lowercased filter.
 _STATIC_LIBRARY_SUFFIXES = (".a", ".lib")
 
 
@@ -1297,7 +1298,7 @@ def _fold_link_provenance(graph: SourceGraphSummary, build: BuildEvidence) -> No
         for inp in link.inputs:
             if not inp:
                 continue
-            is_archive = inp.endswith(_STATIC_LIBRARY_SUFFIXES)
+            is_archive = inp.lower().endswith(_STATIC_LIBRARY_SUFFIXES)
             iid = _static_library_node_id(inp) if is_archive else _object_node_id(inp)
             if not graph.has_node(iid):
                 graph.add_node(

@@ -41,7 +41,12 @@ from abicheck.buildsource.archive_graph import (
     parse_ar_archive,
     read_archive,
 )
-from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
+from abicheck.buildsource.build_evidence import BuildEvidence, LinkUnit
+from abicheck.buildsource.source_graph import (
+    GraphNode,
+    SourceGraphSummary,
+    build_source_graph,
+)
 
 
 def _header(name: str, size: int) -> bytes:
@@ -1065,6 +1070,22 @@ def test_thin_archive_regular_member_object_magic_is_empty_not_fabricated() -> N
     assert contents.flavor == "thin"
     assert [m.name for m in contents.members] == ["a.o"]
     assert contents.object_magic == b""
+
+
+def test_link_unit_input_static_library_suffix_match_is_case_insensitive() -> None:
+    """An uppercase-suffixed archive (``FOO.LIB``, legitimate Windows build
+    evidence on a case-insensitive filesystem) must still classify as
+    ``static_library``, not fall through to ``object_file`` -- a
+    same-suffix-set check ``adapters/make.py`` already does case-
+    insensitively -- since only a ``static_library`` node is ever visible to
+    this module's own :func:`augment_graph_with_archives` pass (Codex
+    review, fresh evidence)."""
+    build = BuildEvidence(
+        link_units=[LinkUnit(id="link://Foo.exe", inputs=["Foo.obj", "BAR.LIB"])]
+    )
+    g = build_source_graph(build)
+    node_by_id = {n.id: n for n in g.nodes}
+    assert node_by_id["static_library://BAR.LIB"].kind == "static_library"
 
 
 def test_augment_graph_bsd_index_without_macho_magic_not_stripped(tmp_path) -> None:

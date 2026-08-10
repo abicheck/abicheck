@@ -545,6 +545,37 @@ def _primary_pattern_member_locs(
     return locs
 
 
+def _class_template_has_auto_nttp(class_template_node: dict[str, Any]) -> bool:
+    """Whether *class_template_node* (a ``ClassTemplateDecl``) declares a
+    non-type template parameter (``NonTypeTemplateParmDecl``) via ``auto``
+    (e.g. ``template <auto V> struct A;``) -- the signal
+    :func:`parse_clang_ast_templates`'s class-instantiation loop needs to
+    know a specialization's own NTTP argument spelling can't be trusted as
+    a unique identity (Codex review, fresh evidence, confirmed against real
+    clang 18 AST output): for an ``auto`` NTTP whose deduced type is a
+    scoped-enum, clang's ``-ast-dump=json`` serializes the ``TemplateArgument``
+    as bare ``{"value": 1}`` -- no ``type`` field, nothing distinguishing an
+    argument's *deduced* type at all -- so ``A<E1::X>`` and ``A<E2::X>``
+    (two different enum types sharing the same underlying value) both
+    reduce to the identical label ``"A<1>"`` and collide onto the same
+    ``template_instantiation`` graph node, merging their genuinely distinct
+    emitted-symbol edges. A concrete, non-``auto`` NTTP (``template <int
+    V>``) carries no such ambiguity -- its type is fixed and known from the
+    parameter declaration itself, so the identical bare ``{"value": N}``
+    shape means the identical, single-typed argument every time; only the
+    ``auto`` case is deliberately checked, not every bare-``value`` shape
+    (that would needlessly discard the common, unambiguous case too, the
+    opposite of this module's usual false-negative-over-false-positive
+    default)."""
+    for child in class_template_node.get("inner", []) or []:
+        if str(child.get("kind", "")) != "NonTypeTemplateParmDecl":
+            continue
+        param_type = child.get("type")
+        if isinstance(param_type, dict) and param_type.get("qualType") == "auto":
+            return True
+    return False
+
+
 def _collect_full_specializations(
     node: Any, full_by_id: dict[str, dict[str, Any]]
 ) -> None:
@@ -629,9 +660,21 @@ def _is_opaque_template_argument(node: dict[str, Any]) -> bool:
 
 def _flatten_template_args(
     children: list[dict[str, Any]],
+    *,
+    ambiguous_value_args: bool = False,
 ) -> list[TemplateArgUse] | None:
     """Collect every :class:`TemplateArgUse` from a decl's direct
     ``TemplateArgument`` children, flattening a parameter pack.
+
+    *ambiguous_value_args* — set by the caller when the enclosing class
+    template declares an ``auto`` NTTP parameter (see
+    :func:`_class_template_has_auto_nttp`'s own docstring) — treats a
+    bare, type-less ``{"value": N}`` argument the same way an opaque
+    template-template argument is already treated: identity untrustworthy,
+    skip the whole instantiation rather than record a wrong one. Default
+    ``False`` everywhere else (an ordinary, non-``auto`` NTTP's bare value
+    shape is unambiguous on its own, see that function's docstring for why
+    only the ``auto`` case is checked).
 
     A variadic template's pack argument is *itself* one ``TemplateArgument``
     node (``isPack: true``, no ``type``/``value`` of its own) whose real
@@ -667,12 +710,21 @@ def _flatten_template_args(
         if str(child.get("kind", "")) != "TemplateArgument":
             continue
         if child.get("isPack") and child.get("type") is None and "value" not in child:
-            nested = _flatten_template_args(child.get("inner", []) or [])
+            nested = _flatten_template_args(
+                child.get("inner", []) or [],
+                ambiguous_value_args=ambiguous_value_args,
+            )
             if nested is None:
                 return None
             out.extend(nested)
             continue
         if _is_opaque_template_argument(child):
+            return None
+        if ambiguous_value_args and child.get("type") is None and "value" in child:
+            # An `auto` NTTP's bare {"value": N} shape carries no type --
+            # see this function's own docstring and
+            # _class_template_has_auto_nttp's. Treated the same as an
+            # opaque argument: skip the whole instantiation.
             return None
         use = _template_arg_use(child)
         if use is not None:
@@ -1155,6 +1207,7 @@ def _walk_class_templates(
     id_to_qname: dict[str, str],
     id_to_template_qname: dict[str, str],
     qname_to_member_locs: dict[str, dict[tuple[str, str], int]],
+    qname_has_auto_nttp: set[str],
 ) -> None:
     if not isinstance(node, dict):
         return
@@ -1173,6 +1226,11 @@ def _walk_class_templates(
             # identically (a stub nested here, full content elsewhere), so
             # structural position alone can't distinguish them.
             qname_to_member_locs[qname] = _primary_pattern_member_locs(node)
+            # See _class_template_has_auto_nttp's own docstring: an `auto`
+            # NTTP parameter means a specialization's own bare-value
+            # argument spelling can't be trusted as a unique identity.
+            if _class_template_has_auto_nttp(node):
+                qname_has_auto_nttp.add(qname)
         # Stop here: a ClassTemplateDecl's own pattern CXXRecordDecl child
         # would open a scope for its own members if recursed into
         # generically. A template nested inside a template pattern is
@@ -1193,12 +1251,18 @@ def _walk_class_templates(
                 id_to_qname,
                 id_to_template_qname,
                 qname_to_member_locs,
+                qname_has_auto_nttp,
             )
         return
 
     for child in node.get("inner", []) or []:
         _walk_class_templates(
-            child, scope, id_to_qname, id_to_template_qname, qname_to_member_locs
+            child,
+            scope,
+            id_to_qname,
+            id_to_template_qname,
+            qname_to_member_locs,
+            qname_has_auto_nttp,
         )
 
 
@@ -1233,8 +1297,14 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
     _collect_full_specializations(ast, full_by_id)
     id_to_template_qname: dict[str, str] = {}
     qname_to_member_locs: dict[str, dict[tuple[str, str], int]] = {}
+    qname_has_auto_nttp: set[str] = set()
     _walk_class_templates(
-        ast, [], id_to_qname, id_to_template_qname, qname_to_member_locs
+        ast,
+        [],
+        id_to_qname,
+        id_to_template_qname,
+        qname_to_member_locs,
+        qname_has_auto_nttp,
     )
     # _walk_class_templates above only *registers* class-template membership
     # (id_to_template_qname); the actual instantiation objects are built
@@ -1246,7 +1316,10 @@ def parse_clang_ast_templates(ast: dict[str, Any]) -> list[TemplateInstantiation
         full = full_by_id.get(spec_id)
         if full is None:
             continue  # a stub with no corresponding full definition anywhere
-        args = _flatten_template_args(full.get("inner", []) or [])
+        args = _flatten_template_args(
+            full.get("inner", []) or [],
+            ambiguous_value_args=template_qname in qname_has_auto_nttp,
+        )
         if args is None:
             # An opaque argument (e.g. a template-template argument -- see
             # _is_opaque_template_argument) means this instantiation's own

@@ -585,3 +585,34 @@
   first four bytes of that specific member's own data), and the fallback
   gates on the *referenced symbol's own defining member's* magic instead
   of the archive-wide value.
+
+  A twenty-first round found and fixed two more real gaps, both confirmed
+  empirically. First, `source_graph.py`'s `LinkUnit` input classification
+  (`inp.endswith(_STATIC_LIBRARY_SUFFIXES)`) was case-sensitive, so a
+  legitimately uppercase-suffixed Windows archive input (`FOO.LIB`, common
+  on a case-insensitive filesystem) was silently misclassified as a plain
+  `object_file` instead of `static_library` -- `adapters/make.py`'s own
+  link-input filter already lowercases before the identical suffix check,
+  but this classification site didn't, so the archive never became a
+  `static_library` node and `archive_graph.py`'s pass (which only ever
+  looks at that node kind) never saw it at all: no extractor row, no
+  member nodes, no `OBJECT_DEFINES_SYMBOL` edges (Codex review, fresh
+  evidence). Fixed by lowercasing before the compare, matching the Make
+  adapter. Second, an `auto` non-type template parameter (`template <auto
+  V> struct A;`) whose deduced type is a scoped enum produces a bare
+  `{"value": N}` `TemplateArgument` node in clang's `-ast-dump=json` --
+  confirmed against real clang 18 output -- with no `type` field
+  distinguishing the argument's *deduced* type at all, so `A<E1::X>` and
+  `A<E2::X>` (two different enum types sharing the same underlying value)
+  both reduced to the identical label `"A<1>"` and collided onto one
+  `template_instantiation` graph node, merging their genuinely distinct
+  emitted-symbol edges. Fixed by detecting a class template's own `auto`
+  NTTP parameter (`_class_template_has_auto_nttp`) and treating a bare
+  `{"value": N}` argument on such a template the same way an opaque
+  template-template argument is already treated: skip the whole
+  instantiation rather than record a wrong, merged identity. Deliberately
+  scoped to the `auto` case only -- an ordinary, non-`auto` NTTP
+  (`template <int V>`) carries no such ambiguity, since its type is fixed
+  and known from the parameter declaration itself, so a blanket "any bare
+  value" check would have needlessly discarded the far more common,
+  unambiguous case too.
