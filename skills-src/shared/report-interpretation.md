@@ -36,13 +36,26 @@ scope.resolved      false → fell back to the full export table
 contract_coverage   "partial" → only one side had a fingerprint
 ```
 
-`evidence_tier` is the one to key trust decisions off. There is no
-"depth actually achieved" field to read on this path: `requested_depth` and
-`effective_depth` exist in the report schema but are populated only by the
-GitHub Action's `check-target` envelope, never by a direct `abicheck compare`.
-You do not need them — `compare` **fails the run** when an explicitly
-requested `--depth` cannot be reached, so a report that exists at all already
-reached the depth you asked for. Verify the tier, not a depth echo.
+`evidence_tier` is the one to key trust decisions off, and on this path it is
+the *only* thing that answers "what depth did this actually reach". There is
+no depth echo to read: `requested_depth` and `effective_depth` exist in the
+report schema but are populated only by the GitHub Action's `check-target`
+envelope, never by a direct `abicheck compare`.
+
+**`compare` does not enforce `--depth`.** Unlike `dump`, which refuses to
+write a snapshot whose explicit `--depth` was never reached, `compare` warns
+and proceeds: two headerless shared libraries compared with an explicit
+`--depth headers` produce an exit-`0` report at `evidence_tier: elf_only` or
+`dwarf_aware`, with only a "no headers provided" warning on stderr. Passing
+`--depth headers` therefore proves nothing on its own.
+
+So: **read `evidence_tier` and check it against the depth you asked for**
+before trusting the verdict. `--depth headers` is honoured only when
+`evidence_tier` is `header_aware`; anything lower means the headers were not
+found, the comparison ran on weaker evidence than you requested, and a clean
+verdict is a statement about symbols — not about the API surface you meant to
+check. Supply the headers (`-H/--header`, `-I/--include`) and rerun rather
+than reporting that result.
 
 ## 3. The verdict, and the gate when one was configured
 

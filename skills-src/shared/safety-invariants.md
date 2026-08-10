@@ -22,7 +22,10 @@ found nothing".
 
 Check `evidence_tier`, `evidence_tiers`, and `coverage_warnings` in the JSON
 report before summarizing anything — and, when public-header scoping was
-requested, `scope.resolved`. See
+requested, `scope.resolved`. **Asking for `--depth headers` is not evidence
+that headers were read**: `compare` warns and proceeds on weaker evidence
+rather than failing, so `evidence_tier` must confirm the depth you requested
+before its verdict is reported as one. See
 [report-interpretation.md](report-interpretation.md) for which blocks a given
 invocation actually produces: an absent block means the run did not produce
 it, never that it was clean.

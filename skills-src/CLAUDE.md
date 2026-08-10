@@ -71,10 +71,14 @@ Generated output, per skill, per target tree:
    how the range first came to say `>=0.5.0` while every workflow depended on
    `aggregate`, `project plan`, `--report-mode root-cause`,
    `--diagnostic-comparison`, and `--contract-evaluation`, none of which
-   0.5.0 shipped. `tests/test_agent_skills_structural.py` enforces that the
-   minimum is newer than `repo_facts.json`'s `latest_release` while
-   `changelog.d/` still holds unreleased fragments. Bump the ranges when the
-   surface a skill needs first ships, not when the tree's own version moves.
+   0.5.0 shipped. `tests/test_agent_skills_structural.py` enforces the
+   minimum against its own `SURFACE_FLOOR` constant — a stated fact about
+   which release contains which commands, since nothing in the working tree
+   can answer that. Do not re-derive it from the installed version or from
+   whether `changelog.d/` is non-empty; both were tried, and each is wrong in
+   one direction (see the constant's own comment). Raise it when a skill
+   starts depending on surface that first ships in a later release, not when
+   the tree's own version moves.
 
 ## Adding a public skill
 

@@ -133,19 +133,22 @@ def test_skill_declares_an_abicheck_version_range(skill_dir: Path):
     )
 
 
-def _repo_facts() -> dict:
-    import json
-
-    return json.loads((REPO / "repo_facts.json").read_text(encoding="utf-8"))
-
-
-def _has_unreleased_work() -> bool:
-    """True while `changelog.d/` still holds fragments `scriv collect` has not
-    folded into a dated CHANGELOG section — i.e. the working tree carries
-    surface no published release contains."""
-    return any((REPO / "changelog.d").glob("*.md")) and not all(
-        p.name.lower() == "readme.md" for p in (REPO / "changelog.d").glob("*.md")
-    )
+#: The first release that provides the CLI surface these workflows drive.
+#:
+#: Stated as a constant rather than derived, because it is a fact about
+#: *which release contains which commands* — something no signal in the
+#: working tree can answer. Two derivations were tried and both were wrong:
+#: the installed version (`importlib.metadata` reports the last *published*
+#: version in an unreleased tree, so it forced the minimum down to a release
+#: predating the surface), and "is `changelog.d/` non-empty" (any unrelated
+#: post-0.6.0 fragment would then demand a minimum above 0.6.0, blocking
+#: every later PR over surface that had in fact already shipped).
+#:
+#: 0.6.0 because `aggregate`, `project plan`, `--report-mode root-cause`,
+#: `--diagnostic-comparison`, and `--contract-evaluation` all postdate the
+#: 0.5.0 release. Raise this only when a skill starts depending on surface
+#: that first ships in a later release — not when the tree's version moves.
+SURFACE_FLOOR = (0, 6, 0)
 
 
 @pytest.mark.parametrize("skill_dir", SKILL_DIRS, ids=lambda d: d.name)
@@ -162,26 +165,23 @@ def test_declared_minimum_is_not_a_release_that_lacks_the_surface(skill_dir: Pat
     approved exactly the installation the workflow cannot run on — the failure
     the version range exists to prevent.
 
-    While unreleased work is pending, the minimum must therefore be *newer*
-    than the last release. Once it ships, `latest_release` catches up and the
-    same assertion holds as equality.
+    The bar is `SURFACE_FLOOR` — the release that first contains that
+    surface — and deliberately not anything derived from the working tree.
+    See that constant for the two derivations that were tried and why each
+    produced a wrong answer in one direction or the other.
     """
     raw = _front_matter(skill_dir / "SKILL.md")["metadata"]["abicheck-version-range"]
     match = _VERSION_RANGE_RE.match(raw)
     assert match is not None
     minimum, maximum = (_version_tuple(g) for g in match.groups())
-    latest_release = _version_tuple(_repo_facts()["latest_release"])
 
-    if _has_unreleased_work():
-        assert minimum > latest_release, (
-            f"{skill_dir.name} declares a minimum of {match.group(1)}, but "
-            f"{'.'.join(map(str, latest_release))} is the last published "
-            "release and this tree still carries unreleased surface the "
-            "skills depend on — a user installing the published version would "
-            "pass the preflight and then fail on unknown commands"
-        )
-    else:
-        assert minimum >= latest_release
+    assert minimum >= SURFACE_FLOOR, (
+        f"{skill_dir.name} declares a minimum of {match.group(1)}, which "
+        f"predates {'.'.join(map(str, SURFACE_FLOOR))} — the release that "
+        "first provides the commands and options this workflow drives. A "
+        "user on that older version would pass the preflight and then fail "
+        "on unknown commands, which is what the range exists to prevent"
+    )
     assert maximum > minimum, "the range must be non-empty"
 
 
