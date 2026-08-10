@@ -28,10 +28,12 @@ that would re-introduce an import cycle.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
+from typing import Any
 
 from .inline import (
     BuildConfig,
@@ -44,6 +46,121 @@ from .inline import (
 from .pack import BuildSourcePack
 
 logger = logging.getLogger(__name__)
+
+
+def _l2_seed_config(
+    build_config: Path | None,
+    sources: Path | None,
+    build_query: str | None,
+    build_compile_db: str | None,
+) -> BuildConfig | None:
+    """The effective ``BuildConfig`` for L2 seeding, or ``None`` to degrade.
+
+    Mirrors ``embed_build_source``'s config handling so a trusted ``--config``
+    ``build.compile_db``/``build.query`` is honored here too (and only an
+    explicit ``--config`` file is trusted for query execution; an
+    auto-discovered ``.abicheck.yml`` is loaded for its non-executable settings
+    but never run), then folds the CLI build-DB overrides in exactly as embed
+    does, so L2 seeding resolves the *same* DB L3 will.
+
+    A malformed/invalid config surfaces loudly elsewhere (``embed_build_source``,
+    the compile-context resolver); this is a best-effort include-dir hint, so it
+    degrades to "no seeded dirs" rather than raising through.
+    """
+    cfg_path = build_config or discover_build_config(sources)
+    try:
+        cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
+    except ValueError:
+        return None
+    if build_query is None and build_compile_db is None:
+        return cfg
+    return dataclasses.replace(
+        cfg,
+        query=build_query if build_query is not None else cfg.query,
+        compile_db=(
+            build_compile_db if build_compile_db is not None else cfg.compile_db
+        ),
+    )
+
+
+def _l2_seed_pack_inputs(
+    build_info: Path | None, sources: Path | None
+) -> tuple[Any, Path | None, Path | None]:
+    """``(base_build, raw_build_info, raw_sources)`` with any pack pre-loaded.
+
+    A ``--sources`` pack carries its own L3 ``build_evidence``, which
+    ``embed_build_source``/``_combine_packs`` use for L3 when no ``--build-info``
+    does; mirror that so the pack's compile-unit include dirs seed L2 too
+    (Codex). Any explicit ``--build-info`` wins L3, so seed from the source pack
+    only when *no* ``--build-info`` was given (not merely no build-info *pack*):
+    a raw ``--build-info`` must still be resolved by ``collect_inline_pack``,
+    not skipped by folding the pack into ``base_build`` (Codex review).
+    """
+    base_build = None
+    raw_build_info = build_info
+    if build_info is not None and is_pack_dir(build_info):
+        base_build = BuildSourcePack.load(build_info).build_evidence
+        raw_build_info = None
+    raw_sources = sources
+    if sources is not None and is_pack_dir(sources):
+        if build_info is None:
+            base_build = BuildSourcePack.load(sources).build_evidence
+        raw_sources = None
+    return base_build, raw_build_info, raw_sources
+
+
+def _unit_include_dirs(cu: Any) -> list[str]:
+    """One compile unit's normal-priority include dirs, structured + argv.
+
+    The compile-DB adapter folds only ``-I``/``-isystem`` into the structured
+    ``include_paths``/``system_include_paths``; normal-priority include dirs
+    given via ``-iquote`` (GNU) or ``/I`` (MSVC) stay only in argv. The L4
+    replay honours those, so L2 must see them too or a build resolving
+    dependency headers via ``-iquote deps/include`` fails its header parse with
+    no manual ``-I`` (Codex review). Restricted to normal-priority buckets: the
+    callers re-emit every seeded dir as plain ``-I``, so promoting an
+    after-system dir (``-idirafter``) or a system dir (``-isystem``/``-imsvc``)
+    would shadow a system header the build would actually use (Codex review) —
+    ``-isystem`` dirs are already carried structurally anyway. Relative operands
+    resolve against the unit's ``directory`` (the compile command's cwd) and the
+    home-relative ``~`` the adapter stored is expanded.
+    """
+    from ..header_utils import _build_context_include_dirs
+
+    argv_dirs = (
+        _build_context_include_dirs(
+            list(cu.argv),
+            base_dir=cu.directory or None,
+            expand_user=True,
+            prefixes=("-I", "-iquote", "/I"),
+        )
+        if cu.argv
+        else set()
+    )
+    return [*cu.include_paths, *cu.system_include_paths, *sorted(argv_dirs)]
+
+
+def _existing_include_dirs(units: Iterable[Any]) -> list[str]:
+    """De-duplicated, existing include dirs across every compile unit.
+
+    ``CompileDbAdapter`` stores paths through ``DEFAULT_REDACTION``, which
+    rewrites the home prefix to a literal ``~`` (e.g. a CI runner's
+    ``/home/runner/work`` -> ``~/work``). This derivation is ephemeral and runs
+    on the same host as the build, so ``~`` is expanded back before the
+    existence check — otherwise every home-rooted include dir (the common CI
+    case this fallback targets) would be silently dropped.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for cu in units:
+        for inc in _unit_include_dirs(cu):
+            if not inc:
+                continue
+            real = os.path.expanduser(inc)
+            if real not in seen and Path(real).is_dir():
+                seen.add(real)
+                out.append(real)
+    return out
 
 
 def derive_l2_include_dirs(
@@ -79,37 +196,16 @@ def derive_l2_include_dirs(
     """
     if sources is None and build_info is None:
         return [], []
-    # Mirror embed_build_source's config handling so a trusted --config
-    # build.compile_db / build.query is honored here too (and only an explicit
-    # --config file is trusted for query execution; an auto-discovered
-    # .abicheck.yml is loaded for its non-executable settings but never run).
-    cfg_path = build_config or discover_build_config(sources)
-    try:
-        cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
-    except ValueError:
-        # A malformed/invalid config surfaces loudly elsewhere (embed_build_source,
-        # the compile-context resolver); this is a best-effort L2 include-dir hint,
-        # so degrade to "no seeded dirs" rather than raising through it.
+    cfg = _l2_seed_config(build_config, sources, build_query, build_compile_db)
+    if cfg is None:
         return [], []
-    # Fold the CLI build-DB overrides into cfg exactly as embed_build_source does,
-    # so the L2 seeding resolves the *same* DB L3 will (an explicit --build-compile-db
-    # / --build-query wins over an auto-discovered one). compile_db_explicit mirrors
-    # embed too: when the DB is explicitly configured, a missing glob must *stop*
-    # here rather than silently seed from an unrelated auto-discovered/inferred DB.
-    if build_query is not None or build_compile_db is not None:
-        import dataclasses
-
-        cfg = dataclasses.replace(
-            cfg,
-            query=build_query if build_query is not None else cfg.query,
-            compile_db=build_compile_db
-            if build_compile_db is not None
-            else cfg.compile_db,
-        )
     cfg_trusted_for_query = build_config is not None or build_query is not None
     compile_db_explicit = build_compile_db is not None or build_config is not None
     cleanups: list[Callable[[], None]] = []
     try:
+        base_build, raw_build_info, raw_sources = _l2_seed_pack_inputs(
+            build_info, sources
+        )
         # Reuse the same L3-collection path embed_build_source drives, restricted
         # to build context only (no L4/L5), so every supported build-info form —
         # a collected pack, a Bazel aquery/cquery, an explicit/auto-discovered/
@@ -117,23 +213,6 @@ def derive_l2_include_dirs(
         # the same CompileUnit include dirs the L4 replay would use. Re-deriving
         # this by hand kept missing input forms (packs, bazel); collect_inline_pack
         # owns them, plus the temp-build-dir cleanup lifecycle via defer_cleanup.
-        base_build = None
-        raw_build_info = build_info
-        if build_info is not None and is_pack_dir(build_info):
-            base_build = BuildSourcePack.load(build_info).build_evidence
-            raw_build_info = None
-        raw_sources = sources
-        if sources is not None and is_pack_dir(sources):
-            # A --sources pack carries its own L3 build_evidence, which
-            # embed_build_source/_combine_packs use for L3 when no --build-info does;
-            # mirror that so the pack's compile-unit include dirs seed L2 too (Codex).
-            # Any explicit --build-info wins L3, so seed from the source pack only
-            # when *no* --build-info was given (not merely no build-info *pack*): a
-            # raw --build-info must still be resolved by collect_inline_pack below,
-            # not skipped by folding the pack into base_build (Codex review).
-            if build_info is None:
-                base_build = BuildSourcePack.load(sources).build_evidence
-            raw_sources = None
         pack = collect_inline_pack(
             sources=raw_sources,
             build_info=raw_build_info,
@@ -150,46 +229,7 @@ def derive_l2_include_dirs(
             if pack is not None and pack.build_evidence is not None
             else []
         )
-        from ..header_utils import _build_context_include_dirs
-
-        seen: set[str] = set()
-        out: list[str] = []
-        for cu in units:
-            # The compile-DB adapter folds only -I/-isystem into the structured
-            # include_paths/system_include_paths; normal-priority include dirs given
-            # via -iquote (GNU) or /I (MSVC) stay only in argv. The L4 replay honours
-            # those, so L2 must see them too or a build resolving dependency headers
-            # via `-iquote deps/include` fails its header parse with no manual -I
-            # (Codex review). Restrict to normal-priority buckets: the callers re-emit
-            # every seeded dir as plain -I, so promoting an *after-system* dir
-            # (-idirafter) or a system dir (-isystem/-imsvc) would shadow a system
-            # header the build would actually use (Codex review) — -isystem dirs are
-            # already carried structurally anyway. Resolve relative operands against
-            # the unit's `directory` (the compile command's cwd) and un-redact the
-            # home-relative `~` the adapter stored. Union, deduped.
-            argv_dirs = (
-                _build_context_include_dirs(
-                    list(cu.argv),
-                    base_dir=cu.directory or None,
-                    expand_user=True,
-                    prefixes=("-I", "-iquote", "/I"),
-                )
-                if cu.argv
-                else set()
-            )
-            for inc in (*cu.include_paths, *cu.system_include_paths, *sorted(argv_dirs)):
-                if not inc:
-                    continue
-                # CompileDbAdapter stores paths through DEFAULT_REDACTION, which
-                # rewrites the home prefix to a literal ``~`` (e.g. a CI runner's
-                # /home/runner/work -> ~/work). This derivation is ephemeral and
-                # runs on the same host as the build, so expand ~ back before the
-                # existence check — otherwise every home-rooted include dir (the
-                # common CI case this fallback targets) would be silently dropped.
-                real = os.path.expanduser(inc)
-                if real not in seen and Path(real).is_dir():
-                    seen.add(real)
-                    out.append(real)
+        out = _existing_include_dirs(units)
         if not out:
             # Nothing to preserve — release any temp build dir now.
             _run_cleanups(cleanups)

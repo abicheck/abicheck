@@ -538,6 +538,31 @@ def _looks_like_record_definition(node: dict[str, Any]) -> bool:
 
 
 @dataclass(frozen=True)
+class _AstIndexes:
+    """The four whole-TU indexes both AST passes below read and populate.
+
+    Bundled so the two mutually recursive walks take one argument instead of
+    four. Every field is a mutable container filled in place and shared by
+    reference across the whole walk, so the dataclass itself is frozen: what
+    must not change is *which* dicts a walk writes into, not their contents.
+    """
+
+    #: bare type name -> every qualified name it can resolve to in this TU.
+    name_index: dict[str, list[str]]
+    #: entity identity -> the file it was declared in.
+    decl_file: dict[str, str]
+    #: bare var/enum-constant name -> every identity it can resolve to.
+    ref_name_index: dict[str, list[str]]
+    #: clang node id -> (identity, file), the unambiguous reference lookup.
+    id_index: dict[str, tuple[str, str]]
+
+
+def _new_ast_indexes() -> _AstIndexes:
+    """A fresh, empty :class:`_AstIndexes` for one AST walk."""
+    return _AstIndexes({}, {}, {}, {})
+
+
+@dataclass(frozen=True)
 class TypeEdge:
     """One type/reference edge extracted from a clang AST (ADR-041 P0)."""
 
@@ -578,14 +603,81 @@ class TypeEdge:
     resolution: str = field(default="", compare=False)
 
 
+def _index_type_target(
+    qname: str,
+    name: str,
+    cur_file: str,
+    idx: _AstIndexes,
+    *,
+    prefer_definition: bool,
+) -> None:
+    """Index one resolvable *type* target: its bare-name alias and its file.
+
+    ``prefer_definition`` is the records-only rule that a later, complete
+    definition overwrites a file recorded from an earlier forward declaration;
+    enums/typedefs keep the first file seen.
+    """
+    candidates = idx.name_index.setdefault(name, [])
+    if qname not in candidates:
+        candidates.append(qname)
+    if not cur_file:
+        return
+    if prefer_definition:
+        idx.decl_file[qname] = cur_file
+    else:
+        idx.decl_file.setdefault(qname, cur_file)
+
+
+def _index_reference_target(
+    node: Any, name: str, cur_file: str, idx: _AstIndexes
+) -> None:
+    """Index one var/enum-constant as a resolvable *reference* target.
+
+    Three lookups are populated, weakest last: the identity's declaring file,
+    the ambiguous bare-name alias, and clang's own per-node id. The id map is
+    the only unambiguous one — two same-named declarations in different scopes
+    collapse to one bare-name entry, so routing a stub's resolution through
+    ``decl_file``/``ref_name_index`` alone would pick whichever was indexed
+    first (Codex review). Mapping the id to *both* identity and file lets a
+    stub carrying only an ``id`` (no ``mangledName``) resolve its identity
+    precisely too — e.g. telling a reference to ``a::k`` from one to ``b::k``.
+    """
+    ident = _decl_identity(node)
+    if ident and cur_file:
+        idx.decl_file.setdefault(ident, cur_file)
+    if ident and name:
+        candidates = idx.ref_name_index.setdefault(name, [])
+        if ident not in candidates:
+            candidates.append(ident)
+    node_id = str(node.get("id") or "")
+    if node_id and ident:
+        idx.id_index.setdefault(node_id, (ident, cur_file))
+
+
+def _index_children(
+    node: Any,
+    scope: list[str],
+    cur_file: str,
+    idx: _AstIndexes,
+    in_body: bool,
+) -> str:
+    """Index every child of *node* in order, threading the sticky file state.
+
+    clang emits ``loc.file`` only on the *first* declaration in a file — later
+    siblings carry line/column only (Codex review) — so each sibling's return
+    value feeds the next call rather than every child re-receiving the parent's
+    value, which would lose the file for every sibling after the first.
+    """
+    for child in node.get("inner", []) or []:
+        cur_file = _index_declared_entities(child, scope, cur_file, idx, in_body)
+    return cur_file
+
+
 def _index_declared_entities(
     node: Any,
     scope: list[str],
     cur_file: str,
-    name_index: dict[str, list[str]],
-    decl_file: dict[str, str],
-    ref_name_index: dict[str, list[str]],
-    id_index: dict[str, tuple[str, str]],
+    idx: _AstIndexes,
     in_body: bool = False,
 ) -> str:
     """First pass: record every type declaration's qualified name (+declaring
@@ -600,12 +692,9 @@ def _index_declared_entities(
     targets (Codex review: a private enum/typedef used as a field/param type
     was previously left un-indexed, same gap as an un-indexed record).
 
-    Returns the last-seen file after visiting *node* and its whole subtree.
-    clang emits ``loc.file`` only on the *first* declaration in a file — later
-    siblings just carry line/column (Codex review) — so this sticky state
-    must be threaded from one sibling call to the next in every loop below,
-    not just passed down independently to each child from the parent's
-    value, or every sibling after the first loses its file.
+    Returns the last-seen file after visiting *node* and its whole subtree;
+    :func:`_index_children` documents why that state is threaded sibling to
+    sibling.
     """
     if not isinstance(node, dict):
         return cur_file
@@ -616,63 +705,26 @@ def _index_declared_entities(
     name = str(node.get("name") or "")
 
     if kind in _RECORD_DECL_KINDS and name:
-        qname = "::".join([*scope, name])
-        name_index.setdefault(name, [])
-        if qname not in name_index[name]:
-            name_index[name].append(qname)
-        if cur_file and (qname not in decl_file or _looks_like_record_definition(node)):
-            decl_file[qname] = cur_file
-        child_scope = [*scope, name]
-        for child in node.get("inner", []) or []:
-            cur_file = _index_declared_entities(
-                child,
-                child_scope,
-                cur_file,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
-                in_body,
-            )
-        return cur_file
+        _index_type_target(
+            "::".join([*scope, name]),
+            name,
+            cur_file,
+            idx,
+            prefer_definition=_looks_like_record_definition(node),
+        )
+        return _index_children(node, [*scope, name], cur_file, idx, in_body)
 
     if kind in _OTHER_TYPE_DECL_KINDS and name:
-        qname = "::".join([*scope, name])
-        name_index.setdefault(name, [])
-        if qname not in name_index[name]:
-            name_index[name].append(qname)
-        if cur_file:
-            decl_file.setdefault(qname, cur_file)
+        _index_type_target(
+            "::".join([*scope, name]), name, cur_file, idx, prefer_definition=False
+        )
         # Enum constants (and any nested decls) still need indexing; no new
         # scope is opened — an unscoped/scoped enum's own name is not part of
         # its enumerators' spelling in clang's AST dump.
-        for child in node.get("inner", []) or []:
-            cur_file = _index_declared_entities(
-                child,
-                scope,
-                cur_file,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
-                in_body,
-            )
-        return cur_file
+        return _index_children(node, scope, cur_file, idx, in_body)
 
     if kind == "NamespaceDecl" and name:
-        child_scope = [*scope, name]
-        for child in node.get("inner", []) or []:
-            cur_file = _index_declared_entities(
-                child,
-                child_scope,
-                cur_file,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
-                in_body,
-            )
-        return cur_file
+        return _index_children(node, [*scope, name], cur_file, idx, in_body)
 
     if kind == "FieldDecl" and name and not in_body:
         # A field's own qualified identity (``Widget::x``), mirroring
@@ -686,21 +738,9 @@ def _index_declared_entities(
         # Deliberately NOT added to ``name_index``/``ref_name_index`` —
         # fields are not resolvable *type* targets or reference targets in
         # their own right, only entities with their own file to look up.
-        field_ident = "::".join([*scope, name])
         if cur_file:
-            decl_file.setdefault(field_ident, cur_file)
-        for child in node.get("inner", []) or []:
-            cur_file = _index_declared_entities(
-                child,
-                scope,
-                cur_file,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
-                in_body,
-            )
-        return cur_file
+            idx.decl_file.setdefault("::".join([*scope, name]), cur_file)
+        return _index_children(node, scope, cur_file, idx, in_body)
 
     if kind in _FUNCTION_DECL_KINDS:
         # Everything declared inside a function/method body — including a
@@ -712,52 +752,12 @@ def _index_declared_entities(
         # local variables* get marked ``defined_in_project`` and reported by
         # ``public_to_internal_dependency`` as a hidden internal dependency
         # (Codex review).
-        for child in node.get("inner", []) or []:
-            cur_file = _index_declared_entities(
-                child,
-                scope,
-                cur_file,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
-                True,
-            )
-        return cur_file
+        return _index_children(node, scope, cur_file, idx, True)
 
     if kind in _REFERENCE_DECL_KINDS and not in_body:
-        ident = _decl_identity(node)
-        if ident and cur_file:
-            decl_file.setdefault(ident, cur_file)
-        if ident and name:
-            candidates = ref_name_index.setdefault(name, [])
-            if ident not in candidates:
-                candidates.append(ident)
-        node_id = str(node.get("id") or "")
-        # Keyed by clang's own per-node id (unique, unlike the bare-name
-        # identity two same-named declarations in different scopes both
-        # collapse to) and mapped to *both* the full identity and the file —
-        # routing either through the shared identity->file `decl_file` dict,
-        # or through the ambiguous bare-name `ref_name_index`, would still
-        # pick whichever same-named declaration was indexed first (Codex
-        # review). A stub that only carries an ``id`` (no ``mangledName``)
-        # can then resolve its *identity* precisely too, not just its file —
-        # e.g. disambiguating a reference to ``a::k`` from one to ``b::k``.
-        if node_id and ident:
-            id_index.setdefault(node_id, (ident, cur_file))
+        _index_reference_target(node, name, cur_file, idx)
 
-    for child in node.get("inner", []) or []:
-        cur_file = _index_declared_entities(
-            child,
-            scope,
-            cur_file,
-            name_index,
-            decl_file,
-            ref_name_index,
-            id_index,
-            in_body,
-        )
-    return cur_file
+    return _index_children(node, scope, cur_file, idx, in_body)
 
 
 #: :func:`_resolve_type_name` resolution labels (ADR-041 richer-confidence
@@ -955,15 +955,208 @@ def _resolve_ref_identity(
     return ident, file, resolution
 
 
+def _walk_children(
+    node: Any,
+    scope: list[str],
+    enclosing_func: str,
+    edges: list[TypeEdge],
+    idx: _AstIndexes,
+) -> None:
+    """Recurse into every child of *node* with the given scope/function."""
+    for child in node.get("inner", []) or []:
+        _walk_types(child, scope, enclosing_func, edges, idx)
+
+
+def _emit_record_member_edges(
+    node: Any,
+    qname: str,
+    child_scope: list[str],
+    edges: list[TypeEdge],
+    idx: _AstIndexes,
+) -> None:
+    """Emit a record's own base and field type edges.
+
+    Base/field types resolve against the record's *own* scope
+    (``child_scope``), not just the enclosing one — a field or base naming a
+    type nested in this same record (``Outer::Inner`` referenced as bare
+    ``"Inner"`` from inside ``Outer``) must be looked up starting from the
+    record's own body outward, matching real C++ member lookup order (Codex
+    review). :func:`_resolve_type_name` still tries every shorter prefix down
+    to the enclosing scopes, so this is a strict superset of the previous
+    (enclosing-scope-only) lookup.
+    """
+    for base in node.get("bases", []) or []:
+        if not isinstance(base, dict):
+            continue
+        base_type = base.get("type")
+        raw_base = (
+            str(base_type.get("qualType", "")) if isinstance(base_type, dict) else ""
+        )
+        _emit_type_edges(
+            edges,
+            qname,
+            raw_base,
+            EDGE_TYPE_INHERITS,
+            "base",
+            child_scope,
+            idx.name_index,
+            idx.decl_file,
+        )
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict) and child.get("kind") == "FieldDecl":
+            _emit_type_edges(
+                edges,
+                qname,
+                _decl_type_name(child),
+                EDGE_TYPE_HAS_FIELD_TYPE,
+                "field",
+                child_scope,
+                idx.name_index,
+                idx.decl_file,
+            )
+
+
+def _emit_alias_edge(
+    node: Any, scope: list[str], name: str, edges: list[TypeEdge], idx: _AstIndexes
+) -> None:
+    """Emit the edge from a typedef/type-alias to its *underlying* type.
+
+    A public alias's underlying type was never emitted as a dependency at all
+    — only the alias's own name was indexed as a resolvable target (Codex
+    review: ``using Handle = detail::Impl *;`` produced no edge from
+    ``Handle`` to the private ``detail::Impl`` it wraps, so
+    ``public_to_internal_dependency`` had nothing to report for APIs that only
+    ever spell the public alias name).
+    """
+    _emit_type_edges(
+        edges,
+        "::".join([*scope, name]),
+        _decl_type_name(node),
+        EDGE_TYPE_HAS_FIELD_TYPE,
+        "alias",
+        scope,
+        idx.name_index,
+        idx.decl_file,
+    )
+
+
+def _emit_var_decl_edge(
+    node: Any, scope: list[str], name: str, edges: list[TypeEdge], idx: _AstIndexes
+) -> None:
+    """Emit a namespace/class-scope variable's own DECL_HAS_TYPE edge.
+
+    A public/exported data declaration's own type was never emitted either —
+    this module only ever read a VarDecl's type when it was the *target* of a
+    DeclRefExpr, never at its own declaration site (Codex review: ``extern
+    detail::Impl *g;`` or a public static data member produced no
+    DECL_HAS_TYPE edge for the private pointee).
+
+    Identity must be scope-qualified when unmangled (Codex review): a public
+    ``extern "C"`` variable inside a namespace (``namespace api { extern "C"
+    detail::Impl *g; }``) reports ``mangledName == name`` (no real Itanium
+    mangling), so ``SourceEntity.identity()`` falls back to the qualified name
+    ``"api::g"`` -- but the bare ``_decl_identity(node)`` gives just ``"g"``,
+    landing this edge's src on a different ``decl://`` node than the public
+    SOURCE_DECLARES node and breaking reachability from the public variable to
+    its private pointee. :func:`function_decl_identity` with an empty
+    ``type_qual`` falls through to the same bare-qualified-name case (a
+    variable's ``SourceEntity`` never sets ``signature_hash``, unlike a
+    function's), so it doubles as the right fallback here.
+    """
+    ident = function_decl_identity(
+        _normalize_mangled(str(node.get("mangledName") or "")),
+        name,
+        "::".join([*scope, name]) if scope else name,
+        "",
+    )
+    if not ident:
+        return
+    _emit_type_edges(
+        edges,
+        ident,
+        _decl_type_name(node),
+        EDGE_DECL_HAS_TYPE,
+        "var",
+        scope,
+        idx.name_index,
+        idx.decl_file,
+    )
+
+
+def _emit_function_signature_edges(
+    node: Any, ident: str, scope: list[str], edges: list[TypeEdge], idx: _AstIndexes
+) -> None:
+    """Emit a function's own return-type and parameter-type edges."""
+    raw_return = _decl_return_type_name(node)
+    if raw_return:
+        _emit_type_edges(
+            edges,
+            ident,
+            raw_return,
+            EDGE_DECL_HAS_TYPE,
+            "return",
+            scope,
+            idx.name_index,
+            idx.decl_file,
+        )
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
+            _emit_type_edges(
+                edges,
+                ident,
+                _decl_type_name(child),
+                EDGE_DECL_HAS_TYPE,
+                "param",
+                scope,
+                idx.name_index,
+                idx.decl_file,
+            )
+
+
+def _function_decl_ident(node: Any, scope: list[str], name: str) -> str:
+    """The identity a function/method declaration contributes as an edge src."""
+    if not name:
+        return ""
+    type_obj = node.get("type")
+    return function_decl_identity(
+        _normalize_mangled(str(node.get("mangledName") or "")),
+        name,
+        "::".join([*scope, name]) if scope else name,
+        str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else "",
+    )
+
+
+def _emit_decl_ref_edge(
+    node: Any, enclosing_func: str, edges: list[TypeEdge], idx: _AstIndexes
+) -> None:
+    """Emit the DECL_REFERENCES_DECL edge for one ``DeclRefExpr``."""
+    ref = node.get("referencedDecl")
+    if not isinstance(ref, dict) or ref.get("kind") not in _REFERENCE_DECL_KINDS:
+        return
+    ref_ident, ref_file, ref_resolution = _resolve_ref_identity(
+        ref, idx.decl_file, idx.ref_name_index, idx.id_index
+    )
+    if not ref_ident or ref_ident == enclosing_func:
+        return
+    edges.append(
+        TypeEdge(
+            enclosing_func,
+            ref_ident,
+            EDGE_DECL_REFERENCES_DECL,
+            CONF_HIGH if ref_resolution == RESOLUTION_REF_EXACT else CONF_REDUCED,
+            "ref",
+            ref_file,
+            ref_resolution,
+        )
+    )
+
+
 def _walk_types(
     node: Any,
     scope: list[str],
     enclosing_func: str,
     edges: list[TypeEdge],
-    name_index: dict[str, list[str]],
-    decl_file: dict[str, str],
-    ref_name_index: dict[str, list[str]],
-    id_index: dict[str, tuple[str, str]],
+    idx: _AstIndexes,
 ) -> None:
     """Recursive AST walk tracking the qualified-name scope and enclosing function."""
     if not isinstance(node, dict):
@@ -972,191 +1165,40 @@ def _walk_types(
     name = str(node.get("name") or "")
 
     if kind in _RECORD_DECL_KINDS and name:
-        qname = "::".join([*scope, name])
-        # Resolve base/field types against the record's *own* scope
-        # (child_scope), not just the enclosing one — a field/base naming a
-        # type nested in this same record (``Outer::Inner`` referenced as
-        # bare "Inner" from inside ``Outer``) must be looked up starting from
-        # the record's own body outward, matching real C++ member lookup
-        # order (Codex review). ``_resolve_type_name`` still tries every
-        # shorter prefix down to the enclosing scopes, so this is a strict
-        # superset of the previous (enclosing-scope-only) lookup.
         child_scope = [*scope, name]
         # A ClassTemplateSpecializationDecl's own "name" is the *primary*
         # template's bare name (clang does not fold template arguments into
-        # it), so qname here collides with the generic template's node id.
-        # Emitting base/field edges from a specific *internal* instantiation
-        # (e.g. Holder<detail::Impl>) would misattribute that one
+        # it), so the qualified name here collides with the generic template's
+        # node id. Emitting base/field edges from a specific *internal*
+        # instantiation (e.g. Holder<detail::Impl>) would misattribute that one
         # instantiation's dependency to the public generic template itself
         # (Codex review) — skip edge emission for specializations, but still
-        # recurse into their children below (nested decls still resolve).
+        # recurse into their children (nested decls still resolve).
         if kind != "ClassTemplateSpecializationDecl":
-            for base in node.get("bases", []) or []:
-                if not isinstance(base, dict):
-                    continue
-                base_type = base.get("type")
-                raw_base = (
-                    str(base_type.get("qualType", ""))
-                    if isinstance(base_type, dict)
-                    else ""
-                )
-                _emit_type_edges(
-                    edges,
-                    qname,
-                    raw_base,
-                    EDGE_TYPE_INHERITS,
-                    "base",
-                    child_scope,
-                    name_index,
-                    decl_file,
-                )
-            for child in node.get("inner", []) or []:
-                if isinstance(child, dict) and child.get("kind") == "FieldDecl":
-                    raw_field = _decl_type_name(child)
-                    _emit_type_edges(
-                        edges,
-                        qname,
-                        raw_field,
-                        EDGE_TYPE_HAS_FIELD_TYPE,
-                        "field",
-                        child_scope,
-                        name_index,
-                        decl_file,
-                    )
-        for child in node.get("inner", []) or []:
-            _walk_types(
-                child,
-                child_scope,
-                enclosing_func,
-                edges,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
+            _emit_record_member_edges(
+                node, "::".join([*scope, name]), child_scope, edges, idx
             )
+        _walk_children(node, child_scope, enclosing_func, edges, idx)
         return
 
     if kind == "NamespaceDecl" and name:
-        child_scope = [*scope, name]
-        for child in node.get("inner", []) or []:
-            _walk_types(
-                child,
-                child_scope,
-                enclosing_func,
-                edges,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
-            )
+        _walk_children(node, [*scope, name], enclosing_func, edges, idx)
         return
 
     if kind in _OTHER_TYPE_DECL_KINDS and name:
-        # A public alias's *underlying* type was never emitted as a
-        # dependency at all — only the alias's own name was indexed as a
-        # resolvable target (Codex review: `using Handle = detail::Impl *;`
-        # produced no edge from `Handle` to the private `detail::Impl` it
-        # actually wraps, so `public_to_internal_dependency` had nothing to
-        # report for APIs that only ever spell the public alias name).
-        qname = "::".join([*scope, name])
-        raw_underlying = _decl_type_name(node)
-        _emit_type_edges(
-            edges,
-            qname,
-            raw_underlying,
-            EDGE_TYPE_HAS_FIELD_TYPE,
-            "alias",
-            scope,
-            name_index,
-            decl_file,
-        )
+        _emit_alias_edge(node, scope, name, edges, idx)
 
     if kind == "VarDecl" and name and not enclosing_func:
-        # A public/exported data declaration's *own* type was never emitted
-        # either — this module only ever read a VarDecl's type when it was
-        # the *target* of a DeclRefExpr, never at its own declaration site
-        # (Codex review: `extern detail::Impl *g;` or a public static data
-        # member produced no DECL_HAS_TYPE edge for the private pointee).
         # Block-scope locals are excluded the same way
         # `_index_declared_entities`'s `in_body` tracking excludes them from
         # provenance — `enclosing_func` is only truthy inside a function/
         # method body, never for a namespace- or class-scope declaration.
-        #
-        # Identity must be scope-qualified when unmangled (Codex review): a
-        # public `extern "C"` variable inside a namespace (`namespace api {
-        # extern "C" detail::Impl *g; }`) reports mangledName == name (no
-        # real Itanium mangling), so SourceEntity.identity() falls back to
-        # the qualified name "api::g" -- but the bare _decl_identity(node)
-        # used here gives just "g", landing this edge's src on a different
-        # decl:// node than the public SOURCE_DECLARES node, breaking
-        # reachability from the public variable to its private pointee.
-        # function_decl_identity() with an empty type_qual falls through to
-        # the same bare-qualified-name case (a variable's SourceEntity never
-        # sets signature_hash, unlike a function's), so it doubles as the
-        # right fallback here too.
-        qualified_name = "::".join([*scope, name]) if scope else name
-        ident = function_decl_identity(
-            _normalize_mangled(str(node.get("mangledName") or "")),
-            name,
-            qualified_name,
-            "",
-        )
-        if ident:
-            raw_var = _decl_type_name(node)
-            _emit_type_edges(
-                edges,
-                ident,
-                raw_var,
-                EDGE_DECL_HAS_TYPE,
-                "var",
-                scope,
-                name_index,
-                decl_file,
-            )
+        _emit_var_decl_edge(node, scope, name, edges, idx)
 
     if kind in _FUNCTION_DECL_KINDS:
-        qualified_name = "::".join([*scope, name]) if scope else name
-        type_obj = node.get("type")
-        type_qual = (
-            str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
-        )
-        ident = (
-            function_decl_identity(
-                _normalize_mangled(str(node.get("mangledName") or "")),
-                name,
-                qualified_name,
-                type_qual,
-            )
-            if name
-            else ""
-        )
+        ident = _function_decl_ident(node, scope, name)
         if ident:
-            raw_return = _decl_return_type_name(node)
-            if raw_return:
-                _emit_type_edges(
-                    edges,
-                    ident,
-                    raw_return,
-                    EDGE_DECL_HAS_TYPE,
-                    "return",
-                    scope,
-                    name_index,
-                    decl_file,
-                )
-            for child in node.get("inner", []) or []:
-                if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
-                    raw_param = _decl_type_name(child)
-                    _emit_type_edges(
-                        edges,
-                        ident,
-                        raw_param,
-                        EDGE_DECL_HAS_TYPE,
-                        "param",
-                        scope,
-                        name_index,
-                        decl_file,
-                    )
-        next_func = ident or enclosing_func
+            _emit_function_signature_edges(node, ident, scope, edges, idx)
         # Recurse into every child, including a ParmVarDecl — its type was
         # already recorded as a "param" edge above, but a default-argument
         # expression (e.g. `int f(int x = detail::k)`) lives *under* the
@@ -1166,17 +1208,7 @@ def _walk_types(
         # default argument (Codex review). ParmVarDecl isn't a case this
         # walk special-cases, so recursing into it just walks its children
         # with the enclosing function scope — the same as every other node.
-        for child in node.get("inner", []) or []:
-            _walk_types(
-                child,
-                scope,
-                next_func,
-                edges,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
-            )
+        _walk_children(node, scope, ident or enclosing_func, edges, idx)
         return
 
     if kind == "FieldDecl" and name:
@@ -1189,53 +1221,13 @@ def _walk_types(
         # review). Give it a scope-qualified identity, mirroring how a
         # function's own identity becomes the enclosing_func for its body.
         field_ident = "::".join([*scope, name])
-        for child in node.get("inner", []) or []:
-            _walk_types(
-                child,
-                scope,
-                field_ident or enclosing_func,
-                edges,
-                name_index,
-                decl_file,
-                ref_name_index,
-                id_index,
-            )
+        _walk_children(node, scope, field_ident or enclosing_func, edges, idx)
         return
 
     if kind == "DeclRefExpr" and enclosing_func:
-        ref = node.get("referencedDecl")
-        if isinstance(ref, dict) and ref.get("kind") in _REFERENCE_DECL_KINDS:
-            ref_ident, ref_file, ref_resolution = _resolve_ref_identity(
-                ref, decl_file, ref_name_index, id_index
-            )
-            if ref_ident and ref_ident != enclosing_func:
-                edges.append(
-                    TypeEdge(
-                        enclosing_func,
-                        ref_ident,
-                        EDGE_DECL_REFERENCES_DECL,
-                        CONF_HIGH
-                        if ref_resolution == RESOLUTION_REF_EXACT
-                        else CONF_REDUCED,
-                        "ref",
-                        ref_file,
-                        ref_resolution,
-                    )
-                )
+        _emit_decl_ref_edge(node, enclosing_func, edges, idx)
 
-    for child in node.get("inner", []) or []:
-        _walk_types(
-            child,
-            scope,
-            enclosing_func,
-            edges,
-            name_index,
-            decl_file,
-            ref_name_index,
-            id_index,
-        )
-
-
+    _walk_children(node, scope, enclosing_func, edges, idx)
 def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
     """Dedup on ``(src, dst, kind, role)``, not just ``(src, dst, kind)``
     (Codex review, fresh evidence): a function that both returns and takes
@@ -1279,15 +1271,10 @@ def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
     declaration. Filtered here to exactly the qualified names
     ``name_index`` actually collected — the type-only subset.
     """
-    name_index: dict[str, list[str]] = {}
-    decl_file: dict[str, str] = {}
-    ref_name_index: dict[str, list[str]] = {}
-    id_index: dict[str, tuple[str, str]] = {}
-    _index_declared_entities(
-        ast, [], "", name_index, decl_file, ref_name_index, id_index
-    )
-    type_qnames = {qname for qnames in name_index.values() for qname in qnames}
-    return {qname: decl_file[qname] for qname in type_qnames if qname in decl_file}
+    idx = _new_ast_indexes()
+    _index_declared_entities(ast, [], "", idx)
+    type_qnames = {qname for qnames in idx.name_index.values() for qname in qnames}
+    return {q: idx.decl_file[q] for q in type_qnames if q in idx.decl_file}
 
 
 def index_declared_entity_files(ast: dict[str, Any]) -> dict[str, str]:
@@ -1310,14 +1297,9 @@ def index_declared_entity_files(ast: dict[str, Any]) -> dict[str, str]:
     per-edge ``dst_file``/``caller_file``/``callee_file`` backfill for each
     edge's *target* (Codex review).
     """
-    name_index: dict[str, list[str]] = {}
-    decl_file: dict[str, str] = {}
-    ref_name_index: dict[str, list[str]] = {}
-    id_index: dict[str, tuple[str, str]] = {}
-    _index_declared_entities(
-        ast, [], "", name_index, decl_file, ref_name_index, id_index
-    )
-    return decl_file
+    idx = _new_ast_indexes()
+    _index_declared_entities(ast, [], "", idx)
+    return idx.decl_file
 
 
 def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
@@ -1339,15 +1321,10 @@ def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
     types and non-call body references). Edges are de-duplicated by
     ``(src, dst, kind)``.
     """
-    name_index: dict[str, list[str]] = {}
-    decl_file: dict[str, str] = {}
-    ref_name_index: dict[str, list[str]] = {}
-    id_index: dict[str, tuple[str, str]] = {}
-    _index_declared_entities(
-        ast, [], "", name_index, decl_file, ref_name_index, id_index
-    )
+    idx = _new_ast_indexes()
+    _index_declared_entities(ast, [], "", idx)
     edges: list[TypeEdge] = []
-    _walk_types(ast, [], "", edges, name_index, decl_file, ref_name_index, id_index)
+    _walk_types(ast, [], "", edges, idx)
     return _dedupe_edges(edges)
 
 

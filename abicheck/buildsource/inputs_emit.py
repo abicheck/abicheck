@@ -344,6 +344,174 @@ def _reject_escaping_filename(name: str) -> None:
         )
 
 
+def _normalize_compacted_filename(output_filename: str, compress: bool) -> tuple[str, bool]:
+    """``(filename, compress)`` with a scan-discoverable extension.
+
+    Compression is inferred from a caller-supplied ``.gz`` name too, same as
+    :func:`append_source_facts` (CodeRabbit review, P2). The default directory
+    scan :func:`_iter_source_fact_files` runs on every later read only
+    recognizes ``*.jsonl(.gz)`` and ``*.json(.gz)`` -- a caller-supplied
+    basename without one of those (e.g. ``--output-filename merged``) writes a
+    merged file that scan can never find. Compaction would then "succeed" with
+    zero diagnostics, delete the originals it merged, and the pack would
+    silently ingest as zero TUs from that point on (Codex review, P2,
+    reproduced empirically for both the compressed and uncompressed case).
+    """
+    compress = compress or output_filename.endswith(".gz")
+    base = (
+        output_filename[: -len(".gz")]
+        if output_filename.endswith(".gz")
+        else output_filename
+    )
+    if not (base.endswith(".jsonl") or base.endswith(".json")):
+        base = f"{base}.jsonl"
+    return (f"{base}.gz" if compress else base), compress
+
+
+def _last_record_wins(
+    files: list[Path], sink: list[str]
+) -> tuple[dict[str, SourceAbiTu], list[SourceAbiTu]]:
+    """Read *files* in (sorted, deterministic) order, keeping the last-seen
+    record per tu_id -- append order within/between files, never a timestamp
+    comparison. A no-tu_id record is never deduped ("" cannot be treated as a
+    real shared identity between otherwise-unrelated TUs, Codex review, P2).
+
+    A non-empty tu_id seen more than once *within this bucket* (as opposed to
+    a fresh record correctly superseding a stale prior-compaction record,
+    handled separately by the caller) is a genuine pack-integrity problem --
+    ``inputs_validate.py``'s own ``duplicate_tu_ids`` check already flags this
+    as an ERROR before compaction. Silently picking one via last-wins would
+    make compaction delete the losing record's file (*remove_originals*) and
+    erase the very duplicate the validator would otherwise catch, discarding
+    one TU's facts with no trace (Codex review, P2). So this counts as lossy
+    instead, same as any other malformed/ambiguous original.
+    """
+    by_id: dict[str, SourceAbiTu] = {}
+    no_id: list[SourceAbiTu] = []
+    for tu in read_source_fact_files(files, diagnostics=sink):
+        if not tu.tu_id:
+            no_id.append(tu)
+            continue
+        if tu.tu_id in by_id:
+            sink.append(
+                f"duplicate tu_id across source-fact files: {tu.tu_id!r} "
+                "(a race-free per-TU filename should make this impossible)"
+            )
+        by_id[tu.tu_id] = tu
+    return by_id, no_id
+
+
+def _recognized_prior_output(
+    root: Path, manifest: InputsManifest, originals: list[Path], sink: list[str]
+) -> tuple[Path | None, list[Path]]:
+    """``(prior_path, prior_files)`` for a previous compaction's own output.
+
+    Recognized via the explicit ``manifest.last_compacted`` pointer (written
+    after every successful compaction) rather than by matching *this* run's
+    output path or comparing file mtimes: a ``--compress`` toggle or a custom
+    ``--output-filename`` between two ``compact`` calls changes the output
+    path, defeating a path match, and a rebuild's freshly-rewritten per-TU
+    file can land in the same filesystem timestamp tick as the previous
+    compaction's write, which an mtime "which is newer" check cannot break
+    correctly (Codex review, P2 -- both findings, the second reproduced
+    empirically by a regression test on some filesystems).
+    """
+    if not manifest.last_compacted:
+        return None, []
+    candidate = _safe_pack_path(root, manifest.last_compacted, sink)
+    if candidate is None:
+        return None, []
+    candidate = candidate.resolve()
+    return candidate, [f for f in originals if f.resolve() == candidate]
+
+
+def _write_merged_facts(
+    facts_dir: Path, output_path: Path, tus: list[SourceAbiTu], compress: bool
+) -> None:
+    """Write *tus* to *output_path* via temp file + atomic rename.
+
+    Same discipline as ``_write_manifest``, so a concurrent reader never
+    observes a partially-written merge.
+    """
+    fd, tmp = tempfile.mkstemp(dir=str(facts_dir), prefix=".compact.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as raw:
+            writer = gzip.GzipFile(fileobj=raw, mode="wb") if compress else raw
+            for tu in tus:
+                writer.write(
+                    (json.dumps(tu.to_dict(), sort_keys=True) + "\n").encode("utf-8")
+                )
+            if compress:
+                writer.close()
+        os.replace(tmp, output_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def _repoint_manifest_entries(
+    root: Path, manifest: InputsManifest, facts_dir: Path, merged_ref: str
+) -> bool:
+    """Repoint an explicit-file manifest at the merged file. True if changed.
+
+    A manifest that names explicit individual files is repointed at the single
+    merged file (those originals are gone). But any entry that is itself a
+    *directory* reference (``SOURCE_FACTS_DIR`` itself — what the Clang facts
+    plugin's ``ensureManifest()`` always writes, and what a bare default
+    manifest effectively means too — or another sibling facts directory in a
+    hand-written mixed manifest) must NOT be dropped: ``ensureManifest()``
+    never rewrites an existing ``manifest.json``, so losing a directory
+    reference would permanently hide every per-TU file a later incremental
+    build writes into that directory from every subsequent
+    ingest/compact/validate (Codex review, P2 — both the single-entry case and
+    the generalization to a manifest listing a directory alongside other
+    entries, since the original single-entry check collapsed the *whole* list,
+    directory entries included, the moment there was more than one).
+
+    The merged file always physically lands directly inside
+    ``SOURCE_FACTS_DIR``, regardless of what the manifest's entries say -- so a
+    directory entry only "covers" it when the entry *resolves to that exact
+    directory*, not merely an ancestor of it. :func:`_iter_source_fact_files`'s
+    directory scan is non-recursive (one ``glob()``, no descent), so an
+    ancestor entry like ``source_facts=["."]`` can never actually discover a
+    file one level deeper no matter how the two paths relate on paper. A prior
+    version used ``Path(merged_ref).is_relative_to(Path(d))``, which answers
+    "is merged_ref a sub-path of d" -- true for essentially any ancestor --
+    not "would a non-recursive scan of d actually find merged_ref". That
+    silently deleted the very TUs compaction had just merged (review finding,
+    reproduced empirically). Likewise a directory-only manifest that does not
+    itself cover ``SOURCE_FACTS_DIR`` (e.g. ``source_facts=["extra_facts"]``)
+    still needs the merged file added explicitly, or it becomes permanently
+    undiscoverable the same way (Codex review, P2).
+
+    Directory-ness is checked against a scratch diagnostics list, not the
+    caller's: this classification pass re-resolves entries already validated
+    once during discovery, so it must not flip the already-decided lossy
+    outcome or duplicate diagnostics in the caller-visible result.
+    """
+    if not manifest.source_facts:
+        return False
+    facts_dir_resolved = facts_dir.resolve()
+    scratch: list[str] = []
+    directory_entries: list[str] = []
+    covered = False
+    for entry in manifest.source_facts:
+        target = _safe_pack_path(root, entry, scratch)
+        if target is None or not target.is_dir():
+            continue
+        directory_entries.append(entry)
+        if target.resolve() == facts_dir_resolved:
+            covered = True
+    new_source_facts = (
+        list(directory_entries) if covered else [*directory_entries, merged_ref]
+    )
+    if new_source_facts == manifest.source_facts:
+        return False
+    manifest.source_facts = new_source_facts
+    return True
+
+
 def compact_inputs_pack(
     root: Path | str,
     *,
@@ -368,69 +536,38 @@ def compact_inputs_pack(
     **Decoded facts an ingest sees are unchanged** (P1 #25 invariance) —
     compaction (and *compress*, gzipping the merged file) only changes file
     layout/size on disk, never the fact content ``ingest_inputs_pack`` folds.
-    One exception, both deliberate: a *rerun* of compaction (the pack already
-    has a prior compaction's output file, plus fresh per-TU files a later
-    incremental build emitted for since-rebuilt TUs) prefers each fresh
-    per-TU record over the prior output's now-stale record for the same
-    ``tu_id`` — the prior output's records for TUs *not* rebuilt since are
-    still carried forward, never dropped (Codex review, P2). "Prior" is
-    identified via the manifest's ``last_compacted`` pointer (this function
-    writes it after every successful run), not by matching *this* run's
-    output filename or comparing file mtimes: a rerun with a different
-    ``--output-filename``/``--compress`` setting than last time still
-    recognizes last run's output as stale, and a rebuild's freshly-rewritten
-    per-TU file landing in the same filesystem timestamp tick as the
-    previous compaction's write can no longer flip the outcome (Codex
-    review, P2 — both findings, the second reproduced empirically). And a
-    read that produces new diagnostics (a malformed/unreadable original)
+    One exception, deliberate: a *rerun* of compaction (the pack already has a
+    prior compaction's output file, plus fresh per-TU files a later
+    incremental build emitted for since-rebuilt TUs) prefers each fresh per-TU
+    record over the prior output's now-stale record for the same ``tu_id`` —
+    the prior output's records for TUs *not* rebuilt since are still carried
+    forward, never dropped (Codex review, P2). See
+    :func:`_recognized_prior_output` for how "prior" is identified.
+
+    A read that produces new diagnostics (a malformed/unreadable original)
     does **not** write or publish anything and returns ``None`` — check
     *diagnostics* to find out why. Publishing a best-effort merged file
     anyway, while leaving the lossy/malformed originals in place too (the
     previous behavior), let a single malformed sibling silently duplicate
-    every successfully-read TU on the next ingest: the default directory
-    scan sees both the untouched originals and their copies now baked into
-    the merged file (CodeRabbit review, P2 — reproduced empirically: a pack
-    with one malformed ``source_facts`` file reported ``tu_count == 2`` for
-    a single TU, and ``inputs validate`` flagged a duplicate ``tu_id``
-    error). A lossy compaction therefore leaves the pack byte-for-byte
-    unchanged — safe to retry once the offending file is fixed or removed.
+    every successfully-read TU on the next ingest: the default directory scan
+    sees both the untouched originals and their copies now baked into the
+    merged file (CodeRabbit review, P2 — reproduced empirically: a pack with
+    one malformed ``source_facts`` file reported ``tu_count == 2`` for a
+    single TU, and ``inputs validate`` flagged a duplicate ``tu_id`` error). A
+    lossy compaction therefore leaves the pack byte-for-byte unchanged — safe
+    to retry once the offending file is fixed or removed.
 
     *remove_originals* deletes the per-TU files that were merged once the
     merged file is written (skipped entirely on a lossy read, see above), so
     a later ingest cannot double-count TUs by reading both the merged file
-    and its stale sources. A manifest that names explicit ``source_facts``
-    entries is repointed at the single merged file; the default (auto-scan
-    of ``source_facts/``) needs no manifest change — the new file already
-    lives where the scan looks.
+    and its stale sources.
     """
     _reject_escaping_filename(output_filename)
     root = Path(root)
     manifest = load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []
 
-    # Infer compression from a caller-supplied ".gz" output_filename too, same
-    # as append_source_facts (CodeRabbit review, P2). Resolved before reading
-    # so the output path is known when partitioning discovered files below.
-    compress = compress or output_filename.endswith(".gz")
-    # The default directory scan _iter_source_fact_files() runs on every
-    # later read only recognizes *.jsonl(.gz) and *.json(.gz) -- a caller-
-    # supplied basename without one of those extensions (e.g.
-    # --output-filename merged, with or without --compress) writes a
-    # merged file that scan can never find. Compaction then "succeeds"
-    # with zero diagnostics, deletes the originals it just merged, and the
-    # pack silently ingests as zero TUs from that point on (Codex review,
-    # P2, reproduced empirically for both the compressed and uncompressed
-    # case). Normalize to the canonical .jsonl extension before the
-    # optional .gz suffix, matching every other producer in this codebase,
-    # unless the caller already used a recognized extension.
-    base = (
-        output_filename[: -len(".gz")]
-        if output_filename.endswith(".gz")
-        else output_filename
-    )
-    if not (base.endswith(".jsonl") or base.endswith(".json")):
-        base = f"{base}.jsonl"
-    output_filename = f"{base}.gz" if compress else base
+    output_filename, compress = _normalize_compacted_filename(output_filename, compress)
     facts_dir = root / SOURCE_FACTS_DIR
     facts_dir.mkdir(parents=True, exist_ok=True)
     output_path = facts_dir / output_filename
@@ -450,24 +587,9 @@ def compact_inputs_pack(
     # must never also be unlinked as a "leftover original".
     fresh_files = [f for f in originals if f.resolve() != output_path.resolve()]
 
-    # Recognize a stale prior compaction's output via an explicit manifest
-    # pointer (manifest.last_compacted, written below after every successful
-    # compaction) rather than matching *this* run's output path or comparing
-    # file mtimes: a --compress toggle or a custom --output-filename between
-    # two `compact` calls changes output_path, defeating a path match, and a
-    # rebuild's freshly-rewritten per-TU file can land in the same
-    # filesystem timestamp tick as the previous compaction's write, which an
-    # mtime "which is newer" check cannot break correctly (Codex review, P2
-    # -- both findings, the second reproduced empirically by a regression
-    # test on some filesystems).
-    prior_files: list[Path] = []
-    recognized_prior_path: Path | None = None
-    if manifest.last_compacted:
-        candidate = _safe_pack_path(root, manifest.last_compacted, sink)
-        if candidate is not None:
-            candidate = candidate.resolve()
-            recognized_prior_path = candidate
-            prior_files = [f for f in originals if f.resolve() == candidate]
+    recognized_prior_path, prior_files = _recognized_prior_output(
+        root, manifest, originals, sink
+    )
 
     # output_path already existing is legitimate ONLY when it IS the
     # recognized prior compaction's own file (a rerun reusing the same
@@ -497,47 +619,12 @@ def compact_inputs_pack(
             "or remove the conflicting file first."
         )
 
-    def _last_record_wins(
-        files: list[Path],
-    ) -> tuple[dict[str, SourceAbiTu], list[SourceAbiTu]]:
-        """Read *files* in (sorted, deterministic) order, keeping the last-seen
-        record per tu_id -- append order within/between files, never a
-        timestamp comparison. A no-tu_id record is never deduped ("" cannot
-        be treated as a real shared identity between otherwise-unrelated TUs,
-        Codex review, P2).
+    prior_by_id, prior_no_id = _last_record_wins(prior_files, sink)
+    fresh_by_id, fresh_no_id = _last_record_wins(
+        [f for f in originals if f not in prior_files], sink
+    )
 
-        A non-empty tu_id seen more than once *within this bucket* (as
-        opposed to a fresh record correctly superseding a stale prior-
-        compaction record, handled separately by the caller) is a genuine
-        pack-integrity problem -- inputs_validate.py's own duplicate_tu_ids
-        check already flags this as an ERROR before compaction. Silently
-        picking one via last-wins would make compaction delete the losing
-        record's file (remove_originals) and erase the very duplicate the
-        validator would otherwise catch, discarding one TU's facts with no
-        trace (Codex review, P2). So this counts as lossy instead, same as
-        any other malformed/ambiguous original.
-        """
-        by_id: dict[str, SourceAbiTu] = {}
-        no_id: list[SourceAbiTu] = []
-        for tu in read_source_fact_files(files, diagnostics=sink):
-            if tu.tu_id:
-                if tu.tu_id in by_id:
-                    sink.append(
-                        f"duplicate tu_id across source-fact files: {tu.tu_id!r} "
-                        "(a race-free per-TU filename should make this "
-                        "impossible)"
-                    )
-                by_id[tu.tu_id] = tu
-            else:
-                no_id.append(tu)
-        return by_id, no_id
-
-    prior_by_id, prior_no_id = _last_record_wins(prior_files)
-    fresh_only = [f for f in originals if f not in prior_files]
-    fresh_by_id, fresh_no_id = _last_record_wins(fresh_only)
-    lossy_read = len(sink) > before_diag_count
-
-    if lossy_read:
+    if len(sink) > before_diag_count:
         # Publishing a best-effort merge here (while leaving the malformed
         # original in place too, for inspection) would duplicate every
         # successfully-read TU on the next scan: the merged file now also
@@ -552,97 +639,23 @@ def compact_inputs_pack(
         )
         return None
 
-    tus = (
+    _write_merged_facts(
+        facts_dir,
+        output_path,
         [tu for tid, tu in prior_by_id.items() if tid not in fresh_by_id]
         + prior_no_id
         + list(fresh_by_id.values())
-        + fresh_no_id
+        + fresh_no_id,
+        compress,
     )
 
-    # Temp file + atomic rename so a concurrent reader never observes a
-    # partially-written merge (same discipline as _write_manifest).
-    fd, tmp = tempfile.mkstemp(dir=str(facts_dir), prefix=".compact.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as raw:
-            writer = gzip.GzipFile(fileobj=raw, mode="wb") if compress else raw
-            for tu in tus:
-                writer.write(
-                    (json.dumps(tu.to_dict(), sort_keys=True) + "\n").encode("utf-8")
-                )
-            if compress:
-                writer.close()
-        os.replace(tmp, output_path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
-
-    # A manifest that names explicit individual files is repointed at the
-    # single merged file (those originals are gone). But any entry that is
-    # itself a *directory* reference (SOURCE_FACTS_DIR itself — what the
-    # Clang facts plugin's ensureManifest() always writes, and what a bare
-    # default manifest effectively means too — or another sibling facts
-    # directory in a hand-written mixed manifest) must NOT be dropped:
-    # ensureManifest() never rewrites an existing manifest.json, so losing a
-    # directory reference would permanently hide every per-TU file a later
-    # incremental build writes into that directory from every subsequent
-    # ingest/compact/validate (Codex review, P2 — both the single-entry case
-    # and this generalization to a manifest that lists a directory alongside
-    # other entries, since the original single-entry check collapsed the
-    # *whole* list, directory entries included, the moment there was more
-    # than one).
-    #
-    # The merged file always physically lands directly inside SOURCE_FACTS_DIR
-    # (facts_dir above), regardless of what the manifest's entries say -- so a
-    # directory entry only "covers" it when the entry *resolves to that exact
-    # directory*, not merely an ancestor of it. _iter_source_fact_files()'s
-    # directory-scan is non-recursive (one glob() call, no descent), so an
-    # ancestor entry like source_facts=["."] can never actually discover a
-    # file one level deeper in source_facts/ no matter how the two paths
-    # relate on paper. A prior version of this check used
-    # Path(merged_ref).is_relative_to(Path(d)), which answers "is merged_ref a
-    # sub-path of d" -- true for essentially any ancestor directory, not
-    # "would a non-recursive scan of d actually find merged_ref". That
-    # silently deleted the very TUs compaction had just merged:
-    # source_facts=["."] with a root-level fact file compacted with zero
-    # diagnostics, deleted the original, and left the pack with zero readable
-    # TUs afterward (review finding, reproduced empirically). Likewise a
-    # directory-only manifest that does not itself cover SOURCE_FACTS_DIR
-    # (e.g. source_facts=["extra_facts"], no "source_facts" entry at all)
-    # still needs the merged file added explicitly, or it becomes permanently
-    # undiscoverable the same way (Codex review, P2). Directory-ness is
-    # checked against a scratch diagnostics list, not *sink*, so this
-    # classification pass — which re-resolves entries already validated once
-    # during discovery above — cannot itself flip the already-decided
-    # lossy_read outcome or duplicate diagnostics in the caller-visible
-    # result.
-    facts_dir_resolved = facts_dir.resolve()
-    _scratch: list[str] = []
-    directory_entries: list[str] = []
-    covered = False
-    for entry in manifest.source_facts:
-        target = _safe_pack_path(root, entry, _scratch)
-        if target is None or not target.is_dir():
-            continue
-        directory_entries.append(entry)
-        if target.resolve() == facts_dir_resolved:
-            covered = True
     merged_ref = f"{SOURCE_FACTS_DIR}/{output_filename}"
-    manifest_changed = False
-    if manifest.source_facts:
-        new_source_facts = (
-            list(directory_entries) if covered else [*directory_entries, merged_ref]
-        )
-        if new_source_facts != manifest.source_facts:
-            manifest.source_facts = new_source_facts
-            manifest_changed = True
-
+    manifest_changed = _repoint_manifest_entries(root, manifest, facts_dir, merged_ref)
     # Record this run's output as the pack's new "last compaction", so a
-    # later rerun recognizes it as stale (see prior_files above) regardless
-    # of what output filename/compression setting that rerun uses.
-    new_last_compacted = f"{SOURCE_FACTS_DIR}/{output_filename}"
-    if manifest.last_compacted != new_last_compacted:
-        manifest.last_compacted = new_last_compacted
+    # later rerun recognizes it as stale (see _recognized_prior_output)
+    # regardless of what output filename/compression setting that rerun uses.
+    if manifest.last_compacted != merged_ref:
+        manifest.last_compacted = merged_ref
         manifest_changed = True
 
     # Publish the manifest BEFORE destructively removing the originals it
@@ -652,28 +665,24 @@ def compact_inputs_pack(
     # failed write pointing an explicit-file manifest at now-deleted files
     # -- a later read finds neither the old originals nor a manifest that
     # knows to look at the merged output, discarding evidence the merge
-    # itself successfully captured. Publishing first means a manifest-write
-    # failure leaves the pack's *manifest* exactly as it was pre-compaction
-    # (still discoverable via its old entries/originals) (CodeRabbit
-    # review, P2).
+    # itself successfully captured (CodeRabbit review, P2).
     #
-    # But os.replace(tmp, output_path) above already published the merged
-    # file itself, inside SOURCE_FACTS_DIR where the default directory scan
-    # finds it unconditionally -- a manifest-write failure at this point
-    # would otherwise leave that stray, already-discoverable merged file
-    # sitting alongside the still-present (never-deleted, since
-    # remove_originals hasn't run yet) originals. A later read would then
-    # see BOTH copies of every TU compaction had just merged: not "less
-    # evidence than before" but silently *duplicated* evidence, and the
-    # stray file wedges every subsequent compact() attempt (Codex review,
-    # P2, reproduced empirically: tu_count doubled after a simulated
-    # manifest-write failure). Rolled back on failure, restoring the pack
-    # to its exact pre-compaction state -- but only when output_path did
-    # NOT already hold a prior successful compaction's result: a rerun
-    # reusing the same output_filename overwrites that file in place, and
-    # deleting it on this run's manifest-write failure would destroy the
-    # still-valid, still-published (per the old manifest) prior result too,
-    # not just this run's unpublished one.
+    # But _write_merged_facts already published the merged file itself,
+    # inside SOURCE_FACTS_DIR where the default directory scan finds it
+    # unconditionally -- a manifest-write failure at this point would
+    # otherwise leave that stray, already-discoverable merged file sitting
+    # alongside the still-present (never-deleted, since remove_originals
+    # hasn't run yet) originals. A later read would then see BOTH copies of
+    # every TU compaction had just merged: not "less evidence than before"
+    # but silently *duplicated* evidence, and the stray file wedges every
+    # subsequent compact() attempt (Codex review, P2, reproduced empirically:
+    # tu_count doubled after a simulated manifest-write failure). Rolled back
+    # on failure -- but only when output_path did NOT already hold a prior
+    # successful compaction's result: a rerun reusing the same output_filename
+    # overwrites that file in place, and deleting it on this run's
+    # manifest-write failure would destroy the still-valid, still-published
+    # (per the old manifest) prior result too, not just this run's unpublished
+    # one.
     if manifest_changed:
         try:
             _write_manifest(root, manifest)
