@@ -327,90 +327,25 @@ def _baseline_is_native_library(path: Path) -> bool:
     return ".so" in name or name.endswith((".dll", ".dylib"))
 
 
-def _run_baseline_compare(
+def _resolve_baseline_header_scope(
     baseline: Path,
-    binary: Path,
-    new_snap: Any,
-    extra_changes: list[Any],
-    lang: str,
-    collect_mode: str,
     headers: list[Path],
     includes: list[Path],
     public_headers: list[Path],
     public_header_dirs: list[Path],
-    compile_context: CompileContext | None = None,
-    baseline_headers: list[Path] | None = None,
-    baseline_includes: list[Path] | None = None,
-    symbols_only: bool = False,
-    debug_presence_only: bool = False,
-    suppression: SuppressionList | None = None,
-    policy: str = "strict_abi",
-    policy_file: PolicyFile | None = None,
-    scope_to_public_surface: bool = True,
-    force_public_symbols: set[str] | None = None,
-    pattern_verdicts: bool = False,
-    env_matrix: EnvironmentMatrix | None = None,
-    collapse_versioned_symbols: bool = False,
-    contract_evaluation: bool = False,
-    contract_mode: str | None = None,
-    resolved_config: Any = None,
-) -> tuple[str, int, dict[str, Any]]:
-    """Compare *new_snap* against *baseline*, preserving scan authority.
+    baseline_headers: list[Path] | None,
+    baseline_includes: list[Path] | None,
+) -> tuple[list[Path], list[Path], list[Path], list[Path]]:
+    """Pick the old side's ``(headers, includes, public_headers, public_dirs)``.
 
-    Single-version cross-source findings are reported in the scan's dedicated
-    ``crosscheck`` block and stay advisory for baseline comparisons unless the
-    maintainer explicitly promotes one with ``--crosscheck KEY=error``. They are
-    not folded into ``extra_changes`` by default: doing so lets a candidate-side
-    evidence hygiene finding such as ``header_build_context_mismatch`` turn a
-    clean old/new artifact diff into an ``API_BREAK`` false positive. Real
-    old/new embedded build/source drift is still diffed below via
-    ``prepare_embedded_build_source``.
-
-    *headers*/*includes* are the same scan header inputs used to build the
-    candidate, threaded into the baseline parse so a native ``--baseline``
-    library is header-scoped symmetrically — else the old side stays
-    symbol/DWARF-only and the compare drops old type evidence or invents spurious
-    API diffs (Codex review). They are inert for a JSON-snapshot baseline.
-
-    The embedded L3/L4/L5 build/source packs on either snapshot are diffed via
-    :func:`prepare_embedded_build_source` — the same path ``abicheck compare``
-    uses — so source-only / graph findings the collected evidence reveals are
-    folded into the verdict too (``checker.compare`` itself does not read
-    ``build_source``).
+    Each side is parsed with its *own* headers. ``scan`` has a single ``-H``
+    (built for the candidate); for a native ``--against`` library whose public
+    headers differ, ``-H old=PATH``/``-I old=PATH`` (side-aware, ADR-043 D5)
+    select the old side's headers. Without them we reuse the candidate
+    ``-H``/``-I`` — correct only when the headers did not change — so warn
+    rather than silently read the old side through the new headers (Codex).
     """
-    from .cli_buildsource import prepare_embedded_build_source
-    from .errors import AbicheckError
-    from .service import compare_snapshots, resolve_input
-
-    # Each side is parsed with its *own* headers. `scan` has a single -H (built for
-    # the candidate); for a native --against library whose public headers differ,
-    # `-H old=PATH`/`-I old=PATH` (side-aware, ADR-043 D5) select the old side's
-    # headers. Without them we reuse the candidate -H/-I — correct only when the
-    # headers did not change — so warn rather than silently read the old side
-    # through the new headers (Codex).
-    if baseline_headers:
-        bl_headers = list(baseline_headers)
-        bl_includes = list(baseline_includes) if baseline_includes else includes
-        # The old-side public boundary comes ONLY from `-H old=`: dirs in
-        # it are public-header dirs, files opt in just themselves. Do NOT fall back
-        # to the new side's public dirs — a relative dir like `include/` would
-        # (segment-based provenance) re-mark old private headers as PUBLIC and skew
-        # the public-surface scoping (Codex review).
-        #
-        # Split by file-vs-dir the same way the candidate side's
-        # `_public_provenance_set` already does (Codex review, PR #624
-        # follow-up): a lone `-H old=<dir>` umbrella must feed its directory
-        # into `bl_public_dirs` ONLY, not also into `bl_public_headers` as a
-        # raw directory "path" -- doing both fed the ADR-050 comparability
-        # gate an old side whose declared scope was represented differently
-        # from the new side's (a directory counted twice vs. once), a false
-        # scope_fingerprint mismatch on an ordinary --against comparison
-        # that never touched the actual public surface.
-        bl_public_headers = [p for p in bl_headers if not p.is_dir()]
-        bl_public_dirs = [p for p in bl_headers if p.is_dir()]
-    else:
-        bl_headers, bl_includes = headers, includes
-        bl_public_headers, bl_public_dirs = public_headers, public_header_dirs
+    if not baseline_headers:
         if headers and _baseline_is_native_library(baseline):
             click.echo(
                 f"warning: --against {baseline.name} is a native library parsed "
@@ -420,85 +355,38 @@ def _run_baseline_compare(
                 f"wrong/noisy).",
                 err=True,
             )
+        return headers, includes, public_headers, public_header_dirs
 
-    try:
-        old_snap = resolve_input(
-            baseline,
-            bl_headers,
-            bl_includes,
-            version="",
-            lang=lang,
-            public_headers=bl_public_headers,
-            public_header_dirs=bl_public_dirs,
-            compile=compile_context,
-            symbols_only=symbols_only,
-            debug_presence_only=debug_presence_only,
-            # Matches the candidate's own resolve_input() default in
-            # scan_engine.py's run_scan_core -- a no-op for a JSON snapshot
-            # baseline (already-serialized, no dumping happens), but keeps a
-            # *native* --baseline library filtered consistently with the
-            # candidate (Codex review).
-            include_dependencies=False,
-        )
-    except AbicheckError as exc:
-        raise click.ClickException(
-            f"Failed to load --baseline {baseline}: {exc}"
-        ) from exc
-
-    # Preserve hard L0 removals even when the richer header/source view cannot
-    # prove public-header ownership for the removed entity.  A source/full scan
-    # may parse both sides' headers through different consumer macro contexts;
-    # in fixtures such as case97 the old library exported a function that the
-    # old header exposes only under a consumer macro, so the final public-surface
-    # comparison can otherwise filter the old-only ELF fact away.  Re-reading the
-    # already-loaded snapshots without public-surface scoping and carrying only
-    # the hard ELF-only removal kind keeps the L0 authority while avoiding the
-    # older false-positive class where advisory cross-check findings were folded
-    # into the verdict wholesale.
+    bl_headers = list(baseline_headers)
+    bl_includes = list(baseline_includes) if baseline_includes else includes
+    # The old-side public boundary comes ONLY from `-H old=`: dirs in
+    # it are public-header dirs, files opt in just themselves. Do NOT fall back
+    # to the new side's public dirs — a relative dir like `include/` would
+    # (segment-based provenance) re-mark old private headers as PUBLIC and skew
+    # the public-surface scoping (Codex review).
     #
-    # Shares abicheck.l0_export_delta.collect_l0_export_delta with
-    # cli_helpers_compare.fold_l0_hard_removals (direct `compare`) -- ADR-049
-    # Phase 5 §6.3 -- rather than each hand-copying the same
-    # resolve-symbols-only-and-diff-unscoped extraction.
-    l0_hard_removals: tuple[Any, ...] = ()
-    if not symbols_only:
-        from .l0_export_delta import collect_l0_export_delta
+    # Split by file-vs-dir the same way the candidate side's
+    # `_public_provenance_set` already does (Codex review, PR #624
+    # follow-up): a lone `-H old=<dir>` umbrella must feed its directory
+    # into `bl_public_dirs` ONLY, not also into `bl_public_headers` as a
+    # raw directory "path" -- doing both fed the ADR-050 comparability
+    # gate an old side whose declared scope was represented differently
+    # from the new side's (a directory counted twice vs. once), a false
+    # scope_fingerprint mismatch on an ordinary --against comparison
+    # that never touched the actual public surface.
+    bl_public_headers = [p for p in bl_headers if not p.is_dir()]
+    bl_public_dirs = [p for p in bl_headers if p.is_dir()]
+    return bl_headers, bl_includes, bl_public_headers, bl_public_dirs
 
-        l0_hard_removals = collect_l0_export_delta(baseline, binary, lang)
-    # Fold embedded build-info/source (L3/L4/L5) diff findings into extra_changes
-    # before comparing — mirrors the compare command (Codex review). Only engage
-    # when a snapshot actually carries an embedded pack; otherwise pass
-    # ``collect_mode="off"`` so the pipeline stays inert (no spurious collection
-    # attempt / output noise on a plain artifact-only baseline compare).
-    has_embedded = (
-        old_snap.build_source is not None or new_snap.build_source is not None
-    )
-    merged_extra, _coverage_rows, _metrics, _ev = prepare_embedded_build_source(
-        old_snap,
-        new_snap,
-        collect_mode if has_embedded else "off",
-        [*extra_changes, *l0_hard_removals],
-        None,
-        None,
-        None,
-        None,
-        policy_file=policy_file,
-    )
-    diff = compare_snapshots(
-        old_snap,
-        new_snap,
-        suppression,
-        policy=policy,
-        policy_file=policy_file,
-        extra_changes=merged_extra,
-        scope_to_public_surface=scope_to_public_surface,
-        force_public_symbols=force_public_symbols,
-        pattern_verdicts=pattern_verdicts,
-        env_matrix=env_matrix,
-        collapse_versioned_symbols=collapse_versioned_symbols,
-        contract_evaluation=contract_evaluation,
-        contract_mode=contract_mode,
-    )
+
+def _baseline_summary(diff: Any) -> dict[str, Any]:
+    """Build the always-on ``scan --against`` summary block from *diff*.
+
+    Counts, detector provenance, the capped gating findings and the
+    suppression audit trail — everything except the contract-context block,
+    which :func:`_baseline_contract_block` adds separately because it also
+    installs the front end's resolved configuration onto *diff*.
+    """
     summary: dict[str, Any] = {
         "breaking": len(diff.breaking),
         "api_break": len(diff.source_breaks),
@@ -591,7 +479,181 @@ def _run_baseline_compare(
         )
         if len(suppressed_changes) > _MAX_BASELINE_FINDINGS:
             summary["suppressed_truncated"] = True
+    return summary
 
+
+def _baseline_contract_block(diff: Any, resolved_config: Any) -> dict[str, Any]:
+    """The ADR-049 contract-context fields for the summary, or ``{}``.
+
+    Installs this front end's own resolved configuration over the narrower
+    object ``checker.compare`` reconstructs from its arguments, then emits the
+    whole persisted context -- which ``scan --against --contract-evaluation``
+    computed and then dropped, so the receipt its per-finding decisions rest on
+    was unobservable. Same encoder ``reporter._add_contract_context`` uses, so
+    the block is byte-for-byte the one ``compare`` writes and
+    ``replay_original_decisions`` reads back.
+    """
+    from .cli_scan_receipt import context_block, record_resolved_config
+
+    if resolved_config is not None:
+        record_resolved_config(diff, resolved_config)
+    context = context_block(diff)
+    if context is None:
+        return {}
+    from .contract_coverage_exit import coverage_exit_for_context
+    from .contract_coverage_ledger import coverage_failures_for_context
+
+    # The sibling unsuppressible ledger, on the same terms `compare`
+    # reports it (plan Section 6.1) -- a coverage failure is not a
+    # finding, so it belongs beside the diff's findings, not among them.
+    failures = coverage_failures_for_context(diff.contract_context)
+    return {
+        "contract_context": context,
+        "contract_coverage_failures": [f.to_dict() for f in failures],
+        "contract_coverage_exit_contribution": coverage_exit_for_context(
+            diff.contract_context
+        ),
+    }
+
+
+def _run_baseline_compare(
+    baseline: Path,
+    binary: Path,
+    new_snap: Any,
+    extra_changes: list[Any],
+    lang: str,
+    collect_mode: str,
+    headers: list[Path],
+    includes: list[Path],
+    public_headers: list[Path],
+    public_header_dirs: list[Path],
+    compile_context: CompileContext | None = None,
+    baseline_headers: list[Path] | None = None,
+    baseline_includes: list[Path] | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
+    suppression: SuppressionList | None = None,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+    scope_to_public_surface: bool = True,
+    force_public_symbols: set[str] | None = None,
+    pattern_verdicts: bool = False,
+    env_matrix: EnvironmentMatrix | None = None,
+    collapse_versioned_symbols: bool = False,
+    contract_evaluation: bool = False,
+    contract_mode: str | None = None,
+    resolved_config: Any = None,
+) -> tuple[str, int, dict[str, Any]]:
+    """Compare *new_snap* against *baseline*, preserving scan authority.
+
+    Single-version cross-source findings are reported in the scan's dedicated
+    ``crosscheck`` block and stay advisory for baseline comparisons unless the
+    maintainer explicitly promotes one with ``--crosscheck KEY=error``. They are
+    not folded into ``extra_changes`` by default: doing so lets a candidate-side
+    evidence hygiene finding such as ``header_build_context_mismatch`` turn a
+    clean old/new artifact diff into an ``API_BREAK`` false positive. Real
+    old/new embedded build/source drift is still diffed below via
+    ``prepare_embedded_build_source``.
+
+    *headers*/*includes* are the same scan header inputs used to build the
+    candidate, threaded into the baseline parse so a native ``--baseline``
+    library is header-scoped symmetrically — else the old side stays
+    symbol/DWARF-only and the compare drops old type evidence or invents spurious
+    API diffs (Codex review). They are inert for a JSON-snapshot baseline.
+
+    The embedded L3/L4/L5 build/source packs on either snapshot are diffed via
+    :func:`prepare_embedded_build_source` — the same path ``abicheck compare``
+    uses — so source-only / graph findings the collected evidence reveals are
+    folded into the verdict too (``checker.compare`` itself does not read
+    ``build_source``).
+    """
+    from .cli_buildsource import prepare_embedded_build_source
+    from .errors import AbicheckError
+    from .service import compare_snapshots, resolve_input
+
+    bl_headers, bl_includes, bl_public_headers, bl_public_dirs = _resolve_baseline_header_scope(
+        baseline, headers, includes, public_headers, public_header_dirs,
+        baseline_headers, baseline_includes,
+    )
+    try:
+        old_snap = resolve_input(
+            baseline,
+            bl_headers,
+            bl_includes,
+            version="",
+            lang=lang,
+            public_headers=bl_public_headers,
+            public_header_dirs=bl_public_dirs,
+            compile=compile_context,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
+            # Matches the candidate's own resolve_input() default in
+            # scan_engine.py's run_scan_core -- a no-op for a JSON snapshot
+            # baseline (already-serialized, no dumping happens), but keeps a
+            # *native* --baseline library filtered consistently with the
+            # candidate (Codex review).
+            include_dependencies=False,
+        )
+    except AbicheckError as exc:
+        raise click.ClickException(
+            f"Failed to load --baseline {baseline}: {exc}"
+        ) from exc
+
+    # Preserve hard L0 removals even when the richer header/source view cannot
+    # prove public-header ownership for the removed entity.  A source/full scan
+    # may parse both sides' headers through different consumer macro contexts;
+    # in fixtures such as case97 the old library exported a function that the
+    # old header exposes only under a consumer macro, so the final public-surface
+    # comparison can otherwise filter the old-only ELF fact away.  Re-reading the
+    # already-loaded snapshots without public-surface scoping and carrying only
+    # the hard ELF-only removal kind keeps the L0 authority while avoiding the
+    # older false-positive class where advisory cross-check findings were folded
+    # into the verdict wholesale.
+    #
+    # Shares abicheck.l0_export_delta.collect_l0_export_delta with
+    # cli_helpers_compare.fold_l0_hard_removals (direct `compare`) -- ADR-049
+    # Phase 5 §6.3 -- rather than each hand-copying the same
+    # resolve-symbols-only-and-diff-unscoped extraction.
+    l0_hard_removals: tuple[Any, ...] = ()
+    if not symbols_only:
+        from .l0_export_delta import collect_l0_export_delta
+
+        l0_hard_removals = collect_l0_export_delta(baseline, binary, lang)
+    # Fold embedded build-info/source (L3/L4/L5) diff findings into extra_changes
+    # before comparing — mirrors the compare command (Codex review). Only engage
+    # when a snapshot actually carries an embedded pack; otherwise pass
+    # ``collect_mode="off"`` so the pipeline stays inert (no spurious collection
+    # attempt / output noise on a plain artifact-only baseline compare).
+    has_embedded = (
+        old_snap.build_source is not None or new_snap.build_source is not None
+    )
+    merged_extra, _coverage_rows, _metrics, _ev = prepare_embedded_build_source(
+        old_snap,
+        new_snap,
+        collect_mode if has_embedded else "off",
+        [*extra_changes, *l0_hard_removals],
+        None,
+        None,
+        None,
+        None,
+        policy_file=policy_file,
+    )
+    diff = compare_snapshots(
+        old_snap,
+        new_snap,
+        suppression,
+        policy=policy,
+        policy_file=policy_file,
+        extra_changes=merged_extra,
+        scope_to_public_surface=scope_to_public_surface,
+        force_public_symbols=force_public_symbols,
+        pattern_verdicts=pattern_verdicts,
+        env_matrix=env_matrix,
+        collapse_versioned_symbols=collapse_versioned_symbols,
+        contract_evaluation=contract_evaluation,
+        contract_mode=contract_mode,
+    )
+    summary = _baseline_summary(diff)
     # ADR-049 Phase 5: install this front end's own resolved configuration
     # over the narrower object `checker.compare` reconstructs from its
     # arguments, then emit the whole persisted context -- which `scan
@@ -600,24 +662,7 @@ def _run_baseline_compare(
     # encoder `reporter._add_contract_context` uses, so the block is
     # byte-for-byte the one `compare` writes and `replay_original_decisions`
     # reads back.
-    from .cli_scan_receipt import context_block, record_resolved_config
-
-    if resolved_config is not None:
-        record_resolved_config(diff, resolved_config)
-    context = context_block(diff)
-    if context is not None:
-        summary["contract_context"] = context
-        from .contract_coverage_exit import coverage_exit_for_context
-        from .contract_coverage_ledger import coverage_failures_for_context
-
-        # The sibling unsuppressible ledger, on the same terms `compare`
-        # reports it (plan Section 6.1) -- a coverage failure is not a
-        # finding, so it belongs beside the diff's findings, not among them.
-        failures = coverage_failures_for_context(diff.contract_context)
-        summary["contract_coverage_failures"] = [f.to_dict() for f in failures]
-        summary["contract_coverage_exit_contribution"] = coverage_exit_for_context(
-            diff.contract_context
-        )
+    summary.update(_baseline_contract_block(diff, resolved_config))
 
     from .cli_compare_helpers import _verdict_exit_code
     from .contract_coverage_exit import fold_coverage_exit

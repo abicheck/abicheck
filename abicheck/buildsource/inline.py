@@ -144,6 +144,72 @@ _TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset({"exit_code_scheme"})
 _TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset({"version"})
 
 
+
+def _block(data: dict[str, object], key: str) -> dict[str, object]:
+    """One top-level config block as a mapping (``{}`` when absent or wrong-typed).
+
+    A wrong type here is never silently accepted -- :meth:`BuildConfig.
+    _validate_structure` already rejected it -- so falling back to ``{}`` only
+    covers a caller that bypassed validation with a non-dict payload.
+    """
+    value = data.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _str(d: dict[str, object], key: str, default: str = "") -> str:
+    v = d.get(key)
+    return v if isinstance(v, str) else default
+
+
+def _opt_str(d: dict[str, object], key: str) -> str | None:
+    v = d.get(key)
+    return v if isinstance(v, str) else None
+
+
+def _opt_bool(d: dict[str, object], key: str) -> bool | None:
+    v = d.get(key)
+    return v if isinstance(v, bool) else None
+
+
+def _strs(d: dict[str, object], key: str) -> list[str]:
+    v = d.get(key)
+    if isinstance(v, list):
+        return [str(x) for x in v]
+    if isinstance(v, str):
+        return [v]
+    return []
+
+
+def _lowered(value: str | None) -> str | None:
+    """Case-normalize an optional enum-ish config scalar."""
+    return value.lower() if value is not None else None
+
+
+def _one_of(
+    value: str | None, allowed: tuple[str, ...] | frozenset[str], where: str
+) -> str | None:
+    """*value* if it is ``None`` or a member of *allowed*, else ``ValueError``."""
+    if value is not None and value not in allowed:
+        raise ValueError(f"{where} must be one of {allowed}, got {value!r}")
+    return value
+
+
+def _safe_compile_atom(key: str, value: str) -> str:
+    """One ``compile.*`` scalar, rejected unless it is a single argv atom.
+
+    Values from auto-discovered source-tree configs are later embedded in
+    individual compiler flags (``-std=<value>``/``-D<value>``) and flow through
+    legacy shlex-split ``gcc_options`` plumbing. Reject whitespace so one
+    config scalar cannot become multiple compiler arguments such as
+    ``-Xclang -load ./evil.so``.
+    """
+    if not value or any(ch.isspace() for ch in value):
+        raise ValueError(
+            f"compile.{key} must be a single compiler option atom, got {value!r}"
+        )
+    return value
+
+
 @dataclass
 class BuildConfig:
     """Parsed ``.abicheck.yml`` project config (ADR-028 amendment D4 + ADR-037 D4).
@@ -280,6 +346,70 @@ class BuildConfig:
     }
 
     @classmethod
+    def _scalar_findings(cls, key: str, value: object) -> list[str]:
+        """Type findings for a recognized top-level *scalar* key.
+
+        ``risk_rules``/``crosschecks`` are deliberately excluded:
+        :meth:`from_dict` never parses them at all (they are consumed by
+        ``risk.py``/``crosscheck.py`` instead), so there is no from_dict-level
+        type contract to enforce for them here.
+        """
+        if value is None:
+            return []
+        if key in _TOP_LEVEL_STR_KEYS and not isinstance(value, str):
+            return [f"{key} must be a string, got {type(value).__name__}: {value!r}"]
+        if key in _TOP_LEVEL_INT_KEYS and (
+            not isinstance(value, int) or isinstance(value, bool)
+        ):
+            return [f"{key} must be an integer, got {type(value).__name__}: {value!r}"]
+        return []
+
+    @classmethod
+    def _subkey_findings(cls, key: str, sub: str, sub_value: object) -> list[str]:
+        """Type findings for one ``<block>.<subkey>`` entry."""
+        if sub in _BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
+            return [
+                f"{key}.{sub} must be a boolean, got "
+                f"{type(sub_value).__name__}: {sub_value!r}"
+            ]
+        if sub in _STR_SUBKEYS.get(key, ()) and not isinstance(sub_value, str):
+            return [
+                f"{key}.{sub} must be a string, got "
+                f"{type(sub_value).__name__}: {sub_value!r}"
+            ]
+        if sub not in _LIST_SUBKEYS.get(key, ()):
+            return []
+        if not isinstance(sub_value, (list, str)):
+            return [
+                f"{key}.{sub} must be a string or list of strings, "
+                f"got {type(sub_value).__name__}: {sub_value!r}"
+            ]
+        # `_strs()` accepts a list container but a non-string element must be
+        # rejected outright, not coerced via `str(x)`.
+        bad = [x for x in sub_value if not isinstance(x, str)] if isinstance(sub_value, list) else []
+        if bad:
+            return [
+                f"{key}.{sub} must be a list of strings, got "
+                f"non-string element(s): {bad!r}"
+            ]
+        return []
+
+    @classmethod
+    def _block_findings(cls, key: str, value: object, known_block: object) -> list[str]:
+        """Type findings for one recognized top-level *block* key."""
+        if value is None:
+            return []
+        if not isinstance(value, dict):
+            return [f"{key} must be a mapping, got {type(value).__name__}: {value!r}"]
+        findings: list[str] = []
+        for sub, sub_value in value.items():
+            if sub not in known_block:  # type: ignore[operator]
+                findings.append(f"unknown .abicheck.yml key {key}.{sub!r}")
+                continue
+            findings += cls._subkey_findings(key, sub, sub_value)
+        return findings
+
+    @classmethod
     def _validate_structure(cls, data: dict[str, object]) -> None:
         """Raise ``ValueError`` for every structural problem in a raw ``.abicheck.yml``.
 
@@ -299,194 +429,47 @@ class BuildConfig:
                 continue
             known_block = cls._KNOWN_BLOCK_KEYS.get(key)
             if known_block is None:
-                # A recognized top-level *scalar* (not a block key) — e.g.
-                # exit_code_scheme/version. risk_rules/crosschecks are
-                # deliberately excluded: from_dict never parses them at all
-                # (consumed by risk.py/crosscheck.py instead), so there is no
-                # from_dict-level type contract to enforce here.
-                if value is not None:
-                    if key in _TOP_LEVEL_STR_KEYS and not isinstance(value, str):
-                        findings.append(
-                            f"{key} must be a string, got "
-                            f"{type(value).__name__}: {value!r}"
-                        )
-                    elif key in _TOP_LEVEL_INT_KEYS and (
-                        not isinstance(value, int) or isinstance(value, bool)
-                    ):
-                        findings.append(
-                            f"{key} must be an integer, got "
-                            f"{type(value).__name__}: {value!r}"
-                        )
-                continue
-            if value is None:
-                continue
-            if not isinstance(value, dict):
-                findings.append(
-                    f"{key} must be a mapping, got {type(value).__name__}: {value!r}"
-                )
-                continue
-            for sub, sub_value in value.items():
-                if sub not in known_block:
-                    findings.append(f"unknown .abicheck.yml key {key}.{sub!r}")
-                    continue
-                if sub in _BOOL_SUBKEYS.get(key, ()) and not isinstance(
-                    sub_value, bool
-                ):
-                    findings.append(
-                        f"{key}.{sub} must be a boolean, got "
-                        f"{type(sub_value).__name__}: {sub_value!r}"
-                    )
-                elif sub in _STR_SUBKEYS.get(key, ()) and not isinstance(
-                    sub_value, str
-                ):
-                    findings.append(
-                        f"{key}.{sub} must be a string, got "
-                        f"{type(sub_value).__name__}: {sub_value!r}"
-                    )
-                elif sub in _LIST_SUBKEYS.get(key, ()):
-                    if not isinstance(sub_value, (list, str)):
-                        findings.append(
-                            f"{key}.{sub} must be a string or list of strings, "
-                            f"got {type(sub_value).__name__}: {sub_value!r}"
-                        )
-                    elif isinstance(sub_value, list):
-                        # `_strs()` accepts a list container but a non-string
-                        # element must be rejected outright, not coerced via
-                        # `str(x)`.
-                        bad = [x for x in sub_value if not isinstance(x, str)]
-                        if bad:
-                            findings.append(
-                                f"{key}.{sub} must be a list of strings, got "
-                                f"non-string element(s): {bad!r}"
-                            )
+                findings += cls._scalar_findings(key, value)
+            else:
+                findings += cls._block_findings(key, value, known_block)
         if findings:
             raise ValueError("; ".join(findings))
-
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
         if isinstance(data, dict):
             cls._validate_structure(data)
-        build = data.get("build") if isinstance(data, dict) else None
-        build = build if isinstance(build, dict) else {}
-        sources = data.get("sources") if isinstance(data, dict) else None
-        sources = sources if isinstance(sources, dict) else {}
-        severity = data.get("severity") if isinstance(data, dict) else None
-        severity = severity if isinstance(severity, dict) else {}
-        scope = data.get("scope") if isinstance(data, dict) else None
-        scope = scope if isinstance(scope, dict) else {}
-        suppression = data.get("suppression") if isinstance(data, dict) else None
-        suppression = suppression if isinstance(suppression, dict) else {}
-        source = data.get("source") if isinstance(data, dict) else None
-        source = source if isinstance(source, dict) else {}
-        compile_blk = data.get("compile") if isinstance(data, dict) else None
-        compile_blk = compile_blk if isinstance(compile_blk, dict) else {}
-        debug = data.get("debug") if isinstance(data, dict) else None
-        debug = debug if isinstance(debug, dict) else {}
-
-        def _str(d: dict[str, object], key: str, default: str = "") -> str:
-            v = d.get(key)
-            return v if isinstance(v, str) else default
-
-        def _opt_str(d: dict[str, object], key: str) -> str | None:
-            v = d.get(key)
-            return v if isinstance(v, str) else None
-
-        def _opt_bool(d: dict[str, object], key: str) -> bool | None:
-            v = d.get(key)
-            return v if isinstance(v, bool) else None
-
-        def _strs(d: dict[str, object], key: str) -> list[str]:
-            v = d.get(key)
-            if isinstance(v, list):
-                return [str(x) for x in v]
-            if isinstance(v, str):
-                return [v]
-            return []
-
-        def _safe_compile_atom(key: str, value: str) -> str:
-            # Values from auto-discovered source-tree configs are later embedded
-            # in individual compiler flags (``-std=<value>``/``-D<value>``) and
-            # flow through legacy shlex-split ``gcc_options`` plumbing.  Reject
-            # whitespace so one config scalar cannot become multiple compiler
-            # arguments such as ``-Xclang -load ./evil.so``.
-            if not value or any(ch.isspace() for ch in value):
-                raise ValueError(
-                    f"compile.{key} must be a single compiler option atom, got {value!r}"
-                )
-            return value
+        top = data if isinstance(data, dict) else {}
+        build = _block(top, "build")
+        sources = _block(top, "sources")
+        severity = _block(top, "severity")
+        scope = _block(top, "scope")
+        suppression = _block(top, "suppression")
+        source = _block(top, "source")
+        compile_blk = _block(top, "compile")
+        debug = _block(top, "debug")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             return [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
 
         def _level(key: str) -> str | None:
-            raw = _opt_str(severity, key)
-            if raw is not None and raw not in _SEVERITY_LEVELS:
-                raise ValueError(
-                    f"severity.{key} must be one of {_SEVERITY_LEVELS}, got {raw!r}"
-                )
-            return raw
+            return _one_of(_opt_str(severity, key), _SEVERITY_LEVELS, f"severity.{key}")
 
-        graph_detail = _str(sources, "graph", "summary") or "summary"
-        if graph_detail not in ("summary", "full"):
-            raise ValueError(
-                f"sources.graph must be 'summary' or 'full', got {graph_detail!r}"
-            )
-
-        preset = _opt_str(severity, "preset")
-        if preset is not None and preset not in _SEVERITY_PRESETS:
-            raise ValueError(
-                f"severity.preset must be one of {_SEVERITY_PRESETS}, got {preset!r}"
-            )
-
-        scheme = (
-            _str(data if isinstance(data, dict) else {}, "exit_code_scheme", "auto")
-            or "auto"
-        )
-        if scheme not in _EXIT_CODE_SCHEMES:
-            raise ValueError(
-                f"exit_code_scheme must be one of {_EXIT_CODE_SCHEMES}, got {scheme!r}"
-            )
-
-        version_raw = data.get("version") if isinstance(data, dict) else None
-        version = (
-            version_raw
-            if isinstance(version_raw, int) and not isinstance(version_raw, bool)
-            else 0
-        )
-
-        debug_format = _opt_str(debug, "format")
-        if debug_format is not None:
-            debug_format = debug_format.lower()
-            if debug_format not in ("auto", "dwarf", "btf", "ctf"):
-                raise ValueError(
-                    "debug.format must be one of ('auto', 'dwarf', 'btf', 'ctf'), "
-                    f"got {debug_format!r}"
-                )
-
-        compile_frontend = _opt_str(compile_blk, "frontend")
-        if compile_frontend is not None:
-            # The CLI accepts the frontend case-insensitively (Click Choice
-            # case_sensitive=False); normalize the config value to match.
-            compile_frontend = compile_frontend.lower()
-        if compile_frontend is not None and compile_frontend not in (
-            "auto",
-            "castxml",
-            "clang",
-            "hybrid",
-        ):
-            raise ValueError(
-                "compile.frontend must be one of ('auto', 'castxml', 'clang', "
-                f"'hybrid'), got {compile_frontend!r}"
-            )
-
+        version_raw = top.get("version")
         return cls(
             system=_str(build, "system", "auto") or "auto",
             query=_str(build, "query"),
             compile_db=_str(build, "compile_db"),
             public_headers=_strs(sources, "public_headers"),
             exclude=_strs(sources, "exclude"),
-            graph_detail=graph_detail,
-            severity_preset=preset,
+            graph_detail=_one_of(
+                _str(sources, "graph", "summary") or "summary",
+                ("summary", "full"),
+                "sources.graph",
+            )
+            or "summary",
+            severity_preset=_one_of(
+                _opt_str(severity, "preset"), _SEVERITY_PRESETS, "severity.preset"
+            ),
             severity_abi_breaking=_level("abi_breaking"),
             severity_potential_breaking=_level("potential_breaking"),
             severity_quality_issues=_level("quality_issues"),
@@ -500,7 +483,13 @@ class BuildConfig:
                 suppression, "require_justification"
             ),
             source_method=_opt_str(source, "method"),
-            compile_frontend=compile_frontend,
+            # The CLI accepts the frontend case-insensitively (Click Choice
+            # case_sensitive=False); normalize the config value to match.
+            compile_frontend=_one_of(
+                _lowered(_opt_str(compile_blk, "frontend")),
+                ("auto", "castxml", "clang", "hybrid"),
+                "compile.frontend",
+            ),
             compile_std=(
                 _safe_compile_atom("std", std)
                 if (std := _opt_str(compile_blk, "std")) is not None
@@ -510,12 +499,25 @@ class BuildConfig:
             compile_defines=_safe_compile_atoms("defines"),
             compile_sysroot=_opt_str(compile_blk, "sysroot"),
             compile_nostdinc=_opt_bool(compile_blk, "nostdinc"),
-            debug_format=debug_format,
+            debug_format=_one_of(
+                _lowered(_opt_str(debug, "format")),
+                ("auto", "dwarf", "btf", "ctf"),
+                "debug.format",
+            ),
             debug_dwarf_only=_opt_bool(debug, "dwarf_only"),
             debug_debuginfod=_opt_bool(debug, "debuginfod"),
             debug_debuginfod_url=_opt_str(debug, "debuginfod_url"),
-            exit_code_scheme=scheme,
-            version=version,
+            exit_code_scheme=_one_of(
+                _str(top, "exit_code_scheme", "auto") or "auto",
+                _EXIT_CODE_SCHEMES,
+                "exit_code_scheme",
+            )
+            or "auto",
+            version=(
+                version_raw
+                if isinstance(version_raw, int) and not isinstance(version_raw, bool)
+                else 0
+            ),
         )
 
     def _build_block(self) -> dict[str, Any]:

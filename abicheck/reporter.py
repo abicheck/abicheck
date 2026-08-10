@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from .severity import KindSets, SeverityConfig
@@ -1306,6 +1306,83 @@ def _add_contract_evaluation_fields(
         d["finding_id"] = report_finding_id(c)
 
 
+def _change_annotation_fields(c: Any) -> dict[str, Any]:
+    """Optional per-change attribution/annotation fields for the JSON report.
+
+    Each is omitted rather than emitted as ``null`` when it carries nothing, so
+    a consumer can tell "not applicable" from "empty". The reasoning behind the
+    individual entries is kept with them below.
+    """
+    out: dict[str, Any] = {}
+    # Source location
+    loc = getattr(c, "source_location", None)
+    if loc:
+        out["source_location"] = loc
+    # Affected symbols
+    affected = getattr(c, "affected_symbols", None)
+    if affected:
+        out["affected_symbols"] = affected
+    # Redundancy annotation
+    caused_by = getattr(c, "caused_by_type", None)
+    if caused_by:
+        out["caused_by_type"] = caused_by
+    caused_count = getattr(c, "caused_count", 0)
+    if caused_count > 0:
+        out["caused_count"] = caused_count
+    # ADR-027 A4 — disclose a pattern-aware modulation on the finding itself.
+    mod_reason = getattr(c, "modulation_reason", None)
+    if mod_reason:
+        out["modulation_reason"] = mod_reason
+        out["modulation_rule"] = getattr(c, "modulation_rule", None)
+        eff = getattr(c, "effective_verdict", None)
+        if isinstance(eff, Verdict):
+            out["effective_verdict"] = eff.value
+    # ADR-041 P0 roadmap item 2 — this finding correlates with another
+    # finding (currently: PUBLIC_API_INTERNAL_DEPENDENCY_ADDED correlating
+    # with the same entry's own body/type-hash change), named by ChangeKind
+    # value so a machine consumer can act on it without parsing description.
+    correlated = getattr(c, "correlated_change_kind", None)
+    if correlated:
+        out["correlated_change_kind"] = correlated
+    return out
+
+
+def _change_reachability_fields(c: Any) -> dict[str, Any]:
+    """Structured reachability evidence and graph-impact data for one change.
+
+    Machine-readable counterparts to what used to be description prose only --
+    see the per-entry comments for which ADR each came from.
+    """
+    out: dict[str, Any] = {}
+    # ADR-044 P1 item 4 — structured reachability evidence (previously
+    # description-text-only): whether a suppression rule's reachability gate
+    # tagged this change public-reachable, how (layout/call-graph/direct),
+    # and the shortest proof path, so a machine consumer doesn't need to
+    # parse the suppression_would_hide_public_break diagnostic's prose.
+    if getattr(c, "public_reachable", False):
+        out["public_reachable"] = True
+        reach_kind = getattr(c, "reachability_kind", None)
+        if reach_kind:
+            out["reachability_kind"] = reach_kind
+        proof_path = getattr(c, "reachability_proof_path", None)
+        if proof_path:
+            out["reachability_proof_path"] = proof_path
+    # G31 Phase B B3 (ADR-048) — structured graph impact/proof-path data:
+    # the machine-readable counterpart of reachability_proof_path's prose,
+    # as a list of node/edge reference dicts, plus which public root(s) it
+    # traces back to and whether the dependency is direct or transitive.
+    affected_roots = getattr(c, "affected_public_roots", None)
+    if affected_roots:
+        out["affected_public_roots"] = affected_roots
+    impact_path = getattr(c, "impact_proof_path", None)
+    if impact_path:
+        out["impact_proof_path"] = impact_path
+    impact_direct = getattr(c, "impact_is_direct", None)
+    if impact_direct is not None:
+        out["impact_is_direct"] = impact_direct
+    return out
+
+
 def _change_to_dict(
     c: object,
     *,
@@ -1401,62 +1478,8 @@ def _change_to_dict(
         impact = impact_for(kind)
         if impact:
             d["impact"] = impact
-    # Source location
-    loc = getattr(c, "source_location", None)
-    if loc:
-        d["source_location"] = loc
-    # Affected symbols
-    affected = getattr(c, "affected_symbols", None)
-    if affected:
-        d["affected_symbols"] = affected
-    # Redundancy annotation
-    caused_by = getattr(c, "caused_by_type", None)
-    if caused_by:
-        d["caused_by_type"] = caused_by
-    caused_count = getattr(c, "caused_count", 0)
-    if caused_count > 0:
-        d["caused_count"] = caused_count
-    # ADR-027 A4 — disclose a pattern-aware modulation on the finding itself.
-    mod_reason = getattr(c, "modulation_reason", None)
-    if mod_reason:
-        d["modulation_reason"] = mod_reason
-        d["modulation_rule"] = getattr(c, "modulation_rule", None)
-        eff = getattr(c, "effective_verdict", None)
-        if isinstance(eff, Verdict):
-            d["effective_verdict"] = eff.value
-    # ADR-041 P0 roadmap item 2 — this finding correlates with another
-    # finding (currently: PUBLIC_API_INTERNAL_DEPENDENCY_ADDED correlating
-    # with the same entry's own body/type-hash change), named by ChangeKind
-    # value so a machine consumer can act on it without parsing description.
-    correlated = getattr(c, "correlated_change_kind", None)
-    if correlated:
-        d["correlated_change_kind"] = correlated
-    # ADR-044 P1 item 4 — structured reachability evidence (previously
-    # description-text-only): whether a suppression rule's reachability gate
-    # tagged this change public-reachable, how (layout/call-graph/direct),
-    # and the shortest proof path, so a machine consumer doesn't need to
-    # parse the suppression_would_hide_public_break diagnostic's prose.
-    if getattr(c, "public_reachable", False):
-        d["public_reachable"] = True
-        reach_kind = getattr(c, "reachability_kind", None)
-        if reach_kind:
-            d["reachability_kind"] = reach_kind
-        proof_path = getattr(c, "reachability_proof_path", None)
-        if proof_path:
-            d["reachability_proof_path"] = proof_path
-    # G31 Phase B B3 (ADR-048) — structured graph impact/proof-path data:
-    # the machine-readable counterpart of reachability_proof_path's prose,
-    # as a list of node/edge reference dicts, plus which public root(s) it
-    # traces back to and whether the dependency is direct or transitive.
-    affected_roots = getattr(c, "affected_public_roots", None)
-    if affected_roots:
-        d["affected_public_roots"] = affected_roots
-    impact_path = getattr(c, "impact_proof_path", None)
-    if impact_path:
-        d["impact_proof_path"] = impact_path
-    impact_direct = getattr(c, "impact_is_direct", None)
-    if impact_direct is not None:
-        d["impact_is_direct"] = impact_direct
+    d.update(_change_annotation_fields(c))
+    d.update(_change_reachability_fields(c))
     # G29 Phase 3 slice 1 (ADR-052): reachability_state has existed on Change
     # since PR #607 but was never serialized -- without it, a JSON consumer
     # cannot tell a PROVEN_UNREACHABLE finding apart from one the graph walk

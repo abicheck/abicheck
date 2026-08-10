@@ -471,3 +471,34 @@ class TestClassifyMissingLayers:
         # L4 (PARTIAL) → the ran-but-empty branch, NOT "install clang/castxml".
         assert "collected but linked no facts" in err
         assert "L4_source_abi" in err
+
+
+def test_relocated_snapshot_helpers_resolve_under_direct_module_execution(
+    tmp_path: Path,
+) -> None:
+    """`python -m abicheck.cli` must reach the relocated snapshot-write helpers.
+
+    Regression guard (Codex review): the lazy `__getattr__` shim that keeps
+    `_write_snapshot_output` and friends at their historical `abicheck.cli`
+    path was first appended *after* the module's `if __name__ == "__main__":
+    main()` block. Under direct-module execution that block runs during module
+    execution, before the shim is bound, so `cli_buildsource.dump_source_only`'s
+    `from .cli import _write_snapshot_output` raised `ImportError` — which every
+    CI job shelling out to `python -m abicheck.cli` hit. The unit suite never
+    caught it because in-process imports always see the fully-executed module.
+    """
+    import subprocess
+    import sys
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "foo.h").write_text("int foo(void);\n")
+    proc = subprocess.run(
+        [sys.executable, "-m", "abicheck.cli", "dump", "--sources", str(src),
+         "-o", str(tmp_path / "out.json")],
+        capture_output=True,
+        text=True,
+    )
+    combined = proc.stdout + proc.stderr
+    assert "ImportError" not in combined, combined
+    assert "_write_snapshot_output" not in combined, combined

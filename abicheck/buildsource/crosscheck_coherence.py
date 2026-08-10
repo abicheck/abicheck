@@ -82,6 +82,76 @@ def _effective_flag_mode(flags: list[str], pos: str, neg: str) -> str | None:
     return mode
 
 
+def _flag_family_conflicts(label: str, units: list[Any]) -> list[Change]:
+    """Conflicts where one target's units disagree on an ABI flag family.
+
+    Compares *effective, language-qualified* per-TU modes, not raw flag
+    membership. Each family is ON by default and C++-only, so the AC-008
+    umbrella case is: most C++ TUs default-on, one built ``-fno-rtti``. Two
+    false positives a raw membership test hits (Codex review): (1) a C TU (no
+    RTTI ABI at all) counted as "positive" and flagged against a C++
+    ``-fno-rtti`` TU; (2) a ``-fno-rtti -frtti`` override read as negative.
+    Both are avoided by taking each unit's last-wins effective mode and only
+    counting a unit that participates in the family — a C++ unit (default-on
+    when it names no token) or any unit carrying an explicit token for this
+    family (meaningful even if its language was not recorded).
+    """
+    findings: list[Change] = []
+    for pos, neg in _ABI_FLAG_FAMILIES:
+        pos_seen = neg_seen = False
+        for cu in units:
+            mode = _effective_flag_mode(cu.abi_relevant_flags, pos, neg)
+            if mode is None:
+                pos_seen = pos_seen or (cu.language or "").upper() in _CPP_LANGUAGES
+            elif mode == "pos":
+                pos_seen = True
+            else:
+                neg_seen = True
+        if pos_seen and neg_seen:
+            findings.append(
+                _change(
+                    ChangeKind.COMPILE_CONTEXT_CONFLICT,
+                    label,
+                    f"Build target {label} has compile units that disagree on "
+                    f"{pos}/{neg} (some built {neg}, others {pos} or the C++ "
+                    "language default); aggregating them into one build context "
+                    "silently picks one ABI. Scope the evidence to a single "
+                    "link unit or pass a compile-DB filter.",
+                    old_value=pos,
+                    new_value=neg,
+                    evidence_category="build_context",
+                )
+            )
+    return findings
+
+
+def _define_value_conflicts(label: str, units: list[Any]) -> list[Change]:
+    """Conflicts where one target's units bind a define to two values."""
+    define_values: dict[str, set[str]] = {}
+    for cu in units:
+        for k, v in cu.defines.items():
+            if v:  # a bare -DFOO (no value) carries no conflicting value
+                define_values.setdefault(k, set()).add(v)
+    findings: list[Change] = []
+    for key, values in sorted(define_values.items()):
+        if len(values) < 2:
+            continue
+        vs = ", ".join(sorted(values))
+        findings.append(
+            _change(
+                ChangeKind.COMPILE_CONTEXT_CONFLICT,
+                label,
+                f"Build target {label} binds define {key!r} to conflicting "
+                f"values ({vs}) across its compile units; the aggregated "
+                "context keeps only one. Scope to a single build variant.",
+                old_value=key,
+                new_value=vs,
+                evidence_category="build_context",
+            )
+        )
+    return findings
+
+
 def _check_compile_context_conflict(
     snapshot: AbiSnapshot, cfg: Any
 ) -> _CheckOutput:
@@ -113,63 +183,8 @@ def _check_compile_context_conflict(
         if len(units) < 2:
             continue
         label = target_id or "(unscoped compile units)"
-        for pos, neg in _ABI_FLAG_FAMILIES:
-            # Compare *effective, language-qualified* per-TU modes, not raw flag
-            # membership. Each of these families is ON by default and C++-only, so
-            # the AC-008 umbrella case is: most C++ TUs default-on, one built
-            # `-fno-rtti`. Two false positives a raw membership test hits (Codex
-            # review): (1) a C TU (no RTTI ABI at all) counted as "positive" and
-            # flagged against a C++ `-fno-rtti` TU; (2) a `-fno-rtti -frtti`
-            # override read as negative. Both are avoided by taking each unit's
-            # last-wins effective mode and only counting a unit that participates
-            # in the family — a C++ unit (default-on when it names no token) or any
-            # unit that carries an explicit token for this family (meaningful even
-            # if its language was not recorded).
-            pos_seen = neg_seen = False
-            for cu in units:
-                mode = _effective_flag_mode(cu.abi_relevant_flags, pos, neg)
-                if mode is None:
-                    if (cu.language or "").upper() in _CPP_LANGUAGES:
-                        pos_seen = True  # C++ default: family on
-                elif mode == "pos":
-                    pos_seen = True
-                else:
-                    neg_seen = True
-            if pos_seen and neg_seen:
-                findings.append(
-                    _change(
-                        ChangeKind.COMPILE_CONTEXT_CONFLICT,
-                        label,
-                        f"Build target {label} has compile units that disagree on "
-                        f"{pos}/{neg} (some built {neg}, others {pos} or the C++ "
-                        "language default); aggregating them into one build context "
-                        "silently picks one ABI. Scope the evidence to a single "
-                        "link unit or pass a compile-DB filter.",
-                        old_value=pos,
-                        new_value=neg,
-                        evidence_category="build_context",
-                    )
-                )
-        define_values: dict[str, set[str]] = {}
-        for cu in units:
-            for k, v in cu.defines.items():
-                if v:  # a bare -DFOO (no value) carries no conflicting value
-                    define_values.setdefault(k, set()).add(v)
-        for key, values in sorted(define_values.items()):
-            if len(values) > 1:
-                vs = ", ".join(sorted(values))
-                findings.append(
-                    _change(
-                        ChangeKind.COMPILE_CONTEXT_CONFLICT,
-                        label,
-                        f"Build target {label} binds define {key!r} to conflicting "
-                        f"values ({vs}) across its compile units; the aggregated "
-                        "context keeps only one. Scope to a single build variant.",
-                        old_value=key,
-                        new_value=vs,
-                        evidence_category="build_context",
-                    )
-                )
+        findings += _flag_family_conflicts(label, units)
+        findings += _define_value_conflicts(label, units)
     n_targets = len(by_target)
     detail = (
         f"L3 compile-context coherence across {n_targets} target(s): "

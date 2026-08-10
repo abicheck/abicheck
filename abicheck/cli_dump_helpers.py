@@ -702,243 +702,123 @@ def _l4_source_abi_frontend(snap: AbiSnapshot) -> str | None:
     return None
 
 
-def render_dump_dry_run(
+def _add_dump_manifest_section(result: Any, dump_manifest: Any) -> None:
+    """Report a ``--dump-manifest`` document's TUs and ``scope_fingerprint``.
+
+    Everything here is derived from the manifest document alone -- no compiler
+    invocation -- which is what lets a dry run report the same
+    ``scope_fingerprint`` (ADR-050 D1) the real extraction computes. It never
+    computes a ``profile_fingerprint``: that fingerprint's ``-I`` component is a
+    ``-MD``-depfile digest that only exists once a real L2 extraction runs.
+    """
+    from .comparability import compute_extraction_contract, manifest_tu_scope_field
+    from .dumper_contract import _manifest_declared_includes
+
+    contract = compute_extraction_contract(
+        declared_headers=list(dump_manifest.roots),
+        # Purely manifest-document-derived (no compiler invocation),
+        # exactly like manifest_tu_scope below -- the real (non-dry) path
+        # folds both into scope_fingerprint via this same helper (Codex
+        # review: the legacy field set either omission would otherwise
+        # fall back to omits every TU's own includes/structure), so
+        # without them the dry-run's printed fingerprint could never
+        # match what the real extraction actually computes.
+        declared_includes=_manifest_declared_includes(dump_manifest),
+        public_header_paths=list(dump_manifest.public_header_paths),
+        public_header_dirs=list(dump_manifest.public_header_dirs),
+        l2_frontend_ran=False,
+        manifest_tu_scope=manifest_tu_scope_field(dump_manifest),
+    )
+    scope_fingerprint = contract.scope_fingerprint if contract is not None else None
+    manifest_lines = [
+        f"compiler: {dump_manifest.compiler}",
+        f"target: {dump_manifest.target or '(none)'}",
+        f"frontend_context: {dump_manifest.frontend_context}",
+        f"roots: {', '.join(str(p) for p in dump_manifest.roots)}",
+    ]
+    if dump_manifest.public_header_paths:
+        manifest_lines.append(
+            "public_header_paths: "
+            + ", ".join(str(p) for p in dump_manifest.public_header_paths)
+        )
+    if dump_manifest.public_header_dirs:
+        manifest_lines.append(
+            "public_header_dirs: "
+            + ", ".join(str(p) for p in dump_manifest.public_header_dirs)
+        )
+    for tu in dump_manifest.translation_units:
+        manifest_lines.append(
+            f"  tu: {tu.name} (required={tu.required}, "
+            f"contributes_to_abi={tu.contributes_to_abi})"
+        )
+        if tu.forced_includes:
+            manifest_lines.append(
+                "      forced_includes: "
+                + ", ".join(str(p) for p in tu.forced_includes)
+            )
+        if tu.includes:
+            inc_repr = ", ".join(
+                f"{inc.path}{' [project_owned]' if inc.project_owned else ''}"
+                for inc in tu.includes
+            )
+            manifest_lines.append(f"      includes: {inc_repr}")
+    manifest_lines.append(f"scope_fingerprint: {scope_fingerprint or '(none)'}")
+    manifest_lines.append(
+        "profile_fingerprint: (not computed -- requires a real L2 "
+        "extraction; run without --dry-run)"
+    )
+    result.add("Multi-TU manifest (--dump-manifest)", *manifest_lines)
+
+
+def _add_dump_data_layers(result: Any, so_path: Path, headers: tuple[Path, ...]) -> None:
+    """Report which L0-L2 data layers the artifact actually carries.
+
+    Best-effort: a diagnostic section, so any parse failure is downgraded to a
+    warning rather than failing the dry run.
+    """
+    try:
+        from .binary_utils import detect_binary_format, normalize_binary_input
+        from .dwarf_snapshot import show_data_sources
+
+        normalized_path, binary_fmt = normalize_binary_input(so_path)
+        if binary_fmt is None:
+            binary_fmt = detect_binary_format(normalized_path)
+        elf_meta = None
+        dwarf_meta = None
+        if binary_fmt == "elf":
+            from .dwarf_unified import parse_dwarf
+            from .elf_metadata import parse_elf_metadata
+
+            elf_meta = parse_elf_metadata(normalized_path)
+            dwarf_meta, _ = parse_dwarf(normalized_path)
+        report = show_data_sources(
+            normalized_path, elf_meta, dwarf_meta, bool(headers), None
+        )
+        result.add("Available data layers", *report.splitlines())
+    except Exception as exc:  # pragma: no cover - best-effort diagnostic
+        result.warn(f"could not inspect available data layers: {exc}")
+
+
+def _add_dump_depth_feasibility(
+    result: Any,
     *,
     so_path: Path | None,
-    headers: tuple[Path, ...],
     sources: Path | None,
     build_info: Path | None,
-    build_config: Path | None,
     depth: str | None,
-    collect_mode: str,
-    header_backend: str,
-    output: Path | None,
-    snapshot_compression: str = "auto",
-    has_compile_db: bool = False,
-    compile_db_matched: bool | None = None,
-    build_info_is_pack: bool = False,
-    compile_db_reused_as_l3: bool = False,
-    dump_manifest: Any | None = None,
-) -> Any:
-    """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
+    has_compile_db: bool,
+    compile_db_matched: bool | None,
+    build_info_is_pack: bool,
+    dump_manifest: Any | None,
+) -> None:
+    """Decide whether the requested ``--depth`` is reachable from these inputs.
 
-    Cheap, read-only resolution only: classifies the inputs, discovers config,
-    shows the resolved depth/collect-mode and available data layers, and
-    checks tool availability on PATH. Never runs castxml/clang, a build query,
-    or any I/O beyond stat()/PATH lookups.
-
-    ``has_compile_db`` (Codex review): whether ``-p``/``--compile-db`` was
-    given at all -- a bare presence flag, kept for the "nothing was given at
-    all" case below, distinct from whether it actually matches.
-
-    ``compile_db_matched`` (external review): the *real* result of loading
-    ``-p``/``--compile-db`` and checking it against the resolved headers --
-    ``cli.dump_cmd`` computes this the same way the real run does
-    (``cli_helpers_compare._resolve_build_context_flags``, the same JSON
-    load + path match the real run performs before castxml even runs) and
-    passes the outcome in, rather than this function loading it itself.
-    Loading and matching a compile database is cheap, deterministic,
-    read-only resolution (no compiler/frontend invocation) -- an earlier
-    version of this function treated it as "real work out of scope for a
-    dry run" and only checked bare presence, so a ``--depth build`` backed
-    by an empty/non-matching compile database dry-ran as merely a soft
-    warning even though the real run's strict depth gate would definitely
-    reject it. ``None`` when no compile database was given at all (the
-    "nothing was given" case is handled separately, below); ``True``/
-    ``False`` is now a definite verdict, not a "possibly satisfiable" guess.
-
-    ``build_info_is_pack`` (Codex review): whether ``--build-info`` names a
-    prebuilt ``BuildSourcePack`` *or* a Flow-2 ``abicheck_inputs/`` directory
-    rather than a raw compile DB / build dir -- the caller ORs
-    ``buildsource.inline.is_pack_dir`` and ``cli_buildsource_helpers.
-    _is_inputs_pack_dir`` (each a manifest-shape stat + small JSON read, not
-    a full pack load), the same two directory kinds ``cli_buildsource.
-    embed_build_source`` itself recognizes as pack-shaped (``bi_is_pack``/
-    ``bi_is_inputs``). Either one's ``_combine_packs`` fallback lets a
-    pack-shaped ``build_info``'s own ``source_abi`` (L4) satisfy ``--depth
-    source`` with no ``--sources`` pack given, unlike a raw compile
-    database, which never carries L4 facts of its own. Checking only
-    ``is_pack_dir`` missed the ``abicheck_inputs/`` case (Codex review,
-    second finding on this signal): that combination was wrongly treated as
-    "--depth source has no path without --sources" and blocked even though
-    the real (non-dry) run writes a valid source-depth snapshot from it.
-
-    ``dump_manifest`` (ADR-050 D3, folded from the former standalone ``plan
-    --dump-manifest`` diagnostic, ADR-054): a parsed
-    :class:`~abicheck.dump_manifest.DumpManifest` when ``--dump-manifest``
-    was given (mutually exclusive with ``headers``, enforced by the caller
-    before this function is reached). When present, this function reports
-    the manifest's translation units and its ``scope_fingerprint`` (ADR-050
-    D1) — computed from the manifest document alone, no compiler invocation
-    — the same information ``dump --dump-manifest FILE --dry-run`` now
-    covers standalone, without running castxml/clang. It never computes a
-    ``profile_fingerprint``: that fingerprint's ``-I`` component is a
-    ``-MD``-depfile digest that only exists once a real L2 extraction
-    actually runs. Text-only, like every other dry-run (ADR-043 D9,
-    ``--format`` is inert against ``--dry-run`` everywhere, not just here) —
-    the former standalone command's ``--format json``/``-o`` machine-readable
-    output has no CLI replacement; see ADR-054's D4 for the accepted
-    trade-off and the equivalent two-line Python snippet (calling
-    ``dump_manifest.load_manifest`` + ``comparability.compute_extraction_contract``
-    directly, the same two functions this branch itself calls below).
-
-    A ``-p`` compile DB with no ``-H``, or a ``--debug-format``/``--dwarf``/
-    ``--btf``/``--ctf`` selection against a PE/Mach-O binary, are genuine
-    usage errors in the real run (``click.UsageError``/``BadParameter``,
-    exit 64) -- ``cli.dump_cmd`` checks both, via
-    :func:`check_dump_compile_db_error`/:func:`check_dump_debug_format_error`,
-    and raises directly *before* branching on ``dry_run`` at all, so this
-    function is never even reached for that input on either path. Do not
-    re-encode either as a :meth:`DryRunResult.block` (exit 1) here -- that
-    would silently downgrade a usage error into an evidence blocker and
-    disagree with the real run's actual exit code for the identical input
-    (CodeRabbit review).
+    Emits the blockers and warnings that predict the real run's strict
+    ``check_requested_depth_satisfied`` gate. A blocker means the real run would
+    certainly exit 1; a warning means "possibly satisfiable" -- the distinction
+    is load-bearing, and the reasoning behind each case is kept with the case
+    itself below.
     """
-    from .cli_helpers_compare import discover_project_config
-    from .dry_run import DryRunResult, tool_status
-
-    result = DryRunResult(command="dump")
-    result.add(
-        "Inputs",
-        f"artifact: {so_path}" if so_path else "artifact: (none -- source-only dump)",
-        f"headers: {', '.join(str(h) for h in headers)}" if headers else None,
-    )
-    if dump_manifest is not None:
-        from .comparability import compute_extraction_contract, manifest_tu_scope_field
-        from .dumper_contract import _manifest_declared_includes
-
-        contract = compute_extraction_contract(
-            declared_headers=list(dump_manifest.roots),
-            # Purely manifest-document-derived (no compiler invocation),
-            # exactly like manifest_tu_scope below -- the real (non-dry) path
-            # folds both into scope_fingerprint via this same helper (Codex
-            # review: the legacy field set either omission would otherwise
-            # fall back to omits every TU's own includes/structure), so
-            # without them the dry-run's printed fingerprint could never
-            # match what the real extraction actually computes.
-            declared_includes=_manifest_declared_includes(dump_manifest),
-            public_header_paths=list(dump_manifest.public_header_paths),
-            public_header_dirs=list(dump_manifest.public_header_dirs),
-            l2_frontend_ran=False,
-            manifest_tu_scope=manifest_tu_scope_field(dump_manifest),
-        )
-        scope_fingerprint = contract.scope_fingerprint if contract is not None else None
-        manifest_lines = [
-            f"compiler: {dump_manifest.compiler}",
-            f"target: {dump_manifest.target or '(none)'}",
-            f"frontend_context: {dump_manifest.frontend_context}",
-            f"roots: {', '.join(str(p) for p in dump_manifest.roots)}",
-        ]
-        if dump_manifest.public_header_paths:
-            manifest_lines.append(
-                "public_header_paths: "
-                + ", ".join(str(p) for p in dump_manifest.public_header_paths)
-            )
-        if dump_manifest.public_header_dirs:
-            manifest_lines.append(
-                "public_header_dirs: "
-                + ", ".join(str(p) for p in dump_manifest.public_header_dirs)
-            )
-        for tu in dump_manifest.translation_units:
-            manifest_lines.append(
-                f"  tu: {tu.name} (required={tu.required}, "
-                f"contributes_to_abi={tu.contributes_to_abi})"
-            )
-            if tu.forced_includes:
-                manifest_lines.append(
-                    "      forced_includes: "
-                    + ", ".join(str(p) for p in tu.forced_includes)
-                )
-            if tu.includes:
-                inc_repr = ", ".join(
-                    f"{inc.path}{' [project_owned]' if inc.project_owned else ''}"
-                    for inc in tu.includes
-                )
-                manifest_lines.append(f"      includes: {inc_repr}")
-        manifest_lines.append(f"scope_fingerprint: {scope_fingerprint or '(none)'}")
-        manifest_lines.append(
-            "profile_fingerprint: (not computed -- requires a real L2 "
-            "extraction; run without --dry-run)"
-        )
-        result.add("Multi-TU manifest (--dump-manifest)", *manifest_lines)
-    result.add(
-        "Resolved depth and source scope",
-        f"requested depth: {depth or '(auto)'}",
-        f"effective collect mode: {collect_mode}",
-        "source scope: target (dump always analyzes the resolved library target)"
-        if collect_mode in ("source-target", "source-changed", "graph-full")
-        else None,
-    )
-    result.add(
-        "Headers and compile context",
-        f"ast-frontend: {header_backend}",
-    )
-    result.add(
-        "Build/source inputs",
-        f"--sources: {sources}" if sources else None,
-        f"--build-info: {build_info}" if build_info else None,
-        # AC-007: the real run reuses a matched -p/--compile-db as the L3 build
-        # source when no --build-info is given, so report that here and do not
-        # also claim "L0-L2 only" (Codex review).
-        "L3 build source: reused from -p/--compile-db (no --build-info needed)"
-        if compile_db_reused_as_l3
-        else None,
-        "no --sources/--build-info given -- L0-L2 only"
-        if sources is None
-        and build_info is None
-        and not compile_db_reused_as_l3
-        and collect_mode != "off"
-        else None,
-    )
-    result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
-    if so_path is not None:
-        try:
-            from .binary_utils import detect_binary_format, normalize_binary_input
-            from .dwarf_snapshot import show_data_sources
-
-            normalized_path, binary_fmt = normalize_binary_input(so_path)
-            if binary_fmt is None:
-                binary_fmt = detect_binary_format(normalized_path)
-            elf_meta = None
-            dwarf_meta = None
-            if binary_fmt == "elf":
-                from .dwarf_unified import parse_dwarf
-                from .elf_metadata import parse_elf_metadata
-
-                elf_meta = parse_elf_metadata(normalized_path)
-                dwarf_meta, _ = parse_dwarf(normalized_path)
-            report = show_data_sources(
-                normalized_path, elf_meta, dwarf_meta, bool(headers), None
-            )
-            result.add("Available data layers", *report.splitlines())
-        except Exception as exc:  # pragma: no cover - best-effort diagnostic
-            result.warn(f"could not inspect available data layers: {exc}")
-    cfg_path = build_config or discover_project_config(sources)
-    result.add(
-        "Configuration and value origins",
-        f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
-    )
-    if output is not None:
-        from .errors import SnapshotError
-        from .snapshot_io import SnapshotCompression, resolve_write_compression
-
-        try:
-            resolved_compression = resolve_write_compression(
-                output, SnapshotCompression(snapshot_compression)
-            )
-        except SnapshotError as exc:
-            raise click.UsageError(str(exc)) from exc
-        compression_line = (
-            f"compression: {resolved_compression.value} (file will not be created)"
-        )
-    else:
-        compression_line = "compression: (n/a -- stdout is always plain JSON)"
-    result.add(
-        "Output and exit-code behavior",
-        f"output: {output if output else 'stdout'}",
-        compression_line,
-        "exit codes: 0 valid, 1 requested depth not satisfiable, 64 usage error",
-    )
     if so_path is None and sources is None and build_info is None:
         if dump_manifest is not None:
             # A --dump-manifest-only dry run is a legitimate narrower
@@ -1058,6 +938,180 @@ def render_dump_dry_run(
             "resolved evidence depth check_requested_depth_satisfied would "
             "raise on this: the real run would exit 1."
         )
+
+
+def render_dump_dry_run(
+    *,
+    so_path: Path | None,
+    headers: tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    build_config: Path | None,
+    depth: str | None,
+    collect_mode: str,
+    header_backend: str,
+    output: Path | None,
+    snapshot_compression: str = "auto",
+    has_compile_db: bool = False,
+    compile_db_matched: bool | None = None,
+    build_info_is_pack: bool = False,
+    compile_db_reused_as_l3: bool = False,
+    dump_manifest: Any | None = None,
+) -> Any:
+    """Build the ``dump --dry-run`` report (ADR-043 D4): resolve, never execute.
+
+    Cheap, read-only resolution only: classifies the inputs, discovers config,
+    shows the resolved depth/collect-mode and available data layers, and
+    checks tool availability on PATH. Never runs castxml/clang, a build query,
+    or any I/O beyond stat()/PATH lookups.
+
+    ``has_compile_db`` (Codex review): whether ``-p``/``--compile-db`` was
+    given at all -- a bare presence flag, kept for the "nothing was given at
+    all" case below, distinct from whether it actually matches.
+
+    ``compile_db_matched`` (external review): the *real* result of loading
+    ``-p``/``--compile-db`` and checking it against the resolved headers --
+    ``cli.dump_cmd`` computes this the same way the real run does
+    (``cli_helpers_compare._resolve_build_context_flags``, the same JSON
+    load + path match the real run performs before castxml even runs) and
+    passes the outcome in, rather than this function loading it itself.
+    Loading and matching a compile database is cheap, deterministic,
+    read-only resolution (no compiler/frontend invocation) -- an earlier
+    version of this function treated it as "real work out of scope for a
+    dry run" and only checked bare presence, so a ``--depth build`` backed
+    by an empty/non-matching compile database dry-ran as merely a soft
+    warning even though the real run's strict depth gate would definitely
+    reject it. ``None`` when no compile database was given at all (the
+    "nothing was given" case is handled separately, below); ``True``/
+    ``False`` is now a definite verdict, not a "possibly satisfiable" guess.
+
+    ``build_info_is_pack`` (Codex review): whether ``--build-info`` names a
+    prebuilt ``BuildSourcePack`` *or* a Flow-2 ``abicheck_inputs/`` directory
+    rather than a raw compile DB / build dir -- the caller ORs
+    ``buildsource.inline.is_pack_dir`` and ``cli_buildsource_helpers.
+    _is_inputs_pack_dir`` (each a manifest-shape stat + small JSON read, not
+    a full pack load), the same two directory kinds ``cli_buildsource.
+    embed_build_source`` itself recognizes as pack-shaped (``bi_is_pack``/
+    ``bi_is_inputs``). Either one's ``_combine_packs`` fallback lets a
+    pack-shaped ``build_info``'s own ``source_abi`` (L4) satisfy ``--depth
+    source`` with no ``--sources`` pack given, unlike a raw compile
+    database, which never carries L4 facts of its own. Checking only
+    ``is_pack_dir`` missed the ``abicheck_inputs/`` case (Codex review,
+    second finding on this signal): that combination was wrongly treated as
+    "--depth source has no path without --sources" and blocked even though
+    the real (non-dry) run writes a valid source-depth snapshot from it.
+
+    ``dump_manifest`` (ADR-050 D3, folded from the former standalone ``plan
+    --dump-manifest`` diagnostic, ADR-054): a parsed
+    :class:`~abicheck.dump_manifest.DumpManifest` when ``--dump-manifest``
+    was given (mutually exclusive with ``headers``, enforced by the caller
+    before this function is reached). When present, this function reports
+    the manifest's translation units and its ``scope_fingerprint`` (ADR-050
+    D1) — computed from the manifest document alone, no compiler invocation
+    — the same information ``dump --dump-manifest FILE --dry-run`` now
+    covers standalone, without running castxml/clang. It never computes a
+    ``profile_fingerprint``: that fingerprint's ``-I`` component is a
+    ``-MD``-depfile digest that only exists once a real L2 extraction
+    actually runs. Text-only, like every other dry-run (ADR-043 D9,
+    ``--format`` is inert against ``--dry-run`` everywhere, not just here) —
+    the former standalone command's ``--format json``/``-o`` machine-readable
+    output has no CLI replacement; see ADR-054's D4 for the accepted
+    trade-off and the equivalent two-line Python snippet (calling
+    ``dump_manifest.load_manifest`` + ``comparability.compute_extraction_contract``
+    directly, the same two functions this branch itself calls below).
+
+    A ``-p`` compile DB with no ``-H``, or a ``--debug-format``/``--dwarf``/
+    ``--btf``/``--ctf`` selection against a PE/Mach-O binary, are genuine
+    usage errors in the real run (``click.UsageError``/``BadParameter``,
+    exit 64) -- ``cli.dump_cmd`` checks both, via
+    :func:`check_dump_compile_db_error`/:func:`check_dump_debug_format_error`,
+    and raises directly *before* branching on ``dry_run`` at all, so this
+    function is never even reached for that input on either path. Do not
+    re-encode either as a :meth:`DryRunResult.block` (exit 1) here -- that
+    would silently downgrade a usage error into an evidence blocker and
+    disagree with the real run's actual exit code for the identical input
+    (CodeRabbit review).
+    """
+    from .cli_helpers_compare import discover_project_config
+    from .dry_run import DryRunResult, tool_status
+
+    result = DryRunResult(command="dump")
+    result.add(
+        "Inputs",
+        f"artifact: {so_path}" if so_path else "artifact: (none -- source-only dump)",
+        f"headers: {', '.join(str(h) for h in headers)}" if headers else None,
+    )
+    if dump_manifest is not None:
+        _add_dump_manifest_section(result, dump_manifest)
+    result.add(
+        "Resolved depth and source scope",
+        f"requested depth: {depth or '(auto)'}",
+        f"effective collect mode: {collect_mode}",
+        "source scope: target (dump always analyzes the resolved library target)"
+        if collect_mode in ("source-target", "source-changed", "graph-full")
+        else None,
+    )
+    result.add(
+        "Headers and compile context",
+        f"ast-frontend: {header_backend}",
+    )
+    result.add(
+        "Build/source inputs",
+        f"--sources: {sources}" if sources else None,
+        f"--build-info: {build_info}" if build_info else None,
+        # AC-007: the real run reuses a matched -p/--compile-db as the L3 build
+        # source when no --build-info is given, so report that here and do not
+        # also claim "L0-L2 only" (Codex review).
+        "L3 build source: reused from -p/--compile-db (no --build-info needed)"
+        if compile_db_reused_as_l3
+        else None,
+        "no --sources/--build-info given -- L0-L2 only"
+        if sources is None
+        and build_info is None
+        and not compile_db_reused_as_l3
+        and collect_mode != "off"
+        else None,
+    )
+    result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
+    if so_path is not None:
+        _add_dump_data_layers(result, so_path, headers)
+    cfg_path = build_config or discover_project_config(sources)
+    result.add(
+        "Configuration and value origins",
+        f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
+    )
+    if output is not None:
+        from .errors import SnapshotError
+        from .snapshot_io import SnapshotCompression, resolve_write_compression
+
+        try:
+            resolved_compression = resolve_write_compression(
+                output, SnapshotCompression(snapshot_compression)
+            )
+        except SnapshotError as exc:
+            raise click.UsageError(str(exc)) from exc
+        compression_line = (
+            f"compression: {resolved_compression.value} (file will not be created)"
+        )
+    else:
+        compression_line = "compression: (n/a -- stdout is always plain JSON)"
+    result.add(
+        "Output and exit-code behavior",
+        f"output: {output if output else 'stdout'}",
+        compression_line,
+        "exit codes: 0 valid, 1 requested depth not satisfiable, 64 usage error",
+    )
+    _add_dump_depth_feasibility(
+        result,
+        so_path=so_path,
+        sources=sources,
+        build_info=build_info,
+        depth=depth,
+        has_compile_db=has_compile_db,
+        compile_db_matched=compile_db_matched,
+        build_info_is_pack=build_info_is_pack,
+        dump_manifest=dump_manifest,
+    )
     return result
 
 

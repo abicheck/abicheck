@@ -17,9 +17,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
@@ -706,6 +707,22 @@ def _python_api_from_dict(d: dict[str, Any]) -> Any:
     )
 
 
+_T = TypeVar("_T")
+
+
+def _sub_block(
+    parser: Callable[[dict[str, Any]], _T], raw: Any
+) -> _T | None:
+    """Parse one optional sub-block of a serialized snapshot, or ``None``.
+
+    Every ``elf``/``pe``/``macho``/``dwarf``/... section of a snapshot document
+    is optional and, per this module's forward-compatibility convention, is
+    ignored rather than fatal when it is present but not an object. Sharing the
+    one guard keeps a dozen call sites from each spelling it out.
+    """
+    return parser(raw) if isinstance(raw, dict) else None
+
+
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # Inspect schema version for future migration hooks.
     # Snapshots without schema_version are treated as v1 (pre-versioning format).
@@ -884,33 +901,21 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     dwarf_data = d.get("dwarf")
     dwarf_adv_data = d.get("dwarf_advanced")
 
-    elf = _elf_from_dict(elf_data) if isinstance(elf_data, dict) else None
-    pe = _pe_from_dict(pe_data) if isinstance(pe_data, dict) else None
-    macho = _macho_from_dict(macho_data) if isinstance(macho_data, dict) else None
-    dwarf = _dwarf_from_dict(dwarf_data) if isinstance(dwarf_data, dict) else None
-    dwarf_advanced = (
-        _dwarf_advanced_from_dict(dwarf_adv_data)
-        if isinstance(dwarf_adv_data, dict)
-        else None
-    )
+    elf = _sub_block(_elf_from_dict, elf_data)
+    pe = _sub_block(_pe_from_dict, pe_data)
+    macho = _sub_block(_macho_from_dict, macho_data)
+    dwarf = _sub_block(_dwarf_from_dict, dwarf_data)
+    dwarf_advanced = _sub_block(_dwarf_advanced_from_dict, dwarf_adv_data)
 
     sycl_data = d.get("sycl")
-    sycl = _sycl_from_dict(sycl_data) if isinstance(sycl_data, dict) else None
+    sycl = _sub_block(_sycl_from_dict, sycl_data)
 
     kabi_data = d.get("kabi")
-    kabi = _kabi_from_dict(kabi_data) if isinstance(kabi_data, dict) else None
+    kabi = _sub_block(_kabi_from_dict, kabi_data)
     numpy_capi_data = d.get("numpy_capi")
-    numpy_capi = (
-        _numpy_capi_from_dict(numpy_capi_data)
-        if isinstance(numpy_capi_data, dict)
-        else None
-    )
+    numpy_capi = _sub_block(_numpy_capi_from_dict, numpy_capi_data)
     python_ext_data = d.get("python_ext")
-    python_ext = (
-        _python_ext_from_dict(python_ext_data)
-        if isinstance(python_ext_data, dict)
-        else None
-    )
+    python_ext = _sub_block(_python_ext_from_dict, python_ext_data)
     # A snapshot dumped without the G14 key (older abicheck, or a `dump` writer
     # path that didn't attach it) has no serialized ``python_ext``. Derive it on
     # load from the already-parsed binary metadata so `dump` → `compare` never
@@ -921,11 +926,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     _python_ext_key_absent = "python_ext" not in d
 
     python_api_data = d.get("python_api")
-    python_api = (
-        _python_api_from_dict(python_api_data)
-        if isinstance(python_api_data, dict)
-        else None
-    )
+    python_api = _sub_block(_python_api_from_dict, python_api_data)
 
     dep_data = d.get("dependency_info")
     dep_info = (
