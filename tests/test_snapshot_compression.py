@@ -343,24 +343,43 @@ def test_zstd_decoder_rejects_window_above_ceiling(tmp_path):
     # decompression step itself (the thing max_window_size gates) must
     # succeed rather than raising "too much memory" for a legitimate,
     # at-the-ceiling window.
-    read_snapshot_bytes(p)
+    assert read_snapshot_bytes(p) == b"a" * (1 << 20)
 
 
 def test_oversized_stored_file_rejected_before_full_read(tmp_path):
     """CodeRabbit review: the stored-file-size check (via stat(), before
     read_bytes()) must reject a file whose *stored* size alone already
-    exceeds the limit -- using low-entropy content so the compressed size
-    stays large rather than shrinking under the limit itself."""
+    exceeds the limit (plus the compressed-file margin, see the boundary
+    test below) -- using low-entropy content, well beyond the margin, so
+    the compressed size stays large rather than shrinking under the limit
+    itself."""
     import os as _os
     import random
 
     random.seed(1234)
-    incompressible = bytes(random.randrange(256) for _ in range(4096))
+    incompressible = bytes(random.randrange(256) for _ in range(200_000))
     p = tmp_path / "big.abicheck.json.gz"
     p.write_bytes(gzip.compress(incompressible, compresslevel=9))
-    assert _os.path.getsize(p) > 100
+    stored_size = _os.path.getsize(p)
+    assert stored_size > 100
     with pytest.raises(SnapshotError, match="exceeds"):
         read_snapshot_bytes(p, max_decoded_bytes=100)
+
+
+def test_tiny_compressed_payload_not_rejected_by_stored_size_precheck(tmp_path):
+    """Codex review, PR #699: gzip/zstd container framing adds a small,
+    fixed overhead independent of payload size (e.g. `{}` decodes to 2
+    bytes but gzip-compresses to 22) -- the stored-size precheck above must
+    not reject a legitimately tiny/boundary decoded payload purely because
+    its *stored* size (with framing overhead) exceeds the exact decoded
+    limit. Only a plain/uncompressed file, whose stored size equals its
+    decoded size exactly, gets the tight comparison."""
+    for compression in (SnapshotCompression.GZIP, SnapshotCompression.ZSTD):
+        p = tmp_path / f"tiny.abicheck.json.{compression.value}"
+        write_snapshot_text("{}", p, compression=compression)
+        stored_size = p.stat().st_size
+        assert stored_size > 2  # framing overhead really does exceed the payload
+        assert read_snapshot_bytes(p, max_decoded_bytes=2) == b"{}"
 
 
 # ── Determinism ──────────────────────────────────────────────────────────

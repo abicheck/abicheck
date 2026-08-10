@@ -84,6 +84,15 @@ _SNIFF_BYTES = 4096
 # without product need).
 DEFAULT_MAX_DECODED_BYTES = 1024 * 1024 * 1024  # 1 GiB
 
+# Margin added to the decoded-size limit when precheck-rejecting a
+# *compressed* file's stored size before a full read (Codex review, PR
+# #699): gzip/zstd container framing is a small, fixed overhead independent
+# of payload size, so an exact stored-size == decoded-limit comparison can
+# reject a legitimately tiny/boundary decoded payload purely because of that
+# overhead. Generous enough to absorb any realistic framing cost; still
+# trivially small next to a genuine decompression-bomb-sized stored file.
+_STORED_SIZE_PRECHECK_MARGIN = 65536  # 64 KiB
+
 # zstd window-size bound, independent of the decoded-size limit above: caps
 # how much memory a hostile frame can force the decompressor to allocate for
 # its sliding window, regardless of how much data it claims/produces.
@@ -356,8 +365,28 @@ def read_snapshot_bytes(
     # avoids buffering the whole oversized file first. Best-effort: a stat()
     # failure here falls through to read_bytes() below, which raises the
     # same OSError either way.
+    #
+    # Codex review: for a *compressed* file this comparison must not be
+    # exact -- gzip/zstd framing (headers, footers, block overhead) adds a
+    # small, bounded number of bytes independent of payload size, so a tiny
+    # decoded payload right at (or just under) the limit can have a
+    # slightly larger stored size purely from that overhead (e.g. `{}`
+    # decodes to 2 bytes but gzip-compresses to 22). A plain/uncompressed
+    # file has stored size == decoded size exactly, so it keeps the exact
+    # check; a compressed file gets a generous fixed margin -- enough to
+    # absorb any realistic container overhead, but trivially small next to
+    # a genuine decompression-bomb-sized stored file, which this precheck
+    # still catches before a full read.
     try:
-        if p.stat().st_size > limit:
+        stored_size = p.stat().st_size
+        with open(p, "rb") as f:
+            compression_hint = detect_compression_from_bytes(f.read(4))
+        margin = (
+            0
+            if compression_hint is SnapshotCompression.NONE
+            else (_STORED_SIZE_PRECHECK_MARGIN)
+        )
+        if stored_size > limit + margin:
             raise SnapshotError(
                 f"{p}: stored file exceeds the {limit} byte safety limit."
             )
