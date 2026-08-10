@@ -175,6 +175,23 @@ class AbiJsonClassifier(FileClassifier):
     def accepts(self, path: Path) -> bool | None:
         if path.suffix.lower() != ".json":
             return None
+        # ADR-059 (Codex review): `dump --compression gzip|zstd -o out.json`
+        # explicitly permits writing compressed bytes under a neutral
+        # `.json` name -- resolve_write_compression() only rejects a
+        # *canonical* suffix (.json.gz/.json.zst) that contradicts an
+        # explicit --compression, not a plain .json one. Reading those raw
+        # compressed bytes as text here would never match the fingerprint
+        # regex, returning False (not None) and ending the "first
+        # non-None wins" pipeline before CompressedAbiJsonClassifier ever
+        # gets a chance to decode and inspect it -- so abstain on a
+        # recognizably compressed file and let that classifier handle it.
+        try:
+            from .snapshot_io import SnapshotCompression, detect_snapshot_compression
+
+            if detect_snapshot_compression(path) is not SnapshotCompression.NONE:
+                return None
+        except Exception:
+            pass  # fall through to the plain-text read below
         try:
             with open(path, "rb") as fh:
                 head = fh.read(self._JSON_PROBE_BYTES).decode("utf-8", errors="replace")

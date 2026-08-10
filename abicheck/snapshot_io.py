@@ -87,12 +87,25 @@ DEFAULT_MAX_DECODED_BYTES = 1024 * 1024 * 1024  # 1 GiB
 
 # Margin added to the decoded-size limit when precheck-rejecting a
 # *compressed* file's stored size before a full read (Codex review, PR
-# #699): gzip/zstd container framing is a small, fixed overhead independent
-# of payload size, so an exact stored-size == decoded-limit comparison can
+# #699): gzip/zstd container framing is overhead independent of a *small*
+# payload's size, so an exact stored-size == decoded-limit comparison can
 # reject a legitimately tiny/boundary decoded payload purely because of that
-# overhead. Generous enough to absorb any realistic framing cost; still
-# trivially small next to a genuine decompression-bomb-sized stored file.
+# overhead (e.g. `{}` decodes to 2 bytes but gzip-compresses to 22). Generous
+# enough to absorb any realistic small-file framing cost.
 _STORED_SIZE_PRECHECK_MARGIN = 65536  # 64 KiB
+
+# Fresh Codex review evidence: for a *large* incompressible payload, this
+# overhead is NOT bounded by the fixed margin above -- DEFLATE's "stored"
+# block (used for data it can't compress) caps at 65535 bytes with a 5-byte
+# header each, so overhead grows roughly linearly with payload size (a 220
+# MiB incompressible payload measured ~70 KiB of gzip overhead, already
+# exceeding the fixed 64 KiB margin). A boundary case where the decoded size
+# sits right at `limit` therefore needs a margin that scales with `limit`
+# too, not just the fixed constant above -- 1/256th (~0.39%) is a >10x
+# safety factor over the measured ~0.03% worst-case overhead ratio, while
+# staying trivially small next to a genuine decompression-bomb-sized stored
+# file (which this precheck still exists to catch before a full read).
+_STORED_SIZE_PRECHECK_SCALE_DIVISOR = 256
 
 # zstd window-size bound, independent of the decoded-size limit above: caps
 # how much memory a hostile frame can force the decompressor to allocate for
@@ -358,6 +371,18 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
     return out.getvalue()
 
 
+def _stored_size_precheck_margin(limit: int) -> int:
+    """How much a *compressed* file's stored size may legitimately exceed
+    *limit* (the decoded-size ceiling) purely from container/block framing
+    overhead -- see :data:`_STORED_SIZE_PRECHECK_MARGIN` and
+    :data:`_STORED_SIZE_PRECHECK_SCALE_DIVISOR` above for why this is the
+    larger of a small fixed floor and a fraction of `limit` itself, not a
+    single fixed constant."""
+    return max(
+        _STORED_SIZE_PRECHECK_MARGIN, limit // _STORED_SIZE_PRECHECK_SCALE_DIVISOR
+    )
+
+
 def read_snapshot_bytes(
     path: str | Path, *, max_decoded_bytes: int | None = None
 ) -> bytes:
@@ -378,16 +403,19 @@ def read_snapshot_bytes(
     # avoids buffering the whole oversized file first.
     #
     # Codex review: for a *compressed* file this comparison must not be
-    # exact -- gzip/zstd framing (headers, footers, block overhead) adds a
-    # small, bounded number of bytes independent of payload size, so a tiny
-    # decoded payload right at (or just under) the limit can have a
-    # slightly larger stored size purely from that overhead (e.g. `{}`
-    # decodes to 2 bytes but gzip-compresses to 22). A plain/uncompressed
+    # exact -- gzip/zstd container framing adds overhead independent of
+    # payload size (e.g. `{}` decodes to 2 bytes but gzip-compresses to 22),
+    # so a tiny decoded payload right at (or just under) the limit can have
+    # a slightly larger stored size purely from that. A plain/uncompressed
     # file has stored size == decoded size exactly, so it keeps the exact
-    # check; a compressed file gets a generous fixed margin -- enough to
-    # absorb any realistic container overhead, but trivially small next to
-    # a genuine decompression-bomb-sized stored file, which this precheck
-    # still catches before a full read.
+    # check; a compressed file's margin (see `_stored_size_precheck_margin`)
+    # scales with `limit` rather than being a single fixed constant -- a
+    # second Codex review round found that for a *large* incompressible
+    # payload near the limit, DEFLATE's per-block framing overhead grows
+    # roughly linearly with size and can exceed a small fixed margin (a 220
+    # MiB incompressible payload measured ~70 KiB of overhead). Still
+    # trivially small next to a genuine decompression-bomb-sized stored
+    # file, which this precheck still catches before a full read.
     #
     # CodeRabbit review: the size probe and the actual content read must
     # come from the *same* open file descriptor. An earlier version stat()'d
@@ -409,7 +437,7 @@ def read_snapshot_bytes(
         margin = (
             0
             if compression_hint is SnapshotCompression.NONE
-            else _STORED_SIZE_PRECHECK_MARGIN
+            else _stored_size_precheck_margin(limit)
         )
         cap = limit + margin
         if stored_size > cap:

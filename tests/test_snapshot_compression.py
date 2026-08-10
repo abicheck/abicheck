@@ -407,6 +407,75 @@ def test_tiny_compressed_payload_not_rejected_by_stored_size_precheck(tmp_path):
         assert read_snapshot_bytes(p, max_decoded_bytes=2) == b"{}"
 
 
+def test_stored_size_precheck_margin_scales_with_limit():
+    """Codex review, PR #699: a *fixed* margin isn't generous enough for a
+    large incompressible payload -- DEFLATE's "stored" block (used for data
+    it can't compress) caps at 65535 bytes with a 5-byte header each, so
+    overhead grows roughly linearly with payload size, not staying flat the
+    way it does for a tiny payload. Fresh evidence: a 220 MiB incompressible
+    gzip payload measured ~70 KiB of overhead, already exceeding the
+    previous fixed 64 KiB margin. Assert the margin scales with `limit`
+    once `limit` is large enough for the proportional term to dominate the
+    fixed floor -- the pure arithmetic, not a multi-hundred-MB fixture."""
+    from abicheck.snapshot_io import (
+        _STORED_SIZE_PRECHECK_MARGIN,
+        _stored_size_precheck_margin,
+    )
+
+    # Small limit: the fixed floor dominates (unchanged from before this fix).
+    assert _stored_size_precheck_margin(100) == _STORED_SIZE_PRECHECK_MARGIN
+    # Large limit (matching the real DEFAULT_MAX_DECODED_BYTES scale): the
+    # proportional term must exceed the old fixed margin by a comfortable
+    # safety factor over the measured ~0.03% worst-case overhead ratio.
+    large_limit = 1024 * 1024 * 1024  # 1 GiB, the real default ceiling
+    margin = _stored_size_precheck_margin(large_limit)
+    assert margin > _STORED_SIZE_PRECHECK_MARGIN
+    assert margin >= large_limit * 0.001  # >= 10x the measured overhead ratio
+
+
+def test_stored_size_precheck_tolerates_large_payload_overhead(tmp_path, monkeypatch):
+    """Codex review, PR #699: simulate the large-incompressible-payload
+    boundary case end to end via a monkeypatched fstat rather than an
+    actually-huge fixture -- a stored size that exceeds `limit` by more
+    than the *old* fixed 64 KiB margin, but less than the new proportional
+    one, must not be rejected by the precheck."""
+    import abicheck.snapshot_io as snapshot_io_mod
+
+    snap = _sample_snapshot()
+    p = tmp_path / "big.abicheck.json.gz"
+    write_snapshot(snap, p)
+
+    limit = 500 * 1024 * 1024  # 500 MiB decoded-size ceiling
+    # ~100 KiB of simulated framing overhead: bigger than the old fixed
+    # 64 KiB margin (would previously have been rejected), well inside the
+    # new proportional one (500 MiB // 256 ≈ 1.95 MiB).
+    inflated_size = limit + 100_000
+    real_fstat = os.fstat
+
+    def _inflated_fstat(fd):
+        st = real_fstat(fd)
+        return os.stat_result(
+            (
+                st.st_mode,
+                st.st_ino,
+                st.st_dev,
+                st.st_nlink,
+                st.st_uid,
+                st.st_gid,
+                inflated_size,
+                int(st.st_atime),
+                int(st.st_mtime),
+                int(st.st_ctime),
+            )
+        )
+
+    monkeypatch.setattr(snapshot_io_mod.os, "fstat", _inflated_fstat)
+    # Must not raise -- the real (small) file content still decodes fine;
+    # only the simulated stored-size precheck comparison is exercised here.
+    decoded = read_snapshot_bytes(p, max_decoded_bytes=limit)
+    assert json.loads(decoded)["library"] == snap.library
+
+
 # ── Determinism ──────────────────────────────────────────────────────────
 
 

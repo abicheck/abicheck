@@ -331,3 +331,36 @@ class TestCompressedAbiJsonClassifier:
         p = tmp_path / "notes.txt.gz"
         p.write_bytes(gzip.compress(b'{"rows": [[1, 2, 3]]}'))
         assert is_supported_compare_input(p) is False
+
+    def test_compressed_snapshot_under_neutral_dot_json_name_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #699: `dump --compression gzip|zstd -o out.json`
+        explicitly permits writing compressed bytes under a plain `.json`
+        name (resolve_write_compression() only rejects a *canonical*
+        suffix that contradicts an explicit --compression, not a neutral
+        one) -- but AbiJsonClassifier used to run first for any `.json`
+        path, read the raw (still-compressed) bytes as text, never match
+        the fingerprint regex, and return False rather than abstaining --
+        ending the "first non-None wins" pipeline before
+        CompressedAbiJsonClassifier ever got a chance to decode it. A
+        compare-release directory scan would then silently skip this
+        supported snapshot."""
+        from abicheck.serialization import write_snapshot
+
+        snap = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        for suffix, compression in ((".json", "gzip"), (".json", "zstd")):
+            p = tmp_path / f"libfoo{suffix}"
+            write_snapshot(snap, p, compression=compression)
+            assert is_supported_compare_input(p) is True, (compression, p)
