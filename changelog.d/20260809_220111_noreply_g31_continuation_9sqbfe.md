@@ -346,3 +346,41 @@ it should read in CHANGELOG.md. Delete the other sections.
   both forms; the only structural distinction is a separate `isPostfix`
   boolean key, verified against real Clang 17 output, which
   `_canonical_expr`'s whitelist didn't read. Now kept verbatim.
+- **Fixed a missed `FIELD_DEFAULT_INITIALIZER_REMOVED` when the OLD side is
+  a pure single-backend snapshot and the NEW side is a hybrid pair with a
+  dual-confirmed absence** (Codex review, fresh evidence, second round):
+  the previous fix only relaxed the producer check when BOTH sides were a
+  `"hybrid"`-merge result, but OLD's own producer plays no role in whether
+  a removal is trustworthy — only whether NEW's `None` is. A hybrid merge's
+  `dumper_hybrid._backfill_fact` convention stamps a matched-but-unset
+  field's provenance `"castxml"` only when BOTH backends independently
+  examined it and both returned no value (verified: the `"clang"` stamp
+  is reachable only when clang's value is non-`None`, so a `None` final
+  value on the matched-field path is always the dual-confirmed `"castxml"`
+  stamp) — a pure-clang OLD side compared against exactly that shape was
+  still declined. The gate is now checked one-sided
+  (`new.ast_producer == "hybrid"` and the field's own resolved producer is
+  `"castxml"`), ORed with the ordinary same-producer path rather than
+  replacing it — restores the original same-producer REMOVED case a first,
+  overly-narrow version of this fix accidentally dropped. A
+  clang-only-appended field (no castxml opinion at all) is still correctly
+  excluded: `merge_snapshots`' append loop stamps it `"clang"`
+  unconditionally regardless of value, which is single-backend
+  confirmation, not dual.
+- **Documented a known, deliberately-deferred gap in `override_graph.py`**
+  (Codex review, fresh evidence): a local class defined inside a function
+  body is scoped only by its enclosing namespace/class chain (mirroring
+  `type_graph.py`'s own `_SCOPE_DECL_KINDS`), never by its enclosing
+  `FunctionDecl` — two different functions each locally declaring
+  same-named class hierarchies collide on that shared bare identity.
+  Confirmed empirically (real Clang 18 output) that a genuine,
+  `OverrideAttr`-confirmed override in the first such function produces
+  zero edges once an unrelated, same-named local hierarchy follows it in
+  the same translation unit. Not a narrow fix scoped to this module alone:
+  `bases_of` is built from `type_graph.py`'s own `TYPE_INHERITS` edges,
+  which have the identical scope-blind collision (documented in that
+  module's own docstring as an accepted tradeoff) — a real fix needs
+  function-scope tracking added consistently across `type_graph.py`,
+  `call_graph.py` (which independently duplicates the same limitation),
+  and this module together. Pinned with a regression test rather than
+  guessed at.

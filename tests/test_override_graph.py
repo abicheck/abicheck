@@ -374,6 +374,71 @@ def test_typedef_aliased_parameter_documents_known_gap() -> None:
     assert parse_clang_ast_overrides(ast) == []
 
 
+def test_same_named_local_classes_in_different_functions_documents_known_gap() -> None:
+    # Codex review, fresh evidence, verified against real Clang 18 output:
+    # a local class is scoped only by its enclosing namespace/class chain
+    # here (mirroring type_graph.py's own _SCOPE_DECL_KINDS), never by its
+    # enclosing FunctionDecl. Two DIFFERENT functions each locally
+    # declaring same-named "B"/"D" hierarchies collide on that shared bare
+    # identity -- confirmed empirically that a genuine, OverrideAttr-
+    # confirmed override in the FIRST such function produces ZERO edges
+    # once a second, unrelated same-named local hierarchy follows it in the
+    # same translation unit. Not a narrow fix scoped to this module alone
+    # (see the module's own docstring): `bases_of` itself is built from
+    # type_graph.py's own TYPE_INHERITS edges, whose resolution has the
+    # identical scope-blind collision. This test pins the current, honest
+    # miss (no edge, not a crash) so a future cross-module fix has a
+    # concrete regression to flip.
+    def _func(name: str, *decls: dict) -> dict:
+        return {
+            "kind": "FunctionDecl",
+            "name": name,
+            "inner": [
+                {
+                    "kind": "CompoundStmt",
+                    "inner": [{"kind": "DeclStmt", "inner": [d]} for d in decls],
+                }
+            ],
+        }
+
+    ast = _tu(
+        _func(
+            "func_one",
+            _record(
+                "B",
+                inner=[
+                    _method("f", "_ZZ8func_onevEN1B1fEv", "void ()", is_virtual=True)
+                ],
+            ),
+            _record(
+                "D",
+                bases=["B"],
+                inner=[
+                    _method(
+                        "f",
+                        "_ZZ8func_onevEN1D1fEv",
+                        "void ()",
+                        has_override_attr=True,
+                    )
+                ],
+            ),
+        ),
+        _func(
+            "func_two",
+            _record("B", inner=[_method("f", "_ZZ8func_twovEN1B1fEv", "void ()")]),
+            _record(
+                "D",
+                bases=["B"],
+                inner=[_method("f", "_ZZ8func_twovEN1D1fEv", "void ()")],
+            ),
+        ),
+    )
+    # The documented collision, not a crash -- the real override in
+    # func_one is lost once func_two's unrelated, same-named, non-virtual
+    # B/D pair overwrites it in the shared `declared` dict.
+    assert parse_clang_ast_overrides(ast) == []
+
+
 def test_override_reaches_through_non_redeclaring_intermediate_class() -> None:
     # Codex review, fresh evidence, verified against real Clang 17 output:
     # Base declares a virtual run(); Mid : Base does NOT redeclare it at

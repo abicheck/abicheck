@@ -91,6 +91,30 @@ omissions):
   signature from each parameter's desugared type plus a return-type
   typedef resolution this format cannot provide, not a narrow extension of
   the current whole-qualType string comparison.
+- KNOWN, deliberately-deferred gap (Codex review, fresh evidence): a LOCAL
+  class defined inside a function body is scoped only by its enclosing
+  namespace/class chain here (mirroring ``type_graph.py``'s own
+  ``_SCOPE_DECL_KINDS``, deliberately — see :func:`_collect_class_methods`'s
+  own docstring), never by its enclosing ``FunctionDecl``. Two DIFFERENT
+  functions each locally declaring same-named classes (e.g. both defining
+  ``struct B { ... }; struct D : B { ... };``) therefore key as the SAME
+  ``B``/``D`` identities and collide in this module's own ``declared``
+  dict — confirmed empirically (real Clang 18 output) that a genuine,
+  ``OverrideAttr``-confirmed override in the first such function produces
+  ZERO edges once a second, unrelated same-named local hierarchy follows it
+  in the same translation unit. This is not a narrow fix scoped to this
+  module alone: ``bases_of`` itself is built from ``type_graph.py``'s own
+  ``TYPE_INHERITS`` edges, whose resolution has the identical scope-blind
+  collision (documented in that module's own docstring: "two same-named
+  types in different scopes can still collide" is an accepted, existing
+  tradeoff) — adding function-scope tracking to only this module's method
+  collection would leave ``bases_of`` itself still ambiguous between the
+  two hierarchies, so the fix would not actually close the gap.
+  ``call_graph.py`` carries the identical, independently-documented
+  limitation in its own (deliberately duplicated, not shared)
+  ``_SCOPE_DECL_KINDS``. A real fix needs function-scope tracking added
+  consistently across all three sibling modules, not a drive-by extension
+  of this one.
 """
 
 from __future__ import annotations
