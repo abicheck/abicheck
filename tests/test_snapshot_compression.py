@@ -895,6 +895,45 @@ def test_write_through_fifo_does_not_replace_it(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX FIFOs only")
+def test_write_through_a_symlink_to_a_fifo_does_not_need_realpath(
+    tmp_path, monkeypatch
+):
+    """Codex review, PR #699 (second finding): the non-regular check used
+    to resolve *path* via os.path.realpath() before stat()-ing it -- for a
+    symlink whose target is a pipe-backed file descriptor (e.g. /dev/stdout
+    connected to a pipe on a CI runner), realpath() can return a synthetic,
+    unstat-able pseudo-path like /proc/<pid>/fd/pipe:[12345], which then
+    made the follow-up stat() fail and the non-regular destination was
+    never recognized -- the write fell through to the atomic-rename path
+    and tried to create a temp file under that bogus pseudo-directory.
+
+    Reproduce the failure mode directly: monkeypatch os.path.realpath to
+    return a path that cannot be stat()-ed at all, and confirm
+    write_snapshot through a symlink-to-FIFO still succeeds -- proving the
+    non-regular detection no longer depends on realpath() succeeding."""
+    import stat as stat_mod
+
+    fifo_path = tmp_path / "real_pipe"
+    os.mkfifo(fifo_path)
+    link_path = tmp_path / "link_to_pipe.abicheck.json"
+    link_path.symlink_to(fifo_path)
+
+    def _broken_realpath(path, *args, **kwargs):
+        return "/proc/nonexistent-pid/fd/pipe:[999999]"
+
+    monkeypatch.setattr(os.path, "realpath", _broken_realpath)
+
+    read_fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        snap = _sample_snapshot()
+        write_snapshot(snap, link_path, compression="none")  # must not raise
+        assert stat_mod.S_ISFIFO(fifo_path.stat().st_mode)  # still a FIFO
+        assert stat_mod.S_ISLNK(link_path.lstat().st_mode)  # symlink intact
+    finally:
+        os.close(read_fd)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFOs only")
 def test_read_snapshot_from_a_fifo(tmp_path):
     """Codex review, PR #699: read_snapshot_bytes() used to rewind via
     f.seek(0) after sniffing the 4-byte magic prefix -- a FIFO/pipe (or

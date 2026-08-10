@@ -791,15 +791,51 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
     expecting the other, so this is a hard error instead: unlink (or
     otherwise resolve) the extra hard link(s) before writing to *path* if
     an atomic, single-alias update is what's wanted.
+
+    Non-regular detection order (Codex review, second finding): the
+    non-regular check below stats *path* directly via ``os.stat()``
+    (kernel-level symlink resolution) *before* any ``os.path.realpath()``
+    call, not after. ``os.path.realpath()`` is a userspace, string-based
+    resolution -- for a symlink whose target is a pipe-backed file
+    descriptor (e.g. ``/dev/stdout`` when it's connected to a pipe, as on
+    a CI runner piping ``dump``'s output), it can produce a synthetic,
+    unstat-able pseudo-path such as ``/proc/<pid>/fd/pipe:[12345]``.
+    Resolving via ``realpath()`` first (the previous ordering) then made
+    the follow-up ``stat()`` fail, so the non-regular destination was
+    never recognized as such and the function fell through to the
+    atomic-rename path -- attempting to create a temp file under that
+    same bogus pseudo-directory. ``os.stat(path)`` alone follows the
+    symlink at the kernel level and correctly reports the pipe's real
+    mode without ever needing a resolved path string, so it is used for
+    both the type check and the direct write below; ``os.path.realpath()``
+    is only ever called afterward, on the regular-file/atomic-rename path,
+    where it does not have this failure mode.
     """
+    try:
+        initial_stat = os.stat(path)
+    except OSError:
+        initial_stat = None
+    if initial_stat is not None and not stat.S_ISREG(initial_stat.st_mode):
+        # open() itself follows a symlink to reach the real FIFO/device/
+        # socket, so no path resolution is needed here at all.
+        with open(path, "wb") as f:
+            f.write(data)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass  # best-effort; not meaningful for most non-regular files
+        return
     target = Path(os.path.realpath(path)) if os.path.islink(path) else path
     try:
         existing_stat_for_type = target.stat()
     except OSError:
-        existing_mode_bits = None
+        pass
     else:
-        existing_mode_bits = existing_stat_for_type.st_mode
-        if stat.S_ISREG(existing_mode_bits) and existing_stat_for_type.st_nlink > 1:
+        if (
+            stat.S_ISREG(existing_stat_for_type.st_mode)
+            and existing_stat_for_type.st_nlink > 1
+        ):
             raise SnapshotError(
                 f"{target}: has {existing_stat_for_type.st_nlink} hard links -- "
                 "an atomic rewrite would silently desynchronize the other "
@@ -808,15 +844,6 @@ def _atomic_write_bytes(data: bytes, path: Path) -> None:
                 "first if you want this path atomically rewritten in "
                 "isolation."
             )
-    if existing_mode_bits is not None and not stat.S_ISREG(existing_mode_bits):
-        with open(target, "wb") as f:
-            f.write(data)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError:
-                pass  # best-effort; not meaningful for most non-regular files
-        return
     parent = target.parent
     parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = _open_unique_temp(parent, f".{target.name}.", ".tmp")
