@@ -439,16 +439,19 @@ _CHAIN_OPEN_RULES: tuple[tuple[_ChainMatcher, tuple[bool, bool, bool]], ...] = (
     (_opens_missing_cplusplus_fallback, _FRAME_LIVE_SETTLED),
     (_opens_unreachable_or_circular_guard, _FRAME_MASKED),
     (_opens_unconditionally_true, _FRAME_LIVE_SETTLED),
+    # The one inverted-polarity rule that does *not* precede the general mask
+    # rule, and safely so: the two are mutually exclusive by construction --
+    # `_opens_unreachable_or_circular_guard` only tests
+    # `_PP_IFNDEF_CPP_FEATURE_GUARD_PATTERN` when
+    # `invert_dialect_fallback_guards` is False, and this rule only fires when
+    # it is True, so neither can shadow the other whatever the order. Stated
+    # here so a later edit to that rule's gating cannot silently change this
+    # spelling's classification (CodeRabbit review).
     (_opens_ifndef_feature_fallback, _FRAME_LIVE_SETTLED),
 )
 
 
-def _frame_for_chain_open(
-    line: bytes,
-    *,
-    invert_dialect_fallback_guards: bool,
-    mask_cplusplus_defined_guards: bool,
-) -> list[bool]:
+def _frame_for_chain_open(line: bytes, policy: _ChainPolicy) -> list[bool]:
     """Classify a chain-opening ``#if``/``#ifdef``/``#ifndef`` directive.
 
     Returns the ``[recognized, masking, settled]`` stack frame this chain
@@ -459,7 +462,6 @@ def _frame_for_chain_open(
     conservative pass-through the top level always applied to an ``#if`` it
     can't evaluate.
     """
-    policy = _ChainPolicy(invert_dialect_fallback_guards, mask_cplusplus_defined_guards)
     for matches, frame in _CHAIN_OPEN_RULES:
         if matches(line, policy):
             return list(frame)
@@ -565,13 +567,7 @@ _OPEN_ARM_RULES: tuple[tuple[_ChainMatcher, Callable[[list[bool]], None]], ...] 
 )
 
 
-def _line_for_open_arm(
-    line: bytes,
-    frame: list[bool],
-    *,
-    invert_dialect_fallback_guards: bool,
-    mask_cplusplus_defined_guards: bool,
-) -> bytes:
+def _line_for_open_arm(line: bytes, frame: list[bool], policy: _ChainPolicy) -> bytes:
     """Advance the innermost open chain by one line; return what to emit.
 
     *frame* is mutated in place: an ``#elif``/``#else`` arm changes which of
@@ -585,7 +581,6 @@ def _line_for_open_arm(
         # exactly like the top level's unrecognized-chain
         # pass-through.
         return line
-    policy = _ChainPolicy(invert_dialect_fallback_guards, mask_cplusplus_defined_guards)
     for matches, advance in _OPEN_ARM_RULES:
         if matches(line, policy):
             advance(frame)
@@ -709,6 +704,10 @@ def _strip_inactive_if_zero_blocks(
     #   settled: an unconditionally-true arm already fired at this level,
     #     so every later sibling arm here is unconditionally unreachable.
     stack: list[list[bool]] = []
+    # Built once for the whole scan, not per line: both flags are constant for
+    # this call, and `_line_for_open_arm` runs once per line inside every chain
+    # of every scanned header (CodeRabbit review).
+    policy = _ChainPolicy(invert_dialect_fallback_guards, mask_cplusplus_defined_guards)
 
     def unreachable() -> bool:
         # Unreachable if this level or any ancestor is masking — a dead
@@ -733,11 +732,7 @@ def _strip_inactive_if_zero_blocks(
                 stack.append([False, True, True])
                 out.append(b"")
                 continue
-            frame = _frame_for_chain_open(
-                line,
-                invert_dialect_fallback_guards=invert_dialect_fallback_guards,
-                mask_cplusplus_defined_guards=mask_cplusplus_defined_guards,
-            )
+            frame = _frame_for_chain_open(line, policy)
             stack.append(frame)
             # Every recognized opener is itself blanked; only the
             # unrecognized pass-through frame keeps its own directive line.
@@ -756,12 +751,7 @@ def _strip_inactive_if_zero_blocks(
                 out.append(b"")
                 continue
             out.append(
-                _line_for_open_arm(
-                    line,
-                    stack[-1],
-                    invert_dialect_fallback_guards=invert_dialect_fallback_guards,
-                    mask_cplusplus_defined_guards=mask_cplusplus_defined_guards,
-                )
+                _line_for_open_arm(line, stack[-1], policy)
             )
             continue
 

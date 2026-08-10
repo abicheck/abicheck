@@ -530,13 +530,16 @@ def _stamp_ast_parser(
     are the enclosing call's toolchain selection, needed only to probe the host
     compiler behind a castxml dump.
     """
-    metadata = {"producer": producer, **_tool_identity_metadata(executable)}
+    executable_meta = _tool_identity_metadata(executable)
+    metadata = {"producer": producer, **executable_meta}
     dialect: str | None
     if producer == "clang":
-        compiler_meta = _tool_identity_metadata(executable)
         # clang is both frontend and compiler here (mirrors
         # _resolve_clang_langmode's own cc_id derivation for the same
-        # binary); same dialect test used there.
+        # binary); same dialect test used there -- and since it is the same
+        # binary, reuse the probe above rather than re-hashing and
+        # re-running --version on it (CodeRabbit review).
+        compiler_meta = executable_meta
         dialect = "msvc" if Path(executable).name.lower() in ("cl", "cl.exe") else "gnu"
     else:
         try:
@@ -845,8 +848,8 @@ def _write_castxml_cache(
     *,
     castxml_bin: str,
     cc_bin: str,
-    frontend_identity: object,
-    compiler_identity: object,
+    frontend_identity: str,
+    compiler_identity: str,
 ) -> None:
     """Persist a fresh castxml XML dump, unless the toolchain moved underneath us.
 

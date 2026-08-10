@@ -409,9 +409,18 @@ def _raw_candidate_spellings(candidate: RecordType | EnumType, identity: str) ->
     if stripped:
         spellings.add(stripped)
     spellings.add(f"::{identity}")
-    tag_keywords = _elaborated_tag_keywords(candidate)
+    # Snapshot the un-elaborated spellings first: ``set.update`` consumes the
+    # generator incrementally, so an inline ``set(spellings)`` would be
+    # re-evaluated per keyword and the second keyword would see the first one's
+    # own output -- yielding double-tagged junk like ``class struct Foo``, and
+    # varying with ``_elaborated_tag_keywords``' frozenset iteration order
+    # (CodeRabbit review). A record with two legal keywords (``struct``/
+    # ``class``) is the common case, not an edge one.
+    base_spellings = set(spellings)
     spellings.update(
-        f"{keyword} {s}" for keyword in tag_keywords for s in set(spellings)
+        f"{keyword} {s}"
+        for keyword in _elaborated_tag_keywords(candidate)
+        for s in base_spellings
     )
     return spellings
 

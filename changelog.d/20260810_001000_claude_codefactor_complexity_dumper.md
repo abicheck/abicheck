@@ -28,3 +28,14 @@
   functions in place needed line budget first. Every caller stays in
   `dumper`, so bare-name calls still resolve through `dumper`'s namespace and
   existing `monkeypatch.setattr(dumper, ...)` targets keep working.
+
+### Fixed
+
+- `dumper_scoping._raw_candidate_spellings` emitted double-tagged
+  elaborated-type-specifier spellings (`class struct Foo`) for any
+  `struct`/`class` record. C++ lets either keyword refer to the same non-union
+  record, so the elaboration step iterates twice over the same spelling set —
+  and because `set.update` consumes its generator incrementally, re-evaluating
+  the base set inside that generator let the second keyword see the first
+  one's output. The junk spellings also varied with frozenset iteration order.
+  The base set is now snapshotted before elaboration (CodeRabbit review).

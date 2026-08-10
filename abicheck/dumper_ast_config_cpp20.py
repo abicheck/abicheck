@@ -1212,9 +1212,10 @@ def _preprocessed_header_content(
         content,
         flags=re.DOTALL,
     )
-    # A separate, additionally "//"-line-comment-stripped copy: raw
+    # "//" line comments are removed once, up front, before *both* masking
+    # passes below (which then differ only in guard-masking polarity). Raw
     # strings/literals/block comments are already blanked above, but "//"
-    # comments are only stripped per-logical-line further down, and a
+    # comments are otherwise only stripped per-logical-line further down, and a
     # "// struct concept {};" comment must never make a *real* concept
     # declaration elsewhere look ambiguous (Codex review, fifth round).
     # #if 0 / #if false regions go too — a disabled compatibility stub must not
