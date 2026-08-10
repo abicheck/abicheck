@@ -1822,3 +1822,73 @@ def test_unrelated_coincidentally_equal_registration_does_not_corrupt_redecl_ide
     types = _types(root)
     assert types["D"].vtable == ["_ZN5OuterIiE1AIddE1fEv"]
     assert types["D"].vptr_offset_bits == 0
+
+
+def test_default_added_by_legal_redeclaration_still_resolves_dependent_default() -> None:
+    """Codex review, fresh evidence (sixth round): a CONFIRMED redeclaration
+    (linked via ``previousDecl``) previously kept the tracked metadata frozen
+    at the FIRST declaration's value unconditionally -- correct for a
+    renamed-parameter redeclaration (the fourth round's own case, where the
+    original names/defaults must win), but wrong when the later declaration
+    legally ADDS a default the first one never had:
+    ``template<class T, class U> struct A;`` followed by ``template<class T,
+    class U=T> struct A {...};`` is one C++ entity whose effective default
+    for ``U`` only becomes visible on the SECOND declaration. Dropping it
+    left ``_index_template_param_defaults`` with ``[None, None]`` for "A",
+    so dependent-default substitution couldn't trim the trailing argument --
+    mis-indexing ``A<double>`` as ``A<double, double>``, unable to match the
+    base's actual trimmed spelling, leaving the inherited vtable invisible.
+    Fixed by positionally MERGING the confirmed redeclaration's value into
+    the tracked one (a position the tracked value has no data for adopts the
+    new declaration's value there) rather than keeping it frozen.
+    """
+    root = _tu(
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "id": "0x1",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {"kind": "TemplateTypeParmDecl", "name": "U"},
+            ],
+        },
+        {
+            "kind": "ClassTemplateDecl",
+            "name": "A",
+            "id": "0x2",
+            "previousDecl": "0x1",
+            "inner": [
+                {"kind": "TemplateTypeParmDecl", "name": "T"},
+                {
+                    "kind": "TemplateTypeParmDecl",
+                    "name": "U",
+                    "defaultArg": {
+                        "kind": "TemplateArgument",
+                        "type": {"qualType": "T"},
+                    },
+                },
+                _record("A"),
+                _specialization(
+                    "A",
+                    {
+                        "kind": "CXXMethodDecl",
+                        "name": "f",
+                        "mangledName": "_ZN1AIddE1fEv",
+                        "type": {"qualType": "void ()"},
+                        "virtual": True,
+                    },
+                    type_args=["double", "double"],
+                ),
+            ],
+        },
+        _record("D", bases=[_base("A<double>")]),
+    )
+    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+
+    # "A" now carries the default the SECOND declaration added, letting
+    # dependent-default substitution trim "A<double, double>" down to the
+    # base's actual spelling "A<double>".
+    assert _index_template_param_defaults(root).get("A") == [None, "T"]
+    types = _types(root)
+    assert types["D"].vtable == ["_ZN1AIddE1fEv"]
+    assert types["D"].vptr_offset_bits == 0

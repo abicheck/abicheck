@@ -715,6 +715,27 @@ def _register_template_param_metadata(
     A value-equal-but-unconfirmed registration is still safely absorbed
     (the stored value doesn't change either way), it just doesn't get to
     reassign whose id is being tracked.
+
+    On a CONFIRMED redeclaration, the stored value is positionally MERGED
+    with the new one -- not simply kept as-is -- because C++ allows a
+    later declaration to legally ADD a default a parameter didn't have
+    before (never repeat one already given elsewhere): ``template<class
+    T, class U> struct A;`` followed by ``template<class T, class U=T>
+    struct A {...};`` is one entity whose effective default for ``U`` only
+    becomes known on the SECOND declaration (Codex review, fresh evidence,
+    sixth round). Keeping only the first declaration's value unconditionally
+    (the fourth round's fix did) silently dropped that added default,
+    leaving the dependent-default substitution unable to trim a trailing
+    argument and mis-indexing the specialization -- confirmed end to end.
+    Merging is safe for every position: where the tracked value already
+    has data (a default, or a parameter's own name), it wins, preserving
+    the ORIGINAL declaration's spelling this module already relies on for
+    dependent-default substitution; only a position the tracked value has
+    nothing for adopts the new declaration's own value there. Length
+    mismatch (parameter count cannot legally change across a redeclaration
+    of the same template) falls back to keeping the existing value as-is,
+    the identical safe default this branch already used before merging was
+    added.
     """
     existing = idx.get(qualname)
     node_id = node.get("id")
@@ -725,6 +746,8 @@ def _register_template_param_metadata(
         return
     previous_decl = node.get("previousDecl")
     if previous_decl and previous_decl == node_ids.get(qualname):
+        if len(existing) == len(value):
+            idx[qualname] = [e if e is not None else v for e, v in zip(existing, value)]
         if node_id:
             node_ids[qualname] = node_id
         return
