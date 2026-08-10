@@ -150,8 +150,11 @@ Deliver, in this shape:
 - **Remediation per cause**, from
   [the remediation catalogue](../shared/remediation-catalog.md)
   — for the cause, not per symptom.
-- **What is out of scope of this answer** — e.g. runtime/dependency-floor
-  compatibility, which `compare` does not judge.
+- **What is out of scope of this answer** — e.g. packaging and behavioural
+  compatibility, or the wider dependency graph (`abicheck deps compare`).
+  A *raised symbol-version floor* is **not** in that list: `compare` emits
+  `runtime_floor_raised` as a risk and can promote it to a break against
+  declared floors, so read it from the findings rather than deferring it.
 
 Optionally, once a verdict exists, offer to wire the same check into CI:
 [CI wiring](../shared/ci-wiring.md). Offer; do not do it

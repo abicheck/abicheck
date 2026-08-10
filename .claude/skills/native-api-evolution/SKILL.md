@@ -114,8 +114,19 @@ Before the change is made, capture the current surface so the change can be
 verified against it:
 
 ```bash
-abicheck dump path/to/libfoo.so --depth headers -o baseline.abi.json
+abicheck dump path/to/libfoo.so \
+  --header include/foo/api.h \
+  --depth headers \
+  -o baseline.abi.json
 ```
+
+**`--depth headers` requires the headers.** For a shared library carrying no
+embedded header snapshot, `dump` refuses to write the file at all rather than
+quietly producing a binary-depth baseline — supply the public headers with
+`-H/--header` (a file or a directory, repeatable), and `-I/--include` for any
+directory the parse needs. Without them the command fails with "`--depth
+headers` was requested but the snapshot only reached 'binary' evidence
+depth", and the workflow cannot proceed.
 
 Record the toolchain this was produced under — the verification in step 5
 must reproduce it, or the comparison will be refused
@@ -135,6 +146,7 @@ until this has run:
 
 ```bash
 abicheck compare baseline.abi.json path/to/libfoo.so \
+  --header include/foo/api.h \
   --depth headers \
   --scope-public-headers \
   --report-mode root-cause \
@@ -157,9 +169,11 @@ rationalize them.
 - The **verified result** of the change: verdict, evidence tier, and any
   finding that remains.
 - The **migration story** for consumers, if any surface was deprecated.
-- What the verification **could not** cover — e.g. runtime/dependency-floor
-  effects, which `compare` does not judge, or reachability if the run was
-  not at `--depth source`
+- What the verification **could not** cover — e.g. the wider dependency
+  graph (`abicheck deps compare`) or reachability if the run was
+  not at `--depth source`. A raised symbol-version floor *is* covered:
+  `compare` emits `runtime_floor_raised`, so report it from the findings
+  instead of listing it as uncovered
   ([evidence and depth](references/shared/evidence-and-depth.md)).
 
 ## Termination criteria

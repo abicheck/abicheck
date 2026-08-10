@@ -46,11 +46,17 @@ baseline:
 
 ```bash
 # once, on the old side
-abicheck dump build/libfoo.so --depth headers -o baseline.abi.json
+abicheck dump build/libfoo.so \
+  --header include/foo/api.h --depth headers -o baseline.abi.json
 
 # later
-abicheck compare baseline.abi.json build/libfoo.so --format json
+abicheck compare baseline.abi.json build/libfoo.so \
+  --header include/foo/api.h --depth headers --format json
 ```
+
+`dump` hard-fails an explicit `--depth headers` that header evidence never
+actually reached, so the `-H/--header` above is required, not decorative — see
+"Headers, not just binaries" below.
 
 Prefer comparing **two persisted snapshots** over mixing a persisted baseline
 with a live binary when the toolchain is in question — the two paths do not

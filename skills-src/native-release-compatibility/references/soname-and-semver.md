@@ -65,7 +65,7 @@ never encode ABI.
 | removed or renamed export | major | bump |
 | changed signature (including a defaulted parameter) | major | bump |
 | source-only break (removed overload never emitted, tightened template) | project's choice | usually unchanged |
-| raised dependency floor (glibc, libstdc++) | not an ABI change — document it | unchanged |
+| raised symbol-version floor (`GLIBC_*`, `GLIBCXX_*`, `CXXABI_*`) | not an ABI change in itself — document the new floor; treat as a risk, or a break where a declared floor is exceeded | unchanged |
 
 The source-only row is the one that genuinely varies by project. Resolve it
 against the project's stated scheme and say which rule was applied.

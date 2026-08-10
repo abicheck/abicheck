@@ -118,13 +118,24 @@ fan-out and reports per library:
 ```bash
 abicheck compare old_release_dir/ new_dir/ \
   --output-dir release-reports/ \
+  --depth headers \
+  --scope-public-headers \
+  --contract-evaluation --contract public \
   --fail-on-removed-library \
   --format json
 ```
 
+Carry the same `--contract-evaluation --contract public` here as in the
+per-library command above. The fan-out applies it to each library and folds
+every library's own coverage contribution into the release's exit code, so
+dropping it on this path would leave step 4 unable to see incomplete contract
+evidence — and a cell would be recorded **pass** that the per-library workflow
+would have blocked.
+
 `--fail-on-removed-library` matters at release time specifically: a library
 that vanished from the shipped set is a release-level break no per-library
-comparison can see.
+comparison can see. Its exit `8` is checked ahead of the coverage-only
+fallback, so a removed library is never masked by an unrelated coverage gap.
 
 Across profiles or environments, use `--env-matrix`; across independently
 produced per-target reports, fan in by pointing `aggregate` at the directory
@@ -259,8 +270,10 @@ whole matrix afterwards.
   findings.
 - **Coverage caveats** — evidence tier per cell, coverage failures, partial
   contract coverage.
-- **What this decision does not cover** — runtime/dependency-floor changes
-  (`abicheck deps compare`), packaging, and behavioural compatibility.
+- **What this decision does not cover** — the wider dependency graph
+  (`abicheck deps compare`), packaging, and behavioural compatibility. A
+  raised symbol-version floor is covered by the comparisons above
+  (`runtime_floor_raised`); it belongs in the risk cells, not here.
 
 Once a decision exists, offer to enforce it from CI:
 [CI wiring](../shared/ci-wiring.md).
