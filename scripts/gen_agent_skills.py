@@ -263,43 +263,52 @@ _LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s")
 
 
 def _indented_code_spans(text: str) -> list[tuple[int, int]]:
-    """Line ranges of top-level indented (4-space) code blocks.
+    """Line ranges of indented code blocks, at top level and inside lists.
 
-    Deliberately conservative about lists. A 4-space indent means *two* things
-    in Markdown: an indented code block, and a continuation of the list item
-    above it. Masking the second kind would leave a real link unrewritten in
-    an installed skill — a worse failure than the one this fixes, and a silent
-    one. So a run is treated as code only when it is blank-line separated and
-    no list is open above it; inside a list, nothing is masked.
+    An indent means *two* things in Markdown — an indented code block, and a
+    continuation of the list item above — and which one it is depends on the
+    enclosing item's content column, not on a fixed number of spaces. Four
+    spaces under `- ` is a continuation; six is code. Tracking only whether a
+    list was open forced a choice between masking continuations (which leaves
+    a real link unrewritten, silently) and masking nothing inside a list
+    (which rewrites a genuine code example's link text, also silently). Both
+    were wrong, so the item's column is tracked instead and the floor is
+    `column + 4` — the same rule CommonMark states, and the reason `2. ` and
+    `- ` legitimately differ by one.
 
     An indented code block also cannot interrupt a paragraph (CommonMark
     §4.4), which the blank-line requirement already encodes.
     """
     lines = text.split("\n")
     spans: list[tuple[int, int]] = []
-    list_open = False
+    #: Content column of the innermost open list item, or `None` at top level.
+    item_column: int | None = None
     index = 0
     while index < len(lines):
         line = lines[index]
         if not line.strip():
             index += 1
             continue
-        if _LIST_ITEM_RE.match(line):
-            list_open = True
+        marker = _LIST_ITEM_RE.match(line)
+        if marker is not None:
+            # The whole matched prefix, not its leading whitespace: the item's
+            # content begins after the marker and its trailing space, so `- `
+            # opens at column 2 and `10. ` at column 4.
+            item_column = _column_width(marker.group())
             index += 1
             continue
-        if not line.startswith(" "):
-            list_open = False  # a flush-left line closes any open list
+        if not line.startswith((" ", "\t")):
+            item_column = None  # a flush-left line closes any open list
             index += 1
             continue
-        indented = line.startswith("    ") or line.startswith("\t")
+        floor = 4 if item_column is None else item_column + 4
         # Document start is a boundary too: with front matter already split
         # off, a reference file can legitimately open on an indented block.
         blank_before = index == 0 or not lines[index - 1].strip()
-        if indented and blank_before and not list_open:
+        if _indent_width(line) >= floor and blank_before:
             start = index
             while index < len(lines) and (
-                not lines[index].strip() or lines[index].startswith(("    ", "\t"))
+                not lines[index].strip() or _indent_width(lines[index]) >= floor
             ):
                 index += 1
             while index - 1 > start and not lines[index - 1].strip():
@@ -308,6 +317,16 @@ def _indented_code_spans(text: str) -> list[tuple[int, int]]:
             continue
         index += 1
     return spans
+
+
+def _column_width(text: str) -> int:
+    """Columns `text` occupies, counting a tab as CommonMark's four."""
+    return sum(4 if char == "\t" else 1 for char in text)
+
+
+def _indent_width(line: str) -> int:
+    """Columns of `line`'s leading whitespace."""
+    return _column_width(line[: len(line) - len(line.lstrip(" \t"))])
 
 
 def _masker(replacements: dict[str, str]) -> Callable[[re.Match[str]], str]:
@@ -790,12 +809,17 @@ def _render(
             "example out of its container, to the left margin."
         )
 
-    # Checked on the raw body, like the container guard and for the same
-    # reason: masking is exactly what an escaped delimiter corrupts, so asking
-    # after the fact would be asking the damaged text.
-    escape = _STRUCTURAL_ESCAPE_RE.search(body)
+    # Checked at the `_mask_block_code` midpoint, exactly like the container
+    # guard. An earlier version scanned the raw body on the theory that
+    # masking is what an escape corrupts — but that is only true of *inline*
+    # pairing. The block-level passes match fence delimiters at line starts
+    # and never pair backticks, so an escape cannot mislead them, and running
+    # first means a `\[` inside a legitimate regex or C-string example is
+    # already hidden. Scanning raw rejected those valid examples outright.
+    escaped_body = _mask_block_code(body, {})
+    escape = _STRUCTURAL_ESCAPE_RE.search(escaped_body)
     if escape is not None:
-        line = body.count("\n", 0, escape.start()) + 1
+        line = escaped_body.count("\n", 0, escape.start()) + 1
         raise SkillGenerationError(
             f"{source_path}: line ~{line}: backslash-escaped {escape.group()!r}. "
             "CommonMark makes it a literal, but the code-span and link "

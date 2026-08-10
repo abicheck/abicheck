@@ -1016,3 +1016,53 @@ def test_a_non_structural_escape_passes_through(synthetic, escaped):
         shared={"a.md": "# A\n"},
     )
     assert escaped in gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
+
+
+@pytest.mark.parametrize(
+    ("body", "masked", "why"),
+    [
+        ("p:\n\n    x\n\nq\n", True, "top-level block still masks at four"),
+        ("    x\n\nq\n", True, "document start is still a boundary"),
+        ("- s:\n\n    x\n", False, "four under `- ` is the item's own continuation"),
+        ("- s:\n\n     x\n", False, "five under `- ` is still continuation"),
+        ("- s:\n\n      x\n\nq\n", True, "six under `- ` is column+4, so code"),
+        ("1. s:\n\n      x\n", False, "six under `1. ` is still continuation"),
+        ("1. s:\n\n       x\n\nq\n", True, "seven under `1. ` is column+4, so code"),
+        ("- s\n\nx\n", False, "a flush-left line closes the list"),
+    ],
+    ids=[
+        "top-level",
+        "doc-start",
+        "dash-cont-4",
+        "dash-cont-5",
+        "dash-code-6",
+        "ordered-cont-6",
+        "ordered-code-7",
+        "list-closed",
+    ],
+)
+def test_indented_code_floor_follows_the_list_item_column(body, masked, why):
+    """Whether an indent is code or a continuation depends on the enclosing
+    item's content column, not a fixed four — which is why `- ` and `1. `
+    legitimately differ by one. Tracking only "is a list open" forced a choice
+    between masking continuations (leaving a real link unrewritten) and
+    masking nothing in a list (rewriting a real code example); both silent."""
+    assert bool(gen._indented_code_spans(body)) is masked, why
+
+
+def test_a_structural_escape_inside_a_fenced_example_is_allowed(synthetic):
+    """A regex or C-string example may legitimately contain `\\[`. The escape
+    guard runs after block-code masking precisely so those stay publishable —
+    scanning the raw body rejected them outright."""
+    fence = "```python\n" + r'pattern = re.compile(r"\[a\]")' + "\n```"
+    synthetic(
+        skills={
+            "demo": {
+                "SKILL.md": (
+                    f"---\nname: demo\n---\n\n[a](../shared/a.md)\n\n{fence}\n"
+                )
+            }
+        },
+        shared={"a.md": "# A\n"},
+    )
+    assert r'r"\[a\]"' in gen.render_all(gen.SRC_DIR)["demo/SKILL.md"]
