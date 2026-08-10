@@ -533,6 +533,30 @@ building a second identity-resolution mechanism from scratch.
   function, rather than a bespoke single pass with its own, narrower
   correctness envelope. New regression test with this exact A/E/F chain.
 
+  **A review round flagged a real, pyelftools-confirmed risk in the base
+  DIE key itself, without a real-compiler repro to back it.** The DIE key
+  every tier above resolves through (`_record_die_index`,
+  `_base_edges_by_record`, `_virtual_base_edges_by_record`) is built in
+  `_resolve_base_name_and_key` as `(CU.cu_offset, base_die.offset)` — *CU*
+  being the referencing `DW_TAG_inheritance` edge's own compilation unit,
+  not necessarily the resolved *base_die*'s. `DW_FORM_ref_addr` is
+  section-absolute by DWARF's own definition, so it can in principle name a
+  DIE genuinely owned by a *different* CU — and pyelftools's `DIE.cu`
+  always records a DIE's real owning unit regardless of which CU's
+  `get_DIE_from_refaddr` happened to resolve it, so a key built from the
+  wrong CU would silently miss both DIE-identity resolution tiers. Unlike
+  every other finding in this section, this one does NOT reproduce against
+  a real compiler: GCC (plain, `-flto`, and `-fdebug-types-section`) and
+  Clang were all tried against a base class defined in one TU and inherited
+  in another, and every producer kept the inheritance edge CU-local —
+  always emitting its own declaration-only stub for the out-of-CU base
+  rather than a genuine cross-CU `DW_FORM_ref_addr`. Fixed anyway, since
+  the fix is free: for every CU-relative form (the only forms actually
+  observed), the referencing die's CU and the resolved DIE's own CU are
+  identical by construction, so keying on `base_die.cu.cu_offset` instead
+  produces the exact same result in every case tested while closing the
+  theoretical gap for a producer this investigation didn't cover.
+
   **A later pass closed the last of this phase's four originally-listed
   facts** (`deprecated`/`is_scoped`/bitfields/default-argument facts were
   the other three, already covered above): direct-clang now populates

@@ -1575,7 +1575,7 @@ class _DwarfSnapshotBuilder:
         The name is bare (``DW_AT_name`` only, no namespace/enclosing-class
         qualification), matching this method's long-standing behavior — every
         other consumer of ``RecordType.bases``/``base_offsets`` already
-        expects that. The DIE key (``(CU.cu_offset, base_die.offset)``,
+        expects that. The DIE key (``(base_die.cu.cu_offset, base_die.offset)``,
         matching ``_type_cache``'s own convention) is the base DIE's own
         identity, returned so a caller that specifically needs to resolve
         *which* record type this base refers to (unambiguous even when two
@@ -1583,13 +1583,35 @@ class _DwarfSnapshotBuilder:
         do so without a second, name-based lookup — see
         ``_finalize_vptr_offsets``. ``None`` for the key when the base type
         DIE itself can't be resolved (only the name lookup then degrades).
+
+        Deliberately keyed on ``base_die.cu`` -- the resolved DIE's OWN
+        owning compilation unit -- rather than *CU* (the referencing
+        ``DW_TAG_inheritance`` DIE's own CU), even though for a CU-relative
+        form (``DW_FORM_ref1``/``ref2``/``ref4``/``ref8``/``ref_udata``) the
+        two are always identical (`resolve_die_ref`'s own arithmetic derives
+        the target from *CU*'s own header offset, so it cannot land outside
+        *CU*). ``DW_FORM_ref_addr`` is the one form this is NOT true for:
+        it is section-absolute by construction (DWARF's own definition), so
+        it can in principle name a DIE genuinely owned by a *different* CU
+        than the referencing one -- and pyelftools's ``DIE.cu`` always
+        records a DIE's real owning unit regardless of which CU's
+        ``get_DIE_from_refaddr`` happened to resolve it (Codex review).
+        Every real GCC/Clang producer checked while investigating this
+        (GCC plain, GCC with `-flto`, GCC with `-fdebug-types-section`,
+        Clang) keeps an inheritance edge CU-local in practice -- each always
+        emits its own declaration-only stub for an out-of-CU base rather
+        than a genuine cross-CU `DW_FORM_ref_addr` -- so this fix has no
+        empirical repro on real compiler output the way this section's
+        other fixes do; it closes a real, pyelftools-confirmed risk in the
+        general case at zero cost (identical result whenever the two CUs
+        already agree, which is every case tested), not a reproduced bug.
         """
         if "DW_AT_type" not in die.attributes:
             return "", None
         try:
             base_die = _resolve_ref(die, "DW_AT_type", CU)
             name = _attr_str(base_die, "DW_AT_name") or ""
-            return name, (CU.cu_offset, base_die.offset)
+            return name, (base_die.cu.cu_offset, base_die.offset)
         except Exception:  # noqa: BLE001
             return "", None
 
